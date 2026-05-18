@@ -113,21 +113,21 @@ export async function sendMessage(
   }
 
   let endpoint = 'https://api.anthropic.com/v1/messages';
-
   if (provider === 'OpenAI') {
     endpoint = 'https://api.openai.com/v1/chat/completions';
   }
-
   if (provider === 'Mistral') {
     endpoint = 'https://api.mistral.ai/v1/chat/completions';
   }
-
   if (provider === 'Custom') {
     endpoint = 'https://api.example.com/v1/messages';
   }
 
-  // In development, use proxy for custom endpoints to avoid CORS issues
-  if (import.meta.env.DEV && customEndpoint && customEndpoint.trim()) {
+  // In production, route all calls through the local Express proxy
+  // In development, use Vite proxy only for custom endpoints to avoid CORS
+  if (import.meta.env.PROD) {
+    endpoint = '/api/proxy';
+  } else if (import.meta.env.DEV && customEndpoint && customEndpoint.trim()) {
     endpoint = '/mistral-proxy/chat/completions';
   }
 
@@ -204,21 +204,21 @@ export async function sendMessageStream(
   }
 
   let endpoint = 'https://api.anthropic.com/v1/messages';
-
   if (provider === 'OpenAI') {
     endpoint = 'https://api.openai.com/v1/chat/completions';
   }
-
   if (provider === 'Mistral') {
     endpoint = 'https://api.mistral.ai/v1/chat/completions';
   }
-
   if (provider === 'Custom') {
     endpoint = 'https://api.example.com/v1/messages';
   }
 
-  // In development, use proxy for custom endpoints to avoid CORS issues
-  if (import.meta.env.DEV && customEndpoint && customEndpoint.trim()) {
+  // In production, route all calls through the local Express proxy
+  // In development, use Vite proxy only for custom endpoints to avoid CORS
+  if (import.meta.env.PROD) {
+    endpoint = '/api/proxy';
+  } else if (import.meta.env.DEV && customEndpoint && customEndpoint.trim()) {
     endpoint = '/mistral-proxy/chat/completions';
   }
 
