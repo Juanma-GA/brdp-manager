@@ -58,9 +58,10 @@ export default function SettingsPage({ showToast }) {
 
         <DataManagementSection brdps={brdps} onSetBrdps={setBrdps} showToast={showToast} />
 
-        <AboutSection />
-
-        <ResetDataSection onSetBrdps={setBrdps} showToast={showToast} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <AboutSection />
+          <ResetDataSection onSetBrdps={setBrdps} showToast={showToast} />
+        </div>
       </div>
     </div>
   );
