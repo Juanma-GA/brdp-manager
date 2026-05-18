@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { mockBRDPs } from '../data/mockBRDPs';
+import { fetchBRDPs, saveBRDPs, deleteAllBRDPs } from '../services/api';
 
 const BRDPContext = createContext();
 
@@ -19,17 +20,41 @@ export function BRDPProvider({ children }) {
   });
 
   const [selectedBRDPs, setSelectedBRDPs] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const setBrdps = useCallback((newBrdps) => {
+  useEffect(() => {
+    const loadBRDPs = async () => {
+      try {
+        const data = await fetchBRDPs();
+        setBrdpsState(data);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        setError(null);
+      } catch (err) {
+        console.error('Failed to fetch BRDPs from server:', err);
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadBRDPs();
+  }, []);
+
+  const setBrdps = useCallback(async (newBrdps) => {
     setBrdpsState(newBrdps);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newBrdps));
+    try {
+      await saveBRDPs(newBrdps);
+    } catch (err) {
+      console.error('Failed to save BRDPs to server:', err);
+    }
   }, []);
 
   const updateBRDP = useCallback((id, changes) => {
     const updated = brdps.map(b => {
       if (b.id !== id) return b;
 
-      // Build history entry for each changed field
       const history = b.history || [];
       const fieldsToTrack = ['proposal', 'comment', 'validation'];
 
@@ -49,9 +74,14 @@ export function BRDPProvider({ children }) {
     setBrdps(updated);
   }, [brdps, setBrdps]);
 
-  const resetToMock = useCallback(() => {
+  const resetToMock = useCallback(async () => {
     setBrdpsState(mockBRDPs);
     localStorage.removeItem(STORAGE_KEY);
+    try {
+      await deleteAllBRDPs();
+    } catch (err) {
+      console.error('Failed to reset BRDPs on server:', err);
+    }
   }, []);
 
   const stats = {
@@ -69,11 +99,11 @@ export function BRDPProvider({ children }) {
     stats,
     selectedBRDPs,
     setSelectedBRDPs,
-    // Backward compatibility: selectedBRDP is first item in selectedBRDPs array
+    isLoading,
+    error,
     get selectedBRDP() {
       return selectedBRDPs.length > 0 ? selectedBRDPs[0] : null;
     },
-    // Backward compatibility: setSelectedBRDP sets array with single item or empty
     setSelectedBRDP: (brdp) => {
       setSelectedBRDPs(brdp ? [brdp] : []);
     },

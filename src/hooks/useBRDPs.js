@@ -1,29 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { mockBRDPs } from '../data/mockBRDPs';
+import { fetchBRDPs, saveBRDPs, updateBRDPApi, deleteAllBRDPs } from '../services/api';
 
 const STORAGE_KEY = 'brdp_data';
 
-/**
- * @typedef {Object} BRDPStats
- * @property {number} total - Total number of BRDPs
- * @property {number} validated - Count of validated BRDPs
- * @property {number} refused - Count of refused BRDPs
- * @property {number} pending - Count of pending BRDPs
- */
-
-/**
- * @typedef {Object} UseBRDPsReturn
- * @property {Array} brdps - Array of BRDP records
- * @property {Function} setBrdps - Function to update BRDPs
- * @property {BRDPStats} stats - Statistics object with counts
- * @property {Function} resetToMock - Reset BRDPs to mock data
- */
-
-/**
- * Custom hook for managing BRDP records and statistics
- * Persists BRDPs to localStorage and provides state management
- * @returns {UseBRDPsReturn} Object containing BRDPs, setter, stats, and reset
- */
 export function useBRDPs() {
   const [brdps, setBrdpsState] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -37,38 +17,70 @@ export function useBRDPs() {
     return mockBRDPs;
   });
 
-  /**
-   * Wrapper for setBrdps that also saves to localStorage
-   */
-  const setBrdps = useCallback((newBrdps) => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const loadBRDPs = async () => {
+      try {
+        const data = await fetchBRDPs();
+        setBrdpsState(data);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        setError(null);
+      } catch (err) {
+        console.error('Failed to fetch BRDPs from server:', err);
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadBRDPs();
+  }, []);
+
+  const setBrdps = useCallback(async (newBrdps) => {
     setBrdpsState(newBrdps);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newBrdps));
+    try {
+      await saveBRDPs(newBrdps);
+    } catch (err) {
+      console.error('Failed to save BRDPs to server:', err);
+    }
   }, []);
 
-  /**
-   * Update a single BRDP record
-   * @param {string} id - BRDP ID to update
-   * @param {Object} changes - Object with fields to update
-   */
   const updateBRDP = useCallback((id, changes) => {
-    const updatedBrdps = brdps.map(brdp =>
-      brdp.id === id ? { ...brdp, ...changes } : brdp
-    );
-    setBrdps(updatedBrdps);
+    const updated = brdps.map(b => {
+      if (b.id !== id) return b;
+
+      const history = b.history || [];
+      const fieldsToTrack = ['proposal', 'comment', 'validation'];
+
+      Object.keys(changes).forEach(field => {
+        if (fieldsToTrack.includes(field) && changes[field] !== b[field]) {
+          history.push({
+            date: new Date().toISOString(),
+            field,
+            oldValue: b[field] || '',
+            newValue: changes[field] || '',
+          });
+        }
+      });
+
+      return { ...b, ...changes, history };
+    });
+    setBrdps(updated);
   }, [brdps, setBrdps]);
 
-  /**
-   * Reset BRDPs to mock data and clear localStorage
-   */
-  const resetToMock = useCallback(() => {
+  const resetToMock = useCallback(async () => {
     setBrdpsState(mockBRDPs);
     localStorage.removeItem(STORAGE_KEY);
+    try {
+      await deleteAllBRDPs();
+    } catch (err) {
+      console.error('Failed to reset BRDPs on server:', err);
+    }
   }, []);
 
-  /**
-   * Calculate statistics from current BRDP array
-   * Counts records by validation status
-   */
   const stats = {
     total: brdps.length,
     validated: brdps.filter((brdp) => brdp.validation === 'Validated').length,
@@ -82,5 +94,7 @@ export function useBRDPs() {
     stats,
     resetToMock,
     updateBRDP,
+    isLoading,
+    error,
   };
 }

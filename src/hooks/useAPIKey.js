@@ -1,24 +1,11 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { fetchSettings, saveSettings } from '../services/api';
 
 const API_KEY_STORAGE = 'brdp_api_key';
 const MODEL_STORAGE = 'brdp_model';
 const PROVIDER_STORAGE = 'brdp_provider';
 const CUSTOM_ENDPOINT_STORAGE = 'brdp_custom_endpoint';
 
-/**
- * Custom hook for managing API key, model, and provider configuration
- * Persists data to localStorage
- * @returns {Object} API configuration management object
- * @property {string} apiKey - Stored API key
- * @property {string} modelName - Stored model name
- * @property {string} provider - Selected LLM provider ('Anthropic', 'OpenAI', 'Custom')
- * @property {Function} setApiKey - Update API key
- * @property {Function} setModelName - Update model name
- * @property {Function} setProvider - Update provider
- * @property {Function} saveKey - Save all settings to localStorage
- * @property {Function} clearKey - Clear all settings from localStorage
- * @property {boolean} isConfigured - Whether API key is set
- */
 export function useAPIKey() {
   const [apiKey, setApiKey] = useState(() => {
     try {
@@ -52,43 +39,72 @@ export function useAPIKey() {
     }
   });
 
-  /**
-   * Save API key, model name, and provider to localStorage
-   * @param {string} key - API key to save
-   * @param {string} model - Model name to save
-   * @param {string} prov - Provider to save
-   * @param {string} endpoint - Custom endpoint to save
-   */
-  const saveKey = useCallback((key, model, prov, endpoint = '') => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const data = await fetchSettings();
+        setApiKey(data.brdp_api_key || '');
+        setModelName(data.brdp_model || '');
+        setProvider(data.brdp_provider || 'Anthropic');
+        setCustomEndpoint(data.brdp_custom_endpoint || '');
+        localStorage.setItem(API_KEY_STORAGE, data.brdp_api_key || '');
+        localStorage.setItem(MODEL_STORAGE, data.brdp_model || '');
+        localStorage.setItem(PROVIDER_STORAGE, data.brdp_provider || 'Anthropic');
+        localStorage.setItem(CUSTOM_ENDPOINT_STORAGE, data.brdp_custom_endpoint || '');
+        setError(null);
+      } catch (err) {
+        console.error('Failed to fetch settings from server:', err);
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  const saveKey = useCallback(async (key, model, prov, endpoint = '') => {
     try {
-      localStorage.setItem(API_KEY_STORAGE, key);
-      localStorage.setItem(MODEL_STORAGE, model);
-      localStorage.setItem(PROVIDER_STORAGE, prov);
-      localStorage.setItem(CUSTOM_ENDPOINT_STORAGE, endpoint);
       setApiKey(key);
       setModelName(model);
       setProvider(prov);
       setCustomEndpoint(endpoint);
-    } catch {
-      console.error('Failed to save API configuration to localStorage');
+      localStorage.setItem(API_KEY_STORAGE, key);
+      localStorage.setItem(MODEL_STORAGE, model);
+      localStorage.setItem(PROVIDER_STORAGE, prov);
+      localStorage.setItem(CUSTOM_ENDPOINT_STORAGE, endpoint);
+      await saveSettings({
+        brdp_api_key: key,
+        brdp_model: model,
+        brdp_provider: prov,
+        brdp_custom_endpoint: endpoint,
+      });
+    } catch (err) {
+      console.error('Failed to save API configuration:', err);
     }
   }, []);
 
-  /**
-   * Clear all API configuration from localStorage
-   */
-  const clearKey = useCallback(() => {
+  const clearKey = useCallback(async () => {
     try {
-      localStorage.removeItem(API_KEY_STORAGE);
-      localStorage.removeItem(MODEL_STORAGE);
-      localStorage.removeItem(PROVIDER_STORAGE);
-      localStorage.removeItem(CUSTOM_ENDPOINT_STORAGE);
       setApiKey('');
       setModelName('');
       setProvider('Anthropic');
       setCustomEndpoint('');
-    } catch {
-      console.error('Failed to clear API configuration from localStorage');
+      localStorage.removeItem(API_KEY_STORAGE);
+      localStorage.removeItem(MODEL_STORAGE);
+      localStorage.removeItem(PROVIDER_STORAGE);
+      localStorage.removeItem(CUSTOM_ENDPOINT_STORAGE);
+      await saveSettings({
+        brdp_api_key: '',
+        brdp_model: '',
+        brdp_provider: 'Anthropic',
+        brdp_custom_endpoint: '',
+      });
+    } catch (err) {
+      console.error('Failed to clear API configuration:', err);
     }
   }, []);
 
@@ -106,5 +122,7 @@ export function useAPIKey() {
     saveKey,
     clearKey,
     isConfigured,
+    isLoading,
+    error,
   };
 }

@@ -1,10 +1,8 @@
+import { useState } from 'react';
+import { fetchNote, saveNote as apiSaveNote } from '../services/api';
+
 const STORAGE_KEY = 'brdp_notes';
 
-/**
- * Get notes for a BRDP from localStorage
- * @param {string} id - BRDP identifier
- * @returns {string} Saved notes or empty string if none
- */
 function getNote(id) {
   try {
     const notes = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -14,11 +12,6 @@ function getNote(id) {
   }
 }
 
-/**
- * Save notes for a BRDP to localStorage
- * @param {string} id - BRDP identifier
- * @param {string} text - Notes text to save
- */
 function saveNote(id, text) {
   try {
     const notes = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -27,15 +20,40 @@ function saveNote(id, text) {
   } catch {
     console.error('Failed to save note to localStorage');
   }
+  apiSaveNote(id, text).catch(err => console.error('Failed to save note to server:', err));
 }
 
-/**
- * Custom hook for managing BRDP notes in localStorage
- * @returns {Object} Object with getNote and saveNote functions
- */
 export function useLocalNotes() {
+  const [loadingNotes, setLoadingNotes] = useState({});
+  const [noteErrors, setNoteErrors] = useState({});
+
+  const getNoteSynced = async (id) => {
+    setLoadingNotes(prev => ({ ...prev, [id]: true }));
+    try {
+      const text = await fetchNote(id);
+      const notes = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      notes[id] = text;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+      setNoteErrors(prev => {
+        const updated = { ...prev };
+        delete updated[id];
+        return updated;
+      });
+      return text;
+    } catch (err) {
+      console.error(`Failed to fetch note ${id}:`, err);
+      setNoteErrors(prev => ({ ...prev, [id]: err.message }));
+      return getNote(id);
+    } finally {
+      setLoadingNotes(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
   return {
     getNote,
     saveNote,
+    getNoteSynced,
+    loadingNotes,
+    noteErrors,
   };
 }

@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { fetchConfig, saveConfig } from '../services/api';
 
 const STORAGE_KEY = 'brdp_project_config';
 
@@ -14,13 +15,6 @@ const DEFAULT_CONFIG = {
   enterpriseCode: '',
 };
 
-/**
- * Custom hook for managing project configuration
- * Persists to localStorage under "brdp_project_config" key
- * @returns {Object} Configuration management object
- * @property {Object} projectConfig - Current project configuration
- * @property {Function} saveProjectConfig - Save configuration to localStorage
- */
 export function useProjectConfig() {
   const [projectConfig, setProjectConfig] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -34,17 +28,42 @@ export function useProjectConfig() {
     return DEFAULT_CONFIG;
   });
 
-  /**
-   * Save project configuration to localStorage
-   * @param {Object} config - Configuration object to save
-   */
-  const saveProjectConfig = useCallback((config) => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const data = await fetchConfig();
+        const config = { ...DEFAULT_CONFIG, ...data };
+        setProjectConfig(config);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+        setError(null);
+      } catch (err) {
+        console.error('Failed to fetch config from server:', err);
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadConfig();
+  }, []);
+
+  const saveProjectConfig = useCallback(async (config) => {
     setProjectConfig(config);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    try {
+      await saveConfig(config);
+    } catch (err) {
+      console.error('Failed to save config to server:', err);
+    }
   }, []);
 
   return {
     projectConfig,
     saveProjectConfig,
+    isLoading,
+    error,
   };
 }
