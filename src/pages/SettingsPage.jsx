@@ -4,6 +4,7 @@ import AIConfigSection from '../components/AIConfigSection';
 import ProjectConfigSection from '../components/ProjectConfigSection';
 import DataManagementSection from '../components/DataManagementSection';
 import AboutSection from '../components/AboutSection';
+import ResetDataSection from '../components/ResetDataSection';
 import styles from './SettingsPage.module.css';
 
 /**
@@ -58,6 +59,8 @@ export default function SettingsPage({ showToast }) {
         <DataManagementSection brdps={brdps} onSetBrdps={setBrdps} showToast={showToast} />
 
         <AboutSection />
+
+        <ResetDataSection onSetBrdps={setBrdps} showToast={showToast} />
       </div>
     </div>
   );
