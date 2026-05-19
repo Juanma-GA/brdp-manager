@@ -253,7 +253,7 @@ function assembleChunks(baseXml, additionalRules) {
   return stripped + '\n' + cleaned + XML_FOOTER;
 }
 
-const CHUNK_SIZE = 50;
+const CHUNK_SIZE = 25;
 
 export async function generateBREX(brdps, projectConfig, options = {}) {
   const {
