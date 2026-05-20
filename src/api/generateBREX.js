@@ -525,7 +525,8 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
     const rawN = await callLLM(sysN, usrN);
     if (!rawN || !rawN.trim()) continue;
 
-    let escapedN = rawN.trim().replace(/\s+allowedObjectFlagContext="[^"]*"/g, '');
+    let escapedN = rawN.trim().replace(/\s+allowedObjectFlagContext="[^"]*"/g, '')
+      .replace(/<brDecisionIdentNumber brDecisionIdentNumber="([^"]+)"\/>/g, '<brDecisionRef brDecisionIdentNumber="$1"/>');
     escapedN = escapeXMLContent(escapedN);
     escapedN = splitMultipleObjectPaths(escapedN);
     const { missing: missingN, invented: inventedN } = verifyChunkRules(escapedN, chunks[i].map(b => b.id));
