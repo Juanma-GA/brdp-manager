@@ -23,6 +23,52 @@ function _lastStep(path) {
   const t = _normSpace(path);
   return t.includes('/') ? t.replace(/^.*\//, '') : t;
 }
+function _isSafePattern(ctx) {
+  if (!ctx || !ctx.trim()) return false;
+  let p = 0, b = 0, inStr = false, q = '';
+  for (let i = 0; i < ctx.length; i++) { const ch = ctx[i];
+    if (inStr) { if (ch === q) inStr = false; continue; }
+    if (ch === "'" || ch === '"') { inStr = true; q = ch; continue; }
+    if (ch === '(') p++; else if (ch === ')') p--; else if (ch === '[') b++; else if (ch === ']') b--;
+    if (p < 0 || b < 0) return false;
+  }
+  if (p !== 0 || b !== 0) return false;
+  if (/[|]\s*$|\b(and|or)\s*$/.test(ctx.trim())) return false;
+  let depth = 0; inStr = false; q = '';
+  for (let i = 0; i < ctx.length; i++) { const ch = ctx[i];
+    if (inStr) { if (ch === q) inStr = false; continue; }
+    if (ch === "'" || ch === '"') { inStr = true; q = ch; continue; }
+    if (ch === '[' || ch === '(') depth++; else if (ch === ']' || ch === ')') depth--;
+    else if (depth === 0) {
+      if (ch === '.' && ctx[i+1] === '.' && (ctx[i+2] === '/' || ctx[i+2] === undefined || ctx[i+2] === '|' || ctx[i+2] === ' ')) return false;
+      const rest = ctx.slice(i); const prev = ctx[i-1];
+      if (/^(parent|ancestor|ancestor-or-self|preceding|preceding-sibling|following|following-sibling)::/.test(rest)
+          && (i === 0 || prev === '/' || prev === '|' || prev === ' ')) return false;
+    }
+  }
+  return true;
+}
+
+function _splitTopLevel(path) {
+  const t = _normSpace(path);
+  let depth = 0, inStr = false, q = '', lastSep = -1;
+  for (let i = 0; i < t.length; i++) { const ch = t[i];
+    if (inStr) { if (ch === q) inStr = false; continue; }
+    if (ch === "'" || ch === '"') { inStr = true; q = ch; continue; }
+    if (ch === '[' || ch === '(') depth++;
+    else if (ch === ']' || ch === ')') depth--;
+    else if (ch === '/' && depth === 0) {
+      const isDouble = t[i+1] === '/' || t[i-1] === '/';
+      if (i > 1 && !isDouble) lastSep = i;
+    }
+  }
+  if (lastSep <= 0) return null;
+  const parent = t.slice(0, lastSep);
+  const step = t.slice(lastSep + 1);
+  if (!parent || !step) return null;
+  return { parent, step };
+}
+
 function _getChild(el, names) {
   for (let i = 0; i < el.childNodes.length; i++) {
     const n = el.childNodes[i];
@@ -138,6 +184,32 @@ function _convertRule(ruleEl, ruleNumber) {
     else coreTest = 'true()';
   }
 
+  // objAppl=1: split consciente de corchetes (evita romper rutas con '/' dentro de predicados)
+  if (isPath && !isNamespaceDeclRule && objAppl === '1') {
+    const sp = _splitTopLevel(objectPath);
+    if (sp && _isSafePattern(sp.parent)) {
+      ruleContext = sp.parent;
+      coreTest = hasValueRules ? 'exists(' + sp.step + '[' + valuePredicate + '])' : 'exists(' + sp.step + ')';
+    } else {
+      ruleContext = '/dmodule';
+      coreTest = hasValueRules ? 'exists(' + objectPath + '[' + valuePredicate + '])' : 'exists(' + objectPath + ')';
+    }
+  }
+
+  // Robustez general: si el context no es un patrón XSLT válido, mover la ruta al test
+  if (isPath && !_isSafePattern(ruleContext)) {
+    ruleContext = '/dmodule';
+    if (objAppl === '0') {
+      coreTest = hasValueRules ? 'not(exists(' + objectPath + '[' + valuePredicate + ']))' : 'not(exists(' + objectPath + '))';
+    } else if (objAppl === '1') {
+      coreTest = hasValueRules ? 'exists(' + objectPath + '[' + valuePredicate + '])' : 'exists(' + objectPath + ')';
+    } else if (hasValueRules) {
+      coreTest = 'not(exists(' + objectPath + '[not(' + valuePredicate + ')]))';
+    } else {
+      coreTest = 'true()';
+    }
+  }
+
   let finalTest;
   if (schemaContext.length > 0) {
     finalTest = 'not(//@xsi:noNamespaceSchemaLocation = ' + _quote(schemaContext) + ') or (' + coreTest + ')';
@@ -169,15 +241,24 @@ function _carryNonContextComments(brexXml) {
   return out;
 }
 
-const _SCH_HEADER =
-`<?xml version="1.0" encoding="UTF-8"?>
-<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">
-   <sch:ns prefix="xsi" uri="http://www.w3.org/2001/XMLSchema-instance"/>
-   <sch:ns prefix="rdf" uri="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
-   <sch:ns prefix="xlink" uri="http://www.w3.org/1999/xlink"/>
-   <sch:ns prefix="dc" uri="http://www.purl.org/dc/elements/1.1/"/>
-`;
 const _SCH_FOOTER = `</sch:schema>`;
+
+function _buildHeader(brexXml) {
+  const base = [
+    ['xsi', 'http://www.w3.org/2001/XMLSchema-instance'],
+    ['rdf', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'],
+    ['xlink', 'http://www.w3.org/1999/xlink'],
+    ['dc', 'http://www.purl.org/dc/elements/1.1/'],
+  ];
+  const have = new Set(base.map(x => x[0]));
+  const tag = (brexXml.match(/<dmodule\b[^>]*>/) || [''])[0];
+  const re = /xmlns:([A-Za-z_][\w.-]*)="([^"]*)"/g; let m; const extra = [];
+  while ((m = re.exec(tag)) !== null) { if (!have.has(m[1])) { have.add(m[1]); extra.push([m[1], m[2]]); } }
+  const all = base.concat(extra);
+  let h = '<?xml version="1.0" encoding="UTF-8"?>\n<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">\n';
+  for (const [pfx, u] of all) h += '   <sch:ns prefix="' + pfx + '" uri="' + u + '"/>\n';
+  return h;
+}
 
 export function brexToSchematron(brexXml, options = {}) {
   const preserveBrdpId = options.preserveBrdpId !== false;
@@ -185,6 +266,7 @@ export function brexToSchematron(brexXml, options = {}) {
   const DP = options.DOMParserImpl || (typeof DOMParser !== 'undefined' ? DOMParser : null);
   if (!DP) throw new Error('DOMParser no disponible en este entorno.');
   const doc = new DP().parseFromString(brexXml, 'text/xml');
+  const header = _buildHeader(brexXml);
   const rules = _collectRules(doc);
   let body = '';
   rules.forEach((ruleEl, i) => {
@@ -207,5 +289,5 @@ export function brexToSchematron(brexXml, options = {}) {
       commentBlock = '   <!-- ===== Reglas sin contexto XPath (solo trazabilidad, no ejecutables) ===== -->\n' + comments.join('\n') + '\n';
     }
   }
-  return _SCH_HEADER + body + commentBlock + _SCH_FOOTER;
+  return header + body + commentBlock + _SCH_FOOTER;
 }
