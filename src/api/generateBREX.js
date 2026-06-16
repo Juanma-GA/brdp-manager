@@ -442,6 +442,96 @@ async function generateSingleRule(brdp, projectConfig, schemaSummary, callLLM) {
   return null;
 }
 
+// ===== Finalización determinista del documento (S1000D 4.2) =====
+
+function forceDmoduleTag(xml, dmoduleOpeningTag) {
+  if (!dmoduleOpeningTag) return xml;
+  return xml.replace(/<dmodule\b[^>]*>/, dmoduleOpeningTag);
+}
+
+function fixFlagPlacement(xml) {
+  // mueve allowedObjectFlag de structureObjectRule (inválido) a su objectPath
+  return xml.replace(/<structureObjectRule\b[^>]*>[\s\S]*?<\/structureObjectRule>/g, (rule) => {
+    const om = rule.match(/<structureObjectRule\b([^>]*)>/);
+    if (!om) return rule;
+    const fm = om[1].match(/\sallowedObjectFlag="([012])"/);
+    if (!fm) return rule;
+    const flag = fm[1];
+    let fixed = rule.replace(/(<structureObjectRule\b[^>]*?)\sallowedObjectFlag="[012]"([^>]*>)/, '$1$2');
+    let injected = false;
+    fixed = fixed.replace(/<objectPath\b([^>]*)>/, (pm, pa) => {
+      if (injected) return pm;
+      injected = true;
+      if (/allowedObjectFlag=/.test(pa)) return pm;
+      return `<objectPath allowedObjectFlag="${flag}"${pa}>`;
+    });
+    return fixed;
+  });
+}
+
+function promoteOrphanSplitRules(xml) {
+  const ids = new Set([...xml.matchAll(/<structureObjectRule id="([^"]+)"/g)].map(m => m[1]));
+  const promoted = new Set();
+  return xml.replace(/<structureObjectRule id="([^"]+)"/g, (full, id) => {
+    const m = id.match(/^(.*)-([bcde])$/);
+    if (!m) return full;
+    const base = m[1];
+    if (ids.has(base) || promoted.has(base)) return full;
+    promoted.add(base);
+    return `<structureObjectRule id="${base}"`;
+  });
+}
+
+function dedupeNonContextRules(xml) {
+  const seen = new Set();
+  return xml.replace(/<nonContextRule\b[^>]*id="([^"]+)"[\s\S]*?<\/nonContextRule>/g, (full, id) => {
+    if (seen.has(id)) return '';
+    seen.add(id);
+    return full;
+  });
+}
+
+function resolveDmCodeFields(projectConfig) {
+  const cfg = projectConfig || {};
+  const up = v => (typeof v === 'string' ? v.toUpperCase() : v);
+  const useIfValid = (v, p, d) => { const u = up(v); return (typeof u === 'string' && p.test(u)) ? u : d; };
+  const mic = up(cfg.modelIdentCode);
+  return {
+    modelIdentCode: (typeof mic === 'string' && /^[A-Z0-9]{2,14}$/.test(mic)) ? mic : (mic || 'UNKNOWN'),
+    systemDiffCode: useIfValid(cfg.systemDiffCode, /^[A-Z0-9]{1,4}$/, 'A'),
+    systemCode: '00',
+    subSystemCode: '0',
+    subSubSystemCode: '0',
+    assyCode: '00',
+    disassyCode: '00',
+    disassyCodeVariant: '0A',
+    infoCode: '022',
+    infoCodeVariant: 'A',
+    itemLocationCode: 'D',
+  };
+}
+
+function forceDmCodeFields(xml, fields) {
+  return xml.replace(/<dmCode\b[^>]*?\/?>/g, (tag) => {
+    let t = tag;
+    for (const [a, val] of Object.entries(fields)) {
+      const re = new RegExp('\\s' + a + '="[^"]*"');
+      if (re.test(t)) t = t.replace(re, ' ' + a + '="' + val + '"');
+      else t = t.replace(/\s*\/?>$/, m => ' ' + a + '="' + val + '"' + m);
+    }
+    return t;
+  });
+}
+
+function finalizeDocument(xml, projectConfig, schemaSummary) {
+  xml = forceDmoduleTag(xml, schemaSummary && schemaSummary.dmodule_opening_tag);
+  xml = fixFlagPlacement(xml);
+  xml = promoteOrphanSplitRules(xml);
+  xml = forceDmCodeFields(xml, resolveDmCodeFields(projectConfig));
+  xml = dedupeNonContextRules(xml);
+  return xml;
+}
+
 export async function generateBREX(brdps, projectConfig, options = {}) {
   const {
     apiKey,
