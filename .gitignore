@@ -28,3 +28,15 @@ data/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+
+# Environment variables
+.env
+.env.local
+
+# Working sources and local notes (not part of the app)
+sources/
+AUDIT_STANDARD.md
+STANDARD_POC.md
+public/fav_original/
