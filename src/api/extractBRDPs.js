@@ -273,8 +273,8 @@ export async function extractBRDPs(file, existingBRDPs, options = {}) {
     }
   }
 
-  if (!documentText || documentText.trim().length < 100) {
-    throw new Error("The document appears to be empty or too short (minimum 100 characters).");
+  if (!documentText || documentText.trim().length < 3000) {
+    throw new Error("The document appears to be empty or too short (minimum 3000 characters, about one page).");
   }
 
   // Step 2 — Split into chunks

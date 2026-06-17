@@ -112,8 +112,8 @@ export default function AIExtractModal({ onClose, existingBRDPs, onImport }) {
       setError('Please select a file first.');
       return;
     }
-    if (inputMode === 'text' && pastedText.trim().length < 100) {
-      setError('Please paste at least 100 characters of text.');
+    if (inputMode === 'text' && pastedText.trim().length < 3000) {
+      setError(`Please paste at least 3000 characters (about one page). Current: ${pastedText.trim().length}.`);
       return;
     }
 
@@ -250,7 +250,7 @@ export default function AIExtractModal({ onClose, existingBRDPs, onImport }) {
             <button
               className={styles.extractBtn}
               onClick={handleExtract}
-              disabled={inputMode === 'file' ? !file : pastedText.trim().length < 100}
+              disabled={inputMode === 'file' && !file}
             >
               {result ? 'Re-extract' : 'Extract BRDPs'}
             </button>
