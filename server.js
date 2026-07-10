@@ -63,13 +63,6 @@ app.post('/api/proxy', async (req, res) => {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
-  // TEMP DEBUG — remove once the connection issue is confirmed fixed
-  const maskedKey = apiKey.length > 8 ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '***';
-  console.log('[/api/proxy] →', targetEndpoint, {
-    provider,
-    headers: { ...headers, Authorization: headers.Authorization ? `Bearer ${maskedKey}` : undefined, 'x-api-key': headers['x-api-key'] ? maskedKey : undefined },
-  });
-
   try {
     const response = await fetch(targetEndpoint, {
       method: 'POST',
