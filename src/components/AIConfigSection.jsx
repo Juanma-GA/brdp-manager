@@ -120,15 +120,28 @@ export default function AIConfigSection({
           message: 'Invalid key ✗',
         });
       } else {
+        const bodyText = await response.text().catch(() => '');
+        console.error('Test Connection failed', response.status, bodyText);
+        let detail = bodyText;
+        try {
+          const parsed = JSON.parse(bodyText);
+          detail = parsed.message || parsed.error?.message || parsed.error || bodyText;
+        } catch {
+          // bodyText wasn't JSON, use as-is
+        }
         setTestResult({
           status: 'error',
-          message: 'Connection error',
+          message: `Connection error (${response.status})${detail ? `: ${String(detail).slice(0, 200)}` : ''}`,
         });
       }
     } catch (error) {
+      console.error('Test Connection failed', error);
+      const isNetworkError = error instanceof TypeError;
       setTestResult({
         status: 'error',
-        message: 'Connection error',
+        message: isNetworkError
+          ? `Network error: ${error.message} (check the endpoint URL / DNS / CORS)`
+          : `Connection error: ${error.message}`,
       });
     } finally {
       setIsTesting(false);

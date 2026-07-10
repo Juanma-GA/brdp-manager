@@ -47,6 +47,13 @@ app.post('/api/proxy', async (req, res) => {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
+  // TEMP DEBUG — remove once the connection issue is confirmed fixed
+  const maskedKey = apiKey.length > 8 ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '***';
+  console.log('[/api/proxy] →', targetEndpoint, {
+    provider,
+    headers: { ...headers, Authorization: headers.Authorization ? `Bearer ${maskedKey}` : undefined, 'x-api-key': headers['x-api-key'] ? maskedKey : undefined },
+  });
+
   try {
     const response = await fetch(targetEndpoint, {
       method: 'POST',
@@ -56,6 +63,7 @@ app.post('/api/proxy', async (req, res) => {
 
     if (!response.ok) {
       const errText = await response.text();
+      console.error('[/api/proxy] upstream error', response.status, errText);
       return res.status(response.status).send(errText);
     }
 
@@ -71,7 +79,14 @@ app.post('/api/proxy', async (req, res) => {
     await pump();
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // Surface the real network-level failure (DNS, TLS, connection refused, etc.)
+    // instead of letting it collapse into a generic message downstream.
+    console.error('[/api/proxy] fetch failed:', err.code || err.name, err.message, err.cause || '');
+    res.status(502).json({
+      error: 'Upstream request failed',
+      code: err.code || err.cause?.code || err.name,
+      message: err.message,
+    });
   }
 });
 
