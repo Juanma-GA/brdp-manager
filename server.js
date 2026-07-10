@@ -9,8 +9,16 @@ import db from './src/db/database.js';
 // outbound HTTPS requests work out-of-the-box behind a TLS-inspecting
 // corporate proxy — no manual NODE_EXTRA_CA_CERTS per machine. No-op on
 // Linux/Mac.
+//
+// inject: '+' patches tls.createSecureContext (instead of the default
+// `true` mode, which only patches https.globalAgent.options.ca and is
+// never consulted by Node's native fetch/undici). The '+' mode is the one
+// that actually reaches undici, since tls.connect() calls
+// tls.createSecureContext() internally whenever no explicit secureContext
+// is passed — which is how fetch() opens its TLS sockets.
 if (process.platform === 'win32') {
-  await import('win-ca');
+  const winCa = (await import('win-ca/api')).default;
+  winCa({ inject: '+' });
 }
 
 const __filename = fileURLToPath(import.meta.url);
