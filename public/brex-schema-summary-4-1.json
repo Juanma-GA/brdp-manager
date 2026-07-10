@@ -195,7 +195,7 @@
         "objectUse",
         "objectValue"
       ],
-      "note": "S1000D 4.1 has NO brDecisionRef element (confirmed: zero occurrences in the real 4.1 XSD). The BRDP identifier is carried ONLY via the id attribute of structureObjectRule -- there is no separate formal traceability element."
+      "note": "Verified against sources/S4.1/brex4.1.xsd (structureObjectRuleElemType): NO brDecisionRef element (present in 4.2, absent in 4.1) and NO brSeverityLevel attribute (present in 4.2, absent in 4.1). The BRDP identifier is carried ONLY via the id attribute of structureObjectRule -- there is no separate formal traceability element."
     },
     "objectPath": {
       "note": "XPath-like path to the S1000D element this rule applies to",
@@ -255,7 +255,7 @@
       "children_required": [
         "simplePara"
       ],
-      "note": "UNVERIFIED beyond removal of brDecisionRef -- confirm full nonContextRuleElemType definition against the real 4.1 XSD before relying on this entry. Use for general rules not tied to a specific element path."
+      "note": "Verified against sources/S4.1/brex4.1.xsd (nonContextRuleElemType): one or more simplePara elements (repeatable). NO brDecisionRef child (present in 4.2, absent in 4.1) and NO brSeverityLevel attribute (present in 4.2, absent in 4.1). Use for general rules not tied to a specific element path."
     }
   },
   "few_shot_examples": [

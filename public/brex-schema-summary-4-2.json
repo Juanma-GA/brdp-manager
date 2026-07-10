@@ -422,7 +422,7 @@
     "Output ONLY the XML — no markdown fences, no explanation, no preamble",
     "Copy the exact namespace declarations from dmodule_opening_tag",
     "infoCode is always 022, infoCodeVariant always A, itemLocationCode always A",
-    "content wraps brex which wraps brexDoc — do NOT put brexDoc directly inside content",
+    "content wraps brex directly — there is NO brexDoc and NO brexDmRules element",
     "brexDmRef is a self-reference — copy the exact same dmCode attributes from dmIdent",
     "brexDmRef/dmRef/dmRefIdent must include BOTH dmCode AND issueInfo",
     "brDecisionRef uses attribute brDecisionIdentNumber — NOT text content",
