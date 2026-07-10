@@ -17,7 +17,7 @@ import db from './src/db/database.js';
 // tls.createSecureContext() internally whenever no explicit secureContext
 // is passed — which is how fetch() opens its TLS sockets.
 if (process.platform === 'win32') {
-  const winCa = (await import('win-ca/api')).default;
+  const winCa = (await import('win-ca/api/index.js')).default;
   winCa({ inject: '+' });
 }
 
