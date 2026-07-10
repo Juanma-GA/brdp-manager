@@ -5,6 +5,14 @@ import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
 import db from './src/db/database.js';
 
+// Trust Windows' certificate store (corporate/ATEXIS root CAs included) so
+// outbound HTTPS requests work out-of-the-box behind a TLS-inspecting
+// corporate proxy — no manual NODE_EXTRA_CA_CERTS per machine. No-op on
+// Linux/Mac.
+if (process.platform === 'win32') {
+  await import('win-ca');
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
