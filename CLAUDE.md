@@ -51,6 +51,7 @@ if (import.meta.env.PROD) {
 | `src/db/schema.sql` | Definición de tablas: brdps, config, settings, notes |
 | `src/services/api.js` | Capa de servicio frontend: fetch a endpoints REST |
 | `src/api/generateBREX.js` | Generador BREX S1000D 4.2 + helpers compartidos |
+| `src/api/generateBREX41.js` | Generador BREX S1000D 4.1 |
 | `src/api/generateBREX301.js` | Generador BREX S1000D 3.0.1 |
 | `src/api/generateBREXSch.js` | Generador Schematron 1.0 (enfoque A2, ver abajo) |
 | `src/api/brexToSchematron.js` | Conversor determinista BREX → Schematron (sin LLM) |
@@ -70,6 +71,7 @@ if (import.meta.env.PROD) {
 Los generadores de BREX cargan su estructura + ejemplos few-shot desde `public/`:
 
 - `brex-schema-summary-4-2.json` — estructura 4.2 + ejemplos few-shot
+- `brex-schema-summary-4-1.json` — estructura 4.1 + ejemplos few-shot (reutiliza los mismos few-shot examples que 4.2 — son datos planos BRDP→XPath, no dependen del issue)
 - `brex-schema-summary-3-0-1.json` — estructura 3.0.1 + ejemplos few-shot
 - `brex-schema-summary-sch.json` — **ya no se usa** (el Schematron se genera por conversión determinista, no por LLM directo). Se conserva por si se quisiera retomar la generación directa.
 
@@ -77,7 +79,7 @@ Los ejemplos few-shot van en `few_shot_examples` y se inyectan en el system prom
 
 ## Generadores BREX / Schematron — arquitectura defensiva
 
-Los tres generadores comparten la **misma arquitectura defensiva**, diseñada para que con datasets grandes (+400 BRDPs) el LLM no trunque el XML, no invente IDs, no salte BRDPs ni produzca XML/XPath inválido.
+Los generadores (4.2, 4.1, 3.0.1, Schematron vía 3.0.1) comparten la **misma arquitectura defensiva**, diseñada para que con datasets grandes (+400 BRDPs) el LLM no trunque el XML, no invente IDs, no salte BRDPs ni produzca XML/XPath inválido.
 
 ### Patrón común
 
@@ -104,6 +106,14 @@ Helpers compartidos: `extractXML()` y `checkWellFormed()` se importan SIEMPRE de
   - `forceDmCodeFields` (`resolveDmCodeFields`) — fuerza atributos del `dmCode`: respeta `modelIdentCode`/`systemDiffCode` de config (en mayúsculas) y hardcodea el resto (`systemCode=00`, `disassyCodeVariant=0A`, `itemLocationCode=D`, etc.).
   - `dropRedundantNonContextRules` — si un BRDP existe como `structureObjectRule`, elimina su `nonContextRule` homónimo (evita id `xs:ID` duplicado).
   - `dedupeNonContextRules` — dedup de `nonContextRule` por id.
+
+### BREX 4.1 (`generateBREX41.js`)
+
+- Mismo mecanismo core que 4.2 (`<structureObjectRule>`, `allowedObjectFlag` 0/1/2 en `objectPath`, `<nonContextRule>` formal) — confirmado idéntico contra el XSD real (`sources/S4.1/brex4.1.xsd` vs `sources/S4.2/brex.xsd`).
+- **Sin `brDecisionRef` ni `brSeverityLevel`** (no existen en el XSD 4.1, confirmado con cero apariciones): la trazabilidad BRDP→regla es solo el atributo `id` de `structureObjectRule`/`nonContextRule`. Todas las funciones de `generateBREX.js` que hardcodeaban estas referencias (plantillas few-shot, `splitMultipleObjectPaths`, el fix-up de `<brDecisionIdentNumber>`, el "safety net" de `nonContextRule`) se adaptaron quitándolas por completo — NO solo renombrándolas.
+- Todas las funciones internas llevan sufijo `41` (mismo patrón que `301` en `generateBREX301.js`): `buildBREXPrompt41`, `buildBREXPromptChunk41`, `finalizeDocument41`, etc.
+- `extractXML()` y `checkWellFormed()` se importan desde `./generateBREX.js` (no se duplican), igual que hace `generateBREX301.js`.
+- `finalizeDocument41(xml, projectConfig, schemaSummary)` aplica el mismo orden que 4.2 (`forceDmoduleTag41`, `fixFlagPlacement41`, `promoteOrphanSplitRules41`, `forceDmCodeFields41`/`resolveDmCodeFields41`, `dropRedundantNonContextRules41`, `dedupeNonContextRules41`) — ninguna de estas funciones tocaba `brDecisionRef`/`brSeverityLevel` en origen, así que no necesitaron más cambio que el renombrado.
 
 ### BREX 3.0.1 (`generateBREX301.js`)
 
@@ -175,6 +185,7 @@ donde `payload` es el body ya construido. El servidor Express solo añade header
 
 ```javascript
 const isBREX42 = format === 'BREX — S1000D 4.2';
+const isBREX41 = format === 'BREX — S1000D 4.1';
 const isBREX301 = format === 'BREX — S1000D 3.0.1';
 const isSch = format === 'Schematron 1.0';
 ```
@@ -187,7 +198,7 @@ Añadir un nuevo formato BREX requiere: nuevo generador + schema JSON + rama en 
 
 ## Lo que NO está implementado todavía
 
-- S1000D 4.1, 5.0, 6.0 (selector existe, botón deshabilitado con "Coming soon").
+- S1000D 5.0, 6.0 (selector existe, botón deshabilitado con "Coming soon").
 - Botón de migración BREX→Schematron sobre un BREX subido (el motor `brexToSchematron.js` ya está listo; falta la UI).
 - Migración automática de localStorage a SQLite en primera ejecución.
 - Autenticación (no necesaria para uso local single-user).

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useProjectConfig } from '../hooks/useProjectConfig';
 import { generateBREX } from '../api/generateBREX';
+import { generateBREX41 } from '../api/generateBREX41.js';
 import { generateBREX301 } from '../api/generateBREX301.js';
 import { generateBREXSch } from '../api/generateBREXSch.js';
 import styles from './GenerateModal.module.css';
@@ -22,6 +23,7 @@ export default function GenerateModal({ brdps, onClose }) {
   const includedCount = onlyValidated ? validatedCount : allCount;
   const isConfigComplete = !!projectConfig?.modelIdentCode;
   const isBREX42 = format === 'BREX — S1000D 4.2';
+  const isBREX41 = format === 'BREX — S1000D 4.1';
   const isBREX301 = format === 'BREX — S1000D 3.0.1';
   const isSch = format === 'Schematron 1.0';
 
@@ -65,6 +67,16 @@ export default function GenerateModal({ brdps, onClose }) {
           onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
           abortController: abortRef.current,
         });
+      } else if (isBREX41) {
+        result = await generateBREX41(brdps, projectConfig, {
+          apiKey,
+          modelName,
+          provider,
+          customEndpoint,
+          onlyValidated,
+          onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
+          abortController: abortRef.current,
+        });
       } else if (isBREX301) {
         result = await generateBREX301(brdps, projectConfig, {
           apiKey,
@@ -92,7 +104,7 @@ export default function GenerateModal({ brdps, onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX301]);
+  }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX41, isBREX301]);
 
   const handleCancel = () => {
     abortRef.current?.abort();
@@ -113,6 +125,8 @@ export default function GenerateModal({ brdps, onClose }) {
       ? `DMC-${projectConfig.modelIdentCode}-00-00-00-00A-022A-D_${dateStr}_301.xml`
       : isSch
       ? `${projectConfig.modelIdentCode}_${dateStr}.sch`
+      : isBREX41
+      ? `DMC-${projectConfig.modelIdentCode}-00-00-00-00A-022A-A_${dateStr}_41.xml`
       : `DMC-${projectConfig.modelIdentCode}-00-00-00-00A-022A-A_${dateStr}.xml`;
     const blob = new Blob([result.xml], { type: 'application/xml' });
     const url = URL.createObjectURL(blob);
@@ -150,9 +164,9 @@ export default function GenerateModal({ brdps, onClose }) {
               <option>BREX — S1000D 6.0</option>
               <option>Schematron 1.0</option>
             </select>
-            {!isBREX42 && !isBREX301 && !isSch && (
+            {!isBREX42 && !isBREX41 && !isBREX301 && !isSch && (
               <p className={styles.comingSoon}>
-                ⚠ Only BREX — S1000D 4.2 and 3.0.1 are implemented. Other formats coming soon.
+                ⚠ Only BREX — S1000D 4.2, 4.1 and 3.0.1 are implemented. Other formats coming soon.
               </p>
             )}
           </div>
@@ -194,10 +208,10 @@ export default function GenerateModal({ brdps, onClose }) {
             <button
               className={styles.generateBtn}
               onClick={handleGenerate}
-              disabled={!isConfigComplete || (!isBREX42 && !isBREX301 && !isSch)}
-              title={!isBREX42 && !isBREX301 && !isSch ? 'Only BREX 4.2, 3.0.1 and Schematron 1.0 are available' : undefined}
+              disabled={!isConfigComplete || (!isBREX42 && !isBREX41 && !isBREX301 && !isSch)}
+              title={!isBREX42 && !isBREX41 && !isBREX301 && !isSch ? 'Only BREX 4.2, 4.1, 3.0.1 and Schematron 1.0 are available' : undefined}
             >
-              {!isBREX42 && !isBREX301 && !isSch ? 'Coming soon' : result ? 'Regenerate' : 'Generate'}
+              {!isBREX42 && !isBREX41 && !isBREX301 && !isSch ? 'Coming soon' : result ? 'Regenerate' : 'Generate'}
             </button>
           ) : (
             <div className={styles.loadingRow}>
