@@ -72,6 +72,7 @@ STRICT RULES:
 NEVER put nonContextRule inside structureObjectRule. NEVER generate a structureObjectRule without objectPath.
 18. The id attribute of structureObjectRule must be globally unique across the entire document. NEVER use the same id value twice. If you split a BRDP into multiple structureObjectRule elements, only the first keeps the BRDP id. Additional rules use BRDP-id-b, BRDP-id-c, etc.
 19. NEVER invent attributes not in the schema. objectPath only allows allowedObjectFlag (values: 0, 1, 2) — no other attributes allowed on objectPath. There is NO brDecisionRef element and NO brSeverityLevel attribute in S1000D 4.1 — traceability to the BRDP is via the id attribute only. Inside <simplePara> text, NEVER use raw XML tags: escape element names as &lt;elementName&gt; instead of <elementName>.
+20. dmStatus issueType attribute: use issueType="new" (this is always a newly generated document). If used at all, valid values are only: new, changed, deleted, revised, status, rinstate-changed, rinstate-revised, rinstate-status.
 
 ## Few-shot examples: BRDP id → structureObjectRule
 Use these real validated examples as reference for structure, XPath patterns and objectValue formatting.
@@ -408,6 +409,20 @@ function forceDmoduleTag41(xml, dmoduleOpeningTag) {
   return xml.replace(/<dmodule\b[^>]*>/, dmoduleOpeningTag);
 }
 
+function forceIssueType41(xml) {
+  // issueType es metadato boilerplate de cabecera (no depende del proyecto ni
+  // de los BRDPs) y este generador SIEMPRE produce un documento nuevo, así que
+  // se fuerza determinísticamente a "new" -- no se deja al LLM ningún margen
+  // de decisión aquí. La STRICT RULE del prompt es solo una guía suave para
+  // reducir ruido; la garantía real de corrección viene de esta función.
+  return xml.replace(/<dmStatus\b([^>]*)>/, (full, attrs) => {
+    const newAttrs = /\bissueType="[^"]*"/.test(attrs)
+      ? attrs.replace(/\bissueType="[^"]*"/, 'issueType="new"')
+      : `${attrs} issueType="new"`;
+    return `<dmStatus${newAttrs}>`;
+  });
+}
+
 function fixFlagPlacement41(xml) {
   // mueve allowedObjectFlag de structureObjectRule (inválido) a su objectPath
   return xml.replace(/<structureObjectRule\b[^>]*>[\s\S]*?<\/structureObjectRule>/g, (rule) => {
@@ -495,6 +510,7 @@ function dropRedundantNonContextRules41(xml) {
 
 function finalizeDocument41(xml, projectConfig, schemaSummary) {
   xml = forceDmoduleTag41(xml, schemaSummary && schemaSummary.dmodule_opening_tag);
+  xml = forceIssueType41(xml);
   xml = fixFlagPlacement41(xml);
   xml = promoteOrphanSplitRules41(xml);
   xml = forceDmCodeFields41(xml, resolveDmCodeFields41(projectConfig));
@@ -562,7 +578,6 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
   const { system: sys1, user: usr1 } = buildBREXPrompt41(chunks[0], projectConfig, schemaSummary);
   const raw1 = await callLLM(sys1, usr1);
   let finalXml = extractXML(raw1);
-  finalXml = finalXml.replace(/issueType="original"/g, 'issueType="new"');
   finalXml = finalXml.replace(/\s+allowedObjectFlagContext="[^"]*"/g, '');
   finalXml = escapeXMLContent41(finalXml);
   finalXml = splitMultipleObjectPaths41(finalXml);
