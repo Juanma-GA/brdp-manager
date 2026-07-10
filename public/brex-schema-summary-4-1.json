@@ -1,0 +1,581 @@
+{
+  "standard": "S1000D Issue 4.1",
+  "rootElement": "dmodule",
+  "infoCode": "022",
+  "namespaces": {
+    "xlink": "http://www.w3.org/1999/xlink",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "xsi": "http://www.w3.org/2001/XMLSchema-instance",
+    "dc": "http://www.purl.org/dc/elements/1.1/"
+  },
+  "dmodule_opening_tag": "<dmodule xsi:noNamespaceSchemaLocation=\"http://www.s1000d.org/S1000D_4-1/xml_schema_flat/brex.xsd\" xmlns:dc=\"http://www.purl.org/dc/elements/1.1/\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+  "structure": {
+    "dmodule": {
+      "children_required": [
+        "identAndStatusSection",
+        "content"
+      ],
+      "note": "Use exact namespace declarations from dmodule_opening_tag above"
+    },
+    "identAndStatusSection": {
+      "children_required": [
+        "dmAddress",
+        "dmStatus"
+      ]
+    },
+    "dmAddress": {
+      "children_required": [
+        "dmIdent",
+        "dmAddressItems"
+      ]
+    },
+    "dmIdent": {
+      "children_required": [
+        "dmCode",
+        "language",
+        "issueInfo"
+      ]
+    },
+    "dmCode": {
+      "attributes_required": [
+        "modelIdentCode",
+        "systemDiffCode",
+        "systemCode",
+        "subSystemCode",
+        "subSubSystemCode",
+        "assyCode",
+        "disassyCode",
+        "disassyCodeVariant",
+        "infoCode",
+        "infoCodeVariant",
+        "itemLocationCode"
+      ],
+      "fixed_values": {
+        "infoCode": "022",
+        "infoCodeVariant": "A",
+        "itemLocationCode": "A",
+        "systemCode": "00",
+        "subSystemCode": "0",
+        "subSubSystemCode": "0",
+        "assyCode": "00",
+        "disassyCode": "00",
+        "disassyCodeVariant": "A"
+      }
+    },
+    "language": {
+      "attributes_required": [
+        "languageIsoCode",
+        "countryIsoCode"
+      ]
+    },
+    "issueInfo": {
+      "attributes_required": [
+        "issueNumber",
+        "inWork"
+      ]
+    },
+    "dmAddressItems": {
+      "children_required": [
+        "issueDate",
+        "dmTitle"
+      ]
+    },
+    "issueDate": {
+      "attributes_required": [
+        "year",
+        "month",
+        "day"
+      ],
+      "note": "Format: year=YYYY month=MM day=DD"
+    },
+    "dmTitle": {
+      "children_required": [
+        "techName"
+      ],
+      "children_optional": [
+        "infoName"
+      ]
+    },
+    "dmStatus": {
+      "children_required": [
+        "security",
+        "responsiblePartnerCompany",
+        "originator",
+        "applic",
+        "brexDmRef",
+        "qualityAssurance"
+      ],
+      "attributes_optional": [
+        "issueType"
+      ]
+    },
+    "security": {
+      "attributes_required": [
+        "securityClassification"
+      ],
+      "valid_values": {
+        "securityClassification": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10"
+        ]
+      }
+    },
+    "responsiblePartnerCompany": {
+      "attributes_optional": [
+        "enterpriseCode"
+      ],
+      "children_optional": [
+        "enterpriseName"
+      ]
+    },
+    "originator": {
+      "attributes_optional": [
+        "enterpriseCode"
+      ],
+      "children_optional": [
+        "enterpriseName"
+      ]
+    },
+    "applic": {
+      "note": "Always use: <applic><displayText><simplePara>All</simplePara></displayText></applic>"
+    },
+    "brexDmRef": {
+      "note": "SELF-REFERENCE — identical dmCode values as the document itself",
+      "structure": "<brexDmRef><dmRef><dmRefIdent><dmCode [same attributes as dmIdent/dmCode]/><issueInfo issueNumber=\"001\" inWork=\"00\"/></dmRefIdent></dmRef></brexDmRef>"
+    },
+    "qualityAssurance": {
+      "note": "Use <qualityAssurance><unverified/></qualityAssurance> for new documents"
+    },
+    "content": {
+      "children_required": [
+        "brex"
+      ]
+    },
+    "brex": {
+      "children_optional": [
+        "commonInfo",
+        "contextRules",
+        "nonContextRules"
+      ],
+      "note": "brex contains contextRules directly — there is NO brexDoc and NO brexDmRules"
+    },
+    "contextRules": {
+      "attributes_optional": [
+        "rulesContext"
+      ],
+      "children_optional": [
+        "structureObjectRuleGroup"
+      ],
+      "note": "rulesContext = empty string for rules applying to all DM types"
+    },
+    "structureObjectRuleGroup": {
+      "children_required": [
+        "structureObjectRule"
+      ],
+      "note": "One structureObjectRule per BRDP"
+    },
+    "structureObjectRule": {
+      "children_required": [
+        "objectPath"
+      ],
+      "children_optional": [
+        "objectUse",
+        "objectValue"
+      ],
+      "order": [
+        "objectPath",
+        "objectUse",
+        "objectValue"
+      ],
+      "note": "S1000D 4.1 has NO brDecisionRef element (confirmed: zero occurrences in the real 4.1 XSD). The BRDP identifier is carried ONLY via the id attribute of structureObjectRule -- there is no separate formal traceability element."
+    },
+    "objectPath": {
+      "note": "XPath-like path to the S1000D element this rule applies to",
+      "attributes": {
+        "allowedObjectFlag": {
+          "values": [
+            "0",
+            "1",
+            "2"
+          ],
+          "meaning": {
+            "0": "prohibited — element must NOT be used",
+            "1": "mandatory — element MUST be used",
+            "2": "optional — element may be used (default)"
+          },
+          "inference_rules": {
+            "use_0": "proposal contains: must not, prohibited, forbidden, not allowed, discard",
+            "use_1": "proposal contains: must, mandatory, required, shall, obligatory",
+            "use_2": "all other cases"
+          }
+        }
+      }
+    },
+    "objectUse": {
+      "note": "Free text. One clear sentence summarising the BRDP decision."
+    },
+    "objectValue": {
+      "attributes_required": [
+        "valueAllowed"
+      ],
+      "attributes_optional": [
+        "valueForm"
+      ],
+      "allowed_attributes_ONLY": [
+        "valueAllowed",
+        "valueForm"
+      ],
+      "valueForm_enum": [
+        "single",
+        "range",
+        "pattern"
+      ],
+      "valueForm_forbidden": [
+        "list",
+        "regex",
+        "conditional",
+        "multiple"
+      ],
+      "note": "ONLY valueAllowed and valueForm are allowed attributes. NO child elements. NO condition attribute. NO other attributes. valueForm defaults to single if omitted. NEVER invent other valueForm values."
+    },
+    "nonContextRules": {
+      "children_required": [
+        "nonContextRule"
+      ]
+    },
+    "nonContextRule": {
+      "children_required": [
+        "simplePara"
+      ],
+      "note": "UNVERIFIED beyond removal of brDecisionRef -- confirm full nonContextRuleElemType definition against the real 4.1 XSD before relying on this entry. Use for general rules not tied to a specific element path."
+    }
+  },
+  "few_shot_examples": [
+    {
+      "id": "BRDP-A1-00001",
+      "allowedObjectFlag": "1",
+      "objectPath": "//originator/enterpriseName",
+      "objectUse": "Códigos Origname permitidos.",
+      "objectValues": [
+        "ESCRIBANO MECHANICAL AND ENGINEERING SL",
+        "INDRA SISTEMAS SA",
+        "JEFATURA DEL MANDO DE APOYO LOGISTICO DEL ET",
+        "SANTA BARBARA SISTEMAS SA",
+        "TESS-DEFENCE SA",
+        "SAPA OPERACIONES SL"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00002",
+      "allowedObjectFlag": "0",
+      "objectPath": "//originator[enterpriseName='ESCRIBANO MECHANICAL AND ENGINEERING SL' and @enterpriseCode != '010CB']",
+      "objectUse": "Si origname es ESCRIBANO MECHANICAL AND ENGINEERING SL, el valor debe ser 010CB.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00003",
+      "allowedObjectFlag": "0",
+      "objectPath": "/dmodule[not(.//responsiblePartnerCompany)]",
+      "objectUse": "rpc - ERROR: No se encontró la etiqueta rpc.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00004",
+      "allowedObjectFlag": null,
+      "objectPath": "/dmodule//responsiblePartnerCompany/@enterpriseCode",
+      "objectUse": "Valores permitidos para rpc.",
+      "objectValues": [
+        "010CB",
+        "0178B",
+        "3883B",
+        "0131B",
+        "9AEWB",
+        "0124B"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00006",
+      "allowedObjectFlag": "0",
+      "objectPath": "/*[ not(//dmAddress/issueInfo) and not(//identAndStatusSection/dmAddress/dmIdent/issueInfo/@issueNumber) ]",
+      "objectUse": "Prohibir ausencia del dato de issue, debe existir dmaddres issno o atributo issueNumber en dmAddress dmIdent issueInfo.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00007",
+      "allowedObjectFlag": "0",
+      "objectPath": "//dmAddress[not(language)]",
+      "objectUse": "Prohibir dmaddres sin elemento language",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00014",
+      "allowedObjectFlag": null,
+      "objectPath": "/dmodule/identAndStatusSection[dmAddress/dmIdent/dmCode/@infoCode='008']/dmAddress/dmAddressItems/dmTitle/infoName",
+      "objectUse": "Valor permitido de infoname cuando incode='008'.",
+      "objectValues": [
+        "Registro de estándares técnicos"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00020",
+      "allowedObjectFlag": null,
+      "objectPath": "/dmodule/identAndStatusSection[dmAddress/dmIdent/dmCode/@infoCode='022']/dmAddress/dmAddressItems/dmTitle/infoName",
+      "objectUse": "Valor permitido de infoname cuando incode='022'.",
+      "objectValues": [
+        "Business rules"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00029",
+      "allowedObjectFlag": "0",
+      "objectPath": "/dmodule/identAndStatusSection/dmAddress/dmAddressItems/dmTitle[not(normalize-space(techName))]",
+      "objectUse": "DMC error. Falta techname ausente o vacío.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00030",
+      "allowedObjectFlag": null,
+      "objectPath": "/dmodule/identAndStatusSection[concat(dmAddress/dmIdent/dmCode/@systemCode, dmAddress/dmIdent/dmCode/@subSystemCode, dmAddress/dmIdent/dmCode/@subSubSystemCode, dmAddress/dmIdent/dmCode/@assyCode)='000000'] /dmAddress/dmAddressItems/dmTitle/techName",
+      "objectUse": "Valor permitido de techname cuando SNS='000000'.",
+      "objectValues": [
+        "SISTEMA GENERAL"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00045",
+      "allowedObjectFlag": null,
+      "objectPath": "//dmRef[concat(dmRefIdent/dmCode/@systemCode, dmRefIdent/dmCode/@subSystemCode, dmRefIdent/dmCode/@subSubSystemCode, dmRefIdent/dmCode/@assyCode)='000000']/dmTitle/techName",
+      "objectUse": "Valor permitido de techname cuando SNS='000000' en refdm.",
+      "objectValues": [
+        "SISTEMA GENERAL"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00046",
+      "allowedObjectFlag": "0",
+      "objectPath": "//identAndStatusSection/dmStatus/reasonForUpdate[(//dmRef/issueInfo/@issueNumber='001' or //dmRef/issueInfo/@issueNumber='000' or //identAndStatusSection/dmAddress/dmIdent/issueInfo/@issueNumber='001' or //identAndStatusSection/dmAddress/dmIdent/issueInfo/@issueNumber='000') and not(normalize-space(.))]",
+      "objectUse": "Prohibir cualquier rfu cuando el numero de issue sea 001 o 000.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00047",
+      "allowedObjectFlag": "0",
+      "objectPath": "//*[@changeMark and ( string(//dmRef/issueInfo/@issueNumber) = '001' or string(//identAndStatusSection/dmAddress/dmIdent/issueInfo/@issueNumber) = '001' )]",
+      "objectUse": "Prohibir cualquier atributo mark en todo el documento cuando el numero de issue sea 001.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00049",
+      "allowedObjectFlag": "0",
+      "objectPath": "//dmStatus/reasonForUpdate[ string(//dmRef/issueInfo/@issueNumber) = '000' or string(//identAndStatusSection/dmAddress/dmIdent/issueInfo/@issueNumber) = '000' ]",
+      "objectUse": "Prohibir cualquier rfu cuando el numero de issue sea 000.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00051",
+      "allowedObjectFlag": "0",
+      "objectPath": "(/dmodule/content/maintPlanning/taskDefinition | /dmodule/content/procedure)/preliminaryRqmts/reqPersons[not(personCategory/@personCategoryCode)]",
+      "objectUse": "En caso de existir las rutas schedule/deftask y proced, cada reqpers debe incluir perscat con atributo category.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00052",
+      "allowedObjectFlag": "0",
+      "objectPath": "(/dmodule/content/maintPlanning/taskDefinition | /dmodule/content/procedure)/preliminaryRqmts/reqPersons[count(trade) != 1]",
+      "objectUse": "En caso de existir las rutas schedule/deftask y proced, debe existir exactamente un trade por reqpers.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00055",
+      "allowedObjectFlag": "0",
+      "objectPath": "(/dmodule/content/maintPlanning/taskDefinition | /dmodule/content/procedure)/preliminaryRqmts/reqPersons/estimatedTime[contains(.,'.')]",
+      "objectUse": "En caso de existir las rutas schedule/deftask y proced, esttime no debe usar punto; use coma como separador decimal.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00059",
+      "allowedObjectFlag": "0",
+      "objectPath": "//supportEquipDescr[not(reqQuantity)] | //supplyDescr[not(reqQuantity)] | //spareDescr[not(reqQuantity)]",
+      "objectUse": "Cada supequi/supply/spare debe tener su propio qty.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00060",
+      "allowedObjectFlag": null,
+      "objectPath": "//reqQuantity/@unitOfMeasure",
+      "objectUse": "Decision by Company. Códigos uom permitidos.",
+      "objectValues": [
+        "*SI",
+        "BF",
+        "BQ",
+        "CC",
+        "CD",
+        "CF"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00061",
+      "allowedObjectFlag": "0",
+      "objectPath": "//supportEquipDescr[ ( /dmodule/content/procedure or /dmodule/content/maintPlanning ) and not(name) ]",
+      "objectUse": "Prohibir supequi sin elemento nomen",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00064",
+      "allowedObjectFlag": "0",
+      "objectPath": "//supportEquipDescr[ ( /dmodule/content/procedure or /dmodule/content/maintPlanning ) and not(natoStockNumber) ]",
+      "objectUse": "Prohibir supequi sin elemento nsn",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00066",
+      "allowedObjectFlag": "0",
+      "objectPath": "//pm/taskDuration[ not(@procedureDuration) and ( /dmodule/content/procedure or /dmodule/content/maintPlanning ) ]",
+      "objectUse": "Prohibir opndurn sin atributo proced",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00069",
+      "allowedObjectFlag": "0",
+      "objectPath": "//pm/taskDuration[@startupDuration  and normalize-space(@startupDuration) != '0,00'  and (//dmodule/content/procedure or //dmodule/content/maintPlanning)  and ( translate(normalize-space(@startupDuration), '0123456789,', '') != ''  or ((string-length(normalize-space(@startupDuration)) - string-length(translate(normalize-space(@startupDuration), ',', ''))) > 1)  or ( contains(@startupDuration, ',')  and ( string-length(substring-before(@startupDuration, ',')) = 0  or string-length(substring-before(@startupDuration, ',')) > 8  or string-length(substring-after(@startupDuration, ',')) < 1  or string-length(substring-after(@startupDuration, ',')) > 2 )) or ( not(contains(@startupDuration, ',')) and string-length(normalize-space(@startupDuration)) > 8 ))]",
+      "objectUse": "Prohibir prelreqs con formato invalido cuando no es cero",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00072",
+      "allowedObjectFlag": "0",
+      "objectPath": "/dmodule[not(//applicCrossRefTableRef)]",
+      "objectUse": "//actref - ERROR: No se encontró ninguna etiqueta actref. Es obligatoria.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00074",
+      "allowedObjectFlag": "0",
+      "objectPath": "/dmodule/content//table//applic",
+      "objectUse": "Table - ERROR: applic no permitido dentro de table.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00075",
+      "allowedObjectFlag": "0",
+      "objectPath": "//referencedApplicGroup[not(applic[@id])]",
+      "objectUse": "Prohibir inlineapplics sin al menos un applic con identificador",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00080",
+      "allowedObjectFlag": "0",
+      "objectPath": "/dmodule//internalRef[not(@internalRefTargetType)]",
+      "objectUse": "xref - ERROR: Nodo xref sin atributo xidtype.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00081",
+      "allowedObjectFlag": "0",
+      "objectPath": "//reqCondGroup/reqCondCircuitBreaker//circuitBreakerDescrGroup[@circuitBreakerAction and ( /dmodule/content/procedure or /dmodule/content/maintPlanning )]",
+      "objectUse": "Prohibir cblst con atributo cbaction dentro de reqcblst",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00085",
+      "allowedObjectFlag": "0",
+      "objectPath": "/dmodule/content//table[not(@frame='topbot')]",
+      "objectUse": "Table - ERROR: El atributo frame debe ser topbot.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00086",
+      "allowedObjectFlag": "0",
+      "objectPath": "/dmodule/content//table[not(@id) or not(starts-with(@id,'tab-')) or string-length(@id) != 8 or string-length(substring(@id,5)) != 4 or translate(substring(@id,5),'0123456789','') != '']",
+      "objectUse": "Table - ERROR: El atributo id debe tener formato tab-YYYY.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00087",
+      "allowedObjectFlag": "0",
+      "objectPath": "/dmodule/content//table[@authorityDocument]",
+      "objectUse": "Table - ERROR: Atributo prohibido authdoc presente.",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00091",
+      "allowedObjectFlag": "0",
+      "objectPath": "//figure[.//graphic//hotspot and not(.//legend)]",
+      "objectUse": "Prohibir figure con hotspots sin legend",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00092",
+      "allowedObjectFlag": "0",
+      "objectPath": "//figure[.//graphic//hotspot and count(.//legend/definitionList/listItemTerm) != count(.//graphic//hotspot) ]",
+      "objectUse": "Prohibir desajuste entre numero de term y numero de hotspots en la misma figure",
+      "objectValues": []
+    },
+    {
+      "id": "BRDP-A1-00097",
+      "allowedObjectFlag": "1",
+      "objectPath": "//techStandard/techPubBase",
+      "objectUse": "Prohibir techstd con tpbase distinto de S1000D.",
+      "objectValues": [
+        "S1000D"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00098",
+      "allowedObjectFlag": "1",
+      "objectPath": "//dmStatus/qualityAssurance/firstVerification/@type",
+      "objectUse": "Obligatorio el atributo type de firstver y su valor debe ser tabtop",
+      "objectValues": [
+        "tabtop"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00099",
+      "allowedObjectFlag": null,
+      "objectPath": "//applicCrossRefTable/productAttributeList/productAttribute[@id='jacked-status']/enumeration/@applicPropertyValues",
+      "objectUse": "(SOPTE BREX 3.9.5.2.1.9-2.2)El valor del atributo status de jacked no esta permitido.",
+      "objectValues": [
+        "yes",
+        "no",
+        "na"
+      ]
+    },
+    {
+      "id": "BRDP-A1-00100",
+      "allowedObjectFlag": "1",
+      "objectPath": "//dmodule/@xsi:noNamespaceSchemaLocation",
+      "objectUse": "Obligatorio que la ubicacion de esquema pertenezca a la lista XMLDM aprobada",
+      "objectValues": [
+        "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/appliccrossreftable.xsd",
+        "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/brex.xsd",
+        "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comment.xsd",
+        "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd",
+        "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/container.xsd",
+        "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ddn.xsd"
+      ]
+    }
+  ],
+  "generation_rules": [
+    "Output ONLY the XML — no markdown fences, no explanation, no preamble",
+    "Copy the exact namespace declarations from dmodule_opening_tag",
+    "infoCode is always 022, infoCodeVariant always A, itemLocationCode always A",
+    "content wraps brex directly — there is NO brexDoc and NO brexDmRules element",
+    "brexDmRef is a self-reference — copy the exact same dmCode attributes from dmIdent",
+    "brexDmRef/dmRef/dmRefIdent must include BOTH dmCode AND issueInfo",
+    "Each validated BRDP becomes one structureObjectRule, identified ONLY by its id attribute (no brDecisionRef in 4.1)",
+    "Infer allowedObjectFlag from proposal text using inference_rules",
+    "objectUse must be one sentence summarising the decision",
+    "Use today's date for issueDate",
+    "techName = project name; infoName = Business Rules Exchange",
+    "qualityAssurance uses unverified/ for new documents",
+    "applic uses All"
+  ]
+}
