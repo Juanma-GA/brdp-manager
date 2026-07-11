@@ -60,7 +60,7 @@ Dos problemas relacionados pero distintos, ambos con la misma causa raíz (el pr
 | `src/api/generateBREX.js` | Generador BREX S1000D 4.2 + helpers compartidos |
 | `src/api/generateBREX41.js` | Generador BREX S1000D 4.1 |
 | `src/api/generateBREX301.js` | Generador BREX S1000D 3.0.1 |
-| `src/api/generateBREXSch.js` | Generador Schematron 1.0 (enfoque A2, ver abajo) |
+| `src/api/generateBREXSch.js` | Generador Schematron 1.0 — S1000D (enfoque A2, ver abajo) |
 | `src/api/brexToSchematron.js` | Conversor determinista BREX → Schematron (sin LLM) |
 | `src/api/buildBREXdocReport.js` | Constructor del informe BREXdoc |
 | `src/api/extractBRDPs.js` | AI Extract: DOCX/PDF/texto plano → BRDPs |
@@ -129,7 +129,7 @@ Helpers compartidos: `extractXML()` y `checkWellFormed()` se importan SIEMPRE de
 - Red de seguridad: comentario `nonContextRule` (no elemento).
 - `finalizeDocument301(xml, projectConfig, schemaSummary)` aplica: `forceDmoduleTag301`, `fixObjapplPlacement301`, `promoteOrphanSplitRules301`, `forceAveeFields301` (`resolveAveeFields301`), `dedupeNonContextComments301`.
 
-### Schematron 1.0 (`generateBREXSch.js` + `brexToSchematron.js`) — enfoque A2
+### Schematron 1.0 — S1000D (`generateBREXSch.js` + `brexToSchematron.js`) — enfoque A2
 
 El Schematron NO se genera con el LLM directamente (era frágil). En su lugar:
 
@@ -194,8 +194,11 @@ donde `payload` es el body ya construido. El servidor Express solo añade header
 const isBREX42 = format === 'BREX — S1000D 4.2';
 const isBREX41 = format === 'BREX — S1000D 4.1';
 const isBREX301 = format === 'BREX — S1000D 3.0.1';
-const isSch = format === 'Schematron 1.0';
+const isSchS1000D = format === 'Schematron 1.0 — S1000D';
+const isSchDITA = format === 'Schematron 1.0 — DITA';
 ```
+
+Schematron 1.0 se divide en dos formatos independientes en el selector: "Schematron 1.0 — S1000D" (implementado, `generateBREXSch.js`) y "Schematron 1.0 — DITA" (pendiente, cae en "Coming soon" igual que 5.0/6.0 — el generador DITA reutilizará `xmllint-wasm` para validación, siguiendo el mismo patrón que S1000D).
 
 Añadir un nuevo formato BREX requiere: nuevo generador + schema JSON + rama en `handleGenerate()` + actualizar `disabled`/"Coming soon".
 
@@ -206,6 +209,7 @@ Añadir un nuevo formato BREX requiere: nuevo generador + schema JSON + rama en 
 ## Lo que NO está implementado todavía
 
 - S1000D 5.0, 6.0 (selector existe, botón deshabilitado con "Coming soon").
+- Schematron 1.0 — DITA (selector existe, botón deshabilitado con "Coming soon"; Schematron 1.0 — S1000D sí está implementado).
 - Botón de migración BREX→Schematron sobre un BREX subido (el motor `brexToSchematron.js` ya está listo; falta la UI).
 - Migración automática de localStorage a SQLite en primera ejecución.
 - Autenticación (no necesaria para uso local single-user).

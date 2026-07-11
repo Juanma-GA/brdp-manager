@@ -34,7 +34,8 @@ export default function GenerateModal({ brdps, onClose }) {
   const isBREX42 = format === 'BREX — S1000D 4.2';
   const isBREX41 = format === 'BREX — S1000D 4.1';
   const isBREX301 = format === 'BREX — S1000D 3.0.1';
-  const isSch = format === 'Schematron 1.0';
+  const isSchS1000D = format === 'Schematron 1.0 — S1000D';
+  const isSchDITA = format === 'Schematron 1.0 — DITA';
   const xsdFormat = XSD_FORMAT_MAP[format];
 
   const getSettings = () => ({
@@ -99,7 +100,7 @@ export default function GenerateModal({ brdps, onClose }) {
           onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
           abortController: abortRef.current,
         });
-      } else if (isSch) {
+      } else if (isSchS1000D) {
         result = await generateBREXSch(brdps, projectConfig, {
           apiKey,
           modelName,
@@ -155,7 +156,7 @@ export default function GenerateModal({ brdps, onClose }) {
     const dateStr = new Date().toISOString().slice(0, 10);
     const filename = isBREX301
       ? `DMC-${projectConfig.modelIdentCode}-00-00-00-00A-022A-D_${dateStr}_301.xml`
-      : isSch
+      : isSchS1000D
       ? `${projectConfig.modelIdentCode}_${dateStr}.sch`
       : isBREX41
       ? `DMC-${projectConfig.modelIdentCode}-00-00-00-00A-022A-A_${dateStr}_41.xml`
@@ -194,9 +195,10 @@ export default function GenerateModal({ brdps, onClose }) {
               <option>BREX — S1000D 4.2</option>
               <option>BREX — S1000D 5.0</option>
               <option>BREX — S1000D 6.0</option>
-              <option>Schematron 1.0</option>
+              <option>Schematron 1.0 — S1000D</option>
+              <option>Schematron 1.0 — DITA</option>
             </select>
-            {!isBREX42 && !isBREX41 && !isBREX301 && !isSch && (
+            {!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D && (
               <p className={styles.comingSoon}>
                 ⚠ Only BREX — S1000D 4.2, 4.1 and 3.0.1 are implemented. Other formats coming soon.
               </p>
@@ -240,10 +242,10 @@ export default function GenerateModal({ brdps, onClose }) {
             <button
               className={styles.generateBtn}
               onClick={handleGenerate}
-              disabled={!isConfigComplete || (!isBREX42 && !isBREX41 && !isBREX301 && !isSch)}
-              title={!isBREX42 && !isBREX41 && !isBREX301 && !isSch ? 'Only BREX 4.2, 4.1, 3.0.1 and Schematron 1.0 are available' : undefined}
+              disabled={!isConfigComplete || (!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D)}
+              title={!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D ? 'Only BREX 4.2, 4.1, 3.0.1 and Schematron 1.0 — S1000D are available' : undefined}
             >
-              {!isBREX42 && !isBREX41 && !isBREX301 && !isSch ? 'Coming soon' : result ? 'Regenerate' : 'Generate'}
+              {!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D ? 'Coming soon' : result ? 'Regenerate' : 'Generate'}
             </button>
           ) : (
             <div className={styles.loadingRow}>
