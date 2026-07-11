@@ -42,6 +42,13 @@ if (import.meta.env.PROD) {
 
 `better-sqlite3` se compila de forma nativa. En Node muy reciente (24+) puede no haber binario precompilado y fallar el build (requiere C++ build tools). Soluciones: `npm install better-sqlite3@latest` (trae prebuilt para Node nuevo) o usar Node LTS 20/22. No es un problema del código de la app.
 
+### Nota de entorno: proxy corporativo con inspección SSL (ATEXIS)
+
+Dos problemas relacionados pero distintos, ambos con la misma causa raíz (el proxy corporativo con inspección SSL — confirmado Zscaler — re-firma el tráfico HTTPS con su propio CA raíz, que ni npm ni Node reconocen por defecto). Detalle completo orientado al usuario en el README ("Troubleshooting: Corporate Network / SSL-Inspecting Proxy"):
+
+1. **`npm install` falla con `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`** — afecta a cualquier instalación o adición de dependencia futura. Es un problema de la propia herramienta npm, no del código de la app. Fix permanente: `npm config set cafile "ruta\al\certificado-corporativo.pem"` (pedir el `.pem` del CA raíz a IT, o exportarlo de `certmgr.msc` → Entidades de certificación raíz de confianza). Fix rápido/temporal si no se tiene el `.pem` a mano: `npm config set strict-ssl false` → `npm install` → `npm config set strict-ssl true` inmediatamente después — nunca dejarlo desactivado.
+2. **La propia app (`npm start`) falla con el mismo error de certificado** — problema distinto: Node en runtime no usa la config de npm ni el almacén de certificados de Windows por defecto. **Ya resuelto en el código** vía `win-ca` (`server.js`, se activa solo si `process.platform === 'win32'`, no-op en Linux/Mac) — no requiere ninguna acción manual, a diferencia del problema 1.
+
 ## Ficheros clave
 
 | Fichero | Responsabilidad |

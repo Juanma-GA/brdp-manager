@@ -62,6 +62,38 @@ Open http://localhost:5173 in your browser.
 
 In development mode, the Vite dev server handles proxying. In production, Express handles everything.
 
+## Troubleshooting: Corporate Network / SSL-Inspecting Proxy
+
+If you're on a corporate network with SSL inspection (e.g. Zscaler), you may hit certificate errors in two different, unrelated places. Both share the same root cause (npm and Node don't trust your organization's proxy root CA), but each needs its own fix.
+
+### 1. `npm install` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`
+
+Affects: any `npm install` — the initial one, or adding any new dependency later. This is an npm tooling issue, not something wrong with this app's code.
+
+**Cause:** your corporate SSL-inspecting proxy (confirmed with Zscaler in our case) re-signs HTTPS traffic with its own root certificate, which npm doesn't recognize.
+
+**Recommended fix (permanent, safer):**
+```bash
+npm config set cafile "C:\path\to\corporate-root-cert.pem"
+```
+Ask your IT department for your organization's root CA `.pem` file, or export it yourself from Windows: `certmgr.msc` → *Trusted Root Certification Authorities*.
+
+**Quick fix (only if you don't have the certificate on hand, temporary):**
+```bash
+npm config set strict-ssl false
+npm install
+npm config set strict-ssl true
+```
+⚠️ This disables npm's SSL verification while active. Re-enable `strict-ssl` immediately after the install completes — don't leave it disabled.
+
+### 2. The app itself (`npm start`) fails with the same certificate error
+
+Affects: running `server.js` at runtime (calls to external LLM APIs like Mistral).
+
+**Cause:** the same corporate SSL-inspecting proxy — but a distinct problem, because Node.js at runtime doesn't use npm's configuration or Windows' certificate store by default.
+
+**Fix:** already built into the code (`win-ca`, auto-enabled only on Windows, no-op on Linux/Mac) — no manual action needed. Unlike problem #1 above, this one is already solved for you.
+
 ## Configuration
 
 ### AI Configuration
