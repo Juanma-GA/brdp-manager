@@ -4,7 +4,14 @@ import { generateBREX } from '../api/generateBREX';
 import { generateBREX41 } from '../api/generateBREX41.js';
 import { generateBREX301 } from '../api/generateBREX301.js';
 import { generateBREXSch } from '../api/generateBREXSch.js';
+import { validateAgainstXSD } from '../api/validateBREX.js';
 import styles from './GenerateModal.module.css';
+
+const XSD_FORMAT_MAP = {
+  'BREX — S1000D 3.0.1': '3.0.1',
+  'BREX — S1000D 4.1': '4.1',
+  'BREX — S1000D 4.2': '4.2',
+};
 
 export default function GenerateModal({ brdps, onClose }) {
   const { projectConfig } = useProjectConfig();
@@ -14,7 +21,9 @@ export default function GenerateModal({ brdps, onClose }) {
   const [streamedChars, setStreamedChars] = useState(0);
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [xsdValidation, setXsdValidation] = useState(null);
   const abortRef = useRef(null);
+  const xsdGenerationRef = useRef(0);
 
   const validatedCount = brdps.filter(
     b => b.validation?.toLowerCase().trim() === 'validated'
@@ -26,6 +35,7 @@ export default function GenerateModal({ brdps, onClose }) {
   const isBREX41 = format === 'BREX — S1000D 4.1';
   const isBREX301 = format === 'BREX — S1000D 3.0.1';
   const isSch = format === 'Schematron 1.0';
+  const xsdFormat = XSD_FORMAT_MAP[format];
 
   const getSettings = () => ({
     apiKey: localStorage.getItem('brdp_api_key') || '',
@@ -40,7 +50,7 @@ export default function GenerateModal({ brdps, onClose }) {
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  useEffect(() => { setResult(null); }, [onlyValidated, format]);
+  useEffect(() => { setResult(null); setXsdValidation(null); }, [onlyValidated, format]);
 
   const handleGenerate = useCallback(async () => {
     const { apiKey, modelName, provider, customEndpoint } = getSettings();
@@ -52,8 +62,10 @@ export default function GenerateModal({ brdps, onClose }) {
 
     setLoading(true);
     setResult(null);
+    setXsdValidation(null);
     setStreamedChars(0);
     abortRef.current = new AbortController();
+    const generationId = ++xsdGenerationRef.current;
 
     try {
       let result;
@@ -99,12 +111,32 @@ export default function GenerateModal({ brdps, onClose }) {
         });
       }
       setResult(result);
+
+      // Real XSD schema validation -- separate from checkWellFormed() above.
+      // Fires in the background; never blocks or replaces the generated XML.
+      // Not available in `npm run dev` (no Node backend behind the Vite dev server).
+      // Guarded by generationId so a slow response from a previous Generate
+      // click can never overwrite the state of a newer one.
+      if (result?.xml && xsdFormat && !import.meta.env.DEV) {
+        setXsdValidation({ status: 'validating' });
+        validateAgainstXSD(result.xml, xsdFormat)
+          .then(({ valid, errors }) => {
+            if (xsdGenerationRef.current === generationId) {
+              setXsdValidation({ status: 'done', valid, errors });
+            }
+          })
+          .catch((err) => {
+            if (xsdGenerationRef.current === generationId) {
+              setXsdValidation({ status: 'error', message: err.message });
+            }
+          });
+      }
     } catch (err) {
       setResult({ xml: null, valid: false, error: err.message, brdpCount: 0 });
     } finally {
       setLoading(false);
     }
-  }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX41, isBREX301]);
+  }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX41, isBREX301, xsdFormat]);
 
   const handleCancel = () => {
     abortRef.current?.abort();
@@ -232,6 +264,32 @@ export default function GenerateModal({ brdps, onClose }) {
                 <span className={styles.countInfo}>{result.brdpCount} rules included</span>
               )}
             </div>
+            {xsdFormat && result.xml && (
+              <div className={styles.xsdSection}>
+                {import.meta.env.DEV ? (
+                  <p className={styles.devNotice}>
+                    Validación XSD no disponible en modo desarrollo (solo en npm start).
+                  </p>
+                ) : xsdValidation?.status === 'validating' ? (
+                  <span className={styles.badgePending}>⧗ Validating against XSD…</span>
+                ) : xsdValidation?.status === 'error' ? (
+                  <span className={styles.badgeError}>✗ XSD validation failed to run: {xsdValidation.message}</span>
+                ) : xsdValidation?.status === 'done' && xsdValidation.valid ? (
+                  <span className={styles.badgeOk}>✓ Valid against XSD schema</span>
+                ) : xsdValidation?.status === 'done' && !xsdValidation.valid ? (
+                  <details>
+                    <summary className={styles.badgeError}>
+                      ✗ {xsdValidation.errors.length} XSD validation {xsdValidation.errors.length === 1 ? 'issue' : 'issues'}
+                    </summary>
+                    <ul className={styles.xsdErrorList}>
+                      {xsdValidation.errors.map((e, i) => (
+                        <li key={i}>{e.line ? `Line ${e.line}: ` : ''}{e.message}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </div>
+            )}
             {result.xml ? (
               <>
                 <pre className={styles.xmlOutput}>{result.xml}</pre>

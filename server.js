@@ -3,6 +3,7 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
+import { validateXML } from 'xmllint-wasm';
 import db from './src/db/database.js';
 
 // Trust Windows' certificate store (corporate/ATEXIS root CAs included) so
@@ -96,6 +97,77 @@ app.post('/api/proxy', async (req, res) => {
       code: err.code || err.cause?.code || err.name,
       message: err.message,
     });
+  }
+});
+
+// ─── BREX XSD validation ───────────────────────────────────────────────────────
+
+// Each S1000D issue ships its own self-contained schema set (main BREX schema
+// + xlink/rdf/dc companions it xs:imports) under sources/. Sets are NOT
+// interchangeable between issues -- always load all 4 files from the same folder.
+const BREX_XSD_MAP = {
+  '3.0.1': { dir: 'S3.0.1', main: 'brex.xsd' },
+  '4.1': { dir: 'S4.1', main: 'brex4.1.xsd' },
+  '4.2': { dir: 'S4.2', main: 'brex4.2.xsd' },
+};
+
+const _xsdSetCache = {};
+
+function loadXsdSet(format) {
+  if (_xsdSetCache[format]) return _xsdSetCache[format];
+  const entry = BREX_XSD_MAP[format];
+  if (!entry) return null;
+  const base = join(__dirname, 'sources', entry.dir);
+  const set = {
+    main: readFileSync(join(base, entry.main), 'utf-8'),
+    xlink: readFileSync(join(base, 'xlink.xsd'), 'utf-8'),
+    rdf: readFileSync(join(base, 'rdf.xsd'), 'utf-8'),
+    dc: readFileSync(join(base, 'dc.xsd'), 'utf-8'),
+  };
+  _xsdSetCache[format] = set;
+  return set;
+}
+
+app.post('/api/validate-brex', async (req, res) => {
+  const { xml, format } = req.body;
+
+  if (!xml || !format) {
+    return res.status(400).json({ error: 'Missing required fields: xml, format' });
+  }
+
+  let xsdSet;
+  try {
+    xsdSet = loadXsdSet(format);
+  } catch (err) {
+    console.error('[/api/validate-brex] failed to load XSD set for', format, err.message);
+    return res.status(500).json({ error: `Could not load XSD schema files for format "${format}"` });
+  }
+
+  if (!xsdSet) {
+    return res.status(400).json({ error: `Unknown format "${format}". Expected one of: 3.0.1, 4.1, 4.2` });
+  }
+
+  try {
+    const result = await validateXML({
+      xml: [{ fileName: 'generated.xml', contents: xml }],
+      schema: [xsdSet.main],
+      preload: [
+        { fileName: 'xlink.xsd', contents: xsdSet.xlink },
+        { fileName: 'rdf.xsd', contents: xsdSet.rdf },
+        { fileName: 'dc.xsd', contents: xsdSet.dc },
+      ],
+    });
+
+    const errors = (result.errors || []).map((e) => ({
+      message: e.message,
+      line: e.loc?.lineNumber ?? null,
+      rawMessage: e.rawMessage,
+    }));
+
+    res.json({ valid: result.valid, errors });
+  } catch (err) {
+    console.error('[/api/validate-brex] xmllint failed:', err.message);
+    res.status(500).json({ error: 'XSD validation failed to run', message: err.message });
   }
 });
 

@@ -23,7 +23,8 @@
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
     "win-ca": "^3.5.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "xmllint-wasm": "^5.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
