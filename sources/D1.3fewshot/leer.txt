@@ -1,0 +1,164 @@
+29 BRDPs clasificados "A - Estructura XML"
+Agrupados por Tipo(s) de topic estimado, orden alta→media dentro de cada grupo.
+
+Grupo 1 — Task / machineryTask (solo tipos de tarea)
+BRDP-D1-00186 — Confianza: alta
+
+Definition: Maximum number of step levels in a task
+Proposal: There will be a maximum of five levels, while the fifth level must not have a title.
+Motivo: Profundidad máxima de <step>/<substep> es comprobable.
+BRDP-D1-00187 — Confianza: alta
+
+Definition: Minimum number of substeps in a step
+Proposal: Single substeps shall not be used; minimum two.
+Motivo: Número mínimo de <substep> por <step> es comprobable.
+BRDP-D1-00031 — Confianza: media
+
+Definition: Decide where to use danger, warning, caution and notice, and how they look like.
+Proposal: General to all task topics shall be included in the safety requirements section. The look: the simplest one for maintanability.
+Motivo: Ubicación de hazard statements en la sección de safety requirements del taskbody es comprobable.
+Grupo 2 — Topic / Concept / Task (contenido técnico general)
+BRDP-D1-00092 — Confianza: alta
+
+Definition: Decide whether and how to use IDs for tables and figures, and all the elements of the SIR (see BRDP-D1-00010, and BRDP-D1-00011).
+Proposal: A nomenclature shall be defined and it should reset the counter in each topic: elementID(3)-nnn for tables and figures (e.g.: fig-001, tbl-001). Oxygen ID Generation config: fig-${id}-${counter}, tbl-${id}-${counter}. For SIR the same (e.g.: sup-0001, "mmo"/"sup"/"seq"/"spa"/"gra"/"hot"/"rqt"/"zon"/"acp" prefixes).
+Motivo: Nomenclatura de IDs (fig-001, tbl-001) es comprobable por patrón regex sobre @id.
+BRDP-D1-00033 — Confianza: alta
+
+Definition: Decide how to use the danger/warning/caution/notice Type (see BRDP-D1-00010 and BRDP-D1-00011).
+Proposal: For technical content (also in concept schemas): <hazardstatement type="warning"><hazardtitle>Warning</hazardtitle><hazardbody><messagepanel><hazardsymbol href="images/warning.svg"/><message>Do not operate with the cover open.</message></messagepanel></hazardbody></hazardstatement> Or simpler: <note type="warning">Do not touch the exposed terminals.</note>
+Motivo: Elige entre <hazardstatement> y <note type="warning">, patrón estructural comprobable.
+BRDP-D1-00095 (row 34) — Confianza: alta
+
+Definition: Use of the element <xRef> in titles is strongly discouraged. However, decide whether to use cross-references in titles.
+Proposal: Not to use it.
+Motivo: Ausencia de <xref> dentro de <title> es comprobable.
+Nota: este mismo ID aparece dos veces en la fuente; ver también más abajo (Grupo 5) para su segunda instancia, clasificada con topics "los 6 tipos".
+BRDP-D1-00095 (row 35) — Confianza: alta
+
+Definition: Decide whether to use the element Title for figures and tables.
+Proposal: Recommend it if the organization wants to use Xrefs or hotspots.
+Motivo: Presencia/ausencia de <title> en <fig>/<table> es comprobable.
+BRDP-D1-00128 — Confianza: alta
+
+Definition: Decide on the strategy for description in tables and figures. The advantage of making the desc part of the text is that the same illustration can have different legends wherever it appears.
+Proposal: Discard if it is not necessary. <fig><title>Equipment Layout</title><desc>The following layout shows the relative position of components A, B and C inside the avionics bay.</desc><image href="layout.svg"/></fig> <table id="tbl-pressure-01"><title>Pressure Limits</title><desc>These values apply only to the primary hydraulic circuit.</desc>
+Motivo: Uso de <desc> en <fig>/<table> es un patrón estructural comprobable.
+BRDP-D1-00132 — Confianza: alta
+
+Definition: Decide whether and how to use hotspots as follows: if hotspots are to be used, decide whether hotspots can be used to link from graphical objects to other graphical objects or local text, or other topics, sections, etc.
+Proposal: If hotspots are going to be used: define only one shape (circle, poly or rect); define the color; define list of the items to link. <imagemap id="EngineeringServices"><image href="images/ICN-QAP-03.png" placement="inline"><alt>Engineering Services overview</alt></image><area><shape>rect</shape><coords>1, 173, 249, 1</coords><xref href="instalacion.dita#topicInstalacion/Primer_p" format="dita">Primer Párrado de Instalación</xref></area>... (análogo para circle y poly)
+Motivo: Estructura de <imagemap>/<area>/<shape> es comprobable.
+BRDP-D1-00172 — Confianza: alta
+
+Definition: Decide whether and how to use the text element <footnote> and when used, decide whether the use of footnotes is limited to regular text and titles (inline) and/or to tables (table footnotes).
+Proposal: <footnote> shall not be used. (El elemento contiene referencias/explicaciones que ocuparían demasiado espacio; genera un marcador en el texto.) Para reutilización: <fn id="fn-certification">Only certified operators may perform this procedure.</fn> ... <fn conref="#fn-certification"/>
+Motivo: Prohibición de <footnote>/<fn> es comprobable.
+BRDP-D1-00356 — Confianza: alta
+
+Definition: Use of the draft-comment element
+Proposal: Discard what is not need: el elemento <draft-comment> se usa solo durante borrador/edición para añadir comentarios internos que NO deben aparecer en la salida final. <p>Install the module following the instructions.</p><draft-comment author="Makoa" time="2025-02-15">Please verify if this is the updated module or the previous version.</draft-comment>
+Motivo: Prohibición de <draft-comment> en la salida final es comprobable.
+BRDP-D1-00524 — Confianza: alta
+
+Definition: Presentation of the name of SIR elements (parts, supplies, tools, …)
+Proposal: Recommended by its name or ID with xRef when a table with the items has previously provided.
+Motivo: Forma de referenciar elementos SIR por nombre o ID vía xRef es un patrón de contenido comprobable.
+BRDP-D1-00026 — Confianza: media
+
+Definition: Decide which method to use to highlight text.
+Proposal: Bold text only shall be used to emphasize text. Overline text may be used only for marking vectors in graphics.
+Motivo: Restringe qué elementos de highlight-domain (p.ej. <b>) están permitidos.
+BRDP-D1-00065 — Confianza: media
+
+Definition: Decide whether and how to use the element <copyright> as metadata.
+Proposal: Discard if not required. Copyright should be reusable topic called from snippets.ditamap. <topic id="copyright"><title>Copyright</title><prolog id="copyright-prolog"><copyright><copyryear year="2001-04-12"></copyryear><copyrholder>IBM</copyrholder></copyright>...</prolog> — luego se inserta vía <prolog conref="copyright.dita#copyright/copyright-prolog"/>
+Motivo: Presencia de <copyright> reutilizado vía conref es un patrón estructural comprobable.
+BRDP-D1-00089 — Confianza: media
+
+Definition: Decide whether standard sentences for reasons for update are to be used and if put it as a topic metadata or control it from the CCMS
+Proposal: CCMS control is the easier way. Si se requiere metadato: <prolog><critdates><revised modified="2025-02-25"><comment>Reason for update: Updated wiring diagram and corrected torque values.</comment></revised></critdates></prolog>
+Motivo: Estructura <critdates><revised><comment> es comprobable si se decide usar ese metadato.
+BRDP-D1-00130 — Confianza: media
+
+Definition: Decide what types of multimedia objects are permitted.
+Proposal: Video (mp4) and Audio (wav, mp3) files allowed.
+Motivo: Formatos de multimedia permitidos son comprobables vía @format en <object>/<video>/<audio>.
+BRDP-D1-00131 — Confianza: media
+
+Definition: Use of download components by URL or physical resource, and by the use of list (<ul> or <ol>, <dl>, or <choicetable>.
+Proposal: Recommended URL if possible and the use of definition list <dl> which fits very well on both PDF and webhelp.
+Motivo: Elección de elemento de lista (<dl> vs <ul>/<choicetable>) es un patrón estructural comprobable.
+BRDP-D1-00344 — Confianza: media
+
+Definition: Decide which method to be used for the illustrations (ICN - Information Control Number). ICN-topicModelCode-IssueNumber
+Proposal: Each illustration sheet, multimedia object, or other data attached to a topic must be identified by an ICN. Recommended to use the same model as for the topic (BRDP-D1-00331) with ICN letters at the beginning and Issue Number = 001 (increments of 1) at the end.
+Motivo: Patrón de codificación ICN es comprobable vía regex si se fija un formato.
+BRDP-D1-00359 — Confianza: media
+
+Definition: Allowed file types for attachments and formats
+Proposal: Discard if not needed, or list the file types (out of multimedia files): Excel (.xlsx), Python scripts (.py), etc.
+Motivo: Tipos de fichero permitidos en adjuntos son comprobables vía @format.
+BRDP-D1-00361 — Confianza: media
+
+Definition: Decide whether photographs will be used. If used, for what purposes.
+Proposal: Photographs are allowed. Data formats allowed: JPEG, GIF, PNG (not recommended for IPD illustrations)
+Motivo: Formatos de imagen permitidos (JPEG/GIF/PNG) son comprobables vía @format.
+Grupo 3 — Topic / Concept / Task / Map
+BRDP-D1-00313 — Confianza: media
+
+Definition: Use of the element <shortDescr> and <Author> metadata
+Proposal: Discard if it is not necessary.
+Motivo: Presencia/ausencia de <shortdesc>/<author> es comprobable.
+Grupo 4 — Topic / Concept / Task / Map / Bookmap
+BRDP-D1-00049 — Confianza: media
+
+Definition: Decide on the use of the issue date metadata, critdates element.
+Proposal: Recommended not to use it if CCMS is used. Issue date shall reflect the creation of the topic and last review. <topic><prolog><critdates><created date="2025-01-15"/><revised modified="2025-02-18"/></critdates></prolog></topic> o equivalente en <map><topicmeta>. Nota: solo se muestra la última versión.
+Motivo: Presencia/estructura de <critdates> es comprobable si se decide usar.
+BRDP-D1-00118 — Confianza: media
+
+Definition: Decide how to use the element <title> and on which elements (see BRDP-D1-00095 for figures and tables), <navtitle>, and file title. (Lista de elementos con title: section, example, task, concept, reference, glossentry/glossterm, mapref, chapter/part en bookmap)
+Proposal: File titles en minúsculas sin espacios (e.g. system-overview.dita). Titles con reglas lingüísticas comunes. Navtitle como título corto de navegación. Main title y section titles obligatorios.
+Motivo: Obligatoriedad de <title> y patrón de <navtitle> son comprobables; la nomenclatura de fichero no lo es.
+Grupo 5 — Los 6 tipos (topic, concept, task, map, bookmap, machineryTask)
+BRDP-D1-00020 — Confianza: alta
+
+Definition: Decide which language to use for producing content.
+Proposal: All topics must be written in U.S. English. Metadata example: <concept xml:lang="en-US">
+Motivo: Valor del atributo xml:lang es comprobable en cualquier elemento raíz.
+BRDP-D1-00095 (row 34 — segunda instancia del mismo ID) — Confianza: alta
+
+Definition: Use of the element <xRef> in titles is strongly discouraged. However, decide whether to use cross-references in titles.
+Proposal: Not to use it.
+Motivo: Ausencia de <xref> dentro de <title> es comprobable.
+BRDP-D1-00107 — Confianza: media
+
+Definition: Define the words before and after the referenced elements. This is important as it has implications on the stylesheets, e.g.: "Refer to: " for sections and topics, tables, figures, etc.
+Proposal: "Refer to: " is recommended as it works for any sets of elements.
+Motivo: Texto previo al xref ("Refer to: ") es comprobable como patrón de contenido.
+Grupo 6 — Map / Bookmap
+BRDP-D1-00180 — Confianza: alta
+
+Definition: Maximum number of subordinate <topic> in maps/bookmaps
+Proposal: Mandatory structure: map → topic A (nivel 1 OK) → topic B (nivel 2 OK) → topic C (nivel 2, not recommended). Dentro de topic: section (nivel 1.1 OK) → subSection (not recommended). Bookmaps usa chapters>section>subsection.
+Motivo: Profundidad máxima de anidamiento de <topicref>/<chapter>/<part> es comprobable.
+BRDP-D1-00016 — Confianza: media
+
+Definition: List and decide on how the security classifications will be marked and/or indicated. Decide the deliverables that shall be marked.
+Proposal: Discard what is not never need. <map><topicmeta><data name="security-classification" value="restricted"/></topicmeta> Values NATO: unclassifed, NATO-restricted, NATO-confidential, NATO-secret, COSMIC-top-secret. Values genéricos: Public, Internal, Confidential, Strictly Confidential, Classified.
+Motivo: Presencia de <data name="security-classification" value=...> en topicmeta es comprobable.
+BRDP-D1-00017 — Confianza: media
+
+Definition: List the verification types and decide on how the quality assurance will be marked and/or indicated. Decide the deliverables that shall be marked.
+Proposal: Discard what is not never need. <map><topicmeta><data name="quality-assurance" value="unverified"/></topicmeta> Values S1000D: Unverified, tabletop, onObject, tableTopAndOnObject.
+Motivo: Presencia de <data name="quality-assurance" value=...> en topicmeta es comprobable.
+Grupo 7 — Map (solo)
+BRDP-D1-00037 — Confianza: media
+
+Definition: Decide whether to use the reltable for the maps.
+Proposal: Discard what is not never need: <map><reltable><relrow><relcell><topicref href="A.dita"/></relcell><relcell><topicref href="B.dita"/></relcell><relcell><topicref href="C.dita"/></relcell></relrow></reltable></map>
+Motivo: Uso de <reltable>/<relrow>/<relcell> es una estructura comprobable en un map.
+Resumen por tipo (una fila puede contar en varios tipos si su combo los incluye): task/machineryTask-específicas: 6 · topic/concept/task generales: 22 · map/bookmap-específicas: 8 · las 6: 3.
+
+No se ha tocado el fichero ni ningún generador — esto es solo el volcado para tu revisión.

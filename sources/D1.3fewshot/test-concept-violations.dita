@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE concept PUBLIC "-//OASIS//DTD DITA Concept//EN" "concept.dtd">
+<concept id="test-concept-001" xml:lang="en-US">
+  <title>System Overview</title>
+  <shortdesc>Test concept with intentional violations.</shortdesc>
+  <prolog>
+    <!-- VIOLACIÓN 00313: (<author> nor <shortdesc>)  -->
+    <!--<author type="contributor">jgutierrez3</author>-->
+    <critdates>
+      <!-- VIOLACIÓN 00049: solo pusiste <revised>, sin <created>  -->      
+      <!-- <created date="2026-07-12"/> -->
+      <revised modified="2026-07-12"/>
+    </critdates>
+    <
+  </prolog>
+  
+  <conbody>
+    <p>The system consists of three main modules.</p>
+
+    <table id="my-table">
+      <!-- VIOLACIÓN 00092: id "my-table" no sigue el patrón tbl-NNN -->
+      <desc></desc>
+      <!-- VIOLACIÓN 00128: desc presente pero vacío -->
+      <tgroup cols="1">
+        <tbody>
+          <row><entry>Module A</entry></row>
+        </tbody>
+      </tgroup>
+    </table>
+
+    <fig id="fig-001">
+      <!-- CUMPLE 00092: id sigue el patrón fig-NNN -->
+      <title>Module layout</title>
+      <!-- CUMPLE 00095b: fig con title -->
+      <!-- VIOLACIÓN 00344: layout.png no seguir el patrón ICN "ICN-A320-021.png" -->
+      <image href="layout.png"/>
+      <!-- CUMPLE 00361: formato .png permitido -->
+    </fig>
+
+    <p>See the details: <xref href="details.dita">the details topic</xref></p>
+    <!-- VIOLACIÓN 00107: falta el texto "Refer to: " antes del xref <p>Refer to: <xref href="details.dita">the details topic</xref></p> -->
+  </conbody>
+</concept>

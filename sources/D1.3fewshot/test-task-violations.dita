@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE task PUBLIC "-//OASIS//DTD DITA Task//EN" "task.dtd">
+<task id="test-task-001" xml:lang="es-ES">
+  <!-- VIOLACIÓN 00020: xml:lang debería ser en-US, no es-ES -->
+  <title>Install <xref href="other.dita">the module</xref></title>
+  <!-- VIOLACIÓN 00095: xref dentro de title -->
+
+  <shortdesc>Test task with intentional rule violations for Schematron testing.</shortdesc>
+
+  <prolog>
+    <author>jgutierrez3</author>
+    <!-- VIOLACIÓN 00065: copyright inline, no vía conref -->
+    <!--<copyright conref="copyright.dita#copyright/copyright-block"/>--> 
+    <copyright>      
+      <copyryear year="2026"/>
+      <copyrholder>ATEXIS</copyrholder>
+    </copyright>
+  </prolog>
+
+  <taskbody>
+    <prereq>
+      <p>Prerequisites for this procedure.</p>
+    </prereq>
+
+    <context>
+      <note type="warning">
+        <!-- VIOLACIÓN 00033: note type=warning en vez de hazardstatement -->
+        Do not operate with the cover open.
+      </note>
+      <!--<hazardstatement>
+        <messagepanel>
+          <typeofhazard>warning</typeofhazard>
+          <howtoavoid>Do not operate with the cover open.</howtoavoid>
+        </messagepanel>
+      </hazardstatement>-->
+    </context>
+
+    <steps>
+      <step>
+        <cmd>Remove the cover <i>carefully</i></cmd>
+        <!-- VIOLACIÓN 00026: uso de <i> en vez de <b> -->
+        <substeps>
+          <substep>
+            <cmd>Only one substep here</cmd>
+            <!-- VIOLACIÓN 00187: substeps con un único substep -->
+          </substep>
+          <!--<substep>
+            <cmd>Second substep here</cmd>
+          </substep>-->
+        </substeps>
+      </step>
+
+      <step>
+        <cmd>Take a photo of the component</cmd>
+        <info>
+          <fig id="figure-001">
+            <image href="ICN-A350-005.tiff"/>
+            <!-- VIOLACIÓN 00361: formato .tiff no permitido (solo jpg/gif/png) -->
+          </fig>
+        </info>
+      </step>
+
+      <step>
+        <cmd>Add a comment for review</cmd>
+        <info>
+          <draft-comment author="reviewer">
+             VIOLACIÓN 00356: draft-comment presente -->
+            Please double-check this step.
+          </draft-comment>
+          <p>See<fn>this is a footnote reference</fn> the note below.</p>
+          <!-- VIOLACIÓN 00172: uso de fn/footnote -->
+        </info>
+      </step>
+    </steps>
+
+    <result>
+      <p>The module is now installed.</p>
+    </result>
+  </taskbody>
+</task>

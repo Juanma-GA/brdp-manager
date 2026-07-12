@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE task PUBLIC "-//OASIS//DTD DITA Machinery Task//EN" "machineryTask.dtd">
+<task id="test-machinerytask-002" xml:lang="en-US">
+  <title>Replace the hydraulic filter</title>
+  <shortdesc>Machinery task example, prelreqs/closereqs directly under taskbody (no prereq/postreq wrapper), confirmed against the real XSD.</shortdesc>
+  <prolog><author>jgutierrez3</author></prolog>
+
+  <taskbody>
+    <!-- content model confirmado: prelreqs?, context?, (steps|steps-unordered)?,
+         result?, tasktroubleshooting?, example?, closereqs? -->
+
+    <prelreqs>
+      <!-- content model: reqconds?, reqpers?, supequip?, supplies?, spares?, safety? -->
+
+      <reqconds>
+        <!-- content model: (data|data-about)*, (noconds | (reqcond|reqcontp)+) -->
+        <reqcond>Machine must be powered off and depressurized.</reqcond>
+      </reqconds>
+
+      <supequip>
+        <!-- content model: (nosupeq|supeqli) - exactamente uno de los dos -->
+        <supeqli>
+          <supequi>Torque wrench, 17mm socket</supequi>
+        </supeqli>
+      </supequip>
+
+      <safety>
+        <!-- content model: (data|data-about)*, (nosafety | safecond+) -->
+        <safecond>
+          <hazardstatement type="warning">
+            <!-- content model: messagepanel+ (obligatorio, primero), hazardsymbol* (despues) -->
+            <messagepanel>
+              <!-- content model: (data|data-about)*, typeofhazard, consequence*, howtoavoid+ -->
+              <typeofhazard>Residual hydraulic pressure</typeofhazard>
+              <consequence>May cause fluid injection injury.</consequence>
+              <howtoavoid>Depressurize the system fully before starting.</howtoavoid>
+            </messagepanel>
+            <hazardsymbol href="images/warning.svg"/>
+          </hazardstatement>
+        </safecond>
+      </safety>
+    </prelreqs>
+
+    <steps>
+      <step>
+        <cmd>Remove the old filter</cmd>
+      </step>
+      <step>
+        <cmd>Install the new filter</cmd>
+        <substeps>
+          <substep><cmd>Align the filter housing</cmd></substep>
+          <substep><cmd>Tighten to 25 Nm</cmd></substep>
+        </substeps>
+      </step>
+    </steps>
+
+    <closereqs>
+      <!-- content model: (reqconds) - un unico reqconds obligatorio -->
+      <reqconds>
+        <reqcond>Restore power and check for leaks.</reqcond>
+      </reqconds>
+    </closereqs>
+  </taskbody>
+</task>

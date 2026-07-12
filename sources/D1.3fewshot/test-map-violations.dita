@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE map PUBLIC "-//OASIS//DTD DITA Map//EN" "map.dtd">
+<map id="test-map-001" xml:lang="en-US">
+  <title>Test Map</title>
+  
+  <topicmeta>
+    <shortdesc>Map example</shortdesc>
+    <author>jgutierrez3</author>
+    <!--<data name="security-classification" value="C1"/> -->
+    <!-- VIOLACIÓN 00016: falta data name="security-classification" -->
+    <data name="quality-assurance" value="verified-by-hand"/>
+    <!-- VIOLACIÓN 00017: valor "verified-by-hand" no está en la enumeración permitida -->
+  </topicmeta>
+
+  <topicref href="topicA.dita" navtitle="Topic A">
+    <topicref href="topicB.dita" navtitle="Topic B">
+      <topicref href="topicC.dita" navtitle="Topic C - too deep"> </topicref>
+        <!-- VIOLACIÓN 00180: 3 niveles de anidamiento (más de lo recomendado: 2) -->      
+    </topicref>
+  </topicref>
+
+  <reltable>
+    <relrow>
+      <relcell/>
+      <!-- VIOLACIÓN 00037: relcell vacía, sin topicref -->
+    </relrow>
+  </reltable>
+</map>
