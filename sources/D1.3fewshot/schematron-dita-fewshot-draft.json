@@ -1,10 +1,12 @@
 {
   "_readme": "Propuestas generadas por Claude a partir del texto de las 29 BRDP. 'confidence_ai': 'alta' = interpretación directa y poco ambigua del texto. 'needs-review' = el texto original es ambiguo o subjetivo y esta es una interpretación razonable, NO una certeza -- verificar en oXygen y con el criterio del proyecto antes de dar por buena. Contexts en XPath 2.0 (queryBinding xslt2, mismo patrón que brexToSchematron.js).",
-
   "fewshots": [
     {
       "id": "BRDP-D1-00186",
-      "topicTypes": ["task", "machineryTask"],
+      "topicTypes": [
+        "task",
+        "machineryTask"
+      ],
       "confidence_ai": "needs-review",
       "context": "ol//ol//ol//ol//ol",
       "assert_role": "error",
@@ -14,7 +16,10 @@
     },
     {
       "id": "BRDP-D1-00187",
-      "topicTypes": ["task", "machineryTask"],
+      "topicTypes": [
+        "task",
+        "machineryTask"
+      ],
       "confidence_ai": "alta",
       "context": "substeps",
       "assert_role": "error",
@@ -24,7 +29,10 @@
     },
     {
       "id": "BRDP-D1-00031",
-      "topicTypes": ["task", "machineryTask"],
+      "topicTypes": [
+        "task",
+        "machineryTask"
+      ],
       "confidence_ai": "alta",
       "context": "hazardstatement | note[@type=('warning','caution','danger')]",
       "assert_role": "warning",
@@ -34,7 +42,11 @@
     },
     {
       "id": "BRDP-D1-00092",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "fig[@id] | table[@id]",
       "assert_role": "warning",
@@ -44,7 +56,11 @@
     },
     {
       "id": "BRDP-D1-00033",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "note[@type='warning']",
       "assert_role": "warning",
@@ -54,7 +70,11 @@
     },
     {
       "id": "BRDP-D1-00095",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "title",
       "assert_role": "error",
@@ -64,7 +84,11 @@
     },
     {
       "id": "BRDP-D1-00095b",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "fig | table",
       "assert_role": "warning",
@@ -74,7 +98,11 @@
     },
     {
       "id": "BRDP-D1-00128",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "needs-review",
       "context": "fig | table",
       "assert_role": "warning",
@@ -84,7 +112,11 @@
     },
     {
       "id": "BRDP-D1-00132",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "area",
       "assert_role": "error",
@@ -94,7 +126,11 @@
     },
     {
       "id": "BRDP-D1-00172",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "footnote | fn",
       "assert_role": "error",
@@ -104,7 +140,11 @@
     },
     {
       "id": "BRDP-D1-00356",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "draft-comment",
       "assert_role": "error",
@@ -114,7 +154,11 @@
     },
     {
       "id": "BRDP-D1-00524",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "needs-review",
       "context": "xref[ancestor::p or ancestor::li]",
       "assert_role": "warning",
@@ -124,7 +168,11 @@
     },
     {
       "id": "BRDP-D1-00026",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "i | u | tt | sup | sub",
       "assert_role": "warning",
@@ -134,7 +182,11 @@
     },
     {
       "id": "BRDP-D1-00065",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "needs-review",
       "context": "copyright[not(ancestor::topic[@id='copyright'])]",
       "assert_role": "warning",
@@ -144,7 +196,11 @@
     },
     {
       "id": "BRDP-D1-00089",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "DESACTIVADA",
       "context": "critdates/revised",
       "assert_role": "warning",
@@ -154,17 +210,25 @@
     },
     {
       "id": "BRDP-D1-00130",
-      "topicTypes": ["topic", "concept", "task"],
-      "confidence_ai": "alta",
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
+      "confidence_ai": "needs-review",
       "context": "object/@type | video/@format | audio/@format",
       "assert_role": "error",
       "test": "matches(., '(mp4|wav|mp3)$', 'i')",
       "message": "Only video (mp4) and audio (wav, mp3) formats are permitted for multimedia objects.",
-      "notes": "Directa, aunque el atributo exacto (@type vs @format) depende de qué elemento use el proyecto (object vs video/audio del dominio multimedia)."
+      "notes": "Directa, aunque el atributo exacto (@type vs @format) depende de qué elemento use el proyecto (object vs video/audio del dominio multimedia). PENDIENTE DE VERIFICAR: vocabulario NO CONFIRMADO contra XSD real (ver schematron-dita-schema-summary.json), no probado en oXygen -- mismo estado que BRDP-D1-00089 antes de su verificación."
     },
     {
       "id": "BRDP-D1-00131",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "needs-review",
       "context": "ul[.//xref[@format='html' or @scope='external']] | choicetable[.//xref]",
       "assert_role": "warning",
@@ -174,7 +238,11 @@
     },
     {
       "id": "BRDP-D1-00344",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "needs-review",
       "context": "image/@href",
       "assert_role": "warning",
@@ -184,17 +252,25 @@
     },
     {
       "id": "BRDP-D1-00359",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "needs-review",
       "context": "object/@type | xref[@format]/@format",
       "assert_role": "warning",
       "test": "matches(., '(xlsx|py)$', 'i')",
       "message": "Only the listed attachment file types are permitted (e.g. .xlsx, .py) outside of multimedia files.",
-      "notes": "Proposal es condicional ('discard if not needed, or list the types') -- lista de ejemplo incompleta en el texto original, ajustar con la lista real que decida el proyecto."
+      "notes": "Proposal es condicional ('discard if not needed, or list the types') -- lista de ejemplo incompleta en el texto original, ajustar con la lista real que decida el proyecto. PENDIENTE DE VERIFICAR: vocabulario NO CONFIRMADO contra XSD real (ver schematron-dita-schema-summary.json), no probado en oXygen -- mismo estado que BRDP-D1-00089 antes de su verificación."
     },
     {
       "id": "BRDP-D1-00361",
-      "topicTypes": ["topic", "concept", "task"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task"
+      ],
       "confidence_ai": "alta",
       "context": "image/@href",
       "assert_role": "error",
@@ -204,7 +280,12 @@
     },
     {
       "id": "BRDP-D1-00313",
-      "topicTypes": ["topic", "concept", "task", "map"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task",
+        "map"
+      ],
       "confidence_ai": "alta",
       "context": "topic | concept | task | map",
       "assert_role": "warning",
@@ -215,7 +296,13 @@
     },
     {
       "id": "BRDP-D1-00049",
-      "topicTypes": ["topic", "concept", "task", "map", "bookmap"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task",
+        "map",
+        "bookmap"
+      ],
       "confidence_ai": "needs-review",
       "context": "critdates",
       "assert_role": "warning",
@@ -225,7 +312,13 @@
     },
     {
       "id": "BRDP-D1-00118",
-      "topicTypes": ["topic", "concept", "task", "map", "bookmap"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task",
+        "map",
+        "bookmap"
+      ],
       "confidence_ai": "alta",
       "context": "topic | concept | task | map | reference | glossentry",
       "assert_role": "error",
@@ -235,7 +328,14 @@
     },
     {
       "id": "BRDP-D1-00020",
-      "topicTypes": ["topic", "concept", "task", "map", "bookmap", "machineryTask"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task",
+        "map",
+        "bookmap",
+        "machineryTask"
+      ],
       "confidence_ai": "alta",
       "context": "topic | concept | task | map | bookmap",
       "assert_role": "error",
@@ -245,7 +345,14 @@
     },
     {
       "id": "BRDP-D1-00107",
-      "topicTypes": ["topic", "concept", "task", "map", "bookmap", "machineryTask"],
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task",
+        "map",
+        "bookmap",
+        "machineryTask"
+      ],
       "confidence_ai": "needs-review",
       "context": "xref[not(ancestor::title)]",
       "assert_role": "warning",
@@ -255,7 +362,10 @@
     },
     {
       "id": "BRDP-D1-00180",
-      "topicTypes": ["map", "bookmap"],
+      "topicTypes": [
+        "map",
+        "bookmap"
+      ],
       "confidence_ai": "alta",
       "context": "topicref | chapter | part",
       "assert_role": "warning",
@@ -265,7 +375,10 @@
     },
     {
       "id": "BRDP-D1-00016",
-      "topicTypes": ["map", "bookmap"],
+      "topicTypes": [
+        "map",
+        "bookmap"
+      ],
       "confidence_ai": "alta",
       "context": "topicmeta[not(data[@name='security-classification'])]",
       "assert_role": "warning",
@@ -275,7 +388,10 @@
     },
     {
       "id": "BRDP-D1-00017",
-      "topicTypes": ["map", "bookmap"],
+      "topicTypes": [
+        "map",
+        "bookmap"
+      ],
       "confidence_ai": "alta",
       "context": "data[@name='quality-assurance']",
       "assert_role": "error",
@@ -285,7 +401,9 @@
     },
     {
       "id": "BRDP-D1-00037",
-      "topicTypes": ["map"],
+      "topicTypes": [
+        "map"
+      ],
       "confidence_ai": "alta",
       "context": "reltable",
       "assert_role": "warning",

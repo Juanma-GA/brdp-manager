@@ -389,12 +389,12 @@
         "concept",
         "task"
       ],
-      "confidence_ai": "alta",
+      "confidence_ai": "needs-review",
       "context": "object/@type | video/@format | audio/@format",
       "assert_role": "error",
       "test": "matches(., '(mp4|wav|mp3)$', 'i')",
       "message": "Only video (mp4) and audio (wav, mp3) formats are permitted for multimedia objects.",
-      "notes": "Directa, aunque el atributo exacto (@type vs @format) depende de qué elemento use el proyecto (object vs video/audio del dominio multimedia)."
+      "notes": "Directa, aunque el atributo exacto (@type vs @format) depende de qué elemento use el proyecto (object vs video/audio del dominio multimedia). PENDIENTE DE VERIFICAR: vocabulario NO CONFIRMADO contra XSD real (ver schematron-dita-schema-summary.json), no probado en oXygen -- mismo estado que BRDP-D1-00089 antes de su verificación."
     },
     {
       "id": "BRDP-D1-00131",
@@ -436,7 +436,7 @@
       "assert_role": "warning",
       "test": "matches(., '(xlsx|py)$', 'i')",
       "message": "Only the listed attachment file types are permitted (e.g. .xlsx, .py) outside of multimedia files.",
-      "notes": "Proposal es condicional ('discard if not needed, or list the types') -- lista de ejemplo incompleta en el texto original, ajustar con la lista real que decida el proyecto."
+      "notes": "Proposal es condicional ('discard if not needed, or list the types') -- lista de ejemplo incompleta en el texto original, ajustar con la lista real que decida el proyecto. PENDIENTE DE VERIFICAR: vocabulario NO CONFIRMADO contra XSD real (ver schematron-dita-schema-summary.json), no probado en oXygen -- mismo estado que BRDP-D1-00089 antes de su verificación."
     },
     {
       "id": "BRDP-D1-00361",
