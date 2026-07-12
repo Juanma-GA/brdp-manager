@@ -134,10 +134,12 @@
         "fn": "fn.cnt* (mixed) -- ESTE es el nombre real; NO existe elemento <footnote> en DITA base",
         "draft-comment": "(basic.phandblock|data.elements.incl|foreign.unknown.incl)* -- atributos author/time/disposition",
         "xref": "(xreftext.cnt|desc)* -- atributos href/keyref/type/format/scope",
-        "object": "desc?, longdescref?, param*, foreign.unknown.incl* -- SI tiene atributo @type (MIME type). NO tiene @format.",
-        "video / audio": "NO CONFIRMADO -- no existen elementos <video> ni <audio> en este paquete D1.3 vendorizado (solo <object> es real). BRDP-D1-00130 los menciona pero no estan en vocabulary confirmado -- tratar object/@type como la unica comprobacion fiable; marcar video/audio como pendiente de verificar si el proyecto usa una especializacion/domain adicional no incluido aqui."
+        "object": "desc?, longdescref?, param*, foreign.unknown.incl* -- SI tiene atributo @type (MIME type). NO tiene @format."
       },
-      "source": "base/xsd/commonElementMod.xsd -- confirmado literalmente en esta sesion (incluye el hallazgo de que video/audio no estan vendorizados)"
+      "source": "base/xsd/commonElementMod.xsd -- confirmado literalmente en esta sesion (incluye el hallazgo de que video/audio no estan vendorizados) NOTA: video/audio movidos a 'unconfirmed_elements' (separado de 'elements') para que el lint de vocabulario del generador no los trate como confirmados por error -- bug real encontrado probando checkWellFormedSchematron().",
+      "unconfirmed_elements": {
+        "video / audio": "NO CONFIRMADO -- no existen elementos <video> ni <audio> en este paquete D1.3 vendorizado (solo <object> es real). BRDP-D1-00130 los menciona pero no estan en vocabulary confirmado -- tratar object/@type como la unica comprobacion fiable; marcar video/audio como pendiente de verificar si el proyecto usa una especializacion/domain adicional no incluido aqui."
+      }
     },
     "base_prolog_metadata": {
       "used_by_rules": [

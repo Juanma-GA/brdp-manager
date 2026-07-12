@@ -1,0 +1,554 @@
+import { sendMessageStream } from "./llmAPI.js";
+import { extractXML } from "./generateBREX.js";
+import { _isSafePattern } from "./brexToSchematron.js";
+
+let _schemaSummaryCache = null;
+
+async function loadSchemaSummary() {
+  if (_schemaSummaryCache) return _schemaSummaryCache;
+  const res = await fetch("/schematron-dita-schema-summary.json?v=" + Date.now());
+  if (!res.ok) throw new Error("Could not load schematron-dita-schema-summary.json");
+  _schemaSummaryCache = await res.json();
+  return _schemaSummaryCache;
+}
+
+function escapeXmlText(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ===== Few-shot rendering =====
+// BRDP-D1-00313 is rendered from the real literal block (schematron-dita-draft.sch)
+// instead of from its JSON fields, because its "test" field is a human-readable
+// description ("two independent reports"), not a single valid XPath expression --
+// interpolating it generically would produce broken XML.
+const BRDP_00313_LITERAL = `<sch:pattern>
+  <sch:rule context="topic | concept | task | map">
+    <sch:report role="warning" id="BRDP-D1-00313-shortdesc" test="not(shortdesc) and not(topicmeta/shortdesc)">Missing &lt;shortdesc&gt; metadata.</sch:report>
+    <sch:report role="warning" id="BRDP-D1-00313-author" test="not(.//author)">Missing &lt;author&gt; metadata.</sch:report>
+  </sch:rule>
+</sch:pattern>`;
+
+function buildFewShotBlock(schemaSummary) {
+  const examples = schemaSummary.few_shot_examples || [];
+  return examples
+    .map((ex, i) => {
+      const topics = (ex.topicTypes || []).join(", ");
+
+      if (ex.confidence_ai === "DESACTIVADA") {
+        // Teaches restraint: this looked checkable but real DITA verification
+        // proved it wrong (not just uncertain) -- the correct move is a
+        // traceability comment, never a forced/invented rule.
+        return `### Example ${i + 1} — ${ex.id} (topics: ${topics}) — WHEN TO STOP AND NOT GENERATE A RULE
+Tempting but WRONG attempt (context="${ex.context}", test="${ex.test}"):
+this assumed <revised> could contain a <comment> child. Real verification against
+the XSD showed <revised> is EMPTY (attributes only, no child elements or text) --
+the rule was structurally impossible, not just unverified.
+CORRECT output when this happens — a traceability comment, nothing else:
+<!-- ${ex.id}: no se pudo generar una regla Schematron automatable (${escapeXmlText(ex.notes.split(".")[0])}) -- pendiente de revision manual. -->`;
+      }
+
+      if (ex.id === "BRDP-D1-00313") {
+        return `### Example ${i + 1} — ${ex.id} (topics: ${topics}, confidence: ${ex.confidence_ai}) — MULTIPLE INDEPENDENT CHECKS IN ONE RULE
+${BRDP_00313_LITERAL}
+Note the two sch:report elements share the same sch:rule/@context but each has
+its OWN globally-unique @id, suffixed with a short descriptive slug
+(-shortdesc / -author) — never reuse the bare BRDP id twice.`;
+      }
+
+      return `### Example ${i + 1} — ${ex.id} (topics: ${topics}, confidence: ${ex.confidence_ai})
+<sch:pattern>
+  <sch:rule context="${ex.context}">
+    <sch:assert role="${ex.assert_role}" id="${ex.id}" test="${ex.test}">${escapeXmlText(ex.message)}</sch:assert>
+  </sch:rule>
+</sch:pattern>`;
+    })
+    .join("\n\n");
+}
+
+// ===== STRICT RULES =====
+// Rules 4-12 map 1:1 onto the 9 real patterns identified across the 29 curated
+// few-shots (absolute prohibition, enumeration, regex-on-correct-attribute,
+// conditional/ancestor structure across topicTypes, nesting depth, unique
+// suffixed ids, assert/report polarity, error/warning mapping, when NOT to
+// generate a rule). Rules 1-3 and 13-14 are the supporting scaffolding needed
+// to make those 9 patterns actually produce valid, assemblable Schematron.
+const STRICT_RULES = `STRICT RULES:
+1. Output ONLY raw <sch:pattern>...</sch:pattern> blocks (or, when rule 12 applies, a single XML comment) — no XML declaration, no <sch:schema> wrapper, no markdown fences, no explanation, no preamble.
+2. Each BRDP produces ONE <sch:pattern> containing ONE <sch:rule context="...">. If a single BRDP needs more than one independent check (see rule 9), put all of them inside that SAME sch:rule as separate sch:assert/sch:report elements — do not create multiple patterns for one BRDP.
+3. context MUST be a valid Schematron/XSLT match pattern: an element name, a union of element names with "|", and predicates on that same node (e.g. fig[@id], topicmeta[not(data[@name='x'])]). NEVER start context with a reverse axis (ancestor::, parent::, preceding::, preceding-sibling::) — that is illegal in a match pattern. If the rule logically needs an ancestor/parent check, put that check inside test (where ancestor::/parent:: are always legal), and keep context simple.
+4. Absolute prohibition of an element with no exceptions -> context targets the forbidden element itself, test="false()".
+5. Closed list of permitted values given in the proposal -> test="@attr = ('v1','v2','v3')" (XPath enumeration). Do not use a regex for a short closed list of literal values.
+6. Attribute pattern/format constraint -> matches(@attr, '^...$', 'i') anchored with ^ and $, case-insensitive unless case clearly matters. CRITICAL: apply the regex to the attribute that ACTUALLY carries that data according to vocabulary_by_domain — verify which element/attribute really holds the value before writing the test (e.g. a filename pattern belongs on image/@href, never on fig/@id or table/@id; those are unrelated attributes on unrelated elements).
+7. Structural rule that must hold across more than one topicType (see the BRDP's topicTypes) -> the test must accept EVERY structural alternative used by those topicTypes, combined with "or". Different topicTypes can satisfy the same rule through different real elements (e.g. a generic task's prereq/context is NOT the same structure as machineryTask's formal <safety> element from taskreq-d — if a rule targets both, test must accept ancestor::safety OR the generic task structure, not just one of them). Check vocabulary_by_domain for the topicTypes involved before writing the test.
+8. Nesting-depth limit -> count(ancestor::element-name) compared with < or >=. Never simulate depth counting with nested positional predicates.
+9. sch:assert/@id and sch:report/@id MUST be globally unique across the ENTIRE document being assembled. If a BRDP produces more than one independent check, suffix each id with a short descriptive slug: BRDP-id-slug (e.g. BRDP-D1-00313-shortdesc, BRDP-D1-00313-author). NEVER reuse the same id twice, and never reuse a bare BRDP id for more than one assert/report.
+10. sch:assert/@test fires its message when the test evaluates to FALSE — phrase it as what MUST be true. sch:report/@test fires its message when the test evaluates to TRUE — phrase it as what must NOT happen. Pick whichever reads naturally for the rule, but never invert the polarity.
+11. role="error" for absolute prohibitions/mandates ("must", "shall not", "is required") and for closed enumerations from a fixed external standard. role="warning" for recommendations/conditional language ("should", "recommend", "discard if not necessary", "consider", "discard what is not never need").
+12. If the BRDP has no reliable structural hook in real DITA — either it is actually a process/governance decision with no XML footprint, or the element/attribute it describes is not present in vocabulary_by_domain/topic_types for the relevant topicTypes — DO NOT invent a rule. Output ONLY this XML comment instead:
+<!-- BRDP-id: no se pudo generar una regla Schematron automatable (motivo breve) -- pendiente de revision manual. -->
+13. NEVER use an element or attribute name that is not listed in vocabulary_by_domain or topic_types. If you are not sure an element exists in real DITA, prefer a name that IS confirmed there, or fall back to rule 12 — never guess a plausible-sounding element name (this is exactly the class of error that caused real false positives before: assuming <video>/<audio> attributes existed when only <object> is confirmed).
+14. Inside sch:assert/sch:report message text, escape angle brackets naming elements: write &lt;elementName&gt;, never a literal <elementName>.
+15. Do not add topic-type detection logic (no checking @domains, no checking the root element name) — contexts self-limit by which elements are actually present in the document being validated; this is intentional (Option B).`;
+
+function buildSchematronPrompt(chunkBRDPs, schemaSummary) {
+  const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
+  const schemaJSON = JSON.stringify(schemaSummaryWithoutExamples, null, 2);
+  const fewShotBlock = buildFewShotBlock(schemaSummary);
+
+  const system = `You are a DITA 1.3 Schematron business-rules expert. Generate sch:pattern blocks (ISO Schematron, xslt2 queryBinding) implementing the given BRDPs (Business Rules Decision Points), each already classified as checkable XML structure.
+
+Reference structure (6 topic types + real confirmed element vocabulary per domain):
+${schemaJSON}
+
+${STRICT_RULES}
+
+## Few-shot examples: BRDP → sch:pattern
+Use these real, oXygen-validated examples as reference for context/test/role style and for when to decline (see the "WHEN TO STOP" example).
+
+${fewShotBlock}`;
+
+  const brdpLines = chunkBRDPs
+    .map(
+      (b, i) =>
+        `${i + 1}. ID: ${b.id}\n   Definition: ${b.definition}\n   Proposal: ${b.proposal}`
+    )
+    .join("\n\n");
+
+  const user = `Generate sch:pattern blocks for these ${chunkBRDPs.length} BRDP(s):
+
+${brdpLines}
+
+Output ONLY the sch:pattern blocks (or traceability comments per rule 12), starting directly with <sch:pattern or <!--`;
+
+  return { system, user };
+}
+
+// ===== Response parsing / verification =====
+
+const CHUNK_SIZE = 10;
+const MAX_RETRIES = 2;
+
+function extractPatternBlocks(text) {
+  return [...text.matchAll(/<sch:pattern\b[\s\S]*?<\/sch:pattern>/g)].map((m) => m[0]);
+}
+
+function extractTraceabilityComments(text) {
+  return [...text.matchAll(/<!--\s*BRDP-[\s\S]*?-->/g)].map((m) => m[0]);
+}
+
+function extractCheckIds(text) {
+  return new Set(
+    [...text.matchAll(/<sch:(?:assert|report)\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1])
+  );
+}
+
+function extractCommentedIds(text) {
+  return new Set([...text.matchAll(/<!--\s*(BRDP-[A-Za-z0-9-]+)\s*:/g)].map((m) => m[1]));
+}
+
+// A generated id "covers" a BRDP if it equals the BRDP id, or is that id with a
+// descriptive suffix (BRDP-id-slug), matching STRICT RULE 9's suffixing scheme.
+function idCoversBRDP(id, brdpId) {
+  return id === brdpId || id.startsWith(brdpId + "-");
+}
+
+function sanitizeForXmlComment(text) {
+  // XML comments must never contain "--" or end with "-" before "-->".
+  return String(text == null ? "" : text)
+    .replace(/[\r\n]+/g, " ")
+    .replace(/-{2,}/g, "—")
+    .replace(/-+$/, "")
+    .trim();
+}
+
+function buildTraceabilityComment(brdp, reason) {
+  const desc = sanitizeForXmlComment(brdp.definition || brdp.proposal || "Regla sin contexto")
+    .slice(0, 300);
+  const why = sanitizeForXmlComment(reason || "sin gancho estructural claro en el vocabulario confirmado");
+  return `<!-- ${brdp.id}: no se pudo generar una regla Schematron automatable (${why}) -- pendiente de revision manual. Definition: ${desc} -->`;
+}
+
+// Splits raw LLM output into pattern blocks (dropping any whose ids don't map
+// to a real target BRDP -- hallucinated/invented patterns) and traceability
+// comments, and reports which of the expected BRDPs remain uncovered.
+function processChunkResponse(rawText, chunkBRDPs, targetIds) {
+  const patterns = extractPatternBlocks(rawText);
+  const comments = extractTraceabilityComments(rawText);
+
+  const keptPatterns = patterns.filter((block) => {
+    const ids = [...extractCheckIds(block)];
+    return ids.some((id) => [...targetIds].some((t) => idCoversBRDP(id, t)));
+  });
+
+  const coveredIds = new Set();
+  for (const block of keptPatterns) {
+    for (const id of extractCheckIds(block)) coveredIds.add(id);
+  }
+  for (const block of comments) {
+    for (const id of extractCommentedIds(block)) coveredIds.add(id);
+  }
+
+  const missing = chunkBRDPs.filter(
+    (b) => ![...coveredIds].some((id) => idCoversBRDP(id, b.id))
+  );
+
+  return { patterns: keptPatterns, comments, missing };
+}
+
+async function generateSingleRule(brdp, schemaSummary, callLLM) {
+  const { system, user } = buildSchematronPrompt([brdp], schemaSummary);
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const raw = await callLLM(system, user);
+    if (!raw) continue;
+    const extracted = extractXML(raw);
+    const { patterns, comments, missing } = processChunkResponse(extracted, [brdp], new Set([brdp.id]));
+    if (missing.length === 0) {
+      if (patterns.length > 0) return { type: "pattern", xml: patterns.join("\n") };
+      if (comments.length > 0) return { type: "comment", xml: comments.join("\n") };
+    }
+  }
+  console.warn(`Could not generate a Schematron rule for ${brdp.id} after ${MAX_RETRIES} attempts`);
+  return null;
+}
+
+// ===== Deterministic finalization (no BREX-equivalent conversion exists for
+// DITA -- this header assembly is the only deterministic step in the whole
+// pipeline, so it carries more weight than its BREX counterpart) =====
+
+function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
+  const header = (schemaSummary && schemaSummary.sch_header) || {};
+  const open =
+    header.root_open ||
+    '<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">';
+  const close = header.root_close || "</sch:schema>";
+  const projectTitle = escapeXmlText(
+    (projectConfig && (projectConfig.projectName || projectConfig.modelIdentCode)) || "Project"
+  );
+  const title = (
+    header.title_template ||
+    "<sch:title>{PROJECT_TITLE} Business Rules Schematron (BRDP-D1)</sch:title>"
+  ).replace("{PROJECT_TITLE}", projectTitle);
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    open,
+    title,
+    ...blocks,
+    close,
+  ].join("\n");
+}
+
+// ===== checkWellFormedSchematron() =====
+// Deliberately does NOT use DOMParser: every check here is regex/string-based
+// so the exact same function runs identically in the browser bundle and in a
+// plain Node test script (no polyfills needed). This is the only safety net
+// left once generated, since -- unlike BREX -- there is no deterministic
+// BREX->Schematron conversion step downstream to catch mistakes.
+
+function checkTagBalance(xml) {
+  const stripped = xml
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
+  const stack = [];
+  const tagRe = /<(\/?)([A-Za-z_][\w:.-]*)(?:\s[^<>]*?)?(\/?)>/g;
+  let m;
+  while ((m = tagRe.exec(stripped)) !== null) {
+    const [, closing, name, selfClose] = m;
+    if (closing) {
+      const top = stack[stack.length - 1];
+      if (top !== name) {
+        const line = stripped.slice(0, m.index).split("\n").length;
+        return { valid: false, error: `Mismatched closing tag </${name}> (around line ${line})` };
+      }
+      stack.pop();
+    } else if (!selfClose) {
+      stack.push(name);
+    }
+  }
+  if (stack.length > 0) {
+    return { valid: false, error: `Unclosed tag(s): ${stack.join(", ")}` };
+  }
+  return { valid: true, error: null };
+}
+
+function checkRootHeader(xml) {
+  const m = xml.match(/<sch:schema\b[^>]*>/);
+  if (!m) return { valid: false, error: "Missing <sch:schema> root element" };
+  if (xml.trim().indexOf(m[0]) > 200) {
+    return { valid: false, error: "<sch:schema> does not appear near the start of the document" };
+  }
+  if (!/xmlns:sch="http:\/\/purl\.oclc\.org\/dsdl\/schematron"/.test(m[0])) {
+    return { valid: false, error: "<sch:schema> is missing the required xmlns:sch namespace declaration" };
+  }
+  if (!/queryBinding="xslt2"/.test(m[0])) {
+    return { valid: false, error: '<sch:schema> is missing queryBinding="xslt2"' };
+  }
+  return { valid: true, error: null };
+}
+
+function checkDuplicateIds(xml) {
+  const ids = [...xml.matchAll(/<sch:(?:assert|report)\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
+  const seen = new Set();
+  const dupes = new Set();
+  for (const id of ids) {
+    if (seen.has(id)) dupes.add(id);
+    seen.add(id);
+  }
+  return dupes.size > 0
+    ? { valid: false, error: `Duplicate sch:assert/sch:report id(s): ${[...dupes].join(", ")}` }
+    : { valid: true, error: null };
+}
+
+const KNOWN_ROLES = new Set(["error", "warning", "info", "fatal"]);
+
+function checkRulesAndChecks(xml) {
+  const errors = [];
+  for (const pm of xml.matchAll(/<sch:pattern\b[^>]*>([\s\S]*?)<\/sch:pattern>/g)) {
+    const patternBody = pm[1];
+    let ruleCount = 0;
+    for (const rm of patternBody.matchAll(/<sch:rule\b([^>]*)>([\s\S]*?)<\/sch:rule>/g)) {
+      ruleCount++;
+      const attrs = rm[1];
+      const ruleBody = rm[2];
+      const ctxMatch = attrs.match(/\bcontext="([^"]*)"/);
+      const ctx = ctxMatch ? ctxMatch[1] : "";
+      if (!ctx.trim()) {
+        errors.push("sch:rule with empty or missing context attribute");
+      } else if (!_isSafePattern(ctx)) {
+        errors.push(`sch:rule context is not a valid Schematron match pattern: "${ctx}"`);
+      }
+      let checkCount = 0;
+      for (const cm of ruleBody.matchAll(/<sch:(?:assert|report)\b([^>]*)>/g)) {
+        checkCount++;
+        const cAttrs = cm[1];
+        const testMatch = cAttrs.match(/\btest="([^"]*)"/);
+        if (!testMatch || !testMatch[1].trim()) {
+          errors.push("sch:assert/sch:report with empty or missing test attribute");
+        }
+        const roleMatch = cAttrs.match(/\brole="([^"]*)"/);
+        if (roleMatch && !KNOWN_ROLES.has(roleMatch[1])) {
+          errors.push(`Unknown role value: "${roleMatch[1]}"`);
+        }
+      }
+      if (checkCount === 0) errors.push("sch:rule with no sch:assert/sch:report inside");
+    }
+    if (ruleCount === 0) errors.push("sch:pattern with no sch:rule inside");
+  }
+  return errors;
+}
+
+function checkPlaceholders(xml) {
+  const markers = ["TODO", "FIXME", "{{", "PROJECT_TITLE}}"];
+  return markers.filter((marker) => xml.includes(marker));
+}
+
+// Non-blocking lint: flags element/attribute-shaped tokens in context/test
+// that are not present in vocabulary_by_domain (nor in a small curated set of
+// base DITA structural names). Heuristic by design (not a real XPath parser)
+// -- it exists specifically to catch the class of error that caused real
+// false positives before (assuming an element/attribute exists without
+// checking the confirmed vocabulary).
+const XPATH_FUNCTIONS = new Set([
+  "not", "count", "matches", "normalize-space", "contains", "concat",
+  "tokenize", "last", "text", "string", "string-length", "starts-with",
+  "ends-with", "substring",
+]);
+const XPATH_AXES = new Set([
+  "ancestor", "ancestor-or-self", "parent", "child", "descendant",
+  "descendant-or-self", "following", "following-sibling", "preceding",
+  "preceding-sibling", "self", "attribute",
+]);
+const XPATH_KEYWORDS = new Set(["and", "or", "not", "true", "false", "div", "mod"]);
+
+const EXTRA_KNOWN_NAMES = [
+  "topic", "concept", "task", "map", "bookmap", "machineryTask",
+  "title", "titlealts", "shortdesc", "abstract", "prolog", "body", "related-links", "topic-info-types",
+  "conbody", "info-types", "taskbody", "task-info-types", "prereq", "context", "steps", "steps-unordered",
+  "steps-informal", "stepsection", "step", "substeps", "substep", "cmd", "info", "itemgroup", "stepxmp",
+  "tutorialinfo", "choices", "choice", "choicetable", "chhead", "choptionhd", "chdeschd", "chrow", "choption",
+  "chdesc", "stepresult", "steptroubleshooting", "tasktroubleshooting", "result", "postreq",
+  "topicmeta", "anchor", "navref", "reltable", "topicref", "relheader", "relcolspec", "relrow", "relcell",
+  "bookmeta", "frontmatter", "backmatter", "chapter", "part", "appendices", "appendix", "booktitle",
+  "bookabstract", "booklists", "colophon", "dedication", "draftintro", "notices", "preface", "amendments",
+  "p", "fig", "table", "tgroup", "tbody", "row", "entry", "note", "dl", "ul", "ol", "sl", "lq", "example",
+  "section", "bodydiv", "desc", "id", "class", "xref", "image", "object", "param",
+  "author", "copyright", "copyryear", "copyrholder", "critdates", "created", "revised", "permissions",
+  "data", "data-about", "sort-as", "unknown",
+  "fn", "draft-comment", "required-cleanup",
+  "b", "i", "u", "tt", "sup", "sub", "line-through", "overline",
+  "imagemap", "area", "shape", "coords",
+  "hazardstatement", "messagepanel", "hazardsymbol", "typeofhazard", "consequence", "howtoavoid",
+  "prelreqs", "closereqs", "reqconds", "reqcond", "reqcontp", "noconds", "reqpers", "personnel", "perscat",
+  "perskill", "esttime", "supequip", "nosupeq", "supeqli", "supequi", "supplies", "nosupply", "supplyli",
+  "supply", "spares", "nospares", "sparesli", "spare", "safety", "nosafety", "safecond",
+  "href", "keyref", "format", "type", "scope", "value", "name", "modified", "date", "lang", "outputclass",
+  "conref", "importance", "domains",
+];
+
+function buildKnownVocabulary(schemaSummary) {
+  const names = new Set(EXTRA_KNOWN_NAMES);
+  const domains = (schemaSummary && schemaSummary.vocabulary_by_domain) || {};
+  for (const domain of Object.values(domains)) {
+    for (const key of Object.keys(domain.elements || {})) {
+      key.split(/[/,]|\s+/).map((s) => s.trim()).filter(Boolean).forEach((n) => names.add(n));
+    }
+  }
+  return names;
+}
+
+function lintVocabulary(xml, schemaSummary) {
+  const known = buildKnownVocabulary(schemaSummary);
+  const values = [];
+  for (const rm of xml.matchAll(/<sch:rule\b[^>]*\bcontext="([^"]*)"/g)) values.push(rm[1]);
+  for (const tm of xml.matchAll(/<sch:(?:assert|report)\b[^>]*\btest="([^"]*)"/g)) values.push(tm[1]);
+
+  const nameTokenRe = /(?<![@'":])\b([a-zA-Z][a-zA-Z0-9-]*)\b(?=\s*(?:\/|\[|\||\s|\(|$|::))/g;
+  const unknown = new Set();
+  for (const value of values) {
+    const stripped = value.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');
+    for (const tok of stripped.matchAll(nameTokenRe)) {
+      const name = tok[1];
+      if (XPATH_FUNCTIONS.has(name) || XPATH_AXES.has(name) || XPATH_KEYWORDS.has(name)) continue;
+      if (/^\d/.test(name)) continue;
+      if (!known.has(name)) unknown.add(name);
+    }
+  }
+  return unknown.size > 0
+    ? [`Posibles nombres de elemento/atributo no confirmados en vocabulary_by_domain: ${[...unknown].join(", ")} -- revisar antes de dar por buena la regla.`]
+    : [];
+}
+
+function checkWellFormedSchematron(xml, schemaSummary) {
+  const errors = [];
+
+  const tagCheck = checkTagBalance(xml);
+  if (!tagCheck.valid) errors.push(tagCheck.error);
+
+  // Remaining checks assume a document that's at least tag-balanced; still
+  // run them defensively (regex-based, won't throw either way) but the caller
+  // should treat tagCheck failure as the primary signal.
+  const rootCheck = checkRootHeader(xml);
+  if (!rootCheck.valid) errors.push(rootCheck.error);
+
+  const dupeCheck = checkDuplicateIds(xml);
+  if (!dupeCheck.valid) errors.push(dupeCheck.error);
+
+  errors.push(...checkRulesAndChecks(xml));
+
+  const placeholders = checkPlaceholders(xml);
+  if (placeholders.length > 0) {
+    errors.push(`Unresolved placeholder(s) found: ${placeholders.join(", ")}`);
+  }
+
+  const vocabularyWarnings = lintVocabulary(xml, schemaSummary);
+
+  return { valid: errors.length === 0, errors, vocabularyWarnings };
+}
+
+// ===== Main entry point =====
+// Same chunking/verify/coverage-sweep architecture as generateBREX.js, but
+// simpler in one respect: since every chunk only ever emits self-contained
+// <sch:pattern> blocks (Option B), there's no "chunk 1 = full document"
+// special case, and assembly is a plain array push instead of BREX's
+// footer-stripping/reinsertion logic.
+
+export async function generateSchematronDITA(brdps, projectConfig, options = {}) {
+  const {
+    apiKey,
+    modelName,
+    provider = "Anthropic",
+    customEndpoint = "",
+    onlyValidated = true,
+    onChunk,
+    abortController,
+    schemaSummary: schemaSummaryOverride,
+    callLLM: callLLMOverride,
+  } = options;
+
+  if (!callLLMOverride && !apiKey) {
+    throw new Error("API key is required. Please configure it in Settings.");
+  }
+
+  const targetBRDPs = onlyValidated
+    ? brdps.filter((b) => b.validation?.toLowerCase().trim() === "validated")
+    : brdps;
+
+  if (targetBRDPs.length === 0) {
+    throw new Error(
+      onlyValidated
+        ? "No validated BRDPs found. Validate at least one BRDP before generating."
+        : "No BRDPs available to generate from."
+    );
+  }
+
+  const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary());
+  const targetIds = new Set(targetBRDPs.map((b) => b.id));
+
+  const callLLM =
+    callLLMOverride ||
+    (async (system, user) => {
+      const messages = [{ role: "user", content: user }];
+      try {
+        return await sendMessageStream(
+          messages, apiKey, modelName, provider, system,
+          onChunk, abortController, { customEndpoint, maxTokens: 8000 }
+        );
+      } catch (err) {
+        throw new Error(`LLM call failed: ${err.message}`);
+      }
+    });
+
+  const chunks = [];
+  for (let i = 0; i < targetBRDPs.length; i += CHUNK_SIZE) {
+    chunks.push(targetBRDPs.slice(i, i + CHUNK_SIZE));
+  }
+
+  const blocks = [];
+
+  for (const chunk of chunks) {
+    const { system, user } = buildSchematronPrompt(chunk, schemaSummary);
+    const raw = await callLLM(system, user);
+    const extracted = raw && raw.trim() ? extractXML(raw.trim()) : "";
+    const { patterns, comments, missing } = processChunkResponse(extracted, chunk, targetIds);
+
+    blocks.push(...patterns, ...comments);
+
+    // Retry missing individually (per-BRDP), same as generateBREX.js
+    for (const brdp of missing) {
+      const rule = await generateSingleRule(brdp, schemaSummary, callLLM);
+      if (rule) blocks.push(rule.xml);
+    }
+  }
+
+  // Barrido final de cobertura: ningun BRDP debe perderse en silencio
+  {
+    const coveredIds = new Set();
+    for (const block of blocks) {
+      for (const id of extractCheckIds(block)) coveredIds.add(id);
+      for (const id of extractCommentedIds(block)) coveredIds.add(id);
+    }
+    const stillMissing = targetBRDPs.filter(
+      (b) => ![...coveredIds].some((id) => idCoversBRDP(id, b.id))
+    );
+    for (const brdp of stillMissing) {
+      const rule = await generateSingleRule(brdp, schemaSummary, callLLM);
+      if (rule) {
+        blocks.push(rule.xml);
+      } else {
+        // Red de seguridad: nunca perder un BRDP en silencio -> comentario de
+        // trazabilidad, mismo patron real que BRDP-D1-00089.
+        blocks.push(buildTraceabilityComment(brdp, "sin respuesta valida del LLM tras los reintentos"));
+      }
+    }
+  }
+
+  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary);
+  const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary);
+
+  return { xml: finalXml, valid, errors, vocabularyWarnings, brdpCount: targetBRDPs.length };
+}
+
+export { buildSchematronPrompt, buildFewShotBlock, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument };

@@ -23,7 +23,7 @@ function _lastStep(path) {
   const t = _normSpace(path);
   return t.includes('/') ? t.replace(/^.*\//, '') : t;
 }
-function _isSafePattern(ctx) {
+export function _isSafePattern(ctx) {
   if (!ctx || !ctx.trim()) return false;
   let p = 0, b = 0, inStr = false, q = '';
   for (let i = 0; i < ctx.length; i++) { const ch = ctx[i];
