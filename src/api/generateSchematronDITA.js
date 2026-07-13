@@ -47,7 +47,7 @@ this assumed <revised> could contain a <comment> child. Real verification agains
 the XSD showed <revised> is EMPTY (attributes only, no child elements or text) --
 the rule was structurally impossible, not just unverified.
 CORRECT output when this happens — a traceability comment, nothing else:
-<!-- ${ex.id}: no se pudo generar una regla Schematron automatable (${escapeXmlText(ex.notes.split(".")[0])}) -- pendiente de revision manual. -->`;
+<!-- ${ex.id}: no se pudo generar una regla Schematron automatable (${escapeXmlText(ex.notes.split(".")[0])}); pendiente de revision manual. -->`;
       }
 
       if (ex.id === "BRDP-D1-00313") {
@@ -83,15 +83,17 @@ const STRICT_RULES = `STRICT RULES:
 5. Closed list of permitted values given in the proposal -> test="@attr = ('v1','v2','v3')" (XPath enumeration). Do not use a regex for a short closed list of literal values.
 6. Attribute pattern/format constraint -> matches(@attr, '^...$', 'i') anchored with ^ and $, case-insensitive unless case clearly matters. CRITICAL: apply the regex to the attribute that ACTUALLY carries that data according to vocabulary_by_domain — verify which element/attribute really holds the value before writing the test (e.g. a filename pattern belongs on image/@href, never on fig/@id or table/@id; those are unrelated attributes on unrelated elements).
 7. Structural rule that must hold across more than one topicType (see the BRDP's topicTypes) -> the test must accept EVERY structural alternative used by those topicTypes, combined with "or". Different topicTypes can satisfy the same rule through different real elements (e.g. a generic task's prereq/context is NOT the same structure as machineryTask's formal <safety> element from taskreq-d — if a rule targets both, test must accept ancestor::safety OR the generic task structure, not just one of them). Check vocabulary_by_domain for the topicTypes involved before writing the test.
-8. Nesting-depth limit -> count(ancestor::element-name) compared with < or >=. Never simulate depth counting with nested positional predicates.
+8. Nesting-depth limit -> count(ancestor::element-name) compared with a relational operator (see rule 17 for how to escape it). Never simulate depth counting with nested positional predicates.
 9. sch:assert/@id and sch:report/@id MUST be globally unique across the ENTIRE document being assembled. If a BRDP produces more than one independent check, suffix each id with a short descriptive slug: BRDP-id-slug (e.g. BRDP-D1-00313-shortdesc, BRDP-D1-00313-author). NEVER reuse the same id twice, and never reuse a bare BRDP id for more than one assert/report.
 10. sch:assert/@test fires its message when the test evaluates to FALSE — phrase it as what MUST be true. sch:report/@test fires its message when the test evaluates to TRUE — phrase it as what must NOT happen. Pick whichever reads naturally for the rule, but never invert the polarity.
 11. role="error" for absolute prohibitions/mandates ("must", "shall not", "is required") and for closed enumerations from a fixed external standard. role="warning" for recommendations/conditional language ("should", "recommend", "discard if not necessary", "consider", "discard what is not never need").
 12. If the BRDP has no reliable structural hook in real DITA — either it is actually a process/governance decision with no XML footprint, or the element/attribute it describes is not present in vocabulary_by_domain/topic_types for the relevant topicTypes — DO NOT invent a rule. Output ONLY this XML comment instead:
-<!-- BRDP-id: no se pudo generar una regla Schematron automatable (motivo breve) -- pendiente de revision manual. -->
+<!-- BRDP-id: no se pudo generar una regla Schematron automatable (motivo breve); pendiente de revision manual. -->
 13. NEVER use an element or attribute name that is not listed in vocabulary_by_domain or topic_types. If you are not sure an element exists in real DITA, prefer a name that IS confirmed there, or fall back to rule 12 — never guess a plausible-sounding element name (this is exactly the class of error that caused real false positives before: assuming <video>/<audio> attributes existed when only <object> is confirmed).
 14. Inside sch:assert/sch:report message text, escape angle brackets naming elements: write &lt;elementName&gt;, never a literal <elementName>.
-15. Do not add topic-type detection logic (no checking @domains, no checking the root element name) — contexts self-limit by which elements are actually present in the document being validated; this is intentional (Option B).`;
+15. Do not add topic-type detection logic (no checking @domains, no checking the root element name) — contexts self-limit by which elements are actually present in the document being validated; this is intentional (Option B).
+16. XML comments (rule 12) must NEVER contain the two-character sequence "--" anywhere in their body, and must not end with "-" right before "-->" — both break XML well-formedness. Use ";" or an em dash "—" for a pause instead of "--".
+17. Inside test and context attribute values — not just message text — a literal < or & must be escaped as &lt; / &amp;. This applies even to numeric comparisons: write count(...) &lt; 2, never count(...) < 2 with a raw <. Attribute values follow the same escaping requirement as element text (rule 14), it is not optional just because the value is XPath.`;
 
 function buildSchematronPrompt(chunkBRDPs, schemaSummary) {
   const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
@@ -165,10 +167,44 @@ function sanitizeForXmlComment(text) {
 }
 
 function buildTraceabilityComment(brdp, reason) {
-  const desc = sanitizeForXmlComment(brdp.definition || brdp.proposal || "Regla sin contexto")
-    .slice(0, 300);
-  const why = sanitizeForXmlComment(reason || "sin gancho estructural claro en el vocabulario confirmado");
-  return `<!-- ${brdp.id}: no se pudo generar una regla Schematron automatable (${why}) -- pendiente de revision manual. Definition: ${desc} -->`;
+  const desc = String(brdp.definition || brdp.proposal || "Regla sin contexto").slice(0, 300);
+  const why = reason || "sin gancho estructural claro en el vocabulario confirmado";
+  // Sanitize the WHOLE assembled body in one pass (not just the injected
+  // fragments) -- a literal "--" in the surrounding boilerplate text itself
+  // is just as fatal to XML well-formedness as one in `why`/`desc`, and this
+  // was in fact the real bug: the boilerplate wording used a raw "--".
+  const inner = `${brdp.id}: no se pudo generar una regla Schematron automatable (${why}); pendiente de revision manual. Definition: ${desc}`;
+  return `<!-- ${sanitizeForXmlComment(inner)} -->`;
+}
+
+// ===== Deterministic escaping (second layer -- never rely on the LLM alone) =====
+// Same philosophy as forceIssueType() in generateBREX.js: the prompt now tells
+// the model not to do these two things (STRICT RULES 16/17), but a real run
+// against 100 BRDPs showed it still does them often enough that a code-level
+// guarantee is required regardless of prompt compliance.
+
+// Attribute values follow XML's AttValue grammar, which (unlike element text)
+// explicitly forbids a literal "<" and requires "&" to be part of a
+// recognized reference. A raw "count(...) < 2" from the LLM is invalid XML
+// even though the surrounding tags are otherwise fine.
+function escapeAttrLiteral(value) {
+  return value
+    .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, "&amp;")
+    .replace(/</g, "&lt;");
+}
+
+function escapeSchTestAttributes(xml) {
+  return xml.replace(/\b(test|context)="([^"]*)"/g, (full, attrName, value) => (
+    `${attrName}="${escapeAttrLiteral(value)}"`
+  ));
+}
+
+// Re-sanitizes every XML comment's body regardless of whether it came from
+// buildTraceabilityComment() (already sanitized once) or directly from the
+// LLM (rule 12 output, never passed through buildTraceabilityComment at
+// all) -- this is the actual majority case found in a real 100-BRDP run.
+function sanitizeXmlCommentBodies(xml) {
+  return xml.replace(/<!--([\s\S]*?)-->/g, (full, body) => `<!--${sanitizeForXmlComment(body)}-->`);
 }
 
 // Splits raw LLM output into pattern blocks (dropping any whose ids don't map
@@ -232,13 +268,20 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
     "<sch:title>{PROJECT_TITLE} Business Rules Schematron (BRDP-D1)</sch:title>"
   ).replace("{PROJECT_TITLE}", projectTitle);
 
-  return [
+  let xml = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     open,
     title,
     ...blocks,
     close,
   ].join("\n");
+
+  // Second layer of defense (rules 16/17 are the prompt-side first layer):
+  // force-correct escaping regardless of whether the LLM actually complied.
+  xml = escapeSchTestAttributes(xml);
+  xml = sanitizeXmlCommentBodies(xml);
+
+  return xml;
 }
 
 // ===== checkWellFormedSchematron() =====
