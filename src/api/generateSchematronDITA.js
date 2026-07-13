@@ -68,6 +68,27 @@ its OWN globally-unique @id, suffixed with a short descriptive slug
     .join("\n\n");
 }
 
+// When a real project BRDP's id happens to exactly match one of the curated
+// few-shot examples, the pattern is copied here DETERMINISTICALLY instead of
+// asking the LLM to regenerate it. A real 100-BRDP run showed the LLM can get
+// confused by seeing its own few-shot example in the prompt and dismiss the
+// actual BRDP as "already exists / duplicate" with a comment instead of
+// producing the real rule -- silently dropping coverage for it. Copying the
+// curated pattern directly is both more reliable (no ambiguity possible) and
+// cheaper (no LLM call needed at all for these ids).
+function buildDeterministicBlockFromFewShot(entry) {
+  if (entry.id === "BRDP-D1-00313") return BRDP_00313_LITERAL;
+  if (entry.confidence_ai === "DESACTIVADA") {
+    const why = sanitizeForXmlComment(String(entry.notes || "").split(".")[0]);
+    return `<!-- ${entry.id}: no se pudo generar una regla Schematron automatable (${why}); pendiente de revision manual. -->`;
+  }
+  return `<sch:pattern>
+  <sch:rule context="${entry.context}">
+    <sch:assert role="${entry.assert_role}" id="${entry.id}" test="${entry.test}">${escapeXmlText(entry.message)}</sch:assert>
+  </sch:rule>
+</sch:pattern>`;
+}
+
 // ===== STRICT RULES =====
 // Rules 4-12 map 1:1 onto the 9 real patterns identified across the 29 curated
 // few-shots (absolute prohibition, enumeration, regex-on-correct-attribute,
@@ -147,8 +168,22 @@ function extractCheckIds(text) {
   );
 }
 
+// Only counts a comment as a genuine resolution if it follows our own
+// canonical "no automatable rule" wording (both STRICT RULE 12's template and
+// buildTraceabilityComment() always include "pendiente de revision manual").
+// A real 100-BRDP run found the LLM sometimes dismisses a BRDP with an
+// off-pattern comment instead ("ya existe en few-shot ... no se genera de
+// nuevo (regla duplicada)") when its id happens to match a few-shot example
+// -- that is NOT a valid resolution, it's the model silently dropping a real
+// rule, and the old code counted ANY "BRDP-id:" comment as coverage,
+// masking the loss. Requiring the canonical phrase closes that loophole
+// without breaking the legitimate rule-12 mechanism.
 function extractCommentedIds(text) {
-  return new Set([...text.matchAll(/<!--\s*(BRDP-[A-Za-z0-9-]+)\s*:/g)].map((m) => m[1]));
+  const ids = new Set();
+  for (const m of text.matchAll(/<!--\s*(BRDP-[A-Za-z0-9-]+)\s*:([\s\S]*?)-->/g)) {
+    if (/pendiente de revision manual/i.test(m[2])) ids.add(m[1]);
+  }
+  return ids;
 }
 
 // A generated id "covers" a BRDP if it equals the BRDP id, or is that id with a
@@ -212,10 +247,20 @@ function sanitizeXmlCommentBodies(xml) {
 // comments, and reports which of the expected BRDPs remain uncovered.
 function processChunkResponse(rawText, chunkBRDPs, targetIds) {
   const patterns = extractPatternBlocks(rawText);
-  const comments = extractTraceabilityComments(rawText);
+  const rawComments = extractTraceabilityComments(rawText);
 
   const keptPatterns = patterns.filter((block) => {
     const ids = [...extractCheckIds(block)];
+    return ids.some((id) => [...targetIds].some((t) => idCoversBRDP(id, t)));
+  });
+
+  // Discard, not just ignore-for-coverage, any comment that doesn't follow
+  // our own canonical "no automatable rule" wording (extractCommentedIds
+  // already enforces that) -- otherwise an off-pattern dismissal like "ya
+  // existe / duplicada" would still leak into the final document even after
+  // a successful retry produced the real rule for the same BRDP.
+  const keptComments = rawComments.filter((block) => {
+    const ids = [...extractCommentedIds(block)];
     return ids.some((id) => [...targetIds].some((t) => idCoversBRDP(id, t)));
   });
 
@@ -223,7 +268,7 @@ function processChunkResponse(rawText, chunkBRDPs, targetIds) {
   for (const block of keptPatterns) {
     for (const id of extractCheckIds(block)) coveredIds.add(id);
   }
-  for (const block of comments) {
+  for (const block of keptComments) {
     for (const id of extractCommentedIds(block)) coveredIds.add(id);
   }
 
@@ -231,7 +276,7 @@ function processChunkResponse(rawText, chunkBRDPs, targetIds) {
     (b) => ![...coveredIds].some((id) => idCoversBRDP(id, b.id))
   );
 
-  return { patterns: keptPatterns, comments, missing };
+  return { patterns: keptPatterns, comments: keptComments, missing };
 }
 
 async function generateSingleRule(brdp, schemaSummary, callLLM) {
@@ -558,7 +603,26 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
   }
 
   const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary());
-  const targetIds = new Set(targetBRDPs.map((b) => b.id));
+
+  // BRDPs whose id exactly matches a curated few-shot are resolved
+  // deterministically (see buildDeterministicBlockFromFewShot) and never sent
+  // to the LLM at all -- see the comment on that function for why. targetIds
+  // (the "is this pattern id real or invented" set used by
+  // processChunkResponse) is scoped to brdpsForLLM only, so if the LLM still
+  // echoes one of the deterministic ids back anyway, it's correctly dropped
+  // as invented rather than duplicating the id already pushed above.
+  const fewShotById = new Map((schemaSummary.few_shot_examples || []).map((e) => [e.id, e]));
+  const blocks = [];
+  const brdpsForLLM = [];
+  for (const brdp of targetBRDPs) {
+    const fewShotEntry = fewShotById.get(brdp.id);
+    if (fewShotEntry) {
+      blocks.push(buildDeterministicBlockFromFewShot(fewShotEntry));
+    } else {
+      brdpsForLLM.push(brdp);
+    }
+  }
+  const targetIds = new Set(brdpsForLLM.map((b) => b.id));
 
   const callLLM =
     callLLMOverride ||
@@ -575,11 +639,9 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     });
 
   const chunks = [];
-  for (let i = 0; i < targetBRDPs.length; i += CHUNK_SIZE) {
-    chunks.push(targetBRDPs.slice(i, i + CHUNK_SIZE));
+  for (let i = 0; i < brdpsForLLM.length; i += CHUNK_SIZE) {
+    chunks.push(brdpsForLLM.slice(i, i + CHUNK_SIZE));
   }
-
-  const blocks = [];
 
   for (const chunk of chunks) {
     const { system, user } = buildSchematronPrompt(chunk, schemaSummary);
@@ -624,4 +686,4 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
   return { xml: finalXml, valid, errors, vocabularyWarnings, brdpCount: targetBRDPs.length };
 }
 
-export { buildSchematronPrompt, buildFewShotBlock, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument };
+export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument };
