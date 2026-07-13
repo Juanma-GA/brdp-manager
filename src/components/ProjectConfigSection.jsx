@@ -257,6 +257,26 @@ export default function ProjectConfigSection() {
             <p className={styles.error}>{errors.enterpriseCode}</p>
           )}
         </div>
+
+        {/* Primary Format */}
+        <div className={styles.formGroup}>
+          <label htmlFor="primaryFormat" className={styles.label}>
+            Primary Format
+          </label>
+          <select
+            id="primaryFormat"
+            value={formData.primaryFormat || ''}
+            onChange={(e) => handleInputChange('primaryFormat', e.target.value)}
+            className={styles.select}
+          >
+            <option value="">— No format selected —</option>
+            <option value="BREX-3.0.1">BREX — S1000D 3.0.1</option>
+            <option value="BREX-4.1">BREX — S1000D 4.1</option>
+            <option value="BREX-4.2">BREX — S1000D 4.2</option>
+            <option value="SCH-S1000D">Schematron 1.0 — S1000D</option>
+            <option value="SCH-DITA">Schematron 1.0 — DITA</option>
+          </select>
+        </div>
       </div>
 
       {/* Save Button and Confirmation */}

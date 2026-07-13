@@ -1,6 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Trash2 } from 'lucide-react';
+import { getApproval, deleteApproval } from '../api/approvals';
 import styles from './BRDPTable.module.css';
+
+const FORMAT_LABELS = {
+  'BREX-3.0.1': 'BREX 3.0.1',
+  'BREX-4.1': 'BREX 4.1',
+  'BREX-4.2': 'BREX 4.2',
+  'SCH-S1000D': 'Schematron S1000D',
+  'SCH-DITA': 'Schematron DITA',
+};
 
 /**
  * Utility function to truncate text with ellipsis
@@ -31,6 +40,75 @@ function ValidationBadge({ status }) {
   }
 
   return <span className={badgeClass}>{status}</span>;
+}
+
+/**
+ * Rule Approval cell component
+ * Shows the frozen deterministic rule for the project's currently-active
+ * format (ProjectConfig.primaryFormat), if any. Approvals are stored per
+ * (BRDP, format) pair -- see src/api/approvals.js.
+ * @param {string} brdpId - BRDP id
+ * @param {string} primaryFormat - Project's currently-active format, or '' if unset
+ * @returns {JSX.Element}
+ */
+function RuleApprovalCell({ brdpId, primaryFormat }) {
+  const [approval, setApproval] = useState(null); // null = none/loading
+  const [revoking, setRevoking] = useState(false);
+
+  useEffect(() => {
+    if (!primaryFormat) {
+      setApproval(null);
+      return;
+    }
+    let cancelled = false;
+    getApproval(brdpId, primaryFormat).then((data) => {
+      if (!cancelled) setApproval(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [brdpId, primaryFormat]);
+
+  const handleRevoke = async (e) => {
+    e.stopPropagation();
+    if (!window.confirm('Revoke this approval? The rule will go through the LLM again next time it is generated.')) return;
+    setRevoking(true);
+    try {
+      await deleteApproval(brdpId, primaryFormat);
+      setApproval(null);
+    } finally {
+      setRevoking(false);
+    }
+  };
+
+  if (!primaryFormat) {
+    return <span className={styles.noFormat}>No format selected</span>;
+  }
+
+  if (!approval) {
+    return (
+      <button
+        className={styles.approvalPendingBtn}
+        disabled
+        title={`Coming soon (${FORMAT_LABELS[primaryFormat] || primaryFormat})`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        Generate &amp; review rule
+      </button>
+    );
+  }
+
+  return (
+    <details className={styles.approvalDetails} onClick={(e) => e.stopPropagation()}>
+      <summary className={styles.approvedBadge}>
+        ✓ Approved <span className={styles.approvalSource}>({FORMAT_LABELS[primaryFormat] || primaryFormat} · {approval.source})</span>
+      </summary>
+      <pre className={styles.approvalXml}>{approval.rule_xml}</pre>
+      <button className={styles.revokeBtn} onClick={handleRevoke} disabled={revoking}>
+        {revoking ? 'Revoking…' : 'Revoke'}
+      </button>
+    </details>
+  );
 }
 
 /**
@@ -82,6 +160,7 @@ export default function BRDPTable({
   editingBrdpId,
   isDirtyEditing,
   onDeleteSelected,
+  primaryFormat,
 }) {
   const [lastSelectedId, setLastSelectedId] = useState(null);
   /**
@@ -209,6 +288,7 @@ export default function BRDPTable({
               Validation
               {sortField === 'validation' && <SortIndicator sortDir={sortDir} />}
             </th>
+            <th>Rule Approval</th>
             <th>Comment</th>
           </tr>
         </thead>
@@ -249,6 +329,9 @@ export default function BRDPTable({
               </td>
               <td className={styles.validation}>
                 <ValidationBadge status={brdp.validation} />
+              </td>
+              <td className={styles.ruleApproval}>
+                <RuleApprovalCell brdpId={brdp.id} primaryFormat={primaryFormat} />
               </td>
               <td className={styles.comment} title={brdp.comment}>
                 {truncate(brdp.comment, 40)}

@@ -149,6 +149,80 @@
   color: #9ca3af;
 }
 
+.ruleApproval {
+  max-width: 220px;
+}
+
+.noFormat {
+  color: #9ca3af;
+  font-style: italic;
+  font-size: 11px;
+}
+
+.approvalPendingBtn {
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.25rem;
+  border: 1px solid #d1d5db;
+  background-color: #f3f4f6;
+  color: #9ca3af;
+  font-size: 0.75rem;
+  cursor: not-allowed;
+}
+
+.approvalDetails {
+  max-width: 220px;
+}
+
+.approvedBadge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.25rem;
+  background-color: #dcfce7;
+  color: #166534;
+  font-weight: 600;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.approvalSource {
+  font-weight: 400;
+  text-transform: none;
+}
+
+.approvalXml {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  background-color: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.7rem;
+  font-family: 'IBM Plex Mono', monospace;
+  max-height: 200px;
+  max-width: 400px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 0.25rem;
+}
+
+.revokeBtn {
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.25rem;
+  border: 1px solid #fecaca;
+  background: white;
+  color: #dc2626;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.revokeBtn:hover:not(:disabled) {
+  background-color: #fee2e2;
+}
+
+.revokeBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .row {
   position: relative;
 }

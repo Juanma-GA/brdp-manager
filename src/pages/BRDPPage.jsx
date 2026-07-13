@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useBRDPContext } from '../context/BRDPContext';
 import { useTableLogic } from '../hooks/useTableLogic';
+import { useProjectConfig } from '../hooks/useProjectConfig';
 import SearchBar from '../components/SearchBar';
 import FilterPills from '../components/FilterPills';
 import BRDPTable from '../components/BRDPTable';
@@ -20,6 +21,7 @@ import styles from './BRDPPage.module.css';
  */
 export default function BRDPPage({ showToast, onNavigate }) {
   const { brdps, setBrdps, selectedBRDPs, setSelectedBRDPs, stats } = useBRDPContext();
+  const { projectConfig } = useProjectConfig();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [sortField, setSortField] = useState('');
@@ -176,6 +178,7 @@ export default function BRDPPage({ showToast, onNavigate }) {
             editingBrdpId={detailBrdp?.id}
             isDirtyEditing={isDirty}
             onDeleteSelected={handleDeleteSelected}
+            primaryFormat={projectConfig.primaryFormat}
           />
         </div>
       </div>
