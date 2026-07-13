@@ -26,3 +26,12 @@ CREATE TABLE IF NOT EXISTS notes (
   text TEXT NOT NULL DEFAULT '',
   updated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS rule_approvals (
+  brdp_id TEXT NOT NULL,
+  format TEXT NOT NULL,
+  rule_xml TEXT NOT NULL,
+  source TEXT NOT NULL,
+  approved_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (brdp_id, format)
+);

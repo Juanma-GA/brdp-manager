@@ -331,6 +331,40 @@ app.put('/api/notes/:brdpId', (req, res) => {
   }
 });
 
+// ─── Rule approvals ───────────────────────────────────────────────────────────
+
+app.get('/api/approvals/:brdpId/:format', (req, res) => {
+  try {
+    const row = db.prepare(
+      'SELECT rule_xml, source, approved_at FROM rule_approvals WHERE brdp_id=? AND format=?'
+    ).get(req.params.brdpId, req.params.format);
+    res.json(row || null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/approvals/:brdpId/:format', (req, res) => {
+  try {
+    db.prepare(`
+      INSERT OR REPLACE INTO rule_approvals (brdp_id, format, rule_xml, source, approved_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+    `).run(req.params.brdpId, req.params.format, req.body.ruleXml || '', req.body.source || 'llm-approved');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/approvals/:brdpId/:format', (req, res) => {
+  try {
+    db.prepare('DELETE FROM rule_approvals WHERE brdp_id=? AND format=?').run(req.params.brdpId, req.params.format);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // SPA fallback — serve index.html for all non-API routes
 app.get('*', (req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'));

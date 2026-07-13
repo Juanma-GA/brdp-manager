@@ -13,6 +13,7 @@ const DEFAULT_CONFIG = {
   countryIsoCode: 'US',
   securityClassification: '01',
   enterpriseCode: '',
+  primaryFormat: '',
 };
 
 export function useProjectConfig() {
