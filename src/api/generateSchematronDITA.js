@@ -291,12 +291,31 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
 // left once generated, since -- unlike BREX -- there is no deterministic
 // BREX->Schematron conversion step downstream to catch mistakes.
 
+// A literal ">" is perfectly legal, unescaped, inside an XML attribute value
+// (only "<" and bare "&" are forbidden there) -- and our own test attributes
+// routinely contain one, e.g. test="count(substep) >= 2". Every check below
+// used to scan attribute lists with a naive [^>]* which cannot tell "a >
+// that's part of an attribute value" from "the > that closes the tag", so it
+// silently truncated at the wrong spot (confirmed with a real, known-good,
+// oXygen-validated .sch: BRDP-D1-00187's own test="count(substep) >= 2" was
+// enough to trigger a false "empty test attribute").
+// ATTR_LIST instead matches whole name="value"/name='value' pairs one at a
+// time, each bounded by its own matching quote -- so a > or < inside a value
+// can never be mistaken for the tag's closing bracket.
+const ATTR_LIST = String.raw`(?:\s+[A-Za-z_][\w:.-]*\s*=\s*(?:"[^"]*"|'[^']*'))*`;
+
+function getAttr(attrs, name) {
+  const m = attrs.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`));
+  if (!m) return null;
+  return m[1] !== undefined ? m[1] : m[2];
+}
+
 function checkTagBalance(xml) {
   const stripped = xml
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
   const stack = [];
-  const tagRe = /<(\/?)([A-Za-z_][\w:.-]*)(?:\s[^<>]*?)?(\/?)>/g;
+  const tagRe = new RegExp(`<(/?)([A-Za-z_][\\w:.-]*)${ATTR_LIST}\\s*(/?)>`, "g");
   let m;
   while ((m = tagRe.exec(stripped)) !== null) {
     const [, closing, name, selfClose] = m;
@@ -318,7 +337,7 @@ function checkTagBalance(xml) {
 }
 
 function checkRootHeader(xml) {
-  const m = xml.match(/<sch:schema\b[^>]*>/);
+  const m = xml.match(new RegExp(`<sch:schema\\b${ATTR_LIST}\\s*>`));
   if (!m) return { valid: false, error: "Missing <sch:schema> root element" };
   if (xml.trim().indexOf(m[0]) > 200) {
     return { valid: false, error: "<sch:schema> does not appear near the start of the document" };
@@ -333,7 +352,8 @@ function checkRootHeader(xml) {
 }
 
 function checkDuplicateIds(xml) {
-  const ids = [...xml.matchAll(/<sch:(?:assert|report)\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
+  const re = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+  const ids = [...xml.matchAll(re)].map((m) => getAttr(m[1], "id")).filter(Boolean);
   const seen = new Set();
   const dupes = new Set();
   for (const id of ids) {
@@ -349,31 +369,33 @@ const KNOWN_ROLES = new Set(["error", "warning", "info", "fatal"]);
 
 function checkRulesAndChecks(xml) {
   const errors = [];
-  for (const pm of xml.matchAll(/<sch:pattern\b[^>]*>([\s\S]*?)<\/sch:pattern>/g)) {
+  const patternRe = new RegExp(`<sch:pattern\\b${ATTR_LIST}\\s*>([\\s\\S]*?)</sch:pattern>`, "g");
+  for (const pm of xml.matchAll(patternRe)) {
     const patternBody = pm[1];
     let ruleCount = 0;
-    for (const rm of patternBody.matchAll(/<sch:rule\b([^>]*)>([\s\S]*?)<\/sch:rule>/g)) {
+    const ruleRe = new RegExp(`<sch:rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</sch:rule>`, "g");
+    for (const rm of patternBody.matchAll(ruleRe)) {
       ruleCount++;
       const attrs = rm[1];
       const ruleBody = rm[2];
-      const ctxMatch = attrs.match(/\bcontext="([^"]*)"/);
-      const ctx = ctxMatch ? ctxMatch[1] : "";
+      const ctx = getAttr(attrs, "context") || "";
       if (!ctx.trim()) {
         errors.push("sch:rule with empty or missing context attribute");
       } else if (!_isSafePattern(ctx)) {
         errors.push(`sch:rule context is not a valid Schematron match pattern: "${ctx}"`);
       }
       let checkCount = 0;
-      for (const cm of ruleBody.matchAll(/<sch:(?:assert|report)\b([^>]*)>/g)) {
+      const checkRe = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+      for (const cm of ruleBody.matchAll(checkRe)) {
         checkCount++;
         const cAttrs = cm[1];
-        const testMatch = cAttrs.match(/\btest="([^"]*)"/);
-        if (!testMatch || !testMatch[1].trim()) {
+        const test = getAttr(cAttrs, "test");
+        if (!test || !test.trim()) {
           errors.push("sch:assert/sch:report with empty or missing test attribute");
         }
-        const roleMatch = cAttrs.match(/\brole="([^"]*)"/);
-        if (roleMatch && !KNOWN_ROLES.has(roleMatch[1])) {
-          errors.push(`Unknown role value: "${roleMatch[1]}"`);
+        const role = getAttr(cAttrs, "role");
+        if (role && !KNOWN_ROLES.has(role)) {
+          errors.push(`Unknown role value: "${role}"`);
         }
       }
       if (checkCount === 0) errors.push("sch:rule with no sch:assert/sch:report inside");
@@ -445,8 +467,16 @@ function buildKnownVocabulary(schemaSummary) {
 function lintVocabulary(xml, schemaSummary) {
   const known = buildKnownVocabulary(schemaSummary);
   const values = [];
-  for (const rm of xml.matchAll(/<sch:rule\b[^>]*\bcontext="([^"]*)"/g)) values.push(rm[1]);
-  for (const tm of xml.matchAll(/<sch:(?:assert|report)\b[^>]*\btest="([^"]*)"/g)) values.push(tm[1]);
+  const ruleRe = new RegExp(`<sch:rule\\b(${ATTR_LIST})\\s*>`, "g");
+  for (const rm of xml.matchAll(ruleRe)) {
+    const ctx = getAttr(rm[1], "context");
+    if (ctx) values.push(ctx);
+  }
+  const checkRe = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+  for (const cm of xml.matchAll(checkRe)) {
+    const test = getAttr(cm[1], "test");
+    if (test) values.push(test);
+  }
 
   const nameTokenRe = /(?<![@'":])\b([a-zA-Z][a-zA-Z0-9-]*)\b(?=\s*(?:\/|\[|\||\s|\(|$|::))/g;
   const unknown = new Set();
