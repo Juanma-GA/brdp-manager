@@ -333,6 +333,20 @@ app.put('/api/notes/:brdpId', (req, res) => {
 
 // ─── Rule approvals ───────────────────────────────────────────────────────────
 
+// Must be registered before the /:brdpId/:format route below -- both are
+// 2-segment paths under /api/approvals, and Express matches in declaration
+// order, so this literal-prefixed route needs to win first.
+app.get('/api/approvals/format/:format', (req, res) => {
+  try {
+    const rows = db.prepare(
+      'SELECT brdp_id, rule_xml, source, approved_at FROM rule_approvals WHERE format=?'
+    ).all(req.params.format);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/approvals/:brdpId/:format', (req, res) => {
   try {
     const row = db.prepare(

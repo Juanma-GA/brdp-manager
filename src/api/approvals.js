@@ -11,6 +11,14 @@ export async function getApproval(brdpId, format) {
   return res.json();
 }
 
+// Batch fetch: every frozen approval for a given format in one request,
+// instead of one GET per BRDP. Returns [] on a non-ok response.
+export async function getApprovalsForFormat(format) {
+  const res = await fetch(`${BASE}/api/approvals/format/${encodeURIComponent(format)}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
 export async function setApproval(brdpId, format, ruleXml, source) {
   const res = await fetch(`${BASE}/api/approvals/${encodeURIComponent(brdpId)}/${encodeURIComponent(format)}`, {
     method: 'PUT',

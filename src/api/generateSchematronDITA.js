@@ -1,6 +1,12 @@
 import { sendMessageStream } from "./llmAPI.js";
 import { extractXML } from "./generateBREX.js";
 import { _isSafePattern } from "./brexToSchematron.js";
+import { getApprovalsForFormat } from "./approvals.js";
+
+// Fixed format id this generator's frozen rule_approvals rows are stored
+// under -- see ProjectConfigSection.jsx's primaryFormat options and
+// CLAUDE.md's rule_approvals design (Phase 1).
+const FORMAT_ID = "SCH-DITA";
 
 let _schemaSummaryCache = null;
 
@@ -77,6 +83,10 @@ its OWN globally-unique @id, suffixed with a short descriptive slug
 // curated pattern directly is both more reliable (no ambiguity possible) and
 // cheaper (no LLM call needed at all for these ids).
 function buildDeterministicBlockFromFewShot(entry) {
+  // A frozen rule_approvals row (see src/api/approvals.js): rule_xml is
+  // already the exact, previously-approved <sch:pattern>/comment block --
+  // inject it verbatim, never rebuild it from separate fields.
+  if (entry.rule_xml != null) return entry.rule_xml.trim();
   if (entry.id === "BRDP-D1-00313") return BRDP_00313_LITERAL;
   if (entry.confidence_ai === "DESACTIVADA") {
     const why = sanitizeForXmlComment(String(entry.notes || "").split(".")[0]);
@@ -278,6 +288,22 @@ function processChunkResponse(rawText, chunkBRDPs, targetIds) {
   );
 
   return { patterns: keptPatterns, comments: keptComments, missing };
+}
+
+// Batch-fetches every frozen approval for FORMAT_ID in one request (see
+// GET /api/approvals/format/:format) instead of one call per BRDP. A fetch
+// failure degrades to "no approvals" rather than aborting generation --
+// affected BRDPs simply fall back to the LLM/safety-net path exactly as
+// before this feature existed, so coverage is never at risk, only the
+// deterministic-injection optimization for that one run.
+async function fetchApprovalsMap(format) {
+  try {
+    const rows = await getApprovalsForFormat(format);
+    return new Map(rows.map((r) => [r.brdp_id, r]));
+  } catch (err) {
+    console.error(`Failed to fetch rule approvals for format ${format}:`, err);
+    return new Map();
+  }
 }
 
 async function generateSingleRule(brdp, schemaSummary, callLLM) {
@@ -680,6 +706,17 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
 
   const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary());
 
+  // A BRDP with a frozen approval for FORMAT_ID (see src/api/approvals.js and
+  // CLAUDE.md's rule_approvals design) is injected verbatim and never sent to
+  // the LLM -- same mechanism as the few-shot exact-id-match below, just
+  // triggered by an explicit user approval instead of a curated example.
+  // Approval takes priority over a few-shot match: a real project decision
+  // always outranks a generic curated example for the same id.
+  const approvalsOverride = options.approvals;
+  const approvalById = approvalsOverride
+    ? (approvalsOverride instanceof Map ? approvalsOverride : new Map(approvalsOverride.map((a) => [a.brdp_id, a])))
+    : await fetchApprovalsMap(FORMAT_ID);
+
   // BRDPs whose id exactly matches a curated few-shot are resolved
   // deterministically (see buildDeterministicBlockFromFewShot) and never sent
   // to the LLM at all -- see the comment on that function for why. targetIds
@@ -691,8 +728,11 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
   const blocks = [];
   const brdpsForLLM = [];
   for (const brdp of targetBRDPs) {
+    const approvalEntry = approvalById.get(brdp.id);
     const fewShotEntry = fewShotById.get(brdp.id);
-    if (fewShotEntry) {
+    if (approvalEntry) {
+      blocks.push(buildDeterministicBlockFromFewShot(approvalEntry));
+    } else if (fewShotEntry) {
       blocks.push(buildDeterministicBlockFromFewShot(fewShotEntry));
     } else {
       brdpsForLLM.push(brdp);
