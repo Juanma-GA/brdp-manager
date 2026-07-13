@@ -62,6 +62,7 @@ Dos problemas relacionados pero distintos, ambos con la misma causa raíz (el pr
 | `src/api/generateBREX301.js` | Generador BREX S1000D 3.0.1 |
 | `src/api/generateBREXSch.js` | Generador Schematron 1.0 — S1000D (enfoque A2, ver abajo) |
 | `src/api/brexToSchematron.js` | Conversor determinista BREX → Schematron (sin LLM) |
+| `src/api/generateSchematronDITA.js` | Generador Schematron 1.0 — DITA (pipeline directo LLM, ver abajo) |
 | `src/api/buildBREXdocReport.js` | Constructor del informe BREXdoc |
 | `src/api/extractBRDPs.js` | AI Extract: DOCX/PDF/texto plano → BRDPs |
 | `src/api/llmAPI.js` | Cliente LLM agnóstico (Anthropic/OpenAI/Mistral/Custom) |
@@ -83,6 +84,8 @@ Los generadores de BREX cargan su estructura + ejemplos few-shot desde `public/`
 - `brex-schema-summary-sch.json` — **ya no se usa** (el Schematron se genera por conversión determinista, no por LLM directo). Se conserva por si se quisiera retomar la generación directa.
 
 Los ejemplos few-shot van en `few_shot_examples` y se inyectan en el system prompt vía `buildBREXPrompt*()`. El schema JSON completo se serializa SIN el array few-shot (para no duplicar tokens); los ejemplos van en un bloque separado.
+
+- `public/schematron-dita-schema-summary.json` — equivalente DITA, con estructura distinta (no hay `dmodule_opening_tag` ni `objectPath`): `sch_header` (esqueleto determinista del `<sch:schema>`), `topic_types` (mapa estructural de los 6 tipos: topic/concept/task/machineryTask/map/bookmap, confirmado contra los XSD reales de `sources/D1.3/schema/`), `vocabulary_by_domain` (content models reales por dominio DITA — hazard-d, taskreq-d, hi-d, ut-d, elementos base — usado también por el lint de vocabulario, ver abajo) y `few_shot_examples` (29 reglas Schematron reales, validadas en oXygen).
 
 ## Generadores BREX / Schematron — arquitectura defensiva
 
@@ -147,6 +150,17 @@ Opciones de `brexToSchematron(brexXml, options)`: `preserveBrdpId` (usa el id de
 
 El motor `brexToSchematron.js` es independiente y reutilizable (p. ej. para un futuro botón de migración BREX→Schematron sobre un BREX subido por el usuario).
 
+### Schematron 1.0 — DITA (`generateSchematronDITA.js`) — pipeline directo, sin BREX
+
+DITA no tiene un equivalente a BREX, así que aquí el pipeline es **directo**: BRDP → LLM → Schematron final, sin conversión determinista intermedia (a diferencia de S1000D, que pasa por BREX 3.0.1 → `brexToSchematron()`). Esto hace que la validación post-generación sea la única red de seguridad real.
+
+- **Opción B**: un único `.sch` combinado por proyecto con múltiples `<sch:pattern>`, cada uno auto-limitado por su propio `context` XPath — no hay detección explícita de tipo de topic; una regla simplemente no dispara si su contexto no existe en el documento validado.
+- Mismo patrón de chunking/verificación/reintento/barrido de cobertura que `generateBREX.js` (`CHUNK_SIZE=10`, `MAX_RETRIES=2`), simplificado: como cada chunk solo emite bloques `<sch:pattern>` autocontenidos, no existe el caso especial "chunk 1 = documento completo" de BREX; el ensamblado es un simple array de bloques.
+- El header `<sch:schema>` se añade de forma determinista al final (`finalizeSchematronDocument`), nunca lo genera el LLM.
+- **Red de seguridad**: si un BRDP no tiene gancho estructural real en DITA, se emite un comentario XML de trazabilidad (mismo patrón real usado para desactivar `BRDP-D1-00089` en el dataset curado) — nunca se fuerza ni se inventa una regla.
+- `checkWellFormedSchematron(xml, schemaSummary)` — implementación propia sin `DOMParser` (funciona igual en navegador y en Node, útil para test scripts aislados), con 7 comprobaciones: balance de tags, `<sch:schema>` raíz correcto (namespace + `queryBinding="xslt2"`), ids de `sch:assert`/`sch:report` únicos en TODO el documento, `context` no vacío y patrón XSLT válido (reutiliza `_isSafePattern()`, exportado desde `brexToSchematron.js`), `test` no vacío + cada `sch:rule` con al menos un `sch:assert`/`sch:report`, `role` restringido a valores conocidos, sin placeholders — más un **lint de vocabulario no bloqueante**: compara los nombres de elemento/atributo usados en `context`/`test` contra `vocabulary_by_domain` del schema summary y avisa (sin bloquear) si alguno no está confirmado contra el XSD real.
+- `options.callLLM` y `options.schemaSummary` son inyectables (no solo vía `fetch`/`sendMessageStream`), pensado para poder testear el generador de forma aislada fuera de la app.
+
 ## AI Extract (`extractBRDPs.js` + `AIExtractModal.jsx`)
 
 Extrae BRDPs desde un documento o texto pegado.
@@ -198,7 +212,7 @@ const isSchS1000D = format === 'Schematron 1.0 — S1000D';
 const isSchDITA = format === 'Schematron 1.0 — DITA';
 ```
 
-Schematron 1.0 se divide en dos formatos independientes en el selector: "Schematron 1.0 — S1000D" (implementado, `generateBREXSch.js`) y "Schematron 1.0 — DITA" (pendiente, cae en "Coming soon" igual que 5.0/6.0 — el generador DITA reutilizará `xmllint-wasm` para validación, siguiendo el mismo patrón que S1000D).
+Schematron 1.0 se divide en dos formatos independientes en el selector: "Schematron 1.0 — S1000D" (implementado, `generateBREXSch.js`) y "Schematron 1.0 — DITA" (implementado, `generateSchematronDITA.js` — ver "Schematron 1.0 — DITA" arriba). A diferencia de S1000D, DITA no usa `xmllint-wasm` ni validación XSD/DTD en tiempo real (decisión explícita: no es necesaria); la única validación post-generación es `checkWellFormedSchematron()`.
 
 Añadir un nuevo formato BREX requiere: nuevo generador + schema JSON + rama en `handleGenerate()` + actualizar `disabled`/"Coming soon".
 
@@ -209,7 +223,6 @@ Añadir un nuevo formato BREX requiere: nuevo generador + schema JSON + rama en 
 ## Lo que NO está implementado todavía
 
 - S1000D 5.0, 6.0 (selector existe, botón deshabilitado con "Coming soon").
-- Schematron 1.0 — DITA (selector existe, botón deshabilitado con "Coming soon"; Schematron 1.0 — S1000D sí está implementado).
 - Botón de migración BREX→Schematron sobre un BREX subido (el motor `brexToSchematron.js` ya está listo; falta la UI).
 - Migración automática de localStorage a SQLite en primera ejecución.
 - Autenticación (no necesaria para uso local single-user).

@@ -4,6 +4,7 @@ import { generateBREX } from '../api/generateBREX';
 import { generateBREX41 } from '../api/generateBREX41.js';
 import { generateBREX301 } from '../api/generateBREX301.js';
 import { generateBREXSch } from '../api/generateBREXSch.js';
+import { generateSchematronDITA } from '../api/generateSchematronDITA.js';
 import { validateAgainstXSD } from '../api/validateBREX.js';
 import styles from './GenerateModal.module.css';
 
@@ -110,6 +111,16 @@ export default function GenerateModal({ brdps, onClose }) {
           onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
           abortController: abortRef.current,
         });
+      } else if (isSchDITA) {
+        result = await generateSchematronDITA(brdps, projectConfig, {
+          apiKey,
+          modelName,
+          provider,
+          customEndpoint,
+          onlyValidated,
+          onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
+          abortController: abortRef.current,
+        });
       }
       setResult(result);
 
@@ -137,7 +148,7 @@ export default function GenerateModal({ brdps, onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX41, isBREX301, xsdFormat]);
+  }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX41, isBREX301, isSchS1000D, isSchDITA, xsdFormat]);
 
   const handleCancel = () => {
     abortRef.current?.abort();
@@ -156,6 +167,8 @@ export default function GenerateModal({ brdps, onClose }) {
     const dateStr = new Date().toISOString().slice(0, 10);
     const filename = isBREX301
       ? `DMC-${projectConfig.modelIdentCode}-00-00-00-00A-022A-D_${dateStr}_301.xml`
+      : isSchDITA
+      ? `${projectConfig.modelIdentCode}_${dateStr}_dita.sch`
       : isSchS1000D
       ? `${projectConfig.modelIdentCode}_${dateStr}.sch`
       : isBREX41
@@ -198,9 +211,9 @@ export default function GenerateModal({ brdps, onClose }) {
               <option>Schematron 1.0 — S1000D</option>
               <option>Schematron 1.0 — DITA</option>
             </select>
-            {!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D && (
+            {!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D && !isSchDITA && (
               <p className={styles.comingSoon}>
-                ⚠ Only BREX — S1000D 4.2, 4.1 and 3.0.1 are implemented. Other formats coming soon.
+                ⚠ Only BREX — S1000D 4.2, 4.1, 3.0.1, Schematron 1.0 — S1000D and Schematron 1.0 — DITA are implemented. Other formats coming soon.
               </p>
             )}
           </div>
@@ -242,10 +255,10 @@ export default function GenerateModal({ brdps, onClose }) {
             <button
               className={styles.generateBtn}
               onClick={handleGenerate}
-              disabled={!isConfigComplete || (!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D)}
-              title={!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D ? 'Only BREX 4.2, 4.1, 3.0.1 and Schematron 1.0 — S1000D are available' : undefined}
+              disabled={!isConfigComplete || (!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D && !isSchDITA)}
+              title={!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D && !isSchDITA ? 'Only BREX 4.2, 4.1, 3.0.1, Schematron 1.0 — S1000D and Schematron 1.0 — DITA are available' : undefined}
             >
-              {!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D ? 'Coming soon' : result ? 'Regenerate' : 'Generate'}
+              {!isBREX42 && !isBREX41 && !isBREX301 && !isSchS1000D && !isSchDITA ? 'Coming soon' : result ? 'Regenerate' : 'Generate'}
             </button>
           ) : (
             <div className={styles.loadingRow}>
@@ -260,7 +273,7 @@ export default function GenerateModal({ brdps, onClose }) {
           <div className={styles.outputSection}>
             <div className={styles.outputMeta}>
               <span className={result.valid ? styles.badgeOk : styles.badgeError}>
-                {result.valid ? '✓ Well-formed XML' : `✗ XML error: ${result.error}`}
+                {result.valid ? '✓ Well-formed XML' : `✗ XML error: ${result.error || (result.errors || []).join('; ')}`}
               </span>
               {result.brdpCount > 0 && (
                 <span className={styles.countInfo}>{result.brdpCount} rules included</span>
@@ -290,6 +303,32 @@ export default function GenerateModal({ brdps, onClose }) {
                     </ul>
                   </details>
                 ) : null}
+              </div>
+            )}
+            {isSchDITA && result.xml && (
+              <div className={styles.schSection}>
+                {result.valid ? (
+                  <span className={styles.badgeOk}>✓ Schematron structure checks passed</span>
+                ) : (
+                  <details>
+                    <summary className={styles.badgeError}>
+                      ✗ {result.errors.length} Schematron structure {result.errors.length === 1 ? 'issue' : 'issues'}
+                    </summary>
+                    <ul className={styles.xsdErrorList}>
+                      {result.errors.map((e, i) => <li key={i}>{e}</li>)}
+                    </ul>
+                  </details>
+                )}
+                {result.vocabularyWarnings?.length > 0 && (
+                  <details>
+                    <summary className={styles.badgePending}>
+                      ⚠ {result.vocabularyWarnings.length} vocabulary {result.vocabularyWarnings.length === 1 ? 'warning' : 'warnings'} (non-blocking)
+                    </summary>
+                    <ul className={styles.warnList}>
+                      {result.vocabularyWarnings.map((w, i) => <li key={i}>{w}</li>)}
+                    </ul>
+                  </details>
+                )}
               </div>
             )}
             {result.xml ? (
