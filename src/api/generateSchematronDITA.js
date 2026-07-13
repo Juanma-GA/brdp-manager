@@ -114,7 +114,8 @@ const STRICT_RULES = `STRICT RULES:
 14. Inside sch:assert/sch:report message text, escape angle brackets naming elements: write &lt;elementName&gt;, never a literal <elementName>.
 15. Do not add topic-type detection logic (no checking @domains, no checking the root element name) — contexts self-limit by which elements are actually present in the document being validated; this is intentional (Option B).
 16. XML comments (rule 12) must NEVER contain the two-character sequence "--" anywhere in their body, and must not end with "-" right before "-->" — both break XML well-formedness. Use ";" or an em dash "—" for a pause instead of "--".
-17. Inside test and context attribute values — not just message text — a literal < or & must be escaped as &lt; / &amp;. This applies even to numeric comparisons: write count(...) &lt; 2, never count(...) < 2 with a raw <. Attribute values follow the same escaping requirement as element text (rule 14), it is not optional just because the value is XPath.`;
+17. Inside test and context attribute values — not just message text — a literal < or & must be escaped as &lt; / &amp;. This applies even to numeric comparisons: write count(...) &lt; 2, never count(...) < 2 with a raw <. Attribute values follow the same escaping requirement as element text (rule 14), it is not optional just because the value is XPath.
+18. Before writing a test, sanity-check it is not vacuous. A test comparing two nearly-identical XPath expressions (e.g. count(X[cond < 3]) >= count(X[cond <= 3]), which is true almost by construction) does not actually verify the rule's intent — treat this as a sign the BRDP has no reliable structural hook and use rule 12 instead of forcing a lookalike rule. This applies especially to BRDPs about publishing/rendering configuration (TOC depth, page layout, print pagination, PDF/output formatting) that only affect how the publishing engine (DITA-OT) renders output, not the source document's own structure — even if a real element name (e.g. the bookmap <toc> placeholder) is nearby, using it to approximate a rendering-only decision is a semantic mismatch, not a real structural check. Apply this consistently: if a BRDP is essentially the same kind of decision as one you would otherwise resolve with rule 12, resolve it the same way even if its wording makes it look superficially structural.`;
 
 function buildSchematronPrompt(chunkBRDPs, schemaSummary) {
   const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
@@ -505,6 +506,21 @@ const EXTRA_KNOWN_NAMES = [
   // base/xsd/commonElementMod.xsd:935 -- distinct from the @navtitle
   // attribute also confirmed on topicref/chapter/part).
   "reference", "glossentry", "topichead", "topicgroup", "navtitle",
+  // ph: extremely common base phrase element -- base/xsd/commonElementMod.xsd:1893.
+  "ph",
+  // toc: a REAL element (bookmap/xsd/bookmapMod.xsd:1831), but note its actual
+  // semantics are narrow: an EMPTY placeholder inside <booklists> (frontmatter)
+  // telling the publishing engine "generate a table of contents here" --
+  // <xs:group name="toc.content"><xs:sequence/></xs:group>, no children, no
+  // relation whatsoever to <topic>/<topicref> nesting depth. Confirmed real so
+  // it belongs in known vocabulary (a rule that legitimately targets the
+  // bookmap <toc> placeholder shouldn't be flagged), but its presence here does
+  // NOT vouch for how a generated rule actually uses it -- a rule computing
+  // topic-nesting depth via a context/test built around <toc> is still almost
+  // certainly a semantic mismatch, just not a vocabulary one (see STRICT RULE
+  // 18 below, added after finding exactly this in a real generated rule for
+  // BRDP-D1-00497).
+  "toc",
 ];
 
 function collectStrings(value, out) {
