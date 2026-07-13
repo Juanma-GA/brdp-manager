@@ -496,7 +496,26 @@ const EXTRA_KNOWN_NAMES = [
   "supply", "spares", "nospares", "sparesli", "spare", "safety", "nosafety", "safecond",
   "href", "keyref", "format", "type", "scope", "value", "name", "modified", "date", "lang", "outputclass",
   "conref", "importance", "domains",
+  // Real DITA elements confirmed against the vendored XSD, referenced by
+  // curated few-shots (BRDP-D1-00118, 00299, 00300) but outside the 6-type
+  // topic_types scope, so they'd otherwise never appear in known vocabulary:
+  // reference/glossentry (topic types -- technicalContent/xsd/referenceMod.xsd,
+  // glossentryMod.xsd), topichead/topicgroup (map grouping elements --
+  // base/xsd/mapGroupMod.xsd), navtitle (a real ELEMENT inside <titlealts> --
+  // base/xsd/commonElementMod.xsd:935 -- distinct from the @navtitle
+  // attribute also confirmed on topicref/chapter/part).
+  "reference", "glossentry", "topichead", "topicgroup", "navtitle",
 ];
+
+function collectStrings(value, out) {
+  if (typeof value === "string") {
+    out.push(value);
+  } else if (Array.isArray(value)) {
+    value.forEach((v) => collectStrings(v, out));
+  } else if (value && typeof value === "object") {
+    Object.values(value).forEach((v) => collectStrings(v, out));
+  }
+}
 
 function buildKnownVocabulary(schemaSummary) {
   const names = new Set(EXTRA_KNOWN_NAMES);
@@ -506,37 +525,78 @@ function buildKnownVocabulary(schemaSummary) {
       key.split(/[/,]|\s+/).map((s) => s.trim()).filter(Boolean).forEach((n) => names.add(n));
     }
   }
+  // topic_types is free-text prose (content_sequence, body_content, etc.),
+  // not a clean element list -- tokenize every string value the same way
+  // context/test XPath is tokenized below, so any element name documented
+  // there (prereq, steps, topicref, chapter, reltable, ...) is recognized as
+  // known even though it isn't repeated in vocabulary_by_domain. Harmless
+  // over-inclusion (the occasional Spanish prose word) is an acceptable
+  // trade-off for a non-blocking lint -- it can only reduce false positives.
+  const topicTypeStrings = [];
+  collectStrings((schemaSummary && schemaSummary.topic_types) || {}, topicTypeStrings);
+  const genericTokenRe = /\b[a-zA-Z][a-zA-Z0-9-]*\b/g;
+  for (const s of topicTypeStrings) {
+    for (const m of s.matchAll(genericTokenRe)) names.add(m[0]);
+  }
   return names;
 }
 
+const NAME_TOKEN_RE = /(?<![@'":])\b([a-zA-Z][a-zA-Z0-9-]*)\b(?=\s*(?:\/|\[|\||\s|\(|$|::))/g;
+
+function findUnknownNames(value, known) {
+  const stripped = value.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');
+  const unknown = new Set();
+  for (const tok of stripped.matchAll(NAME_TOKEN_RE)) {
+    const name = tok[1];
+    if (XPATH_FUNCTIONS.has(name) || XPATH_AXES.has(name) || XPATH_KEYWORDS.has(name)) continue;
+    if (/^\d/.test(name)) continue;
+    if (!known.has(name)) unknown.add(name);
+  }
+  return unknown;
+}
+
+// One warning per (BRDP id, unconfirmed name) pair, in English to match the
+// rest of the UI -- a global "these names are unconfirmed somewhere" list
+// isn't actionable; the reviewer needs to know exactly which rule to check.
 function lintVocabulary(xml, schemaSummary) {
   const known = buildKnownVocabulary(schemaSummary);
-  const values = [];
-  const ruleRe = new RegExp(`<sch:rule\\b(${ATTR_LIST})\\s*>`, "g");
-  for (const rm of xml.matchAll(ruleRe)) {
-    const ctx = getAttr(rm[1], "context");
-    if (ctx) values.push(ctx);
-  }
-  const checkRe = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
-  for (const cm of xml.matchAll(checkRe)) {
-    const test = getAttr(cm[1], "test");
-    if (test) values.push(test);
-  }
+  const warnings = [];
+  const seen = new Set();
 
-  const nameTokenRe = /(?<![@'":])\b([a-zA-Z][a-zA-Z0-9-]*)\b(?=\s*(?:\/|\[|\||\s|\(|$|::))/g;
-  const unknown = new Set();
-  for (const value of values) {
-    const stripped = value.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');
-    for (const tok of stripped.matchAll(nameTokenRe)) {
-      const name = tok[1];
-      if (XPATH_FUNCTIONS.has(name) || XPATH_AXES.has(name) || XPATH_KEYWORDS.has(name)) continue;
-      if (/^\d/.test(name)) continue;
-      if (!known.has(name)) unknown.add(name);
+  const addWarning = (id, name) => {
+    const key = `${id}|${name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    warnings.push(`${id}: uses unconfirmed element/attribute '${name}'`);
+  };
+
+  const ruleRe = new RegExp(`<sch:rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</sch:rule>`, "g");
+  for (const rm of xml.matchAll(ruleRe)) {
+    const ctx = getAttr(rm[1], "context") || "";
+    const ruleBody = rm[2];
+
+    const checkRe = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+    const checks = [...ruleBody.matchAll(checkRe)]
+      .map((cm) => ({ id: getAttr(cm[1], "id"), test: getAttr(cm[1], "test") || "" }))
+      .filter((c) => c.id);
+    if (checks.length === 0) continue;
+
+    // A context can be shared by more than one assert/report in the same
+    // rule (e.g. BRDP-D1-00313's two sch:report) -- attribute an unknown name
+    // found in context to every id in that rule.
+    if (ctx) {
+      const unknownInContext = findUnknownNames(ctx, known);
+      for (const name of unknownInContext) {
+        for (const { id } of checks) addWarning(id, name);
+      }
+    }
+    for (const { id, test } of checks) {
+      if (!test) continue;
+      for (const name of findUnknownNames(test, known)) addWarning(id, name);
     }
   }
-  return unknown.size > 0
-    ? [`Posibles nombres de elemento/atributo no confirmados en vocabulary_by_domain: ${[...unknown].join(", ")} -- revisar antes de dar por buena la regla.`]
-    : [];
+
+  return warnings;
 }
 
 function checkWellFormedSchematron(xml, schemaSummary) {
