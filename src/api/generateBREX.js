@@ -1,4 +1,5 @@
 import { sendMessageStream } from "./llmAPI.js";
+import { getApprovalsForFormat } from "./approvals.js";
 
 let _schemaSummaryCache = null;
 
@@ -410,6 +411,23 @@ function verifyChunkRules(rawResponse, expectedIds) {
   return { missing, invented };
 }
 
+// Batch-fetches every frozen approval for the given format in one request
+// (GET /api/approvals/format/:format) instead of one call per BRDP. Same
+// safe-degrade philosophy as generateBREX301.js's fetchApprovalsMap301: a
+// fetch failure falls back to "no approvals" instead of aborting generation
+// -- affected BRDPs simply go through the normal LLM/safety-net path, so
+// coverage is never at risk, only the deterministic-injection optimization
+// for that run.
+async function fetchApprovalsMap(format) {
+  try {
+    const rows = await getApprovalsForFormat(format);
+    return new Map(rows.map((r) => [r.brdp_id, r]));
+  } catch (err) {
+    console.error(`Failed to fetch rule approvals for format ${format}:`, err);
+    return new Map();
+  }
+}
+
 async function generateSingleRule(brdp, projectConfig, schemaSummary, callLLM) {
   const { system, user } = buildBREXPromptChunk([brdp], projectConfig, schemaSummary);
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -569,9 +587,15 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
     onlyValidated = true,
     onChunk,
     abortController,
+    approvals: approvalsOverride,
+    approvalsFormat,
+    schemaSummary: schemaSummaryOverride,
+    callLLM: callLLMOverride,
   } = options;
 
-  if (!apiKey) throw new Error("API key is required. Please configure it in Settings.");
+  if (!callLLMOverride && !apiKey) {
+    throw new Error("API key is required. Please configure it in Settings.");
+  }
   if (!projectConfig?.modelIdentCode) {
     throw new Error("Project configuration is incomplete. Please fill in Settings.");
   }
@@ -588,20 +612,44 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
     );
   }
 
-  const schemaSummary = await loadSchemaSummary();
-  const validSet = new Set(targetBRDPs.map(b => b.id));
+  const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary());
 
-  const callLLM = async (system, user) => {
-    const messages = [{ role: "user", content: user }];
-    try {
-      return await sendMessageStream(
-        messages, apiKey, modelName, provider, system,
-        onChunk, abortController, { customEndpoint, maxTokens: 8000 }
-      );
-    } catch (err) {
-      throw new Error(`LLM call failed: ${err.message}`);
-    }
-  };
+  // A BRDP with a frozen approval for approvalsFormat (see src/api/approvals.js
+  // and CLAUDE.md's rule_approvals design) is injected verbatim and never
+  // sent to the LLM. approvalsFormat is caller-supplied, not hardcoded, so
+  // GenerateModal.jsx's direct "BREX -- S1000D 4.2" call site controls its
+  // own approvals key ('BREX-4.2') explicitly -- omitting it skips the fetch
+  // entirely, so existing callers are unaffected until they opt in.
+  const approvalById = approvalsOverride
+    ? (approvalsOverride instanceof Map ? approvalsOverride : new Map(approvalsOverride.map((a) => [a.brdp_id, a])))
+    : (approvalsFormat ? await fetchApprovalsMap(approvalsFormat) : new Map());
+
+  const approvedBRDPs = [];
+  const llmBRDPs = [];
+  for (const brdp of targetBRDPs) {
+    if (approvalById.has(brdp.id)) approvedBRDPs.push(brdp);
+    else llmBRDPs.push(brdp);
+  }
+
+  // Scoped to llmBRDPs (not targetBRDPs): if the LLM ever echoes an approved
+  // BRDP's id anyway (it was never given that BRDP in any prompt), it must be
+  // treated as invented and stripped -- otherwise it would duplicate the
+  // rule injected separately below for the same id.
+  const validSet = new Set(llmBRDPs.map(b => b.id));
+
+  const callLLM =
+    callLLMOverride ||
+    (async (system, user) => {
+      const messages = [{ role: "user", content: user }];
+      try {
+        return await sendMessageStream(
+          messages, apiKey, modelName, provider, system,
+          onChunk, abortController, { customEndpoint, maxTokens: 8000 }
+        );
+      } catch (err) {
+        throw new Error(`LLM call failed: ${err.message}`);
+      }
+    });
 
   const removeInvented = (xml) =>
     xml.replace(/<structureObjectRule[\s\S]*?<\/structureObjectRule>/g, (match) => {
@@ -611,9 +659,13 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
 
   // Split into chunks of CHUNK_SIZE
   const chunks = [];
-  for (let i = 0; i < targetBRDPs.length; i += CHUNK_SIZE) {
-    chunks.push(targetBRDPs.slice(i, i + CHUNK_SIZE));
+  for (let i = 0; i < llmBRDPs.length; i += CHUNK_SIZE) {
+    chunks.push(llmBRDPs.slice(i, i + CHUNK_SIZE));
   }
+  // Every BRDP may have a frozen approval and none need the LLM -- chunk 1 is
+  // still generated (header-only, zero rules) since it's the only path that
+  // produces the document skeleton; approved rules are injected afterward.
+  if (chunks.length === 0) chunks.push([]);
 
   // Chunk 1: full DM
   const { system: sys1, user: usr1 } = buildBREXPrompt(chunks[0], projectConfig, schemaSummary);
@@ -657,6 +709,17 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
         if (rule) finalXml = assembleChunks(finalXml, '\n' + rule.xml);
       }
     }
+  }
+
+  // Inject frozen approvals verbatim -- never re-escaped or rebuilt, same as
+  // any already-generated rule. Must happen before the coverage sweep so
+  // `present`/`presentNonCtx` pick these ids up and don't treat them as
+  // missing.
+  if (approvedBRDPs.length > 0) {
+    const approvedXml = approvedBRDPs
+      .map(b => approvalById.get(b.id).rule_xml)
+      .join('\n');
+    finalXml = assembleChunks(finalXml, approvedXml);
   }
 
   // Barrido final de cobertura: ningún BRDP debe perderse en silencio
