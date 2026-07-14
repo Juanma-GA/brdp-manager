@@ -1,6 +1,6 @@
 import { sendMessageStream } from "./llmAPI.js";
 import { extractXML, checkWellFormed } from "./generateBREX.js";
-import { getApprovalsForFormat } from "./approvals.js";
+import { getApprovalsForFormat, proposeApproval } from "./approvals.js";
 
 let _schemaSummaryCache301 = null;
 
@@ -324,6 +324,25 @@ function assembleChunks301(baseXml, additionalRules) {
   return stripped + '\n' + pieces.join('\n') + XML_FOOTER_301;
 }
 
+// Splits a chunk's raw <objrule>/nonContextRule-comment text into per-BRDP
+// blocks, keyed by base id (split-suffix -b/-c/-d/-e stripped, so a rule
+// divided across multiple objrule elements stays one proposal). Used only
+// for auto-proposal (point 3 of Phase 6's design) -- assembleChunks301
+// itself doesn't need per-BRDP granularity since it just appends everything.
+function extractRuleBlocksById301(xml) {
+  const map = new Map();
+  const append = (id, text) => {
+    const baseId = id.replace(/-[bcde]$/, '');
+    map.set(baseId, map.has(baseId) ? map.get(baseId) + '\n' + text : text);
+  };
+  const rulePattern = /<objrule id="([^"]+)"[\s\S]*?<\/objrule>/g;
+  let m;
+  while ((m = rulePattern.exec(xml)) !== null) append(m[1], m[0]);
+  const commentPattern = /<!--\s*nonContextRule id="([^"]+)":[\s\S]*?-->/g;
+  while ((m = commentPattern.exec(xml)) !== null) append(m[1], m[0]);
+  return map;
+}
+
 const CHUNK_SIZE_301 = 10;
 const MAX_RETRIES_301 = 2;
 
@@ -478,7 +497,9 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
     approvalsFormat,
     schemaSummary: schemaSummaryOverride,
     callLLM: callLLMOverride,
+    proposeApproval: proposeApprovalOverride,
   } = options;
+  const proposeRule = proposeApprovalOverride || proposeApproval;
 
   if (!callLLMOverride && !apiKey) {
     throw new Error("API key is required. Please configure it in Settings.");
@@ -519,9 +540,18 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
   const approvedBRDPs = [];
   const llmBRDPs = [];
   for (const brdp of targetBRDPs) {
-    if (approvalById.has(brdp.id)) approvedBRDPs.push(brdp);
+    // A pending_review row must NOT bypass the LLM -- only 'approved' does.
+    // It regenerates every run so the proposal always reflects the latest
+    // generation, until a human explicitly approves it.
+    if (approvalById.get(brdp.id)?.status === 'approved') approvedBRDPs.push(brdp);
     else llmBRDPs.push(brdp);
   }
+
+  // Auto-proposal: any BRDP resolved via llmBRDPs below (not already
+  // approved) gets its freshly generated <objrule> saved as a pending_review
+  // candidate, overwriting any earlier proposal for the same id. Never
+  // proposed: the manually-built safety-net comment (no real rule exists).
+  const proposals = [];
 
   // Scoped to llmBRDPs (not targetBRDPs): if the LLM ever echoes an approved
   // BRDP's id anyway (it was never given that BRDP in any prompt), it must be
@@ -575,11 +605,26 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
 
   const { missing: missing1, invented: invented1 } = verifyChunkRules301(finalXml, chunks[0].map(b => b.id));
   if (invented1.length > 0) finalXml = removeInvented(finalXml);
+
+  // Auto-propose each chunk-1 BRDP's own <objrule> (+ adjacent traceability
+  // comment, if any) -- extracted after invented removal so a hallucinated
+  // block is never proposed.
+  {
+    const blocksById = extractRuleBlocksById301(finalXml);
+    for (const brdp of chunks[0]) {
+      const block = blocksById.get(brdp.id);
+      if (block) proposals.push({ brdpId: brdp.id, ruleXml: block });
+    }
+  }
+
   for (const missingId of missing1) {
     const brdp = chunks[0].find(b => b.id === missingId);
     if (brdp) {
       const rule = await generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM);
-      if (rule) finalXml = assembleChunks301(finalXml, '\n' + rule);
+      if (rule) {
+        finalXml = assembleChunks301(finalXml, '\n' + rule);
+        proposals.push({ brdpId: brdp.id, ruleXml: rule });
+      }
     }
   }
 
@@ -598,11 +643,24 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
     if (inventedN.length > 0) escapedN = removeInvented(escapedN);
     finalXml = assembleChunks301(finalXml, '\n' + escapedN);
 
+    // Auto-propose each of this chunk's BRDPs from the (invented-stripped)
+    // response text, same as chunk 1.
+    {
+      const blocksById = extractRuleBlocksById301(escapedN);
+      for (const brdp of chunks[i]) {
+        const block = blocksById.get(brdp.id);
+        if (block) proposals.push({ brdpId: brdp.id, ruleXml: block });
+      }
+    }
+
     for (const missingId of missingN) {
       const brdp = chunks[i].find(b => b.id === missingId);
       if (brdp) {
         const rule = await generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM);
-        if (rule) finalXml = assembleChunks301(finalXml, '\n' + rule);
+        if (rule) {
+          finalXml = assembleChunks301(finalXml, '\n' + rule);
+          proposals.push({ brdpId: brdp.id, ruleXml: rule });
+        }
       }
     }
   }
@@ -629,8 +687,10 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
       const rule = await generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM);
       if (rule) {
         finalXml = assembleChunks301(finalXml, '\n' + rule);
+        proposals.push({ brdpId: brdp.id, ruleXml: rule });
       } else {
         // Red de seguridad: nunca perder un BRDP -> comentario de trazabilidad
+        // (nunca se propone -- no hay regla real generada)
         const desc = String(brdp.definition || brdp.proposal || 'Regla sin contexto')
           .replace(/--+/g, '-').replace(/[\r\n]+/g, ' ').trim().slice(0, 300);
         finalXml = assembleChunks301(finalXml, '\n<!-- nonContextRule id="' + brdp.id + '": ' + desc + ' -->');
@@ -650,5 +710,16 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
   finalXml = finalizeDocument301(finalXml, projectConfig, schemaSummary);
 
   const { valid, error } = checkWellFormed(finalXml);
+
+  // Fire-and-verify, never fire-and-break: a failed proposal write must never
+  // fail a generation that already succeeded. Gated on approvalsFormat being
+  // set -- without it there is no format key to propose under (same gate
+  // the fetch above already uses).
+  if (approvalsFormat && proposals.length > 0) {
+    await Promise.allSettled(
+      proposals.map(p => proposeRule(p.brdpId, approvalsFormat, p.ruleXml, 'llm'))
+    );
+  }
+
   return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length };
 }
