@@ -339,7 +339,7 @@ app.put('/api/notes/:brdpId', (req, res) => {
 app.get('/api/approvals/format/:format', (req, res) => {
   try {
     const rows = db.prepare(
-      'SELECT brdp_id, rule_xml, source, approved_at FROM rule_approvals WHERE format=?'
+      'SELECT brdp_id, rule_xml, source, status, approved_at FROM rule_approvals WHERE format=?'
     ).all(req.params.format);
     res.json(rows);
   } catch (err) {
@@ -350,7 +350,7 @@ app.get('/api/approvals/format/:format', (req, res) => {
 app.get('/api/approvals/:brdpId/:format', (req, res) => {
   try {
     const row = db.prepare(
-      'SELECT rule_xml, source, approved_at FROM rule_approvals WHERE brdp_id=? AND format=?'
+      'SELECT rule_xml, source, status, approved_at FROM rule_approvals WHERE brdp_id=? AND format=?'
     ).get(req.params.brdpId, req.params.format);
     res.json(row || null);
   } catch (err) {
@@ -358,12 +358,37 @@ app.get('/api/approvals/:brdpId/:format', (req, res) => {
   }
 });
 
+// Proposes (creates or overwrites) a candidate rule for review -- never
+// approves directly. Used both by generators auto-proposing a fresh
+// candidate and, in future, by manual "Generate & review rule" / AI Extract
+// import flows. Always resets status to 'pending_review' and clears
+// approved_at, even when overwriting an existing pending_review row with a
+// newer proposal.
 app.put('/api/approvals/:brdpId/:format', (req, res) => {
   try {
     db.prepare(`
-      INSERT OR REPLACE INTO rule_approvals (brdp_id, format, rule_xml, source, approved_at)
-      VALUES (?, ?, ?, ?, datetime('now'))
-    `).run(req.params.brdpId, req.params.format, req.body.ruleXml || '', req.body.source || 'llm-approved');
+      INSERT OR REPLACE INTO rule_approvals (brdp_id, format, rule_xml, source, status, approved_at)
+      VALUES (?, ?, ?, ?, 'pending_review', NULL)
+    `).run(req.params.brdpId, req.params.format, req.body.ruleXml || '', req.body.source || 'llm');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Transitions an existing pending_review row to approved. Only a status/
+// timestamp flip -- never rewrites rule_xml/source, so approving always
+// freezes exactly what was proposed.
+app.post('/api/approvals/:brdpId/:format/approve', (req, res) => {
+  try {
+    const result = db.prepare(`
+      UPDATE rule_approvals SET status='approved', approved_at=datetime('now')
+      WHERE brdp_id=? AND format=? AND status='pending_review'
+    `).run(req.params.brdpId, req.params.format);
+    if (result.changes === 0) {
+      res.status(404).json({ error: 'No pending_review approval found for this BRDP/format.' });
+      return;
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS rule_approvals (
   format TEXT NOT NULL,
   rule_xml TEXT NOT NULL,
   source TEXT NOT NULL,
-  approved_at TEXT DEFAULT (datetime('now')),
+  status TEXT NOT NULL DEFAULT 'pending_review',
+  approved_at TEXT,
   PRIMARY KEY (brdp_id, format)
 );
