@@ -1,7 +1,7 @@
 import { sendMessageStream } from "./llmAPI.js";
 import { extractXML } from "./generateBREX.js";
 import { _isSafePattern } from "./brexToSchematron.js";
-import { getApprovalsForFormat } from "./approvals.js";
+import { getApprovalsForFormat, proposeApproval } from "./approvals.js";
 
 // Fixed format id this generator's frozen rule_approvals rows are stored
 // under -- see ProjectConfigSection.jsx's primaryFormat options and
@@ -686,7 +686,9 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     abortController,
     schemaSummary: schemaSummaryOverride,
     callLLM: callLLMOverride,
+    proposeApproval: proposeApprovalOverride,
   } = options;
+  const proposeRule = proposeApprovalOverride || proposeApproval;
 
   if (!callLLMOverride && !apiKey) {
     throw new Error("API key is required. Please configure it in Settings.");
@@ -724,16 +726,29 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
   // processChunkResponse) is scoped to brdpsForLLM only, so if the LLM still
   // echoes one of the deterministic ids back anyway, it's correctly dropped
   // as invented rather than duplicating the id already pushed above.
+  // Auto-proposal: any BRDP that reaches the LLM/few-shot path below (i.e.
+  // isn't already frozen-approved) gets its freshly generated fragment saved
+  // as a pending_review candidate -- overwriting any earlier pending_review
+  // proposal for the same id, so it always reflects the latest generation.
+  // Never proposed: the traceability-comment safety net (no real rule was
+  // generated) and, of course, an already-approved BRDP (it never reaches
+  // this code path in the first place).
+  const proposals = [];
+
   const fewShotById = new Map((schemaSummary.few_shot_examples || []).map((e) => [e.id, e]));
   const blocks = [];
   const brdpsForLLM = [];
   for (const brdp of targetBRDPs) {
     const approvalEntry = approvalById.get(brdp.id);
-    const fewShotEntry = fewShotById.get(brdp.id);
-    if (approvalEntry) {
+    if (approvalEntry && approvalEntry.status === "approved") {
       blocks.push(buildDeterministicBlockFromFewShot(approvalEntry));
-    } else if (fewShotEntry) {
-      blocks.push(buildDeterministicBlockFromFewShot(fewShotEntry));
+      continue;
+    }
+    const fewShotEntry = fewShotById.get(brdp.id);
+    if (fewShotEntry) {
+      const block = buildDeterministicBlockFromFewShot(fewShotEntry);
+      blocks.push(block);
+      proposals.push({ brdpId: brdp.id, ruleXml: block });
     } else {
       brdpsForLLM.push(brdp);
     }
@@ -767,10 +782,27 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
 
     blocks.push(...patterns, ...comments);
 
+    // patterns are already split per-block (STRICT RULE 2: one BRDP -> one
+    // sch:pattern, or one shared rule for a documented multi-check exception
+    // like BRDP-D1-00313) -- match each chunk BRDP against the block(s)
+    // whose ids cover it and propose that as its candidate. comments (rule
+    // 12 traceability) are never proposed -- no real rule was generated.
+    for (const brdp of chunk) {
+      const matchingBlocks = patterns.filter((block) =>
+        [...extractCheckIds(block)].some((id) => idCoversBRDP(id, brdp.id))
+      );
+      if (matchingBlocks.length > 0) {
+        proposals.push({ brdpId: brdp.id, ruleXml: matchingBlocks.join("\n") });
+      }
+    }
+
     // Retry missing individually (per-BRDP), same as generateBREX.js
     for (const brdp of missing) {
       const rule = await generateSingleRule(brdp, schemaSummary, callLLM);
-      if (rule) blocks.push(rule.xml);
+      if (rule) {
+        blocks.push(rule.xml);
+        proposals.push({ brdpId: brdp.id, ruleXml: rule.xml });
+      }
     }
   }
 
@@ -788,6 +820,7 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
       const rule = await generateSingleRule(brdp, schemaSummary, callLLM);
       if (rule) {
         blocks.push(rule.xml);
+        proposals.push({ brdpId: brdp.id, ruleXml: rule.xml });
       } else {
         // Red de seguridad: nunca perder un BRDP en silencio -> comentario de
         // trazabilidad, mismo patron real que BRDP-D1-00089.
@@ -798,6 +831,15 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
 
   const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary);
   const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary);
+
+  // Fire-and-verify, never fire-and-break: a failed proposal write must never
+  // fail the generation that already succeeded -- same safe-degrade
+  // philosophy as the approvals fetch itself.
+  if (proposals.length > 0) {
+    await Promise.allSettled(
+      proposals.map((p) => proposeRule(p.brdpId, FORMAT_ID, p.ruleXml, "llm"))
+    );
+  }
 
   return { xml: finalXml, valid, errors, vocabularyWarnings, brdpCount: targetBRDPs.length };
 }
