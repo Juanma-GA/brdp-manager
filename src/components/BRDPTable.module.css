@@ -184,6 +184,60 @@
   cursor: pointer;
 }
 
+.pendingBadge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.25rem;
+  background-color: #fed7aa;
+  color: #92400e;
+  font-weight: 600;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.approvalActions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.approveBtn {
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.25rem;
+  border: 1px solid #86efac;
+  background: white;
+  color: #166534;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.approveBtn:hover:not(:disabled) {
+  background-color: #dcfce7;
+}
+
+.approveBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.discardBtn {
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.25rem;
+  border: 1px solid #d1d5db;
+  background: white;
+  color: #6b7280;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.discardBtn:hover:not(:disabled) {
+  background-color: #f3f4f6;
+}
+
+.discardBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .approvalSource {
   font-weight: 400;
   text-transform: none;
