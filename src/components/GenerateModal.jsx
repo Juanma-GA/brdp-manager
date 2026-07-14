@@ -78,6 +78,7 @@ export default function GenerateModal({ brdps, onClose }) {
           provider,
           customEndpoint,
           onlyValidated,
+          approvalsFormat: 'BREX-4.2',
           onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
           abortController: abortRef.current,
         });
@@ -88,6 +89,7 @@ export default function GenerateModal({ brdps, onClose }) {
           provider,
           customEndpoint,
           onlyValidated,
+          approvalsFormat: 'BREX-4.1',
           onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
           abortController: abortRef.current,
         });
@@ -98,6 +100,7 @@ export default function GenerateModal({ brdps, onClose }) {
           provider,
           customEndpoint,
           onlyValidated,
+          approvalsFormat: 'BREX-3.0.1',
           onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
           abortController: abortRef.current,
         });
