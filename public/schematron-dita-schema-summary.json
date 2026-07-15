@@ -586,6 +586,27 @@
       "test": "child::relrow and relrow/child::relcell",
       "message": "If <reltable> is used, it must contain properly structured <relrow>/<relcell> elements.",
       "notes": "Condicional ('discard what is not never need') -- regla de estructura mínima si se decide usar reltable."
+    },
+    {
+      "id": "BRDP-EXT-00003",
+      "topicTypes": [
+        "topic",
+        "concept",
+        "task",
+        "reference"
+      ],
+      "confidence_ai": "alta",
+      "context": "*[title = ('LISTA DE MATERIAL OBLIGATORIO', 'LISTA DE MATERIAL IMPREVISTO', 'HERRAMIENTAS Y EQUIPOS DE PRUEBA')]//table[tgroup/thead/row/entry[normalize-space(.) = 'Cant.']]",
+      "assert_role": "error",
+      "lets": [
+        {
+          "name": "colCant",
+          "value": "tgroup/thead/row[1]/entry[normalize-space(.) = 'Cant.']/@colname"
+        }
+      ],
+      "test": "every $row in tgroup/tbody/row satisfies (let $part := normalize-space($row/entry[1]), $cant := normalize-space($row/entry[@colname = $colCant]) return $part = '' or $cant != '')",
+      "message": "En tablas con columna \"Cant.\" dentro de los temas \"LISTA DE MATERIAL OBLIGATORIO\", \"LISTA DE MATERIAL IMPREVISTO\" o \"HERRAMIENTAS Y EQUIPOS DE PRUEBA\", la columna \"Cant.\" no puede estar vacía cuando la columna \"Part\" tenga contenido.",
+      "notes": "NUEVA CATEGORÍA DE PATRÓN (primer few-shot que la cubre): comprobación cruzada fila-por-fila entre dos columnas de una tabla CALS/DITA (tgroup/tbody/row/entry), usando sch:let para resolver @colname del encabezado por texto (nunca por posición -- las tablas CALS/DITA identifican columnas por @colname, no por índice) y el cuantificador XPath 2.0 'every $row in ... satisfies (...)' para expresar la condición sobre todas las filas a la vez. Regla ya curada y verificada por el usuario en sintaxis Schematron real (ver STRICT RULE 19)."
     }
   ]
 }

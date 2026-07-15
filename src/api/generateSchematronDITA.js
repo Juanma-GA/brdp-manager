@@ -37,6 +37,15 @@ const BRDP_00313_LITERAL = `<sch:pattern>
   </sch:rule>
 </sch:pattern>`;
 
+// Renders a few-shot's optional "lets" field (array of {name, value}) as
+// <sch:let> lines, one per entry, indented to sit right after <sch:rule
+// context="...">. Returns "" when absent so every existing few-shot without
+// "lets" renders byte-identical to before this field existed.
+function renderSchLets(lets) {
+  if (!lets || lets.length === 0) return "";
+  return lets.map((l) => `    <sch:let name="${l.name}" value="${l.value}"/>\n`).join("");
+}
+
 function buildFewShotBlock(schemaSummary) {
   const examples = schemaSummary.few_shot_examples || [];
   return examples
@@ -67,7 +76,7 @@ its OWN globally-unique @id, suffixed with a short descriptive slug
       return `### Example ${i + 1} — ${ex.id} (topics: ${topics}, confidence: ${ex.confidence_ai})
 <sch:pattern>
   <sch:rule context="${ex.context}">
-    <sch:assert role="${ex.assert_role}" id="${ex.id}" test="${ex.test}">${escapeXmlText(ex.message)}</sch:assert>
+${renderSchLets(ex.lets)}    <sch:assert role="${ex.assert_role}" id="${ex.id}" test="${ex.test}">${escapeXmlText(ex.message)}</sch:assert>
   </sch:rule>
 </sch:pattern>`;
     })
@@ -94,7 +103,7 @@ function buildDeterministicBlockFromFewShot(entry) {
   }
   return `<sch:pattern>
   <sch:rule context="${entry.context}">
-    <sch:assert role="${entry.assert_role}" id="${entry.id}" test="${entry.test}">${escapeXmlText(entry.message)}</sch:assert>
+${renderSchLets(entry.lets)}    <sch:assert role="${entry.assert_role}" id="${entry.id}" test="${entry.test}">${escapeXmlText(entry.message)}</sch:assert>
   </sch:rule>
 </sch:pattern>`;
 }
@@ -124,8 +133,9 @@ const STRICT_RULES = `STRICT RULES:
 14. Inside sch:assert/sch:report message text, escape angle brackets naming elements: write &lt;elementName&gt;, never a literal <elementName>.
 15. Do not add topic-type detection logic (no checking @domains, no checking the root element name) — contexts self-limit by which elements are actually present in the document being validated; this is intentional (Option B).
 16. XML comments (rule 12) must NEVER contain the two-character sequence "--" anywhere in their body, and must not end with "-" right before "-->" — both break XML well-formedness. Use ";" or an em dash "—" for a pause instead of "--".
-17. Inside test and context attribute values — not just message text — a literal < or & must be escaped as &lt; / &amp;. This applies even to numeric comparisons: write count(...) &lt; 2, never count(...) < 2 with a raw <. Attribute values follow the same escaping requirement as element text (rule 14), it is not optional just because the value is XPath.
-18. Before writing a test, sanity-check it is not vacuous. A test comparing two nearly-identical XPath expressions (e.g. count(X[cond < 3]) >= count(X[cond <= 3]), which is true almost by construction) does not actually verify the rule's intent — treat this as a sign the BRDP has no reliable structural hook and use rule 12 instead of forcing a lookalike rule. This applies especially to BRDPs about publishing/rendering configuration (TOC depth, page layout, print pagination, PDF/output formatting) that only affect how the publishing engine (DITA-OT) renders output, not the source document's own structure — even if a real element name (e.g. the bookmap <toc> placeholder) is nearby, using it to approximate a rendering-only decision is a semantic mismatch, not a real structural check. Apply this consistently: if a BRDP is essentially the same kind of decision as one you would otherwise resolve with rule 12, resolve it the same way even if its wording makes it look superficially structural.`;
+17. Inside test, context, and sch:let/@value attribute values — not just message text — a literal < or & must be escaped as &lt; / &amp;. This applies even to numeric comparisons: write count(...) &lt; 2, never count(...) < 2 with a raw <. Attribute values follow the same escaping requirement as element text (rule 14), it is not optional just because the value is XPath.
+18. Before writing a test, sanity-check it is not vacuous. A test comparing two nearly-identical XPath expressions (e.g. count(X[cond < 3]) >= count(X[cond <= 3]), which is true almost by construction) does not actually verify the rule's intent — treat this as a sign the BRDP has no reliable structural hook and use rule 12 instead of forcing a lookalike rule. This applies especially to BRDPs about publishing/rendering configuration (TOC depth, page layout, print pagination, PDF/output formatting) that only affect how the publishing engine (DITA-OT) renders output, not the source document's own structure — even if a real element name (e.g. the bookmap <toc> placeholder) is nearby, using it to approximate a rendering-only decision is a semantic mismatch, not a real structural check. Apply this consistently: if a BRDP is essentially the same kind of decision as one you would otherwise resolve with rule 12, resolve it the same way even if its wording makes it look superficially structural.
+19. Row-by-row cross-column check inside a DITA/CALS table (tgroup/tbody/row/entry) -> resolve the target column by its header TEXT, never by position: add an <sch:let name="colX" value="tgroup/thead/row[1]/entry[normalize-space(.) = 'Header Text']/@colname"/> as a direct child of sch:rule, placed BEFORE the sch:assert/sch:report, then reference it as $colX inside test. CALS/DITA tables identify columns by @colname, not by ordinal position — entry[2]-style positional predicates silently break if columns are reordered. Express the "for every row" condition with the XPath 2.0 quantifier "every $row in tgroup/tbody/row satisfies (...)" — never simulate this with count()/positional indexing, which cannot express a per-row condition that depends on another column's value in that same row.`;
 
 function buildSchematronPrompt(chunkBRDPs, schemaSummary) {
   const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
@@ -239,8 +249,13 @@ function escapeAttrLiteral(value) {
     .replace(/</g, "&lt;");
 }
 
+// Also covers sch:let/@value (STRICT RULE 19's column-header lookup is
+// itself an XPath expression stored in an XML attribute, exactly the same
+// escaping hazard as test/context) -- "value" only ever appears as a literal
+// attribute name here on sch:let in the assembled document, so widening the
+// match is safe.
 function escapeSchTestAttributes(xml) {
-  return xml.replace(/\b(test|context)="([^"]*)"/g, (full, attrName, value) => (
+  return xml.replace(/\b(test|context|value)="([^"]*)"/g, (full, attrName, value) => (
     `${attrName}="${escapeAttrLiteral(value)}"`
   ));
 }
@@ -498,7 +513,14 @@ const XPATH_AXES = new Set([
   "descendant-or-self", "following", "following-sibling", "preceding",
   "preceding-sibling", "self", "attribute",
 ]);
-const XPATH_KEYWORDS = new Set(["and", "or", "not", "true", "false", "div", "mod"]);
+// "every"/"some"/"satisfies"/"let"/"return"/"in" are XPath 2.0 quantifier/let
+// keywords (STRICT RULE 19) -- without these, the lint flags every
+// "every $x in ... satisfies (let ... return ...)" construct as unconfirmed
+// vocabulary, which is noise, not a real finding.
+const XPATH_KEYWORDS = new Set([
+  "and", "or", "not", "true", "false", "div", "mod",
+  "every", "some", "satisfies", "let", "return", "in",
+]);
 
 const EXTRA_KNOWN_NAMES = [
   "topic", "concept", "task", "map", "bookmap", "machineryTask",
@@ -510,7 +532,7 @@ const EXTRA_KNOWN_NAMES = [
   "topicmeta", "anchor", "navref", "reltable", "topicref", "relheader", "relcolspec", "relrow", "relcell",
   "bookmeta", "frontmatter", "backmatter", "chapter", "part", "appendices", "appendix", "booktitle",
   "bookabstract", "booklists", "colophon", "dedication", "draftintro", "notices", "preface", "amendments",
-  "p", "fig", "table", "tgroup", "tbody", "row", "entry", "note", "dl", "ul", "ol", "sl", "lq", "example",
+  "p", "fig", "table", "tgroup", "thead", "tbody", "row", "entry", "note", "dl", "ul", "ol", "sl", "lq", "example",
   "section", "bodydiv", "desc", "id", "class", "xref", "image", "object", "param",
   "author", "copyright", "copyryear", "copyrholder", "critdates", "created", "revised", "permissions",
   "data", "data-about", "sort-as", "unknown",
@@ -583,7 +605,12 @@ function buildKnownVocabulary(schemaSummary) {
   return names;
 }
 
-const NAME_TOKEN_RE = /(?<![@'":])\b([a-zA-Z][a-zA-Z0-9-]*)\b(?=\s*(?:\/|\[|\||\s|\(|$|::))/g;
+// Excludes tokens preceded by @ (attribute names, handled separately),
+// '/" (already-quoted string literals), : (axis/prefix separator) -- and,
+// since STRICT RULE 19 introduced XPath 2.0 $variable references (e.g.
+// $colCant), also $ -- a variable name is never DITA vocabulary and should
+// never be flagged as an unconfirmed element/attribute.
+const NAME_TOKEN_RE = /(?<![@'":$])\b([a-zA-Z][a-zA-Z0-9-]*)\b(?=\s*(?:\/|\[|\||\s|\(|$|::))/g;
 
 function findUnknownNames(value, known) {
   const stripped = value.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');
