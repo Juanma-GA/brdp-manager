@@ -35,7 +35,6 @@ export function buildHTML(brdps, projectConfig) {
     definition: b.definition || '—',
     proposal: b.proposal || '—',
     validation: b.validation || '—',
-    comment: b.comment || b.comments || '—',
   })));
 
   return `<!DOCTYPE html>
@@ -121,7 +120,6 @@ export function buildHTML(brdps, projectConfig) {
         <th>Definition</th>
         <th>Proposal</th>
         <th>Status</th>
-        <th>Comment</th>
       </tr>
     </thead>
     <tbody id="brdp-tbody"></tbody>
@@ -160,7 +158,6 @@ export function buildHTML(brdps, projectConfig) {
         <td>\${b.definition}</td>
         <td>\${b.proposal}</td>
         <td style="text-align:center;"><span class="\${badgeClass(b.validation)}">\${b.validation}</span></td>
-        <td style="font-size:12px;color:#6b7280;">\${b.comment}</td>
       </tr>\`).join('');
     renderPagination();
     window.scrollTo({ top: document.querySelector('.section:last-of-type').offsetTop - 20, behavior: 'smooth' });
@@ -200,7 +197,7 @@ export function buildMarkdown(brdps, projectConfig) {
   const pending   = brdps.filter(b => b.validation === 'Pending').length;
 
   const rows = brdps.map(b =>
-    `| \`${b.id || '—'}\` | ${b.title || '—'} | ${(b.definition || '—').replace(/\n/g,' ')} | ${(b.proposal || '—').replace(/\n/g,' ')} | ${b.validation || '—'} | ${(b.comment || '—').replace(/\n/g,' ')} |`
+    `| \`${b.id || '—'}\` | ${b.title || '—'} | ${(b.definition || '—').replace(/\n/g,' ')} | ${(b.proposal || '—').replace(/\n/g,' ')} | ${b.validation || '—'} |`
   ).join('\n');
 
   return `# BRDP Review Closure Report
@@ -226,8 +223,8 @@ export function buildMarkdown(brdps, projectConfig) {
 
 ## BRDP Detail
 
-| ID | Title | Definition | Proposal | Status | Comment |
-|---|---|---|---|---|---|
+| ID | Title | Definition | Proposal | Status |
+|---|---|---|---|---|
 ${rows}
 
 ---

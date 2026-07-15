@@ -30,4 +30,10 @@ if (!ruleApprovalsCols.includes('status')) {
   db.exec("ALTER TABLE rule_approvals ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'");
 }
 
+// Idempotent migration to drop the comments column from brdps
+const brdpsCols = db.prepare("PRAGMA table_info(brdps)").all().map(c => c.name);
+if (brdpsCols.includes('comments')) {
+  db.exec("ALTER TABLE brdps DROP COLUMN comments");
+}
+
 export default db;

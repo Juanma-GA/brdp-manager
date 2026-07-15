@@ -56,7 +56,7 @@ export function BRDPProvider({ children }) {
       if (b.id !== id) return b;
 
       const history = b.history || [];
-      const fieldsToTrack = ['proposal', 'comment', 'validation'];
+      const fieldsToTrack = ['proposal', 'validation'];
 
       Object.keys(changes).forEach(field => {
         if (fieldsToTrack.includes(field) && changes[field] !== b[field]) {

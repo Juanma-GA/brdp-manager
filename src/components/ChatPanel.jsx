@@ -11,7 +11,7 @@ import styles from './ChatPanel.module.css';
  */
 function parseSuggestions(content) {
   const parts = [];
-  const suggestionRegex = /\[SUGGESTION:(proposal|comment)\]([\s\S]*?)\[\/SUGGESTION\]/g;
+  const suggestionRegex = /\[SUGGESTION:(proposal)\]([\s\S]*?)\[\/SUGGESTION\]/g;
   let lastIndex = 0;
   let match;
 

@@ -178,7 +178,6 @@ app.get('/api/brdps', (req, res) => {
     const rows = db.prepare('SELECT * FROM brdps ORDER BY identifier ASC').all();
     const brdps = rows.map(row => ({
       ...row,
-      comment: row.comments,
       history: JSON.parse(row.history || '[]'),
     }));
     res.json(brdps);
@@ -189,10 +188,10 @@ app.get('/api/brdps', (req, res) => {
 
 app.post('/api/brdps', (req, res) => {
   try {
-    const { id, identifier, title, definition, proposal, validation, comments, comment, history } = req.body;
+    const { id, identifier, title, definition, proposal, validation, history } = req.body;
     db.prepare(`
-      INSERT INTO brdps (id, identifier, title, definition, proposal, validation, comments, history)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO brdps (id, identifier, title, definition, proposal, validation, history)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       identifier || id,
@@ -200,7 +199,6 @@ app.post('/api/brdps', (req, res) => {
       definition || '',
       proposal || '',
       validation || 'Pending',
-      comments || comment || '',
       JSON.stringify(history || [])
     );
     res.json({ ok: true });
@@ -211,9 +209,9 @@ app.post('/api/brdps', (req, res) => {
 
 app.put('/api/brdps/:id', (req, res) => {
   try {
-    const { identifier, title, definition, proposal, validation, comments, comment, history } = req.body;
+    const { identifier, title, definition, proposal, validation, history } = req.body;
     db.prepare(`
-      UPDATE brdps SET identifier=?, title=?, definition=?, proposal=?, validation=?, comments=?, history=?, updated_at=datetime('now')
+      UPDATE brdps SET identifier=?, title=?, definition=?, proposal=?, validation=?, history=?, updated_at=datetime('now')
       WHERE id=?
     `).run(
       identifier || req.params.id,
@@ -221,7 +219,6 @@ app.put('/api/brdps/:id', (req, res) => {
       definition || '',
       proposal || '',
       validation || 'Pending',
-      comments || comment || '',
       JSON.stringify(history || []),
       req.params.id
     );

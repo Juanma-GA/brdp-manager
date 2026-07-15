@@ -7,7 +7,6 @@ const COLUMN_NAMES = [
   'BRDP Definition',
   'ATX Decision Proposal',
   'Validation Status',
-  'Comment',
 ];
 
 const FIELD_MAP = {
@@ -16,7 +15,6 @@ const FIELD_MAP = {
   'BRDP Definition': 'definition',
   'ATX Decision Proposal': 'proposal',
   'Validation Status': 'validation',
-  'Comment': 'comment',
 };
 
 /**
@@ -30,7 +28,6 @@ export function generateTemplate() {
     'BRDP Definition': brdp.definition,
     'ATX Decision Proposal': brdp.proposal,
     'Validation Status': brdp.validation,
-    'Comment': brdp.comment,
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(data);
@@ -44,7 +41,6 @@ export function generateTemplate() {
     { wch: 40 }, // BRDP Definition
     { wch: 40 }, // ATX Decision Proposal
     { wch: 18 }, // Validation Status
-    { wch: 30 }, // Comment
   ];
 
   return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
@@ -142,7 +138,6 @@ export function exportToExcel(brdps) {
     'BRDP Definition': brdp.definition,
     'ATX Decision Proposal': brdp.proposal,
     'Validation Status': brdp.validation,
-    'Comment': brdp.comment,
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(data);
@@ -156,7 +151,6 @@ export function exportToExcel(brdps) {
     { wch: 40 },
     { wch: 40 },
     { wch: 18 },
-    { wch: 30 },
   ];
 
   XLSX.writeFile(workbook, 'brdps-export.xlsx');
@@ -173,7 +167,6 @@ export function exportToCSV(brdps) {
     'BRDP Definition': brdp.definition,
     'ATX Decision Proposal': brdp.proposal,
     'Validation Status': brdp.validation,
-    'Comment': brdp.comment,
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(data);

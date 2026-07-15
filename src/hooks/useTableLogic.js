@@ -27,8 +27,7 @@ function applySearch(brdps, search) {
     brdp.id.toLowerCase().includes(term) ||
     brdp.definition.toLowerCase().includes(term) ||
     brdp.proposal.toLowerCase().includes(term) ||
-    brdp.validation.toLowerCase().includes(term) ||
-    brdp.comment.toLowerCase().includes(term)
+    brdp.validation.toLowerCase().includes(term)
   );
 }
 

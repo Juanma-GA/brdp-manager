@@ -86,7 +86,6 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
   const [editData, setEditData] = useState({
     proposal: brdp.proposal,
     validation: brdp.validation,
-    comment: brdp.comment,
     definition: brdp.definition,
   });
 
@@ -101,10 +100,9 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
     setEditData({
       proposal: brdp.proposal,
       validation: brdp.validation,
-      comment: brdp.comment,
       definition: brdp.definition,
     });
-  }, [brdp.id, brdp.proposal, brdp.validation, brdp.comment, brdp.definition, getNote]);
+  }, [brdp.id, brdp.proposal, brdp.validation, brdp.definition, getNote]);
 
   // Notify parent when isDirty changes
   useEffect(() => {
@@ -166,7 +164,7 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
     setIsDirty(false);
     setDefinitionUnlocked(false);
     if (onUpdate) {
-      const fieldsToTrack = ['proposal', 'comment', 'validation', 'definition'];
+      const fieldsToTrack = ['proposal', 'validation', 'definition'];
       const history = [...(brdp.history || [])];
 
       fieldsToTrack.forEach(field => {
@@ -195,7 +193,6 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
     setEditData({
       proposal: brdp.proposal,
       validation: brdp.validation,
-      comment: brdp.comment,
       definition: brdp.definition,
     });
     setIsEditing(false);
@@ -337,20 +334,6 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
               )}
             </div>
 
-            {/* Comment */}
-            <div className={styles.field}>
-              <label className={styles.label}>Comment</label>
-              {isEditing ? (
-                <textarea
-                  value={editData.comment}
-                  onChange={(e) => handleEditChange('comment', e.target.value)}
-                  className={styles.editTextarea}
-                  rows="3"
-                />
-              ) : (
-                <p className={styles.value}>{brdp.comment}</p>
-              )}
-            </div>
           </div>
 
           {/* Notes Section */}
