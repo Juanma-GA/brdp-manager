@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { mockBRDPs } from '../data/mockBRDPs';
-import { fetchBRDPs, saveBRDPs, deleteAllBRDPs } from '../services/api';
+import { fetchBRDPs, saveBRDPs, updateBRDPApi, deleteAllBRDPs } from '../services/api';
 
 const BRDPContext = createContext();
 
@@ -51,7 +51,14 @@ export function BRDPProvider({ children }) {
     }
   }, []);
 
+  // Single-row edit path (DetailPanel/ChatPanel). Deliberately does NOT go
+  // through setBrdps()/saveBRDPs() -- that helper deletes+recreates the
+  // entire brdps table (needed for bulk import), which cascades to
+  // rule_approvals and wipes every approval in the project, including ones
+  // belonging to BRDPs untouched by this edit. PUT /api/brdps/:id updates
+  // only this row.
   const updateBRDP = useCallback((id, changes) => {
+    let updatedBrdp = null;
     const updated = brdps.map(b => {
       if (b.id !== id) return b;
 
@@ -69,10 +76,19 @@ export function BRDPProvider({ children }) {
         }
       });
 
-      return { ...b, ...changes, history };
+      updatedBrdp = { ...b, ...changes, history };
+      return updatedBrdp;
     });
-    setBrdps(updated);
-  }, [brdps, setBrdps]);
+
+    setBrdpsState(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+
+    if (updatedBrdp) {
+      updateBRDPApi(id, updatedBrdp).catch(err => {
+        console.error('Failed to save BRDP to server:', err);
+      });
+    }
+  }, [brdps]);
 
   const resetToMock = useCallback(async () => {
     setBrdpsState(mockBRDPs);
