@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS brdps (
   definition TEXT,
   proposal TEXT,
   validation TEXT DEFAULT 'Pending',
+  comments TEXT,
   history TEXT DEFAULT '[]',
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))

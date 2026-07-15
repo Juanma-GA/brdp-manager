@@ -195,6 +195,8 @@ export default function BRDPPage({ showToast, onNavigate, approvalsRefreshToken 
           onUpdate={handleBrdpUpdate}
           onDirtyChange={setIsDirty}
           onDelete={handleDeleteBRDP}
+          primaryFormat={projectConfig.primaryFormat}
+          approvalsRefreshToken={approvalsRefreshToken}
         />
       )}
     </div>

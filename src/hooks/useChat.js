@@ -79,10 +79,15 @@ ${JSON.stringify(selectedBRDPs, null, 2)}
 Provide answers focusing on the selected BRDP${selectedBRDPs.length > 1 ? 's' : ''} while leveraging the complete dataset for comparison and validation.
 
 SUGGESTION FORMAT INSTRUCTIONS:
-If the user asks you to improve, rewrite, or suggest a new version of the Proposal field, respond with your explanation followed by a special block in this exact format:
+If the user asks you to improve, rewrite, or suggest a new version of the Proposal or Comment field, respond with your explanation followed by a special block in this exact format:
 
 For proposal field:
 [SUGGESTION:proposal]
+Your suggested text here
+[/SUGGESTION]
+
+For comment field:
+[SUGGESTION:comment]
 Your suggested text here
 [/SUGGESTION]
 

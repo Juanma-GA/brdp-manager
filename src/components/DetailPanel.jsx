@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useBRDPContext } from '../context/BRDPContext';
 import { useLocalNotes } from '../hooks/useLocalNotes';
+import { RuleApprovalCell } from './RuleApprovalCell';
 import styles from './DetailPanel.module.css';
 
 /**
@@ -72,9 +73,13 @@ function ValidationBadge({ status }) {
  * @param {Function} props.onClose - Callback when panel closes
  * @param {Function} props.showToast - Callback to show toast notifications
  * @param {Function} props.onUpdate - Callback when BRDP is updated
+ * @param {Function} props.onDirtyChange - Callback when edit state changes
+ * @param {Function} props.onDelete - Callback when BRDP is deleted
+ * @param {string} props.primaryFormat - Project's currently-active format, or '' if unset
+ * @param {number} [props.approvalsRefreshToken] - Bumped after every Generate attempt
  * @returns {JSX.Element} Detail panel with full record information
  */
-export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirtyChange, onDelete }) {
+export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirtyChange, onDelete, primaryFormat, approvalsRefreshToken }) {
   const { updateBRDP, brdps } = useBRDPContext();
   const { getNote, saveNote } = useLocalNotes();
   const [notes, setNotes] = useState('');
@@ -86,6 +91,7 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
   const [editData, setEditData] = useState({
     proposal: brdp.proposal,
     validation: brdp.validation,
+    comment: brdp.comment,
     definition: brdp.definition,
   });
 
@@ -100,9 +106,10 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
     setEditData({
       proposal: brdp.proposal,
       validation: brdp.validation,
+      comment: brdp.comment,
       definition: brdp.definition,
     });
-  }, [brdp.id, brdp.proposal, brdp.validation, brdp.definition, getNote]);
+  }, [brdp.id, brdp.proposal, brdp.validation, brdp.comment, brdp.definition, getNote]);
 
   // Notify parent when isDirty changes
   useEffect(() => {
@@ -164,7 +171,7 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
     setIsDirty(false);
     setDefinitionUnlocked(false);
     if (onUpdate) {
-      const fieldsToTrack = ['proposal', 'validation', 'definition'];
+      const fieldsToTrack = ['proposal', 'comment', 'validation', 'definition'];
       const history = [...(brdp.history || [])];
 
       fieldsToTrack.forEach(field => {
@@ -193,6 +200,7 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
     setEditData({
       proposal: brdp.proposal,
       validation: brdp.validation,
+      comment: brdp.comment,
       definition: brdp.definition,
     });
     setIsEditing(false);
@@ -334,6 +342,26 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
               )}
             </div>
 
+            {/* Comment */}
+            <div className={styles.field}>
+              <label className={styles.label}>Comment</label>
+              {isEditing ? (
+                <textarea
+                  value={editData.comment}
+                  onChange={(e) => handleEditChange('comment', e.target.value)}
+                  className={styles.editTextarea}
+                  rows="3"
+                />
+              ) : (
+                <p className={styles.value}>{brdp.comment}</p>
+              )}
+            </div>
+
+            {/* Rule Approval */}
+            <div className={styles.field}>
+              <label className={styles.label}>Rule Approval</label>
+              <RuleApprovalCell brdpId={brdp.id} primaryFormat={primaryFormat} approvalsRefreshToken={approvalsRefreshToken} />
+            </div>
           </div>
 
           {/* Notes Section */}

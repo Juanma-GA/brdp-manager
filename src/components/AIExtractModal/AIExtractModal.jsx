@@ -310,6 +310,7 @@ export default function AIExtractModal({ onClose, existingBRDPs, onImport }) {
                       <th>ID</th>
                       <th>Title</th>
                       <th>Proposal</th>
+                      <th>Source</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -335,6 +336,7 @@ export default function AIExtractModal({ onClose, existingBRDPs, onImport }) {
                             )}
                           </td>
                           <td className={styles.tdProposal}>{b.proposal}</td>
+                          <td className={styles.tdComment}>{b.comment}</td>
                         </tr>
                       );
                     })}
