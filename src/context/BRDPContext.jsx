@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { mockBRDPs } from '../data/mockBRDPs';
-import { fetchBRDPs, saveBRDPs, updateBRDPApi, deleteAllBRDPs } from '../services/api';
+import { fetchBRDPs, saveBRDPs, createBRDP, updateBRDPApi, deleteAllBRDPs } from '../services/api';
 
 const BRDPContext = createContext();
 
@@ -90,6 +90,26 @@ export function BRDPProvider({ children }) {
     }
   }, [brdps]);
 
+  // Bulk-add path for Merge import (DataManagementSection.handleMerge).
+  // Only ever called with rows guaranteed not to collide with existing ids
+  // (see the collision-abort validation in handleMerge). Does NOT go
+  // through setBrdps()/saveBRDPs() -- unlike Replace, Merge never touches
+  // existing rows, so there's no reason to delete+recreate the whole table
+  // (and cascade-wipe rule_approvals for every untouched BRDP in the process).
+  const addBRDPs = useCallback(async (newRows) => {
+    const updated = [...brdps, ...newRows];
+    setBrdpsState(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+
+    for (const brdp of newRows) {
+      try {
+        await createBRDP(brdp);
+      } catch (err) {
+        console.error('Failed to save imported BRDP to server:', err);
+      }
+    }
+  }, [brdps]);
+
   const resetToMock = useCallback(async () => {
     setBrdpsState(mockBRDPs);
     localStorage.removeItem(STORAGE_KEY);
@@ -111,6 +131,7 @@ export function BRDPProvider({ children }) {
     brdps,
     setBrdps,
     updateBRDP,
+    addBRDPs,
     resetToMock,
     stats,
     selectedBRDPs,

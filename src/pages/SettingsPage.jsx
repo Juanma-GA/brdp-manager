@@ -27,7 +27,7 @@ export default function SettingsPage({ showToast }) {
     saveKey,
     isConfigured,
   } = useAPIKey();
-  const { brdps, setBrdps } = useBRDPContext();
+  const { brdps, setBrdps, addBRDPs } = useBRDPContext();
 
   /**
    * Handle save button click
@@ -56,7 +56,7 @@ export default function SettingsPage({ showToast }) {
 
         <ProjectConfigSection />
 
-        <DataManagementSection brdps={brdps} onSetBrdps={setBrdps} showToast={showToast} />
+        <DataManagementSection brdps={brdps} onSetBrdps={setBrdps} onAddBrdps={addBRDPs} showToast={showToast} />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <AboutSection />

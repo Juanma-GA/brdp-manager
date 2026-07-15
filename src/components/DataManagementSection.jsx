@@ -7,11 +7,12 @@ import styles from './DataManagementSection.module.css';
  * Handles Excel import/export and data management
  * @param {Object} props - Component props
  * @param {Array} props.brdps - Current BRDP records
- * @param {Function} props.onSetBrdps - Callback to update BRDPs
+ * @param {Function} props.onSetBrdps - Callback to replace all BRDPs
+ * @param {Function} props.onAddBrdps - Callback to append new BRDPs (Merge)
  * @param {Function} props.showToast - Callback to show toast notifications
  * @returns {JSX.Element} Data management section
  */
-export default function DataManagementSection({ brdps, onSetBrdps, showToast }) {
+export default function DataManagementSection({ brdps, onSetBrdps, onAddBrdps, showToast }) {
   const [importedRows, setImportedRows] = useState([]);
   const [importErrors, setImportErrors] = useState([]);
   const [importMode, setImportMode] = useState(null);
@@ -97,7 +98,7 @@ export default function DataManagementSection({ brdps, onSetBrdps, showToast }) 
       return;
     }
 
-    onSetBrdps([...brdps, ...importedRows]);
+    onAddBrdps(importedRows);
     setImportedRows([]);
     setImportMode(null);
     if (showToast) {
