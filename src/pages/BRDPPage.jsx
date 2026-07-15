@@ -22,7 +22,7 @@ import styles from './BRDPPage.module.css';
  * @returns {JSX.Element} Page with table and detail panel
  */
 export default function BRDPPage({ showToast, onNavigate, approvalsRefreshToken }) {
-  const { brdps, setBrdps, selectedBRDPs, setSelectedBRDPs, stats } = useBRDPContext();
+  const { brdps, deleteBRDPs, selectedBRDPs, setSelectedBRDPs, stats } = useBRDPContext();
   const { projectConfig } = useProjectConfig();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
@@ -96,7 +96,7 @@ export default function BRDPPage({ showToast, onNavigate, approvalsRefreshToken 
    * Handle BRDP deletion
    */
   const handleDeleteBRDP = (id) => {
-    setBrdps(prev => prev.filter(b => b.id !== id));
+    deleteBRDPs([id]);
     setSelectedBRDPs(selectedBRDPs.filter(b => b.id !== id));
     setDetailBrdp(null);
   };
@@ -105,7 +105,7 @@ export default function BRDPPage({ showToast, onNavigate, approvalsRefreshToken 
    * Handle deletion of multiple selected BRDPs
    */
   const handleDeleteSelected = (ids) => {
-    setBrdps(prev => prev.filter(b => !ids.includes(b.id)));
+    deleteBRDPs(ids);
     setSelectedBRDPs([]);
   };
 

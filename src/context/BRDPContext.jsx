@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { mockBRDPs } from '../data/mockBRDPs';
-import { fetchBRDPs, saveBRDPs, createBRDP, updateBRDPApi, deleteAllBRDPs } from '../services/api';
+import { fetchBRDPs, saveBRDPs, createBRDP, updateBRDPApi, deleteBRDP, deleteAllBRDPs } from '../services/api';
 import { useToastContext } from './ToastContext';
 
 const BRDPContext = createContext();
@@ -43,7 +43,22 @@ export function BRDPProvider({ children }) {
     loadBRDPs();
   }, []);
 
+  // Defense in depth: setBrdps() replaces the whole dataset (saveBRDPs()
+  // deletes every BRDP + cascades to rule_approvals, then recreates each
+  // row from this array). A caller passing a functional updater instead of
+  // a plain array (React's useState-style API, but NOT supported here) has
+  // caused real, total data loss before: setBrdpsState(fn) applies it
+  // correctly via React's own updater support, but saveBRDPs(fn) then
+  // deletes everything and immediately throws on "for (const brdp of fn)"
+  // (a function is not iterable) -- after the delete already happened, so
+  // nothing gets recreated. Reject non-arrays outright, before any of that
+  // runs, rather than relying on every call site getting this right.
   const setBrdps = useCallback(async (newBrdps) => {
+    if (!Array.isArray(newBrdps)) {
+      console.error('setBrdps() called with a non-array value -- refusing to save. This is a programming error (did you pass a functional updater instead of an array?):', newBrdps);
+      showToast('Internal error: invalid data, changes not saved.', 'error');
+      return;
+    }
     setBrdpsState(newBrdps);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newBrdps));
     try {
@@ -119,6 +134,33 @@ export function BRDPProvider({ children }) {
     }
   }, [brdps, showToast]);
 
+  // Targeted delete path (BRDPPage's single-row and bulk "Delete selected").
+  // Deliberately does NOT go through setBrdps()/saveBRDPs() -- deleting one
+  // or a few rows never needs to destroy+recreate the whole table (and
+  // cascade-wipe rule_approvals for every BRDP that ISN'T being deleted).
+  // DELETE /api/brdps/:id (deleteBRDP) already only removes that one row
+  // and its own rule_approvals row server-side -- it just wasn't wired up
+  // to this UI flow before.
+  const deleteBRDPs = useCallback(async (ids) => {
+    const idSet = new Set(ids);
+    const updated = brdps.filter(b => !idSet.has(b.id));
+    setBrdpsState(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+
+    let failedCount = 0;
+    for (const id of ids) {
+      try {
+        await deleteBRDP(id);
+      } catch (err) {
+        console.error(`Failed to delete BRDP ${id} on server:`, err);
+        failedCount += 1;
+      }
+    }
+    if (failedCount > 0) {
+      showToast(`Failed to delete ${failedCount} of ${ids.length} BRDP(s) on the server. They may reappear after reload.`, 'error');
+    }
+  }, [brdps, showToast]);
+
   const resetToMock = useCallback(async () => {
     setBrdpsState(mockBRDPs);
     localStorage.removeItem(STORAGE_KEY);
@@ -142,6 +184,7 @@ export function BRDPProvider({ children }) {
     setBrdps,
     updateBRDP,
     addBRDPs,
+    deleteBRDPs,
     resetToMock,
     stats,
     selectedBRDPs,
