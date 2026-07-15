@@ -231,9 +231,25 @@ app.put('/api/brdps/:id', (req, res) => {
   }
 });
 
+// Cascades to rule_approvals -- it's a satellite table keyed by brdp_id with
+// no FK/cascade declared in schema.sql, so deleting a BRDP without this
+// leaves its approvals orphaned. If a future BRDP happens to reuse the same
+// id (e.g. AI Extract's per-run-relative BRDP-EXT-NNNNN numbering restarting
+// after a wipe), an orphaned row would silently reattach and be treated as
+// a real approval for unrelated new content.
+const deleteBrdpCascade = db.transaction((id) => {
+  db.prepare('DELETE FROM rule_approvals WHERE brdp_id=?').run(id);
+  db.prepare('DELETE FROM brdps WHERE id=?').run(id);
+});
+
+const deleteAllBrdpsCascade = db.transaction(() => {
+  db.prepare('DELETE FROM rule_approvals').run();
+  db.prepare('DELETE FROM brdps').run();
+});
+
 app.delete('/api/brdps/:id', (req, res) => {
   try {
-    db.prepare('DELETE FROM brdps WHERE id=?').run(req.params.id);
+    deleteBrdpCascade(req.params.id);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -242,7 +258,7 @@ app.delete('/api/brdps/:id', (req, res) => {
 
 app.delete('/api/brdps', (req, res) => {
   try {
-    db.prepare('DELETE FROM brdps').run();
+    deleteAllBrdpsCascade();
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

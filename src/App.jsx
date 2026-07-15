@@ -33,6 +33,10 @@ function AppContent() {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showBREXdocModal, setShowBREXdocModal] = useState(false);
   const [showAIExtractModal, setShowAIExtractModal] = useState(false);
+  // Bumped after every Generate attempt so BRDPTable's Rule Approval column
+  // (each RuleApprovalCell fetches its own approval independently) refetches
+  // instead of staying stale until a manual page reload -- see Issue #15.
+  const [approvalsRefreshToken, setApprovalsRefreshToken] = useState(0);
   const [chatPanelWidth, setChatPanelWidth] = useState(() => {
     const saved = localStorage.getItem('chatPanelWidth');
     return saved ? parseInt(saved) : 340;
@@ -97,7 +101,9 @@ function AppContent() {
       <div className="workspaceRow">
         <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
         <main className="mainContent">
-          {currentPage === 'brdp' && <BRDPPage showToast={showToast} onNavigate={setCurrentPage} />}
+          {currentPage === 'brdp' && (
+            <BRDPPage showToast={showToast} onNavigate={setCurrentPage} approvalsRefreshToken={approvalsRefreshToken} />
+          )}
           {currentPage === 'settings' && <SettingsPage showToast={showToast} />}
         </main>
         {currentPage === 'brdp' && chatOpen && (
@@ -124,6 +130,7 @@ function AppContent() {
         <GenerateModal
           brdps={brdps}
           onClose={() => setShowGenerateModal(false)}
+          onGenerateComplete={() => setApprovalsRefreshToken((t) => t + 1)}
         />
       )}
       {showBREXdocModal && (

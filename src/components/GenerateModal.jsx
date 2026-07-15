@@ -14,7 +14,7 @@ const XSD_FORMAT_MAP = {
   'BREX — S1000D 4.2': '4.2',
 };
 
-export default function GenerateModal({ brdps, onClose }) {
+export default function GenerateModal({ brdps, onClose, onGenerateComplete }) {
   const { projectConfig } = useProjectConfig();
   const [format, setFormat] = useState('BREX — S1000D 4.2');
   const [onlyValidated, setOnlyValidated] = useState(true);
@@ -150,8 +150,14 @@ export default function GenerateModal({ brdps, onClose }) {
       setResult({ xml: null, valid: false, error: err.message, brdpCount: 0 });
     } finally {
       setLoading(false);
+      // Fires on every attempt, successful or not -- a generation that fails
+      // late (e.g. XSD validation) may still have written new pending_review
+      // proposals via the generator's own Promise.allSettled step before
+      // failing, so BRDPTable's Rule Approval column always gets a chance
+      // to refresh instead of silently going stale until a manual reload.
+      onGenerateComplete?.();
     }
-  }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX41, isBREX301, isSchS1000D, isSchDITA, xsdFormat]);
+  }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX41, isBREX301, isSchS1000D, isSchDITA, xsdFormat, onGenerateComplete]);
 
   const handleCancel = () => {
     abortRef.current?.abort();

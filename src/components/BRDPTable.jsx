@@ -49,9 +49,12 @@ function ValidationBadge({ status }) {
  * (BRDP, format) pair -- see src/api/approvals.js.
  * @param {string} brdpId - BRDP id
  * @param {string} primaryFormat - Project's currently-active format, or '' if unset
+ * @param {number} [approvalsRefreshToken] - Bumped after every Generate attempt
+ *   (see App.jsx) so this cell refetches instead of staying stale until a
+ *   manual page reload -- Issue #15.
  * @returns {JSX.Element}
  */
-function RuleApprovalCell({ brdpId, primaryFormat }) {
+function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken }) {
   const [approval, setApproval] = useState(null); // null = none/loading
   const [busy, setBusy] = useState(false);
 
@@ -75,7 +78,7 @@ function RuleApprovalCell({ brdpId, primaryFormat }) {
     return () => {
       cancelled = true;
     };
-  }, [brdpId, primaryFormat]);
+  }, [brdpId, primaryFormat, approvalsRefreshToken]);
 
   const handleRevoke = async (e) => {
     e.stopPropagation();
@@ -210,6 +213,7 @@ export default function BRDPTable({
   isDirtyEditing,
   onDeleteSelected,
   primaryFormat,
+  approvalsRefreshToken,
 }) {
   const [lastSelectedId, setLastSelectedId] = useState(null);
   /**
@@ -380,7 +384,7 @@ export default function BRDPTable({
                 <ValidationBadge status={brdp.validation} />
               </td>
               <td className={styles.ruleApproval}>
-                <RuleApprovalCell brdpId={brdp.id} primaryFormat={primaryFormat} />
+                <RuleApprovalCell brdpId={brdp.id} primaryFormat={primaryFormat} approvalsRefreshToken={approvalsRefreshToken} />
               </td>
               <td className={styles.comment} title={brdp.comment}>
                 {truncate(brdp.comment, 40)}

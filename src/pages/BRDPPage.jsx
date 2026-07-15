@@ -17,9 +17,11 @@ import styles from './BRDPPage.module.css';
  * @param {Function} props.onSelectBrdp - Callback to select/deselect BRDP
  * @param {Function} props.showToast - Callback to show toast notifications
  * @param {Function} props.onNavigate - Callback to navigate to different page
+ * @param {number} [props.approvalsRefreshToken] - Bumped after every Generate
+ *   attempt so BRDPTable's Rule Approval column refetches (see Issue #15)
  * @returns {JSX.Element} Page with table and detail panel
  */
-export default function BRDPPage({ showToast, onNavigate }) {
+export default function BRDPPage({ showToast, onNavigate, approvalsRefreshToken }) {
   const { brdps, setBrdps, selectedBRDPs, setSelectedBRDPs, stats } = useBRDPContext();
   const { projectConfig } = useProjectConfig();
   const [search, setSearch] = useState('');
@@ -179,6 +181,7 @@ export default function BRDPPage({ showToast, onNavigate }) {
             isDirtyEditing={isDirty}
             onDeleteSelected={handleDeleteSelected}
             primaryFormat={projectConfig.primaryFormat}
+            approvalsRefreshToken={approvalsRefreshToken}
           />
         </div>
       </div>
