@@ -79,15 +79,29 @@ export default function DataManagementSection({ brdps, onSetBrdps, showToast }) 
 
   /**
    * Handle merge with existing BRDPs
+   * Merge only adds new IDs -- if the imported file contains any ID that
+   * already exists, the whole operation is aborted (no partial merge) so
+   * existing BRDPs are never silently skipped or overwritten. Use Replace
+   * to update existing IDs instead.
    */
   const handleMerge = () => {
     const existingIds = new Set(brdps.map((b) => b.id));
-    const newRows = importedRows.filter((row) => !existingIds.has(row.id));
-    onSetBrdps([...brdps, ...newRows]);
+    const collidingIds = importedRows
+      .filter((row) => existingIds.has(row.id))
+      .map((row) => row.id);
+
+    if (collidingIds.length > 0) {
+      setImportErrors([
+        `Merge aborted: ${collidingIds.length} BRDP ID(s) already exist and would be skipped or overwritten: ${collidingIds.join(', ')}. Use "Replace all BRDPs" if you want to update existing IDs.`,
+      ]);
+      return;
+    }
+
+    onSetBrdps([...brdps, ...importedRows]);
     setImportedRows([]);
     setImportMode(null);
     if (showToast) {
-      showToast(`${newRows.length} new BRDPs imported successfully`, 'success');
+      showToast(`${importedRows.length} new BRDPs imported successfully`, 'success');
     }
   };
 
