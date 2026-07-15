@@ -41,6 +41,9 @@ function AppContent() {
     const saved = localStorage.getItem('chatPanelWidth');
     return saved ? parseInt(saved) : 340;
   });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    return localStorage.getItem('sidebarCollapsed') === 'true';
+  });
   const { brdps, setBrdps, selectedBRDPs, setSelectedBRDPs } = useBRDPContext();
   const { toasts, showToast } = useToast();
   const { apiKey, modelName, provider, customEndpoint, isConfigured } = useAPIKey();
@@ -58,6 +61,11 @@ function AppContent() {
   useEffect(() => {
     localStorage.setItem('chatPanelWidth', chatPanelWidth.toString());
   }, [chatPanelWidth]);
+
+  // Save sidebar collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem('sidebarCollapsed', sidebarCollapsed.toString());
+  }, [sidebarCollapsed]);
 
   /**
    * Handle opening generate modal
@@ -99,7 +107,12 @@ function AppContent() {
     <div className="appContainer">
       <Header onChatClick={handleHeaderChatClick} chatOpen={chatOpen && currentPage === 'brdp'} onOpenGenerateModal={openGenerateModal} onOpenBREXdocModal={() => setShowBREXdocModal(true)} onOpenAIExtractModal={openAIExtractModal} showToast={showToast} />
       <div className="workspaceRow">
-        <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+        <Sidebar
+          currentPage={currentPage}
+          onNavigate={setCurrentPage}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+        />
         <main className="mainContent">
           {currentPage === 'brdp' && (
             <BRDPPage showToast={showToast} onNavigate={setCurrentPage} approvalsRefreshToken={approvalsRefreshToken} />

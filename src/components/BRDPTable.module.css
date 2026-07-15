@@ -141,16 +141,8 @@
   color: #92400e;
 }
 
-.comment {
-  max-width: 200px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #9ca3af;
-}
-
 .ruleApproval {
-  max-width: 220px;
+  max-width: 420px;
 }
 
 .noFormat {
@@ -170,7 +162,7 @@
 }
 
 .approvalDetails {
-  max-width: 220px;
+  max-width: 420px;
 }
 
 .approvedBadge {
@@ -432,8 +424,8 @@
     max-width: 150px;
   }
 
-  .comment {
-    max-width: 100px;
+  .ruleApproval {
+    max-width: 260px;
   }
 
   .footer {

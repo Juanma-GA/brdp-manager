@@ -342,7 +342,6 @@ export default function BRDPTable({
               {sortField === 'validation' && <SortIndicator sortDir={sortDir} />}
             </th>
             <th>Rule Approval</th>
-            <th>Comment</th>
           </tr>
         </thead>
         <tbody>
@@ -385,9 +384,6 @@ export default function BRDPTable({
               </td>
               <td className={styles.ruleApproval}>
                 <RuleApprovalCell brdpId={brdp.id} primaryFormat={primaryFormat} approvalsRefreshToken={approvalsRefreshToken} />
-              </td>
-              <td className={styles.comment} title={brdp.comment}>
-                {truncate(brdp.comment, 40)}
               </td>
             </tr>
           ))}
