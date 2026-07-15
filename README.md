@@ -54,13 +54,21 @@ PORT=8080 npm start
 
 ## Development
 
+Development mode needs **two processes running at the same time**, in two separate terminals:
+
 ```bash
+# Terminal 1 -- the Express + SQLite backend (BRDPs, approvals, config, settings, notes)
+npm start
+```
+
+```bash
+# Terminal 2 -- the Vite dev server (hot-reloading React frontend)
 npm run dev
 ```
 
-Open http://localhost:5173 in your browser.
+Open http://localhost:5173 in your browser. Vite proxies both `/api/*` (BRDPs, approvals, config, settings, notes) and `/mistral-proxy` (LLM calls) to the backend on port 3000 -- but it only forwards the requests, it does not start that backend for you. If Terminal 1 isn't running, every save will now show a visible error toast instead of silently failing (data would still only exist in the browser, not in the SQLite database, until the backend is up).
 
-In development mode, the Vite dev server handles proxying. In production, Express handles everything.
+In production, Express (`npm start`) serves everything itself on a single port -- no second process or proxy needed.
 
 ## Troubleshooting: Corporate Network / SSL-Inspecting Proxy
 

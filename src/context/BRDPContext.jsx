@@ -1,12 +1,14 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { mockBRDPs } from '../data/mockBRDPs';
 import { fetchBRDPs, saveBRDPs, createBRDP, updateBRDPApi, deleteAllBRDPs } from '../services/api';
+import { useToastContext } from './ToastContext';
 
 const BRDPContext = createContext();
 
 const STORAGE_KEY = 'brdp_data';
 
 export function BRDPProvider({ children }) {
+  const { showToast } = useToastContext();
   const [brdps, setBrdpsState] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
@@ -48,8 +50,9 @@ export function BRDPProvider({ children }) {
       await saveBRDPs(newBrdps);
     } catch (err) {
       console.error('Failed to save BRDPs to server:', err);
+      showToast('Failed to save BRDPs to the server. Your changes are only stored locally and may be lost.', 'error');
     }
-  }, []);
+  }, [showToast]);
 
   // Single-row edit path (DetailPanel/ChatPanel). Deliberately does NOT go
   // through setBrdps()/saveBRDPs() -- that helper deletes+recreates the
@@ -86,9 +89,10 @@ export function BRDPProvider({ children }) {
     if (updatedBrdp) {
       updateBRDPApi(id, updatedBrdp).catch(err => {
         console.error('Failed to save BRDP to server:', err);
+        showToast('Failed to save your changes to the server. Your edit is only stored locally and may be lost.', 'error');
       });
     }
-  }, [brdps]);
+  }, [brdps, showToast]);
 
   // Bulk-add path for Merge import (DataManagementSection.handleMerge).
   // Only ever called with rows guaranteed not to collide with existing ids
@@ -101,14 +105,19 @@ export function BRDPProvider({ children }) {
     setBrdpsState(updated);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
 
+    let failedCount = 0;
     for (const brdp of newRows) {
       try {
         await createBRDP(brdp);
       } catch (err) {
         console.error('Failed to save imported BRDP to server:', err);
+        failedCount += 1;
       }
     }
-  }, [brdps]);
+    if (failedCount > 0) {
+      showToast(`Failed to save ${failedCount} of ${newRows.length} imported BRDP(s) to the server. They are only stored locally and may be lost.`, 'error');
+    }
+  }, [brdps, showToast]);
 
   const resetToMock = useCallback(async () => {
     setBrdpsState(mockBRDPs);
@@ -117,8 +126,9 @@ export function BRDPProvider({ children }) {
       await deleteAllBRDPs();
     } catch (err) {
       console.error('Failed to reset BRDPs on server:', err);
+      showToast('Failed to reset BRDPs on the server. The reset is only applied locally and may not persist.', 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const stats = {
     total: brdps.length,

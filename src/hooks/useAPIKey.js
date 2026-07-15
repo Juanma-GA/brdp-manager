@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchSettings, saveSettings } from '../services/api';
+import { useToastContext } from '../context/ToastContext';
 
 const API_KEY_STORAGE = 'brdp_api_key';
 const MODEL_STORAGE = 'brdp_model';
@@ -7,6 +8,7 @@ const PROVIDER_STORAGE = 'brdp_provider';
 const CUSTOM_ENDPOINT_STORAGE = 'brdp_custom_endpoint';
 
 export function useAPIKey() {
+  const { showToast } = useToastContext();
   const [apiKey, setApiKey] = useState(() => {
     try {
       return localStorage.getItem(API_KEY_STORAGE) || '';
@@ -84,8 +86,9 @@ export function useAPIKey() {
       });
     } catch (err) {
       console.error('Failed to save API configuration:', err);
+      showToast('Failed to save AI configuration to the server. Your changes are only stored locally and may be lost.', 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const clearKey = useCallback(async () => {
     try {
@@ -105,8 +108,9 @@ export function useAPIKey() {
       });
     } catch (err) {
       console.error('Failed to clear API configuration:', err);
+      showToast('Failed to clear AI configuration on the server. The change is only applied locally and may not persist.', 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const isConfigured = apiKey.trim().length > 0;
 

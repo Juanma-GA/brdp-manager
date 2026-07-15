@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useToast } from './hooks/useToast';
 import { useAPIKey } from './hooks/useAPIKey';
 import { useChat } from './hooks/useChat';
 import { useProjectConfig } from './hooks/useProjectConfig';
 import { BRDPProvider, useBRDPContext } from './context/BRDPContext';
+import { ToastProvider, useToastContext } from './context/ToastContext';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import ToastContainer from './components/ToastContainer';
@@ -45,7 +45,7 @@ function AppContent() {
     return localStorage.getItem('sidebarCollapsed') === 'true';
   });
   const { brdps, setBrdps, selectedBRDPs, setSelectedBRDPs } = useBRDPContext();
-  const { toasts, showToast } = useToast();
+  const { toasts, showToast } = useToastContext();
   const { apiKey, modelName, provider, customEndpoint, isConfigured } = useAPIKey();
   const { projectConfig } = useProjectConfig();
 
@@ -167,9 +167,11 @@ function AppContent() {
 
 function App() {
   return (
-    <BRDPProvider>
-      <AppContent />
-    </BRDPProvider>
+    <ToastProvider>
+      <BRDPProvider>
+        <AppContent />
+      </BRDPProvider>
+    </ToastProvider>
   );
 }
 

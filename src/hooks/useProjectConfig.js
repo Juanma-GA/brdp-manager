@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchConfig, saveConfig } from '../services/api';
+import { useToastContext } from '../context/ToastContext';
 
 const STORAGE_KEY = 'brdp_project_config';
 
@@ -17,6 +18,7 @@ const DEFAULT_CONFIG = {
 };
 
 export function useProjectConfig() {
+  const { showToast } = useToastContext();
   const [projectConfig, setProjectConfig] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
@@ -58,8 +60,9 @@ export function useProjectConfig() {
       await saveConfig(config);
     } catch (err) {
       console.error('Failed to save config to server:', err);
+      showToast('Failed to save project configuration to the server. Your changes are only stored locally and may be lost.', 'error');
     }
-  }, []);
+  }, [showToast]);
 
   return {
     projectConfig,
