@@ -42,7 +42,10 @@ function AppContent() {
     return saved ? parseInt(saved) : 340;
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    return localStorage.getItem('sidebarCollapsed') === 'true';
+    const saved = localStorage.getItem('sidebarCollapsed');
+    // Default to collapsed on first launch (no saved preference yet);
+    // once the user has toggled it, respect whatever they last chose.
+    return saved === null ? true : saved === 'true';
   });
   const { brdps, setBrdps, selectedBRDPs, setSelectedBRDPs } = useBRDPContext();
   const { toasts, showToast } = useToastContext();
