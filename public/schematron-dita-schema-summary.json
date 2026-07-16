@@ -588,7 +588,7 @@
       "notes": "Condicional ('discard what is not never need') -- regla de estructura mínima si se decide usar reltable."
     },
     {
-      "id": "BRDP-EXT-00003",
+      "id": "CURATED-cant-table",
       "topicTypes": [
         "topic",
         "concept",
@@ -609,7 +609,7 @@
       "notes": "NUEVA CATEGORÍA DE PATRÓN (primer few-shot que la cubre): comprobación cruzada fila-por-fila entre dos columnas de una tabla CALS/DITA (tgroup/tbody/row/entry), usando sch:let para resolver @colname del encabezado por texto (nunca por posición -- las tablas CALS/DITA identifican columnas por @colname, no por índice) y el cuantificador XPath 2.0 'every $row in ... satisfies (...)' para expresar la condición sobre todas las filas a la vez. Regla ya curada y verificada por el usuario en sintaxis Schematron real (ver STRICT RULE 19)."
     },
     {
-      "id": "BRDP-EXT-00004",
+      "id": "CURATED-ncage-table",
       "topicTypes": [
         "topic",
         "concept",
@@ -628,7 +628,7 @@
       ],
       "test": "every $row in tgroup/tbody/row satisfies (let $part := normalize-space($row/entry[1]), $ncage := normalize-space($row/entry[@colname = $colNCAGE]) return $part = '' or $ncage = '-' or matches($ncage, '^[A-Z0-9]{5}$'))",
       "message": "En tablas con columna \"NCAGE\", cada fila debe contener exactamente 5 caracteres alfanuméricos en mayúsculas (A-Z, 0-9) o \"-\" (solo si el dato es desconocido). Filas con la primera columna vacía están exentas.",
-      "notes": "Segunda instancia de la categoría sch:let + every satisfies (ver BRDP-EXT-00003, STRICT RULE 19). A diferencia de EXT-00003, el context NO restringe por título de topic -- aplica a cualquier tabla del proyecto con columna NCAGE, sea cual sea el topic que la contenga. Regla ya curada y verificada por el usuario en sintaxis Schematron real."
+      "notes": "Segunda instancia de la categoría sch:let + every satisfies (ver CURATED-cant-table, STRICT RULE 19). A diferencia de CURATED-cant-table, el context NO restringe por título de topic -- aplica a cualquier tabla del proyecto con columna NCAGE, sea cual sea el topic que la contenga. Regla ya curada y verificada por el usuario en sintaxis Schematron real."
     }
   ]
 }

@@ -1,7 +1,7 @@
 // Deterministic, offline test for the "lets" few-shot field (sch:let +
 // XPath 2.0 "every ... satisfies" quantifier pattern, STRICT RULE 19),
-// covering every curated example that uses it (BRDP-EXT-00003, "Cant."
-// column; BRDP-EXT-00004, "NCAGE" column). Unlike
+// covering every curated example that uses it (CURATED-cant-table, "Cant."
+// column; CURATED-ncage-table, "NCAGE" column). Unlike
 // scripts/test-schematron-dita.mjs, this needs NO LLM API key: it only
 // exercises the deterministic few-shot injection path
 // (buildDeterministicBlockFromFewShot / buildFewShotBlock / finalization /
@@ -123,14 +123,14 @@ console.log();
 // ---- Full generateSchematronDITA() entry point, zero LLM calls needed, for every "lets" example ----
 console.log("=== generateSchematronDITA() resolves each real project BRDP 100% deterministically (no LLM call) ===");
 const projectBRDPsById = {
-  "BRDP-EXT-00003": {
-    id: "BRDP-EXT-00003",
+  "CURATED-cant-table": {
+    id: "CURATED-cant-table",
     definition: "Decidir si: En los topics cuyo <title> sea LISTA DE MATERIAL OBLIGATORIO, LISTA DE MATERIAL IMPREVISTO, ó HERRAMIENTAS Y EQUIPOS DE PRUEBA, cuando haya una tabla cuyo título de columna sea Cant., todas las filas del tbody/row/entry correspondiente deben tener siempre un valor y nunca estar vacías.",
     proposal: "Exime de error las filas cuya columna \"Part\" (primera columna) esté vacía.",
     validation: "Validated",
   },
-  "BRDP-EXT-00004": {
-    id: "BRDP-EXT-00004",
+  "CURATED-ncage-table": {
+    id: "CURATED-ncage-table",
     definition: "Valores numéricos y caracteres permitidos en las filas de TODAS aquellas tablas de TODOS los XML del proyecto que contengan una columna con nombre NCAGE. Exime de errores aquellas filas cuya primera columna no tenga nada escrito.",
     proposal: "Debe contener o 5 valores alfanuméricos cuyas letras deben ir en mayúsculas, o \"-\" (para casos en los que no se conoce el dato).",
     validation: "Validated",
