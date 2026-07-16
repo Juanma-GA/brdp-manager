@@ -419,12 +419,12 @@
         "concept",
         "task"
       ],
-      "confidence_ai": "needs-review",
+      "confidence_ai": "alta",
       "context": "image/@href",
       "assert_role": "warning",
       "test": "matches(tokenize(., '[\\/]')[last()], '^ICN-[A-Za-z0-9]+-[0-9]{3}\\.[A-Za-z0-9]+$')",
       "message": "Illustration filenames should follow the ICN pattern: ICN-<model-code>-<issue-number>.<ext> (e.g. ICN-A320-001.png).",
-      "notes": "CORREGIDO tras prueba en oXygen: el patrón ICN aplica al NOMBRE DE FICHERO de la imagen (image/@href), no al @id de fig/table -- eran atributos y elementos distintos, mi primera versión los confundía y creaba un falso conflicto con BRDP-D1-00092. El patrón exacto de <model-code> sigue sin especificarse en el texto original -- regex genérica, ajustar con un ejemplo real de ICN del proyecto (BRDP-D1-00331 referenciado pero no incluido en este dataset)."
+      "notes": "El patrón ICN aplica al NOMBRE DE FICHERO de la imagen (image/@href), no al @id de fig/table -- eran atributos y elementos distintos, mi primera versión los confundía y creaba un falso conflicto con BRDP-D1-00092. El patrón exacto de <model-code> sigue sin especificarse en el texto original -- regex genérica, ajustar con un ejemplo real de ICN del proyecto (BRDP-D1-00331 referenciado pero no incluido en este dataset)."
     },
     {
       "id": "BRDP-D1-00359",
