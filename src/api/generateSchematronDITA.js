@@ -336,7 +336,7 @@ async function fetchApprovalsMap(format) {
   }
 }
 
-async function generateSingleRule(brdp, schemaSummary, callLLM) {
+export async function generateSingleRule(brdp, schemaSummary, callLLM) {
   const { system, user } = buildSchematronPrompt([brdp], schemaSummary);
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const raw = await callLLM(system, user);

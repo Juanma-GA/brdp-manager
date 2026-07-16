@@ -4,7 +4,7 @@ import { getApprovalsForFormat, proposeApproval } from "./approvals.js";
 
 let _schemaSummaryCache301 = null;
 
-async function loadSchemaSummary301() {
+export async function loadSchemaSummary301() {
   if (_schemaSummaryCache301) return _schemaSummaryCache301;
   const res = await fetch("/brex-schema-summary-3-0-1.json?v=" + Date.now());
   if (!res.ok) throw new Error("Failed to load brex-schema-summary-3-0-1.json");
@@ -373,7 +373,7 @@ async function fetchApprovalsMap301(format) {
   }
 }
 
-async function generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM) {
+export async function generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM) {
   const { system, user } = buildBREXPromptChunk301([brdp], projectConfig, schemaSummary);
   for (let attempt = 0; attempt < MAX_RETRIES_301; attempt++) {
     const raw = await callLLM(system, user);

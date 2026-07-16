@@ -1,8 +1,57 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useBRDPContext } from '../context/BRDPContext';
+import { proposeApproval } from '../api/approvals';
 import TypingDots from './TypingDots';
 import styles from './ChatPanel.module.css';
+
+const MODES = [
+  { id: 'generic', label: 'Generic Questions' },
+  { id: 'specific', label: 'Specific BRDP Question' },
+  { id: 'suggest-definition', label: 'Suggest Definition' },
+  { id: 'suggest-proposal', label: 'Suggest Proposal' },
+  { id: 'suggest-rule', label: 'Suggest Rule' },
+];
+
+const SUGGESTION_LABELS = {
+  definition: 'Suggested Definition:',
+  proposal: 'Suggested Proposal:',
+  comment: 'Suggested Comment:',
+  rule: 'Suggested Rule:',
+};
+
+const MODE_PLACEHOLDERS = {
+  'generic': 'Ask about S1000D, DITA, or this BRDP...',
+  'specific': 'Ask a question about the selected BRDP(s)...',
+  'suggest-definition': 'Ask for a new definition, or just hit Send...',
+  'suggest-proposal': 'Ask for a new proposal, or just hit Send...',
+  'suggest-rule': 'Optional note (not sent to the generator) — hit Send to generate the rule...',
+};
+
+/**
+ * Determine why sending is blocked for the given mode/selection state, or
+ * null if allowed. Each mode has its own selection requirement (see
+ * CLAUDE.md's BRDP Assistant modes design) enforced here, before the
+ * message ever reaches useChat.
+ * @param {string} mode
+ * @param {number} count - selectedBRDPs.length
+ * @param {string} primaryFormat
+ * @returns {string|null}
+ */
+function getBlockReason(mode, count, primaryFormat) {
+  if (mode === 'specific' && count === 0) {
+    return 'Select at least one BRDP to ask a specific question.';
+  }
+  if ((mode === 'suggest-definition' || mode === 'suggest-proposal' || mode === 'suggest-rule') && count !== 1) {
+    return count === 0
+      ? 'Select exactly one BRDP for this mode.'
+      : 'This mode works with exactly one BRDP — you have multiple selected.';
+  }
+  if (mode === 'suggest-rule' && !primaryFormat) {
+    return 'Set a Primary Format in Settings before suggesting a rule.';
+  }
+  return null;
+}
 
 /**
  * Parse message content for [SUGGESTION:field]...[/SUGGESTION] blocks
@@ -11,7 +60,7 @@ import styles from './ChatPanel.module.css';
  */
 function parseSuggestions(content) {
   const parts = [];
-  const suggestionRegex = /\[SUGGESTION:(proposal|comment)\]([\s\S]*?)\[\/SUGGESTION\]/g;
+  const suggestionRegex = /\[SUGGESTION:(proposal|comment|definition|rule)\]([\s\S]*?)\[\/SUGGESTION\]/g;
   let lastIndex = 0;
   let match;
 
@@ -79,6 +128,7 @@ function TypingIndicator() {
  * @param {Function} props.onNavigateSettings - Navigate to settings
  * @param {Function} props.onClose - Callback to close panel
  * @param {boolean} props.detailPanelOpen - Whether detail panel is open
+ * @param {string} props.primaryFormat - Project's active rule format, required by Suggest Rule mode
  * @param {number} props.width - Panel width in pixels
  * @param {Function} props.onWidthChange - Callback to update width
  * @returns {JSX.Element} Chat panel
@@ -95,17 +145,21 @@ export default function ChatPanel({
   onClose,
   detailPanelOpen,
   selectedBRDPs = [],
+  primaryFormat = '',
   onDeselectBrdp,
   width = 340,
   onWidthChange,
 }) {
   const { brdps, updateBRDP } = useBRDPContext();
   const [input, setInput] = useState('');
+  const [mode, setMode] = useState('generic');
   const [isResizing, setIsResizing] = useState(false);
   const [activeContext, setActiveContext] = useState(selectedBRDPs);
   const [appliedSuggestions, setAppliedSuggestions] = useState({});
+  const [ruleApplyBusy, setRuleApplyBusy] = useState({});
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const blockReason = getBlockReason(mode, activeContext.length, primaryFormat);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -155,8 +209,8 @@ export default function ChatPanel({
    * Handle send button click
    */
   const handleSend = () => {
-    if (input.trim() && !isLoading) {
-      onSendMessage(input);
+    if (input.trim() && !isLoading && !blockReason) {
+      onSendMessage(input, mode);
       setInput('');
     }
   };
@@ -173,9 +227,13 @@ export default function ChatPanel({
   };
 
   /**
-   * Handle applying a suggestion to the first selected BRDP
+   * Handle applying a suggestion to the first selected BRDP. A 'rule'
+   * suggestion (from Suggest Rule mode) doesn't update a BRDP field -- it
+   * saves the XML fragment as a pending_review candidate in rule_approvals
+   * (proposeApproval, source='llm'), reviewable via the existing
+   * Approve/Discard/Edit UI in DetailPanel/BRDPTable (see RuleApprovalCell).
    */
-  const handleApplySuggestion = (field, content) => {
+  const handleApplySuggestion = async (field, content) => {
     if (!activeContext || activeContext.length === 0) {
       // Show warning message to user
       alert('Please select a BRDP first to apply this suggestion');
@@ -183,10 +241,20 @@ export default function ChatPanel({
     }
 
     const targetBrdp = activeContext[0];
-    updateBRDP(targetBrdp.id, { [field]: content });
-
-    // Mark suggestion as applied
     const suggestionKey = `${field}-${content.substring(0, 20)}`;
+
+    if (field === 'rule') {
+      setRuleApplyBusy(prev => ({ ...prev, [suggestionKey]: true }));
+      try {
+        await proposeApproval(targetBrdp.id, primaryFormat, content, 'llm');
+        setAppliedSuggestions(prev => ({ ...prev, [suggestionKey]: true }));
+      } finally {
+        setRuleApplyBusy(prev => ({ ...prev, [suggestionKey]: false }));
+      }
+      return;
+    }
+
+    updateBRDP(targetBrdp.id, { [field]: content });
     setAppliedSuggestions(prev => ({
       ...prev,
       [suggestionKey]: true,
@@ -259,14 +327,19 @@ export default function ChatPanel({
                         ) : (
                           <div key={partIdx} className={styles.suggestionBox}>
                             <div className={styles.suggestionLabel}>
-                              {part.field === 'proposal' ? 'Suggested Proposal:' : 'Suggested Comment:'}
+                              {SUGGESTION_LABELS[part.field] || 'Suggestion:'}
                             </div>
-                            <div className={styles.suggestionText}>
-                              {part.content}
-                            </div>
+                            {part.field === 'rule' ? (
+                              <pre className={styles.suggestionCode}>{part.content}</pre>
+                            ) : (
+                              <div className={styles.suggestionText}>
+                                {part.content}
+                              </div>
+                            )}
                             {(() => {
                               const suggestionKey = `${part.field}-${part.content.substring(0, 20)}`;
                               const isApplied = appliedSuggestions[suggestionKey];
+                              const isBusy = ruleApplyBusy[suggestionKey];
                               return isApplied ? (
                                 <div className={styles.appliedIndicator}>
                                   ✓ Applied
@@ -275,9 +348,9 @@ export default function ChatPanel({
                                 <button
                                   className={styles.applySuggestionBtn}
                                   onClick={() => handleApplySuggestion(part.field, part.content)}
-                                  disabled={!activeContext || activeContext.length === 0}
+                                  disabled={!activeContext || activeContext.length === 0 || isBusy}
                                 >
-                                  Apply
+                                  {isBusy ? 'Saving…' : 'Apply'}
                                 </button>
                               );
                             })()}
@@ -305,6 +378,23 @@ export default function ChatPanel({
       {/* Input Area */}
       {isConfigured && (
         <div className={styles.inputContainer}>
+          <div className={styles.modeSelector} role="radiogroup" aria-label="Assistant mode">
+            {MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="radio"
+                aria-checked={mode === m.id}
+                className={`${styles.modeBtn} ${mode === m.id ? styles.modeBtnActive : ''}`}
+                onClick={() => setMode(m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {blockReason && (
+            <div className={styles.blockReason}>{blockReason}</div>
+          )}
           {activeContext && activeContext.length > 0 && (
             <div className={styles.contextPill}>
               <span className={styles.contextText}>
@@ -328,7 +418,7 @@ export default function ChatPanel({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Ask about S1000D, DITA, or this BRDP..."
+            placeholder={MODE_PLACEHOLDERS[mode]}
             disabled={isLoading}
             className={styles.textarea}
             rows="3"
@@ -346,8 +436,9 @@ export default function ChatPanel({
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={!input.trim() || !!blockReason}
                 className={styles.sendBtn}
+                title={blockReason || undefined}
               >
                 Send
               </button>

@@ -58,6 +58,8 @@ function AppContent() {
     provider,
     customEndpoint,
     selectedBRDPs,
+    projectConfig,
+    primaryFormat: projectConfig.primaryFormat,
   });
 
   // Save chat panel width to localStorage
@@ -135,6 +137,7 @@ function AppContent() {
             onClose={handleCloseChat}
             detailPanelOpen={selectedBRDPs.length > 0}
             selectedBRDPs={selectedBRDPs}
+            primaryFormat={projectConfig.primaryFormat}
             onDeselectBrdp={() => setSelectedBRDPs([])}
             onOpenGenerateModal={openGenerateModal}
             width={chatPanelWidth}
