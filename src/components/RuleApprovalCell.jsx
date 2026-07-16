@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getApproval, deleteApproval, approveApproval } from '../api/approvals';
+import { getApproval, deleteApproval, approveApproval, proposeApproval } from '../api/approvals';
 import styles from './BRDPTable.module.css';
 
 const FORMAT_LABELS = {
@@ -25,6 +25,8 @@ const FORMAT_LABELS = {
 export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken }) {
   const [approval, setApproval] = useState(null); // null = none/loading
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
 
   const reload = () => {
     if (!primaryFormat) {
@@ -47,6 +49,34 @@ export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken 
       cancelled = true;
     };
   }, [brdpId, primaryFormat, approvalsRefreshToken]);
+
+  // Manual edit mode -- available whether or not an approval already exists
+  // (editing an existing pending_review/approved rule, or writing one from
+  // scratch). Saving always freezes it as 'approved' with source='manual':
+  // a human who just wrote/reviewed the rule_xml themselves has nothing left
+  // to re-review, unlike an LLM proposal.
+  const handleStartEdit = (e) => {
+    e.stopPropagation?.();
+    setDraft(approval?.rule_xml || '');
+    setEditing(true);
+  };
+
+  const handleCancelEdit = (e) => {
+    e.stopPropagation?.();
+    setEditing(false);
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.stopPropagation?.();
+    setBusy(true);
+    try {
+      await proposeApproval(brdpId, primaryFormat, draft, 'manual', 'approved');
+      setEditing(false);
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleRevoke = async (e) => {
     e.stopPropagation?.();
@@ -86,16 +116,44 @@ export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken 
     return <span className={styles.noFormat}>No format selected</span>;
   }
 
+  if (editing) {
+    return (
+      <div className={styles.approvalDetails} onClick={(e) => e.stopPropagation()}>
+        <textarea
+          className={styles.ruleEditTextarea}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Paste or write the rule XML fragment for this BRDP…"
+          rows={8}
+          autoFocus
+        />
+        <div className={styles.approvalActions}>
+          <button className={styles.approveBtn} onClick={handleSaveEdit} disabled={busy || !draft.trim()}>
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+          <button className={styles.discardBtn} onClick={handleCancelEdit} disabled={busy}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!approval) {
     return (
-      <button
-        className={styles.approvalPendingBtn}
-        disabled
-        title={`Coming soon (${FORMAT_LABELS[primaryFormat] || primaryFormat})`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        Generate &amp; review rule
-      </button>
+      <div className={styles.approvalActions}>
+        <button
+          className={styles.approvalPendingBtn}
+          disabled
+          title={`Coming soon (${FORMAT_LABELS[primaryFormat] || primaryFormat})`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Generate &amp; review rule
+        </button>
+        <button className={styles.ruleEditBtn} onClick={handleStartEdit}>
+          Create manually
+        </button>
+      </div>
     );
   }
 
@@ -109,6 +167,9 @@ export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken 
         <div className={styles.approvalActions}>
           <button className={styles.approveBtn} onClick={handleApprove} disabled={busy}>
             {busy ? 'Approving…' : 'Approve'}
+          </button>
+          <button className={styles.ruleEditBtn} onClick={handleStartEdit} disabled={busy}>
+            Edit
           </button>
           <button className={styles.discardBtn} onClick={handleDiscard} disabled={busy}>
             {busy ? 'Discarding…' : 'Discard'}
@@ -124,9 +185,14 @@ export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken 
         ✓ Approved <span className={styles.approvalSource}>({FORMAT_LABELS[primaryFormat] || primaryFormat} · {approval.source})</span>
       </summary>
       <pre className={styles.approvalXml}>{approval.rule_xml}</pre>
-      <button className={styles.revokeBtn} onClick={handleRevoke} disabled={busy}>
-        {busy ? 'Revoking…' : 'Revoke'}
-      </button>
+      <div className={styles.approvalActions}>
+        <button className={styles.ruleEditBtn} onClick={handleStartEdit} disabled={busy}>
+          Edit
+        </button>
+        <button className={styles.revokeBtn} onClick={handleRevoke} disabled={busy}>
+          {busy ? 'Revoking…' : 'Revoke'}
+        </button>
+      </div>
     </details>
   );
 }

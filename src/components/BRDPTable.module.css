@@ -269,6 +269,40 @@
   cursor: not-allowed;
 }
 
+.ruleEditBtn {
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.25rem;
+  border: 1px solid #bfdbfe;
+  background: white;
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.ruleEditBtn:hover:not(:disabled) {
+  background-color: #eff6ff;
+}
+
+.ruleEditBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ruleEditTextarea {
+  display: block;
+  width: 100%;
+  max-width: 400px;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  background-color: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.7rem;
+  font-family: 'IBM Plex Mono', monospace;
+  border: 1px solid #334155;
+  border-radius: 0.25rem;
+  resize: vertical;
+}
+
 .row {
   position: relative;
 }

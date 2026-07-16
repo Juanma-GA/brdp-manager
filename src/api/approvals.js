@@ -19,14 +19,16 @@ export async function getApprovalsForFormat(format) {
   return res.json();
 }
 
-// Creates or overwrites a pending_review candidate rule. Never approves
-// directly -- see approveApproval() for the pending_review -> approved
-// transition.
-export async function proposeApproval(brdpId, format, ruleXml, source) {
+// Creates or overwrites a rule approval. Defaults to a pending_review
+// candidate -- see approveApproval() for the pending_review -> approved
+// transition. Pass status='approved' only for a manually written/reviewed
+// rule (DetailPanel's manual edit mode), where there's nothing left to
+// re-review after the human wrote it themselves.
+export async function proposeApproval(brdpId, format, ruleXml, source, status) {
   const res = await fetch(`${BASE}/api/approvals/${encodeURIComponent(brdpId)}/${encodeURIComponent(format)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ruleXml, source }),
+    body: JSON.stringify({ ruleXml, source, status }),
   });
   if (!res.ok) throw new Error('Failed to save rule approval');
   return res.json();

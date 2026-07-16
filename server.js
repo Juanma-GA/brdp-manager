@@ -374,18 +374,19 @@ app.get('/api/approvals/:brdpId/:format', (req, res) => {
   }
 });
 
-// Proposes (creates or overwrites) a candidate rule for review -- never
-// approves directly. Used both by generators auto-proposing a fresh
-// candidate and, in future, by manual "Generate & review rule" / AI Extract
-// import flows. Always resets status to 'pending_review' and clears
-// approved_at, even when overwriting an existing pending_review row with a
-// newer proposal.
+// Proposes (creates or overwrites) a candidate rule for review. Defaults to
+// 'pending_review' (used by generators auto-proposing a fresh candidate and
+// AI Extract import flows), but accepts status='approved' for manual edits
+// in DetailPanel -- a human writing/reviewing the rule_xml themselves has
+// nothing left to re-review, so it can be frozen in one write instead of a
+// PUT (pending_review) followed by a separate POST /approve.
 app.put('/api/approvals/:brdpId/:format', (req, res) => {
   try {
+    const status = req.body.status === 'approved' ? 'approved' : 'pending_review';
     db.prepare(`
       INSERT OR REPLACE INTO rule_approvals (brdp_id, format, rule_xml, source, status, approved_at)
-      VALUES (?, ?, ?, ?, 'pending_review', NULL)
-    `).run(req.params.brdpId, req.params.format, req.body.ruleXml || '', req.body.source || 'llm');
+      VALUES (?, ?, ?, ?, ?, CASE WHEN ? = 'approved' THEN datetime('now') ELSE NULL END)
+    `).run(req.params.brdpId, req.params.format, req.body.ruleXml || '', req.body.source || 'llm', status, status);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
