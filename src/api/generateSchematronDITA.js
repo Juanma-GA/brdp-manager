@@ -46,6 +46,20 @@ function renderSchLets(lets) {
   return lets.map((l) => `    <sch:let name="${l.name}" value="${l.value}"/>\n`).join("");
 }
 
+// Most few-shot "message" values are plain prose that may mention element
+// names in angle brackets for readability (e.g. "The <xref> element...") --
+// escapeXmlText() turns those into proper &lt;xref&gt; text per STRICT RULE
+// 14. But a message that needs a REAL embedded element (STRICT RULE 20's
+// <sch:value-of select="..."/> for dynamic error text) must NOT be escaped,
+// or the element becomes inert literal text instead of a real Schematron
+// node. "messageIsRawXml": true opts a few-shot out of escaping -- the
+// author is then responsible for manually writing &lt;/&gt; for any literal
+// angle bracket that ISN'T a real element. Absent/false (the default for
+// all pre-existing few-shots) keeps today's escaping behavior unchanged.
+function renderMessage(entry) {
+  return entry.messageIsRawXml ? String(entry.message == null ? "" : entry.message) : escapeXmlText(entry.message);
+}
+
 function buildFewShotBlock(schemaSummary) {
   const examples = schemaSummary.few_shot_examples || [];
   return examples
@@ -76,7 +90,7 @@ its OWN globally-unique @id, suffixed with a short descriptive slug
       return `### Example ${i + 1} — ${ex.id} (topics: ${topics}, confidence: ${ex.confidence_ai})
 <sch:pattern>
   <sch:rule context="${ex.context}">
-${renderSchLets(ex.lets)}    <sch:assert role="${ex.assert_role}" id="${ex.id}" test="${ex.test}">${escapeXmlText(ex.message)}</sch:assert>
+${renderSchLets(ex.lets)}    <sch:assert role="${ex.assert_role}" id="${ex.id}" test="${ex.test}">${renderMessage(ex)}</sch:assert>
   </sch:rule>
 </sch:pattern>`;
     })
@@ -103,7 +117,7 @@ function buildDeterministicBlockFromFewShot(entry) {
   }
   return `<sch:pattern>
   <sch:rule context="${entry.context}">
-${renderSchLets(entry.lets)}    <sch:assert role="${entry.assert_role}" id="${entry.id}" test="${entry.test}">${escapeXmlText(entry.message)}</sch:assert>
+${renderSchLets(entry.lets)}    <sch:assert role="${entry.assert_role}" id="${entry.id}" test="${entry.test}">${renderMessage(entry)}</sch:assert>
   </sch:rule>
 </sch:pattern>`;
 }
@@ -135,7 +149,8 @@ const STRICT_RULES = `STRICT RULES:
 16. XML comments (rule 12) must NEVER contain the two-character sequence "--" anywhere in their body, and must not end with "-" right before "-->" — both break XML well-formedness. Use ";" or an em dash "—" for a pause instead of "--".
 17. Inside test, context, and sch:let/@value attribute values — not just message text — a literal < or & must be escaped as &lt; / &amp;. This applies even to numeric comparisons: write count(...) &lt; 2, never count(...) < 2 with a raw <. Attribute values follow the same escaping requirement as element text (rule 14), it is not optional just because the value is XPath.
 18. Before writing a test, sanity-check it is not vacuous. A test comparing two nearly-identical XPath expressions (e.g. count(X[cond < 3]) >= count(X[cond <= 3]), which is true almost by construction) does not actually verify the rule's intent — treat this as a sign the BRDP has no reliable structural hook and use rule 12 instead of forcing a lookalike rule. This applies especially to BRDPs about publishing/rendering configuration (TOC depth, page layout, print pagination, PDF/output formatting) that only affect how the publishing engine (DITA-OT) renders output, not the source document's own structure — even if a real element name (e.g. the bookmap <toc> placeholder) is nearby, using it to approximate a rendering-only decision is a semantic mismatch, not a real structural check. Apply this consistently: if a BRDP is essentially the same kind of decision as one you would otherwise resolve with rule 12, resolve it the same way even if its wording makes it look superficially structural.
-19. Row-by-row cross-column check inside a DITA/CALS table (tgroup/tbody/row/entry) -> resolve the target column by its header TEXT, never by position: add an <sch:let name="colX" value="tgroup/thead/row[1]/entry[normalize-space(.) = 'Header Text']/@colname"/> as a direct child of sch:rule, placed BEFORE the sch:assert/sch:report, then reference it as $colX inside test. CALS/DITA tables identify columns by @colname, not by ordinal position — entry[2]-style positional predicates silently break if columns are reordered. Express the "for every row" condition with the XPath 2.0 quantifier "every $row in tgroup/tbody/row satisfies (...)" — never simulate this with count()/positional indexing, which cannot express a per-row condition that depends on another column's value in that same row.`;
+19. Row-by-row cross-column check inside a DITA/CALS table (tgroup/tbody/row/entry) -> resolve the target column by its header TEXT, never by position: add an <sch:let name="colX" value="tgroup/thead/row[1]/entry[normalize-space(.) = 'Header Text']/@colname"/> as a direct child of sch:rule, placed BEFORE the sch:assert/sch:report, then reference it as $colX inside test. CALS/DITA tables identify columns by @colname, not by ordinal position — entry[2]-style positional predicates silently break if columns are reordered. Express the "for every row" condition with the XPath 2.0 quantifier "every $row in tgroup/tbody/row satisfies (...)" — never simulate this with count()/positional indexing, which cannot express a per-row condition that depends on another column's value in that same row.
+20. Cross-file consistency check (a value declared once, e.g. in the .ditamap via keydef/keyword, must match its real usage inside a topic referenced from elsewhere) -> use document($hrefExpr, .) inside an <sch:let> to resolve and read the OTHER file's content; the second argument (a node, typically ".") anchors the relative href to the document currently being validated -- never call document() with only one argument when the href is relative. Resolve which topic to open via its own reference (e.g. //topicref[@navtitle = '...' or topicmeta/navtitle = '...']/@href), never by guessing a filename. When the assert's message should show the actual mismatched values (not just "these don't match"), embed <sch:value-of select="$var"/> directly inside the message content -- this requires setting "messageIsRawXml": true on the few-shot entry (see renderMessage()), since a plain message string is XML-escaped and would turn a real <sch:value-of> into inert text. This category is inherently less portable than rule 19's: it only works when the Schematron engine validates with real file-system access to the referenced topic (e.g. validating the .ditamap, not an isolated topic file) -- note that limitation explicitly in the BRDP's own documentation rather than assuming it always applies.`;
 
 function buildSchematronPrompt(chunkBRDPs, schemaSummary) {
   const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
@@ -507,6 +522,8 @@ const XPATH_FUNCTIONS = new Set([
   "not", "count", "matches", "normalize-space", "contains", "concat",
   "tokenize", "last", "text", "string", "string-length", "starts-with",
   "ends-with", "substring",
+  // document($href, .) -- STRICT RULE 20's cross-file lookup function.
+  "document",
 ]);
 const XPATH_AXES = new Set([
   "ancestor", "ancestor-or-self", "parent", "child", "descendant",
@@ -569,6 +586,12 @@ const EXTRA_KNOWN_NAMES = [
   // 18 below, added after finding exactly this in a real generated rule for
   // BRDP-D1-00497).
   "toc",
+  // keydef/keyword -- STRICT RULE 20's cross-file key-declaration lookup
+  // (CURATED-escalon-consistency). keydef: map-level key-scope declaration
+  // element, base/xsd/mapGroupMod.xsd -- only ever appears inside
+  // map/bookmap, never inside a topic body. keyword: base phrase element
+  // confirmed real across many XSDs (e.g. base/xsd/commonElementMod.xsd).
+  "keydef", "keyword",
 ];
 
 function collectStrings(value, out) {
@@ -656,6 +679,22 @@ function lintVocabulary(xml, schemaSummary) {
     if (ctx) {
       const unknownInContext = findUnknownNames(ctx, known);
       for (const name of unknownInContext) {
+        for (const { id } of checks) addWarning(id, name);
+      }
+    }
+    // sch:let/@value carries its own XPath (STRICT RULE 19/20's column
+    // lookups and document() cross-file resolution) and was previously
+    // never scanned at all -- exactly the category of rule (cross-file,
+    // document()) where the LLM inventing vocabulary is most likely, so
+    // leaving it unchecked would blind the lint precisely where it matters
+    // most. Same attribution rule as context: a sch:let is scoped to the
+    // whole sch:rule, so an unknown name in it applies to every check in
+    // that rule.
+    const letRe = new RegExp(`<sch:let\\b(${ATTR_LIST})\\s*/?>`, "g");
+    for (const lm of ruleBody.matchAll(letRe)) {
+      const letValue = getAttr(lm[1], "value") || "";
+      if (!letValue) continue;
+      for (const name of findUnknownNames(letValue, known)) {
         for (const { id } of checks) addWarning(id, name);
       }
     }

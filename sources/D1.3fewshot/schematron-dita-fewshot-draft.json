@@ -453,6 +453,34 @@
       "test": "every $row in tgroup/tbody/row satisfies (let $part := normalize-space($row/entry[1]), $ncage := normalize-space($row/entry[@colname = $colNCAGE]) return $part = '' or $ncage = '-' or matches($ncage, '^[A-Z0-9]{5}$'))",
       "message": "En tablas con columna \"NCAGE\", cada fila debe contener exactamente 5 caracteres alfanuméricos en mayúsculas (A-Z, 0-9) o \"-\" (solo si el dato es desconocido). Filas con la primera columna vacía están exentas.",
       "notes": "Segunda instancia de la categoría sch:let + every satisfies (ver CURATED-cant-table, STRICT RULE 19). A diferencia de CURATED-cant-table, el context NO restringe por título de topic -- aplica a cualquier tabla del proyecto con columna NCAGE, sea cual sea el topic que la contenga. Regla ya curada y verificada por el usuario en sintaxis Schematron real."
+    },
+    {
+      "id": "CURATED-escalon-consistency",
+      "topicTypes": [
+        "map",
+        "bookmap"
+      ],
+      "confidence_ai": "alta",
+      "context": "keydef[@keys = 'Escalon']",
+      "assert_role": "error",
+      "lets": [
+        {
+          "name": "valorDitamap",
+          "value": "normalize-space(.//keyword[1])"
+        },
+        {
+          "name": "topicHref",
+          "value": "//topicref[@navtitle = 'RESUMEN DE PROCEDIMIENTO' or topicmeta/navtitle = 'RESUMEN DE PROCEDIMIENTO']/@href"
+        },
+        {
+          "name": "valorEscalon",
+          "value": "normalize-space(document($topicHref, .)//entry[p/b[normalize-space(.) = 'ESCALÓN DE MANTENIMIENTO']]/p[2])"
+        }
+      ],
+      "test": "$valorEscalon = $valorDitamap",
+      "messageIsRawXml": true,
+      "message": "El valor del \"ESCALÓN DE MANTENIMIENTO\" en el topic \"RESUMEN DE PROCEDIMIENTO\" (<sch:value-of select=\"$valorEscalon\"/>) no coincide con el valor declarado en el ditamap para la key \"Escalon\" (<sch:value-of select=\"$valorDitamap\"/>).",
+      "notes": "TERCERA CATEGORÍA DE PATRÓN (distinta de sch:let + every satisfies de CURATED-cant-table/CURATED-ncage-table): comprobación CROSS-FILE mediante document($href, .) -- compara un valor declarado en el .ditamap (vía <keydef>/<keyword>) contra su uso real en un topic referenciado, localizado por <topicref>/@navtitle o <topicmeta>/navtitle (nunca adivinando un nombre de fichero). Usa <sch:value-of> dentro del mensaje (por eso \"messageIsRawXml\": true) para mostrar los valores reales en conflicto, no solo texto estático. Ver STRICT RULE 20. LIMITACIÓN DE ROBUSTEZ: esta regla solo funciona si el motor Schematron valida con acceso real al sistema de ficheros del proyecto y puede resolver el .ditamap junto con sus topics referenciados -- NO funciona validando un topic aislado sin el mapa, a diferencia de todas las reglas anteriores, que eran autocontenidas en un único documento. Regla ya curada y verificada por el usuario en sintaxis Schematron real."
     }
   ]
 }

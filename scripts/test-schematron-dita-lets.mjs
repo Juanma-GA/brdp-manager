@@ -67,7 +67,15 @@ for (const ex of letsExamples) {
   check("sch:let appears BEFORE sch:assert", block.indexOf("<sch:let") < block.indexOf("<sch:assert"));
   check("sch:let is inside the sch:rule", block.indexOf("<sch:rule") < block.indexOf("<sch:let"));
   check("contains the assert with the right id", block.includes(`id="${ex.id}"`));
-  check("contains the quantifier", block.includes("every $row in tgroup/tbody/row satisfies"));
+  // STRICT RULE 19's "every $row ... satisfies" quantifier only applies to
+  // the row-by-row table-column category (CURATED-cant-table/-ncage-table),
+  // not to STRICT RULE 20's cross-file document() category
+  // (CURATED-escalon-consistency) -- only check for it on the former.
+  if (ex.test.includes("tgroup/tbody/row")) {
+    check("contains the quantifier", block.includes("every $row in tgroup/tbody/row satisfies"));
+  } else {
+    check("uses document() for cross-file lookup (STRICT RULE 20 category)", ex.lets.some((l) => l.value.includes("document(")));
+  }
 
   const singleDoc = finalizeSchematronDocument([block], projectConfig, schemaSummary);
   const singleResult = checkWellFormedSchematron(singleDoc, schemaSummary);
@@ -75,6 +83,51 @@ for (const ex of letsExamples) {
   check("zero errors", singleResult.errors.length === 0, JSON.stringify(singleResult.errors));
   console.log();
 }
+
+// ---- Every "messageIsRawXml" few-shot embeds real XML (e.g. sch:value-of),
+// NOT escaped text, in both rendering paths ----
+console.log("=== messageIsRawXml few-shots embed real XML in the message, unescaped ===");
+const rawXmlExamples = schemaSummary.few_shot_examples.filter((ex) => ex.messageIsRawXml);
+console.log(`Found ${rawXmlExamples.length} few-shot(s) using messageIsRawXml: ${rawXmlExamples.map((e) => e.id).join(", ")}`);
+for (const ex of rawXmlExamples) {
+  const block = buildDeterministicBlockFromFewShot(ex);
+  console.log(block);
+  check(`${ex.id}: deterministic block contains literal (unescaped) <sch:value-of`, block.includes("<sch:value-of"));
+  check(`${ex.id}: deterministic block does NOT contain escaped &lt;sch:value-of`, !block.includes("&lt;sch:value-of"));
+
+  const promptBlockForThis = buildFewShotBlock(schemaSummary);
+  const idx = promptBlockForThis.indexOf(ex.id);
+  const promptSnippet = promptBlockForThis.slice(idx, idx + 1200);
+  check(`${ex.id}: prompt text also contains literal (unescaped) <sch:value-of`, promptSnippet.includes("<sch:value-of"));
+  check(`${ex.id}: prompt text does NOT contain escaped &lt;sch:value-of`, !promptSnippet.includes("&lt;sch:value-of"));
+
+  const singleDoc = finalizeSchematronDocument([block], projectConfig, schemaSummary);
+  const singleResult = checkWellFormedSchematron(singleDoc, schemaSummary);
+  check(`${ex.id}: assembled document with embedded sch:value-of is well-formed`, singleResult.valid, JSON.stringify(singleResult.errors));
+  check(`${ex.id}: zero errors`, singleResult.errors.length === 0, JSON.stringify(singleResult.errors));
+
+  check(
+    `${ex.id}: vocabulary lint does not flag 'keydef'/'keyword'/'document' as unconfirmed`,
+    !singleResult.vocabularyWarnings.some((w) => /'keydef'|'keyword'|'document'/.test(w)),
+    JSON.stringify(singleResult.vocabularyWarnings)
+  );
+}
+console.log();
+
+// ---- Zero-regression counterpart: few-shots WITHOUT messageIsRawXml still
+// get their message escaped exactly as before ----
+console.log("=== Regression: few-shots without messageIsRawXml still escape their message ===");
+let messageEscapeRegressionOk = true;
+for (const ex of schemaSummary.few_shot_examples.filter((e) => !e.messageIsRawXml && e.confidence_ai !== "DESACTIVADA" && e.id !== "BRDP-D1-00313")) {
+  const b = buildDeterministicBlockFromFewShot(ex);
+  if (ex.message.includes("<") && !b.includes("&lt;")) {
+    // Only meaningful for messages that actually contain a literal '<'.
+    messageEscapeRegressionOk = false;
+    console.log(`  FAIL ${ex.id}: message contains '<' but rendered block has no escaped '&lt;'`);
+  }
+}
+check("all few-shots without messageIsRawXml still escape '<' in their message", messageEscapeRegressionOk);
+console.log();
 
 // ---- buildFewShotBlock (prompt text) teaches the LLM every "lets" example ----
 console.log("=== buildFewShotBlock() prompt text includes every sch:let example ===");
@@ -118,6 +171,11 @@ check(
   "no vocabulary warning mentions 'thead' (confirmed real DITA/CALS element, added to EXTRA_KNOWN_NAMES)",
   !fullResult.vocabularyWarnings.some((w) => w.includes("'thead'"))
 );
+check(
+  "no vocabulary warning mentions 'keydef'/'keyword'/'document' (confirmed real, added to EXTRA_KNOWN_NAMES/XPATH_FUNCTIONS)",
+  !fullResult.vocabularyWarnings.some((w) => /'keydef'|'keyword'|'document'/.test(w)),
+  JSON.stringify(fullResult.vocabularyWarnings)
+);
 console.log();
 
 // ---- Full generateSchematronDITA() entry point, zero LLM calls needed, for every "lets" example ----
@@ -133,6 +191,12 @@ const projectBRDPsById = {
     id: "CURATED-ncage-table",
     definition: "Valores numéricos y caracteres permitidos en las filas de TODAS aquellas tablas de TODOS los XML del proyecto que contengan una columna con nombre NCAGE. Exime de errores aquellas filas cuya primera columna no tenga nada escrito.",
     proposal: "Debe contener o 5 valores alfanuméricos cuyas letras deben ir en mayúsculas, o \"-\" (para casos en los que no se conoce el dato).",
+    validation: "Validated",
+  },
+  "CURATED-escalon-consistency": {
+    id: "CURATED-escalon-consistency",
+    definition: "En el .ditamap con title \"DOSIER DE MANTENIMIENTO DE 2ºRRTT Y 3er ESCALONES\", se declara el valor de Escalón vía <keydef keys=\"Escalon\">...<keyword>2RRTT</keyword>. Decidir si el topic con navtitle \"RESUMEN DE PROCEDIMIENTO\" debe tener el mismo valor de escalón en su tabla (celda tras \"ESCALÓN DE MANTENIMIENTO\"), coincidiendo con lo declarado en el ditamap.",
+    proposal: "Sí debe coincidir.",
     validation: "Validated",
   },
 };
