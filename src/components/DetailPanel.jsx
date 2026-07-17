@@ -163,29 +163,17 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
   };
 
   /**
-   * Handle save changes
+   * Handle save changes. History is computed once, in updateBRDP() (the
+   * single source of truth -- see BRDPContext.jsx) -- its return value is
+   * reused here to keep this panel and BRDPPage's selectedBRDPs in sync,
+   * instead of recomputing history a second time.
    */
   const handleSaveChanges = () => {
-    updateBRDP(brdp.id, editData);
+    const updatedBrdp = updateBRDP(brdp.id, editData);
     setIsEditing(false);
     setIsDirty(false);
     setDefinitionUnlocked(false);
-    if (onUpdate) {
-      const fieldsToTrack = ['proposal', 'comment', 'validation', 'definition'];
-      const history = [...(brdp.history || [])];
-
-      fieldsToTrack.forEach(field => {
-        if (editData[field] !== brdp[field]) {
-          history.push({
-            date: new Date().toISOString(),
-            field,
-            oldValue: brdp[field] || '',
-            newValue: editData[field] || '',
-          });
-        }
-      });
-
-      const updatedBrdp = { ...brdp, ...editData, history };
+    if (onUpdate && updatedBrdp) {
       onUpdate(updatedBrdp);
     }
     if (showToast) {

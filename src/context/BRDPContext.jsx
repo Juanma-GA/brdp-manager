@@ -75,13 +75,24 @@ export function BRDPProvider({ children }) {
   // rule_approvals and wipes every approval in the project, including ones
   // belonging to BRDPs untouched by this edit. PUT /api/brdps/:id updates
   // only this row.
+  //
+  // This is the ONLY place that computes a BRDP's history entries -- a
+  // second, independent copy of this same logic used to live in
+  // DetailPanel.jsx's handleSaveChanges(), which duplicated every entry:
+  // `history` here was a direct reference to b.history (not a copy), so
+  // pushing onto it mutated the same array DetailPanel's `brdp` prop pointed
+  // to; DetailPanel's own copy-then-push then added a second, redundant
+  // entry on top of that already-mutated array. Returning updatedBrdp lets
+  // callers that need to sync other local state (e.g. BRDPPage's
+  // detailBrdp/selectedBRDPs) reuse the one correctly-computed object
+  // instead of recomputing it themselves.
   const updateBRDP = useCallback((id, changes) => {
     let updatedBrdp = null;
     const updated = brdps.map(b => {
       if (b.id !== id) return b;
 
-      const history = b.history || [];
-      const fieldsToTrack = ['proposal', 'comment', 'validation'];
+      const history = [...(b.history || [])];
+      const fieldsToTrack = ['proposal', 'comment', 'validation', 'definition'];
 
       Object.keys(changes).forEach(field => {
         if (fieldsToTrack.includes(field) && changes[field] !== b[field]) {
@@ -107,6 +118,7 @@ export function BRDPProvider({ children }) {
         showToast('Failed to save your changes to the server. Your edit is only stored locally and may be lost.', 'error');
       });
     }
+    return updatedBrdp;
   }, [brdps, showToast]);
 
   // Bulk-add path for Merge import (DataManagementSection.handleMerge).

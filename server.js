@@ -190,6 +190,12 @@ app.get('/api/brdps', (req, res) => {
 app.post('/api/brdps', (req, res) => {
   try {
     const { id, identifier, title, definition, proposal, validation, comments, comment, history } = req.body;
+    // 'comment' (singular) is the field the frontend actually edits; 'comments'
+    // (plural, DB column name) only ever appears as a stale pass-through from
+    // a spread of the GET response's aliased shape (see CLAUDE.md). 'comment'
+    // must win whenever the payload includes it at all, even as '' -- falling
+    // back to 'comments' only when 'comment' is entirely absent from the body.
+    const commentValue = comment !== undefined ? comment : (comments || '');
     db.prepare(`
       INSERT INTO brdps (id, identifier, title, definition, proposal, validation, comments, history)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -200,7 +206,7 @@ app.post('/api/brdps', (req, res) => {
       definition || '',
       proposal || '',
       validation || 'Pending',
-      comments || comment || '',
+      commentValue,
       JSON.stringify(history || [])
     );
     res.json({ ok: true });
@@ -212,6 +218,7 @@ app.post('/api/brdps', (req, res) => {
 app.put('/api/brdps/:id', (req, res) => {
   try {
     const { identifier, title, definition, proposal, validation, comments, comment, history } = req.body;
+    const commentValue = comment !== undefined ? comment : (comments || '');
     db.prepare(`
       UPDATE brdps SET identifier=?, title=?, definition=?, proposal=?, validation=?, comments=?, history=?, updated_at=datetime('now')
       WHERE id=?
@@ -221,7 +228,7 @@ app.put('/api/brdps/:id', (req, res) => {
       definition || '',
       proposal || '',
       validation || 'Pending',
-      comments || comment || '',
+      commentValue,
       JSON.stringify(history || []),
       req.params.id
     );
