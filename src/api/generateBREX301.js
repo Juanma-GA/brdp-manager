@@ -1,6 +1,5 @@
-import { sendMessageStream } from "./llmAPI.js";
-import { extractXML, checkWellFormed } from "./generateBREX.js";
-import { getApprovalsForFormat, proposeApproval } from "./approvals.js";
+import { checkWellFormed } from "./generateBREX.js";
+import { getApprovalsForFormat } from "./approvals.js";
 
 let _schemaSummaryCache301 = null;
 
@@ -10,118 +9,6 @@ export async function loadSchemaSummary301() {
   if (!res.ok) throw new Error("Failed to load brex-schema-summary-3-0-1.json");
   _schemaSummaryCache301 = await res.json();
   return _schemaSummaryCache301;
-}
-
-export function buildBREXPrompt301(validatedBRDPs, projectConfig, schemaSummary) {
-  const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
-  const schemaJSON = JSON.stringify(schemaSummaryWithoutExamples, null, 2);
-
-  const fewShotBlock = (schemaSummary.few_shot_examples || []).map((ex, i) => {
-    const flag = ex.allowedObjectFlag;
-    const labels = [];
-    if (flag === "0") labels.push("prohibited");
-    else if (flag === "1") labels.push("mandatory");
-    else labels.push("no flag");
-    if (ex.objectPath && ex.objectPath.includes("[")) labels.push("complex XPath");
-    if (ex.objectValues && ex.objectValues.length > 1) labels.push("multi value");
-
-    const objvalLines = (ex.objectValues || [])
-      .map(v => `  <objval val1="${v}" valtype="single"/>`)
-      .join("\n");
-
-    const flagAttr = ex.allowedObjectFlag != null ? ` objappl="${ex.allowedObjectFlag}"` : "";
-
-    return `### Example ${i + 1} — ${labels.join(", ")}
-INPUT id: ${ex.id}
-OUTPUT:
-<objrule id="${ex.id}">
-  <objpath${flagAttr}>${ex.objectPath}</objpath>
-  <objuse>${ex.objectUse}</objuse>
-${objvalLines}</objrule>`;
-  }).join("\n\n");
-
-  const system = `You are an S1000D Issue 3.0.1 expert. Generate a valid BREX Data Module XML.
-
-Follow this schema structure exactly:
-${schemaJSON}
-
-STRICT RULES:
-1. Output ONLY the XML — no markdown fences, no \`\`\`xml tags, no explanation, no preamble.
-2. First character must be: <?xml version="1.0" encoding="UTF-8"?>
-3. Use the exact dmodule opening tag from dmodule_opening_tag in the schema.
-4. incode is always 022.
-5. Structure: content > brex > contextrules > structrules > objrule
-   There is NO structureObjectRuleGroup. There is NO nonContextRules element.
-   <brex> contains one or more <contextrules> elements directly.
-   <contextrules> contains <structrules>.
-   <structrules> contains all <objrule> elements.
-6. Each BRDP = one objrule with attribute id equal to the BRDP identifier.
-7. There is NO brDecisionRef element in 3.0.1 — the BRDP id goes in objrule @id ONLY.
-8. Child order in objrule: objpath -> objuse -> objval (one per allowed value).
-9. objappl attribute inside objpath: "0"=prohibited, "1"=mandatory. NO other values allowed.
-10. objval format: <objval val1="VALUE" valtype="single"/>
-    objval ONLY allows attributes: val1, val2, valtype.
-    valtype MUST be "single" or "range" ONLY. NEVER use pattern, list, regex, conditional or multiple.
-    val2 is only used when valtype="range".
-    NEVER add any other attribute to objval.
-11. objuse = one sentence summarising the decision.
-12. Use the todayDate value for issdate attributes. Format: year="YYYY" month="MM" day="DD".
-13. techname = project name; infoname = "Business rules".
-14. qa: <qa><unverif/></qa>
-15. applic: <applic><displaytext><p>All</p></displaytext></applic>
-16. brexref/refdm/avee must contain the same child elements as dmc/avee (self-reference).
-17. dmaddres child order: dmc -> dmtitle -> issno -> issdate -> language
-18. issno attributes: issno="001" inwork="00" type="new"
-19. status child order: security -> rpc -> orig -> applic -> brexref -> qa
-20. Each objrule must contain EXACTLY ONE objpath element. If a BRDP requires multiple XPath
-    expressions, generate multiple separate objrule elements with UNIQUE id attributes using
-    suffixes -b, -c, -d (e.g. id="BRDP-A1-00093-b"). The first rule keeps the original id.
-    NEVER repeat the same id value in more than one objrule.
-21. The id attribute of objrule must be globally unique across the entire document.
-    NEVER use the same id value twice.
-22. NEVER invent attributes not in the schema. objpath only allows objappl (values: 0 or 1).
-    NO other attributes allowed on objpath.
-23. S1000D 3.0.1 does NOT have a nonContextRules element. If a BRDP has no clear XPath target,
-    generate a valid objrule with a best-effort XPath, then add an XML comment immediately after it
-    for traceability, in this exact form (one single line, NEVER use double hyphens "--" inside):
-    <!-- nonContextRule id="BRDP-xxx": one sentence describing the conceptual rule -->
-24. NEVER use issueType="original". Use type="new" in issno instead.
-25. Inside text content of any element, NEVER use raw XML special characters.
-    Escape them as: &lt; &gt; &amp;
-
-## Few-shot examples: BRDP id -> objrule
-Use these real validated examples as reference for structure, XPath patterns and objval formatting.
-
-${fewShotBlock}`;
-
-  const brdpLines = validatedBRDPs
-    .map((b, i) =>
-      `${i + 1}. ID: ${b.id}\n   Definition: ${b.definition}\n   Proposal: ${b.proposal}\n   Validation: ${b.validation}`
-    )
-    .join("\n\n");
-
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  const user = `Generate a BREX Data Module XML (S1000D 3.0.1) with this project configuration:
-
-modelIdentCode: ${projectConfig.modelIdentCode || "UNKNOWN"}
-systemDiffCode: ${projectConfig.systemDiffCode || "A"}
-issueNumber: ${projectConfig.issueNumber || "001"}
-inWork: ${projectConfig.inWork || "00"}
-languageIsoCode: ${projectConfig.languageIsoCode || "en"}
-countryIsoCode: ${projectConfig.countryIsoCode || "US"}
-securityClassification: ${projectConfig.securityClassification || "01"}
-enterpriseCode: ${projectConfig.enterpriseCode || ""}
-projectName: ${projectConfig.projectName || projectConfig.modelIdentCode || "Project"}
-todayDate: ${todayStr}
-
-Include these ${validatedBRDPs.length} BRDP rule(s):
-
-${brdpLines}
-
-Output ONLY the XML starting with <?xml`;
-
-  return { system, user };
 }
 
 export function buildBREXPromptChunk301(chunkBRDPs, projectConfig, schemaSummary) {
@@ -324,37 +211,7 @@ function assembleChunks301(baseXml, additionalRules) {
   return stripped + '\n' + pieces.join('\n') + XML_FOOTER_301;
 }
 
-// Splits a chunk's raw <objrule>/nonContextRule-comment text into per-BRDP
-// blocks, keyed by base id (split-suffix -b/-c/-d/-e stripped, so a rule
-// divided across multiple objrule elements stays one proposal). Used only
-// for auto-proposal (point 3 of Phase 6's design) -- assembleChunks301
-// itself doesn't need per-BRDP granularity since it just appends everything.
-function extractRuleBlocksById301(xml) {
-  const map = new Map();
-  const append = (id, text) => {
-    const baseId = id.replace(/-[bcde]$/, '');
-    map.set(baseId, map.has(baseId) ? map.get(baseId) + '\n' + text : text);
-  };
-  const rulePattern = /<objrule id="([^"]+)"[\s\S]*?<\/objrule>/g;
-  let m;
-  while ((m = rulePattern.exec(xml)) !== null) append(m[1], m[0]);
-  const commentPattern = /<!--\s*nonContextRule id="([^"]+)":[\s\S]*?-->/g;
-  while ((m = commentPattern.exec(xml)) !== null) append(m[1], m[0]);
-  return map;
-}
-
-const CHUNK_SIZE_301 = 10;
 const MAX_RETRIES_301 = 2;
-
-function verifyChunkRules301(rawResponse, expectedIds) {
-  const foundIds = new Set(
-    [...rawResponse.matchAll(/<objrule id="([^"]+)"/g)].map(m => m[1])
-  );
-  const validExpected = new Set(expectedIds);
-  const missing = expectedIds.filter(id => !foundIds.has(id));
-  const invented = [...foundIds].filter(id => !validExpected.has(id));
-  return { missing, invented };
-}
 
 // Batch-fetches every frozen approval for the given format in one request
 // (GET /api/approvals/format/:format) instead of one call per BRDP. Same
@@ -484,26 +341,91 @@ function finalizeDocument301(xml, projectConfig, schemaSummary) {
   return xml;
 }
 
+// Deterministic empty document skeleton for S1000D 3.0.1 -- built directly
+// from projectConfig per the element order in the STRICT RULES this file's
+// prompts used to enforce on the LLM (dmaddres: dmc -> dmtitle -> issno ->
+// issdate -> language; status: security -> rpc -> orig -> applic -> brexref
+// -> qa) and cross-checked against sources/S3.0.1/brex.xsd directly. avee
+// children are emitted as empty self-closing placeholders -- forceAveeFields301
+// (already run by finalizeDocument301) fills both the ident dmc/avee and the
+// brexref/refdm/avee self-reference identically, exactly as it already does
+// for LLM-authored avee tags, so the values aren't duplicated here.
+// <contextrules> is always present (S1000D 3.0.1's <brex> requires at least
+// one), but its <structrules> child (which itself requires at least one
+// <objrule> when present) starts empty and is pruned away by
+// pruneEmptyContainers301 if no approved BRDP produced one.
+function esc301(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+const AVEE_PLACEHOLDER_301 =
+  '<modelic/><sdc/><chapnum/><section/><subsect/><subject/><discode/><discodev/><incode/><incodev/><itemloc/>';
+
+function buildEmptyDocument301(projectConfig, schemaSummary) {
+  const cfg = projectConfig || {};
+  const languageIsoCode = esc301(cfg.languageIsoCode || 'en');
+  const countryIsoCode = esc301(cfg.countryIsoCode || 'US');
+  const issueNumber = esc301(cfg.issueNumber || '001');
+  const inWork = esc301(cfg.inWork || '00');
+  const securityClassification = esc301(cfg.securityClassification || '01');
+  const enterpriseCode = esc301(cfg.enterpriseCode || '');
+  const projectName = esc301(cfg.projectName || cfg.modelIdentCode || 'Project');
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  const openingTag = (schemaSummary && schemaSummary.dmodule_opening_tag) || '<dmodule>';
+  const rpcAttr = enterpriseCode ? ` rpcname="${enterpriseCode}"` : '';
+  const origAttr = enterpriseCode ? ` origname="${enterpriseCode}"` : '';
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+${openingTag}
+<idstatus>
+<dmaddres>
+<dmc><avee>${AVEE_PLACEHOLDER_301}</avee></dmc>
+<dmtitle><techname>${projectName}</techname><infoname>Business rules</infoname></dmtitle>
+<issno issno="${issueNumber}" inwork="${inWork}" type="new"/>
+<issdate year="${year}" month="${month}" day="${day}"/>
+<language language="${languageIsoCode}" country="${countryIsoCode}"/>
+</dmaddres>
+<status>
+<security class="${securityClassification}"/>
+<rpc${rpcAttr}>${enterpriseCode}</rpc>
+<orig${origAttr}>${enterpriseCode}</orig>
+<applic><displaytext><p>All</p></displaytext></applic>
+<brexref><refdm><avee>${AVEE_PLACEHOLDER_301}</avee></refdm></brexref>
+<qa><unverif/></qa>
+</status>
+</idstatus>
+<content>
+<brex>
+<contextrules>
+<structrules>
+</structrules>
+</contextrules>
+</brex>
+</content>
+</dmodule>`;
+}
+
+function pruneEmptyContainers301(xml) {
+  return xml.replace(/<structrules>\s*<\/structrules>/g, '');
+}
+
+// Pure deterministic assembler -- no LLM call, ever. See generateBREX.js's
+// generateBREX() for the full design rationale. generateSingleRule301 and
+// the prompt builders above still exist, unchanged, for the BRDP Assistant's
+// "Suggest Rule" mode and for generateBREXSch.js (which reuses this same
+// function with approvalsFormat: 'SCH-S1000D' -- its simplification is
+// inherited automatically from this one, nothing else needed there).
 export async function generateBREX301(brdps, projectConfig, options = {}) {
   const {
-    apiKey,
-    modelName,
-    provider = "Anthropic",
-    customEndpoint = "",
     onlyValidated = true,
-    onChunk,
-    abortController,
     approvals: approvalsOverride,
-    approvalsFormat,
+    approvalsFormat = 'BREX-3.0.1',
     schemaSummary: schemaSummaryOverride,
-    callLLM: callLLMOverride,
-    proposeApproval: proposeApprovalOverride,
   } = options;
-  const proposeRule = proposeApprovalOverride || proposeApproval;
 
-  if (!callLLMOverride && !apiKey) {
-    throw new Error("API key is required. Please configure it in Settings.");
-  }
   if (!projectConfig?.modelIdentCode) {
     throw new Error("Project configuration is incomplete. Please fill in Settings.");
   }
@@ -522,204 +444,36 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
 
   const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary301());
 
-  // A BRDP with a frozen approval for approvalsFormat (see src/api/approvals.js
-  // and CLAUDE.md's rule_approvals design) is injected verbatim into the
-  // assembled BREX 3.0.1 document and never sent to the LLM. approvalsFormat
-  // is caller-supplied rather than hardcoded, because this same function
-  // serves two different user-facing formats depending on the caller: called
-  // directly for the "BREX -- S1000D 3.0.1" format (its own future approvals
-  // key, not wired yet) and via generateBREXSch.js for "Schematron 1.0 --
-  // S1000D" (approvalsFormat: 'SCH-S1000D') -- the frozen <objrule> is the
-  // same shape either way, brexToSchematron() deterministically turns it into
-  // the same <sch:pattern> downstream. Omitting approvalsFormat (today's
-  // direct-3.0.1 call site) skips the fetch entirely -- no behavior change.
   const approvalById = approvalsOverride
     ? (approvalsOverride instanceof Map ? approvalsOverride : new Map(approvalsOverride.map((a) => [a.brdp_id, a])))
-    : (approvalsFormat ? await fetchApprovalsMap301(approvalsFormat) : new Map());
+    : await fetchApprovalsMap301(approvalsFormat);
 
   const approvedBRDPs = [];
-  const llmBRDPs = [];
+  const unapprovedBRDPs = [];
   for (const brdp of targetBRDPs) {
-    // A pending_review row must NOT bypass the LLM -- only 'approved' does.
-    // It regenerates every run so the proposal always reflects the latest
-    // generation, until a human explicitly approves it.
     if (approvalById.get(brdp.id)?.status === 'approved') approvedBRDPs.push(brdp);
-    else llmBRDPs.push(brdp);
+    else unapprovedBRDPs.push(brdp);
   }
 
-  // Auto-proposal: any BRDP resolved via llmBRDPs below (not already
-  // approved) gets its freshly generated <objrule> saved as a pending_review
-  // candidate, overwriting any earlier proposal for the same id. Never
-  // proposed: the manually-built safety-net comment (no real rule exists).
-  const proposals = [];
+  let finalXml = buildEmptyDocument301(projectConfig, schemaSummary);
 
-  // Scoped to llmBRDPs (not targetBRDPs): if the LLM ever echoes an approved
-  // BRDP's id anyway (it was never given that BRDP in any prompt), it must be
-  // treated as invented and stripped -- otherwise it would duplicate the
-  // objrule injected separately below for the same id.
-  const validSet = new Set(llmBRDPs.map(b => b.id));
-
-  const callLLM =
-    callLLMOverride ||
-    (async (system, user) => {
-      const messages = [{ role: "user", content: user }];
-      try {
-        return await sendMessageStream(
-          messages, apiKey, modelName, provider, system,
-          onChunk, abortController, { customEndpoint, maxTokens: 8000 }
-        );
-      } catch (err) {
-        throw new Error(`LLM call failed: ${err.message}`);
-      }
-    });
-
-  // Conserva ids validos y sus variantes con sufijo -b/-c/-d/-e (reglas divididas)
-  const removeInvented = (xml) =>
-    xml.replace(/<objrule[\s\S]*?<\/objrule>/g, (match) => {
-      const idMatch = match.match(/objrule id="([^"]+)"/);
-      if (!idMatch) return '';
-      const baseId = idMatch[1].replace(/-[bcde]$/, '');
-      return (validSet.has(idMatch[1]) || validSet.has(baseId)) ? match : '';
-    });
-
-  const chunks = [];
-  for (let i = 0; i < llmBRDPs.length; i += CHUNK_SIZE_301) {
-    chunks.push(llmBRDPs.slice(i, i + CHUNK_SIZE_301));
-  }
-  // Every BRDP may have a frozen approval and none need the LLM -- chunk 1 is
-  // still generated (header-only, zero rules) since it's the only path that
-  // produces the document skeleton; approved objrules are injected afterward.
-  if (chunks.length === 0) chunks.push([]);
-
-  // Chunk 1: DM completo
-  const { system: sys1, user: usr1 } = buildBREXPrompt301(chunks[0], projectConfig, schemaSummary);
-  const raw1 = await callLLM(sys1, usr1);
-  let finalXml = extractXML(raw1);
-  if (!finalXml) throw new Error("The model returned an empty response on chunk 1.");
-
-  finalXml = finalXml.replace(/\s+allowedObjectFlagContext="[^"]*"/g, '');
-  finalXml = finalXml.replace(/<brDecisionIdentNumber brDecisionIdentNumber="([^"]+)"\/>/g, '');
-  finalXml = escapeXMLContent301(finalXml);
-  finalXml = splitMultipleObjPaths301(finalXml);
-  finalXml = sanitizeNonContextComments301(finalXml);
-
-  const { missing: missing1, invented: invented1 } = verifyChunkRules301(finalXml, chunks[0].map(b => b.id));
-  if (invented1.length > 0) finalXml = removeInvented(finalXml);
-
-  // Auto-propose each chunk-1 BRDP's own <objrule> (+ adjacent traceability
-  // comment, if any) -- extracted after invented removal so a hallucinated
-  // block is never proposed.
-  {
-    const blocksById = extractRuleBlocksById301(finalXml);
-    for (const brdp of chunks[0]) {
-      const block = blocksById.get(brdp.id);
-      if (block) proposals.push({ brdpId: brdp.id, ruleXml: block });
-    }
-  }
-
-  for (const missingId of missing1) {
-    const brdp = chunks[0].find(b => b.id === missingId);
-    if (brdp) {
-      const rule = await generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM);
-      if (rule) {
-        finalXml = assembleChunks301(finalXml, '\n' + rule);
-        proposals.push({ brdpId: brdp.id, ruleXml: rule });
-      }
-    }
-  }
-
-  // Chunks 2..N: solo objrule (+ comentarios de trazabilidad)
-  for (let i = 1; i < chunks.length; i++) {
-    const { system: sysN, user: usrN } = buildBREXPromptChunk301(chunks[i], projectConfig, schemaSummary);
-    const rawN = await callLLM(sysN, usrN);
-
-    let escapedN = (rawN && rawN.trim() ? rawN.trim() : '')
-      .replace(/\s+allowedObjectFlagContext="[^"]*"/g, '')
-      .replace(/<brDecisionIdentNumber brDecisionIdentNumber="([^"]+)"\/>/g, '');
-    escapedN = escapeXMLContent301(escapedN);
-    escapedN = splitMultipleObjPaths301(escapedN);
-
-    const { missing: missingN, invented: inventedN } = verifyChunkRules301(escapedN, chunks[i].map(b => b.id));
-    if (inventedN.length > 0) escapedN = removeInvented(escapedN);
-    finalXml = assembleChunks301(finalXml, '\n' + escapedN);
-
-    // Auto-propose each of this chunk's BRDPs from the (invented-stripped)
-    // response text, same as chunk 1.
-    {
-      const blocksById = extractRuleBlocksById301(escapedN);
-      for (const brdp of chunks[i]) {
-        const block = blocksById.get(brdp.id);
-        if (block) proposals.push({ brdpId: brdp.id, ruleXml: block });
-      }
-    }
-
-    for (const missingId of missingN) {
-      const brdp = chunks[i].find(b => b.id === missingId);
-      if (brdp) {
-        const rule = await generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM);
-        if (rule) {
-          finalXml = assembleChunks301(finalXml, '\n' + rule);
-          proposals.push({ brdpId: brdp.id, ruleXml: rule });
-        }
-      }
-    }
-  }
-
-  // Inject frozen approvals verbatim -- never re-escaped or rebuilt, same as
-  // any already-generated objrule. Must happen before the coverage sweep so
-  // `present` picks these ids up and doesn't treat them as missing.
   if (approvedBRDPs.length > 0) {
-    const approvedXml = approvedBRDPs
-      .map(b => approvalById.get(b.id).rule_xml)
-      .join('\n');
+    const approvedXml = approvedBRDPs.map((b) => approvalById.get(b.id).rule_xml).join('\n');
     finalXml = assembleChunks301(finalXml, approvedXml);
   }
 
-  // Barrido final de cobertura: ningún BRDP debe perderse en silencio
-  {
-    const present = new Set(
-      [...finalXml.matchAll(/<objrule id="([^"]+)"/g)].map(m => m[1].replace(/-[bcde]$/, ''))
-    );
-    const stillMissing = targetBRDPs.filter(b =>
-      !present.has(b.id) && !finalXml.includes('nonContextRule id="' + b.id + '"')
-    );
-    for (const brdp of stillMissing) {
-      const rule = await generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM);
-      if (rule) {
-        finalXml = assembleChunks301(finalXml, '\n' + rule);
-        proposals.push({ brdpId: brdp.id, ruleXml: rule });
-      } else {
-        // Red de seguridad: nunca perder un BRDP -> comentario de trazabilidad
-        // (nunca se propone -- no hay regla real generada)
-        const desc = String(brdp.definition || brdp.proposal || 'Regla sin contexto')
-          .replace(/--+/g, '-').replace(/[\r\n]+/g, ' ').trim().slice(0, 300);
-        finalXml = assembleChunks301(finalXml, '\n<!-- nonContextRule id="' + brdp.id + '": ' + desc + ' -->');
-      }
-    }
+  finalXml = pruneEmptyContainers301(finalXml);
+
+  if (unapprovedBRDPs.length > 0) {
+    const comments = unapprovedBRDPs
+      .map((b) => `<!-- ${b.id}: pendiente de aprobación de regla, no incluida en este documento -->`)
+      .join('\n');
+    finalXml = finalXml.replace('</brex>', comments + '\n</brex>');
   }
 
-  // Garantizar footer
-  if (!finalXml.includes('</dmodule>')) {
-    const lastRule = finalXml.lastIndexOf('</objrule>');
-    if (lastRule !== -1) {
-      finalXml = finalXml.slice(0, lastRule + '</objrule>'.length) + XML_FOOTER_301;
-    }
-  }
-
-  // Finalización determinista: tag dmodule, objappl en objpath, campos avee
   finalXml = finalizeDocument301(finalXml, projectConfig, schemaSummary);
 
   const { valid, error } = checkWellFormed(finalXml);
-
-  // Fire-and-verify, never fire-and-break: a failed proposal write must never
-  // fail a generation that already succeeded. Gated on approvalsFormat being
-  // set -- without it there is no format key to propose under (same gate
-  // the fetch above already uses).
-  if (approvalsFormat && proposals.length > 0) {
-    await Promise.allSettled(
-      proposals.map(p => proposeRule(p.brdpId, approvalsFormat, p.ruleXml, 'llm'))
-    );
-  }
 
   return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length };
 }

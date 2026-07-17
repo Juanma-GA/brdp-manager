@@ -19,11 +19,9 @@ export default function GenerateModal({ brdps, onClose, onGenerateComplete }) {
   const [format, setFormat] = useState('BREX — S1000D 4.2');
   const [onlyValidated, setOnlyValidated] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [streamedChars, setStreamedChars] = useState(0);
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
   const [xsdValidation, setXsdValidation] = useState(null);
-  const abortRef = useRef(null);
   const xsdGenerationRef = useRef(0);
 
   const validatedCount = brdps.filter(
@@ -39,13 +37,6 @@ export default function GenerateModal({ brdps, onClose, onGenerateComplete }) {
   const isSchDITA = format === 'Schematron 1.0 — DITA';
   const xsdFormat = XSD_FORMAT_MAP[format];
 
-  const getSettings = () => ({
-    apiKey: localStorage.getItem('brdp_api_key') || '',
-    modelName: localStorage.getItem('brdp_model') || '',
-    provider: localStorage.getItem('brdp_provider') || 'Anthropic',
-    customEndpoint: localStorage.getItem('brdp_custom_endpoint') || '',
-  });
-
   useEffect(() => {
     const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handleKey);
@@ -54,76 +45,27 @@ export default function GenerateModal({ brdps, onClose, onGenerateComplete }) {
 
   useEffect(() => { setResult(null); setXsdValidation(null); }, [onlyValidated, format]);
 
+  // Pure deterministic assembly (see CLAUDE.md) -- no LLM call, no API key
+  // needed. The only async work left is fetching rule_approvals for the
+  // active format and, below, the separate real-XSD-schema validation call.
   const handleGenerate = useCallback(async () => {
-    const { apiKey, modelName, provider, customEndpoint } = getSettings();
-
-    if (!apiKey) {
-      setResult({ xml: null, valid: false, error: 'API key not configured. Go to Settings.', brdpCount: 0 });
-      return;
-    }
-
     setLoading(true);
     setResult(null);
     setXsdValidation(null);
-    setStreamedChars(0);
-    abortRef.current = new AbortController();
     const generationId = ++xsdGenerationRef.current;
 
     try {
       let result;
       if (isBREX42) {
-        result = await generateBREX(brdps, projectConfig, {
-          apiKey,
-          modelName,
-          provider,
-          customEndpoint,
-          onlyValidated,
-          approvalsFormat: 'BREX-4.2',
-          onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
-          abortController: abortRef.current,
-        });
+        result = await generateBREX(brdps, projectConfig, { onlyValidated, approvalsFormat: 'BREX-4.2' });
       } else if (isBREX41) {
-        result = await generateBREX41(brdps, projectConfig, {
-          apiKey,
-          modelName,
-          provider,
-          customEndpoint,
-          onlyValidated,
-          approvalsFormat: 'BREX-4.1',
-          onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
-          abortController: abortRef.current,
-        });
+        result = await generateBREX41(brdps, projectConfig, { onlyValidated, approvalsFormat: 'BREX-4.1' });
       } else if (isBREX301) {
-        result = await generateBREX301(brdps, projectConfig, {
-          apiKey,
-          modelName,
-          provider,
-          customEndpoint,
-          onlyValidated,
-          approvalsFormat: 'BREX-3.0.1',
-          onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
-          abortController: abortRef.current,
-        });
+        result = await generateBREX301(brdps, projectConfig, { onlyValidated, approvalsFormat: 'BREX-3.0.1' });
       } else if (isSchS1000D) {
-        result = await generateBREXSch(brdps, projectConfig, {
-          apiKey,
-          modelName,
-          provider,
-          customEndpoint,
-          onlyValidated,
-          onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
-          abortController: abortRef.current,
-        });
+        result = await generateBREXSch(brdps, projectConfig, { onlyValidated });
       } else if (isSchDITA) {
-        result = await generateSchematronDITA(brdps, projectConfig, {
-          apiKey,
-          modelName,
-          provider,
-          customEndpoint,
-          onlyValidated,
-          onChunk: (chunk) => setStreamedChars(prev => prev + chunk.length),
-          abortController: abortRef.current,
-        });
+        result = await generateSchematronDITA(brdps, projectConfig, { onlyValidated });
       }
       setResult(result);
 
@@ -150,19 +92,10 @@ export default function GenerateModal({ brdps, onClose, onGenerateComplete }) {
       setResult({ xml: null, valid: false, error: err.message, brdpCount: 0 });
     } finally {
       setLoading(false);
-      // Fires on every attempt, successful or not -- a generation that fails
-      // late (e.g. XSD validation) may still have written new pending_review
-      // proposals via the generator's own Promise.allSettled step before
-      // failing, so BRDPTable's Rule Approval column always gets a chance
-      // to refresh instead of silently going stale until a manual reload.
+      // Fires on every attempt, successful or not.
       onGenerateComplete?.();
     }
   }, [brdps, projectConfig, onlyValidated, isBREX42, isBREX41, isBREX301, isSchS1000D, isSchDITA, xsdFormat, onGenerateComplete]);
-
-  const handleCancel = () => {
-    abortRef.current?.abort();
-    setLoading(false);
-  };
 
   const handleCopy = () => {
     if (!result?.xml) return;
@@ -272,8 +205,7 @@ export default function GenerateModal({ brdps, onClose, onGenerateComplete }) {
           ) : (
             <div className={styles.loadingRow}>
               <span className={styles.spinner} />
-              <span>Generating… {streamedChars} characters received</span>
-              <button className={styles.cancelBtn} onClick={handleCancel}>Cancel</button>
+              <span>Generating…</span>
             </div>
           )}
         </div>

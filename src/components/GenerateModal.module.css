@@ -272,18 +272,6 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.cancelBtn {
-  background: none;
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 6px;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-  cursor: pointer;
-  color: var(--color-text-muted, #6b7280);
-}
-
-.cancelBtn:hover { border-color: #ef4444; color: #ef4444; }
-
 .outputSection {
   padding: 1rem 1.5rem;
   border-top: 1px solid var(--color-border, #e5e7eb);

@@ -1,7 +1,6 @@
-import { sendMessageStream } from "./llmAPI.js";
 import { extractXML } from "./generateBREX.js";
 import { _isSafePattern } from "./brexToSchematron.js";
-import { getApprovalsForFormat, proposeApproval } from "./approvals.js";
+import { getApprovalsForFormat } from "./approvals.js";
 
 // Fixed format id this generator's frozen rule_approvals rows are stored
 // under -- see ProjectConfigSection.jsx's primaryFormat options and
@@ -187,7 +186,6 @@ Output ONLY the sch:pattern blocks (or traceability comments per rule 12), start
 
 // ===== Response parsing / verification =====
 
-const CHUNK_SIZE = 10;
 const MAX_RETRIES = 2;
 
 function extractPatternBlocks(text) {
@@ -741,24 +739,26 @@ function checkWellFormedSchematron(xml, schemaSummary) {
 // special case, and assembly is a plain array push instead of BREX's
 // footer-stripping/reinsertion logic.
 
+// Pure deterministic assembler -- no LLM call, ever. For the active format,
+// takes only the BRDPs with a frozen 'approved' rule_approvals row and
+// injects their rule_xml verbatim (via buildDeterministicBlockFromFewShot,
+// which already special-cases entry.rule_xml as a verbatim passthrough);
+// every other Validated BRDP becomes a traceability comment via
+// buildTraceabilityComment(), the exact same mechanism already used for
+// BRDP-D1-00089 -- untouched here, just called with a different reason.
+// The curated few-shot exact-id-match shortcut (previously also used to
+// bypass the LLM for known examples) is intentionally NOT consulted here
+// anymore: approval is now the only gate for inclusion, so an unapproved
+// BRDP that happens to match a curated id still becomes a comment, not a
+// silently-injected rule. generateSingleRule and the prompt builders above
+// still exist, unchanged, for the BRDP Assistant's "Suggest Rule" mode.
 export async function generateSchematronDITA(brdps, projectConfig, options = {}) {
   const {
-    apiKey,
-    modelName,
-    provider = "Anthropic",
-    customEndpoint = "",
     onlyValidated = true,
-    onChunk,
-    abortController,
+    approvals: approvalsOverride,
+    approvalsFormat = FORMAT_ID,
     schemaSummary: schemaSummaryOverride,
-    callLLM: callLLMOverride,
-    proposeApproval: proposeApprovalOverride,
   } = options;
-  const proposeRule = proposeApprovalOverride || proposeApproval;
-
-  if (!callLLMOverride && !apiKey) {
-    throw new Error("API key is required. Please configure it in Settings.");
-  }
 
   const targetBRDPs = onlyValidated
     ? brdps.filter((b) => b.validation?.toLowerCase().trim() === "validated")
@@ -774,138 +774,22 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
 
   const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary());
 
-  // A BRDP with a frozen approval for FORMAT_ID (see src/api/approvals.js and
-  // CLAUDE.md's rule_approvals design) is injected verbatim and never sent to
-  // the LLM -- same mechanism as the few-shot exact-id-match below, just
-  // triggered by an explicit user approval instead of a curated example.
-  // Approval takes priority over a few-shot match: a real project decision
-  // always outranks a generic curated example for the same id.
-  const approvalsOverride = options.approvals;
   const approvalById = approvalsOverride
     ? (approvalsOverride instanceof Map ? approvalsOverride : new Map(approvalsOverride.map((a) => [a.brdp_id, a])))
-    : await fetchApprovalsMap(FORMAT_ID);
+    : await fetchApprovalsMap(approvalsFormat);
 
-  // BRDPs whose id exactly matches a curated few-shot are resolved
-  // deterministically (see buildDeterministicBlockFromFewShot) and never sent
-  // to the LLM at all -- see the comment on that function for why. targetIds
-  // (the "is this pattern id real or invented" set used by
-  // processChunkResponse) is scoped to brdpsForLLM only, so if the LLM still
-  // echoes one of the deterministic ids back anyway, it's correctly dropped
-  // as invented rather than duplicating the id already pushed above.
-  // Auto-proposal: any BRDP that reaches the LLM/few-shot path below (i.e.
-  // isn't already frozen-approved) gets its freshly generated fragment saved
-  // as a pending_review candidate -- overwriting any earlier pending_review
-  // proposal for the same id, so it always reflects the latest generation.
-  // Never proposed: the traceability-comment safety net (no real rule was
-  // generated) and, of course, an already-approved BRDP (it never reaches
-  // this code path in the first place).
-  const proposals = [];
-
-  const fewShotById = new Map((schemaSummary.few_shot_examples || []).map((e) => [e.id, e]));
   const blocks = [];
-  const brdpsForLLM = [];
   for (const brdp of targetBRDPs) {
     const approvalEntry = approvalById.get(brdp.id);
     if (approvalEntry && approvalEntry.status === "approved") {
       blocks.push(buildDeterministicBlockFromFewShot(approvalEntry));
-      continue;
-    }
-    const fewShotEntry = fewShotById.get(brdp.id);
-    if (fewShotEntry) {
-      const block = buildDeterministicBlockFromFewShot(fewShotEntry);
-      blocks.push(block);
-      proposals.push({ brdpId: brdp.id, ruleXml: block });
     } else {
-      brdpsForLLM.push(brdp);
-    }
-  }
-  const targetIds = new Set(brdpsForLLM.map((b) => b.id));
-
-  const callLLM =
-    callLLMOverride ||
-    (async (system, user) => {
-      const messages = [{ role: "user", content: user }];
-      try {
-        return await sendMessageStream(
-          messages, apiKey, modelName, provider, system,
-          onChunk, abortController, { customEndpoint, maxTokens: 8000 }
-        );
-      } catch (err) {
-        throw new Error(`LLM call failed: ${err.message}`);
-      }
-    });
-
-  const chunks = [];
-  for (let i = 0; i < brdpsForLLM.length; i += CHUNK_SIZE) {
-    chunks.push(brdpsForLLM.slice(i, i + CHUNK_SIZE));
-  }
-
-  for (const chunk of chunks) {
-    const { system, user } = buildSchematronPrompt(chunk, schemaSummary);
-    const raw = await callLLM(system, user);
-    const extracted = raw && raw.trim() ? extractXML(raw.trim()) : "";
-    const { patterns, comments, missing } = processChunkResponse(extracted, chunk, targetIds);
-
-    blocks.push(...patterns, ...comments);
-
-    // patterns are already split per-block (STRICT RULE 2: one BRDP -> one
-    // sch:pattern, or one shared rule for a documented multi-check exception
-    // like BRDP-D1-00313) -- match each chunk BRDP against the block(s)
-    // whose ids cover it and propose that as its candidate. comments (rule
-    // 12 traceability) are never proposed -- no real rule was generated.
-    for (const brdp of chunk) {
-      const matchingBlocks = patterns.filter((block) =>
-        [...extractCheckIds(block)].some((id) => idCoversBRDP(id, brdp.id))
-      );
-      if (matchingBlocks.length > 0) {
-        proposals.push({ brdpId: brdp.id, ruleXml: matchingBlocks.join("\n") });
-      }
-    }
-
-    // Retry missing individually (per-BRDP), same as generateBREX.js
-    for (const brdp of missing) {
-      const rule = await generateSingleRule(brdp, schemaSummary, callLLM);
-      if (rule) {
-        blocks.push(rule.xml);
-        proposals.push({ brdpId: brdp.id, ruleXml: rule.xml });
-      }
-    }
-  }
-
-  // Barrido final de cobertura: ningun BRDP debe perderse en silencio
-  {
-    const coveredIds = new Set();
-    for (const block of blocks) {
-      for (const id of extractCheckIds(block)) coveredIds.add(id);
-      for (const id of extractCommentedIds(block)) coveredIds.add(id);
-    }
-    const stillMissing = targetBRDPs.filter(
-      (b) => ![...coveredIds].some((id) => idCoversBRDP(id, b.id))
-    );
-    for (const brdp of stillMissing) {
-      const rule = await generateSingleRule(brdp, schemaSummary, callLLM);
-      if (rule) {
-        blocks.push(rule.xml);
-        proposals.push({ brdpId: brdp.id, ruleXml: rule.xml });
-      } else {
-        // Red de seguridad: nunca perder un BRDP en silencio -> comentario de
-        // trazabilidad, mismo patron real que BRDP-D1-00089.
-        blocks.push(buildTraceabilityComment(brdp, "sin respuesta valida del LLM tras los reintentos"));
-      }
+      blocks.push(buildTraceabilityComment(brdp, "pendiente de aprobación de regla, no incluida en este documento"));
     }
   }
 
   const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary);
   const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary);
-
-  // Fire-and-verify, never fire-and-break: a failed proposal write must never
-  // fail the generation that already succeeded -- same safe-degrade
-  // philosophy as the approvals fetch itself.
-  if (proposals.length > 0) {
-    await Promise.allSettled(
-      proposals.map((p) => proposeRule(p.brdpId, FORMAT_ID, p.ruleXml, "llm"))
-    );
-  }
 
   return { xml: finalXml, valid, errors, vocabularyWarnings, brdpCount: targetBRDPs.length };
 }

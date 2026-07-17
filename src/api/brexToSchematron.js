@@ -229,14 +229,20 @@ function _collectRules(doc) {
   }
   return rules;
 }
+// Carries over every XML comment found in the source BREX doc verbatim --
+// not just the LLM's own "nonContextRule id=...:" traceability shape, but
+// also generateBREX301's newer "pending approval" comments (a deliberately
+// different wording, since a BRDP awaiting approval is not the same thing as
+// a BRDP with no clear XPath target -- see CLAUDE.md). Sanitizing "--" runs
+// stays a defense-in-depth safety net even though both comment sources
+// already sanitize at creation time.
 function _carryNonContextComments(brexXml) {
-  const re = /<!--\s*nonContextRule id="([^"]+)":\s*([\s\S]*?)-->/g;
+  const re = /<!--([\s\S]*?)-->/g;
   const out = [];
   let m;
   while ((m = re.exec(brexXml)) !== null) {
-    const id = m[1];
-    const msg = m[2].replace(/--+/g, '-').trim();
-    out.push('   <!-- nonContextRule id="' + id + '": ' + msg + ' -->');
+    const body = m[1].replace(/--+/g, '-').trim();
+    out.push('   <!-- ' + body + ' -->');
   }
   return out;
 }
