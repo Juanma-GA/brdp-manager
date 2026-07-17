@@ -392,11 +392,11 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
                             <strong>{entry.field || 'unknown'}</strong>
                           </div>
                           <div className={styles.historyChange}>
-                            <span className={styles.oldValue}>
+                            <span className={styles.oldValue} title={entry.oldValue || ''}>
                               {truncate(entry.oldValue || '')}
                             </span>
                             <span className={styles.arrow}>→</span>
-                            <span className={styles.newValue}>
+                            <span className={styles.newValue} title={entry.newValue || ''}>
                               {truncate(entry.newValue || '')}
                             </span>
                           </div>
