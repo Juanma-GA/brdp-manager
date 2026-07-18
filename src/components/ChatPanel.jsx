@@ -1,9 +1,20 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useBRDPContext } from '../context/BRDPContext';
-import { proposeApproval } from '../api/approvals';
+import { getApproval, proposeApproval } from '../api/approvals';
 import TypingDots from './TypingDots';
 import styles from './ChatPanel.module.css';
+
+// Same format-code -> friendly-label map as RuleApprovalCell.jsx (see that
+// file's FORMAT_LABELS) -- kept local since it's a 5-entry display lookup,
+// not shared app logic.
+const FORMAT_LABELS = {
+  'BREX-3.0.1': 'BREX 3.0.1',
+  'BREX-4.1': 'BREX 4.1',
+  'BREX-4.2': 'BREX 4.2',
+  'SCH-S1000D': 'Schematron S1000D',
+  'SCH-DITA': 'Schematron DITA',
+};
 
 const MODES = [
   { id: 'generic', label: 'Generic Questions' },
@@ -150,7 +161,7 @@ export default function ChatPanel({
   width = 340,
   onWidthChange,
 }) {
-  const { brdps, updateBRDP } = useBRDPContext();
+  const { brdps, updateBRDP, appendHistoryEntry } = useBRDPContext();
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('generic');
   const [isResizing, setIsResizing] = useState(false);
@@ -246,8 +257,11 @@ export default function ChatPanel({
     if (field === 'rule') {
       setRuleApplyBusy(prev => ({ ...prev, [suggestionKey]: true }));
       try {
+        const prevApproval = await getApproval(targetBrdp.id, primaryFormat);
         await proposeApproval(targetBrdp.id, primaryFormat, content, 'llm');
         setAppliedSuggestions(prev => ({ ...prev, [suggestionKey]: true }));
+        const oldLabel = prevApproval ? (prevApproval.status === 'approved' ? 'Approved' : 'Pending review') : '';
+        appendHistoryEntry(targetBrdp.id, `rule_approval (${FORMAT_LABELS[primaryFormat] || primaryFormat})`, oldLabel, 'Proposed (LLM)');
       } finally {
         setRuleApplyBusy(prev => ({ ...prev, [suggestionKey]: false }));
       }

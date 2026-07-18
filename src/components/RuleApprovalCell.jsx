@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getApproval, deleteApproval, approveApproval, proposeApproval } from '../api/approvals';
+import { useBRDPContext } from '../context/BRDPContext';
 import styles from './BRDPTable.module.css';
 
 const FORMAT_LABELS = {
@@ -9,6 +10,15 @@ const FORMAT_LABELS = {
   'SCH-S1000D': 'Schematron S1000D',
   'SCH-DITA': 'Schematron DITA',
 };
+
+// Human-readable label for a rule_approvals row's status, used as the
+// oldValue/newValue text in the BRDP's own Change History (see
+// appendHistoryEntry in BRDPContext.jsx) -- distinct from FORMAT_LABELS,
+// which names the S1000D/DITA format itself.
+function statusLabel(approval) {
+  if (!approval) return '';
+  return approval.status === 'approved' ? 'Approved' : 'Pending review';
+}
 
 /**
  * Rule Approval cell component
@@ -23,10 +33,13 @@ const FORMAT_LABELS = {
  * @returns {JSX.Element}
  */
 export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken }) {
+  const { appendHistoryEntry } = useBRDPContext();
   const [approval, setApproval] = useState(null); // null = none/loading
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+
+  const historyField = `rule_approval (${FORMAT_LABELS[primaryFormat] || primaryFormat})`;
 
   const reload = () => {
     if (!primaryFormat) {
@@ -70,9 +83,11 @@ export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken 
     e.stopPropagation?.();
     setBusy(true);
     try {
+      const oldLabel = statusLabel(approval);
       await proposeApproval(brdpId, primaryFormat, draft, 'manual', 'approved');
       setEditing(false);
       await reload();
+      appendHistoryEntry(brdpId, historyField, oldLabel, 'Approved (manual)');
     } finally {
       setBusy(false);
     }
@@ -85,6 +100,7 @@ export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken 
     try {
       await deleteApproval(brdpId, primaryFormat);
       setApproval(null);
+      appendHistoryEntry(brdpId, historyField, 'Approved', 'Revoked');
     } finally {
       setBusy(false);
     }
@@ -96,6 +112,7 @@ export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken 
     try {
       await deleteApproval(brdpId, primaryFormat);
       setApproval(null);
+      appendHistoryEntry(brdpId, historyField, 'Pending review', 'Discarded');
     } finally {
       setBusy(false);
     }
@@ -107,6 +124,7 @@ export function RuleApprovalCell({ brdpId, primaryFormat, approvalsRefreshToken 
     try {
       await approveApproval(brdpId, primaryFormat);
       await reload();
+      appendHistoryEntry(brdpId, historyField, 'Pending review', 'Approved');
     } finally {
       setBusy(false);
     }

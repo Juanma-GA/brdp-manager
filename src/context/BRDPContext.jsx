@@ -121,6 +121,39 @@ export function BRDPProvider({ children }) {
     return updatedBrdp;
   }, [brdps, showToast]);
 
+  // Rule-approval action path (RuleApprovalCell/ChatPanel's Suggest Rule
+  // apply). rule_approvals is a satellite table with its own endpoint --
+  // approve/revoke/discard/propose never touch a BRDP's own fields, so
+  // there's no diff to compute against fieldsToTrack the way updateBRDP()
+  // does. This just appends one literal history entry and PUTs the row,
+  // same selective-PUT path as updateBRDP() (never setBrdps()/saveBRDPs(),
+  // so it can't cascade-wipe other BRDPs' rule_approvals).
+  const appendHistoryEntry = useCallback((id, field, oldValue, newValue) => {
+    let updatedBrdp = null;
+    const updated = brdps.map(b => {
+      if (b.id !== id) return b;
+      const history = [...(b.history || []), {
+        date: new Date().toISOString(),
+        field,
+        oldValue: oldValue || '',
+        newValue: newValue || '',
+      }];
+      updatedBrdp = { ...b, history };
+      return updatedBrdp;
+    });
+
+    setBrdpsState(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+
+    if (updatedBrdp) {
+      updateBRDPApi(id, updatedBrdp).catch(err => {
+        console.error('Failed to save rule approval history entry to server:', err);
+        showToast('Failed to save rule approval history to the server.', 'error');
+      });
+    }
+    return updatedBrdp;
+  }, [brdps, showToast]);
+
   // Bulk-add path for Merge import (DataManagementSection.handleMerge).
   // Only ever called with rows guaranteed not to collide with existing ids
   // (see the collision-abort validation in handleMerge). Does NOT go
@@ -195,6 +228,7 @@ export function BRDPProvider({ children }) {
     brdps,
     setBrdps,
     updateBRDP,
+    appendHistoryEntry,
     addBRDPs,
     deleteBRDPs,
     resetToMock,

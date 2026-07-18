@@ -81,6 +81,14 @@ function ValidationBadge({ status }) {
  */
 export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirtyChange, onDelete, primaryFormat, approvalsRefreshToken }) {
   const { updateBRDP, brdps } = useBRDPContext();
+  // RuleApprovalCell's approve/revoke/discard/propose actions append to this
+  // BRDP's history via appendHistoryEntry() (BRDPContext) without going
+  // through this panel's onUpdate/setDetailBrdp plumbing in BRDPPage.jsx --
+  // the `brdp` prop is a snapshot taken when the panel opened, so it won't
+  // pick those up on its own. Look up the live copy from context for the
+  // history read so Change History reflects rule-approval actions
+  // immediately, without closing/reopening the panel.
+  const liveBrdp = brdps.find(b => b.id === brdp.id) || brdp;
   const { getNote, saveNote } = useLocalNotes();
   const [notes, setNotes] = useState('');
   const [notesDirty, setNotesDirty] = useState(false);
@@ -377,11 +385,11 @@ export default function DetailPanel({ brdp, onClose, showToast, onUpdate, onDirt
             </button>
             {showHistory && (
               <div className={styles.historyContent}>
-                {!Array.isArray(brdp.history) || brdp.history.length === 0 ? (
+                {!Array.isArray(liveBrdp.history) || liveBrdp.history.length === 0 ? (
                   <p className={styles.noHistory}>No changes recorded.</p>
                 ) : (
                   <div className={styles.historyList}>
-                    {[...brdp.history].reverse().map((entry, idx) => {
+                    {[...liveBrdp.history].reverse().map((entry, idx) => {
                       if (!entry || typeof entry !== 'object') return null;
                       return (
                         <div key={idx} className={styles.historyEntry}>
