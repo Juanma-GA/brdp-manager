@@ -33,10 +33,12 @@ class Settings(BaseSettings):
     active_llm_provider: str = "mistral"  # "mistral" | "qwen"
     mistral_api_key: str | None = None
     mistral_endpoint: str = "https://api.mistral.ai/v1/chat/completions"
+    mistral_chat_model: str = "mistral-large-latest"
     mistral_embed_endpoint: str = "https://api.mistral.ai/v1/embeddings"
     mistral_embed_model: str = "mistral-embed"
     qwen_api_key: str | None = None
     qwen_endpoint: str | None = None
+    qwen_chat_model: str = "qwen-plus"
 
     # --- CORS (Phase 3) ---
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:80"]

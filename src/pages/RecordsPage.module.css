@@ -1,0 +1,171 @@
+.page {
+  padding: 24px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 4px;
+  color: #0f172a;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0 0 18px;
+}
+
+.layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.tableWrap {
+  flex: 1;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.createForm {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.createForm input {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: #f8fafc;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.table td {
+  padding: 9px 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.table tr {
+  cursor: pointer;
+}
+
+.selectedRow {
+  background: #eaf2fa;
+}
+
+.mono {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.badge_Validated {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.badge_Refused {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.badge_Pending {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.detailPanel {
+  width: 360px;
+  flex-shrink: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fff;
+}
+
+.detailId {
+  font-family: monospace;
+  font-size: 14px;
+  margin: 0 0 10px;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  margin: 10px 0 4px;
+  text-transform: uppercase;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 50px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+.select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.assistant {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.assistantTitle {
+  font-size: 13.5px;
+  margin: 0 0 8px;
+}
+
+.answerBox,
+.suggestionBox {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+
+.suggestionActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 14px 0;
+}

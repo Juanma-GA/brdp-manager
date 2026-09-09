@@ -60,9 +60,16 @@
 /* Buttons Area */
 .buttons {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
   margin-left: auto;
+}
+
+.userInfo {
+  font-size: 12px;
+  color: var(--text-mid);
+  white-space: nowrap;
 }
 
 /* Chat Button */

@@ -1,0 +1,87 @@
+.page {
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 4px;
+  color: #0f172a;
+}
+
+.subtitle {
+  font-size: 13.5px;
+  color: #64748b;
+  margin: 0;
+}
+
+.error {
+  color: #dc2626;
+}
+
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: #64748b;
+  border: 1px dashed #e2e8f0;
+  border-radius: 10px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.table th {
+  background: #f8fafc;
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.table td {
+  padding: 12px 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.projectName {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.badge {
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eaf2fa;
+  color: #245c90;
+  border: 1px solid #c7ddf0;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+}
+
+.actions button {
+  font-size: 12.5px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  cursor: pointer;
+}

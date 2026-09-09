@@ -21,5 +21,11 @@ class ProjectOut(BaseModel):
     standard: str
     project_config: dict
     created_at: datetime
+    # Computed, not stored: "admin" | "editor" | "viewer" for the CALLER on
+    # THIS project. Added so the frontend can hide edit controls it has no
+    # right to use (docs/v2 §5: "el frontend oculta, el backend impide") --
+    # without this the UI would have to guess, or render editable controls
+    # optimistically and only find out via a failed PUT.
+    my_role: str
 
     model_config = {"from_attributes": True}

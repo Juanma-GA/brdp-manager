@@ -314,3 +314,30 @@ async def test_admin_sees_every_project_editor_sees_only_assigned(client, scenar
     editor_ids = {p["id"] for p in editor_projects.json()}
     assert str(scenario["project_a"].id) in editor_ids
     assert str(scenario["project_b"].id) not in editor_ids
+
+
+async def test_my_role_reflects_the_callers_real_role_per_project(client, scenario):
+    """Phase 4 addition: the frontend hides edit controls based on
+    `my_role` in the project payload, so it has to be computed correctly
+    per caller -- "admin" for an admin (even with no user_project_roles
+    row), "editor"/"viewer" for everyone else, matching their real
+    assignment, never a role the client could influence.
+    """
+    admin_view = (
+        await client.get(f"/api/projects/{scenario['project_a'].id}/config", headers=_headers(scenario["admin"]))
+    ).json()
+    assert admin_view["my_role"] == "admin"
+
+    editor_view = (
+        await client.get(f"/api/projects/{scenario['project_a'].id}/config", headers=_headers(scenario["editor_a"]))
+    ).json()
+    assert editor_view["my_role"] == "editor"
+
+    viewer_view = (
+        await client.get(f"/api/projects/{scenario['project_a'].id}/config", headers=_headers(scenario["viewer_a"]))
+    ).json()
+    assert viewer_view["my_role"] == "viewer"
+
+    list_response = await client.get("/api/projects", headers=_headers(scenario["editor_a"]))
+    project_a_entry = next(p for p in list_response.json() if p["id"] == str(scenario["project_a"].id))
+    assert project_a_entry["my_role"] == "editor"
