@@ -316,28 +316,50 @@ async def test_admin_sees_every_project_editor_sees_only_assigned(client, scenar
     assert str(scenario["project_b"].id) not in editor_ids
 
 
-async def test_my_role_reflects_the_callers_real_role_per_project(client, scenario):
+async def test_effective_role_reflects_the_callers_real_capability_per_project(client, scenario):
     """Phase 4 addition: the frontend hides edit controls based on
-    `my_role` in the project payload, so it has to be computed correctly
-    per caller -- "admin" for an admin (even with no user_project_roles
-    row), "editor"/"viewer" for everyone else, matching their real
-    assignment, never a role the client could influence.
+    `effective_role` in the project payload, so it has to be computed
+    correctly per caller. Unlike the raw user_project_roles.role value,
+    effective_role is never null for an admin -- the admin bypass (§4.3) is
+    resolved server-side to "editor" so the client never re-derives it.
     """
     admin_view = (
         await client.get(f"/api/projects/{scenario['project_a'].id}/config", headers=_headers(scenario["admin"]))
     ).json()
-    assert admin_view["my_role"] == "admin"
+    assert admin_view["effective_role"] == "editor"
 
     editor_view = (
         await client.get(f"/api/projects/{scenario['project_a'].id}/config", headers=_headers(scenario["editor_a"]))
     ).json()
-    assert editor_view["my_role"] == "editor"
+    assert editor_view["effective_role"] == "editor"
 
     viewer_view = (
         await client.get(f"/api/projects/{scenario['project_a'].id}/config", headers=_headers(scenario["viewer_a"]))
     ).json()
-    assert viewer_view["my_role"] == "viewer"
+    assert viewer_view["effective_role"] == "viewer"
 
     list_response = await client.get("/api/projects", headers=_headers(scenario["editor_a"]))
     project_a_entry = next(p for p in list_response.json() if p["id"] == str(scenario["project_a"].id))
-    assert project_a_entry["my_role"] == "editor"
+    assert project_a_entry["effective_role"] == "editor"
+
+
+async def test_list_projects_gives_admin_effective_role_editor_with_no_role_row(client, scenario):
+    """The specific §4.3 read-side case: `scenario["admin"]` has NO
+    user_project_roles row for project_a at all (see the scenario fixture
+    docstring) -- a naive implementation returning the raw row would give
+    null/None here. GET /api/projects must still resolve it to "editor".
+    """
+    list_response = await client.get("/api/projects", headers=_headers(scenario["admin"]))
+    assert list_response.status_code == 200
+    project_a_entry = next(p for p in list_response.json() if p["id"] == str(scenario["project_a"].id))
+    assert project_a_entry["effective_role"] == "editor"
+
+
+async def test_list_projects_gives_real_viewer_effective_role_viewer(client, scenario):
+    """The other side of the same rule: a real (non-admin) viewer role must
+    come through in the list unchanged, not upgraded or dropped.
+    """
+    list_response = await client.get("/api/projects", headers=_headers(scenario["viewer_a"]))
+    assert list_response.status_code == 200
+    project_a_entry = next(p for p in list_response.json() if p["id"] == str(scenario["project_a"].id))
+    assert project_a_entry["effective_role"] == "viewer"

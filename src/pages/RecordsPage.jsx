@@ -11,7 +11,9 @@ export default function RecordsPage() {
   const { t } = useTranslation();
   const { projectId } = useParams();
   const { project } = useOutletContext();
-  const canEdit = project.my_role === 'admin' || project.my_role === 'editor';
+  // project.effective_role is computed server-side (admin already resolved
+  // to 'editor' there, docs/v2 §4.3) -- never re-derive the admin bypass here.
+  const canEdit = project.effective_role === 'editor';
 
   const [brdps, setBrdps] = useState([]);
   const [isLoading, setIsLoading] = useState(true);

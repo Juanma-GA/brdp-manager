@@ -18,15 +18,26 @@ def _require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-def _to_out(project: Project, my_role: str) -> ProjectOut:
+def _to_out(project: Project, effective_role: str) -> ProjectOut:
     return ProjectOut(
         id=project.id,
         name=project.name,
         standard=project.standard,
         project_config=project.project_config,
         created_at=project.created_at,
-        my_role=my_role,
+        effective_role=effective_role,
     )
+
+
+def _resolve_effective_role(user: User, raw_role: str | None) -> str:
+    """Single place that encodes the admin-bypass rule (docs/v2 §4.3) so no
+    frontend component has to repeat "if admin, treat as editor" -- an
+    admin has no user_project_roles row at all, so the raw value for them
+    is always None regardless of which project is being looked at.
+    """
+    if user.global_role == "admin":
+        return "editor"
+    return raw_role or "viewer"
 
 
 async def _get_role_map(db: AsyncSession, user_id: uuid.UUID, project_ids: list[uuid.UUID]) -> dict:
@@ -46,14 +57,15 @@ async def list_projects(
 ) -> list[ProjectOut]:
     """Admin sees every project without needing a user_project_roles row
     (docs/v2 §4.3 clarification); everyone else sees only what they're
-    explicitly assigned to. Each row also carries the caller's own role on
-    that project (my_role) so the frontend can hide edit controls it has
-    no right to use, instead of rendering them optimistically.
+    explicitly assigned to. Each row also carries the caller's effective
+    capability on that project (effective_role) so the frontend can hide
+    edit controls it has no right to use, instead of rendering them
+    optimistically -- and never has to special-case admin itself.
     """
     if current_user.global_role == "admin":
         result = await db.execute(select(Project))
         projects = list(result.scalars().all())
-        return [_to_out(p, "admin") for p in projects]
+        return [_to_out(p, _resolve_effective_role(current_user, None)) for p in projects]
 
     result = await db.execute(
         select(Project)
@@ -62,7 +74,7 @@ async def list_projects(
     )
     projects = list(result.scalars().all())
     role_map = await _get_role_map(db, current_user.id, [p.id for p in projects])
-    return [_to_out(p, role_map.get(p.id, "viewer")) for p in projects]
+    return [_to_out(p, _resolve_effective_role(current_user, role_map.get(p.id))) for p in projects]
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -78,7 +90,7 @@ async def create_project(
     db.add(project)
     await db.commit()
     await db.refresh(project)
-    return _to_out(project, "admin")
+    return _to_out(project, _resolve_effective_role(_admin, None))
 
 
 @router.get("/{project_id}/config", response_model=ProjectOut)
@@ -91,12 +103,10 @@ async def get_project_config(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    if current_user.global_role == "admin":
-        my_role = "admin"
-    else:
-        role_map = await _get_role_map(db, current_user.id, [project_id])
-        my_role = role_map.get(project_id, "viewer")
-    return _to_out(project, my_role)
+    # Skip the lookup entirely for admin -- _resolve_effective_role ignores
+    # raw_role for them anyway (there is no user_project_roles row to find).
+    role_map = {} if current_user.global_role == "admin" else await _get_role_map(db, current_user.id, [project_id])
+    return _to_out(project, _resolve_effective_role(current_user, role_map.get(project_id)))
 
 
 @router.put("/{project_id}/config", response_model=ProjectOut)
@@ -113,5 +123,6 @@ async def update_project_config(
     await db.commit()
     await db.refresh(project)
 
-    my_role = "admin" if current_user.global_role == "admin" else "editor"
-    return _to_out(project, my_role)
+    # require_project_role("editor") above already guarantees the caller is
+    # either admin or has a real "editor" row -- both resolve to "editor".
+    return _to_out(project, _resolve_effective_role(current_user, "editor"))

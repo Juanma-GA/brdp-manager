@@ -23,9 +23,10 @@ export default function ProjectConfigPage() {
 
   // canEdit is purely cosmetic (disables the form) -- the backend's
   // require_project_role('editor') on PUT is the real gate regardless of
-  // what this renders. project.my_role is computed server-side per
-  // request, never trusted from anywhere else.
-  const canEdit = project.my_role === 'admin' || project.my_role === 'editor';
+  // what this renders. project.effective_role is computed server-side
+  // (admin already resolved to 'editor' there, docs/v2 §4.3), so this
+  // never needs its own admin special case.
+  const canEdit = project.effective_role === 'editor';
 
   useEffect(() => {
     setValues(project.project_config || {});
