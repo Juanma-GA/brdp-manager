@@ -44,21 +44,43 @@ export function storeRefreshToken(token) {
   }
 }
 
-async function refreshAccessToken() {
-  const refreshToken = getStoredRefreshToken();
-  if (!refreshToken) return false;
+// Refresh tokens rotate on use (backend/app/api/routes/auth.py: the old one
+// is revoked the instant a new pair is issued), so two callers racing with
+// the SAME stored refresh token is a real failure mode, not a hypothetical
+// one -- React 18 StrictMode double-invokes AuthContext's mount effect in
+// dev, and this exact race was caught live: the first request rotates the
+// token and succeeds, the second (still holding the now-revoked token)
+// gets a genuine 401 from the backend and would otherwise log a perfectly
+// valid session out. Every caller (authFetch's 401 handler, AuthContext's
+// restore-on-mount) must go through this single in-flight promise instead
+// of each firing its own request.
+let refreshPromise = null;
 
-  const res = await fetch('/api/auth/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  });
-  if (!res.ok) return false;
+export async function refreshAccessToken() {
+  if (refreshPromise) return refreshPromise;
 
-  const data = await res.json();
-  setAccessToken(data.access_token);
-  storeRefreshToken(data.refresh_token);
-  return true;
+  refreshPromise = (async () => {
+    const refreshToken = getStoredRefreshToken();
+    if (!refreshToken) return false;
+
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return false;
+
+    const data = await res.json();
+    setAccessToken(data.access_token);
+    storeRefreshToken(data.refresh_token);
+    return true;
+  })();
+
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
 }
 
 export async function authFetch(path, options = {}) {

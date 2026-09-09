@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { authFetchJson, configureAuth, getStoredRefreshToken, storeRefreshToken } from '../services/apiClient';
+import {
+  authFetchJson,
+  configureAuth,
+  getStoredRefreshToken,
+  refreshAccessToken,
+  storeRefreshToken,
+} from '../services/apiClient';
 
 const AuthContext = createContext();
 
@@ -48,7 +54,12 @@ export function AuthProvider({ children }) {
 
   // On mount, try to restore a session from the stored refresh token --
   // this is what makes "refresh (F5) keeps you logged in" actually true,
-  // instead of just "the route exists".
+  // instead of just "the route exists". Goes through the shared
+  // refreshAccessToken() (apiClient.js) rather than its own fetch: React 18
+  // StrictMode double-invokes this effect in dev, and refresh tokens
+  // rotate on use, so two independent calls racing on the same stored
+  // token would have the second one legitimately rejected as already
+  // revoked -- logging out a session that was never actually invalid.
   useEffect(() => {
     let cancelled = false;
     async function restore() {
@@ -58,16 +69,9 @@ export function AuthProvider({ children }) {
         return;
       }
       try {
-        const res = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-        if (!res.ok) throw new Error('refresh failed');
-        const data = await res.json();
+        const refreshed = await refreshAccessToken();
+        if (!refreshed) throw new Error('refresh failed');
         if (cancelled) return;
-        setAccessToken(data.access_token);
-        storeRefreshToken(data.refresh_token);
         const me = await authFetchJson('/api/auth/me');
         if (!cancelled) setUser(me);
       } catch {
