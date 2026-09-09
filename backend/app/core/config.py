@@ -1,6 +1,9 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -37,6 +40,12 @@ class Settings(BaseSettings):
 
     # --- CORS (Phase 3) ---
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:80"]
+
+    # --- BREX XSD validation (Phase 3) ---
+    # v1's real reference schemas (server.js's BREX_XSD_MAP) -- gitignored in
+    # the repo root (large reference material provisioned separately), not
+    # something this backend ships copies of.
+    sources_dir: str = str(_REPO_ROOT / "sources")
 
 
 @lru_cache

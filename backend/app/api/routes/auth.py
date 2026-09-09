@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.config import get_settings
+from app.core.rate_limit import clear_attempts, is_locked_out, record_failed_attempt
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
@@ -36,12 +37,20 @@ async def _issue_tokens(user: User, db: AsyncSession) -> TokenResponse:
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    if is_locked_out(body.email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again later.",
+        )
+
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.password_hash):
+        record_failed_attempt(body.email)
         # Same error for "no such user" and "wrong password" -- never
         # reveal which one to an unauthenticated caller.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    clear_attempts(body.email)
     return await _issue_tokens(user, db)
 
 

@@ -147,3 +147,25 @@ async def test_logout_revokes_refresh_token(client, test_user):
 async def test_logout_with_unknown_token_is_a_noop_not_an_error(client):
     response = await client.post("/api/auth/logout", json={"refresh_token": "never-issued"})
     assert response.status_code == 204
+
+
+async def test_login_locks_out_after_repeated_failures(client, test_user):
+    from app.core.rate_limit import _MAX_ATTEMPTS, clear_attempts
+
+    clear_attempts(test_user.email)
+    for _ in range(_MAX_ATTEMPTS):
+        response = await client.post(
+            "/api/auth/login", json={"email": test_user.email, "password": "wrong-password"}
+        )
+        assert response.status_code == 401
+
+    locked = await client.post(
+        "/api/auth/login", json={"email": test_user.email, "password": "wrong-password"}
+    )
+    assert locked.status_code == 429
+
+    # Even the CORRECT password is locked out during the window.
+    still_locked = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    assert still_locked.status_code == 429
+
+    clear_attempts(test_user.email)

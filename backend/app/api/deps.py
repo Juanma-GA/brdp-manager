@@ -1,5 +1,6 @@
 import uuid
 
+import httpx
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -83,3 +84,12 @@ def require_project_role(min_role: str):
         return current_user
 
     return dependency
+
+
+def get_httpx_transport() -> httpx.AsyncBaseTransport | None:
+    """Overridden in tests (app.dependency_overrides) with an
+    httpx.MockTransport so api/routes/llm_proxy.py can be tested without a
+    real Mistral/Qwen API key -- production leaves this None, which makes
+    httpx.AsyncClient use its real network transport.
+    """
+    return None
