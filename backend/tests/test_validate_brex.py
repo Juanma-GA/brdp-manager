@@ -9,6 +9,8 @@ actually emits. Cross-validating it here confirms the relative xlink/rdf/dc
 xs:import resolution (server.js's old xmllint-wasm preload list) also works
 with lxml's real filesystem-based resolution.
 """
+from pathlib import Path
+
 import pytest
 
 from app.core.security import hash_password
@@ -140,3 +142,82 @@ async def test_every_supported_format_loads_its_own_schema_without_error(client,
     )
     assert response.status_code == 200
     assert response.json()["valid"] is False
+
+
+def test_no_xsd_in_sources_declares_an_absolute_url_schemalocation():
+    """Cheap static guard against a future XSD file swap silently
+    reintroducing the exact risk the network test below rules out today:
+    lxml resolves an absolute http(s) schemaLocation over the network by
+    default, and would either hang or fail in a locked-down deployment with
+    no outbound internet. If this ever fails, the real fix is dropping a
+    local copy next to the importing XSD and changing schemaLocation to a
+    relative path -- not adding a custom Resolver as a band-aid.
+    """
+    import re
+
+    from app.core.config import get_settings
+
+    sources_dir = Path(get_settings().sources_dir)
+    offenders = []
+    for subdir in ("S3.0.1", "S4.1", "S4.2"):
+        for xsd_file in (sources_dir / subdir).glob("*.xsd"):
+            text = xsd_file.read_text()
+            for match in re.finditer(r'schemaLocation="(https?://[^"]+)"', text):
+                offenders.append(f"{xsd_file}: {match.group(1)}")
+    assert offenders == [], f"Absolute-URL schemaLocation found (network dependency risk): {offenders}"
+
+
+def test_xsd_schema_loading_and_validation_works_with_zero_network_access():
+    """The concrete risk: lxml.etree.XMLSchema resolves an absolute-URL
+    schemaLocation over the network when a referenced import is actually
+    needed to complete the schema. A Python-level socket monkeypatch does
+    NOT catch this -- confirmed empirically while writing this test:
+    libxml2 (the C library lxml binds) does its own network I/O in C,
+    completely bypassing Python's socket module, so a schema with a real
+    http:// import still "loaded successfully" with socket.socket patched
+    to raise. The only reliable way to prove zero network dependency is to
+    remove the network at the OS level, below both Python and libxml2 --
+    hence shelling out to a real `unshare --net` subprocess (no network
+    namespace at all, not even loopback) rather than trying to fake it
+    in-process.
+
+    Skips (doesn't fail) if `unshare --net` isn't usable in this
+    environment (needs root or unprivileged user namespaces) -- this is a
+    strong extra check when it can run, not the primary guard. The
+    primary, environment-independent guard is
+    test_no_xsd_in_sources_declares_an_absolute_url_schemalocation above:
+    since our real XSDs only ever use relative schemaLocation, whether
+    libxml2 *would* hit the network for an absolute one is moot.
+    """
+    import shutil
+    import subprocess
+    import sys
+    import textwrap
+
+    if shutil.which("unshare") is None:
+        pytest.skip("unshare not available in this environment")
+
+    from app.core.config import get_settings
+
+    script = textwrap.dedent(f"""
+        from pathlib import Path
+        from lxml import etree
+        for subdir, filename in (("S3.0.1", "brex.xsd"), ("S4.1", "brex4.1.xsd"), ("S4.2", "brex4.2.xsd")):
+            path = Path({str(get_settings().sources_dir)!r}) / subdir / filename
+            doc = etree.parse(str(path))
+            schema = etree.XMLSchema(doc)
+            schema.validate(etree.fromstring(b"<x/>"))
+        print("OK")
+    """)
+
+    result = subprocess.run(
+        ["unshare", "--net", sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0 and "Operation not permitted" in result.stderr:
+        pytest.skip(f"unshare --net not permitted in this environment: {result.stderr.strip()}")
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert "OK" in result.stdout
