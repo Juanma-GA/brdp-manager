@@ -1,0 +1,85 @@
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user
+from app.core.config import get_settings
+from app.core.security import (
+    create_access_token,
+    generate_refresh_token,
+    hash_refresh_token,
+    verify_password,
+)
+from app.db.base import get_db
+from app.models import RefreshToken, User
+from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse, UserOut
+
+router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+async def _issue_tokens(user: User, db: AsyncSession) -> TokenResponse:
+    settings = get_settings()
+    access_token = create_access_token(user.id)
+    raw_refresh, refresh_hash = generate_refresh_token()
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash=refresh_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days),
+        )
+    )
+    await db.commit()
+    return TokenResponse(access_token=access_token, refresh_token=raw_refresh)
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+    if user is None or not verify_password(body.password, user.password_hash):
+        # Same error for "no such user" and "wrong password" -- never
+        # reveal which one to an unauthenticated caller.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    return await _issue_tokens(user, db)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    token_hash = hash_refresh_token(body.refresh_token)
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    stored = result.scalar_one_or_none()
+
+    invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+    if stored is None or stored.revoked_at is not None:
+        raise invalid
+    if stored.expires_at < datetime.now(timezone.utc):
+        raise invalid
+
+    user = await db.get(User, stored.user_id)
+    if user is None:
+        raise invalid
+
+    # Rotate: revoke the token that was just used, issue a fresh pair. Limits
+    # the blast radius of a leaked refresh token to a single use.
+    stored.revoked_at = datetime.now(timezone.utc)
+    await db.commit()
+    return await _issue_tokens(user, db)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> None:
+    token_hash = hash_refresh_token(body.refresh_token)
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    stored = result.scalar_one_or_none()
+    if stored is not None and stored.revoked_at is None:
+        stored.revoked_at = datetime.now(timezone.utc)
+        await db.commit()
+    # Logging out an already-revoked or unknown token is a no-op, not an
+    # error -- the caller's goal (no valid session left) is already true.
+
+
+@router.get("/me", response_model=UserOut)
+async def me(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
