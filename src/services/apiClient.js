@@ -51,10 +51,35 @@ export function storeRefreshToken(token) {
 // dev, and this exact race was caught live: the first request rotates the
 // token and succeeds, the second (still holding the now-revoked token)
 // gets a genuine 401 from the backend and would otherwise log a perfectly
-// valid session out. Every caller (authFetch's 401 handler, AuthContext's
-// restore-on-mount) must go through this single in-flight promise instead
-// of each firing its own request.
+// valid session out.
+//
+// Two distinct races, two distinct guards, both needed:
+//  1. Same page, concurrent callers (StrictMode's double-mount; authFetch's
+//     401 handler racing AuthContext's restore-on-mount) -- guarded by
+//     caching the in-flight promise so they all await the SAME network
+//     call instead of each firing their own.
+//  2. Different browser tabs of the same origin, each with their own JS
+//     module state (so the in-flight promise above can't see across
+//     tabs), sharing the one thing that IS cross-tab: localStorage. If tab
+//     B's request loses the race, tab A has by then already written the
+//     new refresh token to localStorage -- so before giving up, re-read it
+//     and retry once with whatever is actually stored now, instead of
+//     assuming a 401 here always means the session itself is dead.
 let refreshPromise = null;
+
+async function doRefresh(refreshToken) {
+  const res = await fetch('/api/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (!res.ok) return false;
+
+  const data = await res.json();
+  setAccessToken(data.access_token);
+  storeRefreshToken(data.refresh_token);
+  return true;
+}
 
 export async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
@@ -63,17 +88,16 @@ export async function refreshAccessToken() {
     const refreshToken = getStoredRefreshToken();
     if (!refreshToken) return false;
 
-    const res = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-    if (!res.ok) return false;
+    if (await doRefresh(refreshToken)) return true;
 
-    const data = await res.json();
-    setAccessToken(data.access_token);
-    storeRefreshToken(data.refresh_token);
-    return true;
+    // Failed -- but another tab may have rotated the token out from under
+    // us between our read and our request. Only worth retrying if the
+    // stored value actually moved; if it's unchanged, the 401 is real.
+    const currentToken = getStoredRefreshToken();
+    if (currentToken && currentToken !== refreshToken) {
+      return doRefresh(currentToken);
+    }
+    return false;
   })();
 
   try {
