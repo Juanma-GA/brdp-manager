@@ -12,6 +12,13 @@ class UserCreate(BaseModel):
     global_role: str = "user"  # "user" | "admin"
 
 
+class UserUpdate(BaseModel):
+    # global_role is deliberately absent -- only assignable at creation
+    # (this round's spec), never editable afterward through this endpoint.
+    email: EmailStr
+    display_name: str
+
+
 class ProjectRoleAssign(BaseModel):
     project_id: uuid.UUID
     role: str  # "viewer" | "editor"

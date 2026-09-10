@@ -220,6 +220,31 @@
   color: #dc2626;
 }
 
+.actionsCell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.actionsCell button {
+  font-size: 12px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid #dde3ec;
+  background: #fff;
+  cursor: pointer;
+}
+
+.actionsCell button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerLink {
+  color: #dc2626 !important;
+  border-color: #fecaca !important;
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 16px;

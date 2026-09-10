@@ -15,7 +15,7 @@ from app.core.security import (
 )
 from app.db.base import get_db
 from app.models import RefreshToken, User
-from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse, UserOut
+from app.schemas.auth import LoginRequest, MeUpdate, RefreshRequest, TokenResponse, UserOut
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -91,4 +91,19 @@ async def logout(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> No
 
 @router.get("/me", response_model=UserOut)
 async def me(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    body: MeUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> User:
+    """Self-service profile edit -- MeUpdate has no email/global_role field
+    at all, so neither can be smuggled in here regardless of what the
+    request body contains (no admin self-grant possible through this
+    endpoint, unlike PATCH /api/users/{id} which is admin-only anyway).
+    """
+    current_user.display_name = body.display_name
+    await db.commit()
+    await db.refresh(current_user)
     return current_user

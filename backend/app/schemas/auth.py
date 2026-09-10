@@ -25,3 +25,10 @@ class UserOut(BaseModel):
     global_role: str
 
     model_config = {"from_attributes": True}
+
+
+class MeUpdate(BaseModel):
+    # email and global_role are deliberately absent -- a user editing their
+    # own profile must never be able to touch either, especially not
+    # global_role (self-granting admin). Only display_name is editable here.
+    display_name: str

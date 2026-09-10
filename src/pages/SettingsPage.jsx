@@ -5,8 +5,39 @@ import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
 import styles from './SettingsPage.module.css';
 
-function ProfileSection({ user }) {
+function ProfileSection({ user, onUserUpdated }) {
   const { t } = useTranslation();
+  const [displayName, setDisplayName] = useState(user.display_name);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setDisplayName(user.display_name);
+  }, [user.display_name]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const updated = await authFetchJson('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_name: displayName }),
+      });
+      onUserUpdated(updated);
+      setSaved(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isUnchanged = displayName === user.display_name;
+
   return (
     <div className={styles.section}>
       <h3 className={styles.sectionTitle}>{t('settings.profile.title')}</h3>
@@ -14,51 +45,34 @@ function ProfileSection({ user }) {
         <label className={styles.label}>{t('settings.profile.email')}</label>
         <input className={styles.input} value={user.email} disabled />
       </div>
-      <div className={styles.formGroup}>
-        <label className={styles.label}>{t('settings.profile.displayName')}</label>
-        <input className={styles.input} value={user.display_name} disabled />
-      </div>
-      <div className={styles.formGroup}>
-        <label className={styles.label}>{t('settings.profile.globalRole')}</label>
-        <input className={styles.input} value={user.global_role} disabled />
-      </div>
+      <form onSubmit={handleSave}>
+        <div className={styles.formGroup}>
+          <label className={styles.label}>{t('settings.profile.displayName')}</label>
+          <input
+            className={styles.input}
+            value={displayName}
+            required
+            onChange={(e) => {
+              setDisplayName(e.target.value);
+              setSaved(false);
+            }}
+          />
+        </div>
+        <div className={styles.formGroup}>
+          <label className={styles.label}>{t('settings.profile.globalRole')}</label>
+          <input className={styles.input} value={user.global_role} disabled />
+        </div>
+        {error && <p className={styles.statusInvalid}>{error}</p>}
+        <button className={styles.button} type="submit" disabled={saving || isUnchanged}>
+          {saving ? t('settings.profile.saving') : t('settings.profile.save')}
+        </button>
+        {saved && <span className={styles.statusSaved}>{t('settings.profile.saved')}</span>}
+      </form>
     </div>
   );
 }
 
-function AIConfigSection() {
-  const { t } = useTranslation();
-  const [aiProvider, setAiProvider] = useState(null);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    authFetchJson('/api/config/ai-provider')
-      .then(setAiProvider)
-      .catch((err) => setError(err.message));
-  }, []);
-
-  return (
-    <div className={styles.section}>
-      <h3 className={styles.sectionTitle}>{t('settings.aiConfig.title')}</h3>
-      <p className={styles.fieldDescription}>{t('settings.aiConfig.description')}</p>
-      {error && <p className={styles.statusInvalid}>{error}</p>}
-      {aiProvider && (
-        <>
-          <div className={styles.formGroup}>
-            <label className={styles.label}>{t('settings.aiConfig.provider')}</label>
-            <input className={styles.input} value={aiProvider.provider} disabled />
-          </div>
-          <div className={styles.formGroup}>
-            <label className={styles.label}>{t('settings.aiConfig.model')}</label>
-            <input className={styles.input} value={aiProvider.model} disabled />
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function UserManagementSection() {
+function UserManagementSection({ currentUserId }) {
   const { t } = useTranslation();
   const { projects } = useProjectContext();
   const [users, setUsers] = useState([]);
@@ -69,6 +83,12 @@ function UserManagementSection() {
   const [creating, setCreating] = useState(false);
 
   const [roleDraft, setRoleDraft] = useState({}); // userId -> { project_id, role }
+
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [editDraft, setEditDraft] = useState({ email: '', display_name: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const adminCount = users.filter((u) => u.global_role === 'admin').length;
 
   const refresh = () =>
     authFetchJson('/api/users')
@@ -118,6 +138,44 @@ function UserManagementSection() {
   const handleRemoveRole = async (userId, projectId) => {
     await authFetchJson(`/api/users/${userId}/project-roles/${projectId}`, { method: 'DELETE' });
     refresh();
+  };
+
+  const startEdit = (u) => {
+    setEditingUserId(u.id);
+    setEditDraft({ email: u.email, display_name: u.display_name });
+    setError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingUserId(null);
+  };
+
+  const handleSaveEdit = async (userId) => {
+    setSavingEdit(true);
+    setError(null);
+    try {
+      await authFetchJson(`/api/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editDraft),
+      });
+      setEditingUserId(null);
+      refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDelete = async (u) => {
+    if (!window.confirm(t('settings.userManagement.deleteConfirm', { name: u.display_name }))) return;
+    try {
+      await authFetchJson(`/api/users/${u.id}`, { method: 'DELETE' });
+      refresh();
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const projectName = (id) => projects.find((p) => p.id === id)?.name || id;
@@ -184,13 +242,41 @@ function UserManagementSection() {
               <th>{t('settings.userManagement.table.globalRole')}</th>
               <th>{t('settings.userManagement.table.projectRoles')}</th>
               <th>{t('settings.userManagement.table.assign')}</th>
+              <th>{t('settings.userManagement.table.actions')}</th>
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {users.map((u) => {
+              const isEditing = editingUserId === u.id;
+              const isSelf = u.id === currentUserId;
+              const isLastAdmin = u.global_role === 'admin' && adminCount <= 1;
+              return (
               <tr key={u.id}>
-                <td>{u.email}</td>
-                <td>{u.display_name}</td>
+                <td>
+                  {isEditing ? (
+                    <input
+                      className={styles.input}
+                      type="email"
+                      required
+                      value={editDraft.email}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
+                    />
+                  ) : (
+                    u.email
+                  )}
+                </td>
+                <td>
+                  {isEditing ? (
+                    <input
+                      className={styles.input}
+                      required
+                      value={editDraft.display_name}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, display_name: e.target.value }))}
+                    />
+                  ) : (
+                    u.display_name
+                  )}
+                </td>
                 <td>{u.global_role}</td>
                 <td>
                   {u.project_roles.length === 0 ? (
@@ -238,8 +324,47 @@ function UserManagementSection() {
                     {t('settings.userManagement.assignButton')}
                   </button>
                 </td>
+                <td>
+                  {isEditing ? (
+                    <div className={styles.actionsCell}>
+                      <button
+                        type="button"
+                        className={styles.button}
+                        onClick={() => handleSaveEdit(u.id)}
+                        disabled={savingEdit}
+                      >
+                        {savingEdit ? t('settings.userManagement.saving') : t('settings.userManagement.save')}
+                      </button>
+                      <button type="button" onClick={cancelEdit} disabled={savingEdit}>
+                        {t('settings.userManagement.cancel')}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className={styles.actionsCell}>
+                      <button type="button" onClick={() => startEdit(u)}>
+                        {t('settings.userManagement.edit')}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.dangerLink}
+                        onClick={() => handleDelete(u)}
+                        disabled={isSelf || isLastAdmin}
+                        title={
+                          isSelf
+                            ? t('settings.userManagement.deleteDisabledSelf')
+                            : isLastAdmin
+                            ? t('settings.userManagement.deleteDisabledLastAdmin')
+                            : undefined
+                        }
+                      >
+                        {t('settings.userManagement.delete')}
+                      </button>
+                    </div>
+                  )}
+                </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -249,7 +374,7 @@ function UserManagementSection() {
 
 export default function SettingsPage() {
   const { t } = useTranslation();
-  const { user } = useAuthContext();
+  const { user, updateUser } = useAuthContext();
 
   if (!user) return null;
 
@@ -257,9 +382,8 @@ export default function SettingsPage() {
     <div className={styles.container}>
       <h2 className={styles.title}>{t('nav.settings')}</h2>
       <div className={styles.sectionsContainer}>
-        <ProfileSection user={user} />
-        <AIConfigSection />
-        {user.global_role === 'admin' && <UserManagementSection />}
+        <ProfileSection user={user} onUserUpdated={updateUser} />
+        {user.global_role === 'admin' && <UserManagementSection currentUserId={user.id} />}
       </div>
     </div>
   );

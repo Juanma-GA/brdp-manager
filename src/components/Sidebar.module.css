@@ -65,6 +65,7 @@
   transition: all 0.2s;
   background: transparent;
   outline: none;
+  text-decoration: none;
 }
 
 .navItem:hover {

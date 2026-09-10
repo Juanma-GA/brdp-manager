@@ -71,6 +71,22 @@ async def test_non_admin_cannot_assign_project_roles(client, non_admin_and_admin
     assert response.status_code == 403
 
 
+async def test_non_admin_cannot_patch_another_user(client, non_admin_and_admin):
+    non_admin, target = non_admin_and_admin
+    response = await client.patch(
+        f"/api/users/{target.id}",
+        json={"email": target.email, "display_name": "Hacked Name"},
+        headers=_headers(non_admin),
+    )
+    assert response.status_code == 403
+
+
+async def test_non_admin_cannot_delete_another_user(client, non_admin_and_admin):
+    non_admin, target = non_admin_and_admin
+    response = await client.delete(f"/api/users/{target.id}", headers=_headers(non_admin))
+    assert response.status_code == 403
+
+
 async def test_admin_can_list_and_create_users(client, non_admin_and_admin):
     _, admin = non_admin_and_admin
     listed = await client.get("/api/users", headers=_headers(admin))

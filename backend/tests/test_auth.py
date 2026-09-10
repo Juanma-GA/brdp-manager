@@ -110,6 +110,66 @@ async def test_me_with_malformed_token_rejected(client):
     assert response.status_code == 401
 
 
+async def test_me_update_changes_display_name(client, test_user):
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+
+    response = await client.patch(
+        "/api/auth/me",
+        json={"display_name": "Renamed Self"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["display_name"] == "Renamed Self"
+
+    async with async_session_factory() as session:
+        db_user = await session.get(User, test_user.id)
+        assert db_user.display_name == "Renamed Self"
+
+
+async def test_me_update_ignores_global_role_change(client):
+    """A non-admin sending global_role in the PATCH /api/auth/me body must
+    NOT become admin -- MeUpdate has no global_role field at all, so this
+    confirms the extra field is silently dropped, not silently applied.
+    """
+    async with async_session_factory() as session:
+        user = User(
+            email=f"selfpromote-{uuid.uuid4()}@example.com",
+            password_hash=hash_password(TEST_PASSWORD),
+            display_name="Would-Be Admin",
+            global_role="user",
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+    try:
+        login = await client.post("/api/auth/login", json={"email": user.email, "password": TEST_PASSWORD})
+        access_token = login.json()["access_token"]
+
+        response = await client.patch(
+            "/api/auth/me",
+            json={"display_name": "Still Not Admin", "global_role": "admin", "email": "hijacked@example.com"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["global_role"] == "user"
+        assert body["email"] == user.email
+        assert body["display_name"] == "Still Not Admin"
+
+        async with async_session_factory() as session:
+            db_user = await session.get(User, user.id)
+            assert db_user.global_role == "user"
+            assert db_user.email == user.email
+    finally:
+        async with async_session_factory() as session:
+            db_user = await session.get(User, user.id)
+            if db_user is not None:
+                await session.delete(db_user)
+                await session.commit()
+
+
 async def test_refresh_rotates_token_and_invalidates_the_old_one(client, test_user):
     login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
     old_refresh = login.json()["refresh_token"]

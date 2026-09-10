@@ -105,6 +105,15 @@ export function AuthProvider({ children }) {
     [setAccessToken]
   );
 
+  // Lets a component that just PATCHed /api/auth/me (SettingsPage's own
+  // Display Name edit) hand back the fresh User it already got in the
+  // response, without a redundant extra GET -- every other piece of UI
+  // reading `user` (e.g. the Header) picks up the change immediately since
+  // it's the same context value.
+  const updateUser = useCallback((updatedUser) => {
+    setUser(updatedUser);
+  }, []);
+
   const value = {
     user,
     accessToken,
@@ -112,6 +121,7 @@ export function AuthProvider({ children }) {
     isLoading,
     login,
     logout,
+    updateUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
