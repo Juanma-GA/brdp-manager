@@ -15,6 +15,13 @@ class ProjectConfigUpdate(BaseModel):
     project_config: dict
 
 
+class ProjectRename(BaseModel):
+    # standard is deliberately absent here and everywhere else in the API --
+    # fixed for the project's lifetime once created (docs/v2 §2), never
+    # editable through any endpoint.
+    name: str
+
+
 class ProjectOut(BaseModel):
     id: uuid.UUID
     name: str

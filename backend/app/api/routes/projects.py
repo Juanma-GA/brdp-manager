@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, require_project_role
 from app.db.base import get_db
 from app.models import Project, User, UserProjectRole
-from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut
+from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut, ProjectRename
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -126,3 +126,46 @@ async def update_project_config(
     # require_project_role("editor") above already guarantees the caller is
     # either admin or has a real "editor" row -- both resolve to "editor".
     return _to_out(project, _resolve_effective_role(current_user, "editor"))
+
+
+@router.patch("/{project_id}", response_model=ProjectOut)
+async def rename_project(
+    project_id: uuid.UUID,
+    body: ProjectRename,
+    current_user: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectOut:
+    """Renames a project -- the PUT on /config only ever touches
+    project_config, never projects.name, so this is a separate endpoint
+    rather than folding name into that body. Same editor-level gate as
+    /config (project-level metadata, not the higher bar DELETE needs).
+    """
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    project.name = body.name
+    await db.commit()
+    await db.refresh(project)
+    return _to_out(project, _resolve_effective_role(current_user, "editor"))
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_id: uuid.UUID,
+    _admin: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Admin-only, deliberately stricter than editor -- an editor can
+    change everything about a project's CONTENT but must never be able to
+    make the project itself disappear, same reasoning as create_project.
+    The actual cascade (brdps, and from there notes/rule_approvals/
+    suggestion_feedback, plus user_project_roles) is real DB-level
+    ON DELETE CASCADE on those foreign keys (see the 0001 migration) --
+    this just deletes the project row and lets Postgres do the rest,
+    rather than issuing a manual DELETE per child table.
+    """
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await db.delete(project)
+    await db.commit()

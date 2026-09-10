@@ -45,7 +45,7 @@ def _mock_query_embedding_transport():
     app.dependency_overrides.pop(get_httpx_transport, None)
 
 
-async def _make_project(standard: str = "S1000D 4.2") -> Project:
+async def _make_project(standard: str = "BREX — S1000D 4.2") -> Project:
     async with async_session_factory() as session:
         project = Project(name=f"Similar Test Project {uuid.uuid4()}", standard=standard)
         session.add(project)
@@ -228,8 +228,8 @@ async def test_source_brdp_never_appears_in_its_own_candidates(client):
 
 
 async def test_different_standard_is_excluded_from_candidates(client):
-    project_a = await _make_project(standard="S1000D 4.2")
-    project_b = await _make_project(standard="S1000D 3.0.1")
+    project_a = await _make_project(standard="BREX — S1000D 4.2")
+    project_b = await _make_project(standard="BREX — S1000D 3.0.1")
     editor = await _make_editor(project_a.id)
     source = await _make_source_brdp(project_a.id)
     # Enough close candidates in project_b to pass MIN_CANDIDATES on their
@@ -250,7 +250,7 @@ async def test_different_standard_is_excluded_from_candidates(client):
 
 
 async def test_kind_rule_maps_project_standard_to_rule_format(client):
-    project = await _make_project(standard="S1000D 4.2")
+    project = await _make_project(standard="BREX — S1000D 4.2")
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     candidates = [
@@ -273,7 +273,7 @@ async def test_kind_rule_maps_project_standard_to_rule_format(client):
 
 
 async def test_kind_rule_unsupported_standard_returns_400(client):
-    project = await _make_project(standard="DITA 1.3")
+    project = await _make_project(standard="Schematron 1.0 — DITA")
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     try:

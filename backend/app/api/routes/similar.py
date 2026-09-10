@@ -33,17 +33,20 @@ MIN_SIMILARITY = 0.5
 
 CANDIDATE_LIMIT = 10
 
-# project.standard (fixed per project, docs/v2 §2) -> the rule_approvals
-# format its BREX rules are stored under. Schematron formats are derived
-# from BREX-3.0.1 deterministically (see CLAUDE.md's brexToSchematron
-# section), not something a user directly "Suggests a Rule" for, so only
-# the three BREX standards map here; anything else (DITA, unrecognized)
-# has no rule-kind precedent available. Flagged here, not hidden: this is
-# a scope decision docs/v2 §3 doesn't spell out explicitly.
+# project.standard (fixed per project, docs/v2 §2 -- one of the exact 7
+# strings the Create Project dropdown offers) -> the rule_approvals format
+# its rules are stored under. "Schematron 1.0 — S1000D" rules are frozen
+# under "SCH-S1000D", not "BREX-3.0.1" -- generateBREXSch.js generates a
+# real BREX 3.0.1 under the hood and converts it deterministically
+# (brexToSchematron.js), but keys its OWN frozen approvals under the
+# Schematron format id, matching generateBREXSch.js's own
+# `approvalsFormat: 'SCH-S1000D'` (see CLAUDE.md). DITA has no rule-kind
+# precedent at all -- there is no BREX equivalent for it.
 _STANDARD_TO_RULE_FORMAT = {
-    "S1000D 4.2": "BREX-4.2",
-    "S1000D 4.1": "BREX-4.1",
-    "S1000D 3.0.1": "BREX-3.0.1",
+    "BREX — S1000D 4.2": "BREX-4.2",
+    "BREX — S1000D 4.1": "BREX-4.1",
+    "BREX — S1000D 3.0.1": "BREX-3.0.1",
+    "Schematron 1.0 — S1000D": "SCH-S1000D",
 }
 
 

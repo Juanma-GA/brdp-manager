@@ -5,6 +5,7 @@ import { authFetchJson } from '../services/apiClient';
 import { generateBREX } from '../api/generateBREX';
 import { generateBREX41 } from '../api/generateBREX41.js';
 import { generateBREX301 } from '../api/generateBREX301.js';
+import { generateBREXSch } from '../api/generateBREXSch.js';
 import { generateSchematronDITA } from '../api/generateSchematronDITA.js';
 import styles from './GeneratePage.module.css';
 
@@ -12,27 +13,24 @@ import styles from './GeneratePage.module.css';
 // each generator's `approvalsFormat` default) -- kept here explicitly
 // because this page fetches approvals itself (see below) instead of
 // letting the generator do it.
+// docs/v2 §1/§2: project.standard is fixed at project creation, is one of
+// the 7 exact display strings the Create Project dropdown offers, and IS
+// the generation format directly -- "Generate BREX/Schematron no ofrece
+// selector, genera directamente el formato del proyecto", one project
+// standard maps to exactly one generation format, never an open choice at
+// generate time. "Schematron 1.0 — S1000D" generates via generateBREXSch,
+// which reuses generateBREX301 internally to build a real BREX 3.0.1 and
+// converts it deterministically (brexToSchematron.js, see CLAUDE.md) --
+// same reasoning already applied to routes/similar.py's kind='rule'
+// standard->format mapping on the backend, kept consistent here. S1000D
+// 5.0/6.0 have no entry: no generation engine exists for them yet
+// (CLAUDE.md "Lo que NO está implementado todavía").
 const FORMAT_DEFS = {
   'BREX — S1000D 4.2': { approvalsFormat: 'BREX-4.2', xsdFormat: '4.2', run: generateBREX },
   'BREX — S1000D 4.1': { approvalsFormat: 'BREX-4.1', xsdFormat: '4.1', run: generateBREX41 },
   'BREX — S1000D 3.0.1': { approvalsFormat: 'BREX-3.0.1', xsdFormat: '3.0.1', run: generateBREX301 },
+  'Schematron 1.0 — S1000D': { approvalsFormat: 'SCH-S1000D', xsdFormat: null, run: generateBREXSch },
   'Schematron 1.0 — DITA': { approvalsFormat: 'SCH-DITA', xsdFormat: null, run: generateSchematronDITA },
-};
-
-// docs/v2 §1/§2: project.standard is fixed at project creation and
-// "Generate BREX/Schematron no ofrece selector, genera directamente el
-// formato del proyecto" -- one project standard maps to exactly one
-// generation format, never an open choice at generate time. (Schematron
-// 1.0 — S1000D has no entry here: it's a BREX-3.0.1 derivative
-// (generateBREXSch reuses generateBREX301 internally, see CLAUDE.md), not
-// a project.standard value of its own in v2's model -- same reasoning
-// already applied to routes/similar.py's kind='rule' standard->format
-// mapping on the backend, kept consistent here.)
-const STANDARD_TO_FORMAT = {
-  'S1000D 4.2': 'BREX — S1000D 4.2',
-  'S1000D 4.1': 'BREX — S1000D 4.1',
-  'S1000D 3.0.1': 'BREX — S1000D 3.0.1',
-  'DITA 1.3': 'Schematron 1.0 — DITA',
 };
 
 // generateBREX()/generateBREX41()/generateBREX301()/generateBREXSch()/
@@ -80,7 +78,7 @@ export default function GeneratePage() {
   const { project } = useOutletContext();
 
   // Fixed by the project's own standard, never user-selectable (docs/v2 §1).
-  const format = STANDARD_TO_FORMAT[project.standard];
+  const format = project.standard;
 
   const [brdps, setBrdps] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -153,10 +151,13 @@ export default function GeneratePage() {
     const dateStr = new Date().toISOString().slice(0, 10);
     const mic = project.project_config?.modelIdentCode || 'UNKNOWN';
     const isSchDITA = format === 'Schematron 1.0 — DITA';
+    const isSchS1000D = format === 'Schematron 1.0 — S1000D';
     const isBREX301 = format === 'BREX — S1000D 3.0.1';
     const isBREX41 = format === 'BREX — S1000D 4.1';
     const filename = isSchDITA
       ? `${mic}_${dateStr}_dita.sch`
+      : isSchS1000D
+      ? `${mic}_${dateStr}_s1000d.sch`
       : isBREX301
       ? `DMC-${mic}-00-00-00-00A-022A-D_${dateStr}_301.xml`
       : isBREX41

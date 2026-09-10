@@ -305,6 +305,18 @@ async def test_viewer_of_a_can_post_discarded_suggestion_feedback_in_a(client, s
     assert response.status_code == 201
 
 
+async def test_editor_of_a_cannot_delete_project_a_even_though_assigned_as_editor(client, scenario):
+    """DELETE /api/projects/{id} is admin-only, deliberately stricter than
+    the editor role that otherwise controls everything about a project's
+    content -- an editor of project A can edit/create/delete BRDPs in A,
+    but must never be able to make project A itself disappear.
+    """
+    response = await client.delete(
+        f"/api/projects/{scenario['project_a'].id}", headers=_headers(scenario["editor_a"])
+    )
+    assert response.status_code == 403
+
+
 async def test_editor_of_a_can_propose_and_approve_in_a(client, scenario):
     """Positive control: editor really can do what viewer can't, in the
     SAME project -- proves the 403s above are about role, not something
