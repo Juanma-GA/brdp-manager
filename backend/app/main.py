@@ -10,6 +10,8 @@ from app.api.routes.config import router as config_router
 from app.api.routes.llm_proxy import router as llm_proxy_router
 from app.api.routes.notes import router as notes_router
 from app.api.routes.projects import router as projects_router
+from app.api.routes.similar import router as similar_router
+from app.api.routes.suggestion_feedback import router as suggestion_feedback_router
 from app.api.routes.users import router as users_router
 from app.api.routes.validate_brex import router as validate_brex_router
 from app.core.config import get_settings
@@ -32,6 +34,8 @@ app.include_router(config_router)
 app.include_router(brdps_router)
 app.include_router(notes_router)
 app.include_router(approvals_router)
+app.include_router(similar_router)
+app.include_router(suggestion_feedback_router)
 app.include_router(llm_proxy_router)
 app.include_router(validate_brex_router)
 

@@ -6,6 +6,7 @@ import { sendMessage } from '../api/llmAPI';
 import styles from './RecordsPage.module.css';
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
+const KIND_LABEL = { definition: 'definition', proposal: 'proposal', rule: 'BREX rule' };
 
 export default function RecordsPage() {
   const { t } = useTranslation();
@@ -23,7 +24,11 @@ export default function RecordsPage() {
   const [aiProvider, setAiProvider] = useState(null);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
-  const [suggestion, setSuggestion] = useState('');
+  // null, or { kind, text, sourceBrdpIds, format? } for a real suggestion,
+  // or { kind, insufficientPrecedent: true, message } when /similar (§3
+  // point 3) reports fewer than its minimum candidates -- shown as an
+  // explicit notice instead of ever calling the LLM with weak/no few-shot.
+  const [suggestion, setSuggestion] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = () =>
@@ -88,40 +93,90 @@ export default function RecordsPage() {
     }
   };
 
-  // Simplified for Phase 4: a direct LLM call, no few-shot precedent yet --
-  // the similarity search over the project's own validated BRDPs
-  // (docs/v2 §3) is Phase 5's job. This proves the real proxy round-trip
-  // and the real role-gated Accept/Discard flow now; the suggestion
-  // quality improves once Phase 5 lands, without changing this UI.
-  const suggestDefinition = async () => {
+  // docs/v2 §3: real few-shot precedent from the project's own validated
+  // BRDPs, via GET .../similar (pure data, no LLM call in the backend --
+  // §4's "FastAPI never builds prompts" rule). §3 point 3 (HR7): when
+  // /similar itself reports insufficient precedent, show that verbatim
+  // and stop -- never fall back to a no-few-shot LLM call, which is
+  // exactly the Phase-4 behavior this replaces.
+  const requestSuggestion = async (kind) => {
     if (!selected || !aiProvider) return;
     setBusy(true);
-    setSuggestion('');
+    setSuggestion(null);
     try {
+      const similar = await authFetchJson(
+        `/api/projects/${projectId}/brdps/${selected.id}/similar?kind=${kind}`
+      );
+      if (!similar.sufficient_precedent) {
+        setSuggestion({ kind, insufficientPrecedent: true, message: similar.message });
+        return;
+      }
+
+      const label = KIND_LABEL[kind];
+      const examples = similar.candidates
+        .map((c, i) => `Example ${i + 1} (BRDP ${c.identifier}, similarity ${c.score.toFixed(2)}):\n${c.text}`)
+        .join('\n\n');
+      const systemPrompt =
+        `You are an S1000D/DITA BRDP expert assistant. Use the following real, validated precedent ` +
+        `examples from this project's own dataset as few-shot guidance. Return only the new ${label} ` +
+        `text, nothing else.\n\n${examples}`;
+
       const res = await sendMessage(
         [
           {
             role: 'user',
-            content: `Suggest a concise BRDP definition for identifier "${selected.identifier}" (current definition: "${selected.definition}"). Return only the suggested definition text.`,
+            content: `Suggest a ${label} for BRDP "${selected.identifier}" (current definition: "${selected.definition}", current proposal: "${selected.proposal}").`,
           },
         ],
         null,
         aiProvider.model,
         aiProvider.provider,
-        'You are an S1000D/DITA BRDP expert assistant.'
+        systemPrompt
       );
-      setSuggestion(res.content);
+      setSuggestion({
+        kind,
+        text: res.content,
+        sourceBrdpIds: similar.candidates.map((c) => c.id),
+        format: similar.format,
+      });
     } catch (err) {
-      setSuggestion(`Error: ${err.message}`);
+      setSuggestion({ kind, text: `Error: ${err.message}`, sourceBrdpIds: [] });
     } finally {
       setBusy(false);
     }
   };
 
+  const logSuggestionFeedback = (outcome) =>
+    authFetchJson('/api/suggestion-feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brdp_id: selected.id,
+        kind: suggestion.kind,
+        suggested_text: suggestion.text,
+        source_brdp_ids: suggestion.sourceBrdpIds,
+        outcome,
+      }),
+    });
+
   const acceptSuggestion = async () => {
-    if (!selected || !suggestion) return;
-    await handleUpdate(selected.id, { definition: suggestion });
-    setSuggestion('');
+    if (!selected || !suggestion?.text) return;
+    if (suggestion.kind === 'rule') {
+      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${suggestion.format}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule_xml: suggestion.text, source: 'llm', status: 'pending_review' }),
+      });
+    } else {
+      await handleUpdate(selected.id, { [suggestion.kind]: suggestion.text });
+    }
+    await logSuggestionFeedback('accepted');
+    setSuggestion(null);
+  };
+
+  const discardSuggestion = async () => {
+    if (suggestion?.text) await logSuggestionFeedback('discarded');
+    setSuggestion(null);
   };
 
   return (
@@ -237,12 +292,27 @@ export default function RecordsPage() {
 
                 <hr className={styles.hr} />
 
-                <button onClick={suggestDefinition} disabled={busy || !aiProvider}>
-                  {busy ? '…' : 'Suggest Definition'}
-                </button>
-                {suggestion && (
+                <div className={styles.suggestionActions}>
+                  <button onClick={() => requestSuggestion('definition')} disabled={busy || !aiProvider}>
+                    {busy && suggestion?.kind === 'definition' ? '…' : 'Suggest Definition'}
+                  </button>
+                  <button onClick={() => requestSuggestion('proposal')} disabled={busy || !aiProvider}>
+                    {busy && suggestion?.kind === 'proposal' ? '…' : 'Suggest Proposal'}
+                  </button>
+                  <button onClick={() => requestSuggestion('rule')} disabled={busy || !aiProvider}>
+                    {busy && suggestion?.kind === 'rule' ? '…' : 'Suggest Rule'}
+                  </button>
+                </div>
+
+                {suggestion?.insufficientPrecedent && (
                   <div className={styles.suggestionBox}>
-                    <div>{suggestion}</div>
+                    <span className={styles.muted}>⚠ {suggestion.message}</span>
+                  </div>
+                )}
+
+                {suggestion?.text && (
+                  <div className={styles.suggestionBox}>
+                    <div className={styles.mono}>{suggestion.text}</div>
                     <div className={styles.suggestionActions}>
                       <button
                         onClick={acceptSuggestion}
@@ -251,7 +321,7 @@ export default function RecordsPage() {
                       >
                         Accept
                       </button>
-                      <button onClick={() => setSuggestion('')}>Discard</button>
+                      <button onClick={discardSuggestion}>Discard</button>
                     </div>
                   </div>
                 )}

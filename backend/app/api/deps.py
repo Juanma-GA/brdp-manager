@@ -50,6 +50,28 @@ async def get_current_user(
     return user
 
 
+async def has_project_role(current_user: User, project_id: uuid.UUID, min_role: str, db: AsyncSession) -> bool:
+    """Core check behind require_project_role, factored out so an endpoint
+    that ISN'T path-scoped by project_id (e.g. POST /api/suggestion-feedback,
+    scoped by brdp_id instead -- its project_id has to be looked up from
+    the BRDP row first) can still apply the exact same rule, rather than
+    reimplementing it or skipping the check because require_project_role's
+    dependency signature can't bind to a param FastAPI never sees in the
+    path.
+    """
+    if current_user.global_role == "admin":
+        return True
+
+    result = await db.execute(
+        select(UserProjectRole).where(
+            UserProjectRole.user_id == current_user.id,
+            UserProjectRole.project_id == project_id,
+        )
+    )
+    assignment = result.scalar_one_or_none()
+    return assignment is not None and _ROLE_RANK.get(assignment.role, -1) >= _ROLE_RANK[min_role]
+
+
 def require_project_role(min_role: str):
     """Dependency factory for project-scoped endpoints (Phase 3's
     brdps/notes/approvals routes). `project_id` is bound from the route's
@@ -66,17 +88,7 @@ def require_project_role(min_role: str):
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ) -> User:
-        if current_user.global_role == "admin":
-            return current_user
-
-        result = await db.execute(
-            select(UserProjectRole).where(
-                UserProjectRole.user_id == current_user.id,
-                UserProjectRole.project_id == project_id,
-            )
-        )
-        assignment = result.scalar_one_or_none()
-        if assignment is None or _ROLE_RANK.get(assignment.role, -1) < _ROLE_RANK[min_role]:
+        if not await has_project_role(current_user, project_id, min_role, db):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized for this project",

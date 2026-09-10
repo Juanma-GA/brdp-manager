@@ -1,14 +1,30 @@
 """Functional correctness of the brdps/notes/approvals CRUD endpoints
 (as an editor -- authorization itself is covered separately in
-test_authorization.py). Real Postgres, no mocking.
+test_authorization.py). Real Postgres, no mocking -- except the Mistral
+embeddings call triggered by validating a BRDP (Phase 5), mocked here
+because this file's job is CRUD correctness, not embeddings correctness
+(see test_similar.py / test_embeddings.py for that).
 """
 import uuid
 
+import httpx
 import pytest
 
+from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
+from app.main import app
 from app.models import Project, User, UserProjectRole
+
+
+@pytest.fixture(autouse=True)
+def _mock_embeddings_transport():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
+    yield
+    app.dependency_overrides.pop(get_httpx_transport, None)
 
 
 @pytest.fixture
