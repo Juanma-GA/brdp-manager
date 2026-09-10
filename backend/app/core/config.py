@@ -33,7 +33,11 @@ class Settings(BaseSettings):
     active_llm_provider: str = "mistral"  # "mistral" | "qwen"
     mistral_api_key: str | None = None
     mistral_endpoint: str = "https://api.mistral.ai/v1/chat/completions"
-    mistral_chat_model: str = "mistral-large-latest"
+    # MISTRAL_MODEL, not hardcoded: this deployment's private Mistral
+    # endpoint may not accept the same model names as the public API, so
+    # this has to be changeable from .env without a code change if
+    # "mistral-medium-latest" turns out not to be right for it either.
+    mistral_model: str = "mistral-medium-latest"
     mistral_embed_endpoint: str = "https://api.mistral.ai/v1/embeddings"
     mistral_embed_model: str = "mistral-embed"
     qwen_api_key: str | None = None

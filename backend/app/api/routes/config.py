@@ -24,5 +24,5 @@ async def get_ai_provider(_current_user: User = Depends(get_current_user)) -> AI
     decision, not a per-user preference.
     """
     settings = get_settings()
-    model = settings.mistral_chat_model if settings.active_llm_provider == "mistral" else settings.qwen_chat_model
+    model = settings.mistral_model if settings.active_llm_provider == "mistral" else settings.qwen_chat_model
     return AIProviderOut(provider=settings.active_llm_provider, model=model)

@@ -48,6 +48,6 @@ async def test_reflects_real_server_settings(client, auth_headers):
     settings = get_settings()
     assert body["provider"] == settings.active_llm_provider
     expected_model = (
-        settings.mistral_chat_model if settings.active_llm_provider == "mistral" else settings.qwen_chat_model
+        settings.mistral_model if settings.active_llm_provider == "mistral" else settings.qwen_chat_model
     )
     assert body["model"] == expected_model
