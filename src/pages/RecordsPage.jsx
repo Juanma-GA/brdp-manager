@@ -8,20 +8,47 @@ import styles from './RecordsPage.module.css';
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
 const SUGGEST_KINDS = ['definition', 'proposal', 'rule'];
+const RULE_STATES = ['todo', 'draft', 'verified'];
 
-// Read-only status + a minimal Approve action -- NOT a rebuild of v1's
-// RuleApprovalCell (manual edit/revoke/discard from the table). That
-// component is orphaned in this rewrite: it calls v1's global unscoped
-// /api/approvals/:brdpId/:format (via src/api/approvals.js) and reads
-// v1's BRDPContext, neither of which exist in v2's project-scoped API,
-// so its logic isn't valid here and it isn't reused. This is scoped to
-// what was asked: make the real per-BRDP approval status (already
-// writable via Suggest Rule's Accept) visible again, with just enough
-// action (Approve) that a pending_review row isn't a dead end.
-function RuleStatusCell({ projectId, brdpId, format, canEdit, refreshToken, onApproved }) {
+// The engine's inclusion gate hardcodes the literal DB values
+// "pending_review"/"approved" in 4 generator files (never touch those) --
+// this UI only ever relabels them as Draft/Verified. "todo" is not a DB
+// value at all, it is the absence of a rule_approvals row.
+function ruleStateOf(approval) {
+  if (approval === null) return 'todo';
+  return approval.status === 'approved' ? 'verified' : 'draft';
+}
+
+// Each dot always carries its own state name as title/aria-label (not
+// color alone) per the accessibility requirement -- the current step is
+// additionally marked via aria-current and a filled style.
+function RuleStatusDots({ state }) {
+  const { t } = useTranslation();
+  const currentIndex = RULE_STATES.indexOf(state);
+  return (
+    <span className={styles.dots}>
+      {RULE_STATES.map((s, i) => (
+        <span
+          key={s}
+          role="img"
+          className={`${styles.dot} ${i <= currentIndex ? styles.dotFilled : ''} ${
+            i === currentIndex ? styles.dotCurrent : ''
+          }`}
+          title={t(`records.rule.states.${s}`)}
+          aria-label={t(`records.rule.states.${s}`)}
+          aria-current={i === currentIndex ? 'step' : undefined}
+        />
+      ))}
+    </span>
+  );
+}
+
+// Read-only summary for the table column -- the Edit/Verify/Revoke actions
+// and the manual rule editor live in the detail panel below, tied to
+// whichever row is selected (see the Rule Status section further down).
+function RuleStatusCell({ projectId, brdpId, format, refreshToken }) {
   const { t } = useTranslation();
   const [approval, setApproval] = useState(undefined); // undefined = loading, null = none
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!format) return;
@@ -34,36 +61,15 @@ function RuleStatusCell({ projectId, brdpId, format, canEdit, refreshToken, onAp
     };
   }, [projectId, brdpId, format, refreshToken]);
 
-  if (!format) return <span className={styles.muted}>{t('records.rule.unsupportedStandard')}</span>;
-  if (approval === undefined) return <span className={styles.muted}>…</span>;
-  if (approval === null) return <span className={styles.muted}>{t('records.rule.none')}</span>;
-
-  const handleApprove = async (e) => {
-    e.stopPropagation();
-    setBusy(true);
-    try {
-      await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/approvals/${format}/approve`, {
-        method: 'POST',
-      });
-      onApproved();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (approval.status === 'approved') {
-    return <span className={styles.badge_approved}>✓ {t('records.rule.approved')}</span>;
+  if (!format) {
+    return (
+      <span className={styles.muted} title={t('records.rule.unsupportedStandard')}>
+        —
+      </span>
+    );
   }
-  return (
-    <span className={styles.badge_pending_review}>
-      ⏳ {t('records.rule.pendingReview')}
-      {canEdit && (
-        <button onClick={handleApprove} disabled={busy} className={styles.inlineApproveBtn}>
-          {busy ? t('records.rule.approving') : t('records.rule.approve')}
-        </button>
-      )}
-    </span>
-  );
+  if (approval === undefined) return <span className={styles.muted}>…</span>;
+  return <RuleStatusDots state={ruleStateOf(approval)} />;
 }
 
 export default function RecordsPage() {
@@ -91,6 +97,14 @@ export default function RecordsPage() {
   const [suggestion, setSuggestion] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // Rule Status stepper state for the SELECTED BRDP -- the manual editor
+  // and Edit/Verify/Revoke actions live here in the detail panel (v1's
+  // large plain-text editor), not in the table cell above.
+  const [ruleApproval, setRuleApproval] = useState(undefined); // undefined = loading, null = none
+  const [ruleEditing, setRuleEditing] = useState(false);
+  const [ruleDraftText, setRuleDraftText] = useState('');
+  const [ruleBusy, setRuleBusy] = useState(false);
+
   const refresh = () =>
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => {
       setBrdps(data);
@@ -104,6 +118,68 @@ export default function RecordsPage() {
   }, [projectId]);
 
   const selected = brdps.find((b) => b.id === selectedId) || null;
+
+  useEffect(() => {
+    setRuleEditing(false);
+    if (!selected || !ruleFormat) {
+      setRuleApproval(undefined);
+      return;
+    }
+    let cancelled = false;
+    authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}`).then((data) => {
+      if (!cancelled) setRuleApproval(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, ruleFormat, approvalsRefreshToken]);
+
+  const openRuleEditor = () => {
+    setRuleDraftText(ruleApproval?.rule_xml || '');
+    setRuleEditing(true);
+  };
+
+  const cancelRuleEditor = () => setRuleEditing(false);
+
+  const saveRuleEditor = async () => {
+    setRuleBusy(true);
+    try {
+      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule_xml: ruleDraftText, source: 'manual', status: 'pending_review' }),
+      });
+      setRuleEditing(false);
+      setApprovalsRefreshToken((n) => n + 1);
+    } finally {
+      setRuleBusy(false);
+    }
+  };
+
+  const verifyRule = async () => {
+    setRuleBusy(true);
+    try {
+      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}/approve`, {
+        method: 'POST',
+      });
+      setApprovalsRefreshToken((n) => n + 1);
+    } finally {
+      setRuleBusy(false);
+    }
+  };
+
+  const revokeRule = async () => {
+    setRuleBusy(true);
+    try {
+      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}/revoke`, {
+        method: 'POST',
+      });
+      setApprovalsRefreshToken((n) => n + 1);
+    } finally {
+      setRuleBusy(false);
+    }
+  };
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -272,7 +348,7 @@ export default function RecordsPage() {
                   <th>{t('records.table.id')}</th>
                   <th>{t('records.table.title')}</th>
                   <th>{t('records.table.validation')}</th>
-                  <th>{t('records.table.ruleApproval')}</th>
+                  <th>{t('records.table.ruleStatus')}</th>
                   {canEdit && <th></th>}
                 </tr>
               </thead>
@@ -295,9 +371,7 @@ export default function RecordsPage() {
                         projectId={projectId}
                         brdpId={b.id}
                         format={ruleFormat}
-                        canEdit={canEdit}
                         refreshToken={approvalsRefreshToken}
-                        onApproved={() => setApprovalsRefreshToken((n) => n + 1)}
                       />
                     </td>
                     {canEdit && (
@@ -349,6 +423,59 @@ export default function RecordsPage() {
                   </option>
                 ))}
               </select>
+
+              <label className={styles.fieldLabel}>{t('records.fieldRuleStatus')}</label>
+              {!ruleFormat ? (
+                <p className={styles.muted} title={t('records.rule.unsupportedStandard')}>
+                  —
+                </p>
+              ) : ruleApproval === undefined ? (
+                <p className={styles.muted}>…</p>
+              ) : ruleEditing ? (
+                <div className={styles.ruleEditor}>
+                  <textarea
+                    className={styles.ruleTextarea}
+                    value={ruleDraftText}
+                    onChange={(e) => setRuleDraftText(e.target.value)}
+                    placeholder={t('records.rule.editorPlaceholder')}
+                    spellCheck={false}
+                  />
+                  <div className={styles.suggestionActions}>
+                    <button onClick={saveRuleEditor} disabled={ruleBusy}>
+                      {ruleBusy ? t('records.rule.saving') : t('records.rule.save')}
+                    </button>
+                    <button onClick={cancelRuleEditor} disabled={ruleBusy}>
+                      {t('records.rule.cancel')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.ruleStatusRow}>
+                  <RuleStatusDots state={ruleStateOf(ruleApproval)} />
+                  <span className={styles.ruleStatusLabel}>
+                    {t(`records.rule.states.${ruleStateOf(ruleApproval)}`)}
+                  </span>
+                  {canEdit && (
+                    <div className={styles.suggestionActions}>
+                      {ruleStateOf(ruleApproval) !== 'verified' && (
+                        <button onClick={openRuleEditor} disabled={ruleBusy}>
+                          {t('records.rule.edit')}
+                        </button>
+                      )}
+                      {ruleStateOf(ruleApproval) === 'draft' && (
+                        <button onClick={verifyRule} disabled={ruleBusy}>
+                          {ruleBusy ? t('records.rule.verifying') : t('records.rule.verify')}
+                        </button>
+                      )}
+                      {ruleStateOf(ruleApproval) === 'verified' && (
+                        <button onClick={revokeRule} disabled={ruleBusy}>
+                          {ruleBusy ? t('records.rule.revoking') : t('records.rule.revoke')}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className={styles.assistant}>
                 <h3 className={styles.assistantTitle}>{t('records.assistant.title')}</h3>

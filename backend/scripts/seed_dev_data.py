@@ -35,7 +35,7 @@ async def main() -> None:
         if project is None:
             project = Project(
                 name=DEMO_PROJECT_NAME,
-                standard="S1000D 4.2",
+                standard="BREX — S1000D 4.2",
                 project_config={
                     "modelIdentCode": "DMOD",
                     "systemDiffCode": "A",

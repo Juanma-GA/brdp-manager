@@ -269,6 +269,26 @@ async def test_viewer_of_a_cannot_revoke_an_approved_rule_in_a(client, scenario)
     assert response.status_code == 403
 
 
+async def test_viewer_of_a_cannot_revoke_an_approved_rule_via_new_endpoint_in_a(client, scenario):
+    """The new Rule Status stepper's Revoke action (Verified -> Draft, docs
+    request item 2) -- distinct from the pre-existing DELETE endpoint above,
+    but the same editor-only gate must apply.
+    """
+    async with async_session_factory() as session:
+        session.add(
+            RuleApproval(
+                brdp_id=scenario["brdp_a"].id, format="BREX-4.2", rule_xml="<x/>", status="approved"
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}/approvals/BREX-4.2/revoke",
+        headers=_headers(scenario["viewer_a"]),
+    )
+    assert response.status_code == 403
+
+
 async def test_viewer_of_a_cannot_post_accepted_suggestion_feedback_in_a(client, scenario):
     """Same criterion already applied to rule_approvals: a viewer can log
     that they discarded a suggestion (read-only, no mutation), but
@@ -320,7 +340,10 @@ async def test_editor_of_a_cannot_delete_project_a_even_though_assigned_as_edito
 async def test_editor_of_a_can_propose_and_approve_in_a(client, scenario):
     """Positive control: editor really can do what viewer can't, in the
     SAME project -- proves the 403s above are about role, not something
-    incidentally broken about the endpoint.
+    incidentally broken about the endpoint. Extended to also cover the new
+    Revoke endpoint (docs request item 2): the full Draft -> Verified ->
+    Draft happy path, confirming revoke preserves rule_xml rather than
+    deleting it.
     """
     propose = await client.put(
         f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}/approvals/BREX-4.2",
@@ -335,6 +358,16 @@ async def test_editor_of_a_can_propose_and_approve_in_a(client, scenario):
     )
     assert approve.status_code == 200
     assert approve.json()["status"] == "approved"
+
+    revoke = await client.post(
+        f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}/approvals/BREX-4.2/revoke",
+        headers=_headers(scenario["editor_a"]),
+    )
+    assert revoke.status_code == 200
+    revoke_body = revoke.json()
+    assert revoke_body["status"] == "pending_review"
+    assert revoke_body["rule_xml"] == "<structureObjectRule/>"
+    assert revoke_body["approved_at"] is None
 
 
 # ---------------------------------------------------------------------------

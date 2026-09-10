@@ -77,17 +77,48 @@ async def approve_approval(
     return approval
 
 
+@router.post("/revoke", response_model=RuleApprovalOut)
+async def revoke_approval_status(
+    project_id: uuid.UUID,
+    brdp_id: uuid.UUID,
+    format: str,
+    _editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+) -> RuleApproval:
+    """Rule Status stepper's Verified -> Draft action: flips an approved
+    rule back to pending_review while PRESERVING rule_xml/source -- unlike
+    the DELETE endpoint below, nothing is deleted, so the text that was
+    actually reviewed is never lost. This is intentional (docs request
+    item 2): Edit is unavailable directly on an approved rule precisely so
+    a Verified rule can never end up with different text than what was
+    reviewed, without needing auto-revocation logic on edit.
+    """
+    await _get_owned_brdp(project_id, brdp_id, db)
+    approval = await db.get(RuleApproval, (brdp_id, format))
+    if approval is None or approval.status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No approved approval found for this BRDP/format",
+        )
+    approval.status = "pending_review"
+    approval.approved_at = None
+    await db.commit()
+    await db.refresh(approval)
+    return approval
+
+
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_approval(
+async def discard_approval(
     project_id: uuid.UUID,
     brdp_id: uuid.UUID,
     format: str,
     _editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Covers both v1 actions that end up here: discarding a pending_review
-    candidate, and revoking an already-approved rule -- same DELETE either
-    way, editor+ only in both cases.
+    """Full delete of the row, editor+ only. Distinct from POST /revoke
+    above: this discards the rule entirely (v1's "discard a pending_review
+    candidate" action), it does not just flip status back while keeping
+    the text.
     """
     await _get_owned_brdp(project_id, brdp_id, db)
     approval = await db.get(RuleApproval, (brdp_id, format))
