@@ -171,7 +171,6 @@ const resources = {
           globalRole: 'Global role',
           save: 'Save',
           saving: 'Saving…',
-          saved: 'Saved',
         },
         userManagement: {
           title: 'User Management',
@@ -367,7 +366,6 @@ const resources = {
           globalRole: 'Rol global',
           save: 'Guardar',
           saving: 'Guardando…',
-          saved: 'Guardado',
         },
         userManagement: {
           title: 'Gestión de usuarios',

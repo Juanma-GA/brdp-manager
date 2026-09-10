@@ -2,6 +2,15 @@
   padding: 24px;
   max-width: 100%;
   margin: 0 auto;
+  /* AppLayout's .mainContent (App.css) is a fixed-height (100vh) flex
+     column with overflow: hidden -- content taller than the viewport is
+     silently clipped unless a page establishes its own scroll region.
+     flex: 1 + min-height: 0 let this shrink below its content height
+     inside that flex column (the default min-height: auto would instead
+     let it grow past the viewport, defeating overflow-y: auto entirely). */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .title {
@@ -135,10 +144,6 @@
 
 .statusInvalid {
   color: #991b1b;
-}
-
-.statusSaved {
-  color: #2563eb;
 }
 
 .formRow {

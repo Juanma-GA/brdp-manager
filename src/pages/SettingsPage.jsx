@@ -3,13 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
+import Button from '../components/Button';
 import styles from './SettingsPage.module.css';
 
 function ProfileSection({ user, onUserUpdated }) {
   const { t } = useTranslation();
   const [displayName, setDisplayName] = useState(user.display_name);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -20,15 +20,17 @@ function ProfileSection({ user, onUserUpdated }) {
     e.preventDefault();
     setSaving(true);
     setError(null);
-    setSaved(false);
     try {
       const updated = await authFetchJson('/api/auth/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ display_name: displayName }),
       });
+      // Same success pattern as User Management's Create user: no separate
+      // "Saved" message -- the field simply reflects the now-current value
+      // (onUserUpdated feeds the fresh User back down from AuthContext,
+      // exactly like Create user's table refresh shows the new row).
       onUserUpdated(updated);
-      setSaved(true);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -52,10 +54,7 @@ function ProfileSection({ user, onUserUpdated }) {
             className={styles.input}
             value={displayName}
             required
-            onChange={(e) => {
-              setDisplayName(e.target.value);
-              setSaved(false);
-            }}
+            onChange={(e) => setDisplayName(e.target.value)}
           />
         </div>
         <div className={styles.formGroup}>
@@ -63,10 +62,9 @@ function ProfileSection({ user, onUserUpdated }) {
           <input className={styles.input} value={user.global_role} disabled />
         </div>
         {error && <p className={styles.statusInvalid}>{error}</p>}
-        <button className={styles.button} type="submit" disabled={saving || isUnchanged}>
+        <Button type="submit" disabled={saving || isUnchanged}>
           {saving ? t('settings.profile.saving') : t('settings.profile.save')}
-        </button>
-        {saved && <span className={styles.statusSaved}>{t('settings.profile.saved')}</span>}
+        </Button>
       </form>
     </div>
   );
@@ -226,9 +224,9 @@ function UserManagementSection({ currentUserId }) {
             <option value="admin">admin</option>
           </select>
         </div>
-        <button className={styles.button} type="submit" disabled={creating}>
+        <Button type="submit" disabled={creating}>
           {creating ? t('settings.userManagement.creating') : t('settings.userManagement.createUser')}
-        </button>
+        </Button>
       </form>
 
       {isLoading ? (
