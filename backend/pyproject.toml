@@ -25,6 +25,15 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "aiosqlite>=0.20",
+    # Dev-only convenience for corporate SSL-inspecting proxies (README
+    # "Troubleshooting: Corporate Network / SSL-Inspecting Proxy" #3):
+    # patches Python's ssl module to trust the OS certificate store
+    # (where the corporate root CA is normally already installed) instead
+    # of only certifi's bundled list, so httpx calls to Mistral/Qwen work
+    # without hand-setting SSL_CERT_FILE/REQUESTS_CA_BUNDLE. NOT a
+    # production fix -- a real deployment installs the corporate root CA
+    # into the server OS's trust store directly, same as always.
+    "pip-system-certs>=4.0",
 ]
 
 [tool.pytest.ini_options]
