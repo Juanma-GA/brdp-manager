@@ -17,6 +17,14 @@ export default function LoginPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    // Not the native `required` attribute -- its browser tooltip follows
+    // the browser/OS locale, not this app's own language selector (a real
+    // i18n bug, confirmed by forcing the OS locale to es-ES independent of
+    // the app's language setting and observing the tooltip text change).
+    if (!email.trim() || !password.trim()) {
+      setError(t('validation.required'));
+      return;
+    }
     setIsSubmitting(true);
     try {
       await login(email, password);
@@ -43,7 +51,6 @@ export default function LoginPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           autoComplete="username"
-          required
         />
         <label className={styles.label} htmlFor="login-password">
           {t('login.password')}
@@ -55,7 +62,6 @@ export default function LoginPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
-          required
         />
         {error && <p className={styles.error}>{error}</p>}
         <button type="submit" className={styles.submit} disabled={isSubmitting}>

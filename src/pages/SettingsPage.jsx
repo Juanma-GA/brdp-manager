@@ -18,8 +18,15 @@ function ProfileSection({ user, onUserUpdated }) {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    setSaving(true);
     setError(null);
+    // Not the native `required` attribute -- its browser tooltip follows
+    // the browser/OS locale, not this app's language selector (confirmed
+    // bug, see LoginPage.jsx for the reproduction).
+    if (!displayName.trim()) {
+      setError(t('validation.required'));
+      return;
+    }
+    setSaving(true);
     try {
       const updated = await authFetchJson('/api/auth/me', {
         method: 'PATCH',
@@ -51,7 +58,6 @@ function ProfileSection({ user, onUserUpdated }) {
           <input
             className={styles.input}
             value={displayName}
-            required
             onChange={(e) => setDisplayName(e.target.value)}
           />
         </div>
@@ -111,6 +117,14 @@ function UserManagementSection({ currentUserId }) {
 
   const handleCreate = async (e) => {
     e.preventDefault();
+    setError(null);
+    // Not the native `required` attribute -- its browser tooltip follows
+    // the browser/OS locale, not this app's language selector (confirmed
+    // bug, see LoginPage.jsx for the reproduction).
+    if (!newUser.email.trim() || !newUser.password.trim() || !newUser.display_name.trim()) {
+      setError(t('validation.required'));
+      return;
+    }
     setCreating(true);
     try {
       await authFetchJson('/api/users', {
@@ -154,8 +168,15 @@ function UserManagementSection({ currentUserId }) {
   };
 
   const handleSaveEdit = async (userId) => {
-    setSavingEdit(true);
     setError(null);
+    // Not the native `required` attribute -- its browser tooltip follows
+    // the browser/OS locale, not this app's language selector (confirmed
+    // bug, see LoginPage.jsx for the reproduction).
+    if (!editDraft.email.trim() || !editDraft.display_name.trim()) {
+      setError(t('validation.required'));
+      return;
+    }
+    setSavingEdit(true);
     try {
       await authFetchJson(`/api/users/${userId}`, {
         method: 'PATCH',
@@ -194,7 +215,6 @@ function UserManagementSection({ currentUserId }) {
           <input
             className={styles.input}
             type="email"
-            required
             value={newUser.email}
             onChange={(e) => setNewUser((u) => ({ ...u, email: e.target.value }))}
           />
@@ -204,7 +224,6 @@ function UserManagementSection({ currentUserId }) {
           <input
             className={styles.input}
             type="password"
-            required
             value={newUser.password}
             onChange={(e) => setNewUser((u) => ({ ...u, password: e.target.value }))}
           />
@@ -213,7 +232,6 @@ function UserManagementSection({ currentUserId }) {
           <label className={styles.label}>{t('settings.userManagement.displayName')}</label>
           <input
             className={styles.input}
-            required
             value={newUser.display_name}
             onChange={(e) => setNewUser((u) => ({ ...u, display_name: e.target.value }))}
           />
@@ -260,7 +278,6 @@ function UserManagementSection({ currentUserId }) {
                     <input
                       className={styles.input}
                       type="email"
-                      required
                       value={editDraft.email}
                       onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
                     />
@@ -272,7 +289,6 @@ function UserManagementSection({ currentUserId }) {
                   {isEditing ? (
                     <input
                       className={styles.input}
-                      required
                       value={editDraft.display_name}
                       onChange={(e) => setEditDraft((d) => ({ ...d, display_name: e.target.value }))}
                     />

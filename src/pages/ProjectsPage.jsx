@@ -31,8 +31,15 @@ function CreateProjectForm({ onCreated, onCancel }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setCreating(true);
     setError(null);
+    // Not the native `required` attribute -- its browser tooltip follows
+    // the browser/OS locale, not this app's language selector (confirmed
+    // bug, see LoginPage.jsx for the reproduction).
+    if (!name.trim()) {
+      setError(t('validation.required'));
+      return;
+    }
+    setCreating(true);
     try {
       await authFetchJson('/api/projects', {
         method: 'POST',
@@ -55,7 +62,6 @@ function CreateProjectForm({ onCreated, onCancel }) {
         <label className={styles.label}>{t('projects.create.nameLabel')}</label>
         <input
           className={styles.input}
-          required
           value={name}
           placeholder={t('projects.create.namePlaceholder')}
           onChange={(e) => setName(e.target.value)}
@@ -93,8 +99,15 @@ function RenameProjectForm({ project, onRenamed, onCancel }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSaving(true);
     setError(null);
+    // Not the native `required` attribute -- its browser tooltip follows
+    // the browser/OS locale, not this app's language selector (confirmed
+    // bug, see LoginPage.jsx for the reproduction).
+    if (!name.trim()) {
+      setError(t('validation.required'));
+      return;
+    }
+    setSaving(true);
     try {
       await authFetchJson(`/api/projects/${project.id}`, {
         method: 'PATCH',
@@ -114,7 +127,6 @@ function RenameProjectForm({ project, onRenamed, onCancel }) {
       {error && <p className={styles.error}>{error}</p>}
       <input
         className={styles.input}
-        required
         value={name}
         autoFocus
         onChange={(e) => setName(e.target.value)}

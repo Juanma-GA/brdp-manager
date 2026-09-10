@@ -12,6 +12,16 @@ const resources = {
   en: {
     common: {
       appName: 'BRDP Manager',
+      validation: {
+        // Replaces the native HTML `required` attribute's browser tooltip
+        // (e.g. "Please fill out this field") -- that message's language
+        // follows the BROWSER/OS locale, not this app's own language
+        // selector, which is a real, confirmed bug (see LoginPage.jsx,
+        // SettingsPage.jsx, ProjectsPage.jsx). Every form-level "empty
+        // required field" error goes through this single shared key
+        // instead, via each form's own existing inline error message.
+        required: 'Please fill out all required fields.',
+      },
       login: {
         title: 'Sign in',
         email: 'Email',
@@ -245,6 +255,9 @@ const resources = {
   es: {
     common: {
       appName: 'BRDP Manager',
+      validation: {
+        required: 'Completa todos los campos obligatorios.',
+      },
       login: {
         title: 'Iniciar sesión',
         email: 'Correo electrónico',
