@@ -197,6 +197,16 @@ function DataManagementSection({ projectId, canEdit, dataVersion, onDataChanged 
         <Button onClick={handleDownloadTemplate}>{t('config.dataManagement.downloadTemplateButton')}</Button>
       </div>
 
+      <div className={styles.subsection}>
+        <h3 className={styles.subsectionHeading}>{t('config.dataManagement.exportTitle')}</h3>
+        <Button onClick={handleExport} disabled={busy}>
+          {busy ? t('config.dataManagement.exporting') : t('config.dataManagement.exportButton')}
+        </Button>
+        {brdpCount !== null && (
+          <p className={styles.hint}>{t('config.dataManagement.countAvailable', { count: brdpCount })}</p>
+        )}
+      </div>
+
       {canEdit && (
         <div className={styles.subsection}>
           <h3 className={styles.subsectionHeading}>{t('config.dataManagement.importTitle')}</h3>
@@ -239,16 +249,6 @@ function DataManagementSection({ projectId, canEdit, dataVersion, onDataChanged 
           {importMessage && <p className={styles.savedIndicator}>{importMessage}</p>}
         </div>
       )}
-
-      <div className={styles.subsection}>
-        <h3 className={styles.subsectionHeading}>{t('config.dataManagement.exportTitle')}</h3>
-        <Button onClick={handleExport} disabled={busy}>
-          {busy ? t('config.dataManagement.exporting') : t('config.dataManagement.exportButton')}
-        </Button>
-        {brdpCount !== null && (
-          <p className={styles.hint}>{t('config.dataManagement.countAvailable', { count: brdpCount })}</p>
-        )}
-      </div>
     </div>
   );
 }
