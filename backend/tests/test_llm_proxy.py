@@ -6,6 +6,9 @@ tests. Everything else (auth requirement, provider/endpoint/key resolution
 from server settings, streaming pass-through, error propagation) runs for
 real against the actual app.
 """
+import logging
+import traceback
+
 import httpx
 import pytest
 
@@ -128,3 +131,42 @@ async def test_upstream_error_status_is_propagated_not_streamed(client, auth_hea
     )
     assert response.status_code == 429
     assert "rate limited" in response.text
+
+
+async def test_upstream_connection_failure_is_logged_with_real_traceback(client, auth_headers, caplog):
+    """A user reported dozens of real 500s from this endpoint with NO
+    traceback ever appearing in the server console -- FastAPI's default
+    HTTPException handler just serializes {"detail": ...} to the client
+    and never logs anything server-side, for any status code, so a real
+    failure (their suspicion: a corporate SSL-inspecting proxy causing an
+    SSLCertVerificationError when calling out to Mistral) was going
+    completely unrecorded. This simulates exactly that shape of failure
+    (a transport-level exception raised while sending the request, before
+    any response comes back) and confirms the server now logs the real
+    exception with a full traceback, while the client still only ever
+    sees the same generic message (docs/v2 S8 -- never leak upstream
+    connection internals to the client).
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("simulated SSL certificate verification failure")
+
+    _install_mock_transport(handler)
+
+    with caplog.at_level(logging.ERROR):
+        response = await client.post(
+            "/api/llm-proxy", json={"payload": {"model": "x"}}, headers=auth_headers
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "LLM proxy request failed"
+
+    matching = [
+        r for r in caplog.records if r.levelno >= logging.ERROR and "upstream provider" in r.message
+    ]
+    assert len(matching) == 1, f"expected exactly one matching error log record, got: {caplog.records}"
+    record = matching[0]
+    assert record.exc_info is not None, "the log record must carry a real traceback, not just a message"
+    formatted = "".join(traceback.format_exception(*record.exc_info))
+    assert "simulated SSL certificate verification failure" in formatted
+    assert "ConnectError" in formatted
