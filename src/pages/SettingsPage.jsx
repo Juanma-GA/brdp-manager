@@ -38,8 +38,6 @@ function ProfileSection({ user, onUserUpdated }) {
     }
   };
 
-  const isUnchanged = displayName === user.display_name;
-
   return (
     <div className={styles.section}>
       <h3 className={styles.sectionTitle}>{t('settings.profile.title')}</h3>
@@ -62,7 +60,14 @@ function ProfileSection({ user, onUserUpdated }) {
           <input className={styles.input} value={user.global_role} disabled />
         </div>
         {error && <p className={styles.statusInvalid}>{error}</p>}
-        <Button type="submit" disabled={saving || isUnchanged}>
+        {/* Disabled only while the request is in flight -- same rule as
+            Create user's disabled={creating}. Previously also disabled
+            whenever displayName === user.display_name, which meant the
+            button stayed disabled right after a successful save (the
+            local value and the freshly-saved user.display_name are equal
+            at that point), a real bug, not cosmetic: it looked broken
+            until the next edit. */}
+        <Button type="submit" disabled={saving}>
           {saving ? t('settings.profile.saving') : t('settings.profile.save')}
         </Button>
       </form>
