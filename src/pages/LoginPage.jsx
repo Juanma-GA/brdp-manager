@@ -12,19 +12,20 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  // Per-field, not a single form-level message -- replaces the native
+  // `required` attribute's own per-field browser tooltip (see the i18n fix:
+  // that tooltip's language followed the browser/OS locale, not this app's
+  // selector), so the replacement needs to keep pointing at the exact
+  // field that's empty, not summarize it in one banner at the top.
+  const [fieldErrors, setFieldErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    // Not the native `required` attribute -- its browser tooltip follows
-    // the browser/OS locale, not this app's own language selector (a real
-    // i18n bug, confirmed by forcing the OS locale to es-ES independent of
-    // the app's language setting and observing the tooltip text change).
-    if (!email.trim() || !password.trim()) {
-      setError(t('validation.required'));
-      return;
-    }
+    const errors = { email: !email.trim(), password: !password.trim() };
+    setFieldErrors(errors);
+    if (errors.email || errors.password) return;
     setIsSubmitting(true);
     try {
       await login(email, password);
@@ -47,22 +48,30 @@ export default function LoginPage() {
         <input
           id="login-email"
           type="email"
-          className={styles.input}
+          className={`${styles.input} ${fieldErrors.email ? styles.inputError : ''}`}
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setFieldErrors((f) => ({ ...f, email: false }));
+          }}
           autoComplete="username"
         />
+        {fieldErrors.email && <p className={styles.fieldError}>{t('validation.required')}</p>}
         <label className={styles.label} htmlFor="login-password">
           {t('login.password')}
         </label>
         <input
           id="login-password"
           type="password"
-          className={styles.input}
+          className={`${styles.input} ${fieldErrors.password ? styles.inputError : ''}`}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setFieldErrors((f) => ({ ...f, password: false }));
+          }}
           autoComplete="current-password"
         />
+        {fieldErrors.password && <p className={styles.fieldError}>{t('validation.required')}</p>}
         {error && <p className={styles.error}>{error}</p>}
         <button type="submit" className={styles.submit} disabled={isSubmitting}>
           {isSubmitting ? '…' : t('login.submit')}

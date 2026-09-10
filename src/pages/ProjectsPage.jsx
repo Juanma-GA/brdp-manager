@@ -28,17 +28,14 @@ function CreateProjectForm({ onCreated, onCancel }) {
   const [standard, setStandard] = useState(STANDARD_OPTIONS[0].value);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
+  const [nameError, setNameError] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
-    // Not the native `required` attribute -- its browser tooltip follows
-    // the browser/OS locale, not this app's language selector (confirmed
-    // bug, see LoginPage.jsx for the reproduction).
-    if (!name.trim()) {
-      setError(t('validation.required'));
-      return;
-    }
+    const isEmpty = !name.trim();
+    setNameError(isEmpty);
+    if (isEmpty) return;
     setCreating(true);
     try {
       await authFetchJson('/api/projects', {
@@ -61,11 +58,15 @@ function CreateProjectForm({ onCreated, onCancel }) {
       <div className={styles.formGroup}>
         <label className={styles.label}>{t('projects.create.nameLabel')}</label>
         <input
-          className={styles.input}
+          className={`${styles.input} ${nameError ? styles.inputError : ''}`}
           value={name}
           placeholder={t('projects.create.namePlaceholder')}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setNameError(false);
+          }}
         />
+        {nameError && <p className={styles.fieldError}>{t('validation.required')}</p>}
       </div>
       <div className={styles.formGroup}>
         <label className={styles.label}>{t('projects.create.standardLabel')}</label>
@@ -96,17 +97,14 @@ function RenameProjectForm({ project, onRenamed, onCancel }) {
   const [name, setName] = useState(project.name);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [nameError, setNameError] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
-    // Not the native `required` attribute -- its browser tooltip follows
-    // the browser/OS locale, not this app's language selector (confirmed
-    // bug, see LoginPage.jsx for the reproduction).
-    if (!name.trim()) {
-      setError(t('validation.required'));
-      return;
-    }
+    const isEmpty = !name.trim();
+    setNameError(isEmpty);
+    if (isEmpty) return;
     setSaving(true);
     try {
       await authFetchJson(`/api/projects/${project.id}`, {
@@ -125,12 +123,18 @@ function RenameProjectForm({ project, onRenamed, onCancel }) {
   return (
     <form className={styles.renameForm} onSubmit={handleSubmit}>
       {error && <p className={styles.error}>{error}</p>}
-      <input
-        className={styles.input}
-        value={name}
-        autoFocus
-        onChange={(e) => setName(e.target.value)}
-      />
+      <div className={styles.renameFieldWrap}>
+        <input
+          className={`${styles.input} ${nameError ? styles.inputError : ''}`}
+          value={name}
+          autoFocus
+          onChange={(e) => {
+            setName(e.target.value);
+            setNameError(false);
+          }}
+        />
+        {nameError && <p className={styles.fieldError}>{t('validation.required')}</p>}
+      </div>
       <button type="submit" className={styles.button} disabled={saving}>
         {saving ? t('projects.rename.saving') : t('projects.rename.save')}
       </button>

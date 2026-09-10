@@ -146,6 +146,16 @@
   color: #991b1b;
 }
 
+.inputError {
+  border-color: #dc2626;
+}
+
+.fieldError {
+  color: #dc2626;
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
 .formRow {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -43,6 +43,16 @@
   margin: 10px 0 0;
 }
 
+.inputError {
+  border-color: #dc2626;
+}
+
+.fieldError {
+  color: #dc2626;
+  font-size: 11.5px;
+  margin: 4px 0 0;
+}
+
 .submit {
   margin-top: 18px;
   padding: 9px 12px;

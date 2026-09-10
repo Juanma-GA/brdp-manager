@@ -198,6 +198,16 @@
   margin: 4px 0 0;
 }
 
+.inputError {
+  border-color: #dc2626;
+}
+
+.fieldError {
+  color: #dc2626;
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
 .formActions {
   display: flex;
   gap: 8px;
@@ -209,9 +219,14 @@
   align-items: center;
 }
 
-.renameForm .input {
-  width: auto;
+.renameFieldWrap {
   flex: 1;
+  min-width: 0;
+}
+
+.renameForm .input {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .renameForm button {

@@ -11,6 +11,11 @@ function ProfileSection({ user, onUserUpdated }) {
   const [displayName, setDisplayName] = useState(user.display_name);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  // Separate from `error` (API failures, shown once near the button) --
+  // this is the "field is empty" case, which must stay pinned to the
+  // exact input, the same way the native `required` tooltip it replaced
+  // pointed at that field specifically.
+  const [nameError, setNameError] = useState(false);
 
   useEffect(() => {
     setDisplayName(user.display_name);
@@ -19,13 +24,9 @@ function ProfileSection({ user, onUserUpdated }) {
   const handleSave = async (e) => {
     e.preventDefault();
     setError(null);
-    // Not the native `required` attribute -- its browser tooltip follows
-    // the browser/OS locale, not this app's language selector (confirmed
-    // bug, see LoginPage.jsx for the reproduction).
-    if (!displayName.trim()) {
-      setError(t('validation.required'));
-      return;
-    }
+    const isEmpty = !displayName.trim();
+    setNameError(isEmpty);
+    if (isEmpty) return;
     setSaving(true);
     try {
       const updated = await authFetchJson('/api/auth/me', {
@@ -56,10 +57,14 @@ function ProfileSection({ user, onUserUpdated }) {
         <div className={styles.formGroup}>
           <label className={styles.label}>{t('settings.profile.displayName')}</label>
           <input
-            className={styles.input}
+            className={`${styles.input} ${nameError ? styles.inputError : ''}`}
             value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
+            onChange={(e) => {
+              setDisplayName(e.target.value);
+              setNameError(false);
+            }}
           />
+          {nameError && <p className={styles.fieldError}>{t('validation.required')}</p>}
         </div>
         <div className={styles.formGroup}>
           <label className={styles.label}>{t('settings.profile.globalRole')}</label>
@@ -90,11 +95,13 @@ function UserManagementSection({ currentUserId }) {
 
   const [newUser, setNewUser] = useState({ email: '', password: '', display_name: '', global_role: 'user' });
   const [creating, setCreating] = useState(false);
+  const [createErrors, setCreateErrors] = useState({});
 
   const [roleDraft, setRoleDraft] = useState({}); // userId -> { project_id, role }
 
   const [editingUserId, setEditingUserId] = useState(null);
   const [editDraft, setEditDraft] = useState({ email: '', display_name: '' });
+  const [editErrors, setEditErrors] = useState({});
   const [savingEdit, setSavingEdit] = useState(false);
 
   const adminCount = users.filter((u) => u.global_role === 'admin').length;
@@ -118,13 +125,13 @@ function UserManagementSection({ currentUserId }) {
   const handleCreate = async (e) => {
     e.preventDefault();
     setError(null);
-    // Not the native `required` attribute -- its browser tooltip follows
-    // the browser/OS locale, not this app's language selector (confirmed
-    // bug, see LoginPage.jsx for the reproduction).
-    if (!newUser.email.trim() || !newUser.password.trim() || !newUser.display_name.trim()) {
-      setError(t('validation.required'));
-      return;
-    }
+    const errors = {
+      email: !newUser.email.trim(),
+      password: !newUser.password.trim(),
+      display_name: !newUser.display_name.trim(),
+    };
+    setCreateErrors(errors);
+    if (errors.email || errors.password || errors.display_name) return;
     setCreating(true);
     try {
       await authFetchJson('/api/users', {
@@ -133,6 +140,7 @@ function UserManagementSection({ currentUserId }) {
         body: JSON.stringify(newUser),
       });
       setNewUser({ email: '', password: '', display_name: '', global_role: 'user' });
+      setCreateErrors({});
       refresh();
     } catch (err) {
       setError(err.message);
@@ -160,22 +168,20 @@ function UserManagementSection({ currentUserId }) {
   const startEdit = (u) => {
     setEditingUserId(u.id);
     setEditDraft({ email: u.email, display_name: u.display_name });
+    setEditErrors({});
     setError(null);
   };
 
   const cancelEdit = () => {
     setEditingUserId(null);
+    setEditErrors({});
   };
 
   const handleSaveEdit = async (userId) => {
     setError(null);
-    // Not the native `required` attribute -- its browser tooltip follows
-    // the browser/OS locale, not this app's language selector (confirmed
-    // bug, see LoginPage.jsx for the reproduction).
-    if (!editDraft.email.trim() || !editDraft.display_name.trim()) {
-      setError(t('validation.required'));
-      return;
-    }
+    const errors = { email: !editDraft.email.trim(), display_name: !editDraft.display_name.trim() };
+    setEditErrors(errors);
+    if (errors.email || errors.display_name) return;
     setSavingEdit(true);
     try {
       await authFetchJson(`/api/users/${userId}`, {
@@ -184,6 +190,7 @@ function UserManagementSection({ currentUserId }) {
         body: JSON.stringify(editDraft),
       });
       setEditingUserId(null);
+      setEditErrors({});
       refresh();
     } catch (err) {
       setError(err.message);
@@ -213,28 +220,40 @@ function UserManagementSection({ currentUserId }) {
         <div className={styles.formGroup}>
           <label className={styles.label}>{t('settings.userManagement.email')}</label>
           <input
-            className={styles.input}
+            className={`${styles.input} ${createErrors.email ? styles.inputError : ''}`}
             type="email"
             value={newUser.email}
-            onChange={(e) => setNewUser((u) => ({ ...u, email: e.target.value }))}
+            onChange={(e) => {
+              setNewUser((u) => ({ ...u, email: e.target.value }));
+              setCreateErrors((errs) => ({ ...errs, email: false }));
+            }}
           />
+          {createErrors.email && <p className={styles.fieldError}>{t('validation.required')}</p>}
         </div>
         <div className={styles.formGroup}>
           <label className={styles.label}>{t('settings.userManagement.password')}</label>
           <input
-            className={styles.input}
+            className={`${styles.input} ${createErrors.password ? styles.inputError : ''}`}
             type="password"
             value={newUser.password}
-            onChange={(e) => setNewUser((u) => ({ ...u, password: e.target.value }))}
+            onChange={(e) => {
+              setNewUser((u) => ({ ...u, password: e.target.value }));
+              setCreateErrors((errs) => ({ ...errs, password: false }));
+            }}
           />
+          {createErrors.password && <p className={styles.fieldError}>{t('validation.required')}</p>}
         </div>
         <div className={styles.formGroup}>
           <label className={styles.label}>{t('settings.userManagement.displayName')}</label>
           <input
-            className={styles.input}
+            className={`${styles.input} ${createErrors.display_name ? styles.inputError : ''}`}
             value={newUser.display_name}
-            onChange={(e) => setNewUser((u) => ({ ...u, display_name: e.target.value }))}
+            onChange={(e) => {
+              setNewUser((u) => ({ ...u, display_name: e.target.value }));
+              setCreateErrors((errs) => ({ ...errs, display_name: false }));
+            }}
           />
+          {createErrors.display_name && <p className={styles.fieldError}>{t('validation.required')}</p>}
         </div>
         <div className={styles.formGroup}>
           <label className={styles.label}>{t('settings.userManagement.globalRole')}</label>
@@ -275,23 +294,35 @@ function UserManagementSection({ currentUserId }) {
               <tr key={u.id}>
                 <td>
                   {isEditing ? (
-                    <input
-                      className={styles.input}
-                      type="email"
-                      value={editDraft.email}
-                      onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
-                    />
+                    <>
+                      <input
+                        className={`${styles.input} ${editErrors.email ? styles.inputError : ''}`}
+                        type="email"
+                        value={editDraft.email}
+                        onChange={(e) => {
+                          setEditDraft((d) => ({ ...d, email: e.target.value }));
+                          setEditErrors((errs) => ({ ...errs, email: false }));
+                        }}
+                      />
+                      {editErrors.email && <p className={styles.fieldError}>{t('validation.required')}</p>}
+                    </>
                   ) : (
                     u.email
                   )}
                 </td>
                 <td>
                   {isEditing ? (
-                    <input
-                      className={styles.input}
-                      value={editDraft.display_name}
-                      onChange={(e) => setEditDraft((d) => ({ ...d, display_name: e.target.value }))}
-                    />
+                    <>
+                      <input
+                        className={`${styles.input} ${editErrors.display_name ? styles.inputError : ''}`}
+                        value={editDraft.display_name}
+                        onChange={(e) => {
+                          setEditDraft((d) => ({ ...d, display_name: e.target.value }));
+                          setEditErrors((errs) => ({ ...errs, display_name: false }));
+                        }}
+                      />
+                      {editErrors.display_name && <p className={styles.fieldError}>{t('validation.required')}</p>}
+                    </>
                   ) : (
                     u.display_name
                   )}
