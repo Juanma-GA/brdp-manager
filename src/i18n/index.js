@@ -176,6 +176,7 @@ const resources = {
           saving: 'Saving…',
           cancel: 'Cancel',
           editorPlaceholder: 'Paste or write the rule text (raw XML/Schematron)…',
+          notWellFormed: 'Not well-formed XML: {{error}}',
         },
         assistant: {
           title: '✨ BRDP Assistant',
@@ -422,6 +423,7 @@ const resources = {
           saving: 'Guardando…',
           cancel: 'Cancelar',
           editorPlaceholder: 'Pega o escribe el texto de la regla (XML/Schematron en bruto)…',
+          notWellFormed: 'XML no bien formado: {{error}}',
         },
         assistant: {
           title: '✨ Asistente de BRDP',

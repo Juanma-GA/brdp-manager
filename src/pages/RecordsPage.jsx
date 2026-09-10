@@ -3,6 +3,7 @@ import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
+import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import styles from './RecordsPage.module.css';
 
@@ -104,6 +105,7 @@ export default function RecordsPage() {
   const [ruleEditing, setRuleEditing] = useState(false);
   const [ruleDraftText, setRuleDraftText] = useState('');
   const [ruleBusy, setRuleBusy] = useState(false);
+  const [ruleValidationError, setRuleValidationError] = useState(null);
 
   const refresh = () =>
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => {
@@ -137,12 +139,29 @@ export default function RecordsPage() {
 
   const openRuleEditor = () => {
     setRuleDraftText(ruleApproval?.rule_xml || '');
+    setRuleValidationError(null);
     setRuleEditing(true);
   };
 
-  const cancelRuleEditor = () => setRuleEditing(false);
+  const cancelRuleEditor = () => {
+    setRuleValidationError(null);
+    setRuleEditing(false);
+  };
 
+  // The manual editor is a write path into rule_approvals that bypasses
+  // the generation engine entirely, so it also bypasses the engine's own
+  // checkWellFormed() safety net (docs/v2 CLAUDE.md) -- without this check
+  // a broken tag would surface silently, later, inside a generated
+  // BREX/Schematron document instead of here at save time. Reuses the
+  // engine's own helper (never duplicated) rather than re-implementing
+  // XML parsing; the backend enforces the same rule server-side too.
   const saveRuleEditor = async () => {
+    const wellFormed = checkWellFormed(ruleDraftText);
+    if (!wellFormed.valid) {
+      setRuleValidationError(wellFormed.error);
+      return;
+    }
+    setRuleValidationError(null);
     setRuleBusy(true);
     try {
       await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}`, {
@@ -152,6 +171,11 @@ export default function RecordsPage() {
       });
       setRuleEditing(false);
       setApprovalsRefreshToken((n) => n + 1);
+    } catch (err) {
+      // Defense in depth: the backend enforces the same well-formedness
+      // rule independently (never trust only the client), so surface its
+      // rejection the same way in the rare case the two checks disagree.
+      setRuleValidationError(err.message);
     } finally {
       setRuleBusy(false);
     }
@@ -436,10 +460,19 @@ export default function RecordsPage() {
                   <textarea
                     className={styles.ruleTextarea}
                     value={ruleDraftText}
-                    onChange={(e) => setRuleDraftText(e.target.value)}
+                    onChange={(e) => {
+                      setRuleDraftText(e.target.value);
+                      if (ruleValidationError) setRuleValidationError(null);
+                    }}
                     placeholder={t('records.rule.editorPlaceholder')}
                     spellCheck={false}
+                    aria-invalid={ruleValidationError ? 'true' : undefined}
                   />
+                  {ruleValidationError && (
+                    <p className={styles.ruleErrorText} role="alert">
+                      {t('records.rule.notWellFormed', { error: ruleValidationError })}
+                    </p>
+                  )}
                   <div className={styles.suggestionActions}>
                     <button onClick={saveRuleEditor} disabled={ruleBusy}>
                       {ruleBusy ? t('records.rule.saving') : t('records.rule.save')}

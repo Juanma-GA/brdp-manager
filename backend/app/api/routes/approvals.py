@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from lxml import etree
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_project_role
@@ -13,6 +14,24 @@ from app.schemas.rule_approval import RuleApprovalOut, RuleApprovalPropose
 router = APIRouter(
     prefix="/api/projects/{project_id}/brdps/{brdp_id}/approvals/{format}", tags=["approvals"]
 )
+
+
+def _xml_well_formed_error(xml_text: str) -> str | None:
+    """Well-formedness only -- not a full XSD validation (that already
+    happens later, in the browser, against the actual generated document).
+    This exists because the manual rule editor is a NEW write path into
+    rule_approvals that bypasses the generation engine entirely, so it
+    also bypasses the engine's own checkWellFormed() safety net -- without
+    this, a broken tag saved here would surface silently, later, inside a
+    generated BREX/Schematron document instead of at save time. Mirrors
+    the frontend's checkWellFormed() (src/api/generateBREX.js) so the API
+    enforces the same rule even for a caller that skips the UI.
+    """
+    try:
+        etree.fromstring(xml_text.encode("utf-8"))
+        return None
+    except etree.XMLSyntaxError as exc:
+        return str(exc)
 
 
 @router.get("", response_model=RuleApprovalOut | None)
@@ -41,6 +60,12 @@ async def propose_approval(
     db: AsyncSession = Depends(get_db),
 ) -> RuleApproval:
     await _get_owned_brdp(project_id, brdp_id, db)
+    xml_error = _xml_well_formed_error(body.rule_xml)
+    if xml_error is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"rule_xml is not well-formed XML: {xml_error}",
+        )
     status_value = "approved" if body.status == "approved" else "pending_review"
     approval = await db.get(RuleApproval, (brdp_id, format))
     if approval is None:

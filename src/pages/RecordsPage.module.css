@@ -135,6 +135,16 @@
   color: #334155;
 }
 
+.ruleErrorText {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
 .ruleEditor {
   display: flex;
   flex-direction: column;

@@ -174,3 +174,28 @@ async def test_manual_propose_can_save_directly_as_approved(client, editor_and_p
     assert response.status_code == 200
     assert response.json()["status"] == "approved"
     assert response.json()["approved_at"] is not None
+
+
+async def test_propose_rejects_malformed_xml(client, editor_and_project):
+    """The manual rule editor is a write path into rule_approvals that
+    bypasses the generation engine entirely -- so it also bypasses the
+    engine's own checkWellFormed() safety net. Without a check here, a
+    broken tag saved from the editor (or straight against the API) would
+    surface silently, later, inside a generated BREX/Schematron document
+    instead of at save time.
+    """
+    project, headers = editor_and_project
+    brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-APPR-004"}, headers=headers)
+    ).json()
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
+
+    response = await client.put(
+        url, json={"rule_xml": "<structureObjectRule>", "source": "manual"}, headers=headers
+    )
+    assert response.status_code == 422
+    assert "not well-formed" in response.json()["detail"]
+
+    # Confirm it was really rejected, not saved anyway.
+    fetched = await client.get(url, headers=headers)
+    assert fetched.json() is None
