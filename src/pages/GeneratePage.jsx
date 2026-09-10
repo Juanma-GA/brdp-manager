@@ -5,7 +5,6 @@ import { authFetchJson } from '../services/apiClient';
 import { generateBREX } from '../api/generateBREX';
 import { generateBREX41 } from '../api/generateBREX41.js';
 import { generateBREX301 } from '../api/generateBREX301.js';
-import { generateBREXSch } from '../api/generateBREXSch.js';
 import { generateSchematronDITA } from '../api/generateSchematronDITA.js';
 import styles from './GeneratePage.module.css';
 
@@ -17,19 +16,24 @@ const FORMAT_DEFS = {
   'BREX — S1000D 4.2': { approvalsFormat: 'BREX-4.2', xsdFormat: '4.2', run: generateBREX },
   'BREX — S1000D 4.1': { approvalsFormat: 'BREX-4.1', xsdFormat: '4.1', run: generateBREX41 },
   'BREX — S1000D 3.0.1': { approvalsFormat: 'BREX-3.0.1', xsdFormat: '3.0.1', run: generateBREX301 },
-  'Schematron 1.0 — S1000D': { approvalsFormat: 'SCH-S1000D', xsdFormat: null, run: generateBREXSch },
   'Schematron 1.0 — DITA': { approvalsFormat: 'SCH-DITA', xsdFormat: null, run: generateSchematronDITA },
 };
 
-const FORMAT_OPTIONS = [
-  'BREX — S1000D 3.0.1',
-  'BREX — S1000D 4.1',
-  'BREX — S1000D 4.2',
-  'BREX — S1000D 5.0',
-  'BREX — S1000D 6.0',
-  'Schematron 1.0 — S1000D',
-  'Schematron 1.0 — DITA',
-];
+// docs/v2 §1/§2: project.standard is fixed at project creation and
+// "Generate BREX/Schematron no ofrece selector, genera directamente el
+// formato del proyecto" -- one project standard maps to exactly one
+// generation format, never an open choice at generate time. (Schematron
+// 1.0 — S1000D has no entry here: it's a BREX-3.0.1 derivative
+// (generateBREXSch reuses generateBREX301 internally, see CLAUDE.md), not
+// a project.standard value of its own in v2's model -- same reasoning
+// already applied to routes/similar.py's kind='rule' standard->format
+// mapping on the backend, kept consistent here.)
+const STANDARD_TO_FORMAT = {
+  'S1000D 4.2': 'BREX — S1000D 4.2',
+  'S1000D 4.1': 'BREX — S1000D 4.1',
+  'S1000D 3.0.1': 'BREX — S1000D 3.0.1',
+  'DITA 1.3': 'Schematron 1.0 — DITA',
+};
 
 // generateBREX()/generateBREX41()/generateBREX301()/generateBREXSch()/
 // generateSchematronDITA() are the untouched core engine (CLAUDE.md) --
@@ -75,9 +79,11 @@ export default function GeneratePage() {
   const { projectId } = useParams();
   const { project } = useOutletContext();
 
+  // Fixed by the project's own standard, never user-selectable (docs/v2 §1).
+  const format = STANDARD_TO_FORMAT[project.standard];
+
   const [brdps, setBrdps] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [format, setFormat] = useState('BREX — S1000D 4.2');
   const [onlyValidated, setOnlyValidated] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
@@ -95,7 +101,7 @@ export default function GeneratePage() {
   useEffect(() => {
     setResult(null);
     setXsdValidation(null);
-  }, [format, onlyValidated]);
+  }, [onlyValidated]);
 
   const formatDef = FORMAT_DEFS[format];
   const isImplemented = !!formatDef;
@@ -147,13 +153,10 @@ export default function GeneratePage() {
     const dateStr = new Date().toISOString().slice(0, 10);
     const mic = project.project_config?.modelIdentCode || 'UNKNOWN';
     const isSchDITA = format === 'Schematron 1.0 — DITA';
-    const isSchS1000D = format === 'Schematron 1.0 — S1000D';
     const isBREX301 = format === 'BREX — S1000D 3.0.1';
     const isBREX41 = format === 'BREX — S1000D 4.1';
     const filename = isSchDITA
       ? `${mic}_${dateStr}_dita.sch`
-      : isSchS1000D
-      ? `${mic}_${dateStr}.sch`
       : isBREX301
       ? `DMC-${mic}-00-00-00-00A-022A-D_${dateStr}_301.xml`
       : isBREX41
@@ -178,17 +181,11 @@ export default function GeneratePage() {
       </p>
 
       <div className={styles.card}>
-        <label className={styles.fieldLabel} htmlFor="format">
-          Format &amp; Standard
-        </label>
-        <select id="format" className={styles.select} value={format} onChange={(e) => setFormat(e.target.value)}>
-          {FORMAT_OPTIONS.map((f) => (
-            <option key={f}>{f}</option>
-          ))}
-        </select>
+        <label className={styles.fieldLabel}>Format &amp; Standard</label>
+        <p className={styles.fixedFormat}>{format || `No generator for "${project.standard}"`}</p>
         {!isImplemented && (
           <p className={styles.warning}>
-            ⚠ Only BREX 4.2, 4.1, 3.0.1, Schematron 1.0 — S1000D and Schematron 1.0 — DITA are implemented.
+            ⚠ Generation is not implemented yet for this project's standard ({project.standard}).
           </p>
         )}
 

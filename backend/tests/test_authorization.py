@@ -269,6 +269,42 @@ async def test_viewer_of_a_cannot_revoke_an_approved_rule_in_a(client, scenario)
     assert response.status_code == 403
 
 
+async def test_viewer_of_a_cannot_post_accepted_suggestion_feedback_in_a(client, scenario):
+    """Same criterion already applied to rule_approvals: a viewer can log
+    that they discarded a suggestion (read-only, no mutation), but
+    outcome='accepted' is a claim they acted on it -- and the real accept
+    action is editor-gated, so this must be too.
+    """
+    response = await client.post(
+        "/api/suggestion-feedback",
+        json={
+            "brdp_id": str(scenario["brdp_a"].id),
+            "kind": "definition",
+            "suggested_text": "viewer-hack",
+            "outcome": "accepted",
+        },
+        headers=_headers(scenario["viewer_a"]),
+    )
+    assert response.status_code == 403
+
+
+async def test_viewer_of_a_can_post_discarded_suggestion_feedback_in_a(client, scenario):
+    """Positive control for the same rule: a discarded outcome is exactly
+    what §4.3 says a viewer CAN do with the BRDP Assistant.
+    """
+    response = await client.post(
+        "/api/suggestion-feedback",
+        json={
+            "brdp_id": str(scenario["brdp_a"].id),
+            "kind": "definition",
+            "suggested_text": "not for me",
+            "outcome": "discarded",
+        },
+        headers=_headers(scenario["viewer_a"]),
+    )
+    assert response.status_code == 201
+
+
 async def test_editor_of_a_can_propose_and_approve_in_a(client, scenario):
     """Positive control: editor really can do what viewer can't, in the
     SAME project -- proves the 403s above are about role, not something

@@ -32,13 +32,17 @@
   text-transform: uppercase;
 }
 
-.select {
+.fixedFormat {
   width: 100%;
+  box-sizing: border-box;
   padding: 8px 10px;
   border-radius: 7px;
   border: 1px solid #dde3ec;
+  background: #f8fafc;
   font-size: 13px;
-  margin-bottom: 8px;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 8px;
 }
 
 .warning {

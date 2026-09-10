@@ -29,11 +29,17 @@ async def create_suggestion_feedback(
     if brdp is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BRDP not found")
 
-    # viewer, not editor: logging feedback never mutates the BRDP itself
-    # (the real accept action is a separate PUT, already editor-gated) --
-    # a viewer using the BRDP Assistant read-only (docs/v2 §4.3) can still
-    # discard/rate a suggestion they were shown.
-    if not await has_project_role(current_user, brdp.project_id, "viewer", db):
+    # A discarded outcome never mutates the BRDP itself -- viewer-safe,
+    # same as reading a rule_approvals row. But outcome='accepted' here is
+    # a CLAIM that the caller actually accepted a suggestion, and the real
+    # accept action (the BRDP field PUT, or the approvals PUT for a rule)
+    # is editor-gated -- docs/v2 §4.3's "viewer can read BRDP Assistant
+    # suggestions but the Accept button is disabled" rule, so logging
+    # outcome='accepted' needs the same floor as accepting for real, or a
+    # viewer could write a false "I accepted this" row into the feedback
+    # table they were never allowed to act on.
+    min_role = "editor" if body.outcome == "accepted" else "viewer"
+    if not await has_project_role(current_user, brdp.project_id, min_role, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this project")
 
     feedback = SuggestionFeedback(
