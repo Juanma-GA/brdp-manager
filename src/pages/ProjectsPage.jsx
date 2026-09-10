@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
-import LanguageSwitcher from '../components/LanguageSwitcher';
 import styles from './ProjectsPage.module.css';
 
 // The 7 exact standards the project can be created with (fixed forever
@@ -239,7 +238,6 @@ export default function ProjectsPage() {
               {t('projects.create.button')}
             </button>
           )}
-          <LanguageSwitcher />
         </div>
       </div>
 
