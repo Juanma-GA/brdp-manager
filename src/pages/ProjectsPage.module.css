@@ -1,5 +1,16 @@
 .page {
   padding: 24px;
+  /* AppLayout's .mainContent (App.css) is a fixed-height (100vh) flex
+     column with overflow: hidden by design -- content taller than the
+     viewport is silently clipped unless a page establishes its own
+     scroll region. flex: 1 + min-height: 0 let this shrink below its
+     content height inside that flex column (the default min-height: auto
+     would instead let it grow past the viewport, defeating
+     overflow-y: auto entirely). Same fix as SettingsPage.module.css's
+     .container. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .header {
