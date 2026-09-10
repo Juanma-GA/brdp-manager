@@ -77,6 +77,16 @@ async def list_projects(
     return [_to_out(p, _resolve_effective_role(current_user, role_map.get(p.id))) for p in projects]
 
 
+_DEFAULT_PROJECT_CONFIG = {
+    "systemDiffCode": "A",
+    "issueNumber": "001",
+    "inWork": "00",
+    "languageIsoCode": "en",
+    "countryIsoCode": "US",
+    "securityClassification": "01",
+}
+
+
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 async def create_project(
     body: ProjectCreate, _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
@@ -85,8 +95,19 @@ async def create_project(
     §4.3 permission matrix (project creation isn't a row there at all) --
     treated as admin-only here since it's a structural action akin to User
     Management, not project content. Flagged for confirmation.
+
+    _DEFAULT_PROJECT_CONFIG seeds the 6 identification fields every BREX/
+    Schematron-S1000D generator reads the same values for regardless of
+    standard (see generateBREX.js/generateBREX41.js/generateBREX301.js --
+    confirmed identical field set); projectName/modelIdentCode/
+    enterpriseCode stay unset for the user to fill in. Harmless no-op for a
+    Schematron 1.0 — DITA project, whose Project Configuration page only
+    ever shows/reads projectName (generateSchematronDITA.js reads nothing
+    else) -- these defaults are simply never displayed there. Any value
+    the caller does supply in body.project_config wins over the default.
     """
-    project = Project(name=body.name, standard=body.standard, project_config=body.project_config)
+    project_config = {**_DEFAULT_PROJECT_CONFIG, **body.project_config}
+    project = Project(name=body.name, standard=body.standard, project_config=project_config)
     db.add(project)
     await db.commit()
     await db.refresh(project)

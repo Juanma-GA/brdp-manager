@@ -56,6 +56,70 @@ async def _cleanup_user(user: User) -> None:
             await session.commit()
 
 
+async def test_create_project_seeds_default_config_values(client):
+    admin = await _make_user(global_role="admin")
+    created_id = None
+    try:
+        response = await client.post(
+            "/api/projects",
+            json={"name": f"Defaults Test {uuid.uuid4()}", "standard": "BREX — S1000D 4.2"},
+            headers=_headers(admin),
+        )
+        assert response.status_code == 201
+        body = response.json()
+        created_id = uuid.UUID(body["id"])
+        cfg = body["project_config"]
+        assert cfg["systemDiffCode"] == "A"
+        assert cfg["issueNumber"] == "001"
+        assert cfg["inWork"] == "00"
+        assert cfg["languageIsoCode"] == "en"
+        assert cfg["countryIsoCode"] == "US"
+        assert cfg["securityClassification"] == "01"
+        # projectName/modelIdentCode/enterpriseCode are left for the user --
+        # never seeded with a default value.
+        assert "projectName" not in cfg
+        assert "modelIdentCode" not in cfg
+        assert "enterpriseCode" not in cfg
+    finally:
+        if created_id is not None:
+            async with async_session_factory() as session:
+                db_project = await session.get(Project, created_id)
+                if db_project is not None:
+                    await session.delete(db_project)
+                await session.commit()
+        await _cleanup_user(admin)
+
+
+async def test_create_project_caller_supplied_config_overrides_defaults(client):
+    admin = await _make_user(global_role="admin")
+    created_id = None
+    try:
+        response = await client.post(
+            "/api/projects",
+            json={
+                "name": f"Defaults Override Test {uuid.uuid4()}",
+                "standard": "BREX — S1000D 4.2",
+                "project_config": {"systemDiffCode": "Z", "projectName": "Explicit Name"},
+            },
+            headers=_headers(admin),
+        )
+        assert response.status_code == 201
+        body = response.json()
+        created_id = uuid.UUID(body["id"])
+        cfg = body["project_config"]
+        assert cfg["systemDiffCode"] == "Z"  # caller-supplied wins over the "A" default
+        assert cfg["projectName"] == "Explicit Name"
+        assert cfg["issueNumber"] == "001"  # untouched defaults still apply
+    finally:
+        if created_id is not None:
+            async with async_session_factory() as session:
+                db_project = await session.get(Project, created_id)
+                if db_project is not None:
+                    await session.delete(db_project)
+                await session.commit()
+        await _cleanup_user(admin)
+
+
 async def test_rename_updates_name_but_never_standard(client):
     project = await _make_project(standard="BREX — S1000D 3.0.1")
     editor = await _make_user()

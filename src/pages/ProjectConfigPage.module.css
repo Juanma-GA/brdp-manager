@@ -83,3 +83,127 @@
   color: #94a3b8;
   margin: 0;
 }
+
+.card + .card,
+.card + .dangerCard {
+  margin-top: 20px;
+}
+
+.sectionHeading {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 14px;
+}
+
+.subsection {
+  margin-bottom: 18px;
+}
+
+.subsection:last-child {
+  margin-bottom: 0;
+}
+
+.subsectionHeading {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #334155;
+  margin: 0 0 8px;
+}
+
+.fileInputLabel {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 7px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+
+.fileInputLabel:hover {
+  background: #f8fafc;
+}
+
+.errorList {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #991b1b;
+  font-size: 12.5px;
+}
+
+.actionsRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.secondaryButton {
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 7px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  cursor: pointer;
+}
+
+.actionsRow button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerCard {
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 18px;
+}
+
+.dangerText {
+  font-size: 13px;
+  color: #7f1d1d;
+  margin: 0 0 12px;
+}
+
+.dangerButton {
+  padding: 8px 16px;
+  border-radius: 7px;
+  border: none;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.dangerButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
