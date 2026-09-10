@@ -95,6 +95,31 @@
   font-weight: 600;
 }
 
+.badge_approved {
+  color: #16a34a;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.badge_pending_review {
+  color: #d97706;
+  font-weight: 600;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inlineApproveBtn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid #d97706;
+  background: #fffbeb;
+  color: #92400e;
+  cursor: pointer;
+}
+
 .detailPanel {
   width: 360px;
   flex-shrink: 0;

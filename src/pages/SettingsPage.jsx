@@ -6,19 +6,20 @@ import { authFetchJson } from '../services/apiClient';
 import styles from './SettingsPage.module.css';
 
 function ProfileSection({ user }) {
+  const { t } = useTranslation();
   return (
     <div className={styles.section}>
-      <h3 className={styles.sectionTitle}>Profile</h3>
+      <h3 className={styles.sectionTitle}>{t('settings.profile.title')}</h3>
       <div className={styles.formGroup}>
-        <label className={styles.label}>Email</label>
+        <label className={styles.label}>{t('settings.profile.email')}</label>
         <input className={styles.input} value={user.email} disabled />
       </div>
       <div className={styles.formGroup}>
-        <label className={styles.label}>Display name</label>
+        <label className={styles.label}>{t('settings.profile.displayName')}</label>
         <input className={styles.input} value={user.display_name} disabled />
       </div>
       <div className={styles.formGroup}>
-        <label className={styles.label}>Global role</label>
+        <label className={styles.label}>{t('settings.profile.globalRole')}</label>
         <input className={styles.input} value={user.global_role} disabled />
       </div>
     </div>
@@ -26,6 +27,7 @@ function ProfileSection({ user }) {
 }
 
 function AIConfigSection() {
+  const { t } = useTranslation();
   const [aiProvider, setAiProvider] = useState(null);
   const [error, setError] = useState(null);
 
@@ -37,19 +39,17 @@ function AIConfigSection() {
 
   return (
     <div className={styles.section}>
-      <h3 className={styles.sectionTitle}>AI Configuration</h3>
-      <p className={styles.fieldDescription}>
-        The active AI provider is a server-side decision (.env) -- it cannot be changed from here.
-      </p>
+      <h3 className={styles.sectionTitle}>{t('settings.aiConfig.title')}</h3>
+      <p className={styles.fieldDescription}>{t('settings.aiConfig.description')}</p>
       {error && <p className={styles.statusInvalid}>{error}</p>}
       {aiProvider && (
         <>
           <div className={styles.formGroup}>
-            <label className={styles.label}>Provider</label>
+            <label className={styles.label}>{t('settings.aiConfig.provider')}</label>
             <input className={styles.input} value={aiProvider.provider} disabled />
           </div>
           <div className={styles.formGroup}>
-            <label className={styles.label}>Model</label>
+            <label className={styles.label}>{t('settings.aiConfig.model')}</label>
             <input className={styles.input} value={aiProvider.model} disabled />
           </div>
         </>
@@ -59,6 +59,7 @@ function AIConfigSection() {
 }
 
 function UserManagementSection() {
+  const { t } = useTranslation();
   const { projects } = useProjectContext();
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -123,12 +124,12 @@ function UserManagementSection() {
 
   return (
     <div className={styles.section}>
-      <h3 className={styles.sectionTitle}>User Management</h3>
+      <h3 className={styles.sectionTitle}>{t('settings.userManagement.title')}</h3>
       {error && <p className={styles.statusInvalid}>{error}</p>}
 
       <form className={styles.formRow} onSubmit={handleCreate} style={{ marginBottom: 12, flexWrap: 'wrap' }}>
         <div className={styles.formGroup}>
-          <label className={styles.label}>Email</label>
+          <label className={styles.label}>{t('settings.userManagement.email')}</label>
           <input
             className={styles.input}
             type="email"
@@ -138,7 +139,7 @@ function UserManagementSection() {
           />
         </div>
         <div className={styles.formGroup}>
-          <label className={styles.label}>Password</label>
+          <label className={styles.label}>{t('settings.userManagement.password')}</label>
           <input
             className={styles.input}
             type="password"
@@ -148,7 +149,7 @@ function UserManagementSection() {
           />
         </div>
         <div className={styles.formGroup}>
-          <label className={styles.label}>Display name</label>
+          <label className={styles.label}>{t('settings.userManagement.displayName')}</label>
           <input
             className={styles.input}
             required
@@ -157,7 +158,7 @@ function UserManagementSection() {
           />
         </div>
         <div className={styles.formGroup}>
-          <label className={styles.label}>Global role</label>
+          <label className={styles.label}>{t('settings.userManagement.globalRole')}</label>
           <select
             className={styles.select}
             value={newUser.global_role}
@@ -168,7 +169,7 @@ function UserManagementSection() {
           </select>
         </div>
         <button className={styles.button} type="submit" disabled={creating}>
-          {creating ? '…' : 'Create user'}
+          {creating ? t('settings.userManagement.creating') : t('settings.userManagement.createUser')}
         </button>
       </form>
 
@@ -178,11 +179,11 @@ function UserManagementSection() {
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Email</th>
-              <th>Name</th>
-              <th>Global role</th>
-              <th>Project roles</th>
-              <th>Assign</th>
+              <th>{t('settings.userManagement.table.email')}</th>
+              <th>{t('settings.userManagement.table.name')}</th>
+              <th>{t('settings.userManagement.table.globalRole')}</th>
+              <th>{t('settings.userManagement.table.projectRoles')}</th>
+              <th>{t('settings.userManagement.table.assign')}</th>
             </tr>
           </thead>
           <tbody>
@@ -198,7 +199,11 @@ function UserManagementSection() {
                     u.project_roles.map((r) => (
                       <div key={r.project_id} className={styles.roleTag}>
                         {projectName(r.project_id)}: {r.role}{' '}
-                        <button type="button" onClick={() => handleRemoveRole(u.id, r.project_id)} aria-label="Remove">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRole(u.id, r.project_id)}
+                          aria-label={t('settings.userManagement.removeAria')}
+                        >
                           ✕
                         </button>
                       </div>
@@ -213,7 +218,7 @@ function UserManagementSection() {
                       setRoleDraft((d) => ({ ...d, [u.id]: { ...d[u.id], project_id: e.target.value } }))
                     }
                   >
-                    <option value="">Project…</option>
+                    <option value="">{t('settings.userManagement.projectPlaceholder')}</option>
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -225,12 +230,12 @@ function UserManagementSection() {
                     value={roleDraft[u.id]?.role || ''}
                     onChange={(e) => setRoleDraft((d) => ({ ...d, [u.id]: { ...d[u.id], role: e.target.value } }))}
                   >
-                    <option value="">Role…</option>
+                    <option value="">{t('settings.userManagement.rolePlaceholder')}</option>
                     <option value="viewer">viewer</option>
                     <option value="editor">editor</option>
                   </select>
                   <button type="button" className={styles.button} onClick={() => handleAssignRole(u.id)}>
-                    Assign
+                    {t('settings.userManagement.assignButton')}
                   </button>
                 </td>
               </tr>

@@ -5,12 +5,12 @@ import { authFetchJson } from '../services/apiClient';
 import styles from './ProjectConfigPage.module.css';
 
 const FIELDS = [
-  { key: 'modelIdentCode', label: 'Model Ident Code', hint: 'CAGE code' },
-  { key: 'systemDiffCode', label: 'System Diff Code' },
-  { key: 'issueNumber', label: 'Issue Number' },
-  { key: 'languageIsoCode', label: 'Language ISO Code' },
-  { key: 'countryIsoCode', label: 'Country ISO Code' },
-  { key: 'securityClassification', label: 'Security Classification' },
+  { key: 'modelIdentCode', labelKey: 'modelIdentCode', hintKey: 'modelIdentCodeHint' },
+  { key: 'systemDiffCode', labelKey: 'systemDiffCode' },
+  { key: 'issueNumber', labelKey: 'issueNumber' },
+  { key: 'languageIsoCode', labelKey: 'languageIsoCode' },
+  { key: 'countryIsoCode', labelKey: 'countryIsoCode' },
+  { key: 'securityClassification', labelKey: 'securityClassification' },
 ];
 
 export default function ProjectConfigPage() {
@@ -65,7 +65,7 @@ export default function ProjectConfigPage() {
           {FIELDS.map((f) => (
             <div key={f.key} className={styles.field}>
               <label className={styles.label} htmlFor={`cfg-${f.key}`}>
-                {f.label}
+                {t(`config.fields.${f.labelKey}`)}
               </label>
               <input
                 id={`cfg-${f.key}`}
@@ -74,17 +74,17 @@ export default function ProjectConfigPage() {
                 onChange={(e) => handleChange(f.key, e.target.value)}
                 disabled={!canEdit}
               />
-              {f.hint && <span className={styles.hint}>{f.hint}</span>}
+              {f.hintKey && <span className={styles.hint}>{t(`config.fields.${f.hintKey}`)}</span>}
             </div>
           ))}
         </div>
         {canEdit && (
           <button type="submit" className={styles.saveBtn} disabled={isSaving}>
-            {isSaving ? '…' : 'Save Configuration'}
+            {isSaving ? '…' : t('config.save')}
           </button>
         )}
-        {saved && <span className={styles.savedIndicator}>Saved</span>}
-        {!canEdit && <p className={styles.readOnlyNote}>Read-only -- your role on this project doesn't allow editing.</p>}
+        {saved && <span className={styles.savedIndicator}>{t('config.saved')}</span>}
+        {!canEdit && <p className={styles.readOnlyNote}>{t('config.readOnly')}</p>}
       </form>
     </div>
   );

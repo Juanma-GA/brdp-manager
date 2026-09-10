@@ -181,33 +181,27 @@ export default function GeneratePage() {
       </p>
 
       <div className={styles.card}>
-        <label className={styles.fieldLabel}>Format &amp; Standard</label>
-        <p className={styles.fixedFormat}>{format || `No generator for "${project.standard}"`}</p>
+        <label className={styles.fieldLabel}>{t('generate.formatLabel')}</label>
+        <p className={styles.fixedFormat}>{format || t('generate.noFormatFor', { standard: project.standard })}</p>
         {!isImplemented && (
-          <p className={styles.warning}>
-            ⚠ Generation is not implemented yet for this project's standard ({project.standard}).
-          </p>
+          <p className={styles.warning}>⚠ {t('generate.notImplemented', { standard: project.standard })}</p>
         )}
 
         <label className={styles.checkboxLabel}>
           <input type="checkbox" checked={onlyValidated} onChange={(e) => setOnlyValidated(e.target.checked)} />
-          Only include Validated BRDPs
+          {t('generate.onlyValidated')}
         </label>
 
-        <p className={styles.summary}>
-          {includedCount} {includedCount === 1 ? 'BRDP' : 'BRDPs'} will be included
-        </p>
+        <p className={styles.summary}>{t('generate.summary', { count: includedCount })}</p>
 
-        {!isConfigComplete && (
-          <p className={styles.warning}>⚠ Project configuration incomplete. Go to Project Configuration first.</p>
-        )}
+        {!isConfigComplete && <p className={styles.warning}>⚠ {t('generate.configIncomplete')}</p>}
 
         <button
           className={styles.generateBtn}
           onClick={handleGenerate}
           disabled={generating || isLoading || !isImplemented || !isConfigComplete}
         >
-          {generating ? 'Generating…' : result ? 'Regenerate' : 'Generate'}
+          {generating ? t('generate.generating') : result ? t('generate.regenerateButton') : t('generate.generateButton')}
         </button>
       </div>
 
@@ -215,23 +209,27 @@ export default function GeneratePage() {
         <div className={styles.outputCard}>
           <div className={styles.outputMeta}>
             <span className={result.valid ? styles.badgeOk : styles.badgeError}>
-              {result.valid ? '✓ Well-formed XML' : `✗ XML error: ${result.error || (result.errors || []).join('; ')}`}
+              {result.valid
+                ? `✓ ${t('generate.wellFormed')}`
+                : `✗ ${t('generate.xmlError', { error: result.error || (result.errors || []).join('; ') })}`}
             </span>
-            {result.brdpCount > 0 && <span className={styles.countInfo}>{result.brdpCount} rules included</span>}
+            {result.brdpCount > 0 && (
+              <span className={styles.countInfo}>{t('generate.rulesIncluded', { count: result.brdpCount })}</span>
+            )}
           </div>
 
           {formatDef?.xsdFormat && result.xml && (
             <div className={styles.xsdSection}>
               {xsdValidation?.status === 'validating' ? (
-                <span className={styles.badgePending}>⧗ Validating against XSD…</span>
+                <span className={styles.badgePending}>⧗ {t('generate.validating')}</span>
               ) : xsdValidation?.status === 'error' ? (
-                <span className={styles.badgeError}>✗ XSD validation failed to run: {xsdValidation.message}</span>
+                <span className={styles.badgeError}>✗ {t('generate.xsdFailedToRun', { message: xsdValidation.message })}</span>
               ) : xsdValidation?.status === 'done' && xsdValidation.valid ? (
-                <span className={styles.badgeOk}>✓ Valid against XSD schema</span>
+                <span className={styles.badgeOk}>✓ {t('generate.validAgainstXsd')}</span>
               ) : xsdValidation?.status === 'done' && !xsdValidation.valid ? (
                 <details>
                   <summary className={styles.badgeError}>
-                    ✗ {xsdValidation.errors.length} XSD validation {xsdValidation.errors.length === 1 ? 'issue' : 'issues'}
+                    ✗ {t('generate.xsdIssues', { count: xsdValidation.errors.length })}
                   </summary>
                   <ul className={styles.errorList}>
                     {xsdValidation.errors.map((e, i) => (
@@ -249,7 +247,7 @@ export default function GeneratePage() {
           {isSchDITA && result.xml && result.vocabularyWarnings?.length > 0 && (
             <details className={styles.xsdSection}>
               <summary className={styles.badgePending}>
-                ⚠ {result.vocabularyWarnings.length} vocabulary {result.vocabularyWarnings.length === 1 ? 'warning' : 'warnings'} (non-blocking)
+                ⚠ {t('generate.vocabularyWarnings', { count: result.vocabularyWarnings.length })}
               </summary>
               <ul className={styles.errorList}>
                 {result.vocabularyWarnings.map((w, i) => (
@@ -263,8 +261,8 @@ export default function GeneratePage() {
             <>
               <pre className={styles.xmlOutput}>{result.xml}</pre>
               <div className={styles.outputActions}>
-                <button onClick={handleCopy}>{copied ? 'Copied!' : 'Copy to clipboard'}</button>
-                <button onClick={handleDownload}>Download</button>
+                <button onClick={handleCopy}>{copied ? t('generate.copied') : t('generate.copy')}</button>
+                <button onClick={handleDownload}>{t('generate.download')}</button>
               </div>
             </>
           ) : (

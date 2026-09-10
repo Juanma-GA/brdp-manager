@@ -24,13 +24,13 @@ export default function Sidebar({ collapsed, onToggleCollapse }) {
       <button
         className={styles.collapseToggle}
         onClick={onToggleCollapse}
-        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-label={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
+        title={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
       >
         ☰
       </button>
 
-      {!collapsed && <div className={styles.sectionLabel}>Navigation</div>}
+      {!collapsed && <div className={styles.sectionLabel}>{t('sidebar.navigation')}</div>}
       <nav className={styles.nav}>
         <NavLink to="/projects" className={navItemClass} title={collapsed ? t('nav.projects') : undefined}>
           <span className={styles.navIcon}>📋</span>
@@ -74,7 +74,7 @@ export default function Sidebar({ collapsed, onToggleCollapse }) {
       <div className={styles.footer}>
         <div>
           <span className={styles.footerIcon}>ℹ️</span>
-          {!collapsed && 'BRDP Manager v2'}
+          {!collapsed && t('sidebar.footer')}
         </div>
       </div>
     </aside>

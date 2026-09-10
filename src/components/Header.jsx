@@ -30,7 +30,7 @@ export default function Header() {
                 {user.display_name} · {user.global_role}
               </span>
               <button className={styles.secondaryBtn} onClick={logout}>
-                Logout
+                {t('logout')}
               </button>
             </>
           )}
