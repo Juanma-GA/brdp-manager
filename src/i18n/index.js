@@ -146,6 +146,8 @@ const resources = {
       records: {
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
         searchPlaceholder: 'Search by ID or Title…',
+        save: 'Save',
+        saving: 'Saving…',
         addButton: 'Add BRDP',
         selectHint: 'Select a BRDP from the table.',
         table: {
@@ -422,6 +424,8 @@ const resources = {
       records: {
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
         searchPlaceholder: 'Buscar por ID o Título…',
+        save: 'Guardar',
+        saving: 'Guardando…',
         addButton: 'Añadir BRDP',
         selectHint: 'Selecciona un BRDP de la tabla.',
         table: {

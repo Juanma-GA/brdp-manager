@@ -183,6 +183,16 @@ export default function RecordsPage() {
   const [ruleDraftText, setRuleDraftText] = useState('');
   const [ruleBusy, setRuleBusy] = useState(false);
   const [ruleValidationError, setRuleValidationError] = useState(null);
+  // Distinct from ruleValidationError above: that one is ONLY for the
+  // client-side checkWellFormed() pre-check (and reuses its "Not
+  // well-formed XML: {error}" template, which is accurate there). This one
+  // is for whatever the PUT call itself fails with -- a 500, a 502, a
+  // network error, anything -- and is shown as the server's own message
+  // verbatim, with no added label. Conflating the two used to mean a
+  // completely unrelated server error (e.g. a missing DB table) rendered
+  // as "Not well-formed XML: Internal Server Error", which is actively
+  // misleading about the real cause.
+  const [ruleSaveError, setRuleSaveError] = useState(null);
 
   // Real per-field audit trail for the selected BRDP (GET .../history) --
   // refetched whenever the selection changes or historyRefreshToken is
@@ -238,11 +248,13 @@ export default function RecordsPage() {
   const openRuleEditor = () => {
     setRuleDraftText(ruleApproval?.rule_xml || '');
     setRuleValidationError(null);
+    setRuleSaveError(null);
     setRuleEditing(true);
   };
 
   const cancelRuleEditor = () => {
     setRuleValidationError(null);
+    setRuleSaveError(null);
     setRuleEditing(false);
   };
 
@@ -260,6 +272,7 @@ export default function RecordsPage() {
       return;
     }
     setRuleValidationError(null);
+    setRuleSaveError(null);
     setRuleBusy(true);
     try {
       await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}`, {
@@ -271,10 +284,14 @@ export default function RecordsPage() {
       setApprovalsRefreshToken((n) => n + 1);
       setHistoryRefreshToken((n) => n + 1);
     } catch (err) {
-      // Defense in depth: the backend enforces the same well-formedness
-      // rule independently (never trust only the client), so surface its
-      // rejection the same way in the rare case the two checks disagree.
-      setRuleValidationError(err.message);
+      // Whatever the PUT itself failed with -- the backend's own 422 for a
+      // well-formedness rejection already reads as "rule_xml is not
+      // well-formed XML: ..." on its own, and any other error (500, 502,
+      // network) is shown exactly as the server reported it. Never route
+      // this through ruleValidationError/its "Not well-formed XML:"
+      // template -- that mislabels an unrelated server error as an XML
+      // problem.
+      setRuleSaveError(err.message);
     } finally {
       setRuleBusy(false);
     }
@@ -373,6 +390,26 @@ export default function RecordsPage() {
     });
     setHistoryRefreshToken((n) => n + 1);
     refresh();
+  };
+
+  // Title/Definition/Proposal previously saved only on blur, with no
+  // explicit way to commit them (docs request: bug report). onBlur is left
+  // in place (harmless, already relied on), this just adds a visible,
+  // explicit way to save the same 3 fields without needing to tab away.
+  const [fieldsSaving, setFieldsSaving] = useState(false);
+
+  const saveFields = async () => {
+    if (!selected) return;
+    setFieldsSaving(true);
+    try {
+      await handleUpdate(selected.id, {
+        title: selected.title,
+        definition: selected.definition,
+        proposal: selected.proposal,
+      });
+    } finally {
+      setFieldsSaving(false);
+    }
   };
 
   const handleDelete = async (brdpId, identifier) => {
@@ -700,6 +737,12 @@ export default function RecordsPage() {
                 onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: e.target.value } : b)))}
                 onBlur={(e) => canEdit && handleUpdate(selected.id, { proposal: e.target.value })}
               />
+              {canEdit && (
+                <button onClick={saveFields} disabled={fieldsSaving} className={styles.saveFieldsButton}>
+                  {fieldsSaving ? t('records.saving') : t('records.save')}
+                </button>
+              )}
+
               <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
               <select
                 className={styles.select}
@@ -729,14 +772,20 @@ export default function RecordsPage() {
                     onChange={(e) => {
                       setRuleDraftText(e.target.value);
                       if (ruleValidationError) setRuleValidationError(null);
+                      if (ruleSaveError) setRuleSaveError(null);
                     }}
                     placeholder={t('records.rule.editorPlaceholder')}
                     spellCheck={false}
-                    aria-invalid={ruleValidationError ? 'true' : undefined}
+                    aria-invalid={ruleValidationError || ruleSaveError ? 'true' : undefined}
                   />
                   {ruleValidationError && (
                     <p className={styles.ruleErrorText} role="alert">
                       {t('records.rule.notWellFormed', { error: ruleValidationError })}
+                    </p>
+                  )}
+                  {ruleSaveError && (
+                    <p className={styles.ruleErrorText} role="alert">
+                      {ruleSaveError}
                     </p>
                   )}
                   <div className={styles.suggestionActions}>
