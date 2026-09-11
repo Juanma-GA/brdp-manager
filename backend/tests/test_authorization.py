@@ -246,19 +246,6 @@ async def test_viewer_of_a_cannot_update_brdp_in_a(client, scenario):
     assert response.status_code == 403
 
 
-async def test_viewer_of_a_cannot_rename_brdp_identifier_in_a(client, scenario):
-    """The ID field became directly editable this round (previously a
-    plain heading) -- a real HTTP call must still be blocked by role, not
-    merely have its input disabled in the UI.
-    """
-    response = await client.put(
-        f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}",
-        json={"identifier": "VIEWER-RENAMED-THIS"},
-        headers=_headers(scenario["viewer_a"]),
-    )
-    assert response.status_code == 403
-
-
 async def test_viewer_of_a_cannot_delete_brdp_in_a(client, scenario):
     response = await client.delete(
         f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}",

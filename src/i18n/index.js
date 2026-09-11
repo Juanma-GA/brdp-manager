@@ -146,8 +146,6 @@ const resources = {
       records: {
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
         searchPlaceholder: 'Search by ID or Title…',
-        save: 'Save',
-        saving: 'Saving…',
         addButton: 'Add BRDP',
         selectHint: 'Select a BRDP from the table.',
         table: {
@@ -208,8 +206,8 @@ const resources = {
           title: 'History',
           empty: 'No changes recorded yet.',
           unknownUser: 'Unknown user',
+          revert: 'Revert to this',
           fields: {
-            identifier: 'ID',
             title: 'Title',
             definition: 'Definition',
             proposal: 'Proposal',
@@ -424,8 +422,6 @@ const resources = {
       records: {
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
         searchPlaceholder: 'Buscar por ID o Título…',
-        save: 'Guardar',
-        saving: 'Guardando…',
         addButton: 'Añadir BRDP',
         selectHint: 'Selecciona un BRDP de la tabla.',
         table: {
@@ -486,8 +482,8 @@ const resources = {
           title: 'Historial',
           empty: 'Todavía no hay cambios registrados.',
           unknownUser: 'Usuario desconocido',
+          revert: 'Volver a este punto',
           fields: {
-            identifier: 'ID',
             title: 'Título',
             definition: 'Definición',
             proposal: 'Propuesta',

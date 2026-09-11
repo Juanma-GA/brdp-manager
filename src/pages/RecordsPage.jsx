@@ -392,24 +392,28 @@ export default function RecordsPage() {
     refresh();
   };
 
-  // Title/Definition/Proposal previously saved only on blur, with no
-  // explicit way to commit them (docs request: bug report). onBlur is left
-  // in place (harmless, already relied on), this just adds a visible,
-  // explicit way to save the same 3 fields without needing to tab away.
-  const [fieldsSaving, setFieldsSaving] = useState(false);
+  // Fields to consider for a History "Revert to this" action -- scoped to
+  // the simple text fields with real per-field history (docs request):
+  // rule_status has its own Revoke mechanism already and must not be mixed
+  // with this one. Maps the audit trail's field_name label to the DB
+  // column handleUpdate expects (only proposal_status differs, since the
+  // column is "validation").
+  const REVERTIBLE_HISTORY_FIELDS = {
+    title: 'title',
+    definition: 'definition',
+    proposal: 'proposal',
+    proposal_status: 'validation',
+  };
 
-  const saveFields = async () => {
-    if (!selected) return;
-    setFieldsSaving(true);
-    try {
-      await handleUpdate(selected.id, {
-        title: selected.title,
-        definition: selected.definition,
-        proposal: selected.proposal,
-      });
-    } finally {
-      setFieldsSaving(false);
-    }
+  // Reverting restores the field to old_value (the value immediately
+  // BEFORE this entry's change), i.e. classic undo semantics -- confirmed
+  // with the user. This is a normal PUT through handleUpdate, so it flows
+  // through record_change() like any other edit and produces its own new
+  // history row; nothing about the original entry is touched.
+  const revertHistoryEntry = (entry) => {
+    const column = REVERTIBLE_HISTORY_FIELDS[entry.field_name];
+    if (!column || !selected) return;
+    handleUpdate(selected.id, { [column]: entry.old_value });
   };
 
   const handleDelete = async (brdpId, identifier) => {
@@ -706,13 +710,7 @@ export default function RecordsPage() {
           ) : (
             <>
               <label className={styles.fieldLabel}>{t('records.fieldId')}</label>
-              <input
-                className={styles.input}
-                value={selected.identifier}
-                disabled={!canEdit}
-                onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, identifier: e.target.value } : b)))}
-                onBlur={(e) => canEdit && handleUpdate(selected.id, { identifier: e.target.value })}
-              />
+              <p className={styles.mono}>{selected.identifier}</p>
               <label className={styles.fieldLabel}>{t('records.fieldTitle')}</label>
               <input
                 className={styles.input}
@@ -737,11 +735,6 @@ export default function RecordsPage() {
                 onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: e.target.value } : b)))}
                 onBlur={(e) => canEdit && handleUpdate(selected.id, { proposal: e.target.value })}
               />
-              {canEdit && (
-                <button onClick={saveFields} disabled={fieldsSaving} className={styles.saveFieldsButton}>
-                  {fieldsSaving ? t('records.saving') : t('records.save')}
-                </button>
-              )}
 
               <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
               <select
@@ -896,6 +889,15 @@ export default function RecordsPage() {
                           {h.user_email || t('records.history.unknownUser')} ·{' '}
                           {new Date(h.changed_at).toLocaleString()}
                         </div>
+                        {canEdit && REVERTIBLE_HISTORY_FIELDS[h.field_name] && (
+                          <button
+                            type="button"
+                            className={styles.historyRevertButton}
+                            onClick={() => revertHistoryEntry(h)}
+                          >
+                            {t('records.history.revert')}
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>

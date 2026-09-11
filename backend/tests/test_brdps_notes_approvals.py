@@ -107,44 +107,30 @@ async def test_duplicate_identifier_rejected_within_same_project(client, editor_
     assert len(listed) == 1
 
 
-async def test_renaming_a_brdp_to_an_existing_identifier_is_rejected(client, editor_and_project):
-    project, headers = editor_and_project
-    await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-002"}, headers=headers)
-    second = (
-        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-003"}, headers=headers)
-    ).json()
-
-    response = await client.put(
-        f"/api/projects/{project.id}/brdps/{second['id']}",
-        json={"identifier": "BRDP-DUP-002"},
-        headers=headers,
-    )
-    assert response.status_code == 409
-    assert "already exists" in response.json()["detail"]
-
-    # confirm it wasn't silently renamed anyway
-    listed = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
-    second_after = next(b for b in listed if b["id"] == second["id"])
-    assert second_after["identifier"] == "BRDP-DUP-003"
-
-
-async def test_updating_a_brdp_to_its_own_identifier_is_allowed(client, editor_and_project):
-    """The uniqueness check excludes the BRDP's own row -- saving other
-    fields alongside an unchanged identifier must not falsely collide with
-    itself.
+async def test_identifier_cannot_be_changed_via_put(client, editor_and_project):
+    """identifier is immutable once a BRDP is created (docs request: "ID
+    nunca debe ser editable, bajo ningún concepto") -- BRDPUpdate doesn't
+    declare the field at all, so sending it is silently ignored (not a
+    422, not a 409, no special-casing); other fields in the same request
+    still apply normally. This replaces the old rename-conflict tests,
+    which no longer have a rename to test in the first place.
     """
     project, headers = editor_and_project
     brdp = (
-        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-004"}, headers=headers)
+        await client.post(
+            f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-IMMUTABLE-001"}, headers=headers
+        )
     ).json()
 
     response = await client.put(
         f"/api/projects/{project.id}/brdps/{brdp['id']}",
-        json={"identifier": "BRDP-DUP-004", "title": "Same id, new title"},
+        json={"identifier": "BRDP-SHOULD-BE-IGNORED", "title": "New Title"},
         headers=headers,
     )
     assert response.status_code == 200
-    assert response.json()["title"] == "Same id, new title"
+    body = response.json()
+    assert body["identifier"] == "BRDP-IMMUTABLE-001"
+    assert body["title"] == "New Title"
 
 
 async def test_same_identifier_is_allowed_in_a_different_project(client, editor_and_project):

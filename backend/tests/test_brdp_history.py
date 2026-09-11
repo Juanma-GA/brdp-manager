@@ -136,7 +136,7 @@ async def test_multiple_field_changes_in_one_save_write_multiple_rows(client, ed
 
     response = await client.put(
         f"/api/projects/{project.id}/brdps/{brdp['id']}",
-        json={"identifier": "BRDP-HIST-003-RENAMED", "title": "New Title", "validation": "Validated"},
+        json={"title": "New Title", "definition": "New Definition", "validation": "Validated"},
         headers=editor_headers,
     )
     assert response.status_code == 200
@@ -147,7 +147,9 @@ async def test_multiple_field_changes_in_one_save_write_multiple_rows(client, ed
     field_names = {h["field_name"] for h in history}
     # "validation" is exposed under its Proposal Status audit name, not the
     # raw DB column name -- matches the renamed table column in the UI.
-    assert field_names == {"identifier", "title", "proposal_status"}
+    # identifier is absent from BRDPUpdate entirely (immutable once
+    # created), so it can never appear here.
+    assert field_names == {"title", "definition", "proposal_status"}
 
 
 async def test_history_ordered_newest_first(client, editor_viewer_and_project):

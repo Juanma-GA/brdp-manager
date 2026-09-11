@@ -15,7 +15,11 @@ class BRDPCreate(BaseModel):
 
 
 class BRDPUpdate(BaseModel):
-    identifier: str | None = None
+    # identifier is deliberately absent -- a BRDP's identifier is fixed for
+    # its lifetime once created (BRDPCreate still takes it), never editable
+    # afterward under any circumstance. Same pattern as MeUpdate leaving
+    # out global_role (schemas/auth.py): structurally impossible to send,
+    # not just hidden in the UI.
     title: str | None = None
     definition: str | None = None
     proposal: str | None = None
