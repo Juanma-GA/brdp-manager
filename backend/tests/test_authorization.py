@@ -211,6 +211,32 @@ async def test_viewer_of_a_cannot_create_brdp_in_a(client, scenario):
     assert response.status_code == 403
 
 
+async def test_viewer_of_a_cannot_read_next_ext_identifier_in_a(client, scenario):
+    """Add BRDP's pre-filled ID field is part of the creation flow, which
+    is editor+ end to end -- a viewer must not even be able to read what
+    the next identifier would be.
+    """
+    response = await client.get(
+        f"/api/projects/{scenario['project_a'].id}/brdps/next-ext-identifier",
+        headers=_headers(scenario["viewer_a"]),
+    )
+    assert response.status_code == 403
+
+
+async def test_editor_of_a_cannot_create_a_project_even_with_catalog_seed(client, scenario):
+    """Project creation (docs/v2 §4.2) is stricter than editor -- admin
+    only, same reasoning as DELETE /api/projects/{id} -- and the new
+    seed_from_catalog flag doesn't change that: an editor of an existing
+    project still can't create a brand new one, catalog-seeded or not.
+    """
+    response = await client.post(
+        "/api/projects",
+        json={"name": "Editor Should Not Create This", "standard": "BREX — S1000D 4.2", "seed_from_catalog": True},
+        headers=_headers(scenario["editor_a"]),
+    )
+    assert response.status_code == 403
+
+
 async def test_viewer_of_a_cannot_update_brdp_in_a(client, scenario):
     response = await client.put(
         f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}",

@@ -24,6 +24,10 @@ class BRDPUpdate(BaseModel):
     history: list | None = None
 
 
+class NextExtIdentifierOut(BaseModel):
+    identifier: str
+
+
 class BRDPOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID

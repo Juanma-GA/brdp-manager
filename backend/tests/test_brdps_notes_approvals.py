@@ -189,6 +189,36 @@ async def test_same_identifier_is_allowed_in_a_different_project(client, editor_
             await session.commit()
 
 
+async def test_next_ext_identifier_starts_at_00001_for_a_new_project(client, editor_and_project):
+    project, headers = editor_and_project
+    response = await client.get(f"/api/projects/{project.id}/brdps/next-ext-identifier", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["identifier"] == "BRDP-EXT-00001"
+
+
+async def test_next_ext_identifier_ignores_non_ext_identifiers(client, editor_and_project):
+    """Catalog-imported identifiers (BRDP-S1-NNNNN) and anything else that
+    isn't BRDP-EXT-NNNNN must not influence the EXT sequence at all --
+    a project seeded from the catalog still starts its first manual BRDP
+    at 00001.
+    """
+    project, headers = editor_and_project
+    await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-S1-00099"}, headers=headers)
+    await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "SOME-OTHER-ID-999"}, headers=headers)
+
+    response = await client.get(f"/api/projects/{project.id}/brdps/next-ext-identifier", headers=headers)
+    assert response.json()["identifier"] == "BRDP-EXT-00001"
+
+
+async def test_next_ext_identifier_increments_from_existing_ext_ids(client, editor_and_project):
+    project, headers = editor_and_project
+    await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-EXT-00001"}, headers=headers)
+    await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-EXT-00002"}, headers=headers)
+
+    response = await client.get(f"/api/projects/{project.id}/brdps/next-ext-identifier", headers=headers)
+    assert response.json()["identifier"] == "BRDP-EXT-00003"
+
+
 async def test_note_defaults_to_empty_then_upserts(client, editor_and_project):
     project, headers = editor_and_project
     brdp = (

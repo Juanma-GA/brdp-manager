@@ -144,8 +144,26 @@ export default function RecordsPage() {
   const [brdps, setBrdps] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
-  const [newIdentifier, setNewIdentifier] = useState('');
+  const [tableSearchQuery, setTableSearchQuery] = useState('');
   const [approvalsRefreshToken, setApprovalsRefreshToken] = useState(0);
+
+  // Add BRDP creation flow -- opens this panel instead of creating
+  // directly from a bare identifier field (docs request: new dedicated
+  // flow). newBrdpIdentifier is null while the next-EXT id is loading;
+  // once a catalog entry is picked it holds that real identifier instead,
+  // but stays just as locked either way -- only Title/Definition become
+  // genuinely editable after a catalog pick (they're already editable,
+  // just blank, before one).
+  const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [newBrdpIdentifier, setNewBrdpIdentifier] = useState(null);
+  const [newBrdpTitle, setNewBrdpTitle] = useState('');
+  const [newBrdpDefinition, setNewBrdpDefinition] = useState('');
+  const [newBrdpProposal, setNewBrdpProposal] = useState('');
+  const [newBrdpProposalStatus, setNewBrdpProposalStatus] = useState('Pending');
+  const [catalogEntries, setCatalogEntries] = useState([]);
+  const [catalogSearchQuery, setCatalogSearchQuery] = useState('');
+  const [creatingBusy, setCreatingBusy] = useState(false);
+  const [createError, setCreateError] = useState(null);
 
   const [aiProvider, setAiProvider] = useState(null);
   const [question, setQuestion] = useState('');
@@ -288,16 +306,63 @@ export default function RecordsPage() {
     }
   };
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (!newIdentifier.trim()) return;
-    await authFetchJson(`/api/projects/${projectId}/brdps`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: newIdentifier.trim() }),
-    });
-    setNewIdentifier('');
-    refresh();
+  const openCreatePanel = () => {
+    setSelectedId(null);
+    setIsCreatingNew(true);
+    setCreateError(null);
+    setNewBrdpIdentifier(null); // loading, until next-ext-identifier resolves
+    setNewBrdpTitle('');
+    setNewBrdpDefinition('');
+    setNewBrdpProposal('');
+    setNewBrdpProposalStatus('Pending');
+    setCatalogSearchQuery('');
+    setCatalogEntries([]);
+    authFetchJson(`/api/projects/${projectId}/brdps/next-ext-identifier`).then((data) =>
+      setNewBrdpIdentifier(data.identifier)
+    );
+    // Global reference data (not project-scoped) -- naturally empty for a
+    // standard with no imported catalog, which is exactly how the picker
+    // section below decides whether to render at all.
+    authFetchJson(`/api/brdp-catalog?standard=${encodeURIComponent(project.standard)}`)
+      .then(setCatalogEntries)
+      .catch(() => setCatalogEntries([]));
+  };
+
+  const closeCreatePanel = () => setIsCreatingNew(false);
+
+  const chooseCatalogEntry = (entry) => {
+    setNewBrdpIdentifier(entry.identifier);
+    setNewBrdpTitle(entry.title);
+    setNewBrdpDefinition(entry.definition);
+  };
+
+  const saveNewBrdp = async () => {
+    if (!newBrdpIdentifier) return;
+    setCreatingBusy(true);
+    setCreateError(null);
+    try {
+      const created = await authFetchJson(`/api/projects/${projectId}/brdps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: newBrdpIdentifier,
+          title: newBrdpTitle,
+          definition: newBrdpDefinition,
+          proposal: newBrdpProposal,
+          validation: newBrdpProposalStatus,
+        }),
+      });
+      setIsCreatingNew(false);
+      await refresh();
+      setSelectedId(created.id);
+    } catch (err) {
+      // (project_id, identifier) uniqueness is enforced server-side --
+      // the catalog picker already excludes identifiers the project has,
+      // this is the safety net for whatever slips through (docs request).
+      setCreateError(err.message);
+    } finally {
+      setCreatingBusy(false);
+    }
   };
 
   const handleUpdate = async (brdpId, patch) => {
@@ -437,16 +502,18 @@ export default function RecordsPage() {
 
       <div className={styles.layout}>
         <div className={styles.tableWrap}>
-          {canEdit && (
-            <form className={styles.createForm} onSubmit={handleCreate}>
-              <input
-                value={newIdentifier}
-                onChange={(e) => setNewIdentifier(e.target.value)}
-                placeholder={t('records.addPlaceholder')}
-              />
-              <button type="submit">{t('records.addButton')}</button>
-            </form>
-          )}
+          <div className={styles.createForm}>
+            <input
+              value={tableSearchQuery}
+              onChange={(e) => setTableSearchQuery(e.target.value)}
+              placeholder={t('records.searchPlaceholder')}
+            />
+            {canEdit && (
+              <button type="button" onClick={openCreatePanel}>
+                {t('records.addButton')}
+              </button>
+            )}
+          </div>
 
           {isLoading ? (
             <p>…</p>
@@ -462,7 +529,13 @@ export default function RecordsPage() {
                 </tr>
               </thead>
               <tbody>
-                {brdps.map((b) => (
+                {brdps
+                  .filter((b) => {
+                    const q = tableSearchQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    return b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q);
+                  })
+                  .map((b) => (
                   <tr
                     key={b.id}
                     className={selectedId === b.id ? styles.selectedRow : ''}
@@ -498,7 +571,100 @@ export default function RecordsPage() {
         </div>
 
         <div className={styles.detailPanel}>
-          {!selected ? (
+          {isCreatingNew ? (
+            <>
+              <label className={styles.fieldLabel}>{t('records.fieldId')}</label>
+              <input className={styles.input} value={newBrdpIdentifier ?? '…'} disabled />
+
+              <label className={styles.fieldLabel}>{t('records.fieldTitle')}</label>
+              <input
+                className={styles.input}
+                value={newBrdpTitle}
+                onChange={(e) => setNewBrdpTitle(e.target.value)}
+              />
+
+              <label className={styles.fieldLabel}>{t('records.fieldDefinition')}</label>
+              <textarea
+                className={styles.textarea}
+                value={newBrdpDefinition}
+                onChange={(e) => setNewBrdpDefinition(e.target.value)}
+              />
+
+              <label className={styles.fieldLabel}>{t('records.fieldProposal')}</label>
+              <textarea
+                className={styles.textarea}
+                value={newBrdpProposal}
+                onChange={(e) => setNewBrdpProposal(e.target.value)}
+              />
+
+              <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
+              <select
+                className={styles.select}
+                value={newBrdpProposalStatus}
+                onChange={(e) => setNewBrdpProposalStatus(e.target.value)}
+              >
+                {VALIDATION_OPTIONS.map((v) => (
+                  <option key={v} value={v}>
+                    {t(`records.validationOptions.${v}`)}
+                  </option>
+                ))}
+              </select>
+
+              {catalogEntries.length > 0 && (() => {
+                const existingIdentifiers = new Set(brdps.map((b) => b.identifier));
+                const q = catalogSearchQuery.trim().toLowerCase();
+                const matches = catalogEntries
+                  .filter((entry) => !existingIdentifiers.has(entry.identifier))
+                  .filter(
+                    (entry) =>
+                      !q || entry.identifier.toLowerCase().includes(q) || entry.title.toLowerCase().includes(q)
+                  );
+                return (
+                  <div className={styles.catalogPicker}>
+                    <label className={styles.fieldLabel}>{t('records.newBrdp.catalogSectionTitle')}</label>
+                    <input
+                      className={styles.input}
+                      value={catalogSearchQuery}
+                      onChange={(e) => setCatalogSearchQuery(e.target.value)}
+                      placeholder={t('records.searchPlaceholder')}
+                    />
+                    <ul className={styles.catalogList}>
+                      {matches.length === 0 && <li className={styles.muted}>{t('records.newBrdp.catalogEmpty')}</li>}
+                      {matches.slice(0, 50).map((entry) => (
+                        <li key={entry.id} className={styles.catalogItem}>
+                          <div className={styles.catalogItemHeader}>
+                            <span className={styles.mono}>{entry.identifier}</span>
+                            <button type="button" onClick={() => chooseCatalogEntry(entry)}>
+                              {t('records.newBrdp.catalogChoose')}
+                            </button>
+                          </div>
+                          <div className={styles.catalogItemTitle}>{entry.title}</div>
+                        </li>
+                      ))}
+                    </ul>
+                    {matches.length > 50 && (
+                      <p className={styles.hint}>{t('records.newBrdp.catalogTruncated', { count: matches.length })}</p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {createError && (
+                <p className={styles.ruleErrorText} role="alert">
+                  {createError}
+                </p>
+              )}
+
+              <div className={styles.suggestionActions}>
+                <button onClick={saveNewBrdp} disabled={creatingBusy || !newBrdpIdentifier}>
+                  {creatingBusy ? t('records.newBrdp.saving') : t('records.newBrdp.save')}
+                </button>
+                <button onClick={closeCreatePanel} disabled={creatingBusy}>
+                  {t('records.newBrdp.cancel')}
+                </button>
+              </div>
+            </>
+          ) : !selected ? (
             <p className={styles.muted}>{t('records.selectHint')}</p>
           ) : (
             <>

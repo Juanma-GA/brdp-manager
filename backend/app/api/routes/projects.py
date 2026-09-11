@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_project_role
 from app.db.base import get_db
-from app.models import Project, User, UserProjectRole
+from app.models import BRDP, BRDPCatalog, Project, User, UserProjectRole
 from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut, ProjectRename
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -109,6 +109,24 @@ async def create_project(
     project_config = {**_DEFAULT_PROJECT_CONFIG, **body.project_config}
     project = Project(name=body.name, standard=body.standard, project_config=project_config)
     db.add(project)
+    await db.flush()  # assigns project.id, needed below, before the real commit
+
+    if body.seed_from_catalog:
+        catalog_entries = (
+            (await db.execute(select(BRDPCatalog).where(BRDPCatalog.standard == body.standard))).scalars().all()
+        )
+        for entry in catalog_entries:
+            db.add(
+                BRDP(
+                    project_id=project.id,
+                    identifier=entry.identifier,
+                    title=entry.title,
+                    definition=entry.definition,
+                    proposal="",
+                    validation="Pending",
+                )
+            )
+
     await db.commit()
     await db.refresh(project)
     return _to_out(project, _resolve_effective_role(_admin, None))

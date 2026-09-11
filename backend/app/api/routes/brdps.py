@@ -1,3 +1,4 @@
+import re
 import uuid
 
 import httpx
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_httpx_transport, require_project_role
 from app.db.base import get_db
 from app.models import BRDP, BRDPHistory, User
-from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate
+from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate, NextExtIdentifierOut
 from app.schemas.brdp_history import BRDPHistoryOut
 from app.services.embeddings import EmbeddingUnavailable, compute_embedding
 from app.services.history import record_change
@@ -25,6 +26,18 @@ _HISTORY_FIELDS = {
     "proposal": "proposal",
     "validation": "proposal_status",
 }
+
+# Deliberately its own numbering, scoped to ONLY this exact prefix -- NOT
+# a port of extractBRDPs.js's generateIds() (frontend, untouchable engine
+# file), which looks at the highest number across ANY prefix. Confirmed
+# with the user: a project seeded from the catalog (identifiers like
+# "BRDP-S1-00001") must still start its first manually-added BRDP at
+# BRDP-EXT-00001, not continue from the catalog's numbers -- so catalog
+# identifiers need to be ignored entirely here, not just deprioritized.
+# NOTE for a future round: AI Extract's generateIds() has this same
+# mixed-prefix bug and will need the identical fix when that feature is
+# revisited -- not done here, out of scope for this round.
+_EXT_IDENTIFIER_PATTERN = re.compile(r"^BRDP-EXT-(\d+)$")
 
 
 async def _compute_brdp_embedding(brdp: BRDP, transport: httpx.AsyncBaseTransport | None) -> list[float]:
@@ -85,6 +98,24 @@ async def list_brdps(
 ) -> list[BRDP]:
     result = await db.execute(select(BRDP).where(BRDP.project_id == project_id))
     return list(result.scalars().all())
+
+
+@router.get("/next-ext-identifier", response_model=NextExtIdentifierOut)
+async def get_next_ext_identifier(
+    project_id: uuid.UUID,
+    _editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+) -> NextExtIdentifierOut:
+    """Powers Add BRDP's pre-filled, locked ID field. Editor-gated since
+    it only ever matters to the creation flow, which is itself editor+.
+    """
+    identifiers = (await db.execute(select(BRDP.identifier).where(BRDP.project_id == project_id))).scalars().all()
+    highest = 0
+    for identifier in identifiers:
+        match = _EXT_IDENTIFIER_PATTERN.match(identifier)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return NextExtIdentifierOut(identifier=f"BRDP-EXT-{highest + 1:05d}")
 
 
 @router.post("", response_model=BRDPOut, status_code=status.HTTP_201_CREATED)

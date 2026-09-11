@@ -9,6 +9,11 @@ class ProjectCreate(BaseModel):
     # e.g. "S1000D 4.2" -- fixed for the project's lifetime (docs/v2 §2).
     standard: str
     project_config: dict = {}
+    # If true and brdp_catalog has rows for `standard`, seed the new
+    # project with one real BRDP per catalog entry (identifier/title/
+    # definition from the catalog, proposal empty, proposal_status
+    # Pending). No-op if the catalog has no rows for this standard.
+    seed_from_catalog: bool = False
 
 
 class ProjectConfigUpdate(BaseModel):

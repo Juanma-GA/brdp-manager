@@ -28,6 +28,26 @@ function CreateProjectForm({ onCreated, onCancel }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
   const [nameError, setNameError] = useState(false);
+  // Real count read from brdp_catalog, never hardcoded -- 0 means either
+  // no catalog exists yet for this standard, or the standard isn't
+  // implemented at all (5.0/6.0), and the checkbox simply doesn't render.
+  const [catalogCount, setCatalogCount] = useState(0);
+  const [seedFromCatalog, setSeedFromCatalog] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSeedFromCatalog(false);
+    authFetchJson(`/api/brdp-catalog/count?standard=${encodeURIComponent(standard)}`)
+      .then((data) => {
+        if (!cancelled) setCatalogCount(data.count);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [standard]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -40,7 +60,7 @@ function CreateProjectForm({ onCreated, onCancel }) {
       await authFetchJson('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, standard }),
+        body: JSON.stringify({ name, standard, seed_from_catalog: seedFromCatalog }),
       });
       onCreated();
     } catch (err) {
@@ -79,6 +99,18 @@ function CreateProjectForm({ onCreated, onCancel }) {
         </select>
         <p className={styles.hint}>{t('projects.create.standardHint')}</p>
       </div>
+      {catalogCount > 0 && (
+        <div className={styles.formGroup}>
+          <label className={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={seedFromCatalog}
+              onChange={(e) => setSeedFromCatalog(e.target.checked)}
+            />
+            {t('projects.create.seedFromCatalog', { count: catalogCount })}
+          </label>
+        </div>
+      )}
       <div className={styles.formActions}>
         <button type="submit" className={styles.button} disabled={creating}>
           {creating ? t('projects.create.creating') : t('projects.create.submit')}

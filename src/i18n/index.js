@@ -52,6 +52,8 @@ const resources = {
           namePlaceholder: 'e.g. Project Falcon',
           standardLabel: 'Standard',
           standardHint: 'The standard cannot be changed once the project is created.',
+          seedFromCatalog_one: 'Seed with official catalog ({{count}} item)',
+          seedFromCatalog_other: 'Seed with official catalog ({{count}} items)',
           comingSoon: '(Coming soon)',
           submit: 'Create',
           creating: 'Creating…',
@@ -143,7 +145,7 @@ const resources = {
       },
       records: {
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
-        addPlaceholder: 'New BRDP identifier',
+        searchPlaceholder: 'Search by ID or Title…',
         addButton: 'Add BRDP',
         selectHint: 'Select a BRDP from the table.',
         table: {
@@ -212,6 +214,15 @@ const resources = {
             proposal_status: 'Proposal Status',
             rule_status: 'Rule Status',
           },
+        },
+        newBrdp: {
+          save: 'Save',
+          saving: 'Saving…',
+          cancel: 'Cancel',
+          catalogSectionTitle: 'Or choose from the official catalog',
+          catalogChoose: 'Choose',
+          catalogEmpty: 'No matching catalog entries.',
+          catalogTruncated: 'Showing 50 of {{count}} matches — refine your search.',
         },
       },
       generate: {
@@ -317,6 +328,8 @@ const resources = {
           namePlaceholder: 'p. ej. Proyecto Falcon',
           standardLabel: 'Estándar',
           standardHint: 'El estándar no se puede cambiar una vez creado el proyecto.',
+          seedFromCatalog_one: 'Sembrar con catálogo oficial ({{count}} elemento)',
+          seedFromCatalog_other: 'Sembrar con catálogo oficial ({{count}} elementos)',
           comingSoon: '(Próximamente)',
           submit: 'Crear',
           creating: 'Creando…',
@@ -408,7 +421,7 @@ const resources = {
       },
       records: {
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
-        addPlaceholder: 'Nuevo identificador de BRDP',
+        searchPlaceholder: 'Buscar por ID o Título…',
         addButton: 'Añadir BRDP',
         selectHint: 'Selecciona un BRDP de la tabla.',
         table: {
@@ -477,6 +490,15 @@ const resources = {
             proposal_status: 'Estado de propuesta',
             rule_status: 'Estado de la regla',
           },
+        },
+        newBrdp: {
+          save: 'Guardar',
+          saving: 'Guardando…',
+          cancel: 'Cancelar',
+          catalogSectionTitle: 'O elige del catálogo oficial',
+          catalogChoose: 'Elegir',
+          catalogEmpty: 'No hay entradas del catálogo que coincidan.',
+          catalogTruncated: 'Mostrando 50 de {{count}} coincidencias — afina la búsqueda.',
         },
       },
       generate: {

@@ -5,6 +5,7 @@ sees every table without each caller needing to import every module by hand.
 """
 
 from app.models.brdp import BRDP
+from app.models.brdp_catalog import BRDPCatalog
 from app.models.brdp_history import BRDPHistory
 from app.models.note import Note
 from app.models.project import Project
@@ -16,6 +17,7 @@ from app.models.user_project_role import UserProjectRole
 
 __all__ = [
     "BRDP",
+    "BRDPCatalog",
     "BRDPHistory",
     "Note",
     "Project",
