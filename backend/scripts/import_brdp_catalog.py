@@ -9,11 +9,16 @@ Example:
     python scripts/import_brdp_catalog.py catalog_sources/s1000d_4.2.xlsx "BREX — S1000D 4.2"
 
 Reads the "Auto-gen Decisions" sheet, columns ID / Title / Definition
-(header row 1, data from row 2), stopping at the first row whose ID cell
-is blank (the real source file has ~2300 fully blank trailing rows after
-the actual data). "_x000D_" is a leaked, literal Windows CR escape that
-shows up throughout Definition text in the source file (visible garbage
-if inserted as-is) -- normalized to a real newline here.
+(header row 1, data from row 2), skipping any row whose ID cell is
+blank rather than stopping at the first one -- the 4.2 source file only
+has blank IDs as ~2300 trailing rows after the real data, but the 4.1
+source file has 228 blank-ID "No BRDP" rows INTERSPERSED between real
+rows (552 real rows total, confirmed against the real file), so
+stopping at the first blank would import nothing. Skipping uniformly
+handles both shapes: 4.2's trailing blanks are just skipped as a block,
+same net result as before. "_x000D_" is a leaked, literal Windows CR
+escape that shows up throughout Definition text in the source file
+(visible garbage if inserted as-is) -- normalized to a real newline here.
 
 Idempotent: upserts by (standard, identifier) rather than inserting
 blindly, so re-running the same file never duplicates rows -- confirmed
@@ -67,7 +72,7 @@ def _read_rows(xlsx_path: Path) -> list[tuple[str, str, str]]:
     for row in ws.iter_rows(min_row=2, max_col=3, values_only=True):
         identifier = row[0]
         if identifier is None or str(identifier).strip() == "":
-            break  # first blank row -- everything after it is trailing blanks
+            continue  # blank-ID row (a "No BRDP" filler row, or trailing blank) -- skip, don't stop
         rows.append((str(identifier).strip(), _clean(row[1]), _clean(row[2])))
     return rows
 
