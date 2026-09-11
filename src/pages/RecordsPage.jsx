@@ -235,6 +235,14 @@ export default function RecordsPage() {
     tablePage * TABLE_PAGE_SIZE
   );
 
+  // Safety net for anything that shrinks the row count out from under the
+  // current page without going through handleTableSearchChange's explicit
+  // reset -- most notably deleting the last row on the last page (docs
+  // request: must not strand the user on an empty "page 2 of 1").
+  useEffect(() => {
+    setTablePage((p) => Math.min(p, tableTotalPages));
+  }, [tableTotalPages]);
+
   useEffect(() => {
     setRuleEditing(false);
     if (!selected || !ruleFormat) {

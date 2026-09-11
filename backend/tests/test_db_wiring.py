@@ -15,7 +15,13 @@ from app.models import BRDP, Project, User
 async def test_health_check_hits_real_db(client):
     response = await client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    # docs request: /health surfaces whether the DB is on the latest
+    # Alembic migration -- the test DB is migrated to head by the test
+    # setup, so this must read as up to date, not just be present.
+    assert body["migrations"]["up_to_date"] is True
+    assert body["migrations"]["current"] == body["migrations"]["head"]
 
 
 async def test_can_insert_and_query_every_table():

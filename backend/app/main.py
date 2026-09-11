@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -16,7 +18,10 @@ from app.api.routes.suggestion_feedback import router as suggestion_feedback_rou
 from app.api.routes.users import router as users_router
 from app.api.routes.validate_brex import router as validate_brex_router
 from app.core.config import get_settings
-from app.db.base import get_db
+from app.core.migrations import get_migration_status
+from app.db.base import engine, get_db
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="BRDP Manager v2 API")
 
@@ -42,7 +47,24 @@ app.include_router(llm_proxy_router)
 app.include_router(validate_brex_router)
 
 
+@app.on_event("startup")
+async def warn_on_pending_migrations() -> None:
+    """Non-blocking: a DB behind head must never stop the app from
+    starting (docs request) -- this only logs so it's visible in the
+    server's own startup output, same DB check /health exposes below.
+    """
+    async with engine.connect() as conn:
+        migrations = await get_migration_status(conn)
+    if not migrations["up_to_date"]:
+        logger.warning(
+            "Database is behind the latest migration: current=%s head=%s -- run `alembic upgrade head`.",
+            migrations["current"],
+            migrations["head"],
+        )
+
+
 @app.get("/health")
 async def health(db: AsyncSession = Depends(get_db)) -> dict:
     await db.execute(text("SELECT 1"))
-    return {"status": "ok"}
+    migrations = await get_migration_status(await db.connection())
+    return {"status": "ok", "migrations": migrations}
