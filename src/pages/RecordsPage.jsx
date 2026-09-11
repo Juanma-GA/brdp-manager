@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Trash2 } from 'lucide-react';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { checkWellFormed } from '../api/generateBREX.js';
@@ -41,6 +42,48 @@ function RuleStatusDots({ state }) {
         />
       ))}
     </span>
+  );
+}
+
+// Richer variant for the detail panel only (the table keeps the compact
+// dots-only RuleStatusDots above): all 3 stage labels are always visible,
+// connected by a track line, reached stages filled, the current one
+// highlighted with the ATEXIS primary color + a halo. The dot itself
+// keeps its own title/aria-label/aria-current -- the visible label text
+// is an addition for sighted users, not a replacement for it.
+function RuleStatusStepper({ state }) {
+  const { t } = useTranslation();
+  const currentIndex = RULE_STATES.indexOf(state);
+  return (
+    <div className={styles.stepper}>
+      {RULE_STATES.map((s, i) => {
+        const reached = i <= currentIndex;
+        const isCurrent = i === currentIndex;
+        return (
+          <div key={s} className={styles.stepperStep}>
+            {i > 0 && (
+              <span className={`${styles.stepperLine} ${reached ? styles.stepperLineFilled : ''}`} />
+            )}
+            <span
+              role="img"
+              className={`${styles.stepperDot} ${reached ? styles.stepperDotFilled : ''} ${
+                isCurrent ? styles.stepperDotCurrent : ''
+              }`}
+              title={t(`records.rule.states.${s}`)}
+              aria-label={t(`records.rule.states.${s}`)}
+              aria-current={isCurrent ? 'step' : undefined}
+            />
+            <span
+              className={`${styles.stepperLabel} ${reached ? styles.stepperLabelReached : ''} ${
+                isCurrent ? styles.stepperLabelCurrent : ''
+              }`}
+            >
+              {t(`records.rule.states.${s}`)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -401,7 +444,7 @@ export default function RecordsPage() {
                     {canEdit && (
                       <td onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => handleDelete(b.id)} aria-label={t('records.deleteAria', { identifier: b.identifier })}>
-                          🗑
+                          <Trash2 size={14} />
                         </button>
                       </td>
                     )}
@@ -484,10 +527,7 @@ export default function RecordsPage() {
                 </div>
               ) : (
                 <div className={styles.ruleStatusRow}>
-                  <RuleStatusDots state={ruleStateOf(ruleApproval)} />
-                  <span className={styles.ruleStatusLabel}>
-                    {t(`records.rule.states.${ruleStateOf(ruleApproval)}`)}
-                  </span>
+                  <RuleStatusStepper state={ruleStateOf(ruleApproval)} />
                   {canEdit && (
                     <div className={styles.suggestionActions}>
                       {ruleStateOf(ruleApproval) !== 'verified' && (
