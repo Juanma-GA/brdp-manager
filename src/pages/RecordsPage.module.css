@@ -232,10 +232,13 @@
   background: #fff;
 }
 
-.detailId {
-  font-family: monospace;
-  font-size: 14px;
-  margin: 0 0 10px;
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12.5px;
 }
 
 .fieldLabel {
@@ -274,6 +277,65 @@
 .assistantTitle {
   font-size: 13.5px;
   margin: 0 0 8px;
+}
+
+.historySection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.historyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.historyItem {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.historyField {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.historyChange {
+  font-size: 12.5px;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.historyOld {
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
+.historyArrow {
+  margin: 0 6px;
+  color: #94a3b8;
+}
+
+.historyNew {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.historyMeta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #94a3b8;
 }
 
 .answerBox,

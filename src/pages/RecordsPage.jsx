@@ -21,6 +21,22 @@ function ruleStateOf(approval) {
   return approval.status === 'approved' ? 'verified' : 'draft';
 }
 
+// rule_status/proposal_status history values are internal keys ("draft",
+// "Validated"...) -- translate them through the same i18n tables the live
+// fields already use, so the audit trail reads in the same language as
+// everything else. Free-text fields (identifier/title/definition/
+// proposal) are shown as-is; an empty value reads as an em dash.
+const HISTORY_TRANSLATED_FIELDS = {
+  rule_status: 'records.rule.states',
+  proposal_status: 'records.validationOptions',
+};
+
+function formatHistoryValue(t, fieldName, value) {
+  const prefix = HISTORY_TRANSLATED_FIELDS[fieldName];
+  if (prefix) return t(`${prefix}.${value}`, { defaultValue: value });
+  return value || '—';
+}
+
 // Each dot always carries its own state name as title/aria-label (not
 // color alone) per the accessibility requirement -- the current step is
 // additionally marked via aria-current and a filled style.
@@ -150,6 +166,12 @@ export default function RecordsPage() {
   const [ruleBusy, setRuleBusy] = useState(false);
   const [ruleValidationError, setRuleValidationError] = useState(null);
 
+  // Real per-field audit trail for the selected BRDP (GET .../history) --
+  // refetched whenever the selection changes or historyRefreshToken is
+  // bumped by a successful field edit or rule-status transition.
+  const [history, setHistory] = useState([]);
+  const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
+
   const refresh = () =>
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => {
       setBrdps(data);
@@ -179,6 +201,21 @@ export default function RecordsPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, ruleFormat, approvalsRefreshToken]);
+
+  useEffect(() => {
+    if (!selected) {
+      setHistory([]);
+      return;
+    }
+    let cancelled = false;
+    authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/history`).then((data) => {
+      if (!cancelled) setHistory(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, historyRefreshToken]);
 
   const openRuleEditor = () => {
     setRuleDraftText(ruleApproval?.rule_xml || '');
@@ -214,6 +251,7 @@ export default function RecordsPage() {
       });
       setRuleEditing(false);
       setApprovalsRefreshToken((n) => n + 1);
+      setHistoryRefreshToken((n) => n + 1);
     } catch (err) {
       // Defense in depth: the backend enforces the same well-formedness
       // rule independently (never trust only the client), so surface its
@@ -231,6 +269,7 @@ export default function RecordsPage() {
         method: 'POST',
       });
       setApprovalsRefreshToken((n) => n + 1);
+      setHistoryRefreshToken((n) => n + 1);
     } finally {
       setRuleBusy(false);
     }
@@ -243,6 +282,7 @@ export default function RecordsPage() {
         method: 'POST',
       });
       setApprovalsRefreshToken((n) => n + 1);
+      setHistoryRefreshToken((n) => n + 1);
     } finally {
       setRuleBusy(false);
     }
@@ -266,6 +306,7 @@ export default function RecordsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
+    setHistoryRefreshToken((n) => n + 1);
     refresh();
   };
 
@@ -461,7 +502,22 @@ export default function RecordsPage() {
             <p className={styles.muted}>{t('records.selectHint')}</p>
           ) : (
             <>
-              <h2 className={styles.detailId}>{selected.identifier}</h2>
+              <label className={styles.fieldLabel}>{t('records.fieldId')}</label>
+              <input
+                className={styles.input}
+                value={selected.identifier}
+                disabled={!canEdit}
+                onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, identifier: e.target.value } : b)))}
+                onBlur={(e) => canEdit && handleUpdate(selected.id, { identifier: e.target.value })}
+              />
+              <label className={styles.fieldLabel}>{t('records.fieldTitle')}</label>
+              <input
+                className={styles.input}
+                value={selected.title}
+                disabled={!canEdit}
+                onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, title: e.target.value } : b)))}
+                onBlur={(e) => canEdit && handleUpdate(selected.id, { title: e.target.value })}
+              />
               <label className={styles.fieldLabel}>{t('records.fieldDefinition')}</label>
               <textarea
                 className={styles.textarea}
@@ -602,6 +658,32 @@ export default function RecordsPage() {
                       <button onClick={discardSuggestion}>{t('records.assistant.discard')}</button>
                     </div>
                   </div>
+                )}
+              </div>
+
+              <div className={styles.historySection}>
+                <h3 className={styles.assistantTitle}>{t('records.history.title')}</h3>
+                {history.length === 0 ? (
+                  <p className={styles.muted}>{t('records.history.empty')}</p>
+                ) : (
+                  <ul className={styles.historyList}>
+                    {history.map((h) => (
+                      <li key={h.id} className={styles.historyItem}>
+                        <div className={styles.historyField}>
+                          {t(`records.history.fields.${h.field_name}`, { defaultValue: h.field_name })}
+                        </div>
+                        <div className={styles.historyChange}>
+                          <span className={styles.historyOld}>{formatHistoryValue(t, h.field_name, h.old_value)}</span>
+                          <span className={styles.historyArrow}>→</span>
+                          <span className={styles.historyNew}>{formatHistoryValue(t, h.field_name, h.new_value)}</span>
+                        </div>
+                        <div className={styles.historyMeta}>
+                          {h.user_email || t('records.history.unknownUser')} ·{' '}
+                          {new Date(h.changed_at).toLocaleString()}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             </>

@@ -154,6 +154,8 @@ const resources = {
         },
         deleteAria: 'Delete {{identifier}}',
         deleteConfirm: 'Delete BRDP "{{identifier}}"? This cannot be undone.',
+        fieldId: 'ID',
+        fieldTitle: 'Title',
         fieldDefinition: 'Definition',
         fieldProposal: 'Proposal',
         fieldValidation: 'Proposal Status',
@@ -197,6 +199,19 @@ const resources = {
             'Insufficient precedent: only {{count}} Validated BRDP of the same standard meets the similarity threshold (minimum 3 required). Suggestions built without enough precedent are not offered automatically — review manually instead.',
           insufficientPrecedent_other:
             'Insufficient precedent: only {{count}} Validated BRDPs of the same standard meet the similarity threshold (minimum 3 required). Suggestions built without enough precedent are not offered automatically — review manually instead.',
+        },
+        history: {
+          title: 'History',
+          empty: 'No changes recorded yet.',
+          unknownUser: 'Unknown user',
+          fields: {
+            identifier: 'ID',
+            title: 'Title',
+            definition: 'Definition',
+            proposal: 'Proposal',
+            proposal_status: 'Proposal Status',
+            rule_status: 'Rule Status',
+          },
         },
       },
       generate: {
@@ -404,6 +419,8 @@ const resources = {
         },
         deleteAria: 'Eliminar {{identifier}}',
         deleteConfirm: '¿Eliminar el BRDP "{{identifier}}"? Esta acción no se puede deshacer.',
+        fieldId: 'ID',
+        fieldTitle: 'Título',
         fieldDefinition: 'Definición',
         fieldProposal: 'Propuesta',
         fieldValidation: 'Estado de propuesta',
@@ -447,6 +464,19 @@ const resources = {
             'Precedente insuficiente: solo {{count}} BRDP validado del mismo estándar supera el umbral de similitud (mínimo 3 requeridos). Las sugerencias sin precedente suficiente no se ofrecen automáticamente — revísalo manualmente.',
           insufficientPrecedent_other:
             'Precedente insuficiente: solo {{count}} BRDPs validados del mismo estándar superan el umbral de similitud (mínimo 3 requeridos). Las sugerencias sin precedente suficiente no se ofrecen automáticamente — revísalo manualmente.',
+        },
+        history: {
+          title: 'Historial',
+          empty: 'Todavía no hay cambios registrados.',
+          unknownUser: 'Usuario desconocido',
+          fields: {
+            identifier: 'ID',
+            title: 'Título',
+            definition: 'Definición',
+            proposal: 'Propuesta',
+            proposal_status: 'Estado de propuesta',
+            rule_status: 'Estado de la regla',
+          },
         },
       },
       generate: {

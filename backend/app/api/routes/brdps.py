@@ -7,11 +7,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_httpx_transport, require_project_role
 from app.db.base import get_db
-from app.models import BRDP, User
+from app.models import BRDP, BRDPHistory, User
 from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate
+from app.schemas.brdp_history import BRDPHistoryOut
 from app.services.embeddings import EmbeddingUnavailable, compute_embedding
+from app.services.history import record_change
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps", tags=["brdps"])
+
+# DB column name -> the audit trail's field_name (docs request: the
+# Proposal Status column/label maps to the "validation" column, so the
+# history entry should read "proposal_status", not the internal name).
+_HISTORY_FIELDS = {
+    "identifier": "identifier",
+    "title": "title",
+    "definition": "definition",
+    "proposal": "proposal",
+    "validation": "proposal_status",
+}
 
 
 async def _compute_brdp_embedding(brdp: BRDP, transport: httpx.AsyncBaseTransport | None) -> list[float]:
@@ -79,14 +92,22 @@ async def update_brdp(
     project_id: uuid.UUID,
     brdp_id: uuid.UUID,
     body: BRDPUpdate,
-    _editor: User = Depends(require_project_role("editor")),
+    editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
     transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> BRDP:
     brdp = await _get_owned_brdp(project_id, brdp_id, db)
     was_validated = brdp.validation == "Validated"
-    for field, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+    # Snapshot old values BEFORE mutating, only for fields actually present
+    # in this request -- record_change() below then does the real old-vs-
+    # new diff and only stages a row when the value genuinely changed.
+    old_values = {field: getattr(brdp, field) for field in _HISTORY_FIELDS if field in updates}
+    for field, value in updates.items():
         setattr(brdp, field, value)
+    for field, history_name in _HISTORY_FIELDS.items():
+        if field in old_values:
+            record_change(db, brdp.id, editor, history_name, old_values[field], getattr(brdp, field))
 
     if brdp.validation == "Validated":
         # docs/v2 §3 point 1: compute on first validation, recompute on
@@ -118,3 +139,20 @@ async def delete_brdp(
     brdp = await _get_owned_brdp(project_id, brdp_id, db)
     await db.delete(brdp)
     await db.commit()
+
+
+@router.get("/{brdp_id}/history", response_model=list[BRDPHistoryOut])
+async def get_brdp_history(
+    project_id: uuid.UUID,
+    brdp_id: uuid.UUID,
+    _viewer: User = Depends(require_project_role("viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> list[BRDPHistory]:
+    """Read-only for viewer, same as every other read endpoint -- this is a
+    query, not a mutation (docs request explicit on this point).
+    """
+    await _get_owned_brdp(project_id, brdp_id, db)
+    result = await db.execute(
+        select(BRDPHistory).where(BRDPHistory.brdp_id == brdp_id).order_by(BRDPHistory.changed_at.desc())
+    )
+    return list(result.scalars().all())

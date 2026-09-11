@@ -10,10 +10,24 @@ from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
 from app.models import RuleApproval, User
 from app.schemas.rule_approval import RuleApprovalOut, RuleApprovalPropose
+from app.services.history import record_change
 
 router = APIRouter(
     prefix="/api/projects/{project_id}/brdps/{brdp_id}/approvals/{format}", tags=["approvals"]
 )
+
+
+def _rule_state(approval: RuleApproval | None) -> str:
+    """Mirrors the frontend's ruleStateOf()/RULE_STATES (RecordsPage.jsx)
+    exactly, "todo" included (no underscore -- matches the i18n table's
+    records.rule.states.todo key, so the History section's formatHistoryValue()
+    can translate it the same way the live stepper does). "todo" is not a
+    DB value, it's the absence of a row. Used only to compute the
+    audit-trail transition; never persisted on RuleApproval itself.
+    """
+    if approval is None:
+        return "todo"
+    return "verified" if approval.status == "approved" else "draft"
 
 
 def _xml_well_formed_error(xml_text: str) -> str | None:
@@ -56,7 +70,7 @@ async def propose_approval(
     brdp_id: uuid.UUID,
     format: str,
     body: RuleApprovalPropose,
-    _editor: User = Depends(require_project_role("editor")),
+    editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
 ) -> RuleApproval:
     await _get_owned_brdp(project_id, brdp_id, db)
@@ -68,6 +82,7 @@ async def propose_approval(
         )
     status_value = "approved" if body.status == "approved" else "pending_review"
     approval = await db.get(RuleApproval, (brdp_id, format))
+    old_state = _rule_state(approval)
     if approval is None:
         approval = RuleApproval(brdp_id=brdp_id, format=format)
         db.add(approval)
@@ -75,6 +90,7 @@ async def propose_approval(
     approval.source = body.source
     approval.status = status_value
     approval.approved_at = datetime.now(timezone.utc) if status_value == "approved" else None
+    record_change(db, brdp_id, editor, "rule_status", old_state, _rule_state(approval))
     await db.commit()
     await db.refresh(approval)
     return approval
@@ -85,7 +101,7 @@ async def approve_approval(
     project_id: uuid.UUID,
     brdp_id: uuid.UUID,
     format: str,
-    _editor: User = Depends(require_project_role("editor")),
+    editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
 ) -> RuleApproval:
     await _get_owned_brdp(project_id, brdp_id, db)
@@ -97,6 +113,7 @@ async def approve_approval(
         )
     approval.status = "approved"
     approval.approved_at = datetime.now(timezone.utc)
+    record_change(db, brdp_id, editor, "rule_status", "draft", "verified")
     await db.commit()
     await db.refresh(approval)
     return approval
@@ -107,7 +124,7 @@ async def revoke_approval_status(
     project_id: uuid.UUID,
     brdp_id: uuid.UUID,
     format: str,
-    _editor: User = Depends(require_project_role("editor")),
+    editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
 ) -> RuleApproval:
     """Rule Status stepper's Verified -> Draft action: flips an approved
@@ -127,6 +144,7 @@ async def revoke_approval_status(
         )
     approval.status = "pending_review"
     approval.approved_at = None
+    record_change(db, brdp_id, editor, "rule_status", "verified", "draft")
     await db.commit()
     await db.refresh(approval)
     return approval
