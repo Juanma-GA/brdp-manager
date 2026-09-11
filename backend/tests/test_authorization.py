@@ -178,6 +178,18 @@ async def test_editor_of_a_cannot_propose_approval_in_b(client, scenario):
     assert response.status_code == 403
 
 
+async def test_editor_of_a_cannot_read_history_of_a_brdp_in_b(client, scenario):
+    """Cross-project isolation for the new GET .../history endpoint --
+    editor_a has a real editor role, just not on project B, so this must
+    fail on project ownership, not merely be hidden by the UI.
+    """
+    response = await client.get(
+        f"/api/projects/{scenario['project_b'].id}/brdps/{scenario['brdp_b'].id}/history",
+        headers=_headers(scenario["editor_a"]),
+    )
+    assert response.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # Axis (b): same-project role level (viewer vs editor, same project)
 # ---------------------------------------------------------------------------
@@ -208,12 +220,38 @@ async def test_viewer_of_a_cannot_update_brdp_in_a(client, scenario):
     assert response.status_code == 403
 
 
+async def test_viewer_of_a_cannot_rename_brdp_identifier_in_a(client, scenario):
+    """The ID field became directly editable this round (previously a
+    plain heading) -- a real HTTP call must still be blocked by role, not
+    merely have its input disabled in the UI.
+    """
+    response = await client.put(
+        f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}",
+        json={"identifier": "VIEWER-RENAMED-THIS"},
+        headers=_headers(scenario["viewer_a"]),
+    )
+    assert response.status_code == 403
+
+
 async def test_viewer_of_a_cannot_delete_brdp_in_a(client, scenario):
     response = await client.delete(
         f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}",
         headers=_headers(scenario["viewer_a"]),
     )
     assert response.status_code == 403
+
+
+async def test_viewer_of_a_can_read_history_of_a_brdp_in_a(client, scenario):
+    """Positive control for test_editor_of_a_cannot_read_history_of_a_brdp_in_b:
+    proves that 403 is genuinely about role/project scope, not a broken
+    endpoint -- the exact same viewer, reading history for a BRDP in a
+    project they DO belong to, must succeed.
+    """
+    response = await client.get(
+        f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}/history",
+        headers=_headers(scenario["viewer_a"]),
+    )
+    assert response.status_code == 200
 
 
 async def test_viewer_of_a_can_read_approval_in_a(client, scenario):

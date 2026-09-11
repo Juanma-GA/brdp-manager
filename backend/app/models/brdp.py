@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +16,14 @@ EMBEDDING_DIM = 1024
 
 class BRDP(Base):
     __tablename__ = "brdps"
+    __table_args__ = (
+        # identifier only needs to be unique WITHIN a project -- the same
+        # identifier string is valid in two different projects (each
+        # project is its own independent BRDP dataset), so this is
+        # deliberately a composite constraint, never a bare unique on
+        # identifier alone.
+        UniqueConstraint("project_id", "identifier", name="uq_brdps_project_id_identifier"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(

@@ -46,6 +46,23 @@ async def _compute_brdp_embedding(brdp: BRDP, transport: httpx.AsyncBaseTranspor
         )
 
 
+async def _identifier_taken(
+    project_id: uuid.UUID, identifier: str, db: AsyncSession, *, exclude_brdp_id: uuid.UUID | None = None
+) -> bool:
+    """Pre-check for the (project_id, identifier) unique constraint --
+    matches this codebase's existing convention for uniqueness (see
+    users.py's email check): a clean 409 from an application-level query,
+    not a raw IntegrityError/500 from the DB constraint, which remains the
+    actual source of truth for data integrity. identifier is unique WITHIN
+    a project only -- the same identifier is valid in a different project.
+    """
+    query = select(BRDP).where(BRDP.project_id == project_id, BRDP.identifier == identifier)
+    if exclude_brdp_id is not None:
+        query = query.where(BRDP.id != exclude_brdp_id)
+    existing = (await db.execute(query)).scalar_one_or_none()
+    return existing is not None
+
+
 async def _get_owned_brdp(project_id: uuid.UUID, brdp_id: uuid.UUID, db: AsyncSession) -> BRDP:
     """Fetches a BRDP and verifies it actually belongs to `project_id` --
     without this, an editor of project A could mutate a BRDP that belongs
@@ -78,6 +95,11 @@ async def create_brdp(
     db: AsyncSession = Depends(get_db),
     transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> BRDP:
+    if await _identifier_taken(project_id, body.identifier, db):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A BRDP with identifier {body.identifier!r} already exists in this project",
+        )
     brdp = BRDP(project_id=project_id, **body.model_dump())
     if brdp.validation == "Validated":
         brdp.embedding = await _compute_brdp_embedding(brdp, transport)
@@ -97,8 +119,14 @@ async def update_brdp(
     transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> BRDP:
     brdp = await _get_owned_brdp(project_id, brdp_id, db)
-    was_validated = brdp.validation == "Validated"
     updates = body.model_dump(exclude_unset=True)
+    if "identifier" in updates and updates["identifier"] != brdp.identifier:
+        if await _identifier_taken(project_id, updates["identifier"], db, exclude_brdp_id=brdp.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A BRDP with identifier {updates['identifier']!r} already exists in this project",
+            )
+    was_validated = brdp.validation == "Validated"
     # Snapshot old values BEFORE mutating, only for fields actually present
     # in this request -- record_change() below then does the real old-vs-
     # new diff and only stages a row when the value genuinely changed.

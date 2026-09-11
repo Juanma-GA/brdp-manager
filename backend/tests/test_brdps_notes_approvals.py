@@ -89,6 +89,106 @@ async def test_brdp_create_read_update_delete(client, editor_and_project):
     assert listed_after.json() == []
 
 
+async def test_duplicate_identifier_rejected_within_same_project(client, editor_and_project):
+    project, headers = editor_and_project
+    created = await client.post(
+        f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-001"}, headers=headers
+    )
+    assert created.status_code == 201
+
+    duplicate = await client.post(
+        f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-001"}, headers=headers
+    )
+    assert duplicate.status_code == 409
+    assert "already exists" in duplicate.json()["detail"]
+
+    # the rejected duplicate must not have been saved anyway
+    listed = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
+    assert len(listed) == 1
+
+
+async def test_renaming_a_brdp_to_an_existing_identifier_is_rejected(client, editor_and_project):
+    project, headers = editor_and_project
+    await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-002"}, headers=headers)
+    second = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-003"}, headers=headers)
+    ).json()
+
+    response = await client.put(
+        f"/api/projects/{project.id}/brdps/{second['id']}",
+        json={"identifier": "BRDP-DUP-002"},
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"]
+
+    # confirm it wasn't silently renamed anyway
+    listed = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
+    second_after = next(b for b in listed if b["id"] == second["id"])
+    assert second_after["identifier"] == "BRDP-DUP-003"
+
+
+async def test_updating_a_brdp_to_its_own_identifier_is_allowed(client, editor_and_project):
+    """The uniqueness check excludes the BRDP's own row -- saving other
+    fields alongside an unchanged identifier must not falsely collide with
+    itself.
+    """
+    project, headers = editor_and_project
+    brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-004"}, headers=headers)
+    ).json()
+
+    response = await client.put(
+        f"/api/projects/{project.id}/brdps/{brdp['id']}",
+        json={"identifier": "BRDP-DUP-004", "title": "Same id, new title"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["title"] == "Same id, new title"
+
+
+async def test_same_identifier_is_allowed_in_a_different_project(client, editor_and_project):
+    """Uniqueness is per-project, not global -- two independent BRDP
+    datasets are allowed to use the same identifier string.
+    """
+    project_a, headers_a = editor_and_project
+    async with async_session_factory() as session:
+        project_b = Project(name=f"CRUD Test Project B {uuid.uuid4()}", standard="BREX — S1000D 4.2")
+        user_b = User(
+            email=f"crud-b-{uuid.uuid4()}@example.com",
+            password_hash=hash_password("irrelevant-password"),
+            display_name="CRUD Test Editor B",
+            global_role="user",
+        )
+        session.add_all([project_b, user_b])
+        await session.flush()
+        session.add(UserProjectRole(user_id=user_b.id, project_id=project_b.id, role="editor"))
+        await session.commit()
+        await session.refresh(project_b)
+        await session.refresh(user_b)
+    headers_b = {"Authorization": f"Bearer {create_access_token(user_b.id)}"}
+
+    try:
+        created_a = await client.post(
+            f"/api/projects/{project_a.id}/brdps", json={"identifier": "BRDP-SHARED-ID"}, headers=headers_a
+        )
+        assert created_a.status_code == 201
+
+        created_b = await client.post(
+            f"/api/projects/{project_b.id}/brdps", json={"identifier": "BRDP-SHARED-ID"}, headers=headers_b
+        )
+        assert created_b.status_code == 201
+    finally:
+        async with async_session_factory() as session:
+            db_project_b = await session.get(Project, project_b.id)
+            if db_project_b is not None:
+                await session.delete(db_project_b)
+            db_user_b = await session.get(User, user_b.id)
+            if db_user_b is not None:
+                await session.delete(db_user_b)
+            await session.commit()
+
+
 async def test_note_defaults_to_empty_then_upserts(client, editor_and_project):
     project, headers = editor_and_project
     brdp = (
