@@ -148,6 +148,12 @@ const resources = {
         searchPlaceholder: 'Search by ID or Title…',
         addButton: 'Add BRDP',
         selectHint: 'Select a BRDP from the table.',
+        pagination: {
+          info_one: '{{count}} BRDP · Page {{page}} of {{totalPages}}',
+          info_other: '{{count}} BRDPs · Page {{page}} of {{totalPages}}',
+          previous: 'Previous',
+          next: 'Next',
+        },
         table: {
           id: 'ID',
           title: 'Title',
@@ -424,6 +430,12 @@ const resources = {
         searchPlaceholder: 'Buscar por ID o Título…',
         addButton: 'Añadir BRDP',
         selectHint: 'Selecciona un BRDP de la tabla.',
+        pagination: {
+          info_one: '{{count}} BRDP · Página {{page}} de {{totalPages}}',
+          info_other: '{{count}} BRDPs · Página {{page}} de {{totalPages}}',
+          previous: 'Anterior',
+          next: 'Siguiente',
+        },
         table: {
           id: 'ID',
           title: 'Título',

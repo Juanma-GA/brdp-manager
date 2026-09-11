@@ -1,5 +1,15 @@
+/* .mainContent (App.css) is a bounded-height flex column with
+   overflow:hidden -- .page must be a flex:1 item of it (not auto-height)
+   so its own height is definite too, which is what lets .layout's
+   children below size and scroll independently instead of silently
+   overflowing past the app shell with no scrollbar. */
 .page {
   padding: 24px;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .title {
@@ -18,11 +28,17 @@
 .layout {
   display: flex;
   gap: 16px;
-  align-items: flex-start;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 
 .tableWrap {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   overflow: hidden;
@@ -35,6 +51,15 @@
   padding: 10px;
   border-bottom: 1px solid #e2e8f0;
   background: #f8fafc;
+  flex-shrink: 0;
+}
+
+/* The scrollable middle of tableWrap -- createForm above and tableFooter
+   below stay pinned, only the rows scroll. */
+.tableScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .createForm input {
@@ -44,8 +69,13 @@
   border: 1px solid #e2e8f0;
 }
 
+/* table-layout: fixed so column widths come from the colgroup below, not
+   from cell content -- otherwise a long Title (or a long value in any
+   other column) reflows every column's width, including ID's, which is
+   exactly the bug this fixes (docs request: ID must never move). */
 .table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -71,9 +101,40 @@
   background: #eaf2fa;
 }
 
+/* Wide enough for "BRDP-S1-00001" (14 chars, the longest identifier the
+   system produces) on one line regardless of what the other columns
+   contain -- fixed width AND min-width so table-layout: fixed can't
+   shrink it either. */
+.colId {
+  width: 150px;
+  min-width: 150px;
+}
+
+.colValidation {
+  width: 130px;
+}
+
+.colRuleStatus {
+  width: 130px;
+}
+
+.colActions {
+  width: 44px;
+}
+
 .mono {
   font-family: monospace;
   font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Long titles truncate with an ellipsis instead of stretching the row or
+   squeezing neighboring columns -- the full text is still available via
+   the native title="" tooltip set on this <td> in the JSX. */
+.titleCell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .muted {
@@ -223,6 +284,10 @@
   resize: vertical;
 }
 
+/* .layout is now a bounded-height flex row (align-items: stretch), so
+   this panel gets a definite height too -- overflow-y: auto lets its own
+   (potentially long: assistant + history) content scroll in place
+   instead of being silently clipped by an ancestor's overflow: hidden. */
 .detailPanel {
   width: 460px;
   flex-shrink: 0;
@@ -230,6 +295,8 @@
   border-radius: 10px;
   padding: 14px;
   background: #fff;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .input {
@@ -407,4 +474,47 @@
   border: none;
   border-top: 1px solid #e2e8f0;
   margin: 14px 0;
+}
+
+/* Same footer/pagination pattern as v1's BRDPTable.module.css. */
+.tableFooter {
+  flex-shrink: 0;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.tableFooterInfo {
+  flex: 1;
+}
+
+.pagination {
+  display: flex;
+  gap: 8px;
+}
+
+.paginationBtn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.paginationBtn:hover:not(:disabled) {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.paginationBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

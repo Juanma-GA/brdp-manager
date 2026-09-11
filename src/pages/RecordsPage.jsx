@@ -11,6 +11,9 @@ import styles from './RecordsPage.module.css';
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
 const SUGGEST_KINDS = ['definition', 'proposal', 'rule'];
 const RULE_STATES = ['todo', 'draft', 'verified'];
+// v1's BRDPTable/useTableLogic used 25 rows/page (see src/hooks/useTableLogic.js)
+// -- this docs request specifically asks for 15 here, same prev/next pattern.
+const TABLE_PAGE_SIZE = 15;
 
 // The engine's inclusion gate hardcodes the literal DB values
 // "pending_review"/"approved" in 4 generator files (never touch those) --
@@ -145,6 +148,7 @@ export default function RecordsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [tableSearchQuery, setTableSearchQuery] = useState('');
+  const [tablePage, setTablePage] = useState(1);
   const [approvalsRefreshToken, setApprovalsRefreshToken] = useState(0);
 
   // Add BRDP creation flow -- opens this panel instead of creating
@@ -209,10 +213,27 @@ export default function RecordsPage() {
   useEffect(() => {
     refresh();
     authFetchJson('/api/config/ai-provider').then(setAiProvider).catch(() => setAiProvider(null));
+    setTablePage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const selected = brdps.find((b) => b.id === selectedId) || null;
+
+  const handleTableSearchChange = (value) => {
+    setTableSearchQuery(value);
+    setTablePage(1);
+  };
+
+  const filteredBrdps = brdps.filter((b) => {
+    const q = tableSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q);
+  });
+  const tableTotalPages = Math.max(1, Math.ceil(filteredBrdps.length / TABLE_PAGE_SIZE));
+  const pagedBrdps = filteredBrdps.slice(
+    (tablePage - 1) * TABLE_PAGE_SIZE,
+    tablePage * TABLE_PAGE_SIZE
+  );
 
   useEffect(() => {
     setRuleEditing(false);
@@ -546,7 +567,7 @@ export default function RecordsPage() {
           <div className={styles.createForm}>
             <input
               value={tableSearchQuery}
-              onChange={(e) => setTableSearchQuery(e.target.value)}
+              onChange={(e) => handleTableSearchChange(e.target.value)}
               placeholder={t('records.searchPlaceholder')}
             />
             {canEdit && (
@@ -556,58 +577,93 @@ export default function RecordsPage() {
             )}
           </div>
 
-          {isLoading ? (
-            <p>…</p>
-          ) : (
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>{t('records.table.id')}</th>
-                  <th>{t('records.table.title')}</th>
-                  <th>{t('records.table.validation')}</th>
-                  <th>{t('records.table.ruleStatus')}</th>
-                  {canEdit && <th></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {brdps
-                  .filter((b) => {
-                    const q = tableSearchQuery.trim().toLowerCase();
-                    if (!q) return true;
-                    return b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q);
-                  })
-                  .map((b) => (
-                  <tr
-                    key={b.id}
-                    className={selectedId === b.id ? styles.selectedRow : ''}
-                    onClick={() => setSelectedId(b.id)}
-                  >
-                    <td className={styles.mono}>{b.identifier}</td>
-                    <td>{b.title || <span className={styles.muted}>—</span>}</td>
-                    <td>
-                      <span className={styles[`badge_${b.validation}`] || ''}>
-                        {t(`records.validationOptions.${b.validation}`, { defaultValue: b.validation })}
-                      </span>
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <RuleStatusCell
-                        projectId={projectId}
-                        brdpId={b.id}
-                        format={ruleFormat}
-                        refreshToken={approvalsRefreshToken}
-                      />
-                    </td>
-                    {canEdit && (
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => handleDelete(b.id, b.identifier)} aria-label={t('records.deleteAria', { identifier: b.identifier })}>
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    )}
+          <div className={styles.tableScroll}>
+            {isLoading ? (
+              <p>…</p>
+            ) : (
+              <table className={styles.table}>
+                <colgroup>
+                  <col className={styles.colId} />
+                  <col />
+                  <col className={styles.colValidation} />
+                  <col className={styles.colRuleStatus} />
+                  {canEdit && <col className={styles.colActions} />}
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>{t('records.table.id')}</th>
+                    <th>{t('records.table.title')}</th>
+                    <th>{t('records.table.validation')}</th>
+                    <th>{t('records.table.ruleStatus')}</th>
+                    {canEdit && <th></th>}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {pagedBrdps.map((b) => (
+                    <tr
+                      key={b.id}
+                      className={selectedId === b.id ? styles.selectedRow : ''}
+                      onClick={() => setSelectedId(b.id)}
+                    >
+                      <td className={styles.mono}>{b.identifier}</td>
+                      <td className={styles.titleCell} title={b.title || undefined}>
+                        {b.title || <span className={styles.muted}>—</span>}
+                      </td>
+                      <td>
+                        <span className={styles[`badge_${b.validation}`] || ''}>
+                          {t(`records.validationOptions.${b.validation}`, { defaultValue: b.validation })}
+                        </span>
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <RuleStatusCell
+                          projectId={projectId}
+                          brdpId={b.id}
+                          format={ruleFormat}
+                          refreshToken={approvalsRefreshToken}
+                        />
+                      </td>
+                      {canEdit && (
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => handleDelete(b.id, b.identifier)} aria-label={t('records.deleteAria', { identifier: b.identifier })}>
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {!isLoading && (
+            <div className={styles.tableFooter}>
+              <div className={styles.tableFooterInfo}>
+                {t('records.pagination.info', {
+                  count: filteredBrdps.length,
+                  page: tablePage,
+                  totalPages: tableTotalPages,
+                })}
+              </div>
+              <div className={styles.pagination}>
+                <button
+                  type="button"
+                  className={styles.paginationBtn}
+                  onClick={() => setTablePage((p) => p - 1)}
+                  disabled={tablePage === 1}
+                >
+                  {t('records.pagination.previous')}
+                </button>
+                <button
+                  type="button"
+                  className={styles.paginationBtn}
+                  onClick={() => setTablePage((p) => p + 1)}
+                  disabled={tablePage === tableTotalPages}
+                >
+                  {t('records.pagination.next')}
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
