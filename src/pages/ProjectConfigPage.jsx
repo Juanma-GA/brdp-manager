@@ -134,6 +134,16 @@ function DataManagementSection({ projectId, canEdit, dataVersion, onDataChanged 
   };
 
   const handleReplaceAll = async () => {
+    if (
+      !window.confirm(
+        t('config.dataManagement.replaceAllConfirm', {
+          count: brdpCount ?? 0,
+          importCount: importedRows.length,
+        })
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     setImportErrors([]);
     try {

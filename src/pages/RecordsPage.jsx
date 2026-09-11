@@ -269,7 +269,8 @@ export default function RecordsPage() {
     refresh();
   };
 
-  const handleDelete = async (brdpId) => {
+  const handleDelete = async (brdpId, identifier) => {
+    if (!window.confirm(t('records.deleteConfirm', { identifier }))) return;
     await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, { method: 'DELETE' });
     if (selectedId === brdpId) setSelectedId(null);
     refresh();
@@ -443,7 +444,7 @@ export default function RecordsPage() {
                     </td>
                     {canEdit && (
                       <td onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => handleDelete(b.id)} aria-label={t('records.deleteAria', { identifier: b.identifier })}>
+                        <button onClick={() => handleDelete(b.id, b.identifier)} aria-label={t('records.deleteAria', { identifier: b.identifier })}>
                           <Trash2 size={14} />
                         </button>
                       </td>
