@@ -1,183 +1,51 @@
-import { useState, useEffect } from 'react';
-import { useAPIKey } from './hooks/useAPIKey';
-import { useChat } from './hooks/useChat';
-import { useProjectConfig } from './hooks/useProjectConfig';
-import { BRDPProvider, useBRDPContext } from './context/BRDPContext';
-import { ToastProvider, useToastContext } from './context/ToastContext';
-import Header from './components/Header';
-import Sidebar from './components/Sidebar';
-import ToastContainer from './components/ToastContainer';
-import BRDPPage from './pages/BRDPPage';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { ProjectProvider } from './context/ProjectContext';
+import ProtectedRoute from './layouts/ProtectedRoute';
+import AppLayout from './layouts/AppLayout';
+import ProjectLayout from './layouts/ProjectLayout';
+import LoginPage from './pages/LoginPage';
+import ProjectsPage from './pages/ProjectsPage';
+import ProjectConfigPage from './pages/ProjectConfigPage';
+import RecordsPage from './pages/RecordsPage';
+import GeneratePage from './pages/GeneratePage';
 import SettingsPage from './pages/SettingsPage';
-import ChatPanel from './components/ChatPanel';
-import GenerateModal from './components/GenerateModal';
-import BREXdocModal from './components/BREXdocModal/BREXdocModal';
-import AIExtractModal from './components/AIExtractModal/AIExtractModal';
 import './index.css';
 import './App.css';
 
-// Access BRDPContext inside AppContent
-function useSelectedBRDP() {
-  const { selectedBRDPs } = useBRDPContext();
-  return selectedBRDPs.length > 0 ? selectedBRDPs[0] : null;
-}
-
-/**
- * Main App component
- * Manages page routing between BRDP and Settings pages
- * @returns {JSX.Element} Application layout with header, sidebar, and main content
- */
-function AppContent() {
-  const [currentPage, setCurrentPage] = useState('brdp');
-  const [chatOpen, setChatOpen] = useState(false);
-  const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [showBREXdocModal, setShowBREXdocModal] = useState(false);
-  const [showAIExtractModal, setShowAIExtractModal] = useState(false);
-  // Bumped after every Generate attempt so BRDPTable's Rule Approval column
-  // (each RuleApprovalCell fetches its own approval independently) refetches
-  // instead of staying stale until a manual page reload -- see Issue #15.
-  const [approvalsRefreshToken, setApprovalsRefreshToken] = useState(0);
-  const [chatPanelWidth, setChatPanelWidth] = useState(() => {
-    const saved = localStorage.getItem('chatPanelWidth');
-    return saved ? parseInt(saved) : 340;
-  });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('sidebarCollapsed');
-    // Default to collapsed on first launch (no saved preference yet);
-    // once the user has toggled it, respect whatever they last chose.
-    return saved === null ? true : saved === 'true';
-  });
-  const { brdps, setBrdps, selectedBRDPs, setSelectedBRDPs } = useBRDPContext();
-  const { toasts, showToast } = useToastContext();
-  const { apiKey, modelName, provider, customEndpoint, isConfigured } = useAPIKey();
-  const { projectConfig } = useProjectConfig();
-
-  const { messages, sendUserMessage, clearHistory, stopStreaming, isLoading, error } = useChat({
-    apiKey,
-    modelName,
-    provider,
-    customEndpoint,
-    selectedBRDPs,
-    projectConfig,
-    primaryFormat: projectConfig.primaryFormat,
-  });
-
-  // Save chat panel width to localStorage
-  useEffect(() => {
-    localStorage.setItem('chatPanelWidth', chatPanelWidth.toString());
-  }, [chatPanelWidth]);
-
-  // Save sidebar collapsed state to localStorage
-  useEffect(() => {
-    localStorage.setItem('sidebarCollapsed', sidebarCollapsed.toString());
-  }, [sidebarCollapsed]);
-
-  /**
-   * Handle opening generate modal
-   */
-  const openGenerateModal = () => {
-    setShowGenerateModal(true);
-  };
-
-  const openAIExtractModal = () => {
-    setShowAIExtractModal(true);
-  };
-
-  const handleImportBRDPs = (newBrdps, mergeMode) => {
-    if (mergeMode === 'replace') {
-      setBrdps(newBrdps);
-    } else {
-      setBrdps([...brdps, ...newBrdps]);
-    }
-  };
-
-  /**
-   * Handle opening chat from header
-   */
-  const handleHeaderChatClick = () => {
-    if (currentPage === 'brdp') {
-      setChatOpen(!chatOpen);
-    }
-  };
-
-  const handleCloseChat = () => {
-    setChatOpen(false);
-  };
-
-  const handleNavigateSettings = () => {
-    handleCloseChat();
-  };
-
-  return (
-    <div className="appContainer">
-      <Header onChatClick={handleHeaderChatClick} chatOpen={chatOpen && currentPage === 'brdp'} onOpenGenerateModal={openGenerateModal} onOpenBREXdocModal={() => setShowBREXdocModal(true)} onOpenAIExtractModal={openAIExtractModal} showToast={showToast} />
-      <div className="workspaceRow">
-        <Sidebar
-          currentPage={currentPage}
-          onNavigate={setCurrentPage}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-        />
-        <main className="mainContent">
-          {currentPage === 'brdp' && (
-            <BRDPPage showToast={showToast} onNavigate={setCurrentPage} approvalsRefreshToken={approvalsRefreshToken} />
-          )}
-          {currentPage === 'settings' && <SettingsPage showToast={showToast} />}
-        </main>
-        {currentPage === 'brdp' && chatOpen && (
-          <ChatPanel
-            messages={messages}
-            onSendMessage={sendUserMessage}
-            onClearHistory={clearHistory}
-            onStopStreaming={stopStreaming}
-            isLoading={isLoading}
-            error={error}
-            isConfigured={isConfigured}
-            onNavigateSettings={handleNavigateSettings}
-            onClose={handleCloseChat}
-            detailPanelOpen={selectedBRDPs.length > 0}
-            selectedBRDPs={selectedBRDPs}
-            primaryFormat={projectConfig.primaryFormat}
-            onDeselectBrdp={() => setSelectedBRDPs([])}
-            onOpenGenerateModal={openGenerateModal}
-            width={chatPanelWidth}
-            onWidthChange={setChatPanelWidth}
-          />
-        )}
-      </div>
-      {showGenerateModal && (
-        <GenerateModal
-          brdps={brdps}
-          onClose={() => setShowGenerateModal(false)}
-          onGenerateComplete={() => setApprovalsRefreshToken((t) => t + 1)}
-        />
-      )}
-      {showBREXdocModal && (
-        <BREXdocModal
-          brdps={brdps}
-          projectConfig={projectConfig}
-          onClose={() => setShowBREXdocModal(false)}
-        />
-      )}
-      {showAIExtractModal && (
-        <AIExtractModal
-          onClose={() => setShowAIExtractModal(false)}
-          existingBRDPs={brdps}
-          onImport={handleImportBRDPs}
-        />
-      )}
-      <ToastContainer toasts={toasts} />
-    </div>
-  );
-}
-
 function App() {
   return (
-    <ToastProvider>
-      <BRDPProvider>
-        <AppContent />
-      </BRDPProvider>
-    </ToastProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <ProjectProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+
+            <Route
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+
+              <Route path="/projects/:projectId" element={<ProjectLayout />}>
+                <Route path="config" element={<ProjectConfigPage />} />
+                <Route path="records" element={<RecordsPage />} />
+                <Route path="generate" element={<GeneratePage />} />
+                <Route index element={<Navigate to="records" replace />} />
+              </Route>
+
+              <Route path="/" element={<Navigate to="/projects" replace />} />
+            </Route>
+
+            <Route path="*" element={<Navigate to="/projects" replace />} />
+          </Routes>
+        </ProjectProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

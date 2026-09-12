@@ -2,6 +2,15 @@
   padding: 24px;
   max-width: 100%;
   margin: 0 auto;
+  /* AppLayout's .mainContent (App.css) is a fixed-height (100vh) flex
+     column with overflow: hidden -- content taller than the viewport is
+     silently clipped unless a page establishes its own scroll region.
+     flex: 1 + min-height: 0 let this shrink below its content height
+     inside that flex column (the default min-height: auto would instead
+     let it grow past the viewport, defeating overflow-y: auto entirely). */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .title {
@@ -24,7 +33,7 @@
 .sectionsContainer {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 32px;
 }
 
 .section {
@@ -137,8 +146,14 @@
   color: #991b1b;
 }
 
-.statusSaved {
-  color: #2563eb;
+.inputError {
+  border-color: #dc2626;
+}
+
+.fieldError {
+  color: #dc2626;
+  font-size: 11px;
+  margin: 4px 0 0;
 }
 
 .formRow {
@@ -156,12 +171,7 @@
   font-size: 12px;
   color: #6b7280;
   margin-top: 4px;
-}
-
-.divider {
-  height: 1px;
-  background: #e8edf5;
-  margin: 16px 0;
+  margin-bottom: 8px;
 }
 
 .buttonGroup {
@@ -172,6 +182,77 @@
 
 .buttonGroup .button {
   flex: 1;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th {
+  text-align: left;
+  padding: 8px 10px;
+  background: #f8fafc;
+  font-size: 11px;
+  color: #64748b;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.table td {
+  padding: 8px 10px;
+  border-top: 1px solid #e8edf5;
+  vertical-align: top;
+}
+
+.roleTag {
+  font-size: 11.5px;
+  color: #374151;
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 2px 6px;
+  margin: 0 4px 4px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.roleTag button {
+  border: none;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+}
+
+.roleTag button:hover {
+  color: #dc2626;
+}
+
+.actionsCell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.actionsCell button {
+  font-size: 12px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid #dde3ec;
+  background: #fff;
+  cursor: pointer;
+}
+
+.actionsCell button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerLink {
+  color: #dc2626 !important;
+  border-color: #fecaca !important;
 }
 
 @media (max-width: 768px) {

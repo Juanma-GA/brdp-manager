@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# RSA keypair for JWT signing (Phase 2) -- generated locally, never committed
+keys/
+
+# Real environment file -- .env.example is the committed template
+.env

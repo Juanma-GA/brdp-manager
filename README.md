@@ -72,7 +72,7 @@ In production, Express (`npm start`) serves everything itself on a single port -
 
 ## Troubleshooting: Corporate Network / SSL-Inspecting Proxy
 
-If you're on a corporate network with SSL inspection (e.g. Zscaler), you may hit certificate errors in two different, unrelated places. Both share the same root cause (npm and Node don't trust your organization's proxy root CA), but each needs its own fix.
+If you're on a corporate network with SSL inspection (e.g. Zscaler), you may hit certificate errors in three different, unrelated places. All share the same root cause (npm, Node, and Python each maintain their own trust store and none of them trust your organization's proxy root CA by default), but each needs its own fix.
 
 ### 1. `npm install` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`
 
@@ -101,6 +101,29 @@ Affects: running `server.js` at runtime (calls to external LLM APIs like Mistral
 **Cause:** the same corporate SSL-inspecting proxy — but a distinct problem, because Node.js at runtime doesn't use npm's configuration or Windows' certificate store by default.
 
 **Fix:** already built into the code (`win-ca`, auto-enabled only on Windows, no-op on Linux/Mac) — no manual action needed. Unlike problem #1 above, this one is already solved for you.
+
+### 3. The v2 backend (`uvicorn`) fails with `SSLCertVerificationError` calling Mistral/Qwen
+
+Affects: `POST /api/llm-proxy` (Ask, Suggest Definition, and any other AI feature) — confirmed live with a real traceback (see backend log) after adding explicit logging around the upstream call; without that logging this used to surface only as a bare 500 with nothing in the console.
+
+**Cause:** the same corporate SSL-inspecting proxy as problems #1/#2 above — but a third, distinct problem, because Python doesn't use npm's config, Node's `win-ca` fix, or Windows' certificate store either. `httpx` (the backend's HTTP client) needs its own trust anchor.
+
+**Recommended fix for local development:**
+```bash
+pip install -e ".[dev]"
+uvicorn app.main:app --reload
+```
+That's it — no certificate path to find, no environment variable to set. `pip-system-certs` is in the `[dev]` extras specifically for this: it patches Python's `ssl` module (via a `.pth` file that runs automatically every time the interpreter starts, in this venv, no import needed anywhere in the app's own code) to validate against the OS's certificate store instead of only `certifi`'s bundled list — the same idea as problem #2's `win-ca`, just for Python instead of Node. Your corporate root CA is normally already in the OS store (that's what makes your browser and other apps work on this network), so this "just works" without you having to locate the `.pem` file yourself.
+
+⚠️ **Dev-only, not a production fix.** `pip-system-certs` is deliberately in `[dev]`, never in the production dependency list. A real deployment installs the corporate root CA into the server OS's trust store directly (the normal, correct way to do this for a server) — nothing in this app's own code or dependencies should be relying on this shortcut in production.
+
+**Manual alternative** (if you'd rather not add the dev dependency, or need this outside the `[dev]` extras): point Python at your organization's root CA `.pem` before starting `uvicorn`:
+```bash
+set SSL_CERT_FILE=C:\path\to\corporate-root-cert.pem
+set REQUESTS_CA_BUNDLE=C:\path\to\corporate-root-cert.pem
+uvicorn app.main:app --reload
+```
+(`export` instead of `set` on Linux/Mac.) Same `.pem` file as problem #1 — ask IT or export it from `certmgr.msc` → *Trusted Root Certification Authorities* if you don't have it yet. Both variables point to the same file; between them they cover `httpx` and the other Python HTTP libraries in the dependency chain, so set both rather than guessing which one your setup needs.
 
 ## Configuration
 

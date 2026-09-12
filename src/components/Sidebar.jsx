@@ -1,51 +1,80 @@
+import { NavLink, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { useProjectContext } from '../context/ProjectContext';
 import styles from './Sidebar.module.css';
 
 /**
- * Sidebar component with navigation
- * Displays navigation buttons for different pages
- * @param {Object} props - Component props
- * @param {string} props.currentPage - Currently active page
- * @param {Function} props.onNavigate - Callback when navigation button is clicked
- * @param {boolean} props.collapsed - Whether the sidebar is collapsed to icon-only width
- * @param {Function} props.onToggleCollapse - Callback to toggle collapsed state
- * @returns {JSX.Element} Sidebar element with navigation buttons
+ * v2 sidebar: BRDP Projects / Settings at the top level, and -- only while
+ * inside a project route (projectId present in the URL) -- the project's
+ * own sub-nav (Config/Records/Generate), matching the mockup. Real
+ * <NavLink>s, not onClick+setState, so the active route drives the
+ * highlighted item and the URL is always the source of truth (docs/v2 §5:
+ * "la app real necesita URLs de verdad").
  */
-export default function Sidebar({ currentPage, onNavigate, collapsed, onToggleCollapse }) {
+export default function Sidebar({ collapsed, onToggleCollapse }) {
+  const { t } = useTranslation();
+  const { projectId } = useParams();
+  const { projects } = useProjectContext();
+  const activeProject = projects.find((p) => p.id === projectId);
+
+  const navItemClass = ({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`;
+
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`}>
       <button
         className={styles.collapseToggle}
         onClick={onToggleCollapse}
-        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-label={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
+        title={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
       >
         ☰
       </button>
 
-      {!collapsed && <div className={styles.sectionLabel}>Navigation</div>}
+      {!collapsed && <div className={styles.sectionLabel}>{t('sidebar.navigation')}</div>}
       <nav className={styles.nav}>
-        <button
-          onClick={() => onNavigate('brdp')}
-          className={`${styles.navItem} ${currentPage === 'brdp' ? styles.active : ''}`}
-          title={collapsed ? 'BRDP Records' : undefined}
-        >
+        <NavLink to="/projects" className={navItemClass} title={collapsed ? t('nav.projects') : undefined}>
           <span className={styles.navIcon}>📋</span>
-          {!collapsed && <span className={styles.navLabel}>BRDP Records</span>}
-        </button>
-        <button
-          onClick={() => onNavigate('settings')}
-          className={`${styles.navItem} ${currentPage === 'settings' ? styles.active : ''}`}
-          title={collapsed ? 'Settings' : undefined}
-        >
+          {!collapsed && <span className={styles.navLabel}>{t('nav.projects')}</span>}
+        </NavLink>
+        <NavLink to="/settings" className={navItemClass} title={collapsed ? t('nav.settings') : undefined}>
           <span className={styles.navIcon}>⚙️</span>
-          {!collapsed && <span className={styles.navLabel}>Settings</span>}
-        </button>
+          {!collapsed && <span className={styles.navLabel}>{t('nav.settings')}</span>}
+        </NavLink>
       </nav>
+
+      {projectId && activeProject && (
+        <>
+          <div className={styles.divider} />
+          {!collapsed && (
+            <>
+              <NavLink to="/projects" className={styles.backLink}>
+                ← {t('nav.allProjects')}
+              </NavLink>
+              <div className={styles.projectName}>{activeProject.name}</div>
+              <div className={styles.projectStandard}>{activeProject.standard}</div>
+            </>
+          )}
+          <nav className={styles.nav}>
+            <NavLink to={`/projects/${projectId}/config`} className={navItemClass} title={collapsed ? t('nav.config') : undefined}>
+              <span className={styles.navIcon}>📑</span>
+              {!collapsed && <span className={styles.navLabel}>{t('nav.config')}</span>}
+            </NavLink>
+            <NavLink to={`/projects/${projectId}/records`} className={navItemClass} title={collapsed ? t('nav.records') : undefined}>
+              <span className={styles.navIcon}>📄</span>
+              {!collapsed && <span className={styles.navLabel}>{t('nav.records')}</span>}
+            </NavLink>
+            <NavLink to={`/projects/${projectId}/generate`} className={navItemClass} title={collapsed ? t('nav.generate') : undefined}>
+              <span className={styles.navIcon}>🧬</span>
+              {!collapsed && <span className={styles.navLabel}>{t('nav.generate')}</span>}
+            </NavLink>
+          </nav>
+        </>
+      )}
 
       <div className={styles.footer}>
         <div>
           <span className={styles.footerIcon}>ℹ️</span>
-          {!collapsed && 'BRDP Manager v1.0'}
+          {!collapsed && t('sidebar.footer')}
         </div>
       </div>
     </aside>
