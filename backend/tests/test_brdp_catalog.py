@@ -166,6 +166,72 @@ async def test_create_project_without_seed_flag_creates_no_brdps(client, catalog
         await _cleanup_user(admin)
 
 
+async def test_schematron_s1000d_catalog_aliases_to_brex_301(client):
+    """Schematron 1.0 — S1000D has no catalog import of its own -- it must
+    see the same rows as BREX — S1000D 3.0.1 (docs request: same
+    underlying 27 BRDP decisions, since generateBREXSch.js generates a
+    real BREX 3.0.1 under the hood). Uses the two real, literal standard
+    strings rather than a throwaway UUID-suffixed one, since the alias in
+    routes/brdp_catalog.py is keyed on them specifically -- adds 2 marker
+    rows under the real "BREX — S1000D 3.0.1" standard and checks the
+    Schematron alias sees them too (on top of whatever real catalog data
+    is already imported there), cleaning up only the marker rows after.
+    """
+    user = await _make_user()
+    real_standard = "BREX — S1000D 3.0.1"
+    alias_standard = "Schematron 1.0 — S1000D"
+    marker = uuid.uuid4().hex[:8]
+    marker_ids = [f"ALIAS-TEST-{marker}-1", f"ALIAS-TEST-{marker}-2"]
+    try:
+        baseline = (
+            await client.get(f"/api/brdp-catalog/count?standard={real_standard}", headers=_headers(user))
+        ).json()["count"]
+
+        async with async_session_factory() as session:
+            session.add_all(
+                [
+                    BRDPCatalog(
+                        standard=real_standard, identifier=marker_ids[0], title="Alias Test 1", definition="Def 1"
+                    ),
+                    BRDPCatalog(
+                        standard=real_standard, identifier=marker_ids[1], title="Alias Test 2", definition="Def 2"
+                    ),
+                ]
+            )
+            await session.commit()
+
+        count_response = await client.get(
+            f"/api/brdp-catalog/count?standard={alias_standard}", headers=_headers(user)
+        )
+        assert count_response.status_code == 200
+        # The response echoes the standard actually requested, not the
+        # aliased one the count came from -- the caller shouldn't need to
+        # know an alias exists at all.
+        assert count_response.json() == {"standard": alias_standard, "count": baseline + 2}
+
+        list_response = await client.get(f"/api/brdp-catalog?standard={alias_standard}", headers=_headers(user))
+        assert list_response.status_code == 200
+        returned_ids = {e["identifier"] for e in list_response.json()}
+        assert set(marker_ids) <= returned_ids
+    finally:
+        async with async_session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(BRDPCatalog).where(
+                            BRDPCatalog.standard == real_standard, BRDPCatalog.identifier.in_(marker_ids)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in rows:
+                await session.delete(row)
+            await session.commit()
+        await _cleanup_user(user)
+
+
 async def test_seed_from_catalog_is_noop_for_standard_with_no_catalog_rows(client):
     admin = await _make_user(global_role="admin")
     created_id = None
