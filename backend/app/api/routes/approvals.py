@@ -3,18 +3,47 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from lxml import etree
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_project_role
 from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
-from app.models import RuleApproval, User
-from app.schemas.rule_approval import RuleApprovalOut, RuleApprovalPropose
+from app.models import BRDP, RuleApproval, User
+from app.schemas.rule_approval import BulkRuleApprovalOut, RuleApprovalOut, RuleApprovalPropose
 from app.services.history import record_change
 
 router = APIRouter(
     prefix="/api/projects/{project_id}/brdps/{brdp_id}/approvals/{format}", tags=["approvals"]
 )
+
+# Separate router (no {brdp_id} segment) for the project-wide bulk lookup
+# below -- APIRouter's prefix is fixed at construction, so it can't share
+# `router` above.
+project_router = APIRouter(prefix="/api/projects/{project_id}/approvals/{format}", tags=["approvals"])
+
+
+@project_router.get("", response_model=list[BulkRuleApprovalOut])
+async def list_project_approvals(
+    project_id: uuid.UUID,
+    format: str,
+    _viewer: User = Depends(require_project_role("viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> list[RuleApproval]:
+    """Every rule-approval row for this project+format in one call -- powers
+    RecordsPage's Rule Status column sort, which needs every row's status
+    up front to sort the FULL dataset before pagination, not just fetch
+    each visible row's own status independently the way RuleStatusCell
+    does for display. A BRDP absent from the result has no approval row
+    at all (frontend's ruleStateOf(null) => "todo", same convention the
+    per-BRDP GET endpoint above already uses).
+    """
+    result = await db.execute(
+        select(RuleApproval)
+        .join(BRDP, RuleApproval.brdp_id == BRDP.id)
+        .where(BRDP.project_id == project_id, RuleApproval.format == format)
+    )
+    return list(result.scalars().all())
 
 
 def _rule_state(approval: RuleApproval | None) -> str:

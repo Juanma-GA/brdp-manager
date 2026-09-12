@@ -135,6 +135,30 @@ function RuleStatusCell({ projectId, brdpId, format, refreshToken }) {
   return <RuleStatusDots state={ruleStateOf(approval)} />;
 }
 
+// aria-sort on the <th> itself is the standard accessible way to expose a
+// sortable column's current direction; the ▲/▼ glyph is a purely visual
+// echo of that same state, carrying its own translated aria-label since a
+// bare arrow character isn't reliably announced by every screen reader.
+function SortableHeader({ field, sortField, sortDir, onSort, children }) {
+  const { t } = useTranslation();
+  const active = sortField === field;
+  return (
+    <th aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className={styles.sortHeaderBtn} onClick={() => onSort(field)}>
+        {children}
+        {active && (
+          <span
+            className={styles.sortIndicator}
+            aria-label={t(sortDir === 'asc' ? 'records.table.sortedAscending' : 'records.table.sortedDescending')}
+          >
+            {sortDir === 'asc' ? '▲' : '▼'}
+          </span>
+        )}
+      </button>
+    </th>
+  );
+}
+
 export default function RecordsPage() {
   const { t } = useTranslation();
   const { projectId } = useParams();
@@ -149,7 +173,16 @@ export default function RecordsPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [tableSearchQuery, setTableSearchQuery] = useState('');
   const [tablePage, setTablePage] = useState(1);
+  // null = unsorted (API order). Sorting is applied to the FULL filtered
+  // dataset before pagination (docs request), not just the visible page.
+  const [sortField, setSortField] = useState(null);
+  const [sortDir, setSortDir] = useState('asc');
   const [approvalsRefreshToken, setApprovalsRefreshToken] = useState(0);
+  // Every BRDP's rule-approval status for the project's rule format, in
+  // one call -- needed to sort the Rule Status column across the full
+  // dataset; the table's per-row RuleStatusCell keeps fetching its own
+  // status independently for display, this is only for sorting.
+  const [ruleApprovalsById, setRuleApprovalsById] = useState({});
 
   // Add BRDP creation flow -- opens this panel instead of creating
   // directly from a bare identifier field (docs request: new dedicated
@@ -224,13 +257,51 @@ export default function RecordsPage() {
     setTablePage(1);
   };
 
+  // Clicking a column header: same column toggles direction, a different
+  // one starts fresh at ascending (matches the search box's own "reset to
+  // page 1 on any change" behavior above).
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+    setTablePage(1);
+  };
+
+  // Proposal Status and Rule Status have a natural workflow order, not an
+  // alphabetical one (docs request: alphabetical would give
+  // Pending/Refused/Validated, which follows no real logic) -- VALIDATION_
+  // OPTIONS/RULE_STATES above are already declared in that flow order, so
+  // sorting is just each value's position in that array.
+  const compareByFlowOrder = (order, a, b) => order.indexOf(a) - order.indexOf(b);
+
   const filteredBrdps = brdps.filter((b) => {
     const q = tableSearchQuery.trim().toLowerCase();
     if (!q) return true;
     return b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q);
   });
-  const tableTotalPages = Math.max(1, Math.ceil(filteredBrdps.length / TABLE_PAGE_SIZE));
-  const pagedBrdps = filteredBrdps.slice(
+
+  const sortedBrdps = !sortField
+    ? filteredBrdps
+    : [...filteredBrdps].sort((a, b) => {
+        let cmp;
+        if (sortField === 'identifier') cmp = a.identifier.localeCompare(b.identifier);
+        else if (sortField === 'title') cmp = (a.title || '').localeCompare(b.title || '');
+        else if (sortField === 'validation') cmp = compareByFlowOrder(VALIDATION_OPTIONS, a.validation, b.validation);
+        else if (sortField === 'ruleStatus') {
+          cmp = compareByFlowOrder(
+            RULE_STATES,
+            ruleStateOf(ruleApprovalsById[a.id] ?? null),
+            ruleStateOf(ruleApprovalsById[b.id] ?? null)
+          );
+        } else cmp = 0;
+        return sortDir === 'asc' ? cmp : -cmp;
+      });
+
+  const tableTotalPages = Math.max(1, Math.ceil(sortedBrdps.length / TABLE_PAGE_SIZE));
+  const pagedBrdps = sortedBrdps.slice(
     (tablePage - 1) * TABLE_PAGE_SIZE,
     tablePage * TABLE_PAGE_SIZE
   );
@@ -242,6 +313,33 @@ export default function RecordsPage() {
   useEffect(() => {
     setTablePage((p) => Math.min(p, tableTotalPages));
   }, [tableTotalPages]);
+
+  // Bulk fetch for the Rule Status column's sort -- refetched whenever an
+  // Edit/Verify/Revoke action bumps approvalsRefreshToken, same trigger
+  // RuleStatusCell/the detail panel's own rule-status fetch already use.
+  // A standard without a rule format (e.g. DITA) just gets an empty map,
+  // so sorting by Rule Status there is a harmless no-op (every row reads
+  // as "todo", same as the column already shows "—" for them).
+  useEffect(() => {
+    if (!ruleFormat) {
+      setRuleApprovalsById({});
+      return;
+    }
+    let cancelled = false;
+    authFetchJson(`/api/projects/${projectId}/approvals/${ruleFormat}`)
+      .then((rows) => {
+        if (cancelled) return;
+        const byId = {};
+        for (const row of rows) byId[row.brdp_id] = { status: row.status };
+        setRuleApprovalsById(byId);
+      })
+      .catch(() => {
+        if (!cancelled) setRuleApprovalsById({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, ruleFormat, approvalsRefreshToken]);
 
   useEffect(() => {
     setRuleEditing(false);
@@ -599,11 +697,19 @@ export default function RecordsPage() {
                 </colgroup>
                 <thead>
                   <tr>
-                    <th>{t('records.table.id')}</th>
-                    <th>{t('records.table.title')}</th>
-                    <th>{t('records.table.validation')}</th>
-                    <th>{t('records.table.ruleStatus')}</th>
-                    {canEdit && <th></th>}
+                    <SortableHeader field="identifier" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                      {t('records.table.id')}
+                    </SortableHeader>
+                    <SortableHeader field="title" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                      {t('records.table.title')}
+                    </SortableHeader>
+                    <SortableHeader field="validation" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                      {t('records.table.validation')}
+                    </SortableHeader>
+                    <SortableHeader field="ruleStatus" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                      {t('records.table.ruleStatus')}
+                    </SortableHeader>
+                    {canEdit && <th className={styles.plainHeader}></th>}
                   </tr>
                 </thead>
                 <tbody>

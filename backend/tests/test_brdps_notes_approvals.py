@@ -261,6 +261,44 @@ async def test_approval_propose_get_approve_revoke_lifecycle(client, editor_and_
     assert gone.json() is None
 
 
+async def test_bulk_project_approvals_lists_every_brdps_status(client, editor_and_project):
+    """Powers RecordsPage's Rule Status column sort (docs request): needs
+    every BRDP's status up front to sort the full dataset before
+    pagination, not fetch each row independently like the per-BRDP GET
+    endpoint above does for display. A BRDP with no approval row at all
+    (draft-1 here) is simply absent from the result -- the frontend
+    treats that as "todo", same convention as ruleStateOf(null) already
+    uses for the per-BRDP endpoint.
+    """
+    project, headers = editor_and_project
+    todo_brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-BULK-000"}, headers=headers)
+    ).json()
+    draft_brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-BULK-001"}, headers=headers)
+    ).json()
+    verified_brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-BULK-002"}, headers=headers)
+    ).json()
+
+    await client.put(
+        f"/api/projects/{project.id}/brdps/{draft_brdp['id']}/approvals/BREX-4.2",
+        json={"rule_xml": "<structureObjectRule/>", "source": "llm"},
+        headers=headers,
+    )
+    approve_url = f"/api/projects/{project.id}/brdps/{verified_brdp['id']}/approvals/BREX-4.2"
+    await client.put(approve_url, json={"rule_xml": "<structureObjectRule/>", "source": "llm"}, headers=headers)
+    await client.post(approve_url + "/approve", headers=headers)
+
+    response = await client.get(f"/api/projects/{project.id}/approvals/BREX-4.2", headers=headers)
+    assert response.status_code == 200
+    by_brdp_id = {row["brdp_id"]: row["status"] for row in response.json()}
+
+    assert todo_brdp["id"] not in by_brdp_id
+    assert by_brdp_id[draft_brdp["id"]] == "pending_review"
+    assert by_brdp_id[verified_brdp["id"]] == "approved"
+
+
 async def test_approving_without_a_pending_review_row_404s(client, editor_and_project):
     project, headers = editor_and_project
     brdp = (

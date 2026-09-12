@@ -190,6 +190,20 @@ async def test_editor_of_a_cannot_read_history_of_a_brdp_in_b(client, scenario):
     assert response.status_code == 403
 
 
+async def test_editor_of_a_cannot_read_bulk_approvals_of_b(client, scenario):
+    """Cross-project isolation for the project-wide bulk approvals
+    endpoint (docs request: powers the Records table's Rule Status sort)
+    -- editor_a has a real editor role, just not on project B, so this
+    must fail on project ownership like every other project-scoped
+    endpoint, not merely be hidden by the UI.
+    """
+    response = await client.get(
+        f"/api/projects/{scenario['project_b'].id}/approvals/BREX-4.2",
+        headers=_headers(scenario["editor_a"]),
+    )
+    assert response.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # Axis (b): same-project role level (viewer vs editor, same project)
 # ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel
@@ -17,5 +18,12 @@ class RuleApprovalOut(BaseModel):
     source: str
     status: str
     approved_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class BulkRuleApprovalOut(BaseModel):
+    brdp_id: uuid.UUID
+    status: str
 
     model_config = {"from_attributes": True}
