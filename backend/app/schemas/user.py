@@ -6,10 +6,30 @@ from app.schemas.auth import UserOut
 
 
 class UserCreate(BaseModel):
+    # No password field at all (docs request: unify with the admin Reset
+    # password flow) -- create_user always generates a real random
+    # temporary password server-side via generate_temporary_password(),
+    # never one the admin types in. Structurally impossible to set a
+    # known/fixed initial password through this endpoint, same pattern
+    # this codebase already uses to make a field un-settable (see
+    # BRDPUpdate leaving out identifier).
     email: EmailStr
-    password: str
     display_name: str
     global_role: str = "user"  # "user" | "admin"
+
+
+class TemporaryPasswordOut(BaseModel):
+    """Response shape for both create_user and reset_password -- the raw
+    temporary password is included exactly once, here, in this one
+    response. Never stored in plaintext anywhere, never logged, never
+    retrievable again after this.
+    """
+
+    temporary_password: str
+
+
+class UserCreateOut(UserOut, TemporaryPasswordOut):
+    pass
 
 
 class UserUpdate(BaseModel):

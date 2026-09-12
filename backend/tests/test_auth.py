@@ -253,6 +253,31 @@ async def test_change_password_with_correct_current_password_succeeds(client, te
     assert new_password_login.status_code == 200
 
 
+async def test_change_password_clears_must_change_password_flag(client, test_user):
+    """docs request: a successful change is what lifts the frontend's
+    force-change-password gate set by Create user/admin Reset password.
+    """
+    async with async_session_factory() as session:
+        db_user = await session.get(User, test_user.id)
+        db_user.must_change_password = True
+        await session.commit()
+
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+    me_before = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {access_token}"})
+    assert me_before.json()["must_change_password"] is True
+
+    response = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": TEST_PASSWORD, "new_password": "new-correct-password"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 204
+
+    me_after = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {access_token}"})
+    assert me_after.json()["must_change_password"] is False
+
+
 async def test_change_password_with_wrong_current_password_rejected(client, test_user):
     login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
     access_token = login.json()["access_token"]

@@ -22,6 +22,19 @@ const resources = {
         // instead, via each form's own existing inline error message.
         required: 'Please fill out all required fields.',
       },
+      // Shared across every sortable table (Records, User Management) via
+      // the one SortableHeader component -- not duplicated per page.
+      sort: {
+        ascending: 'sorted ascending',
+        descending: 'sorted descending',
+      },
+      // ProtectedRoute forces this screen (reusing ChangePasswordForm,
+      // never a second form) for any account still on a temporary
+      // password from Create user or an admin's Reset password.
+      forcePasswordChange: {
+        title: 'You must change your password',
+        description: 'Your account has a temporary password. Set a new one to continue.',
+      },
       login: {
         title: 'Sign in',
         email: 'Email',
@@ -159,8 +172,6 @@ const resources = {
           title: 'Title',
           validation: 'Proposal Status',
           ruleStatus: 'Rule Status',
-          sortedAscending: 'sorted ascending',
-          sortedDescending: 'sorted descending',
         },
         deleteAria: 'Delete {{identifier}}',
         deleteConfirm: 'Delete BRDP "{{identifier}}"? This cannot be undone.',
@@ -282,7 +293,6 @@ const resources = {
         userManagement: {
           title: 'User Management',
           email: 'Email',
-          password: 'Password',
           displayName: 'Display name',
           globalRole: 'Global role',
           createUser: 'Create user',
@@ -307,6 +317,18 @@ const resources = {
           deleteConfirm: 'Delete user "{{name}}"? This cannot be undone.',
           deleteDisabledSelf: 'You cannot delete your own account',
           deleteDisabledLastAdmin: 'Cannot delete the last remaining admin',
+          resetPassword: 'Reset password',
+          resettingPassword: 'Resetting…',
+          resetPasswordConfirm:
+            'Reset the password for "{{name}}"? They will need to sign in with the new temporary password and set their own.',
+          tempPassword: {
+            title: 'Temporary password',
+            onlyShownOnce:
+              'This is shown only once. Share it with {{email}} through a secure channel -- they will be required to set their own password on first login.',
+            copy: 'Copy',
+            copied: 'Copied!',
+            close: 'Close',
+          },
         },
       },
     },
@@ -316,6 +338,14 @@ const resources = {
       appName: 'BRDP Manager',
       validation: {
         required: 'Completa todos los campos obligatorios.',
+      },
+      sort: {
+        ascending: 'orden ascendente',
+        descending: 'orden descendente',
+      },
+      forcePasswordChange: {
+        title: 'Debes cambiar tu contraseña',
+        description: 'Tu cuenta tiene una contraseña temporal. Establece una nueva para continuar.',
       },
       login: {
         title: 'Iniciar sesión',
@@ -454,8 +484,6 @@ const resources = {
           title: 'Título',
           validation: 'Estado de propuesta',
           ruleStatus: 'Estado de la regla',
-          sortedAscending: 'orden ascendente',
-          sortedDescending: 'orden descendente',
         },
         deleteAria: 'Eliminar {{identifier}}',
         deleteConfirm: '¿Eliminar el BRDP "{{identifier}}"? Esta acción no se puede deshacer.',
@@ -577,7 +605,6 @@ const resources = {
         userManagement: {
           title: 'Gestión de usuarios',
           email: 'Correo electrónico',
-          password: 'Contraseña',
           displayName: 'Nombre visible',
           globalRole: 'Rol global',
           createUser: 'Crear usuario',
@@ -602,6 +629,18 @@ const resources = {
           deleteConfirm: '¿Eliminar al usuario "{{name}}"? Esta acción no se puede deshacer.',
           deleteDisabledSelf: 'No puedes eliminar tu propia cuenta',
           deleteDisabledLastAdmin: 'No se puede eliminar al último admin restante',
+          resetPassword: 'Restablecer contraseña',
+          resettingPassword: 'Restableciendo…',
+          resetPasswordConfirm:
+            '¿Restablecer la contraseña de "{{name}}"? Deberá iniciar sesión con la contraseña temporal y establecer la suya propia.',
+          tempPassword: {
+            title: 'Contraseña temporal',
+            onlyShownOnce:
+              'Esto solo se muestra una vez. Compártela con {{email}} por un canal seguro -- deberá establecer su propia contraseña en el primer inicio de sesión.',
+            copy: 'Copiar',
+            copied: '¡Copiado!',
+            close: 'Cerrar',
+          },
         },
       },
     },

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,4 +19,9 @@ class User(Base):
     # Settings -> User Management, independent of any per-project role
     # (see docs/v2/03-especificacion-v2-para-claude-code.md §4.3).
     global_role: Mapped[str] = mapped_column(String, nullable=False, default="user")
+    # True right after Create user or an admin's Reset password (both set a
+    # random temporary password, docs request) -- the frontend forces the
+    # Change Password screen, blocking every other route, until a
+    # successful POST /api/auth/change-password clears this back to False.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

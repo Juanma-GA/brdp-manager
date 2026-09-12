@@ -127,6 +127,10 @@ async def change_password(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Current password is incorrect")
 
     current_user.password_hash = hash_password(body.new_password)
+    # Whatever forced this change (a fresh Create user or an admin's Reset
+    # password, both set this True) is now satisfied -- clears back to
+    # False so the frontend's force-change-password gate lifts.
+    current_user.must_change_password = False
 
     # Revoke every OTHER active refresh token for this user in one UPDATE
     # (docs request) -- an access token isn't tied to the password hash at

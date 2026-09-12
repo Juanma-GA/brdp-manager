@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+import string
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -24,6 +25,30 @@ _BCRYPT_MAX_PASSWORD_BYTES = 72
 # schemas/auth.py's ChangePasswordRequest) instead of the number being
 # repeated inline.
 MIN_PASSWORD_LENGTH = 8
+
+# Comfortably above MIN_PASSWORD_LENGTH (docs request: "mínimo 12
+# caracteres") -- one fixed length, not a random range, since there's no
+# reason for it to vary and a fixed value is simpler to reason about.
+TEMPORARY_PASSWORD_LENGTH = 16
+
+# Alphanumeric + a handful of symbols -- avoids characters that are easy to
+# mis-transcribe when an admin reads a temporary password aloud or pastes
+# it somewhere (no ambiguous-looking set here, just a broad-enough
+# character pool that `secrets.choice` picking uniformly from it gives a
+# real, high-entropy result at TEMPORARY_PASSWORD_LENGTH).
+_TEMPORARY_PASSWORD_ALPHABET = string.ascii_letters + string.digits + "!@#$%^&*"
+
+
+def generate_temporary_password() -> str:
+    """A real random one-time password (docs request: NOT a fixed value
+    like "1234" -- that would be a known, shared credential exploitable by
+    anyone with app access, and would violate MIN_PASSWORD_LENGTH besides).
+    Uses `secrets`, not `random` -- this is for authentication, it has to
+    be cryptographically secure, not just look random. Callers (create_user,
+    reset_password) never persist this in plaintext anywhere; it's handed
+    back in the response body exactly once.
+    """
+    return "".join(secrets.choice(_TEMPORARY_PASSWORD_ALPHABET) for _ in range(TEMPORARY_PASSWORD_LENGTH))
 
 
 def hash_password(password: str) -> str:

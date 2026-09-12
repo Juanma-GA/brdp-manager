@@ -1,15 +1,24 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.core.security import hash_password
+from app.core.security import generate_temporary_password, hash_password
 from app.db.base import get_db
-from app.models import User, UserProjectRole
+from app.models import RefreshToken, User, UserProjectRole
 from app.schemas.auth import UserOut
-from app.schemas.user import ProjectRoleAssign, ProjectRoleOut, UserCreate, UserUpdate, UserWithRolesOut
+from app.schemas.user import (
+    ProjectRoleAssign,
+    ProjectRoleOut,
+    TemporaryPasswordOut,
+    UserCreate,
+    UserCreateOut,
+    UserUpdate,
+    UserWithRolesOut,
+)
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -36,30 +45,75 @@ async def list_users(_admin: User = Depends(_require_admin), db: AsyncSession = 
                 email=user.email,
                 display_name=user.display_name,
                 global_role=user.global_role,
+                must_change_password=user.must_change_password,
                 project_roles=[ProjectRoleOut.model_validate(r) for r in roles],
             )
         )
     return out
 
 
-@router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=UserCreateOut, status_code=status.HTTP_201_CREATED)
 async def create_user(
     body: UserCreate, _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
-) -> User:
+) -> UserCreateOut:
+    """No password comes from the admin at all (docs request: unified with
+    Reset password below) -- a real random temporary is generated here,
+    must_change_password starts True, and the temporary is returned in
+    THIS response only. It is never stored in plaintext, never logged,
+    and there is no way to retrieve it again after this call returns.
+    """
     existing = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
+    temporary_password = generate_temporary_password()
     user = User(
         email=body.email,
-        password_hash=hash_password(body.password),
+        password_hash=hash_password(temporary_password),
         display_name=body.display_name,
         global_role=body.global_role,
+        must_change_password=True,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return user
+    return UserCreateOut(**UserOut.model_validate(user).model_dump(), temporary_password=temporary_password)
+
+
+@router.post("/{user_id}/reset-password", response_model=TemporaryPasswordOut)
+async def reset_password(
+    user_id: uuid.UUID,
+    _admin: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> TemporaryPasswordOut:
+    """Same mechanism as create_user (docs request: unify, no fixed value
+    like "1234" -- that's a known credential anyone with app access could
+    exploit, and it would violate MIN_PASSWORD_LENGTH anyway): a real
+    random temporary password, returned in plaintext exactly once in this
+    response, must_change_password set True so the frontend forces the
+    Change Password screen on next login.
+
+    Also revokes every active refresh token for this user, unconditionally
+    (unlike self-service change-password, there is no "current session to
+    exclude" here -- an admin resetting someone else's password is, by
+    definition, acting on a session that isn't their own).
+    """
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    temporary_password = generate_temporary_password()
+    user.password_hash = hash_password(temporary_password)
+    user.must_change_password = True
+
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
+
+    await db.commit()
+    return TemporaryPasswordOut(temporary_password=temporary_password)
 
 
 @router.patch("/{user_id}", response_model=UserOut)

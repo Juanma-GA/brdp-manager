@@ -25,6 +25,11 @@ class UserOut(BaseModel):
     email: str
     display_name: str
     global_role: str
+    # The frontend's own signal (docs request) to force the Change
+    # Password screen right after login, before anything else is
+    # reachable -- true right after Create user or an admin's Reset
+    # password, cleared back to False by a successful change-password.
+    must_change_password: bool
 
     model_config = {"from_attributes": True}
 

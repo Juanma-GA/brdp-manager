@@ -6,6 +6,7 @@ import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
+import SortableHeader from '../components/SortableHeader';
 import styles from './RecordsPage.module.css';
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
@@ -133,30 +134,6 @@ function RuleStatusCell({ projectId, brdpId, format, refreshToken }) {
   }
   if (approval === undefined) return <span className={styles.muted}>…</span>;
   return <RuleStatusDots state={ruleStateOf(approval)} />;
-}
-
-// aria-sort on the <th> itself is the standard accessible way to expose a
-// sortable column's current direction; the ▲/▼ glyph is a purely visual
-// echo of that same state, carrying its own translated aria-label since a
-// bare arrow character isn't reliably announced by every screen reader.
-function SortableHeader({ field, sortField, sortDir, onSort, children }) {
-  const { t } = useTranslation();
-  const active = sortField === field;
-  return (
-    <th aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-      <button type="button" className={styles.sortHeaderBtn} onClick={() => onSort(field)}>
-        {children}
-        {active && (
-          <span
-            className={styles.sortIndicator}
-            aria-label={t(sortDir === 'asc' ? 'records.table.sortedAscending' : 'records.table.sortedDescending')}
-          >
-            {sortDir === 'asc' ? '▲' : '▼'}
-          </span>
-        )}
-      </button>
-    </th>
-  );
 }
 
 export default function RecordsPage() {

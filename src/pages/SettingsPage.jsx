@@ -2,99 +2,12 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
-import { authFetchJson, getStoredRefreshToken } from '../services/apiClient';
+import { authFetchJson } from '../services/apiClient';
 import Button from '../components/Button';
+import ChangePasswordForm from '../components/ChangePasswordForm';
+import SortableHeader from '../components/SortableHeader';
+import TemporaryPasswordModal from '../components/TemporaryPasswordModal';
 import styles from './SettingsPage.module.css';
-
-// Must match backend/app/core/security.py's MIN_PASSWORD_LENGTH -- there's
-// no shared-across-runtimes constant to import, so this client-side
-// pre-check (saves a round trip for the common case) is a separate copy;
-// the backend's own check is what actually enforces the policy.
-const MIN_PASSWORD_LENGTH = 8;
-
-function ChangePasswordForm() {
-  const { t } = useTranslation();
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-    if (newPassword.length < MIN_PASSWORD_LENGTH) {
-      setError(t('settings.profile.changePassword.tooShort', { count: MIN_PASSWORD_LENGTH }));
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setError(t('settings.profile.changePassword.mismatch'));
-      return;
-    }
-    setSaving(true);
-    try {
-      await authFetchJson('/api/auth/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          current_password: currentPassword,
-          new_password: newPassword,
-          current_refresh_token: getStoredRefreshToken(),
-        }),
-      });
-      // Same no-separate-success-message pattern as the Display Name form
-      // above -- clearing the fields is the visible confirmation.
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <>
-      <div className={styles.divider} />
-      <h4 className={styles.subsectionTitle}>{t('settings.profile.changePassword.title')}</h4>
-      <p className={styles.fieldDescription}>{t('settings.profile.changePassword.sessionsWarning')}</p>
-      <form onSubmit={handleSubmit}>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.profile.changePassword.current')}</label>
-          <input
-            className={styles.input}
-            type="password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-          />
-        </div>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.profile.changePassword.new')}</label>
-          <input
-            className={styles.input}
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-          />
-        </div>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.profile.changePassword.confirm')}</label>
-          <input
-            className={styles.input}
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-          />
-        </div>
-        {error && <p className={styles.statusInvalid}>{error}</p>}
-        <Button type="submit" disabled={saving}>
-          {saving ? t('settings.profile.changePassword.saving') : t('settings.profile.changePassword.save')}
-        </Button>
-      </form>
-    </>
-  );
-}
 
 function ProfileSection({ user, onUserUpdated }) {
   const { t } = useTranslation();
@@ -172,7 +85,7 @@ function ProfileSection({ user, onUserUpdated }) {
           {saving ? t('settings.profile.saving') : t('settings.profile.save')}
         </Button>
       </form>
-      <ChangePasswordForm />
+      <ChangePasswordForm withDivider />
     </div>
   );
 }
@@ -184,7 +97,7 @@ function UserManagementSection({ currentUserId }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [newUser, setNewUser] = useState({ email: '', password: '', display_name: '', global_role: 'user' });
+  const [newUser, setNewUser] = useState({ email: '', display_name: '', global_role: 'user' });
   const [creating, setCreating] = useState(false);
   const [createErrors, setCreateErrors] = useState({});
 
@@ -194,6 +107,17 @@ function UserManagementSection({ currentUserId }) {
   const [editDraft, setEditDraft] = useState({ email: '', display_name: '' });
   const [editErrors, setEditErrors] = useState({});
   const [savingEdit, setSavingEdit] = useState(false);
+
+  const [resettingUserId, setResettingUserId] = useState(null);
+  // { email, temporaryPassword } while the modal is open, null otherwise --
+  // shared by both Create user and Reset password (docs request: same
+  // "shown exactly once" UI for both).
+  const [temporaryPasswordInfo, setTemporaryPasswordInfo] = useState(null);
+
+  // Same sortable-header pattern as BRDP Records (docs request), reused
+  // via the shared SortableHeader component rather than re-implemented.
+  const [sortField, setSortField] = useState(null);
+  const [sortDir, setSortDir] = useState('asc');
 
   const adminCount = users.filter((u) => u.global_role === 'admin').length;
 
@@ -218,25 +142,54 @@ function UserManagementSection({ currentUserId }) {
     setError(null);
     const errors = {
       email: !newUser.email.trim(),
-      password: !newUser.password.trim(),
       display_name: !newUser.display_name.trim(),
     };
     setCreateErrors(errors);
-    if (errors.email || errors.password || errors.display_name) return;
+    if (errors.email || errors.display_name) return;
     setCreating(true);
     try {
-      await authFetchJson('/api/users', {
+      // No password in the request body at all -- the backend always
+      // generates a real random temporary one (docs request: unified with
+      // Reset password below, never a value the admin types in).
+      const created = await authFetchJson('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newUser),
       });
-      setNewUser({ email: '', password: '', display_name: '', global_role: 'user' });
+      setNewUser({ email: '', display_name: '', global_role: 'user' });
       setCreateErrors({});
+      setTemporaryPasswordInfo({ email: created.email, temporaryPassword: created.temporary_password });
       refresh();
     } catch (err) {
       setError(err.message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleResetPassword = async (u) => {
+    if (!window.confirm(t('settings.userManagement.resetPasswordConfirm', { name: u.display_name }))) return;
+    setResettingUserId(u.id);
+    setError(null);
+    try {
+      const result = await authFetchJson(`/api/users/${u.id}/reset-password`, { method: 'POST' });
+      setTemporaryPasswordInfo({ email: u.email, temporaryPassword: result.temporary_password });
+      refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResettingUserId(null);
+    }
+  };
+
+  // Click toggles asc/desc on the same column, switching column starts
+  // fresh at ascending -- same rule as Records' toggleSort.
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
     }
   };
 
@@ -302,6 +255,27 @@ function UserManagementSection({ currentUserId }) {
 
   const projectName = (id) => projects.find((p) => p.id === id)?.name || id;
 
+  // Project roles sorts by COUNT, not alphabetically (docs request) --
+  // ties are broken by each user's alphabetically-first assigned project
+  // name, since "who has more projects" doesn't otherwise say anything
+  // about ordering among users with the same count.
+  const sortedUsers = !sortField
+    ? users
+    : [...users].sort((a, b) => {
+        let cmp;
+        if (sortField === 'email') cmp = a.email.localeCompare(b.email);
+        else if (sortField === 'name') cmp = a.display_name.localeCompare(b.display_name);
+        else if (sortField === 'projectRoles') {
+          cmp = a.project_roles.length - b.project_roles.length;
+          if (cmp === 0) {
+            const firstA = [...a.project_roles].map((r) => projectName(r.project_id)).sort()[0] || '';
+            const firstB = [...b.project_roles].map((r) => projectName(r.project_id)).sort()[0] || '';
+            cmp = firstA.localeCompare(firstB);
+          }
+        } else cmp = 0;
+        return sortDir === 'asc' ? cmp : -cmp;
+      });
+
   return (
     <div className={styles.section}>
       <h3 className={styles.sectionTitle}>{t('settings.userManagement.title')}</h3>
@@ -320,19 +294,6 @@ function UserManagementSection({ currentUserId }) {
             }}
           />
           {createErrors.email && <p className={styles.fieldError}>{t('validation.required')}</p>}
-        </div>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.userManagement.password')}</label>
-          <input
-            className={`${styles.input} ${createErrors.password ? styles.inputError : ''}`}
-            type="password"
-            value={newUser.password}
-            onChange={(e) => {
-              setNewUser((u) => ({ ...u, password: e.target.value }));
-              setCreateErrors((errs) => ({ ...errs, password: false }));
-            }}
-          />
-          {createErrors.password && <p className={styles.fieldError}>{t('validation.required')}</p>}
         </div>
         <div className={styles.formGroup}>
           <label className={styles.label}>{t('settings.userManagement.displayName')}</label>
@@ -368,16 +329,22 @@ function UserManagementSection({ currentUserId }) {
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>{t('settings.userManagement.table.email')}</th>
-              <th>{t('settings.userManagement.table.name')}</th>
+              <SortableHeader field="email" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                {t('settings.userManagement.table.email')}
+              </SortableHeader>
+              <SortableHeader field="name" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                {t('settings.userManagement.table.name')}
+              </SortableHeader>
               <th>{t('settings.userManagement.table.globalRole')}</th>
-              <th>{t('settings.userManagement.table.projectRoles')}</th>
+              <SortableHeader field="projectRoles" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                {t('settings.userManagement.table.projectRoles')}
+              </SortableHeader>
               <th>{t('settings.userManagement.table.assign')}</th>
               <th>{t('settings.userManagement.table.actions')}</th>
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => {
+            {sortedUsers.map((u) => {
               const isEditing = editingUserId === u.id;
               const isSelf = u.id === currentUserId;
               const isLastAdmin = u.global_role === 'admin' && adminCount <= 1;
@@ -487,6 +454,15 @@ function UserManagementSection({ currentUserId }) {
                       </button>
                       <button
                         type="button"
+                        onClick={() => handleResetPassword(u)}
+                        disabled={resettingUserId === u.id}
+                      >
+                        {resettingUserId === u.id
+                          ? t('settings.userManagement.resettingPassword')
+                          : t('settings.userManagement.resetPassword')}
+                      </button>
+                      <button
+                        type="button"
                         className={styles.dangerLink}
                         onClick={() => handleDelete(u)}
                         disabled={isSelf || isLastAdmin}
@@ -508,6 +484,13 @@ function UserManagementSection({ currentUserId }) {
             })}
           </tbody>
         </table>
+      )}
+      {temporaryPasswordInfo && (
+        <TemporaryPasswordModal
+          email={temporaryPasswordInfo.email}
+          temporaryPassword={temporaryPasswordInfo.temporaryPassword}
+          onClose={() => setTemporaryPasswordInfo(null)}
+        />
       )}
     </div>
   );

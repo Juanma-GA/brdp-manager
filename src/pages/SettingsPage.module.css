@@ -174,20 +174,6 @@
   margin-bottom: 8px;
 }
 
-.divider {
-  height: 1px;
-  background: #e8edf5;
-  margin: 16px 0;
-}
-
-.subsectionTitle {
-  font-family: 'Syne', sans-serif;
-  font-size: 12px;
-  font-weight: 700;
-  color: #111827;
-  margin: 0 0 6px 0;
-}
-
 .buttonGroup {
   display: flex;
   gap: 8px;
