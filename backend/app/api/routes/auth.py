@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -10,12 +10,13 @@ from app.core.rate_limit import clear_attempts, is_locked_out, record_failed_att
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
+    hash_password,
     hash_refresh_token,
     verify_password,
 )
 from app.db.base import get_db
 from app.models import RefreshToken, User
-from app.schemas.auth import LoginRequest, MeUpdate, RefreshRequest, TokenResponse, UserOut
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, MeUpdate, RefreshRequest, TokenResponse, UserOut
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -107,3 +108,34 @@ async def update_me(
     await db.commit()
     await db.refresh(current_user)
     return current_user
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Separate from PATCH /me on purpose -- that endpoint stays limited to
+    display_name and never sees a password. 403 (not 401): the caller is
+    already authenticated via a valid access token, they just haven't
+    proven they know the CURRENT password, which is a different failure
+    than "not logged in" -- same reasoning as _require_admin's 403 for an
+    authenticated-but-insufficiently-privileged caller.
+    """
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Current password is incorrect")
+
+    current_user.password_hash = hash_password(body.new_password)
+
+    # Revoke every OTHER active refresh token for this user in one UPDATE
+    # (docs request) -- an access token isn't tied to the password hash at
+    # all, so it keeps working until its own short natural expiry either
+    # way; this is what actually forces other sessions to re-login, on
+    # their next /refresh.
+    conditions = [RefreshToken.user_id == current_user.id, RefreshToken.revoked_at.is_(None)]
+    if body.current_refresh_token:
+        conditions.append(RefreshToken.token_hash != hash_refresh_token(body.current_refresh_token))
+    await db.execute(update(RefreshToken).where(*conditions).values(revoked_at=datetime.now(timezone.utc)))
+
+    await db.commit()

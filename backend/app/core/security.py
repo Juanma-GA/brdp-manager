@@ -18,6 +18,13 @@ JWT_ALGORITHM = "RS256"
 # silently truncating.
 _BCRYPT_MAX_PASSWORD_BYTES = 72
 
+# The app's first-ever password policy (docs request: none existed before
+# this) -- deliberately just a minimum length, no other complexity rule.
+# One constant, imported everywhere this needs checking (currently only
+# schemas/auth.py's ChangePasswordRequest) instead of the number being
+# repeated inline.
+MIN_PASSWORD_LENGTH = 8
+
 
 def hash_password(password: str) -> str:
     encoded = password.encode("utf-8")

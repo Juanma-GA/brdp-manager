@@ -229,3 +229,121 @@ async def test_login_locks_out_after_repeated_failures(client, test_user):
     assert still_locked.status_code == 429
 
     clear_attempts(test_user.email)
+
+
+async def test_change_password_with_correct_current_password_succeeds(client, test_user):
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+
+    response = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": TEST_PASSWORD, "new_password": "new-correct-password"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 204
+
+    old_password_login = await client.post(
+        "/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD}
+    )
+    assert old_password_login.status_code == 401
+
+    new_password_login = await client.post(
+        "/api/auth/login", json={"email": test_user.email, "password": "new-correct-password"}
+    )
+    assert new_password_login.status_code == 200
+
+
+async def test_change_password_with_wrong_current_password_rejected(client, test_user):
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+
+    response = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": "totally-wrong", "new_password": "new-correct-password"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 403
+
+    # The real password must still work -- nothing changed.
+    still_works = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    assert still_works.status_code == 200
+
+
+async def test_change_password_without_a_valid_token_rejected(client):
+    response = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": "whatever", "new_password": "new-correct-password"},
+    )
+    assert response.status_code == 401
+
+
+async def test_change_password_rejects_new_password_shorter_than_minimum(client, test_user):
+    """The app's first-ever password policy (docs request): >= 8 chars,
+    nothing else. 7 chars must be rejected; the real password must still
+    work afterward, same as the wrong-current-password case above.
+    """
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+
+    response = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": TEST_PASSWORD, "new_password": "short7!"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 422
+
+    still_works = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    assert still_works.status_code == 200
+
+
+async def test_change_password_revokes_other_sessions_but_not_the_current_one(client, test_user):
+    """Two real, independent sessions (docs request's "dos pestañas") --
+    changing the password from session A, naming session A's own refresh
+    token as current_refresh_token, must revoke session B's refresh token
+    while leaving session A's usable.
+    """
+    session_a = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    session_b = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token_a = session_a.json()["access_token"]
+    refresh_a = session_a.json()["refresh_token"]
+    refresh_b = session_b.json()["refresh_token"]
+
+    response = await client.post(
+        "/api/auth/change-password",
+        json={
+            "current_password": TEST_PASSWORD,
+            "new_password": "new-correct-password",
+            "current_refresh_token": refresh_a,
+        },
+        headers={"Authorization": f"Bearer {access_token_a}"},
+    )
+    assert response.status_code == 204
+
+    # Session B is forced to re-login on its next refresh -- the whole
+    # point of this feature.
+    session_b_refresh = await client.post("/api/auth/refresh", json={"refresh_token": refresh_b})
+    assert session_b_refresh.status_code == 401
+
+    # Session A's own refresh token was excluded, so it's still usable.
+    session_a_refresh = await client.post("/api/auth/refresh", json={"refresh_token": refresh_a})
+    assert session_a_refresh.status_code == 200
+
+
+async def test_change_password_without_current_refresh_token_revokes_every_session(client, test_user):
+    """No current_refresh_token given at all -- every active refresh token
+    for this user gets revoked, current session included (the frontend
+    always sends its own, but the endpoint must not assume that).
+    """
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+    refresh_token = login.json()["refresh_token"]
+
+    response = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": TEST_PASSWORD, "new_password": "new-correct-password"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 204
+
+    refresh_attempt = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    assert refresh_attempt.status_code == 401

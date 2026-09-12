@@ -1,6 +1,8 @@
 import uuid
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
+
+from app.core.security import MIN_PASSWORD_LENGTH
 
 
 class LoginRequest(BaseModel):
@@ -32,3 +34,21 @@ class MeUpdate(BaseModel):
     # own profile must never be able to touch either, especially not
     # global_role (self-granting admin). Only display_name is editable here.
     display_name: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    # The caller's OWN current refresh token, if it has one stored -- lets
+    # the endpoint exclude that one session from the "revoke every other
+    # refresh token" step below (docs request: "no el de la sesión
+    # actual"). Optional so a caller with nothing stored still works, it
+    # just revokes everything in that case.
+    current_refresh_token: str | None = None
+
+    @field_validator("new_password")
+    @classmethod
+    def _enforce_min_length(cls, value: str) -> str:
+        if len(value) < MIN_PASSWORD_LENGTH:
+            raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+        return value
