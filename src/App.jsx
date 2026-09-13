@@ -9,6 +9,7 @@ import ProjectsPage from './pages/ProjectsPage';
 import ProjectConfigPage from './pages/ProjectConfigPage';
 import RecordsPage from './pages/RecordsPage';
 import GeneratePage from './pages/GeneratePage';
+import GenerateBREXdocPage from './pages/GenerateBREXdocPage';
 import SettingsPage from './pages/SettingsPage';
 import './index.css';
 import './App.css';
@@ -35,6 +36,7 @@ function App() {
                 <Route path="config" element={<ProjectConfigPage />} />
                 <Route path="records" element={<RecordsPage />} />
                 <Route path="generate" element={<GeneratePage />} />
+                <Route path="brexdoc" element={<GenerateBREXdocPage />} />
                 <Route index element={<Navigate to="records" replace />} />
               </Route>
 

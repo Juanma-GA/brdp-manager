@@ -57,6 +57,7 @@ const resources = {
         config: 'Project Configuration',
         records: 'BRDP Records',
         generate: 'Generate BREX / Schematron',
+        brexdoc: 'Generate Report',
       },
       projects: {
         title: 'BRDP Projects',
@@ -304,6 +305,15 @@ const resources = {
         copied: 'Copied!',
         download: 'Download',
       },
+      brexdoc: {
+        total: 'Total',
+        outputFormat: 'Output format',
+        formatHtml: 'HTML',
+        formatHtmlHint: '— opens in browser, print to PDF',
+        formatMarkdown: 'Markdown',
+        formatMarkdownHint: '— plain text, Git-friendly',
+        download: 'Download {{extension}}',
+      },
       settings: {
         profile: {
           title: 'Profile',
@@ -399,6 +409,7 @@ const resources = {
         config: 'Configuración del proyecto',
         records: 'Registros BRDP',
         generate: 'Generar BREX / Schematron',
+        brexdoc: 'Generar informe',
       },
       projects: {
         title: 'Proyectos BRDP',
@@ -645,6 +656,15 @@ const resources = {
         copy: 'Copiar al portapapeles',
         copied: '¡Copiado!',
         download: 'Descargar',
+      },
+      brexdoc: {
+        total: 'Total',
+        outputFormat: 'Formato de salida',
+        formatHtml: 'HTML',
+        formatHtmlHint: '— se abre en el navegador, imprime a PDF',
+        formatMarkdown: 'Markdown',
+        formatMarkdownHint: '— texto plano, compatible con Git',
+        download: 'Descargar {{extension}}',
       },
       settings: {
         profile: {

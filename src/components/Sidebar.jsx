@@ -67,6 +67,10 @@ export default function Sidebar({ collapsed, onToggleCollapse }) {
               <span className={styles.navIcon}>🧬</span>
               {!collapsed && <span className={styles.navLabel}>{t('nav.generate')}</span>}
             </NavLink>
+            <NavLink to={`/projects/${projectId}/brexdoc`} className={navItemClass} title={collapsed ? t('nav.brexdoc') : undefined}>
+              <span className={styles.navIcon}>📊</span>
+              {!collapsed && <span className={styles.navLabel}>{t('nav.brexdoc')}</span>}
+            </NavLink>
           </nav>
         </>
       )}
