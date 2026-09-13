@@ -43,28 +43,11 @@ function fieldsForStandard(standard) {
   return standard === 'Schematron 1.0 — DITA' ? DITA_FIELDS : FULL_FIELDS;
 }
 
-// v1's excelUtils.js Import half (generateTemplate/importFromExcel,
-// deliberately NOT touched by this round) still speaks the old
-// id/title/definition/proposal/validation/comment shape internally --
-// v2's BRDP schema calls those `identifier`/`comments` and has a separate
-// real UUID `id`, so this translation is still needed for Import.
-function excelRowToBRDPCreate(row) {
-  return {
-    identifier: row.id,
-    title: row.title || '',
-    definition: row.definition || '',
-    proposal: row.proposal || '',
-    validation: row.validation || 'Pending',
-    comments: row.comment || '',
-  };
-}
-
-// Export's own shape (docs request: ID/Title/Definition/Proposal/Proposal
-// Status/Rule Status/Rule, in that order, "Comment" dropped) -- separate
-// from excelRowToBRDPCreate above, which is Import's shape and stays
-// exactly as it always was. ruleApproval is the matching row from the
-// project-wide bulk export endpoint (or null -- no row yet means "To Do"
-// and an empty Rule, same convention as the live Records table).
+// Export's own shape (ID/Title/Definition/Proposal/Proposal Status/Rule
+// Status/Rule, in that order, "Comment" dropped). ruleApproval is the
+// matching row from the project-wide bulk export endpoint (or null -- no
+// row yet means "To Do" and an empty Rule, same convention as the live
+// Records table).
 function brdpToExportRow(brdp, ruleApproval) {
   return {
     id: brdp.identifier,
@@ -80,10 +63,15 @@ function brdpToExportRow(brdp, ruleApproval) {
 function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDataChanged }) {
   const { t } = useTranslation();
   const fileInputRef = useRef(null);
-  const [importedRows, setImportedRows] = useState([]);
-  const [importMode, setImportMode] = useState(null); // null | 'preview'
+  // pendingRows is the EXACT same row array sent to both /analyze and
+  // /apply (docs request: apply re-validates against current Postgres
+  // state itself, so the client only ever needs to remember the raw
+  // parsed rows, never a client-computed classification).
+  const [pendingRows, setPendingRows] = useState(null);
+  const [analysis, setAnalysis] = useState(null); // { results: [...] } from /analyze
+  const [conflictResolution, setConflictResolution] = useState('keep');
+  const [applyResult, setApplyResult] = useState(null);
   const [importErrors, setImportErrors] = useState([]);
-  const [importMessage, setImportMessage] = useState(null);
   const [busy, setBusy] = useState(false);
   const [brdpCount, setBrdpCount] = useState(null);
 
@@ -113,64 +101,67 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     window.URL.revokeObjectURL(url);
   };
 
+  const resetImportState = () => {
+    setPendingRows(null);
+    setAnalysis(null);
+    setConflictResolution('keep');
+    setApplyResult(null);
+    setImportErrors([]);
+  };
+
+  // Phase 1 (docs request): runs automatically as soon as a file parses
+  // cleanly -- no writes to Postgres happen here at all, it only builds
+  // the summary the user reviews before Apply.
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setImportErrors([]);
-    setImportedRows([]);
-    setImportMessage(null);
+    resetImportState();
     const { rows, errors } = await importFromExcel(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
     if (errors.length > 0) {
       setImportErrors(errors);
-      setImportMode(null);
-    } else if (rows.length === 0) {
+      return;
+    }
+    if (rows.length === 0) {
       setImportErrors([t('config.dataManagement.noValidRows')]);
-      setImportMode(null);
-    } else {
-      setImportedRows(rows);
-      setImportMode('preview');
-    }
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleCancelImport = () => {
-    setImportedRows([]);
-    setImportMode(null);
-    setImportErrors([]);
-  };
-
-  const createImportedRows = async () => {
-    for (const row of importedRows) {
-      await authFetchJson(`/api/projects/${projectId}/brdps`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(excelRowToBRDPCreate(row)),
-      });
-    }
-  };
-
-  const handleReplaceAll = async () => {
-    if (
-      !window.confirm(
-        t('config.dataManagement.replaceAllConfirm', {
-          count: brdpCount ?? 0,
-          importCount: importedRows.length,
-        })
-      )
-    ) {
       return;
     }
     setBusy(true);
+    try {
+      const result = await authFetchJson(`/api/projects/${projectId}/brdps/import/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows }),
+      });
+      setPendingRows(rows);
+      setAnalysis(result);
+    } catch (err) {
+      setImportErrors([err.message]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCancelImport = () => {
+    resetImportState();
+  };
+
+  // Phase 2 (docs request): only reachable after the user has seen the
+  // Phase 1 summary and explicitly clicked Apply -- re-validates against
+  // current Postgres state server-side rather than trusting the Phase 1
+  // classification, which could be stale by now.
+  const handleApplyImport = async () => {
+    setBusy(true);
     setImportErrors([]);
     try {
-      const existing = await authFetchJson(`/api/projects/${projectId}/brdps`);
-      for (const b of existing) {
-        await authFetchJson(`/api/projects/${projectId}/brdps/${b.id}`, { method: 'DELETE' });
-      }
-      await createImportedRows();
-      setImportMessage(t('config.dataManagement.importSuccess', { count: importedRows.length }));
-      setImportedRows([]);
-      setImportMode(null);
+      const result = await authFetchJson(`/api/projects/${projectId}/brdps/import/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: pendingRows, conflict_resolution: conflictResolution }),
+      });
+      setApplyResult(result);
+      setPendingRows(null);
+      setAnalysis(null);
       refreshCount();
       onDataChanged();
     } catch (err) {
@@ -180,29 +171,9 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     }
   };
 
-  const handleMerge = async () => {
-    setBusy(true);
-    setImportErrors([]);
-    try {
-      const existing = await authFetchJson(`/api/projects/${projectId}/brdps`);
-      const existingIdentifiers = new Set(existing.map((b) => b.identifier));
-      const colliding = importedRows.filter((row) => existingIdentifiers.has(row.id)).map((row) => row.id);
-      if (colliding.length > 0) {
-        setImportErrors([t('config.dataManagement.mergeAborted', { count: colliding.length, ids: colliding.join(', ') })]);
-        return;
-      }
-      await createImportedRows();
-      setImportMessage(t('config.dataManagement.importSuccess', { count: importedRows.length }));
-      setImportedRows([]);
-      setImportMode(null);
-      refreshCount();
-      onDataChanged();
-    } catch (err) {
-      setImportErrors([err.message]);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const okCount = analysis?.results.filter((r) => r.outcome === 'ok').length ?? 0;
+  const rejectedRows = analysis?.results.filter((r) => r.outcome === 'rejected') ?? [];
+  const conflictRows = analysis?.results.filter((r) => r.outcome === 'conflict') ?? [];
 
   const handleExport = async () => {
     setBusy(true);
@@ -247,13 +218,14 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
         <div className={styles.subsection}>
           <h3 className={styles.subsectionHeading}>{t('config.dataManagement.importTitle')}</h3>
 
-          {importMode === null && (
+          {!analysis && !applyResult && (
             <>
               <label className={styles.fileInputLabel}>
                 {t('config.dataManagement.chooseFile')}
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileSelect} hidden />
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileSelect} hidden disabled={busy} />
               </label>
               <p className={styles.hint}>{t('config.dataManagement.chooseFileHint')}</p>
+              {busy && <p className={styles.hint}>{t('config.dataManagement.analyzing')}</p>}
             </>
           )}
 
@@ -265,16 +237,78 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
             </ul>
           )}
 
-          {importMode === 'preview' && (
+          {analysis && (
             <div>
-              <p className={styles.hint}>{t('config.dataManagement.rowsFound', { count: importedRows.length })}</p>
+              <p className={styles.hint}>
+                {t('config.dataManagement.summaryOk', { count: okCount })}
+                {' · '}
+                {t('config.dataManagement.summaryRejected', { count: rejectedRows.length })}
+                {' · '}
+                {t('config.dataManagement.summaryConflicts', { count: conflictRows.length })}
+              </p>
+
+              {rejectedRows.length > 0 && (
+                <>
+                  <h4 className={styles.subsectionHeading}>{t('config.dataManagement.rejectedListTitle')}</h4>
+                  <ul className={styles.errorList}>
+                    {rejectedRows.map((r) => (
+                      <li key={r.row_number}>
+                        {t('config.dataManagement.rowReason', {
+                          row: r.row_number,
+                          identifier: r.identifier || '—',
+                          reason: r.reason,
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              {conflictRows.length > 0 && (
+                <>
+                  <h4 className={styles.subsectionHeading}>{t('config.dataManagement.conflictsListTitle')}</h4>
+                  <ul className={styles.errorList}>
+                    {conflictRows.map((r) => (
+                      <li key={r.row_number}>
+                        {t('config.dataManagement.conflictRow', {
+                          row: r.row_number,
+                          identifier: r.identifier,
+                          status: r.existing_rule_status,
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                  <fieldset className={styles.field}>
+                    <legend className={styles.label}>{t('config.dataManagement.conflictResolutionTitle')}</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="conflictResolution"
+                        value="keep"
+                        checked={conflictResolution === 'keep'}
+                        onChange={() => setConflictResolution('keep')}
+                      />{' '}
+                      {t('config.dataManagement.conflictResolutionKeep')}
+                    </label>
+                    <br />
+                    <label>
+                      <input
+                        type="radio"
+                        name="conflictResolution"
+                        value="clear"
+                        checked={conflictResolution === 'clear'}
+                        onChange={() => setConflictResolution('clear')}
+                      />{' '}
+                      {t('config.dataManagement.conflictResolutionClear')}
+                    </label>
+                  </fieldset>
+                </>
+              )}
+
               <div className={styles.actionsRow}>
-                <Button onClick={handleReplaceAll} disabled={busy}>
-                  {busy ? t('config.dataManagement.importing') : t('config.dataManagement.replaceAll')}
+                <Button onClick={handleApplyImport} disabled={busy}>
+                  {busy ? t('config.dataManagement.applying') : t('config.dataManagement.applyButton')}
                 </Button>
-                <button type="button" className={styles.secondaryButton} onClick={handleMerge} disabled={busy}>
-                  {busy ? t('config.dataManagement.importing') : t('config.dataManagement.merge')}
-                </button>
                 <button type="button" className={styles.secondaryButton} onClick={handleCancelImport} disabled={busy}>
                   {t('config.dataManagement.cancel')}
                 </button>
@@ -282,7 +316,25 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
             </div>
           )}
 
-          {importMessage && <p className={styles.savedIndicator}>{importMessage}</p>}
+          {applyResult && (
+            <div>
+              <h4 className={styles.subsectionHeading}>{t('config.dataManagement.resultTitle')}</h4>
+              <ul className={styles.summaryList}>
+                <li>{t('config.dataManagement.resultCreated', { count: applyResult.created })}</li>
+                <li>{t('config.dataManagement.resultUpdated', { count: applyResult.updated })}</li>
+                <li>{t('config.dataManagement.resultRejected', { count: applyResult.rejected })}</li>
+                {applyResult.conflicts_kept > 0 && (
+                  <li>{t('config.dataManagement.resultConflictsKept', { count: applyResult.conflicts_kept })}</li>
+                )}
+                {applyResult.conflicts_cleared > 0 && (
+                  <li>{t('config.dataManagement.resultConflictsCleared', { count: applyResult.conflicts_cleared })}</li>
+                )}
+              </ul>
+              <button type="button" className={styles.secondaryButton} onClick={resetImportState}>
+                {t('config.dataManagement.close')}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

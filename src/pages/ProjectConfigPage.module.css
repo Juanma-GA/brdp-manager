@@ -147,6 +147,13 @@
   font-size: 12.5px;
 }
 
+.summaryList {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #111827;
+  font-size: 12.5px;
+}
+
 .actionsRow {
   display: flex;
   gap: 8px;

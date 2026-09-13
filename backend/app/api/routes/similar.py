@@ -16,6 +16,7 @@ from app.db.base import get_db
 from app.models import BRDP, Project, RuleApproval, User
 from app.schemas.similar import SimilarCandidateOut, SimilarOut
 from app.services.embeddings import EmbeddingUnavailable, compute_embedding
+from app.services.rule_formats import STANDARD_TO_RULE_FORMAT as _STANDARD_TO_RULE_FORMAT
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps/{brdp_id}/similar", tags=["similar"])
 
@@ -32,22 +33,6 @@ MIN_CANDIDATES = 3
 MIN_SIMILARITY = 0.5
 
 CANDIDATE_LIMIT = 10
-
-# project.standard (fixed per project, docs/v2 §2 -- one of the exact 7
-# strings the Create Project dropdown offers) -> the rule_approvals format
-# its rules are stored under. "Schematron 1.0 — S1000D" rules are frozen
-# under "SCH-S1000D", not "BREX-3.0.1" -- generateBREXSch.js generates a
-# real BREX 3.0.1 under the hood and converts it deterministically
-# (brexToSchematron.js), but keys its OWN frozen approvals under the
-# Schematron format id, matching generateBREXSch.js's own
-# `approvalsFormat: 'SCH-S1000D'` (see CLAUDE.md). DITA has no rule-kind
-# precedent at all -- there is no BREX equivalent for it.
-_STANDARD_TO_RULE_FORMAT = {
-    "BREX — S1000D 4.2": "BREX-4.2",
-    "BREX — S1000D 4.1": "BREX-4.1",
-    "BREX — S1000D 3.0.1": "BREX-3.0.1",
-    "Schematron 1.0 — S1000D": "SCH-S1000D",
-}
 
 
 @router.get("", response_model=SimilarOut)

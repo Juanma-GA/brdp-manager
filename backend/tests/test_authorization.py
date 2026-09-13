@@ -217,6 +217,28 @@ async def test_editor_of_a_cannot_read_bulk_approvals_export_of_b(client, scenar
     assert response.status_code == 403
 
 
+async def test_editor_of_a_cannot_analyze_or_apply_import_in_b(client, scenario):
+    """Cross-project isolation for the two-phase Excel import endpoints
+    (docs request: Import BRDPs from Excel now accepts Rule/Rule Status) --
+    same require_project_role("editor") dependency as every other write
+    path, so the same ownership check applies to both phases.
+    """
+    rows = [{"row_number": 2, "identifier": "BRDP-HACK", "rule_status": "To Do", "rule": ""}]
+    analyze_resp = await client.post(
+        f"/api/projects/{scenario['project_b'].id}/brdps/import/analyze",
+        json={"rows": rows},
+        headers=_headers(scenario["editor_a"]),
+    )
+    assert analyze_resp.status_code == 403
+
+    apply_resp = await client.post(
+        f"/api/projects/{scenario['project_b'].id}/brdps/import/apply",
+        json={"rows": rows, "conflict_resolution": "keep"},
+        headers=_headers(scenario["editor_a"]),
+    )
+    assert apply_resp.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # Axis (b): same-project role level (viewer vs editor, same project)
 # ---------------------------------------------------------------------------
