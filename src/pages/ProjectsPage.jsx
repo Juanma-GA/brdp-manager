@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
+import SortableHeader from '../components/SortableHeader';
 import styles from './ProjectsPage.module.css';
 
 // The 7 exact standards the project can be created with (fixed forever
@@ -257,6 +258,30 @@ export default function ProjectsPage() {
   const [renamingId, setRenamingId] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
 
+  // Same simple (non-nested-functional-updater) toggle pattern as Records/
+  // User Management -- avoids the StrictMode double-toggle bug seen earlier.
+  const [sortField, setSortField] = useState(null);
+  const [sortDir, setSortDir] = useState('asc');
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  // Both columns are plain alphabetical -- unlike Proposal/Rule Status,
+  // standards (BREX 4.2, Schematron DITA, ...) have no natural order
+  // between them, so no special-cased comparator is needed here.
+  const sortedProjects = !sortField
+    ? projects
+    : [...projects].sort((a, b) => {
+        const cmp =
+          sortField === 'name' ? a.name.localeCompare(b.name) : a.standard.localeCompare(b.standard);
+        return sortDir === 'asc' ? cmp : -cmp;
+      });
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -292,13 +317,17 @@ export default function ProjectsPage() {
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>{t('projects.name')}</th>
-              <th>{t('projects.standard')}</th>
+              <SortableHeader field="name" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                {t('projects.name')}
+              </SortableHeader>
+              <SortableHeader field="standard" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                {t('projects.standard')}
+              </SortableHeader>
               <th>{t('projects.actions')}</th>
             </tr>
           </thead>
           <tbody>
-            {projects.map((p) => (
+            {sortedProjects.map((p) => (
               <tr key={p.id}>
                 <td className={styles.projectName}>
                   {renamingId === p.id ? (

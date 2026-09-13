@@ -265,6 +265,7 @@ function UserManagementSection({ currentUserId }) {
         let cmp;
         if (sortField === 'email') cmp = a.email.localeCompare(b.email);
         else if (sortField === 'name') cmp = a.display_name.localeCompare(b.display_name);
+        else if (sortField === 'globalRole') cmp = a.global_role.localeCompare(b.global_role);
         else if (sortField === 'projectRoles') {
           cmp = a.project_roles.length - b.project_roles.length;
           if (cmp === 0) {
@@ -335,7 +336,9 @@ function UserManagementSection({ currentUserId }) {
               <SortableHeader field="name" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
                 {t('settings.userManagement.table.name')}
               </SortableHeader>
-              <th>{t('settings.userManagement.table.globalRole')}</th>
+              <SortableHeader field="globalRole" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+                {t('settings.userManagement.table.globalRole')}
+              </SortableHeader>
               <SortableHeader field="projectRoles" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
                 {t('settings.userManagement.table.projectRoles')}
               </SortableHeader>
