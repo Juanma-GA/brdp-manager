@@ -1,9 +1,43 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Eye, EyeOff } from 'lucide-react';
 import { useAuthContext } from '../context/AuthContext';
 import { authFetchJson, getStoredRefreshToken } from '../services/apiClient';
 import Button from './Button';
 import styles from './ChangePasswordForm.module.css';
+
+// One local component so the three password fields (current/new/confirm)
+// share the exact same show/hide markup and behavior instead of repeating
+// it three times inline -- private to this file, not a shared export,
+// since nothing else in the app needs a bare password-toggle field yet.
+function PasswordField({ id, label, value, onChange }) {
+  const { t } = useTranslation();
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className={styles.formGroup}>
+      <label className={styles.label} htmlFor={id}>
+        {label}
+      </label>
+      <div className={styles.passwordWrapper}>
+        <input
+          id={id}
+          className={`${styles.input} ${styles.passwordInput}`}
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={onChange}
+        />
+        <button
+          type="button"
+          className={styles.passwordToggle}
+          onClick={() => setVisible((v) => !v)}
+          aria-label={t(visible ? 'password.hide' : 'password.show')}
+        >
+          {visible ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // Must match backend/app/core/security.py's MIN_PASSWORD_LENGTH -- there's
 // no shared-across-runtimes constant to import, so this client-side
@@ -78,33 +112,24 @@ export default function ChangePasswordForm({ withDivider = false, title, descrip
         {description ?? t('settings.profile.changePassword.sessionsWarning')}
       </p>
       <form onSubmit={handleSubmit}>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.profile.changePassword.current')}</label>
-          <input
-            className={styles.input}
-            type="password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-          />
-        </div>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.profile.changePassword.new')}</label>
-          <input
-            className={styles.input}
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-          />
-        </div>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.profile.changePassword.confirm')}</label>
-          <input
-            className={styles.input}
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-          />
-        </div>
+        <PasswordField
+          id="change-password-current"
+          label={t('settings.profile.changePassword.current')}
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+        />
+        <PasswordField
+          id="change-password-new"
+          label={t('settings.profile.changePassword.new')}
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+        />
+        <PasswordField
+          id="change-password-confirm"
+          label={t('settings.profile.changePassword.confirm')}
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+        />
         {error && <p className={styles.statusInvalid}>{error}</p>}
         <Button type="submit" disabled={saving}>
           {saving ? t('settings.profile.changePassword.saving') : t('settings.profile.changePassword.save')}

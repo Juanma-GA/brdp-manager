@@ -28,6 +28,14 @@ const resources = {
         ascending: 'sorted ascending',
         descending: 'sorted descending',
       },
+      // Shared aria-label pair for every show/hide-password toggle
+      // (LoginPage, ChangePasswordForm's 3 fields) -- the icon itself
+      // (Eye/EyeOff) never carries text, so this is the only accessible
+      // name a screen reader gets for the button.
+      password: {
+        show: 'Show password',
+        hide: 'Hide password',
+      },
       // ProtectedRoute forces this screen (reusing ChangePasswordForm,
       // never a second form) for any account still on a temporary
       // password from Create user or an admin's Reset password.
@@ -342,6 +350,10 @@ const resources = {
       sort: {
         ascending: 'orden ascendente',
         descending: 'orden descendente',
+      },
+      password: {
+        show: 'Mostrar contraseña',
+        hide: 'Ocultar contraseña',
       },
       forcePasswordChange: {
         title: 'Debes cambiar tu contraseña',

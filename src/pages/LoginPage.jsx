@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Eye, EyeOff } from 'lucide-react';
 import { useAuthContext } from '../context/AuthContext';
 import styles from './LoginPage.module.css';
 
@@ -19,6 +20,7 @@ export default function LoginPage() {
   // field that's empty, not summarize it in one banner at the top.
   const [fieldErrors, setFieldErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -60,17 +62,27 @@ export default function LoginPage() {
         <label className={styles.label} htmlFor="login-password">
           {t('login.password')}
         </label>
-        <input
-          id="login-password"
-          type="password"
-          className={`${styles.input} ${fieldErrors.password ? styles.inputError : ''}`}
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            setFieldErrors((f) => ({ ...f, password: false }));
-          }}
-          autoComplete="current-password"
-        />
+        <div className={styles.passwordWrapper}>
+          <input
+            id="login-password"
+            type={showPassword ? 'text' : 'password'}
+            className={`${styles.input} ${styles.passwordInput} ${fieldErrors.password ? styles.inputError : ''}`}
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setFieldErrors((f) => ({ ...f, password: false }));
+            }}
+            autoComplete="current-password"
+          />
+          <button
+            type="button"
+            className={styles.passwordToggle}
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={t(showPassword ? 'password.hide' : 'password.show')}
+          >
+            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
         {fieldErrors.password && <p className={styles.fieldError}>{t('validation.required')}</p>}
         {error && <p className={styles.error}>{error}</p>}
         <button type="submit" className={styles.submit} disabled={isSubmitting}>

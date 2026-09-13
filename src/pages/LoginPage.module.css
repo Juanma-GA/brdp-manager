@@ -37,6 +37,41 @@
   font-size: 13.5px;
 }
 
+.passwordWrapper {
+  position: relative;
+  display: flex;
+}
+
+.passwordInput {
+  width: 100%;
+  padding-right: 34px;
+}
+
+.passwordToggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: #64748b;
+  border-radius: 5px;
+}
+
+.passwordToggle:hover {
+  color: #334155;
+}
+
+.passwordToggle:focus-visible {
+  outline: 2px solid #2e74b5;
+  outline-offset: 1px;
+}
+
 .error {
   color: #dc2626;
   font-size: 12.5px;
