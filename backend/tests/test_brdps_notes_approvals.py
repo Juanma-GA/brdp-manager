@@ -299,6 +299,47 @@ async def test_bulk_project_approvals_lists_every_brdps_status(client, editor_an
     assert by_brdp_id[verified_brdp["id"]] == "approved"
 
 
+async def test_bulk_project_approvals_export_includes_rule_xml(client, editor_and_project):
+    """The /export variant (docs request: Project Configuration's Export to
+    Excel Rule column) is the same JOIN as the lean bulk endpoint above,
+    but must also carry rule_xml -- the lean one deliberately doesn't,
+    since RecordsPage's bulk fetch (every Records page load) only ever
+    reads `.status` and shouldn't grow its payload with rule text it never
+    uses.
+    """
+    project, headers = editor_and_project
+    todo_brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-EXP-000"}, headers=headers)
+    ).json()
+    draft_brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-EXP-001"}, headers=headers)
+    ).json()
+    verified_brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-EXP-002"}, headers=headers)
+    ).json()
+
+    await client.put(
+        f"/api/projects/{project.id}/brdps/{draft_brdp['id']}/approvals/BREX-4.2",
+        json={"rule_xml": "<structureObjectRule id='draft-rule'/>", "source": "llm"},
+        headers=headers,
+    )
+    approve_url = f"/api/projects/{project.id}/brdps/{verified_brdp['id']}/approvals/BREX-4.2"
+    await client.put(
+        approve_url, json={"rule_xml": "<structureObjectRule id='verified-rule'/>", "source": "llm"}, headers=headers
+    )
+    await client.post(approve_url + "/approve", headers=headers)
+
+    response = await client.get(f"/api/projects/{project.id}/approvals/BREX-4.2/export", headers=headers)
+    assert response.status_code == 200
+    by_brdp_id = {row["brdp_id"]: row for row in response.json()}
+
+    assert todo_brdp["id"] not in by_brdp_id
+    assert by_brdp_id[draft_brdp["id"]]["status"] == "pending_review"
+    assert by_brdp_id[draft_brdp["id"]]["rule_xml"] == "<structureObjectRule id='draft-rule'/>"
+    assert by_brdp_id[verified_brdp["id"]]["status"] == "approved"
+    assert by_brdp_id[verified_brdp["id"]]["rule_xml"] == "<structureObjectRule id='verified-rule'/>"
+
+
 async def test_approving_without_a_pending_review_row_404s(client, editor_and_project):
     project, headers = editor_and_project
     brdp = (

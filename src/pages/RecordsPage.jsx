@@ -6,24 +6,15 @@ import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
+import { RULE_STATES, ruleStateOf } from '../utils/ruleState';
 import SortableHeader from '../components/SortableHeader';
 import styles from './RecordsPage.module.css';
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
 const SUGGEST_KINDS = ['definition', 'proposal', 'rule'];
-const RULE_STATES = ['todo', 'draft', 'verified'];
 // v1's BRDPTable/useTableLogic used 25 rows/page (see src/hooks/useTableLogic.js)
 // -- this docs request specifically asks for 15 here, same prev/next pattern.
 const TABLE_PAGE_SIZE = 15;
-
-// The engine's inclusion gate hardcodes the literal DB values
-// "pending_review"/"approved" in 4 generator files (never touch those) --
-// this UI only ever relabels them as Draft/Verified. "todo" is not a DB
-// value at all, it is the absence of a rule_approvals row.
-function ruleStateOf(approval) {
-  if (approval === null) return 'todo';
-  return approval.status === 'approved' ? 'verified' : 'draft';
-}
 
 // rule_status/proposal_status history values are internal keys ("draft",
 // "Validated"...) -- translate them through the same i18n tables the live

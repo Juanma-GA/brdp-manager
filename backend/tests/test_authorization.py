@@ -204,6 +204,19 @@ async def test_editor_of_a_cannot_read_bulk_approvals_of_b(client, scenario):
     assert response.status_code == 403
 
 
+async def test_editor_of_a_cannot_read_bulk_approvals_export_of_b(client, scenario):
+    """Same cross-project isolation, for the /export variant (docs request:
+    Project Configuration's Export to Excel Rule column) -- same
+    require_project_role("viewer") dependency as the endpoint above, so
+    the same ownership check applies.
+    """
+    response = await client.get(
+        f"/api/projects/{scenario['project_b'].id}/approvals/BREX-4.2/export",
+        headers=_headers(scenario["editor_a"]),
+    )
+    assert response.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # Axis (b): same-project role level (viewer vs editor, same project)
 # ---------------------------------------------------------------------------

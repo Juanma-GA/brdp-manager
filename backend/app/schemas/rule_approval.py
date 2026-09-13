@@ -27,3 +27,15 @@ class BulkRuleApprovalOut(BaseModel):
     status: str
 
     model_config = {"from_attributes": True}
+
+
+class BulkRuleApprovalWithRuleOut(BulkRuleApprovalOut):
+    """Same shape as the bulk lookup above, plus the actual rule text --
+    used only by Project Configuration's Export to Excel (Rule column).
+    Kept as a separate response model (not an extra field bolted onto
+    BulkRuleApprovalOut) so RecordsPage's bulk fetch, which only ever
+    reads `.status` and runs on every Records page load, never grows its
+    payload with rule_xml it doesn't use.
+    """
+
+    rule_xml: str

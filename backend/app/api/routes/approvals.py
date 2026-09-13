@@ -10,7 +10,12 @@ from app.api.deps import require_project_role
 from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
 from app.models import BRDP, RuleApproval, User
-from app.schemas.rule_approval import BulkRuleApprovalOut, RuleApprovalOut, RuleApprovalPropose
+from app.schemas.rule_approval import (
+    BulkRuleApprovalOut,
+    BulkRuleApprovalWithRuleOut,
+    RuleApprovalOut,
+    RuleApprovalPropose,
+)
 from app.services.history import record_change
 
 router = APIRouter(
@@ -21,6 +26,18 @@ router = APIRouter(
 # below -- APIRouter's prefix is fixed at construction, so it can't share
 # `router` above.
 project_router = APIRouter(prefix="/api/projects/{project_id}/approvals/{format}", tags=["approvals"])
+
+
+def _project_approvals_stmt(project_id: uuid.UUID, format: str):
+    """Shared by both bulk endpoints below -- the only difference between
+    them is the response model (whether rule_xml is serialized out), never
+    the query itself.
+    """
+    return (
+        select(RuleApproval)
+        .join(BRDP, RuleApproval.brdp_id == BRDP.id)
+        .where(BRDP.project_id == project_id, RuleApproval.format == format)
+    )
 
 
 @project_router.get("", response_model=list[BulkRuleApprovalOut])
@@ -38,11 +55,26 @@ async def list_project_approvals(
     at all (frontend's ruleStateOf(null) => "todo", same convention the
     per-BRDP GET endpoint above already uses).
     """
-    result = await db.execute(
-        select(RuleApproval)
-        .join(BRDP, RuleApproval.brdp_id == BRDP.id)
-        .where(BRDP.project_id == project_id, RuleApproval.format == format)
-    )
+    result = await db.execute(_project_approvals_stmt(project_id, format))
+    return list(result.scalars().all())
+
+
+@project_router.get("/export", response_model=list[BulkRuleApprovalWithRuleOut])
+async def list_project_approvals_for_export(
+    project_id: uuid.UUID,
+    format: str,
+    _viewer: User = Depends(require_project_role("viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> list[RuleApproval]:
+    """Same query as list_project_approvals above, but also returns
+    rule_xml -- Project Configuration's Export to Excel needs the actual
+    rule text for its Rule column (docs request), which the lean bulk
+    endpoint deliberately omits. This is the JOIN with rule_approvals that
+    export didn't have before: brdpToExportRow (ProjectConfigPage.jsx)
+    looks up each BRDP's row here by brdp_id, same "absent row -> todo,
+    empty rule" convention as everywhere else.
+    """
+    result = await db.execute(_project_approvals_stmt(project_id, format))
     return list(result.scalars().all())
 
 

@@ -3,8 +3,17 @@ import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authFetchJson } from '../services/apiClient';
 import { generateTemplate, importFromExcel, exportToExcel } from '../utils/excelUtils';
+import { ruleStateOf } from '../utils/ruleState';
+import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import Button from '../components/Button';
 import styles from './ProjectConfigPage.module.css';
+
+// Plain English labels, NOT run through i18n -- Export to Excel has never
+// been translated (generateTemplate()/importFromExcel() in excelUtils.js,
+// its "engine", only ever emit literal English column headers/values), so
+// this round doesn't introduce i18n here either. Mirrors RecordsPage's
+// i18n'd records.rule.states.* strings in their default (English) form.
+const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified' };
 
 // Confirmed by reading generateBREX.js/generateBREX41.js/generateBREX301.js
 // directly: all three read exactly these 9 projectConfig keys (only how
@@ -34,22 +43,11 @@ function fieldsForStandard(standard) {
   return standard === 'Schematron 1.0 — DITA' ? DITA_FIELDS : FULL_FIELDS;
 }
 
-// v1's excelUtils.js (untouched -- the "engine" for this feature) maps the
-// "BRDP Identifier"/"Comment" Excel columns to internal keys `id`/`comment`.
+// v1's excelUtils.js Import half (generateTemplate/importFromExcel,
+// deliberately NOT touched by this round) still speaks the old
+// id/title/definition/proposal/validation/comment shape internally --
 // v2's BRDP schema calls those `identifier`/`comments` and has a separate
-// real UUID `id` -- these two helpers are the only translation needed
-// between the two shapes, in either direction.
-function brdpToExcelRow(brdp) {
-  return {
-    id: brdp.identifier,
-    title: brdp.title,
-    definition: brdp.definition,
-    proposal: brdp.proposal,
-    validation: brdp.validation,
-    comment: brdp.comments,
-  };
-}
-
+// real UUID `id`, so this translation is still needed for Import.
 function excelRowToBRDPCreate(row) {
   return {
     identifier: row.id,
@@ -61,7 +59,25 @@ function excelRowToBRDPCreate(row) {
   };
 }
 
-function DataManagementSection({ projectId, canEdit, dataVersion, onDataChanged }) {
+// Export's own shape (docs request: ID/Title/Definition/Proposal/Proposal
+// Status/Rule Status/Rule, in that order, "Comment" dropped) -- separate
+// from excelRowToBRDPCreate above, which is Import's shape and stays
+// exactly as it always was. ruleApproval is the matching row from the
+// project-wide bulk export endpoint (or null -- no row yet means "To Do"
+// and an empty Rule, same convention as the live Records table).
+function brdpToExportRow(brdp, ruleApproval) {
+  return {
+    id: brdp.identifier,
+    title: brdp.title,
+    definition: brdp.definition,
+    proposal: brdp.proposal,
+    proposalStatus: brdp.validation,
+    ruleStatus: RULE_STATUS_LABELS[ruleStateOf(ruleApproval)],
+    rule: ruleApproval?.rule_xml || '',
+  };
+}
+
+function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDataChanged }) {
   const { t } = useTranslation();
   const fileInputRef = useRef(null);
   const [importedRows, setImportedRows] = useState([]);
@@ -192,7 +208,17 @@ function DataManagementSection({ projectId, canEdit, dataVersion, onDataChanged 
     setBusy(true);
     try {
       const brdps = await authFetchJson(`/api/projects/${projectId}/brdps`);
-      exportToExcel(brdps.map(brdpToExcelRow));
+      // No rule format at all for this standard (Schematron 1.0 -- DITA,
+      // see STANDARD_TO_RULE_FORMAT) -- skip the fetch entirely rather
+      // than call an endpoint with an undefined format; every row falls
+      // back to "To Do"/empty Rule, same as RecordsPage's own convention.
+      const ruleFormat = STANDARD_TO_RULE_FORMAT[standard];
+      let approvalsByBrdpId = {};
+      if (ruleFormat) {
+        const approvals = await authFetchJson(`/api/projects/${projectId}/approvals/${ruleFormat}/export`);
+        approvalsByBrdpId = Object.fromEntries(approvals.map((a) => [a.brdp_id, a]));
+      }
+      exportToExcel(brdps.map((b) => brdpToExportRow(b, approvalsByBrdpId[b.id] ?? null)));
     } finally {
       setBusy(false);
     }
@@ -405,7 +431,13 @@ export default function ProjectConfigPage() {
         {!canEdit && <p className={styles.readOnlyNote}>{t('config.readOnly')}</p>}
       </form>
 
-      <DataManagementSection projectId={projectId} canEdit={canEdit} dataVersion={dataVersion} onDataChanged={bumpDataVersion} />
+      <DataManagementSection
+        projectId={projectId}
+        standard={project.standard}
+        canEdit={canEdit}
+        dataVersion={dataVersion}
+        onDataChanged={bumpDataVersion}
+      />
       <ResetDataSection projectId={projectId} canEdit={canEdit} onDataChanged={bumpDataVersion} />
     </div>
   );

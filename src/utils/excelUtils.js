@@ -133,16 +133,28 @@ export function importFromExcel(file) {
 
 /**
  * Export BRDPs to Excel
- * @param {Array} brdps - Array of BRDP records
+ *
+ * Docs request: this export's own columns (renamed to current app
+ * terminology, plus the new Rule Status/Rule columns, "Comment" dropped),
+ * deliberately DIFFERENT from generateTemplate()/importFromExcel() above,
+ * which are NOT touched by this change -- Import must keep accepting only
+ * the original columns, since letting Rule/Rule Status be typed by hand
+ * into an Excel and imported would bypass the well-formed-XML check and
+ * the Draft->Verified workflow entirely.
+ *
+ * @param {Array} brdps - Array of rows already shaped by
+ *   ProjectConfigPage's brdpToExportRow(): {id, title, definition,
+ *   proposal, proposalStatus, ruleStatus, rule}.
  */
 export function exportToExcel(brdps) {
   const data = brdps.map((brdp) => ({
-    'BRDP Identifier': brdp.id,
-    'BRDP Title': brdp.title,
-    'BRDP Definition': brdp.definition,
-    'ATX Decision Proposal': brdp.proposal,
-    'Validation Status': brdp.validation,
-    'Comment': brdp.comment,
+    ID: brdp.id,
+    Title: brdp.title,
+    Definition: brdp.definition,
+    Proposal: brdp.proposal,
+    'Proposal Status': brdp.proposalStatus,
+    'Rule Status': brdp.ruleStatus,
+    Rule: brdp.rule,
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(data);
@@ -151,12 +163,13 @@ export function exportToExcel(brdps) {
 
   // Set column widths
   worksheet['!cols'] = [
-    { wch: 20 },
-    { wch: 30 },
-    { wch: 40 },
-    { wch: 40 },
-    { wch: 18 },
-    { wch: 30 },
+    { wch: 20 }, // ID
+    { wch: 30 }, // Title
+    { wch: 40 }, // Definition
+    { wch: 40 }, // Proposal
+    { wch: 16 }, // Proposal Status
+    { wch: 14 }, // Rule Status
+    { wch: 60 }, // Rule
   ];
 
   XLSX.writeFile(workbook, 'brdps-export.xlsx');
