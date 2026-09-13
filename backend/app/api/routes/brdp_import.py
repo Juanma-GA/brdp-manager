@@ -56,7 +56,11 @@ def _classify_row(
     match (docs request) is layered on top at the very end, as a WARNING
     rather than another rejection branch: it only ever matters for a row
     that's going to be applied at all (ok or conflict), never for one
-    that's already rejected for an unrelated reason.
+    that's already rejected for an unrelated reason. The warning itself
+    only fires when the file's Title/Definition actually differ from the
+    catalog's -- the substitution in apply_import happens unconditionally
+    on any match, but a match that already agrees with the file has
+    nothing perceptible to warn about.
     """
     identifier = row.identifier.strip()
     if not identifier:
@@ -111,6 +115,16 @@ def _classify_row(
 
     action = "update" if existing_brdp is not None else "create"
 
+    # The Title/Definition substitution itself (apply_import below) always
+    # happens on a catalog match, unconditionally. This flag is only about
+    # whether to SURFACE that as a warning: correction (docs request) --
+    # a match whose Title/Definition already equal the catalog's has
+    # nothing perceptible to warn about, even though the same values get
+    # written again.
+    catalog_override = catalog_entry is not None and (
+        row.title != catalog_entry.title or row.definition != catalog_entry.definition
+    )
+
     # The one combination that is a real DB conflict, not a validation
     # failure: the file says "no rule" but this BRDP already has a real
     # (non-todo) one in Postgres. A brand-new BRDP (existing_approval is
@@ -125,12 +139,10 @@ def _classify_row(
             outcome="conflict",
             action=action,
             existing_rule_status=_rule_state(existing_approval).capitalize(),
-            catalog_override=catalog_entry is not None,
+            catalog_override=catalog_override,
         )
 
-    return ImportRowResult(
-        row_number=row.row_number, identifier=identifier, outcome="ok", action=action, catalog_override=catalog_entry is not None
-    )
+    return ImportRowResult(row_number=row.row_number, identifier=identifier, outcome="ok", action=action, catalog_override=catalog_override)
 
 
 async def _load_existing(

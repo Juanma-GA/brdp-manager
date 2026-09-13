@@ -313,6 +313,43 @@ async def test_catalog_match_overrides_title_definition_and_flags_a_warning(clie
     assert brdp["validation"] == "Validated"  # nor Proposal Status
 
 
+async def test_catalog_match_with_identical_values_applies_but_does_not_warn(client, editor_and_project, catalog_entry):
+    """Correction (docs request): the warning is about VISIBILITY of a
+    change, not a condition for the substitution to happen. A row whose
+    Excel Title/Definition already equal the catalog's has nothing
+    perceptible to flag, but the values still come from the catalog (this
+    test proves that by giving a real, distinguishable Proposal so the
+    Postgres row can't be mistaken for one that got no catalog treatment
+    at all).
+    """
+    project, headers, _viewer_headers = editor_and_project
+    rows = [
+        _row(
+            2,
+            catalog_entry.identifier,
+            title=catalog_entry.title,  # exactly matches the catalog already
+            definition=catalog_entry.definition,
+            proposal="Distinct proposal proving this row was processed",
+        )
+    ]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["catalog_override"] is False  # nothing to warn about
+
+    await client.post(
+        f"/api/projects/{project.id}/brdps/import/apply",
+        json={"rows": rows, "conflict_resolution": "keep"},
+        headers=headers,
+    )
+
+    (brdp,) = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
+    assert brdp["title"] == catalog_entry.title  # applied from the catalog regardless
+    assert brdp["definition"] == catalog_entry.definition
+    assert brdp["proposal"] == "Distinct proposal proving this row was processed"
+
+
 async def test_catalog_match_is_standard_specific(client, editor_and_project, catalog_entry):
     """The same identifier exists in the catalog under a DIFFERENT standard
     ("BREX — S1000D 4.1") -- editor_and_project's project is "BREX —
