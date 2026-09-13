@@ -174,6 +174,10 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const okCount = analysis?.results.filter((r) => r.outcome === 'ok').length ?? 0;
   const rejectedRows = analysis?.results.filter((r) => r.outcome === 'rejected') ?? [];
   const conflictRows = analysis?.results.filter((r) => r.outcome === 'conflict') ?? [];
+  // Warning, not a rejection -- these rows DO still import (docs request),
+  // shown up front (same place/detail level as rejected rows) so the
+  // Title/Definition override is visible before confirming, not after.
+  const catalogOverrideRows = analysis?.results.filter((r) => r.catalog_override) ?? [];
 
   const handleExport = async () => {
     setBusy(true);
@@ -245,6 +249,12 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                 {t('config.dataManagement.summaryRejected', { count: rejectedRows.length })}
                 {' · '}
                 {t('config.dataManagement.summaryConflicts', { count: conflictRows.length })}
+                {catalogOverrideRows.length > 0 && (
+                  <>
+                    {' · '}
+                    {t('config.dataManagement.summaryCatalogOverrides', { count: catalogOverrideRows.length })}
+                  </>
+                )}
               </p>
 
               {rejectedRows.length > 0 && (
@@ -257,6 +267,22 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                           row: r.row_number,
                           identifier: r.identifier || '—',
                           reason: r.reason,
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              {catalogOverrideRows.length > 0 && (
+                <>
+                  <h4 className={styles.subsectionHeading}>{t('config.dataManagement.catalogOverrideListTitle')}</h4>
+                  <ul className={styles.warningList}>
+                    {catalogOverrideRows.map((r) => (
+                      <li key={r.row_number}>
+                        {t('config.dataManagement.catalogOverrideRow', {
+                          row: r.row_number,
+                          identifier: r.identifier,
                         })}
                       </li>
                     ))}

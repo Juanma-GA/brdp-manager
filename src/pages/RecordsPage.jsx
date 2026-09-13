@@ -185,6 +185,12 @@ export default function RecordsPage() {
   // large plain-text editor), not in the table cell above.
   const [ruleApproval, setRuleApproval] = useState(undefined); // undefined = loading, null = none
   const [ruleEditing, setRuleEditing] = useState(false);
+  // Read-only view of the saved rule_xml while Verified -- the only state
+  // where the actual rule text was otherwise invisible without Revoke
+  // first (docs request). Available to viewer AND editor alike, same
+  // criterion as being able to see the stepper at all: this never writes
+  // anything, it only reads what's already there.
+  const [rulePreviewOpen, setRulePreviewOpen] = useState(false);
   const [ruleDraftText, setRuleDraftText] = useState('');
   const [ruleBusy, setRuleBusy] = useState(false);
   const [ruleValidationError, setRuleValidationError] = useState(null);
@@ -311,6 +317,7 @@ export default function RecordsPage() {
 
   useEffect(() => {
     setRuleEditing(false);
+    setRulePreviewOpen(false);
     if (!selected || !ruleFormat) {
       setRuleApproval(undefined);
       return;
@@ -931,24 +938,40 @@ export default function RecordsPage() {
               ) : (
                 <div className={styles.ruleStatusRow}>
                   <RuleStatusStepper state={ruleStateOf(ruleApproval)} />
-                  {canEdit && (
-                    <div className={styles.suggestionActions}>
-                      {ruleStateOf(ruleApproval) !== 'verified' && (
-                        <button onClick={openRuleEditor} disabled={ruleBusy}>
-                          {t('records.rule.edit')}
-                        </button>
-                      )}
-                      {ruleStateOf(ruleApproval) === 'draft' && (
-                        <button onClick={verifyRule} disabled={ruleBusy}>
-                          {ruleBusy ? t('records.rule.verifying') : t('records.rule.verify')}
-                        </button>
-                      )}
-                      {ruleStateOf(ruleApproval) === 'verified' && (
-                        <button onClick={revokeRule} disabled={ruleBusy}>
-                          {ruleBusy ? t('records.rule.revoking') : t('records.rule.revoke')}
-                        </button>
-                      )}
-                    </div>
+                  <div className={styles.suggestionActions}>
+                    {ruleStateOf(ruleApproval) === 'verified' && (
+                      <button onClick={() => setRulePreviewOpen((v) => !v)}>
+                        {rulePreviewOpen ? t('records.rule.closePreview') : t('records.rule.preview')}
+                      </button>
+                    )}
+                    {canEdit && (
+                      <>
+                        {ruleStateOf(ruleApproval) !== 'verified' && (
+                          <button onClick={openRuleEditor} disabled={ruleBusy}>
+                            {t('records.rule.edit')}
+                          </button>
+                        )}
+                        {ruleStateOf(ruleApproval) === 'draft' && (
+                          <button onClick={verifyRule} disabled={ruleBusy}>
+                            {ruleBusy ? t('records.rule.verifying') : t('records.rule.verify')}
+                          </button>
+                        )}
+                        {ruleStateOf(ruleApproval) === 'verified' && (
+                          <button onClick={revokeRule} disabled={ruleBusy}>
+                            {ruleBusy ? t('records.rule.revoking') : t('records.rule.revoke')}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {rulePreviewOpen && ruleStateOf(ruleApproval) === 'verified' && (
+                    <textarea
+                      className={styles.ruleTextarea}
+                      value={ruleApproval.rule_xml}
+                      readOnly
+                      spellCheck={false}
+                      aria-label={t('records.rule.preview')}
+                    />
                   )}
                 </div>
               )}

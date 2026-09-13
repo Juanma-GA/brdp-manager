@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_httpx_transport, require_project_role
 from app.api.routes.approvals import _rule_state, _xml_well_formed_error
+from app.api.routes.brdp_catalog import _resolve_catalog_standard
 from app.api.routes.brdps import _HISTORY_FIELDS, _compute_brdp_embedding
 from app.db.base import get_db
-from app.models import BRDP, Project, RuleApproval, User
+from app.models import BRDP, BRDPCatalog, Project, RuleApproval, User
 from app.schemas.brdp_import import (
     ImportAnalyzeRequest,
     ImportAnalyzeResponse,
@@ -43,6 +44,7 @@ def _classify_row(
     rule_format: str | None,
     existing_brdp: BRDP | None,
     existing_approval: RuleApproval | None,
+    catalog_entry: BRDPCatalog | None,
 ) -> ImportRowResult:
     """Pure function, no DB access -- every business rule from the docs
     request lives here, in the exact priority order confirmed with the
@@ -50,7 +52,11 @@ def _classify_row(
     -> (no rule format at all for this standard) -> well-formed XML (a
     hard technical defect, checked before any Rule/Rule Status mismatch
     logic) -> Rule/Rule Status combination -> finally, the one case that
-    is a real DB conflict rather than a validation rejection.
+    is a real DB conflict rather than a validation rejection. A catalog
+    match (docs request) is layered on top at the very end, as a WARNING
+    rather than another rejection branch: it only ever matters for a row
+    that's going to be applied at all (ok or conflict), never for one
+    that's already rejected for an unrelated reason.
     """
     identifier = row.identifier.strip()
     if not identifier:
@@ -119,9 +125,12 @@ def _classify_row(
             outcome="conflict",
             action=action,
             existing_rule_status=_rule_state(existing_approval).capitalize(),
+            catalog_override=catalog_entry is not None,
         )
 
-    return ImportRowResult(row_number=row.row_number, identifier=identifier, outcome="ok", action=action)
+    return ImportRowResult(
+        row_number=row.row_number, identifier=identifier, outcome="ok", action=action, catalog_override=catalog_entry is not None
+    )
 
 
 async def _load_existing(
@@ -149,19 +158,45 @@ async def _load_existing(
     return existing_brdps, existing_approvals
 
 
+async def _load_catalog(
+    rows: list[ImportRowIn], catalog_standard: str, db: AsyncSession
+) -> dict[str, BRDPCatalog]:
+    """One batch query, exactly like _load_existing above -- never N+1.
+    catalog_standard is already resolved (see _resolve_catalog_standard):
+    "Schematron 1.0 -- S1000D" shares its catalog with "BREX -- S1000D
+    3.0.1" rather than having its own, so the lookup has to go through the
+    same alias Create Project's own catalog count/seed already uses, or a
+    Schematron project would never match anything.
+    """
+    identifiers = [r.identifier.strip() for r in rows if r.identifier.strip()]
+    catalog_by_identifier: dict[str, BRDPCatalog] = {}
+    if identifiers:
+        result = await db.execute(
+            select(BRDPCatalog).where(
+                BRDPCatalog.standard == catalog_standard, BRDPCatalog.identifier.in_(identifiers)
+            )
+        )
+        for entry in result.scalars().all():
+            catalog_by_identifier[entry.identifier] = entry
+    return catalog_by_identifier
+
+
 async def _analyze(
     project_id: uuid.UUID, rows: list[ImportRowIn], db: AsyncSession
-) -> tuple[Project, str | None, list[ImportRowResult], dict[str, BRDP], dict[uuid.UUID, RuleApproval]]:
+) -> tuple[Project, str | None, list[ImportRowResult], dict[str, BRDP], dict[uuid.UUID, RuleApproval], dict[str, BRDPCatalog]]:
     project = await _get_owned_project(project_id, db)
     rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
     existing_brdps, existing_approvals = await _load_existing(project_id, rows, rule_format, db)
+    catalog_by_identifier = await _load_catalog(rows, _resolve_catalog_standard(project.standard), db)
 
     results = []
     for row in rows:
-        existing_brdp = existing_brdps.get(row.identifier.strip())
+        identifier = row.identifier.strip()
+        existing_brdp = existing_brdps.get(identifier)
         existing_approval = existing_approvals.get(existing_brdp.id) if existing_brdp is not None else None
-        results.append(_classify_row(row, rule_format, existing_brdp, existing_approval))
-    return project, rule_format, results, existing_brdps, existing_approvals
+        catalog_entry = catalog_by_identifier.get(identifier)
+        results.append(_classify_row(row, rule_format, existing_brdp, existing_approval, catalog_entry))
+    return project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier
 
 
 @router.post("/analyze", response_model=ImportAnalyzeResponse)
@@ -177,7 +212,9 @@ async def analyze_import(
     even though this call itself never mutates anything, since its only
     purpose is to prepare an /apply call.
     """
-    _project, _rule_format, results, _existing_brdps, _existing_approvals = await _analyze(project_id, body.rows, db)
+    _project, _rule_format, results, _existing_brdps, _existing_approvals, _catalog = await _analyze(
+        project_id, body.rows, db
+    )
     return ImportAnalyzeResponse(results=results)
 
 
@@ -202,7 +239,9 @@ async def apply_import(
             status_code=status.HTTP_400_BAD_REQUEST, detail="conflict_resolution must be 'keep' or 'clear'"
         )
 
-    _project, rule_format, results, existing_brdps, existing_approvals = await _analyze(project_id, body.rows, db)
+    _project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier = await _analyze(
+        project_id, body.rows, db
+    )
     rows_by_number = {r.row_number: r for r in body.rows}
 
     apply_results: list[ImportApplyRowResult] = []
@@ -221,13 +260,20 @@ async def apply_import(
         row = rows_by_number[result.row_number]
         identifier = row.identifier.strip()
         brdp = existing_brdps.get(identifier)
+        # Catalog match (docs request): Title/Definition come from the
+        # catalog, never the file, for this identifier -- Proposal/
+        # Proposal Status/Rule/Rule Status are untouched by the catalog
+        # and stay exactly what the row says.
+        catalog_entry = catalog_by_identifier.get(identifier)
+        title = catalog_entry.title if catalog_entry is not None else row.title
+        definition = catalog_entry.definition if catalog_entry is not None else row.definition
 
         if brdp is None:
             brdp = BRDP(
                 project_id=project_id,
                 identifier=identifier,
-                title=row.title,
-                definition=row.definition,
+                title=title,
+                definition=definition,
                 proposal=row.proposal,
                 validation=row.proposal_status,
             )
@@ -243,8 +289,8 @@ async def apply_import(
         else:
             was_validated = brdp.validation == "Validated"
             old_values = {field: getattr(brdp, field) for field in _HISTORY_FIELDS}
-            brdp.title = row.title
-            brdp.definition = row.definition
+            brdp.title = title
+            brdp.definition = definition
             brdp.proposal = row.proposal
             brdp.validation = row.proposal_status
             for field, history_name in _HISTORY_FIELDS.items():

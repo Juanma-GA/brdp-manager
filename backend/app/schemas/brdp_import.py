@@ -29,6 +29,15 @@ class ImportRowResult(BaseModel):
     action: str | None = None  # "create" | "update" -- set for ok/conflict only
     reason: str | None = None  # set for rejected only
     existing_rule_status: str | None = None  # set for conflict only: "Draft" | "Verified"
+    # True when this identifier matches brdp_catalog for the PROJECT's
+    # exact standard (docs request) -- a warning, not a rejection: the row
+    # still imports, but Title/Definition come from the catalog, not the
+    # file. Always False for a rejected row (nothing about it applies at
+    # all, so there is nothing to override). Set unconditionally whenever
+    # the identifier matches, even if the file's Title/Definition already
+    # happen to equal the catalog's -- predictable, not conditional on
+    # whether anything would actually change.
+    catalog_override: bool = False
 
 
 class ImportAnalyzeRequest(BaseModel):

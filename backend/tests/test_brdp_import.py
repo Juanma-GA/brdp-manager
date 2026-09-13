@@ -13,7 +13,7 @@ from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.main import app
-from app.models import Project, RuleApproval, User, UserProjectRole
+from app.models import BRDPCatalog, Project, RuleApproval, User, UserProjectRole
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +69,33 @@ async def editor_and_project():
             db_user = await session.get(User, user_id)
             if db_user is not None:
                 await session.delete(db_user)
+        await session.commit()
+
+
+@pytest.fixture
+async def catalog_entry():
+    """A single brdp_catalog row for "BREX — S1000D 4.2" (matches
+    editor_and_project's fixture standard exactly) -- global reference
+    data, not project-scoped, so it's seeded/torn down independently.
+    """
+    identifier = f"BRDP-CAT-{uuid.uuid4()}"
+    async with async_session_factory() as session:
+        entry = BRDPCatalog(
+            standard="BREX — S1000D 4.2",
+            identifier=identifier,
+            title="Catalog title",
+            definition="Catalog definition",
+        )
+        session.add(entry)
+        await session.commit()
+        await session.refresh(entry)
+
+    yield entry
+
+    async with async_session_factory() as session:
+        db_entry = await session.get(BRDPCatalog, entry.id)
+        if db_entry is not None:
+            await session.delete(db_entry)
         await session.commit()
 
 
@@ -253,6 +280,86 @@ async def test_conflict_clear_wipes_existing_rule_to_todo(client, editor_and_pro
 
     approval_after = (await client.get(approve_url, headers=headers)).json()
     assert approval_after is None  # genuinely back to "todo"
+
+
+async def test_catalog_match_overrides_title_definition_and_flags_a_warning(client, editor_and_project, catalog_entry):
+    project, headers, _viewer_headers = editor_and_project
+    rows = [
+        _row(
+            2,
+            catalog_entry.identifier,
+            title="Excel title (should be ignored)",
+            definition="Excel definition (should be ignored)",
+            proposal="Excel proposal (should survive)",
+            proposal_status="Validated",
+        )
+    ]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["catalog_override"] is True  # warning surfaced BEFORE apply
+
+    await client.post(
+        f"/api/projects/{project.id}/brdps/import/apply",
+        json={"rows": rows, "conflict_resolution": "keep"},
+        headers=headers,
+    )
+
+    (brdp,) = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
+    assert brdp["title"] == "Catalog title"  # from brdp_catalog, NOT the Excel
+    assert brdp["definition"] == "Catalog definition"
+    assert brdp["proposal"] == "Excel proposal (should survive)"  # catalog never touches Proposal
+    assert brdp["validation"] == "Validated"  # nor Proposal Status
+
+
+async def test_catalog_match_is_standard_specific(client, editor_and_project, catalog_entry):
+    """The same identifier exists in the catalog under a DIFFERENT standard
+    ("BREX — S1000D 4.1") -- editor_and_project's project is "BREX —
+    S1000D 4.2", so this must NOT match (docs request: the filter is the
+    project's exact standard, not any standard the identifier happens to
+    appear under).
+    """
+    project, headers, _viewer_headers = editor_and_project
+    async with async_session_factory() as session:
+        other_standard_entry = BRDPCatalog(
+            standard="BREX — S1000D 4.1",
+            identifier=catalog_entry.identifier,
+            title="Wrong-standard catalog title",
+            definition="Wrong-standard catalog definition",
+        )
+        session.add(other_standard_entry)
+        await session.commit()
+        await session.refresh(other_standard_entry)
+        other_standard_entry_id = other_standard_entry.id
+
+    try:
+        # Use a fresh identifier that ISN'T seeded under 4.2 at all --
+        # proves a 4.1-only catalog row never leaks into a 4.2 project's
+        # import.
+        non_catalog_identifier = f"BRDP-EXT-{uuid.uuid4()}"
+        rows = [_row(2, non_catalog_identifier, title="Real Excel title", definition="Real Excel definition")]
+
+        analyze_resp = await client.post(
+            f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers
+        )
+        (analyzed,) = analyze_resp.json()["results"]
+        assert analyzed["catalog_override"] is False
+
+        await client.post(
+            f"/api/projects/{project.id}/brdps/import/apply",
+            json={"rows": rows, "conflict_resolution": "keep"},
+            headers=headers,
+        )
+        (brdp,) = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
+        assert brdp["title"] == "Real Excel title"
+        assert brdp["definition"] == "Real Excel definition"
+    finally:
+        async with async_session_factory() as session:
+            db_entry = await session.get(BRDPCatalog, other_standard_entry_id)
+            if db_entry is not None:
+                await session.delete(db_entry)
+            await session.commit()
 
 
 async def test_apply_is_editor_gated_viewer_gets_403_and_writes_nothing(client, editor_and_project):
