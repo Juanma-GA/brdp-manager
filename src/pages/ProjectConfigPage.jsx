@@ -60,6 +60,23 @@ function brdpToExportRow(brdp, ruleApproval) {
   };
 }
 
+// Excel's own hard per-cell text limit -- confirmed real: XLSX.write()
+// (called inside exportToExcel()) throws an uncaught exception deep
+// inside SheetJS for any cell over this, silently failing the WHOLE
+// export with no user-facing message at all (found while stress-testing
+// the freeze fix below, not the originally reported bug -- confirmed
+// with the user this round: catch it and tell them exactly which
+// BRDP(s) are affected, never download a partial/corrupt file).
+const EXCEL_CELL_CHAR_LIMIT = 32767;
+
+// Checked client-side BEFORE calling exportToExcel() -- the raw SheetJS
+// exception carries no row/column information at all, so this is the
+// only way to name the actual offending BRDP(s) in the error message.
+function findOversizedExportRows(rows) {
+  const fields = ['id', 'title', 'definition', 'proposal', 'proposalStatus', 'ruleStatus', 'rule'];
+  return rows.filter((row) => fields.some((f) => (row[f] || '').length > EXCEL_CELL_CHAR_LIMIT)).map((row) => row.id);
+}
+
 function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDataChanged }) {
   const { t } = useTranslation();
   const fileInputRef = useRef(null);
@@ -72,6 +89,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const [conflictResolution, setConflictResolution] = useState('keep');
   const [applyResult, setApplyResult] = useState(null);
   const [importErrors, setImportErrors] = useState([]);
+  const [exportError, setExportError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [brdpCount, setBrdpCount] = useState(null);
 
@@ -181,6 +199,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
 
   const handleExport = async () => {
     setBusy(true);
+    setExportError(null);
     // Real yield to the browser before any work starts (docs request,
     // confirmed with real timing: exportToExcel() below is synchronous
     // XLSX generation -- for a project with many BRDPs and long Rule
@@ -206,7 +225,24 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
         const approvals = await authFetchJson(`/api/projects/${projectId}/approvals/${ruleFormat}/export`);
         approvalsByBrdpId = Object.fromEntries(approvals.map((a) => [a.brdp_id, a]));
       }
-      exportToExcel(brdps.map((b) => brdpToExportRow(b, approvalsByBrdpId[b.id] ?? null)));
+      const reportRows = brdps.map((b) => brdpToExportRow(b, approvalsByBrdpId[b.id] ?? null));
+
+      // Confirmed with the user: catch this and name the affected BRDP(s)
+      // rather than let SheetJS throw uncaught and silently fail the
+      // whole export with no message at all.
+      const oversized = findOversizedExportRows(reportRows);
+      if (oversized.length > 0) {
+        setExportError(
+          t('config.dataManagement.exportCellTooLarge', { count: oversized.length, ids: oversized.join(', ') })
+        );
+        return;
+      }
+
+      try {
+        exportToExcel(reportRows);
+      } catch (err) {
+        setExportError(t('config.dataManagement.exportFailed', { message: err.message }));
+      }
     } finally {
       setBusy(false);
     }
@@ -235,6 +271,11 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
         </Button>
         {brdpCount !== null && (
           <p className={styles.hint}>{t('config.dataManagement.countAvailable', { count: brdpCount })}</p>
+        )}
+        {exportError && (
+          <ul className={styles.errorList}>
+            <li>{exportError}</li>
+          </ul>
         )}
       </div>
 
