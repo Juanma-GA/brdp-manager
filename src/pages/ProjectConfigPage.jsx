@@ -81,10 +81,10 @@ const EXCEL_CELL_CHAR_LIMIT = 32767;
 // caveat instead of folding a guess into the estimate.
 const MEASURED_MS_PER_PLAIN_ROW = 2;
 
-// Confirmation-modal thresholds (docs request: "usa 20 filas... pero
-// déjalo como constante fácilmente ajustable, no hardcodeada dentro de la
-// función") -- either one tripping is enough to ask for confirmation.
-const VALIDATED_ROWS_WARNING_THRESHOLD = 20;
+// Confirmation-modal thresholds (docs request: easily adjustable
+// constants, never hardcoded inline) -- either one tripping is enough to
+// ask for confirmation.
+const VALIDATED_ROWS_WARNING_THRESHOLD = 10;
 const APPLY_ETA_WARNING_SECONDS = 30;
 
 // Single source of truth for the Apply time/cost estimate -- used by the
