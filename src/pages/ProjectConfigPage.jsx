@@ -5,6 +5,7 @@ import { authFetchJson } from '../services/apiClient';
 import { generateTemplate, importFromExcel, exportToExcel } from '../utils/excelUtils';
 import { ruleStateOf } from '../utils/ruleState';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
+import { useActiveImportJob, useInvalidateImportJob } from '../hooks/useImportJob';
 import Button from '../components/Button';
 import styles from './ProjectConfigPage.module.css';
 
@@ -43,6 +44,30 @@ function fieldsForStandard(standard) {
   return standard === 'Schematron 1.0 — DITA' ? DITA_FIELDS : FULL_FIELDS;
 }
 
+// Apply/Import ETA settings (HR0/HR8: every setting needs a UI, nothing
+// hardcoded) -- shown regardless of standard, unlike FULL_FIELDS/
+// DITA_FIELDS above, since importing Excel applies to every project the
+// same way. Same values/keys migration 0007 backfills onto every
+// pre-existing project and _DEFAULT_PROJECT_CONFIG (backend) seeds for a
+// new one -- the DEFAULT_* fallbacks below only ever matter for a
+// project_config that somehow predates both (defensive, not the primary
+// source of truth).
+const IMPORT_ETA_FIELDS = [
+  { key: 'applyEtaMsPerPlainRow', labelKey: 'applyEtaMsPerPlainRow', hintKey: 'applyEtaMsPerPlainRowHint' },
+  { key: 'applyEtaMsPerValidatedRow', labelKey: 'applyEtaMsPerValidatedRow', hintKey: 'applyEtaMsPerValidatedRowHint' },
+  {
+    key: 'applyEtaValidatedRowsThreshold',
+    labelKey: 'applyEtaValidatedRowsThreshold',
+    hintKey: 'applyEtaValidatedRowsThresholdHint',
+  },
+  { key: 'applyEtaWarningSeconds', labelKey: 'applyEtaWarningSeconds', hintKey: 'applyEtaWarningSecondsHint' },
+];
+
+const DEFAULT_MS_PER_PLAIN_ROW = 2;
+const DEFAULT_MS_PER_VALIDATED_ROW = 1500;
+const DEFAULT_VALIDATED_ROWS_THRESHOLD = 10;
+const DEFAULT_APPLY_ETA_WARNING_SECONDS = 30;
+
 // Export's own shape (ID/Title/Definition/Proposal/Proposal Status/Rule
 // Status/Rule, in that order, "Comment" dropped). ruleApproval is the
 // matching row from the project-wide bulk export endpoint (or null -- no
@@ -69,38 +94,31 @@ function brdpToExportRow(brdp, ruleApproval) {
 // BRDP(s) are affected, never download a partial/corrupt file).
 const EXCEL_CELL_CHAR_LIMIT = 32767;
 
-// Real measurement, not invented (docs request): a standalone script hit
-// POST .../brdps/import/apply directly with batches of 50/200/500 plain
-// (non-Validated) rows and got ~1-2ms/row. Rounded up to 2ms/row as a
-// conservative floor for the ETA estimate below. This does NOT cover rows
-// whose Proposal Status is "Validated" -- those trigger a real Mistral
-// embedding API call each (see generateEmbedding() wiring on BRDP
-// create/update), whose latency this environment has no way to measure
-// (outbound calls to api.mistral.ai are network-blocked here) -- rather
-// than invent a number for that cost, the UI shows a separate, explicit
-// caveat instead of folding a guess into the estimate.
-const MEASURED_MS_PER_PLAIN_ROW = 2;
-
-// Confirmation-modal thresholds (docs request: easily adjustable
-// constants, never hardcoded inline) -- either one tripping is enough to
-// ask for confirmation.
-const VALIDATED_ROWS_WARNING_THRESHOLD = 10;
-const APPLY_ETA_WARNING_SECONDS = 30;
-
 // Single source of truth for the Apply time/cost estimate -- used by the
-// always-visible inline alert (Phase 1, before Apply is even clickable),
-// the confirmation modal (same numbers, same wording, no duplicated
-// logic), and the busy-state countdown once Apply is actually running.
-function computeApplyEta(rows) {
+// always-visible inline alert (Phase 1, before Apply is even clickable)
+// and the confirmation modal (same numbers, same wording, no duplicated
+// logic). Sums BOTH plain-row time AND Validated-row time (bug fix, docs
+// request): a Validated row triggers a real Mistral embedding call, which
+// this project's own measured production rate puts at ~1500ms/row
+// (project_config.applyEtaMsPerValidatedRow) -- omitting it entirely from
+// the total, as the previous version did, understated a 78-Validated-row
+// import as "under 1 minute" when it realistically takes ~2 minutes.
+function computeApplyEta(rows, projectConfig) {
+  const msPerPlainRow = projectConfig?.applyEtaMsPerPlainRow ?? DEFAULT_MS_PER_PLAIN_ROW;
+  const msPerValidatedRow = projectConfig?.applyEtaMsPerValidatedRow ?? DEFAULT_MS_PER_VALIDATED_ROW;
   const rowCount = rows?.length || 0;
   const validatedCount = (rows || []).filter(
     (r) => (r.proposal_status || '').toLowerCase().trim() === 'validated'
   ).length;
-  const seconds = Math.max(1, Math.ceil((rowCount * MEASURED_MS_PER_PLAIN_ROW) / 1000));
+  const plainCount = rowCount - validatedCount;
+  const seconds = Math.max(1, Math.ceil((plainCount * msPerPlainRow + validatedCount * msPerValidatedRow) / 1000));
   return { seconds, validatedCount, hasValidatedRows: validatedCount > 0 };
 }
 
 // Shared text for the inline alert and the modal -- see computeApplyEta().
+// The Validated caveat is now a safety margin (Mistral latency can still
+// vary call to call), not an excuse for an unmeasured number -- the
+// estimate itself already accounts for the real per-row cost.
 function applyEtaMessage(t, { seconds, hasValidatedRows }) {
   const timeText =
     seconds < 60
@@ -120,7 +138,7 @@ function findOversizedExportRows(rows) {
   return rows.filter((row) => fields.some((f) => (row[f] || '').length > EXCEL_CELL_CHAR_LIMIT)).map((row) => row.id);
 }
 
-function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDataChanged }) {
+function DataManagementSection({ projectId, standard, projectConfig, canEdit, dataVersion, onDataChanged }) {
   const { t } = useTranslation();
   const fileInputRef = useRef(null);
   // pendingRows is the EXACT same row array sent to both /analyze and
@@ -130,17 +148,13 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const [pendingRows, setPendingRows] = useState(null);
   const [analysis, setAnalysis] = useState(null); // { results: [...] } from /analyze
   const [conflictResolution, setConflictResolution] = useState('keep');
-  const [applyResult, setApplyResult] = useState(null);
   const [importErrors, setImportErrors] = useState([]);
   const [exportError, setExportError] = useState(null);
+  // Only for the (fast, synchronous) analyze call and the Export button's
+  // own synchronous XLSX build -- Apply itself is a background job now
+  // (docs request), tracked via the job below, never this flag.
   const [busy, setBusy] = useState(false);
   const [brdpCount, setBrdpCount] = useState(null);
-  // Seconds remaining, ticked down once a minute while Apply is busy --
-  // an honest estimate (see MEASURED_MS_PER_PLAIN_ROW above), not a
-  // measured progress bar (docs request: no fake exact percentage).
-  const [applyEtaSeconds, setApplyEtaSeconds] = useState(null);
-  const [applyHasValidatedRows, setApplyHasValidatedRows] = useState(false);
-  const etaIntervalRef = useRef(null);
   // Confirmation modal for costly Apply operations. dontAskAgain is
   // deliberately plain component state, not sessionStorage -- it needs to
   // survive across repeated imports within the same page load (component
@@ -151,6 +165,27 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const [dontAskAgain, setDontAskAgain] = useState(false);
   const [showApplyConfirm, setShowApplyConfirm] = useState(false);
   const [modalDontAskChecked, setModalDontAskChecked] = useState(false);
+  // True only while the POST /apply request itself is in flight (a real,
+  // short-lived network round trip) -- once it returns 202, the actual
+  // import's progress comes from `job` below, polled from Postgres, never
+  // a local fake countdown.
+  const [applying, setApplying] = useState(false);
+  // Locally hides a finished (completed/failed) job's panel so the user
+  // can get back to the file picker without starting a fresh import --
+  // never sent to the backend, so a reload correctly re-surfaces the last
+  // known result (docs request: closing the tab and reopening later must
+  // still show it) rather than silently forgetting it "was dismissed".
+  const [dismissed, setDismissed] = useState(false);
+
+  // Postgres, via import_jobs, is the only source of truth for "is an
+  // import running" (HR1: never localStorage/sessionStorage) -- this is
+  // what survives navigating away from this page and back, reloading, or
+  // closing the tab entirely and reopening the app later. Shared with
+  // Sidebar's badge via the same React Query cache key, so both poll
+  // exactly once, not twice.
+  const { data: job } = useActiveImportJob(projectId);
+  const invalidateImportJob = useInvalidateImportJob();
+  const lastJobStatusRef = useRef(null);
 
   const refreshCount = () =>
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => setBrdpCount(data.length));
@@ -164,7 +199,19 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, dataVersion]);
 
-  useEffect(() => () => clearInterval(etaIntervalRef.current), []);
+  // Fires exactly once per job completion (not on every poll tick while
+  // already completed) -- refreshes this section's own BRDP count and
+  // tells ResetDataSection's sibling count to refresh too, exactly like
+  // the old synchronous handleApplyImport did right after success.
+  useEffect(() => {
+    const prevStatus = lastJobStatusRef.current;
+    lastJobStatusRef.current = job?.status ?? null;
+    if (job?.status === 'completed' && prevStatus !== 'completed') {
+      refreshCount();
+      onDataChanged();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.status]);
 
   const handleDownloadTemplate = () => {
     const blob = new Blob([generateTemplate()], {
@@ -184,7 +231,6 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     setPendingRows(null);
     setAnalysis(null);
     setConflictResolution('keep');
-    setApplyResult(null);
     setImportErrors([]);
   };
 
@@ -226,47 +272,51 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   };
 
   // Phase 2 (docs request): only reachable after the user has seen the
-  // Phase 1 summary and explicitly clicked Apply -- re-validates against
-  // current Postgres state server-side rather than trusting the Phase 1
-  // classification, which could be stale by now.
+  // Phase 1 summary and explicitly clicked Apply. Now fires the
+  // background job and returns immediately (202) -- the real work,
+  // including re-validating against CURRENT Postgres state, happens
+  // server-side (app/services/import_jobs.py), never trusting the Phase 1
+  // classification computed here, which could be stale by now.
   const handleApplyImport = async () => {
-    setBusy(true);
+    setApplying(true);
     setImportErrors([]);
-
-    const eta = computeApplyEta(pendingRows);
-    setApplyHasValidatedRows(eta.hasValidatedRows);
-    setApplyEtaSeconds(eta.seconds);
-    etaIntervalRef.current = setInterval(() => {
-      setApplyEtaSeconds((s) => (s === null ? null : Math.max(0, s - 60)));
-    }, 60000);
-
     try {
-      const result = await authFetchJson(`/api/projects/${projectId}/brdps/import/apply`, {
+      await authFetchJson(`/api/projects/${projectId}/brdps/import/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows: pendingRows, conflict_resolution: conflictResolution }),
       });
-      setApplyResult(result);
       setPendingRows(null);
       setAnalysis(null);
-      refreshCount();
-      onDataChanged();
+      setDismissed(false);
+      invalidateImportJob(projectId);
     } catch (err) {
+      // 409 (another job already running for this project -- docs
+      // request: at most one at a time) reads fine as-is from the
+      // backend's own detail message; refresh the job query either way so
+      // the UI reflects whatever IS actually running instead of staying
+      // stuck on the stale "no job" view.
       setImportErrors([err.message]);
+      invalidateImportJob(projectId);
     } finally {
-      setBusy(false);
-      clearInterval(etaIntervalRef.current);
-      setApplyEtaSeconds(null);
+      setApplying(false);
     }
   };
+
+  const etaConfig = {
+    applyEtaMsPerPlainRow: projectConfig?.applyEtaMsPerPlainRow,
+    applyEtaMsPerValidatedRow: projectConfig?.applyEtaMsPerValidatedRow,
+  };
+  const validatedRowsThreshold = projectConfig?.applyEtaValidatedRowsThreshold ?? DEFAULT_VALIDATED_ROWS_THRESHOLD;
+  const etaWarningSeconds = projectConfig?.applyEtaWarningSeconds ?? DEFAULT_APPLY_ETA_WARNING_SECONDS;
 
   // Gate in front of handleApplyImport (docs request): only interrupts
   // with a blocking modal when the cost is actually significant (either
   // threshold tripped) AND the user hasn't already waved it off this
   // session -- otherwise Apply runs immediately, same as before.
   const handleApplyClick = () => {
-    const eta = computeApplyEta(pendingRows);
-    const isCostly = eta.validatedCount > VALIDATED_ROWS_WARNING_THRESHOLD || eta.seconds > APPLY_ETA_WARNING_SECONDS;
+    const eta = computeApplyEta(pendingRows, etaConfig);
+    const isCostly = eta.validatedCount > validatedRowsThreshold || eta.seconds > etaWarningSeconds;
     if (isCostly && !dontAskAgain) {
       setModalDontAskChecked(false);
       setShowApplyConfirm(true);
@@ -285,12 +335,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     setShowApplyConfirm(false);
   };
 
-  // One display value that's live (recalculated from pendingRows) before
-  // Apply is pressed, and switches to the ticking busy-state countdown
-  // once it is -- a single alert, not two competing estimates on screen.
-  const applyEtaPreview = pendingRows ? computeApplyEta(pendingRows) : null;
-  const displayEtaSeconds = busy && applyEtaSeconds !== null ? applyEtaSeconds : applyEtaPreview?.seconds ?? null;
-  const displayEtaHasValidated = busy ? applyHasValidatedRows : applyEtaPreview?.hasValidatedRows ?? false;
+  const applyEtaPreview = pendingRows ? computeApplyEta(pendingRows, etaConfig) : null;
 
   const okCount = analysis?.results.filter((r) => r.outcome === 'ok').length ?? 0;
   const rejectedRows = analysis?.results.filter((r) => r.outcome === 'rejected') ?? [];
@@ -351,6 +396,13 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     }
   };
 
+  // Showing the job's own panel (progress/result/error) takes over the
+  // whole Import subsection in place of the file-picker/analyze/apply
+  // flow -- a job that's actually running must not be raced by starting
+  // a second analyze/apply in the same UI, and a just-finished one is the
+  // more relevant thing to show until the user dismisses it.
+  const showingJobPanel = !!job && (job.status === 'running' || (!dismissed && job.status !== 'running'));
+
   return (
     <div className={styles.card}>
       <h2 className={styles.sectionHeading}>{t('config.dataManagement.title')}</h2>
@@ -386,182 +438,235 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
         <div className={styles.subsection}>
           <h3 className={styles.subsectionHeading}>{t('config.dataManagement.importTitle')}</h3>
 
-          {!analysis && !applyResult && (
-            <>
-              <label className={styles.fileInputLabel}>
-                {t('config.dataManagement.chooseFile')}
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileSelect} hidden disabled={busy} />
-              </label>
-              <p className={styles.hint}>{t('config.dataManagement.chooseFileHint')}</p>
-              {busy && <p className={styles.hint}>{t('config.dataManagement.analyzing')}</p>}
-            </>
-          )}
-
-          {importErrors.length > 0 && (
-            <ul className={styles.errorList}>
-              {importErrors.map((err, i) => (
-                <li key={i}>{err}</li>
-              ))}
-            </ul>
-          )}
-
-          {analysis && (
+          {showingJobPanel ? (
             <div>
-              <p className={styles.hint}>
-                {t('config.dataManagement.summaryOk', { count: okCount })}
-                {' · '}
-                {t('config.dataManagement.summaryRejected', { count: rejectedRows.length })}
-                {' · '}
-                {t('config.dataManagement.summaryConflicts', { count: conflictRows.length })}
-                {catalogOverrideRows.length > 0 && (
-                  <>
-                    {' · '}
-                    {t('config.dataManagement.summaryCatalogOverrides', { count: catalogOverrideRows.length })}
-                  </>
-                )}
-              </p>
-
-              {rejectedRows.length > 0 && (
+              {job.status === 'running' && (
                 <>
-                  <h4 className={styles.subsectionHeading}>{t('config.dataManagement.rejectedListTitle')}</h4>
-                  <ul className={styles.errorList}>
-                    {rejectedRows.map((r) => (
-                      <li key={r.row_number}>
-                        {t('config.dataManagement.rowReason', {
-                          row: r.row_number,
-                          identifier: r.identifier || '—',
-                          reason: r.reason,
-                        })}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-
-              {catalogOverrideRows.length > 0 && (
-                <>
-                  <h4 className={styles.subsectionHeading}>{t('config.dataManagement.catalogOverrideListTitle')}</h4>
-                  <ul className={styles.warningList}>
-                    {catalogOverrideRows.map((r) => (
-                      <li key={r.row_number}>
-                        {t('config.dataManagement.catalogOverrideRow', {
-                          row: r.row_number,
-                          identifier: r.identifier,
-                        })}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-
-              {conflictRows.length > 0 && (
-                <>
-                  <h4 className={styles.subsectionHeading}>{t('config.dataManagement.conflictsListTitle')}</h4>
-                  <ul className={styles.errorList}>
-                    {conflictRows.map((r) => (
-                      <li key={r.row_number}>
-                        {t('config.dataManagement.conflictRow', {
-                          row: r.row_number,
-                          identifier: r.identifier,
-                          status: r.existing_rule_status,
-                        })}
-                      </li>
-                    ))}
-                  </ul>
-                  <fieldset className={styles.field}>
-                    <legend className={styles.label}>{t('config.dataManagement.conflictResolutionTitle')}</legend>
-                    <label>
-                      <input
-                        type="radio"
-                        name="conflictResolution"
-                        value="keep"
-                        checked={conflictResolution === 'keep'}
-                        onChange={() => setConflictResolution('keep')}
-                      />{' '}
-                      {t('config.dataManagement.conflictResolutionKeep')}
-                    </label>
-                    <br />
-                    <label>
-                      <input
-                        type="radio"
-                        name="conflictResolution"
-                        value="clear"
-                        checked={conflictResolution === 'clear'}
-                        onChange={() => setConflictResolution('clear')}
-                      />{' '}
-                      {t('config.dataManagement.conflictResolutionClear')}
-                    </label>
-                  </fieldset>
-                </>
-              )}
-
-              {/* Always visible as soon as the Phase 1 summary is (docs
-                  request) -- not tucked below the button where it's only
-                  seen after Apply has already been clicked. Recalculated
-                  from pendingRows on every render, so it stays accurate
-                  if the user re-analyzes a different file. */}
-              {displayEtaSeconds !== null && (
-                <p className={styles.warning}>
-                  {displayEtaHasValidated ? '⚠️' : 'ℹ️'} {applyEtaMessage(t, { seconds: displayEtaSeconds, hasValidatedRows: displayEtaHasValidated })}
-                </p>
-              )}
-
-              <div className={styles.actionsRow}>
-                <Button onClick={handleApplyClick} disabled={busy}>
-                  {busy && <span className={styles.spinner} aria-hidden="true" />}
-                  {busy ? t('config.dataManagement.applying') : t('config.dataManagement.applyButton')}
-                </Button>
-                <button type="button" className={styles.secondaryButton} onClick={handleCancelImport} disabled={busy}>
-                  {t('config.dataManagement.cancel')}
-                </button>
-              </div>
-
-              {showApplyConfirm && (
-                <div className={styles.modalOverlay} onClick={handleConfirmCancel}>
-                  <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-                    <h3 className={styles.sectionHeading}>{t('config.dataManagement.applyConfirmTitle')}</h3>
-                    <p className={styles.warning}>
-                      {applyEtaPreview?.hasValidatedRows ? '⚠️' : 'ℹ️'}{' '}
-                      {applyEtaPreview && applyEtaMessage(t, applyEtaPreview)}
+                  <p className={styles.hint}>
+                    <span className={styles.spinner} aria-hidden="true" />
+                    {t('config.dataManagement.jobRunning', {
+                      processed: job.processed_rows,
+                      total: job.total_rows,
+                    })}
+                  </p>
+                  {job.validated_rows_total > 0 && (
+                    <p className={styles.hint}>
+                      {t('config.dataManagement.jobValidatedContext', { count: job.validated_rows_total })}
                     </p>
-                    <label className={styles.checkboxLabel}>
-                      <input
-                        type="checkbox"
-                        checked={modalDontAskChecked}
-                        onChange={(e) => setModalDontAskChecked(e.target.checked)}
-                      />
-                      {t('config.dataManagement.applyConfirmDontAskAgain')}
-                    </label>
-                    <div className={styles.actionsRow}>
-                      <Button onClick={handleConfirmProceed}>{t('config.dataManagement.applyConfirmProceed')}</Button>
-                      <button type="button" className={styles.secondaryButton} onClick={handleConfirmCancel}>
-                        {t('config.dataManagement.cancel')}
-                      </button>
-                    </div>
-                  </div>
+                  )}
+                </>
+              )}
+
+              {job.status === 'completed' && (
+                <div>
+                  <h4 className={styles.subsectionHeading}>{t('config.dataManagement.resultTitle')}</h4>
+                  <ul className={styles.summaryList}>
+                    <li>{t('config.dataManagement.resultCreated', { count: job.result.created })}</li>
+                    <li>{t('config.dataManagement.resultUpdated', { count: job.result.updated })}</li>
+                    <li>{t('config.dataManagement.resultRejected', { count: job.result.rejected })}</li>
+                    {job.result.conflicts_kept > 0 && (
+                      <li>{t('config.dataManagement.resultConflictsKept', { count: job.result.conflicts_kept })}</li>
+                    )}
+                    {job.result.conflicts_cleared > 0 && (
+                      <li>
+                        {t('config.dataManagement.resultConflictsCleared', { count: job.result.conflicts_cleared })}
+                      </li>
+                    )}
+                  </ul>
+                  <button type="button" className={styles.secondaryButton} onClick={() => setDismissed(true)}>
+                    {t('config.dataManagement.close')}
+                  </button>
+                </div>
+              )}
+
+              {job.status === 'failed' && (
+                <div>
+                  <ul className={styles.errorList}>
+                    <li>{t('config.dataManagement.jobFailed', { error: job.error })}</li>
+                  </ul>
+                  <button type="button" className={styles.secondaryButton} onClick={() => setDismissed(true)}>
+                    {t('config.dataManagement.close')}
+                  </button>
                 </div>
               )}
             </div>
-          )}
+          ) : (
+            <>
+              {!analysis && (
+                <>
+                  <label className={styles.fileInputLabel}>
+                    {t('config.dataManagement.chooseFile')}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".xlsx,.xls"
+                      onChange={handleFileSelect}
+                      hidden
+                      disabled={busy}
+                    />
+                  </label>
+                  <p className={styles.hint}>{t('config.dataManagement.chooseFileHint')}</p>
+                  {busy && <p className={styles.hint}>{t('config.dataManagement.analyzing')}</p>}
+                </>
+              )}
 
-          {applyResult && (
-            <div>
-              <h4 className={styles.subsectionHeading}>{t('config.dataManagement.resultTitle')}</h4>
-              <ul className={styles.summaryList}>
-                <li>{t('config.dataManagement.resultCreated', { count: applyResult.created })}</li>
-                <li>{t('config.dataManagement.resultUpdated', { count: applyResult.updated })}</li>
-                <li>{t('config.dataManagement.resultRejected', { count: applyResult.rejected })}</li>
-                {applyResult.conflicts_kept > 0 && (
-                  <li>{t('config.dataManagement.resultConflictsKept', { count: applyResult.conflicts_kept })}</li>
-                )}
-                {applyResult.conflicts_cleared > 0 && (
-                  <li>{t('config.dataManagement.resultConflictsCleared', { count: applyResult.conflicts_cleared })}</li>
-                )}
-              </ul>
-              <button type="button" className={styles.secondaryButton} onClick={resetImportState}>
-                {t('config.dataManagement.close')}
-              </button>
-            </div>
+              {importErrors.length > 0 && (
+                <ul className={styles.errorList}>
+                  {importErrors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              )}
+
+              {analysis && (
+                <div>
+                  <p className={styles.hint}>
+                    {t('config.dataManagement.summaryOk', { count: okCount })}
+                    {' · '}
+                    {t('config.dataManagement.summaryRejected', { count: rejectedRows.length })}
+                    {' · '}
+                    {t('config.dataManagement.summaryConflicts', { count: conflictRows.length })}
+                    {catalogOverrideRows.length > 0 && (
+                      <>
+                        {' · '}
+                        {t('config.dataManagement.summaryCatalogOverrides', { count: catalogOverrideRows.length })}
+                      </>
+                    )}
+                  </p>
+
+                  {rejectedRows.length > 0 && (
+                    <>
+                      <h4 className={styles.subsectionHeading}>{t('config.dataManagement.rejectedListTitle')}</h4>
+                      <ul className={styles.errorList}>
+                        {rejectedRows.map((r) => (
+                          <li key={r.row_number}>
+                            {t('config.dataManagement.rowReason', {
+                              row: r.row_number,
+                              identifier: r.identifier || '—',
+                              reason: r.reason,
+                            })}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
+                  {catalogOverrideRows.length > 0 && (
+                    <>
+                      <h4 className={styles.subsectionHeading}>
+                        {t('config.dataManagement.catalogOverrideListTitle')}
+                      </h4>
+                      <ul className={styles.warningList}>
+                        {catalogOverrideRows.map((r) => (
+                          <li key={r.row_number}>
+                            {t('config.dataManagement.catalogOverrideRow', {
+                              row: r.row_number,
+                              identifier: r.identifier,
+                            })}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
+                  {conflictRows.length > 0 && (
+                    <>
+                      <h4 className={styles.subsectionHeading}>{t('config.dataManagement.conflictsListTitle')}</h4>
+                      <ul className={styles.errorList}>
+                        {conflictRows.map((r) => (
+                          <li key={r.row_number}>
+                            {t('config.dataManagement.conflictRow', {
+                              row: r.row_number,
+                              identifier: r.identifier,
+                              status: r.existing_rule_status,
+                            })}
+                          </li>
+                        ))}
+                      </ul>
+                      <fieldset className={styles.field}>
+                        <legend className={styles.label}>{t('config.dataManagement.conflictResolutionTitle')}</legend>
+                        <label>
+                          <input
+                            type="radio"
+                            name="conflictResolution"
+                            value="keep"
+                            checked={conflictResolution === 'keep'}
+                            onChange={() => setConflictResolution('keep')}
+                          />{' '}
+                          {t('config.dataManagement.conflictResolutionKeep')}
+                        </label>
+                        <br />
+                        <label>
+                          <input
+                            type="radio"
+                            name="conflictResolution"
+                            value="clear"
+                            checked={conflictResolution === 'clear'}
+                            onChange={() => setConflictResolution('clear')}
+                          />{' '}
+                          {t('config.dataManagement.conflictResolutionClear')}
+                        </label>
+                      </fieldset>
+                    </>
+                  )}
+
+                  {/* Always visible as soon as the Phase 1 summary is (docs
+                      request) -- not tucked below the button where it's only
+                      seen after Apply has already been clicked. Recalculated
+                      from pendingRows on every render, so it stays accurate
+                      if the user re-analyzes a different file or edits the
+                      Import Settings fields below without reloading. */}
+                  {applyEtaPreview && (
+                    <p className={styles.warning}>
+                      {applyEtaPreview.hasValidatedRows ? '⚠️' : 'ℹ️'} {applyEtaMessage(t, applyEtaPreview)}
+                    </p>
+                  )}
+
+                  <div className={styles.actionsRow}>
+                    <Button onClick={handleApplyClick} disabled={applying}>
+                      {applying && <span className={styles.spinner} aria-hidden="true" />}
+                      {applying ? t('config.dataManagement.applying') : t('config.dataManagement.applyButton')}
+                    </Button>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      onClick={handleCancelImport}
+                      disabled={applying}
+                    >
+                      {t('config.dataManagement.cancel')}
+                    </button>
+                  </div>
+
+                  {showApplyConfirm && (
+                    <div className={styles.modalOverlay} onClick={handleConfirmCancel}>
+                      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+                        <h3 className={styles.sectionHeading}>{t('config.dataManagement.applyConfirmTitle')}</h3>
+                        <p className={styles.warning}>
+                          {applyEtaPreview?.hasValidatedRows ? '⚠️' : 'ℹ️'}{' '}
+                          {applyEtaPreview && applyEtaMessage(t, applyEtaPreview)}
+                        </p>
+                        <label className={styles.checkboxLabel}>
+                          <input
+                            type="checkbox"
+                            checked={modalDontAskChecked}
+                            onChange={(e) => setModalDontAskChecked(e.target.checked)}
+                          />
+                          {t('config.dataManagement.applyConfirmDontAskAgain')}
+                        </label>
+                        <div className={styles.actionsRow}>
+                          <Button onClick={handleConfirmProceed}>
+                            {t('config.dataManagement.applyConfirmProceed')}
+                          </Button>
+                          <button type="button" className={styles.secondaryButton} onClick={handleConfirmCancel}>
+                            {t('config.dataManagement.cancel')}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -661,6 +766,10 @@ export default function ProjectConfigPage() {
     setSaved(false);
   };
 
+  const handleNumberChange = (key, rawValue) => {
+    handleChange(key, rawValue === '' ? '' : Number(rawValue));
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     setIsSaving(true);
@@ -671,6 +780,10 @@ export default function ProjectConfigPage() {
         body: JSON.stringify({ project_config: values }),
       });
       setSaved(true);
+      // Import Settings (below) read from the SAVED project.project_config,
+      // not this form's own draft `values` -- refreshing here is what
+      // makes a changed threshold/estimate take effect immediately,
+      // without a page reload (docs request).
       refreshProject();
     } finally {
       setIsSaving(false);
@@ -702,6 +815,29 @@ export default function ProjectConfigPage() {
             </div>
           ))}
         </div>
+
+        <h3 className={styles.subsectionHeading}>{t('config.importSettings.title')}</h3>
+        <p className={styles.hint}>{t('config.importSettings.description')}</p>
+        <div className={styles.grid}>
+          {IMPORT_ETA_FIELDS.map((f) => (
+            <div key={f.key} className={styles.field}>
+              <label className={styles.label} htmlFor={`cfg-${f.key}`}>
+                {t(`config.fields.${f.labelKey}`)}
+              </label>
+              <input
+                id={`cfg-${f.key}`}
+                type="number"
+                min="0"
+                className={styles.input}
+                value={values[f.key] ?? ''}
+                onChange={(e) => handleNumberChange(f.key, e.target.value)}
+                disabled={!canEdit}
+              />
+              {f.hintKey && <span className={styles.hint}>{t(`config.fields.${f.hintKey}`)}</span>}
+            </div>
+          ))}
+        </div>
+
         {canEdit && (
           <button type="submit" className={styles.saveBtn} disabled={isSaving}>
             {isSaving ? '…' : t('config.save')}
@@ -714,6 +850,7 @@ export default function ProjectConfigPage() {
       <DataManagementSection
         projectId={projectId}
         standard={project.standard}
+        projectConfig={project.project_config}
         canEdit={canEdit}
         dataVersion={dataVersion}
         onDataChanged={bumpDataVersion}

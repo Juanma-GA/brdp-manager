@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './context/AuthContext';
 import { ProjectProvider } from './context/ProjectContext';
 import ProtectedRoute from './layouts/ProtectedRoute';
@@ -14,40 +15,50 @@ import SettingsPage from './pages/SettingsPage';
 import './index.css';
 import './App.css';
 
+// Module-scope singleton (created once, never remounted with the
+// component tree) -- this is what makes the import-job polling query's
+// cache survive navigating away from Project Configuration and back
+// (docs request), without needing Zustand or any other global store for
+// this: React Query's own cache already IS that global store for
+// server-derived state like "is a job running".
+const queryClient = new QueryClient();
+
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <ProjectProvider>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <AuthProvider>
+          <ProjectProvider>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
 
-            <Route
-              element={
-                <ProtectedRoute>
-                  <AppLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route path="/projects" element={<ProjectsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <AppLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route path="/projects" element={<ProjectsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
 
-              <Route path="/projects/:projectId" element={<ProjectLayout />}>
-                <Route path="config" element={<ProjectConfigPage />} />
-                <Route path="records" element={<RecordsPage />} />
-                <Route path="generate" element={<GeneratePage />} />
-                <Route path="brexdoc" element={<GenerateBREXdocPage />} />
-                <Route index element={<Navigate to="records" replace />} />
+                <Route path="/projects/:projectId" element={<ProjectLayout />}>
+                  <Route path="config" element={<ProjectConfigPage />} />
+                  <Route path="records" element={<RecordsPage />} />
+                  <Route path="generate" element={<GeneratePage />} />
+                  <Route path="brexdoc" element={<GenerateBREXdocPage />} />
+                  <Route index element={<Navigate to="records" replace />} />
+                </Route>
+
+                <Route path="/" element={<Navigate to="/projects" replace />} />
               </Route>
 
-              <Route path="/" element={<Navigate to="/projects" replace />} />
-            </Route>
-
-            <Route path="*" element={<Navigate to="/projects" replace />} />
-          </Routes>
-        </ProjectProvider>
-      </AuthProvider>
-    </BrowserRouter>
+              <Route path="*" element={<Navigate to="/projects" replace />} />
+            </Routes>
+          </ProjectProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 }
 

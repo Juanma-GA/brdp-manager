@@ -163,6 +163,44 @@
   color: var(--blue-dark, #245c90);
 }
 
+.importBadge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  text-decoration: none;
+}
+
+.importBadge:hover {
+  background: #fef3c7;
+}
+
+.importBadge .navLabel {
+  color: #92400e;
+  font-weight: 600;
+}
+
+.importBadge .spinner {
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  border: 2px solid rgba(146, 64, 14, 0.35);
+  border-top-color: #92400e;
+  border-radius: 50%;
+  animation: sidebarSpin 0.7s linear infinite;
+}
+
+@keyframes sidebarSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 768px) {
   .sidebar {
     width: 160px;

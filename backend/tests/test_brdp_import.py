@@ -4,6 +4,7 @@ triggered by a row importing as validation="Validated" (Phase 5's existing
 precedent, not new to this file) -- mocked here because this file's job is
 import correctness, not embeddings correctness.
 """
+import asyncio
 import uuid
 
 import httpx
@@ -13,7 +14,7 @@ from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.main import app
-from app.models import BRDPCatalog, Project, RuleApproval, User, UserProjectRole
+from app.models import BRDPCatalog, ImportJob, Project, RuleApproval, User, UserProjectRole
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +119,35 @@ VALID_RULE = '<structureObjectRule id="x"><objectPath allowedObjectFlag="1">//x<
 INVALID_RULE = "<structureObjectRule><unclosed>"
 
 
+async def _apply_and_wait(client, project_id, headers, rows, conflict_resolution="keep"):
+    """Apply is now async (docs request: background job, not a blocking
+    request) -- POST /apply returns job_id immediately (202), the actual
+    work happens via BackgroundTasks. Under the test client's ASGITransport
+    (in-process, no real network), Starlette runs background tasks to
+    completion as part of the same coroutine chain that sends the
+    response, so by the time `await client.post(...)` returns here the job
+    has, in practice, already finished -- but this still polls
+    /status/{job_id} (bounded, 20 x 0.25s) rather than assuming that
+    timing, so the test keeps working even if that implementation detail
+    ever changes. Returns the final ImportJobStatusOut body.
+    """
+    apply_resp = await client.post(
+        f"/api/projects/{project_id}/brdps/import/apply",
+        json={"rows": rows, "conflict_resolution": conflict_resolution},
+        headers=headers,
+    )
+    assert apply_resp.status_code == 202
+    job_id = apply_resp.json()["job_id"]
+
+    for _ in range(20):
+        status_resp = await client.get(f"/api/projects/{project_id}/brdps/import/status/{job_id}", headers=headers)
+        body = status_resp.json()
+        if body["status"] != "running":
+            return body
+        await asyncio.sleep(0.25)
+    raise AssertionError(f"Import job {job_id} never left 'running' status")
+
+
 async def test_analyze_rejects_empty_rule_with_verified_status(client, editor_and_project):
     project, headers, _viewer_headers = editor_and_project
     rows = [_row(2, "BRDP-IMP-001", rule_status="Verified", rule="")]
@@ -199,15 +229,10 @@ async def test_apply_valid_draft_and_verified_rows_write_real_postgres_state(cli
         _row(4, "BRDP-IMP-TODO", rule_status="To Do", rule="", title="Todo row"),
     ]
 
-    apply_resp = await client.post(
-        f"/api/projects/{project.id}/brdps/import/apply",
-        json={"rows": rows, "conflict_resolution": "keep"},
-        headers=headers,
-    )
-    assert apply_resp.status_code == 200
-    body = apply_resp.json()
-    assert body["created"] == 3
-    assert body["rejected"] == 0
+    body = await _apply_and_wait(client, project.id, headers, rows)
+    assert body["status"] == "completed"
+    assert body["result"]["created"] == 3
+    assert body["result"]["rejected"] == 0
 
     brdps = {b["identifier"]: b for b in (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()}
     draft_brdp = brdps["BRDP-IMP-DRAFT"]
@@ -239,14 +264,9 @@ async def test_apply_skips_rejected_rows_entirely(client, editor_and_project):
     project, headers, _viewer_headers = editor_and_project
     rows = [_row(2, "BRDP-IMP-BAD", rule_status="Verified", rule="", title="Should never be written")]
 
-    apply_resp = await client.post(
-        f"/api/projects/{project.id}/brdps/import/apply",
-        json={"rows": rows, "conflict_resolution": "keep"},
-        headers=headers,
-    )
-    body = apply_resp.json()
-    assert body["created"] == 0
-    assert body["rejected"] == 1
+    body = await _apply_and_wait(client, project.id, headers, rows)
+    assert body["result"]["created"] == 0
+    assert body["result"]["rejected"] == 1
 
     listed = await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
     assert listed.json() == []  # nothing applied, not even title
@@ -268,14 +288,9 @@ async def test_conflict_keep_leaves_existing_rule_intact(client, editor_and_proj
     assert analyzed["outcome"] == "conflict"
     assert analyzed["existing_rule_status"] == "Verified"
 
-    apply_resp = await client.post(
-        f"/api/projects/{project.id}/brdps/import/apply",
-        json={"rows": rows, "conflict_resolution": "keep"},
-        headers=headers,
-    )
-    body = apply_resp.json()
-    assert body["conflicts_kept"] == 1
-    assert body["conflicts_cleared"] == 0
+    body = await _apply_and_wait(client, project.id, headers, rows)
+    assert body["result"]["conflicts_kept"] == 1
+    assert body["result"]["conflicts_cleared"] == 0
 
     brdp_after = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()[0]
     assert brdp_after["title"] == "Updated via import"  # core fields still apply
@@ -295,14 +310,9 @@ async def test_conflict_clear_wipes_existing_rule_to_todo(client, editor_and_pro
 
     rows = [_row(2, "BRDP-IMP-CONFLICT2", rule_status="To Do", rule="")]
 
-    apply_resp = await client.post(
-        f"/api/projects/{project.id}/brdps/import/apply",
-        json={"rows": rows, "conflict_resolution": "clear"},
-        headers=headers,
-    )
-    body = apply_resp.json()
-    assert body["conflicts_kept"] == 0
-    assert body["conflicts_cleared"] == 1
+    body = await _apply_and_wait(client, project.id, headers, rows, conflict_resolution="clear")
+    assert body["result"]["conflicts_kept"] == 0
+    assert body["result"]["conflicts_cleared"] == 1
 
     approval_after = (await client.get(approve_url, headers=headers)).json()
     assert approval_after is None  # genuinely back to "todo"
@@ -326,11 +336,7 @@ async def test_catalog_match_overrides_title_definition_and_flags_a_warning(clie
     assert analyzed["outcome"] == "ok"
     assert analyzed["catalog_override"] is True  # warning surfaced BEFORE apply
 
-    await client.post(
-        f"/api/projects/{project.id}/brdps/import/apply",
-        json={"rows": rows, "conflict_resolution": "keep"},
-        headers=headers,
-    )
+    await _apply_and_wait(client, project.id, headers, rows)
 
     (brdp,) = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
     assert brdp["title"] == "Catalog title"  # from brdp_catalog, NOT the Excel
@@ -364,11 +370,7 @@ async def test_catalog_match_with_identical_values_applies_but_does_not_warn(cli
     assert analyzed["outcome"] == "ok"
     assert analyzed["catalog_override"] is False  # nothing to warn about
 
-    await client.post(
-        f"/api/projects/{project.id}/brdps/import/apply",
-        json={"rows": rows, "conflict_resolution": "keep"},
-        headers=headers,
-    )
+    await _apply_and_wait(client, project.id, headers, rows)
 
     (brdp,) = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
     assert brdp["title"] == catalog_entry.title  # applied from the catalog regardless
@@ -409,11 +411,7 @@ async def test_catalog_match_is_standard_specific(client, editor_and_project, ca
         (analyzed,) = analyze_resp.json()["results"]
         assert analyzed["catalog_override"] is False
 
-        await client.post(
-            f"/api/projects/{project.id}/brdps/import/apply",
-            json={"rows": rows, "conflict_resolution": "keep"},
-            headers=headers,
-        )
+        await _apply_and_wait(client, project.id, headers, rows)
         (brdp,) = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
         assert brdp["title"] == "Real Excel title"
         assert brdp["definition"] == "Real Excel definition"
@@ -443,3 +441,157 @@ async def test_apply_is_editor_gated_viewer_gets_403_and_writes_nothing(client, 
 
     listed = await client.get(f"/api/projects/{project.id}/brdps", headers=viewer_headers)
     assert listed.json() == []
+
+
+async def test_apply_rejects_concurrent_job_for_same_project(client, editor_and_project):
+    """Docs request: decide and document the concurrency behavior -- at
+    most one running job per project, a second Apply while one is
+    in-flight is rejected outright (409) rather than silently interleaved
+    (two jobs racing on the same identifiers could double-create or lose
+    an update on the same BRDP). Simulated here with a running ImportJob
+    row inserted directly: the real background task actually completes
+    synchronously before `await client.post(.../apply)` returns under the
+    test client's ASGITransport (see _apply_and_wait's docstring), so a
+    genuinely in-flight job can't be produced through the real endpoint
+    within a single test.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    async with async_session_factory() as session:
+        session.add(ImportJob(project_id=project.id, status="running", total_rows=1))
+        await session.commit()
+
+    rows = [_row(2, "BRDP-IMP-CONCURRENT", rule_status="To Do", rule="")]
+    resp = await client.post(
+        f"/api/projects/{project.id}/brdps/import/apply",
+        json={"rows": rows, "conflict_resolution": "keep"},
+        headers=headers,
+    )
+    assert resp.status_code == 409
+    assert "already running" in resp.json()["detail"]
+
+    # The second request was rejected before doing anything -- nothing written.
+    listed = await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
+    assert listed.json() == []
+
+
+async def test_status_active_returns_the_running_job_for_the_project(client, editor_and_project):
+    """Docs request: any page that loads can ask "is an import running"
+    without knowing a job_id in advance -- covers navigating away and
+    back, reloading, or reopening the app later.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    async with async_session_factory() as session:
+        job = ImportJob(project_id=project.id, status="running", total_rows=5, processed_rows=2, validated_rows_total=1)
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    resp = await client.get(f"/api/projects/{project.id}/brdps/import/status/active", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body is not None
+    assert body["id"] == str(job_id)
+    assert body["status"] == "running"
+    assert body["processed_rows"] == 2
+    assert body["total_rows"] == 5
+
+
+async def test_status_active_returns_null_when_no_job_ever_existed(client, editor_and_project):
+    project, headers, _viewer_headers = editor_and_project
+    resp = await client.get(f"/api/projects/{project.id}/brdps/import/status/active", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() is None
+
+
+async def test_status_active_returns_the_finished_job_after_it_completes(client, editor_and_project):
+    """The literal reported scenario (docs request): close the tab while
+    an import is running, reopen the app later -- the job already
+    finished by then, so /status/active must still surface its final
+    result rather than silently going back to null the moment the job
+    leaves "running". This is what get_most_recent_job (not
+    get_running_job) buys: the most recent job for the project regardless
+    of terminal state.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    async with async_session_factory() as session:
+        job = ImportJob(
+            project_id=project.id,
+            status="completed",
+            total_rows=3,
+            processed_rows=3,
+            validated_rows_total=1,
+            result={"created": 3, "updated": 0, "rejected": 0, "conflicts_kept": 0, "conflicts_cleared": 0},
+        )
+        session.add(job)
+        await session.commit()
+
+    resp = await client.get(f"/api/projects/{project.id}/brdps/import/status/active", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body is not None
+    assert body["status"] == "completed"
+    assert body["result"]["created"] == 3
+
+
+async def test_status_job_id_rejects_a_job_from_another_project(client, editor_and_project):
+    """A job_id is meaningless outside its own project -- confirms
+    /status/{job_id} checks job.project_id against the URL's project_id
+    rather than trusting the id alone (a viewer of project A must not be
+    able to peek at project B's import progress just by guessing a UUID).
+    """
+    project, headers, _viewer_headers = editor_and_project
+    async with async_session_factory() as session:
+        other_project = Project(name="Other Project", standard="BREX — S1000D 4.2")
+        session.add(other_project)
+        await session.flush()
+        job = ImportJob(project_id=other_project.id, status="completed", total_rows=1, processed_rows=1)
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+        other_project_id = other_project.id
+
+    try:
+        resp = await client.get(f"/api/projects/{project.id}/brdps/import/status/{job_id}", headers=headers)
+        assert resp.status_code == 404
+    finally:
+        async with async_session_factory() as session:
+            db_job = await session.get(ImportJob, job_id)
+            if db_job is not None:
+                await session.delete(db_job)
+            db_project = await session.get(Project, other_project_id)
+            if db_project is not None:
+                await session.delete(db_project)
+            await session.commit()
+
+
+async def test_embedding_failure_mid_job_marks_job_failed_and_rolls_back_everything(client, editor_and_project):
+    """HR7: a mid-job failure must be visible and explained, never a
+    silent degradation, and must never leave rows in an ambiguous partial
+    state -- the whole job's writes are one Postgres transaction,
+    uncommitted until the very end, so a failure on a LATER row rolls back
+    an EARLIER row's otherwise-successful create too. Simulated here
+    (this sandbox has no route to api.mistral.ai) with a mock transport
+    that fails the embedding call outright, exactly the shape a real
+    Mistral outage would take.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    rows = [
+        _row(2, "BRDP-IMP-FAIL-A", proposal_status="Pending", rule_status="To Do", rule=""),
+        _row(3, "BRDP-IMP-FAIL-B", proposal_status="Validated", rule_status="To Do", rule=""),
+    ]
+
+    def failing_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, json={"error": "simulated Mistral outage"})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(failing_handler)
+
+    body = await _apply_and_wait(client, project.id, headers, rows)
+
+    assert body["status"] == "failed"
+    assert body["error"]
+    assert body["result"] is None
+
+    listed = await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
+    assert listed.json() == []  # BRDP-IMP-FAIL-A's otherwise-successful create rolled back too

@@ -1,6 +1,7 @@
 import { NavLink, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useProjectContext } from '../context/ProjectContext';
+import { useActiveImportJob } from '../hooks/useImportJob';
 import styles from './Sidebar.module.css';
 
 /**
@@ -16,6 +17,14 @@ export default function Sidebar({ collapsed, onToggleCollapse }) {
   const { projectId } = useParams();
   const { projects } = useProjectContext();
   const activeProject = projects.find((p) => p.id === projectId);
+  // Shared React Query cache key with ProjectConfigPage's own
+  // useActiveImportJob(projectId) call (docs request) -- both poll the
+  // exact same query, so this never doubles the request rate regardless
+  // of which pages are mounted at once. Only ever rendered for
+  // status="running" (below): a finished job's result belongs on Project
+  // Configuration, not lingering here as a stale badge forever.
+  const { data: importJob } = useActiveImportJob(projectId);
+  const importRunning = importJob?.status === 'running';
 
   const navItemClass = ({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`;
 
@@ -72,6 +81,21 @@ export default function Sidebar({ collapsed, onToggleCollapse }) {
               {!collapsed && <span className={styles.navLabel}>{t('nav.brexdoc')}</span>}
             </NavLink>
           </nav>
+
+          {importRunning && (
+            <NavLink
+              to={`/projects/${projectId}/config`}
+              className={styles.importBadge}
+              title={t('sidebar.importInProgress', { standard: activeProject.standard })}
+            >
+              <span className={styles.spinner} aria-hidden="true" />
+              {!collapsed && (
+                <span className={styles.navLabel}>
+                  {t('sidebar.importInProgress', { standard: activeProject.standard })}
+                </span>
+              )}
+            </NavLink>
+          )}
         </>
       )}
 

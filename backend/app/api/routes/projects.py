@@ -84,6 +84,15 @@ _DEFAULT_PROJECT_CONFIG = {
     "languageIsoCode": "en",
     "countryIsoCode": "US",
     "securityClassification": "01",
+    # Apply/Import ETA settings (HR0/HR8: configurable per project, not a
+    # hardcoded constant) -- same values migration 0007 backfills onto
+    # every pre-existing project, so a brand-new one starts identical
+    # rather than with a silent gap. See ProjectConfigPage.jsx's Import
+    # Settings subsection.
+    "applyEtaMsPerPlainRow": 2,
+    "applyEtaMsPerValidatedRow": 1500,
+    "applyEtaValidatedRowsThreshold": 10,
+    "applyEtaWarningSeconds": 30,
 }
 
 

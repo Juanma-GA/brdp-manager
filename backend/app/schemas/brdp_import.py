@@ -1,3 +1,6 @@
+import uuid
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -64,6 +67,27 @@ class ImportApplyRowResult(BaseModel):
     reason: str | None = None  # set for rejected only
 
 
+class ImportApplyResultSummary(BaseModel):
+    """The aggregate counts ProjectConfigPage.jsx's "Import complete" panel
+    has always shown -- what used to be most of ImportApplyResponse before
+    Apply became a background job. Persisted on ImportJob.result once the
+    job finishes (docs request's column list didn't name this, but without
+    it there is no way to show "N created / N updated / ..." once the job
+    completes, which the badge's own "click through to see the in-progress
+    result" requirement depends on -- disclosed as a necessary, minimal
+    addition, not a silent scope change). The per-row list
+    (ImportApplyRowResult) itself is intentionally NOT kept: the UI only
+    ever rendered these 5 counts post-apply, never the per-row detail
+    again (that's the analyze-phase summary's job).
+    """
+
+    created: int
+    updated: int
+    rejected: int
+    conflicts_kept: int
+    conflicts_cleared: int
+
+
 class ImportApplyResponse(BaseModel):
     results: list[ImportApplyRowResult]
     created: int
@@ -71,3 +95,20 @@ class ImportApplyResponse(BaseModel):
     rejected: int
     conflicts_kept: int
     conflicts_cleared: int
+
+
+class ImportJobAccepted(BaseModel):
+    job_id: uuid.UUID
+
+
+class ImportJobStatusOut(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    status: str  # "running" | "completed" | "failed"
+    total_rows: int
+    processed_rows: int
+    validated_rows_total: int
+    error: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
+    result: ImportApplyResultSummary | None = None
