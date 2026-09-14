@@ -69,6 +69,18 @@ function brdpToExportRow(brdp, ruleApproval) {
 // BRDP(s) are affected, never download a partial/corrupt file).
 const EXCEL_CELL_CHAR_LIMIT = 32767;
 
+// Real measurement, not invented (docs request): a standalone script hit
+// POST .../brdps/import/apply directly with batches of 50/200/500 plain
+// (non-Validated) rows and got ~1-2ms/row. Rounded up to 2ms/row as a
+// conservative floor for the ETA estimate below. This does NOT cover rows
+// whose Proposal Status is "Validated" -- those trigger a real Mistral
+// embedding API call each (see generateEmbedding() wiring on BRDP
+// create/update), whose latency this environment has no way to measure
+// (outbound calls to api.mistral.ai are network-blocked here) -- rather
+// than invent a number for that cost, the UI shows a separate, explicit
+// caveat instead of folding a guess into the estimate.
+const MEASURED_MS_PER_PLAIN_ROW = 2;
+
 // Checked client-side BEFORE calling exportToExcel() -- the raw SheetJS
 // exception carries no row/column information at all, so this is the
 // only way to name the actual offending BRDP(s) in the error message.
@@ -92,6 +104,12 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const [exportError, setExportError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [brdpCount, setBrdpCount] = useState(null);
+  // Seconds remaining, ticked down once a minute while Apply is busy --
+  // an honest estimate (see MEASURED_MS_PER_PLAIN_ROW above), not a
+  // measured progress bar (docs request: no fake exact percentage).
+  const [applyEtaSeconds, setApplyEtaSeconds] = useState(null);
+  const [applyHasValidatedRows, setApplyHasValidatedRows] = useState(false);
+  const etaIntervalRef = useRef(null);
 
   const refreshCount = () =>
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => setBrdpCount(data.length));
@@ -104,6 +122,8 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     refreshCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, dataVersion]);
+
+  useEffect(() => () => clearInterval(etaIntervalRef.current), []);
 
   const handleDownloadTemplate = () => {
     const blob = new Blob([generateTemplate()], {
@@ -171,6 +191,16 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const handleApplyImport = async () => {
     setBusy(true);
     setImportErrors([]);
+
+    const rowCount = pendingRows?.length || 0;
+    setApplyHasValidatedRows(
+      (pendingRows || []).some((r) => (r.proposal_status || '').toLowerCase().trim() === 'validated')
+    );
+    setApplyEtaSeconds(Math.max(1, Math.ceil((rowCount * MEASURED_MS_PER_PLAIN_ROW) / 1000)));
+    etaIntervalRef.current = setInterval(() => {
+      setApplyEtaSeconds((s) => (s === null ? null : Math.max(0, s - 60)));
+    }, 60000);
+
     try {
       const result = await authFetchJson(`/api/projects/${projectId}/brdps/import/apply`, {
         method: 'POST',
@@ -186,6 +216,8 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       setImportErrors([err.message]);
     } finally {
       setBusy(false);
+      clearInterval(etaIntervalRef.current);
+      setApplyEtaSeconds(null);
     }
   };
 
@@ -394,12 +426,21 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
 
               <div className={styles.actionsRow}>
                 <Button onClick={handleApplyImport} disabled={busy}>
+                  {busy && <span className={styles.spinner} aria-hidden="true" />}
                   {busy ? t('config.dataManagement.applying') : t('config.dataManagement.applyButton')}
                 </Button>
                 <button type="button" className={styles.secondaryButton} onClick={handleCancelImport} disabled={busy}>
                   {t('config.dataManagement.cancel')}
                 </button>
               </div>
+              {busy && applyEtaSeconds !== null && (
+                <p className={styles.hint}>
+                  {applyEtaSeconds < 60
+                    ? t('config.dataManagement.applyEtaUnderMinute')
+                    : t('config.dataManagement.applyEtaEstimate', { minutes: Math.ceil(applyEtaSeconds / 60) })}
+                  {applyHasValidatedRows && ` ${t('config.dataManagement.applyEtaValidatedCaveat')}`}
+                </p>
+              )}
             </div>
           )}
 

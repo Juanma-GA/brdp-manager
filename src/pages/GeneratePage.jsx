@@ -7,6 +7,7 @@ import { generateBREX41 } from '../api/generateBREX41.js';
 import { generateBREX301 } from '../api/generateBREX301.js';
 import { generateBREXSch } from '../api/generateBREXSch.js';
 import { generateSchematronDITA } from '../api/generateSchematronDITA.js';
+import { ruleStateOf } from '../utils/ruleState';
 import styles from './GeneratePage.module.css';
 
 // Same format ids generateBREX*.js already default to internally (see
@@ -38,25 +39,43 @@ const FORMAT_DEFS = {
 // they all accept an `approvals` override (a Map keyed by brdp_id) that
 // bypasses their built-in fetchApprovalsMap(), which otherwise targets
 // v1's global, unscoped GET /api/approvals/format/:format (no v2
-// equivalent: v2's approvals are per-project-BRDP). This fetches each
-// target BRDP's frozen approval via the real v2 per-BRDP endpoint and
-// feeds the engine through that seam instead, so the engine itself never
-// needs to know v2 exists.
-async function fetchApprovalsOverride(projectId, brdps, format) {
-  const entries = await Promise.all(
-    brdps.map(async (b) => {
-      try {
-        const approval = await authFetchJson(
-          `/api/projects/${projectId}/brdps/${b.id}/approvals/${encodeURIComponent(format)}`
-        );
-        return approval ? [b.id, { brdp_id: b.id, ...approval }] : null;
-      } catch (err) {
-        console.error(`Failed to fetch approval for BRDP ${b.id} (${format}):`, err);
-        return null;
-      }
-    })
-  );
-  return new Map(entries.filter(Boolean));
+// equivalent: v2's approvals are per-project-BRDP).
+//
+// This used to be one authFetchJson call PER BRDP run in parallel
+// (Promise.all) -- fine for a handful of BRDPs, but a real 575-BRDP
+// project (confirmed: Lufthansa) fired 575 simultaneous requests just to
+// load the page's own "N BRDPs will be included" counter. Replaced with
+// the SAME bulk endpoint (project.js's approvals/{format}/export --
+// the "with rule_xml" variant, not the lean one RecordsPage's Rule
+// Status sort uses: the engine's approvedBRDPs branch below reads
+// `.rule_xml` off each approval to embed the actual rule content, which
+// the lean endpoint doesn't carry -- using it here would silently embed
+// "undefined" into every generated document) -- one query, fetched once
+// when the page loads (not only at Generate time), so the live checkbox
+// counters below can use it immediately too.
+function useProjectApprovals(projectId, format) {
+  const [approvalsByBrdpId, setApprovalsByBrdpId] = useState(new Map());
+
+  useEffect(() => {
+    if (!format) {
+      setApprovalsByBrdpId(new Map());
+      return;
+    }
+    let cancelled = false;
+    authFetchJson(`/api/projects/${projectId}/approvals/${encodeURIComponent(format)}/export`)
+      .then((rows) => {
+        if (!cancelled) setApprovalsByBrdpId(new Map(rows.map((r) => [r.brdp_id, r])));
+      })
+      .catch((err) => {
+        console.error(`Failed to fetch bulk approvals for format ${format}:`, err);
+        if (!cancelled) setApprovalsByBrdpId(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, format]);
+
+  return approvalsByBrdpId;
 }
 
 // XSD validation needs a real auth header (v2's /api/validate-brex is
@@ -83,11 +102,23 @@ export default function GeneratePage() {
   const [brdps, setBrdps] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [onlyValidated, setOnlyValidated] = useState(true);
+  // Docs request: an independent AND filter on Rule Status -- both boxes
+  // checked by default (same criterion as onlyValidated's own default).
+  const [onlyVerified, setOnlyVerified] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
   const [xsdValidation, setXsdValidation] = useState(null);
   const generationRef = useRef(0);
+
+  const formatDef = FORMAT_DEFS[format];
+  const isImplemented = !!formatDef;
+
+  // Loaded once on page entry (docs request), not just at Generate time --
+  // both the live counter below AND handleGenerate() itself reuse this
+  // same state, so toggling either checkbox updates the counter instantly
+  // with no network round trip.
+  const approvalsByBrdpId = useProjectApprovals(projectId, formatDef?.approvalsFormat);
 
   useEffect(() => {
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => {
@@ -99,12 +130,18 @@ export default function GeneratePage() {
   useEffect(() => {
     setResult(null);
     setXsdValidation(null);
-  }, [onlyValidated]);
+  }, [onlyValidated, onlyVerified]);
 
-  const formatDef = FORMAT_DEFS[format];
-  const isImplemented = !!formatDef;
-  const validatedCount = brdps.filter((b) => b.validation?.toLowerCase().trim() === 'validated').length;
-  const includedCount = onlyValidated ? validatedCount : brdps.length;
+  // Proposal Status AND Rule Status, each only applied if its own
+  // checkbox is on (docs request: two independent AND conditions, not a
+  // single combined toggle) -- reuses ruleStateOf() (src/utils/ruleState.js,
+  // already shared with RecordsPage/Export to Excel) rather than a third
+  // copy of the same "absence of an approval row = todo" rule.
+  const includedCount = brdps.filter((b) => {
+    if (onlyValidated && b.validation?.toLowerCase().trim() !== 'validated') return false;
+    if (onlyVerified && ruleStateOf(approvalsByBrdpId.get(b.id) ?? null) !== 'verified') return false;
+    return true;
+  }).length;
   const isConfigComplete = !!project.project_config?.modelIdentCode;
 
   const handleGenerate = useCallback(async () => {
@@ -115,11 +152,13 @@ export default function GeneratePage() {
     const generationId = ++generationRef.current;
 
     try {
-      const targetBRDPs = onlyValidated
-        ? brdps.filter((b) => b.validation?.toLowerCase().trim() === 'validated')
-        : brdps;
-      const approvals = await fetchApprovalsOverride(projectId, targetBRDPs, formatDef.approvalsFormat);
-      const output = await formatDef.run(brdps, project.project_config, { onlyValidated, approvals });
+      // The engine itself is unconditional here (docs request: don't
+      // change it) -- only an 'approved' (Verified) rule ever becomes
+      // real rule content; anything else falls to a traceability comment
+      // regardless of onlyVerified. onlyVerified only ever affects the
+      // live counter above, giving an honest preview of what the engine
+      // will actually do, never the generation call itself.
+      const output = await formatDef.run(brdps, project.project_config, { onlyValidated, approvals: approvalsByBrdpId });
       setResult(output);
 
       if (output?.xml && formatDef.xsdFormat) {
@@ -137,7 +176,7 @@ export default function GeneratePage() {
     } finally {
       setGenerating(false);
     }
-  }, [brdps, project.project_config, projectId, onlyValidated, formatDef]);
+  }, [brdps, project.project_config, onlyValidated, formatDef, approvalsByBrdpId]);
 
   const handleCopy = () => {
     if (!result?.xml) return;
@@ -192,18 +231,27 @@ export default function GeneratePage() {
           <input type="checkbox" checked={onlyValidated} onChange={(e) => setOnlyValidated(e.target.checked)} />
           {t('generate.onlyValidated')}
         </label>
+        <label className={styles.checkboxLabel}>
+          <input type="checkbox" checked={onlyVerified} onChange={(e) => setOnlyVerified(e.target.checked)} />
+          {t('generate.onlyVerified')}
+        </label>
 
         <p className={styles.summary}>{t('generate.summary', { count: includedCount })}</p>
 
         {!isConfigComplete && <p className={styles.warning}>⚠ {t('generate.configIncomplete')}</p>}
+        {(!onlyValidated || !onlyVerified) && (
+          <p className={styles.warning}>⚠ {t('generate.notRecommended')}</p>
+        )}
 
         <button
           className={styles.generateBtn}
           onClick={handleGenerate}
           disabled={generating || isLoading || !isImplemented || !isConfigComplete}
         >
+          {generating && <span className={styles.spinner} aria-hidden="true" />}
           {generating ? t('generate.generating') : result ? t('generate.regenerateButton') : t('generate.generateButton')}
         </button>
+        {generating && <p className={styles.hint}>{t('generate.generatingHint')}</p>}
       </div>
 
       {result && (
