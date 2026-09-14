@@ -81,6 +81,37 @@ const EXCEL_CELL_CHAR_LIMIT = 32767;
 // caveat instead of folding a guess into the estimate.
 const MEASURED_MS_PER_PLAIN_ROW = 2;
 
+// Confirmation-modal thresholds (docs request: "usa 20 filas... pero
+// déjalo como constante fácilmente ajustable, no hardcodeada dentro de la
+// función") -- either one tripping is enough to ask for confirmation.
+const VALIDATED_ROWS_WARNING_THRESHOLD = 20;
+const APPLY_ETA_WARNING_SECONDS = 30;
+
+// Single source of truth for the Apply time/cost estimate -- used by the
+// always-visible inline alert (Phase 1, before Apply is even clickable),
+// the confirmation modal (same numbers, same wording, no duplicated
+// logic), and the busy-state countdown once Apply is actually running.
+function computeApplyEta(rows) {
+  const rowCount = rows?.length || 0;
+  const validatedCount = (rows || []).filter(
+    (r) => (r.proposal_status || '').toLowerCase().trim() === 'validated'
+  ).length;
+  const seconds = Math.max(1, Math.ceil((rowCount * MEASURED_MS_PER_PLAIN_ROW) / 1000));
+  return { seconds, validatedCount, hasValidatedRows: validatedCount > 0 };
+}
+
+// Shared text for the inline alert and the modal -- see computeApplyEta().
+function applyEtaMessage(t, { seconds, hasValidatedRows }) {
+  const timeText =
+    seconds < 60
+      ? t('config.dataManagement.applyEtaUnderMinute')
+      : t('config.dataManagement.applyEtaEstimate', { minutes: Math.ceil(seconds / 60) });
+  const caveatText = hasValidatedRows
+    ? t('config.dataManagement.applyEtaValidatedCaveat')
+    : t('config.dataManagement.applyEtaNoEmbeddingCalls');
+  return `${timeText} ${caveatText}`;
+}
+
 // Checked client-side BEFORE calling exportToExcel() -- the raw SheetJS
 // exception carries no row/column information at all, so this is the
 // only way to name the actual offending BRDP(s) in the error message.
@@ -110,6 +141,16 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const [applyEtaSeconds, setApplyEtaSeconds] = useState(null);
   const [applyHasValidatedRows, setApplyHasValidatedRows] = useState(false);
   const etaIntervalRef = useRef(null);
+  // Confirmation modal for costly Apply operations. dontAskAgain is
+  // deliberately plain component state, not sessionStorage -- it needs to
+  // survive across repeated imports within the same page load (component
+  // doesn't unmount between them) but reset on an actual page reload,
+  // which sessionStorage would NOT do (it survives same-tab reloads).
+  // Plain React state resets exactly when the component remounts, i.e.
+  // exactly on reload -- matches the required behavior directly.
+  const [dontAskAgain, setDontAskAgain] = useState(false);
+  const [showApplyConfirm, setShowApplyConfirm] = useState(false);
+  const [modalDontAskChecked, setModalDontAskChecked] = useState(false);
 
   const refreshCount = () =>
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => setBrdpCount(data.length));
@@ -192,11 +233,9 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     setBusy(true);
     setImportErrors([]);
 
-    const rowCount = pendingRows?.length || 0;
-    setApplyHasValidatedRows(
-      (pendingRows || []).some((r) => (r.proposal_status || '').toLowerCase().trim() === 'validated')
-    );
-    setApplyEtaSeconds(Math.max(1, Math.ceil((rowCount * MEASURED_MS_PER_PLAIN_ROW) / 1000)));
+    const eta = computeApplyEta(pendingRows);
+    setApplyHasValidatedRows(eta.hasValidatedRows);
+    setApplyEtaSeconds(eta.seconds);
     etaIntervalRef.current = setInterval(() => {
       setApplyEtaSeconds((s) => (s === null ? null : Math.max(0, s - 60)));
     }, 60000);
@@ -220,6 +259,38 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       setApplyEtaSeconds(null);
     }
   };
+
+  // Gate in front of handleApplyImport (docs request): only interrupts
+  // with a blocking modal when the cost is actually significant (either
+  // threshold tripped) AND the user hasn't already waved it off this
+  // session -- otherwise Apply runs immediately, same as before.
+  const handleApplyClick = () => {
+    const eta = computeApplyEta(pendingRows);
+    const isCostly = eta.validatedCount > VALIDATED_ROWS_WARNING_THRESHOLD || eta.seconds > APPLY_ETA_WARNING_SECONDS;
+    if (isCostly && !dontAskAgain) {
+      setModalDontAskChecked(false);
+      setShowApplyConfirm(true);
+      return;
+    }
+    handleApplyImport();
+  };
+
+  const handleConfirmProceed = () => {
+    if (modalDontAskChecked) setDontAskAgain(true);
+    setShowApplyConfirm(false);
+    handleApplyImport();
+  };
+
+  const handleConfirmCancel = () => {
+    setShowApplyConfirm(false);
+  };
+
+  // One display value that's live (recalculated from pendingRows) before
+  // Apply is pressed, and switches to the ticking busy-state countdown
+  // once it is -- a single alert, not two competing estimates on screen.
+  const applyEtaPreview = pendingRows ? computeApplyEta(pendingRows) : null;
+  const displayEtaSeconds = busy && applyEtaSeconds !== null ? applyEtaSeconds : applyEtaPreview?.seconds ?? null;
+  const displayEtaHasValidated = busy ? applyHasValidatedRows : applyEtaPreview?.hasValidatedRows ?? false;
 
   const okCount = analysis?.results.filter((r) => r.outcome === 'ok').length ?? 0;
   const rejectedRows = analysis?.results.filter((r) => r.outcome === 'rejected') ?? [];
@@ -424,8 +495,19 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                 </>
               )}
 
+              {/* Always visible as soon as the Phase 1 summary is (docs
+                  request) -- not tucked below the button where it's only
+                  seen after Apply has already been clicked. Recalculated
+                  from pendingRows on every render, so it stays accurate
+                  if the user re-analyzes a different file. */}
+              {displayEtaSeconds !== null && (
+                <p className={styles.warning}>
+                  {displayEtaHasValidated ? '⚠️' : 'ℹ️'} {applyEtaMessage(t, { seconds: displayEtaSeconds, hasValidatedRows: displayEtaHasValidated })}
+                </p>
+              )}
+
               <div className={styles.actionsRow}>
-                <Button onClick={handleApplyImport} disabled={busy}>
+                <Button onClick={handleApplyClick} disabled={busy}>
                   {busy && <span className={styles.spinner} aria-hidden="true" />}
                   {busy ? t('config.dataManagement.applying') : t('config.dataManagement.applyButton')}
                 </Button>
@@ -433,13 +515,31 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                   {t('config.dataManagement.cancel')}
                 </button>
               </div>
-              {busy && applyEtaSeconds !== null && (
-                <p className={styles.hint}>
-                  {applyEtaSeconds < 60
-                    ? t('config.dataManagement.applyEtaUnderMinute')
-                    : t('config.dataManagement.applyEtaEstimate', { minutes: Math.ceil(applyEtaSeconds / 60) })}
-                  {applyHasValidatedRows && ` ${t('config.dataManagement.applyEtaValidatedCaveat')}`}
-                </p>
+
+              {showApplyConfirm && (
+                <div className={styles.modalOverlay} onClick={handleConfirmCancel}>
+                  <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+                    <h3 className={styles.sectionHeading}>{t('config.dataManagement.applyConfirmTitle')}</h3>
+                    <p className={styles.warning}>
+                      {applyEtaPreview?.hasValidatedRows ? '⚠️' : 'ℹ️'}{' '}
+                      {applyEtaPreview && applyEtaMessage(t, applyEtaPreview)}
+                    </p>
+                    <label className={styles.checkboxLabel}>
+                      <input
+                        type="checkbox"
+                        checked={modalDontAskChecked}
+                        onChange={(e) => setModalDontAskChecked(e.target.checked)}
+                      />
+                      {t('config.dataManagement.applyConfirmDontAskAgain')}
+                    </label>
+                    <div className={styles.actionsRow}>
+                      <Button onClick={handleConfirmProceed}>{t('config.dataManagement.applyConfirmProceed')}</Button>
+                      <button type="button" className={styles.secondaryButton} onClick={handleConfirmCancel}>
+                        {t('config.dataManagement.cancel')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           )}
