@@ -348,10 +348,10 @@ export default function ProjectsPage() {
                 </td>
                 <td>
                   <div className={styles.actions}>
-                    <button onClick={() => navigate(`/projects/${p.id}/config`)}>{t('nav.config')}</button>
-                    <button onClick={() => navigate(`/projects/${p.id}/records`)}>{t('nav.records')}</button>
-                    <button onClick={() => navigate(`/projects/${p.id}/generate`)}>{t('nav.generate')}</button>
-                    <button onClick={() => navigate(`/projects/${p.id}/brexdoc`)}>{t('nav.brexdoc')}</button>
+                    <button className={styles.navAction} onClick={() => navigate(`/projects/${p.id}/config`)}>{t('nav.config')}</button>
+                    <button className={styles.navAction} onClick={() => navigate(`/projects/${p.id}/records`)}>{t('nav.records')}</button>
+                    <button className={styles.navAction} onClick={() => navigate(`/projects/${p.id}/generate`)}>{t('nav.generate')}</button>
+                    <button className={styles.navAction} onClick={() => navigate(`/projects/${p.id}/brexdoc`)}>{t('nav.brexdoc')}</button>
                     {p.effective_role === 'editor' && renamingId !== p.id && (
                       <button onClick={() => setRenamingId(p.id)}>{t('projects.rename.button')}</button>
                     )}

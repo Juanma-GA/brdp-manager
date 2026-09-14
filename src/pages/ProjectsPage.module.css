@@ -102,6 +102,17 @@
   border-color: #fecaca !important;
 }
 
+/* Same ATEXIS blue already used by .badge (Standard column) -- applied
+   only to the 4 navigation actions (Config/Records/Generate BREX-
+   Schematron/Generate Report), never Rename (stays neutral) or Delete
+   (stays .dangerLink), so the row visually separates "go look at
+   something" from "change this project". */
+.navAction {
+  background: #eaf2fa !important;
+  color: #245c90 !important;
+  border-color: #c7ddf0 !important;
+}
+
 .headerActions {
   display: flex;
   align-items: center;
