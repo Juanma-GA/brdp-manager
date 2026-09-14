@@ -181,6 +181,19 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
 
   const handleExport = async () => {
     setBusy(true);
+    // Real yield to the browser before any work starts (docs request,
+    // confirmed with real timing: exportToExcel() below is synchronous
+    // XLSX generation -- for a project with many BRDPs and long Rule
+    // content, that call alone can block the main thread for multiple
+    // seconds). Without this, the two awaited fetches that follow
+    // *usually* yield enough for React to paint "Exporting..." first --
+    // but that's incidental to how fast the network happens to respond,
+    // not guaranteed by the code, and a fast/cached response can win the
+    // race against the browser's next paint. Double rAF (not a single
+    // one) waits until the frame AFTER the one currently being prepared,
+    // so a real paint has already happened, not just been scheduled, by
+    // the time exportToExcel() runs.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
       const brdps = await authFetchJson(`/api/projects/${projectId}/brdps`);
       // No rule format at all for this standard (Schematron 1.0 -- DITA,
@@ -211,6 +224,13 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       <div className={styles.subsection}>
         <h3 className={styles.subsectionHeading}>{t('config.dataManagement.exportTitle')}</h3>
         <Button onClick={handleExport} disabled={busy}>
+          {/* Static text alone isn't enough for a large project (docs
+              request, confirmed with real timing: the synchronous XLSX
+              build can block the main thread for multiple seconds with
+              many BRDPs / long Rule content) -- an animated spinner stays
+              an unmistakable "still working" signal even while nothing
+              else on the page can update. */}
+          {busy && <span className={styles.spinner} aria-hidden="true" />}
           {busy ? t('config.dataManagement.exporting') : t('config.dataManagement.exportButton')}
         </Button>
         {brdpCount !== null && (
