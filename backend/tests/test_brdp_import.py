@@ -155,6 +155,32 @@ async def test_analyze_rejects_malformed_xml_regardless_of_status(client, editor
     assert "claims" not in result["reason"]
 
 
+async def test_analyze_accepts_multi_root_rulescontext_rule(client, editor_and_project):
+    """A real approved BRDP's Rule cell can legitimately mix a loose
+    structureObjectRule with one or more complete <contextRules
+    rulesContext="..."> blocks (S1000D 4.2 allows repeated <contextRules>
+    as siblings under <brex>, confirmed against brex4.2.xsd: contextRules
+    maxOccurs="unbounded") -- e.g. a real Lufthansa BREX rule scoped to a
+    specific schema like fault.xsd. That's multiple XML-sibling roots in
+    one Rule cell, which used to be rejected outright as "not well-formed
+    XML" (etree.fromstring() requires exactly one root) before
+    _xml_well_formed_error started wrapping fragments in a throwaway
+    <root>.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    multi_root_rule = (
+        '<structureObjectRule id="x"><objectPath allowedObjectFlag="1">//x</objectPath></structureObjectRule>'
+        '<contextRules rulesContext="fault.xsd"><structureObjectRuleGroup>'
+        '<structureObjectRule id="x-ctx"><objectPath allowedObjectFlag="1">//scoped</objectPath></structureObjectRule>'
+        "</structureObjectRuleGroup></contextRules>"
+    )
+    rows = [_row(2, "BRDP-IMP-CTX", rule_status="Verified", rule=multi_root_rule)]
+
+    response = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (result,) = response.json()["results"]
+    assert result["outcome"] == "ok"
+
+
 async def test_analyze_rejects_invalid_rule_status_value(client, editor_and_project):
     project, headers, _viewer_headers = editor_and_project
     rows = [_row(2, "BRDP-IMP-004", rule_status="Pending Review", rule="")]

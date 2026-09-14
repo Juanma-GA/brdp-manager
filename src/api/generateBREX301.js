@@ -169,29 +169,59 @@ function splitMultipleObjPaths301(xml) {
   return result;
 }
 
-const XML_FOOTER_301 = `
-</structrules>
-</contextrules>
-</brex>
-</content>
-</dmodule>`;
-
 function assembleChunks301(baseXml, additionalRules) {
-  // Extrae objrule Y comentarios nonContextRule en orden de documento (preserva trazabilidad)
+  // S1000D 3.0.1 ALSO allows multiple <contextrules context="..."> as
+  // siblings under <brex> -- confirmed directly against
+  // sources/S3.0.1/brex.xsd (brexType: contextrules maxOccurs="unbounded"),
+  // same mechanism as 4.x's contextRules/rulesContext, just lowercase
+  // element/attribute names and "context" instead of "rulesContext". Not
+  // dead code: this is the real 3.0.1 equivalent, not an assumption.
+  // Extracted FIRST from the raw text, same rationale as generateBREX.js's
+  // assembleChunks() -- so their nested <objrule> content never leaks into
+  // the loose-piece extraction below. context="[^"]+" (non-empty) keeps
+  // this from ever matching buildEmptyDocument301()'s own generic
+  // <contextrules> (which here doesn't carry the attribute at all).
+  const contextRulesBlocks = [];
+  const contextRulesPattern = /<contextrules\b[^>]*\bcontext="[^"]+"[^>]*>[\s\S]*?<\/contextrules>/g;
+  let crMatch;
+  while ((crMatch = contextRulesPattern.exec(additionalRules)) !== null) {
+    contextRulesBlocks.push(crMatch[0]);
+  }
+  const looseRulesText = additionalRules.replace(contextRulesPattern, '');
+  const contextRulesSiblings = contextRulesBlocks.length ? '\n' + contextRulesBlocks.join('\n') : '';
+
+  // Extrae objrule Y comentarios nonContextRule en orden de documento
+  // (preserva trazabilidad), sobre el texto ya sin los bloques con
+  // contexto extraídos arriba. No anchor needed here (unlike
+  // structureObjectRule/structureObjectRuleGroup in 4.x): confirmed
+  // against brex.xsd that no element name extends "objrule" (no
+  // "objruleGroup" or similar exists in 3.0.1), so "<objrule" can never
+  // accidentally match as a prefix of something else.
   const piecePattern = /<objrule[\s\S]*?<\/objrule>|<!--\s*nonContextRule[\s\S]*?-->/g;
   const pieces = [];
   let m;
-  while ((m = piecePattern.exec(additionalRules)) !== null) {
+  while ((m = piecePattern.exec(looseRulesText)) !== null) {
     let piece = m[0];
     if (piece.startsWith('<!--')) piece = sanitizeNonContextComments301(piece);
     pieces.push(piece);
   }
-  if (!pieces.length) return baseXml;
+  if (!pieces.length && !contextRulesBlocks.length) return baseXml;
 
-  // Insertar justo antes de </structrules> para preservar todo lo que ya hay dentro
+  // Insertar las piezas sueltas justo antes de </structrules> para
+  // preservar todo lo que ya hay dentro, luego los bloques con contexto
+  // como hermanos justo después del </contextrules> genérico que ya
+  // cerró (nunca fusionados entre sí, aunque compartan el mismo context).
   const idx = baseXml.lastIndexOf('</structrules>');
   if (idx !== -1) {
-    return baseXml.slice(0, idx) + pieces.join('\n') + '\n' + baseXml.slice(idx);
+    let assembled = baseXml.slice(0, idx) + (pieces.length ? pieces.join('\n') + '\n' : '') + baseXml.slice(idx);
+    if (contextRulesSiblings) {
+      const genericCloseIdx = assembled.indexOf('</contextrules>', idx);
+      const insertAt = genericCloseIdx !== -1 ? genericCloseIdx + '</contextrules>'.length : -1;
+      if (insertAt !== -1) {
+        assembled = assembled.slice(0, insertAt) + contextRulesSiblings + assembled.slice(insertAt);
+      }
+    }
+    return assembled;
   }
 
   // Fallback: XML truncado sin </structrules> — reconstruir footer
@@ -208,7 +238,14 @@ function assembleChunks301(baseXml, additionalRules) {
     const endLen = lastObj >= lastComment ? '</objrule>'.length : '-->'.length;
     stripped = stripped.slice(0, lastAny + endLen);
   }
-  return stripped + '\n' + pieces.join('\n') + XML_FOOTER_301;
+  return (
+    stripped +
+    '\n' +
+    (pieces.length ? pieces.join('\n') + '\n' : '') +
+    '</structrules>\n</contextrules>' +
+    contextRulesSiblings +
+    '\n</brex>\n</content>\n</dmodule>'
+  );
 }
 
 const MAX_RETRIES_301 = 2;
@@ -332,6 +369,11 @@ function dedupeNonContextComments301(xml) {
   });
 }
 
+// Reviewed against multiple <contextrules> siblings (assembleChunks301()'s
+// context-scoped blocks): none of these functions reference "contextrules"
+// at all, they operate on dmodule/objrule/avee elements/comments directly
+// with global (/g) regexes, so which <contextrules> parent an objrule sits
+// under is irrelevant to any of them.
 function finalizeDocument301(xml, projectConfig, schemaSummary) {
   xml = forceDmoduleTag301(xml, schemaSummary && schemaSummary.dmodule_opening_tag);
   xml = fixObjapplPlacement301(xml);
@@ -353,7 +395,12 @@ function finalizeDocument301(xml, projectConfig, schemaSummary) {
 // <contextrules> is always present (S1000D 3.0.1's <brex> requires at least
 // one), but its <structrules> child (which itself requires at least one
 // <objrule> when present) starts empty and is pruned away by
-// pruneEmptyContainers301 if no approved BRDP produced one.
+// pruneEmptyContainers301 if no approved BRDP produced one. Additional
+// <contextrules context="..."> siblings can appear alongside this generic
+// one -- extracted verbatim from an approved BRDP's rule_xml by
+// assembleChunks301() (brex.xsd confirms contextrules maxOccurs="unbounded",
+// same mechanism as 4.x's contextRules/rulesContext) -- this generic one is
+// unaffected either way.
 function esc301(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -408,6 +455,13 @@ ${openingTag}
 </dmodule>`;
 }
 
+// Safe with multiple <contextrules> siblings now possible
+// (assembleChunks301()'s context-scoped blocks): `>\s*<` between open/close
+// with no [\s\S]* wildcard means this can only match a genuinely empty
+// <structrules></structrules> pair, wherever it occurs -- it never spans
+// into a different, content-bearing block. A freshly-extracted context
+// block always carries the real content it was extracted with, so its own
+// <structrules> (if it has one) is never empty either.
 function pruneEmptyContainers301(xml) {
   return xml.replace(/<structrules>\s*<\/structrules>/g, '');
 }

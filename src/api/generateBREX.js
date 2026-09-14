@@ -26,7 +26,21 @@ export function extractXML(rawResponse) {
 export function checkWellFormed(xmlString) {
   try {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(xmlString, "application/xml");
+    // A rule_xml fragment (never has an <?xml ...?> declaration, unlike a
+    // full assembled document) can legitimately have multiple XML-sibling
+    // roots since this round's rulesContext support -- a loose
+    // <structureObjectRule> alongside one or more complete
+    // <contextRules rulesContext="..."> blocks in the very same cell (e.g.
+    // BRDP-S1-00006). Confirmed empirically that DOMParser otherwise
+    // rejects that with "Extra content at the end of the document", same
+    // as lxml server-side (see _xml_well_formed_error in approvals.py) --
+    // wrapping in a throwaway <root> fixes it for fragments without
+    // changing anything for a real document (detected by its <?xml
+    // declaration), which already always has exactly one root and is
+    // parsed unwrapped, unchanged from before.
+    const isFragment = !xmlString.trim().startsWith("<?xml");
+    const toParse = isFragment ? `<root>${xmlString}</root>` : xmlString;
+    const doc = parser.parseFromString(toParse, "application/xml");
     const parserError = doc.querySelector("parsererror");
     if (parserError) {
       const msg = parserError.textContent || "XML is not well-formed";
@@ -145,7 +159,13 @@ function escapeXMLContent(xml) {
 
 function splitMultipleObjectPaths(xml) {
   const original = xml;
-  const rulePattern = /<structureObjectRule[\s\S]*?<\/structureObjectRule>/g;
+  // (?![a-zA-Z]) anchors the opening tag so it can't also match the
+  // literal prefix "<structureObjectRule" inside "<structureObjectRuleGroup>"
+  // -- confirmed real bug (Lufthansa 78-BRDP BREX): without the anchor this
+  // swallows everything up to the next real </structureObjectRule>,
+  // corrupting the group's own closing tag. See assembleChunks() below,
+  // where the same bug caused a real "tag mismatch" well-formedness error.
+  const rulePattern = /<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/g;
 
   const rules = [];
   let match;
@@ -200,25 +220,60 @@ function splitMultipleObjectPaths(xml) {
 }
 
 function assembleChunks(baseXml, additionalRules) {
-  // Extraer structureObjectRule (igual que antes)
+  // S1000D 4.2 allows multiple <contextRules rulesContext="..."> as
+  // siblings under <brex> (brex4.2.xsd: contextRules maxOccurs="unbounded"),
+  // each scoped to a specific schema (e.g. proced.xsd, fault.xsd). A real
+  // approved BRDP's rule_xml can carry one of these complete blocks
+  // (extracted from a real customer BREX, e.g. Lufthansa) alongside or
+  // instead of a loose structureObjectRule/nonContextRule. These are
+  // extracted FIRST, from the raw text, so their nested content never
+  // leaks into the loose-rule extraction below -- and removed from the
+  // working text before that extraction runs.
+  //
+  // rulesContext="[^"]+" (one or more chars) deliberately requires a
+  // non-empty value: buildEmptyDocument()'s own generic container is
+  // <contextRules rulesContext=""> (empty value, still a match for a
+  // naive rulesContext="[^"]*" pattern) -- using "+" instead of "*" keeps
+  // this extraction from ever touching that generic skeleton container.
+  const contextRulesBlocks = [];
+  const contextRulesPattern = /<contextRules\b[^>]*\brulesContext="[^"]+"[^>]*>[\s\S]*?<\/contextRules>/g;
+  let crMatch;
+  while ((crMatch = contextRulesPattern.exec(additionalRules)) !== null) {
+    contextRulesBlocks.push(crMatch[0]);
+  }
+  const looseRulesText = additionalRules.replace(contextRulesPattern, '');
+
+  // Extraer structureObjectRule sueltos (igual que antes, sobre el texto ya
+  // sin los bloques con contexto extraídos arriba).
+  //
+  // (?![a-zA-Z]) anchors the opening tag so "<structureObjectRule" can't
+  // also match as a prefix of "<structureObjectRuleGroup>" -- confirmed
+  // real bug (Lufthansa 78-BRDP BREX, "tag mismatch" well-formedness
+  // error): without the anchor this swallows everything up to the next
+  // real </structureObjectRule>, corrupting the group's own closing tag.
   const structureRules = [];
-  const rulePattern = /<structureObjectRule[\s\S]*?<\/structureObjectRule>/g;
+  const rulePattern = /<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/g;
   let match;
-  while ((match = rulePattern.exec(additionalRules)) !== null) {
+  while ((match = rulePattern.exec(looseRulesText)) !== null) {
     structureRules.push(match[0]);
   }
 
-  // Extraer nonContextRule sueltos de los chunks
+  // Extraer nonContextRule sueltos de los chunks. Same anchor rationale as
+  // above -- "<nonContextRule" is also a literal prefix of the plural
+  // "<nonContextRules>" container, so it gets the same latent-bug fix even
+  // though today's data never triggers it (a contextRules block can only
+  // contain structureObjectRuleGroup/notationRuleList per the XSD, never
+  // nonContextRules, so the two never actually collide in practice yet).
   const nonContextRules = [];
-  const nonContextPattern = /<nonContextRule[\s\S]*?<\/nonContextRule>/g;
-  while ((match = nonContextPattern.exec(additionalRules)) !== null) {
+  const nonContextPattern = /<nonContextRule(?![a-zA-Z])[\s\S]*?<\/nonContextRule>/g;
+  while ((match = nonContextPattern.exec(looseRulesText)) !== null) {
     nonContextRules.push(match[0]);
   }
 
   const cleanedStructure = structureRules.join('\n');
   const cleanedNonContext = nonContextRules.join('\n');
 
-  if (!cleanedStructure.trim() && !cleanedNonContext.trim()) return baseXml;
+  if (!cleanedStructure.trim() && !cleanedNonContext.trim() && contextRulesBlocks.length === 0) return baseXml;
 
   // Strip footer del baseXml (igual que antes)
   const footerTags = ['</structureObjectRuleGroup>', '</contextRules>', '</nonContextRules>', '</brex>', '</content>', '</dmodule>'];
@@ -258,7 +313,7 @@ function assembleChunks(baseXml, additionalRules) {
       const existingContent = existingMatch ? existingMatch[1] : '';
 
       // Filtrar nonContextRule duplicados contra ids globales
-      const deduped = (cleanedNonContext.match(/<nonContextRule[\s\S]*?<\/nonContextRule>/g) || [])
+      const deduped = (cleanedNonContext.match(/<nonContextRule(?![a-zA-Z])[\s\S]*?<\/nonContextRule>/g) || [])
         .filter(rule => {
           const m = rule.match(/\bid="([^"]+)"/);
           return m ? !globalIds.has(m[1]) : true;
@@ -268,7 +323,7 @@ function assembleChunks(baseXml, additionalRules) {
       nonContextBlock = `\n<nonContextRules>\n${existingContent}${deduped.trim() ? '\n' + deduped : ''}\n</nonContextRules>`;
     } else {
       // Filtrar cleanedNonContext contra ids globales incluso sin existing block
-      const deduped = (cleanedNonContext.match(/<nonContextRule[\s\S]*?<\/nonContextRule>/g) || [])
+      const deduped = (cleanedNonContext.match(/<nonContextRule(?![a-zA-Z])[\s\S]*?<\/nonContextRule>/g) || [])
         .filter(rule => {
           const m = rule.match(/\bid="([^"]+)"/);
           return m ? !globalIds.has(m[1]) : true;
@@ -282,8 +337,19 @@ function assembleChunks(baseXml, additionalRules) {
     nonContextBlock = existingMatch ? `\n${existingMatch[0]}` : '';
   }
 
+  // Any <contextRules rulesContext="..."> blocks extracted above go as
+  // their own siblings, each intact and never merged even if two BRDPs
+  // share the same rulesContext value -- brex4.2.xsd permits repeated
+  // <contextRules> under <brex> (maxOccurs="unbounded"), confirmed
+  // directly against the schema, so grouping by rulesContext is neither
+  // required nor attempted. They must come AFTER the generic
+  // <contextRules> and BEFORE nonContextBlock: brexElemType's sequence is
+  // contextRules* then nonContextRules? (also confirmed against the
+  // schema) -- nonContextRules can never precede a contextRules sibling.
+  const contextRulesSiblings = contextRulesBlocks.length ? '\n' + contextRulesBlocks.join('\n') : '';
+
   // Ensamblar footer correcto
-  const footer = `\n</structureObjectRuleGroup>\n</contextRules>${nonContextBlock}\n</brex>\n</content>\n</dmodule>`;
+  const footer = `\n</structureObjectRuleGroup>\n</contextRules>${contextRulesSiblings}${nonContextBlock}\n</brex>\n</content>\n</dmodule>`;
 
   return stripped + '\n' + (cleanedStructure || '') + footer;
 }
@@ -318,8 +384,8 @@ export async function generateSingleRule(brdp, projectConfig, schemaSummary, cal
     const escapedContent = escapeXMLContent(escaped);
     const splitContent = splitMultipleObjectPaths(escapedContent);
 
-    // Intentar structureObjectRule primero
-    const ruleMatch = splitContent.match(/<structureObjectRule[\s\S]*?<\/structureObjectRule>/);
+    // Intentar structureObjectRule primero (mismo ancla que splitMultipleObjectPaths/assembleChunks)
+    const ruleMatch = splitContent.match(/<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/);
     if (ruleMatch) {
       const idMatch = ruleMatch[0].match(/structureObjectRule id="([^"]+)"/);
       if (idMatch && idMatch[1] === brdp.id) {
@@ -446,6 +512,15 @@ function dropRedundantNonContextRules(xml) {
   });
 }
 
+// Reviewed against the possibility of multiple <contextRules> siblings
+// (assembleChunks()'s rulesContext blocks): none of forceDmoduleTag/
+// forceIssueType/fixFlagPlacement/promoteOrphanSplitRules/forceDmCodeFields/
+// dropRedundantNonContextRules/dedupeNonContextRules reference the literal
+// string "contextRules" at all -- they operate on dmodule/dmStatus/dmCode/
+// structureObjectRule/nonContextRule elements directly, scanning the whole
+// document with global (/g) regexes, so which <contextRules> parent a rule
+// happens to sit under is irrelevant to any of them. No single-container
+// assumption exists here to fix.
 function finalizeDocument(xml, projectConfig, schemaSummary) {
   xml = forceDmoduleTag(xml, schemaSummary && schemaSummary.dmodule_opening_tag);
   xml = forceIssueType(xml);
@@ -536,7 +611,14 @@ ${openingTag}
 // nonContextRule, or there were none at all), an empty
 // structureObjectRuleGroup would violate its own required-child schema rule,
 // so it (and then contextRules, if that leaves it empty too) is dropped
-// rather than left dangling-empty.
+// rather than left dangling-empty. Safe with multiple <contextRules> now
+// possible (assembleChunks()'s rulesContext-scoped siblings): the regex
+// requires `>\s*<` immediately between open and close tags (no [\s\S]*
+// wildcard), so it can only ever match a genuinely empty pair -- it cannot
+// span across a real, content-bearing sibling to falsely "empty out" two
+// adjacent blocks together, and a freshly-extracted rulesContext block is
+// never empty in the first place (it always carries the real content it
+// was extracted with), so it never matches this pattern regardless.
 function pruneEmptyContainers(xml) {
   xml = xml.replace(/<structureObjectRuleGroup>\s*<\/structureObjectRuleGroup>/g, '');
   xml = xml.replace(/<contextRules\b[^>]*>\s*<\/contextRules>/g, '');

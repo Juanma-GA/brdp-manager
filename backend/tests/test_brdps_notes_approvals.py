@@ -394,3 +394,47 @@ async def test_propose_rejects_malformed_xml(client, editor_and_project):
     # Confirm it was really rejected, not saved anyway.
     fetched = await client.get(url, headers=headers)
     assert fetched.json() is None
+
+
+async def test_propose_accepts_multi_root_rulescontext_rule_xml(client, editor_and_project):
+    """S1000D 4.2 allows multiple <contextRules rulesContext="..."> as
+    siblings under <brex> (confirmed against brex4.2.xsd: contextRules
+    maxOccurs="unbounded"), so a real approved BRDP's rule_xml can
+    legitimately mix a loose structureObjectRule with one or more complete
+    <contextRules rulesContext="..."> blocks in the same cell (e.g. a real
+    Lufthansa BREX BRDP whose rule applies to specific schemas like
+    fault.xsd). That is multiple XML-sibling roots in one rule_xml value --
+    confirmed this used to be rejected outright by etree.fromstring() with
+    "Extra content at the end of the document" before _xml_well_formed_error
+    started wrapping fragments in a throwaway <root>.
+    """
+    project, headers = editor_and_project
+    brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-APPR-005"}, headers=headers)
+    ).json()
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
+
+    rule_xml = (
+        '<structureObjectRule id="BRDP-APPR-005"><objectPath allowedObjectFlag="1">//loose</objectPath>'
+        "<objectUse>Loose rule.</objectUse></structureObjectRule>"
+        '<contextRules rulesContext="fault.xsd"><structureObjectRuleGroup>'
+        '<structureObjectRule id="BRDP-APPR-005-ctx"><objectPath allowedObjectFlag="1">//scoped</objectPath>'
+        "<objectUse>Scoped rule.</objectUse></structureObjectRule>"
+        "</structureObjectRuleGroup></contextRules>"
+    )
+    response = await client.put(url, json={"rule_xml": rule_xml, "source": "manual"}, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["rule_xml"] == rule_xml
+
+    # A genuinely malformed multi-root fragment (unclosed tag inside the
+    # second root) must still be rejected -- wrapping in <root> must not
+    # relax real well-formedness errors, only allow multiple valid roots.
+    broken_rule_xml = (
+        '<structureObjectRule id="BRDP-APPR-005"><objectPath>//loose</objectPath></structureObjectRule>'
+        '<contextRules rulesContext="fault.xsd">'
+    )
+    broken_response = await client.put(
+        url, json={"rule_xml": broken_rule_xml, "source": "manual"}, headers=headers
+    )
+    assert broken_response.status_code == 422
+    assert "not well-formed" in broken_response.json()["detail"]

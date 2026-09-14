@@ -101,9 +101,20 @@ def _xml_well_formed_error(xml_text: str) -> str | None:
     generated BREX/Schematron document instead of at save time. Mirrors
     the frontend's checkWellFormed() (src/api/generateBREX.js) so the API
     enforces the same rule even for a caller that skips the UI.
+
+    A rule_xml value here is always a fragment, never a full <?xml ...?>
+    document -- and since this round's rulesContext support, it can
+    legitimately have multiple XML-sibling roots (a loose
+    structureObjectRule alongside one or more complete <contextRules
+    rulesContext="..."> blocks in the same cell, e.g. BRDP-S1-00006).
+    Confirmed empirically that lxml's etree.fromstring() otherwise rejects
+    that with "Extra content at the end of the document" -- wrapping in a
+    throwaway <root> fixes it. Mirrors the same fragment/document split
+    checkWellFormed() now applies client-side, for the same reason.
     """
     try:
-        etree.fromstring(xml_text.encode("utf-8"))
+        wrapped = xml_text if xml_text.lstrip().startswith("<?xml") else f"<root>{xml_text}</root>"
+        etree.fromstring(wrapped.encode("utf-8"))
         return None
     except etree.XMLSyntaxError as exc:
         return str(exc)
