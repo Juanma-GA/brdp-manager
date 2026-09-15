@@ -281,24 +281,115 @@ async def test_permanent_delete_removes_from_trash_and_history_survives(client, 
         assert all(row.brdp_id is None for row in surviving)
 
 
-async def test_editor_cannot_access_trash_endpoints(client, admin_editor_and_project):
+async def test_editor_can_list_restore_and_delete_own_projects_trash(client, admin_editor_and_project):
+    """An editor is no longer admin-gated out of the Trash entirely -- they
+    can see and act on their OWN project's trashed rows through every
+    endpoint (list, restore, single delete, bulk delete), same as an admin
+    would for that project.
+    """
     project, admin, editor, admin_headers, editor_headers = admin_editor_and_project
     brdp = await _create_brdp(client, project.id, editor_headers, "BRDP-AUTHZ-001")
     await client.delete(f"/api/projects/{project.id}/brdps/{brdp['id']}", headers=editor_headers)
 
     list_resp = await client.get("/api/trash", headers=editor_headers)
-    assert list_resp.status_code == 403
+    assert list_resp.status_code == 200
+    assert any(e["id"] == brdp["id"] for e in list_resp.json())
 
     restore_resp = await client.post(f"/api/trash/{brdp['id']}/restore", headers=editor_headers)
-    assert restore_resp.status_code == 403
+    assert restore_resp.status_code == 200
 
+    await client.delete(f"/api/projects/{project.id}/brdps/{brdp['id']}", headers=editor_headers)
     purge_resp = await client.delete(f"/api/trash/{brdp['id']}", headers=editor_headers)
-    assert purge_resp.status_code == 403
+    assert purge_resp.status_code == 204
 
+    brdp2 = await _create_brdp(client, project.id, editor_headers, "BRDP-AUTHZ-002")
+    await client.delete(f"/api/projects/{project.id}/brdps/{brdp2['id']}", headers=editor_headers)
     bulk_resp = await client.request(
-        "DELETE", "/api/trash", json={"brdp_ids": [brdp["id"]]}, headers=editor_headers
+        "DELETE", "/api/trash", json={"brdp_ids": [brdp2["id"]]}, headers=editor_headers
     )
-    assert bulk_resp.status_code == 403
+    assert bulk_resp.status_code == 200
+    assert bulk_resp.json() == {"deleted": [brdp2["id"]], "not_found": []}
+
+
+async def test_pure_viewer_gets_403_from_trash_list_not_an_empty_list(client, admin_editor_and_project):
+    """A viewer (no editor role anywhere) reads as 'no access', not 'your
+    trash happens to be empty' -- the section shouldn't even render for
+    them, and a direct API call must be a 403, never a 200 with [].
+    """
+    project, admin, editor, admin_headers, editor_headers = admin_editor_and_project
+
+    async with async_session_factory() as session:
+        viewer = User(
+            email=f"trash-viewer-{uuid.uuid4()}@example.com",
+            password_hash=hash_password("irrelevant-password"),
+            display_name="Trash Viewer",
+            global_role="user",
+        )
+        session.add(viewer)
+        await session.flush()
+        session.add(UserProjectRole(user_id=viewer.id, project_id=project.id, role="viewer"))
+        await session.commit()
+        await session.refresh(viewer)
+
+    viewer_headers = {"Authorization": f"Bearer {create_access_token(viewer.id)}"}
+    try:
+        resp = await client.get("/api/trash", headers=viewer_headers)
+        assert resp.status_code == 403
+    finally:
+        async with async_session_factory() as session:
+            db_user = await session.get(User, viewer.id)
+            if db_user is not None:
+                await session.delete(db_user)
+            await session.commit()
+
+
+async def test_editor_of_project_a_cannot_touch_project_bs_trash(client, admin_editor_and_project):
+    """The actual authorization boundary this round adds: being an editor
+    of ONE project must never leak into another project's trash, whether
+    through the list, the single-row endpoints (must be 403, not 404 --
+    the row genuinely exists, the caller just can't act on it -- and
+    definitely not a silent 200/500), or the bulk endpoint (folded into
+    `not_found`, indistinguishable from a row that's simply gone, so this
+    can't be used to probe another project's data).
+    """
+    project_a, admin, editor_a, admin_headers, editor_a_headers = admin_editor_and_project
+
+    async with async_session_factory() as session:
+        project_b = Project(name=f"Trash Test Project B {uuid.uuid4()}", standard="BREX — S1000D 4.2")
+        session.add(project_b)
+        await session.commit()
+        await session.refresh(project_b)
+
+    try:
+        brdp_b = await _create_brdp(client, project_b.id, admin_headers, "BRDP-OTHERPROJ-001")
+        del_resp = await client.delete(f"/api/projects/{project_b.id}/brdps/{brdp_b['id']}", headers=admin_headers)
+        assert del_resp.status_code == 204
+
+        list_resp = await client.get("/api/trash", headers=editor_a_headers)
+        assert list_resp.status_code == 200
+        assert not any(e["id"] == brdp_b["id"] for e in list_resp.json())
+
+        restore_resp = await client.post(f"/api/trash/{brdp_b['id']}/restore", headers=editor_a_headers)
+        assert restore_resp.status_code == 403
+
+        purge_resp = await client.delete(f"/api/trash/{brdp_b['id']}", headers=editor_a_headers)
+        assert purge_resp.status_code == 403
+
+        bulk_resp = await client.request(
+            "DELETE", "/api/trash", json={"brdp_ids": [brdp_b["id"]]}, headers=editor_a_headers
+        )
+        assert bulk_resp.status_code == 200
+        assert bulk_resp.json() == {"deleted": [], "not_found": [brdp_b["id"]]}
+
+        # Untouched throughout -- still trashed, visible to admin.
+        admin_trash = await client.get("/api/trash", headers=admin_headers)
+        assert any(e["id"] == brdp_b["id"] for e in admin_trash.json())
+    finally:
+        async with async_session_factory() as session:
+            db_project = await session.get(Project, project_b.id)
+            if db_project is not None:
+                await session.delete(db_project)
+            await session.commit()
 
 
 async def test_bulk_delete_only_removes_the_selected_rows(client, admin_editor_and_project):

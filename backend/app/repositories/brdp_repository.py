@@ -70,22 +70,30 @@ async def get_active_brdp_by_identifier(project_id: uuid.UUID, identifier: str, 
     return result.scalar_one_or_none()
 
 
-async def list_trashed_brdps(db: AsyncSession):
-    """Every soft-deleted BRDP across ALL projects (docs request: the
-    Papelera lists every project's trash, not just the one currently
-    open), newest-deleted first. Project name is joined in here rather
-    than left for the route to look up per row, so the Papelera table
-    doesn't cost an extra query per project represented.
+async def list_trashed_brdps(db: AsyncSession, project_ids: list[uuid.UUID] | None = None):
+    """Every soft-deleted BRDP, newest-deleted first. Project name is
+    joined in here rather than left for the route to look up per row, so
+    the Papelera table doesn't cost an extra query per project
+    represented.
+
+    `project_ids=None` (admin) lists every project's trash, matching the
+    original admin-only behavior. A non-admin editor passes their own
+    editor-project ids here so the query itself never returns a row from
+    a project they don't have access to -- an empty list correctly yields
+    zero rows (SQLAlchemy's `.in_(())` matches nothing) rather than "no
+    filter".
 
     Returns raw (BRDP, project_name) rows -- the route assembles
     TrashedBRDPOut from them.
     """
-    result = await db.execute(
+    query = (
         select(BRDP, Project.name.label("project_name"))
         .join(Project, BRDP.project_id == Project.id)
         .where(BRDP.deleted_at.is_not(None))
-        .order_by(BRDP.deleted_at.desc())
     )
+    if project_ids is not None:
+        query = query.where(BRDP.project_id.in_(project_ids))
+    result = await db.execute(query.order_by(BRDP.deleted_at.desc()))
     return result.all()
 
 
@@ -99,15 +107,25 @@ async def get_trashed_brdp(brdp_id: uuid.UUID, db: AsyncSession) -> BRDP | None:
     return result.scalar_one_or_none()
 
 
-async def list_trashed_brdps_by_ids(brdp_ids: list[uuid.UUID], db: AsyncSession) -> list[BRDP]:
+async def list_trashed_brdps_by_ids(
+    brdp_ids: list[uuid.UUID], db: AsyncSession, project_ids: list[uuid.UUID] | None = None
+) -> list[BRDP]:
     """Backs the Trash's bulk 'Delete permanently' -- one SELECT for the
     whole selected batch (never one per id), same batching discipline as
     every other function here. Only matches rows that are STILL trashed;
     an id the caller sent that isn't in the result is either not trashed
-    any more (restored in the real race the docs request calls out) or
-    never existed -- the route reports that back rather than guessing.
+    any more (restored in the real race the docs request calls out),
+    never existed, or -- same `project_ids` filter as list_trashed_brdps,
+    and same reasoning: a non-admin editor's own project ids -- belongs to
+    a project they can't touch. All three collapse into the same
+    `not_found` outcome on purpose: the route never distinguishes "not
+    yours" from "already gone", so a caller can't use this endpoint to
+    probe whether an id exists in a project they have no access to.
     """
     if not brdp_ids:
         return []
-    result = await db.execute(select(BRDP).where(BRDP.id.in_(brdp_ids), BRDP.deleted_at.is_not(None)))
+    query = select(BRDP).where(BRDP.id.in_(brdp_ids), BRDP.deleted_at.is_not(None))
+    if project_ids is not None:
+        query = query.where(BRDP.project_id.in_(project_ids))
+    result = await db.execute(query)
     return list(result.scalars().all())

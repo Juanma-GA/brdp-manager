@@ -5,7 +5,12 @@ import { authFetchJson } from '../services/apiClient';
 import { generateTemplate, importFromExcel, exportToExcel } from '../utils/excelUtils';
 import { ruleStateOf } from '../utils/ruleState';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
-import { useActiveImportJob, useInvalidateImportJob } from '../hooks/useImportJob';
+import {
+  useActiveImportJob,
+  useDismissImportJob,
+  useDismissedImportJobId,
+  useInvalidateImportJob,
+} from '../hooks/useImportJob';
 import { useImportEtaSettings } from '../hooks/useImportEtaSettings';
 import Button from '../components/Button';
 import styles from './ProjectConfigPage.module.css';
@@ -162,12 +167,18 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // import's progress comes from `job` below, polled from Postgres, never
   // a local fake countdown.
   const [applying, setApplying] = useState(false);
-  // Locally hides a finished (completed/failed) job's panel so the user
-  // can get back to the file picker without starting a fresh import --
-  // never sent to the backend, so a reload correctly re-surfaces the last
-  // known result (docs request: closing the tab and reopening later must
-  // still show it) rather than silently forgetting it "was dismissed".
-  const [dismissed, setDismissed] = useState(false);
+  // Which job.id (if any) the user has closed, hiding a finished
+  // (completed/failed) job's panel so they can get back to the file
+  // picker without starting a fresh import. Lives in the QueryClient
+  // cache (useDismissedImportJobId/useDismissImportJob below), not local
+  // component state -- a plain useState here reset every time this page
+  // unmounted (navigating away and back within the app), silently
+  // resurrecting a result the user had already closed. The QueryClient
+  // itself is still only created once per real page load (App.jsx), so
+  // closing the tab and reopening later still correctly re-surfaces the
+  // last known result (docs request), same as before.
+  const dismissedJobId = useDismissedImportJobId(projectId);
+  const dismissImportJob = useDismissImportJob();
 
   // Postgres, via import_jobs, is the only source of truth for "is an
   // import running" (HR1: never localStorage/sessionStorage) -- this is
@@ -287,7 +298,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       });
       setPendingRows(null);
       setAnalysis(null);
-      setDismissed(false);
+      dismissImportJob(projectId, null);
       invalidateImportJob(projectId);
     } catch (err) {
       // 409 (another job already running for this project -- docs
@@ -401,7 +412,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // flow -- a job that's actually running must not be raced by starting
   // a second analyze/apply in the same UI, and a just-finished one is the
   // more relevant thing to show until the user dismisses it.
-  const showingJobPanel = !!job && (job.status === 'running' || (!dismissed && job.status !== 'running'));
+  const showingJobPanel = !!job && (job.status === 'running' || (job.id !== dismissedJobId && job.status !== 'running'));
 
   return (
     <div className={styles.card}>
@@ -473,7 +484,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                       </li>
                     )}
                   </ul>
-                  <button type="button" className={styles.secondaryButton} onClick={() => setDismissed(true)}>
+                  <button type="button" className={styles.secondaryButton} onClick={() => dismissImportJob(projectId, job.id)}>
                     {t('config.dataManagement.close')}
                   </button>
                 </div>
@@ -484,7 +495,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                   <ul className={styles.errorList}>
                     <li>{t('config.dataManagement.jobFailed', { error: job.error })}</li>
                   </ul>
-                  <button type="button" className={styles.secondaryButton} onClick={() => setDismissed(true)}>
+                  <button type="button" className={styles.secondaryButton} onClick={() => dismissImportJob(projectId, job.id)}>
                     {t('config.dataManagement.close')}
                   </button>
                 </div>

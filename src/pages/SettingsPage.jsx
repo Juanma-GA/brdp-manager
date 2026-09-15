@@ -883,8 +883,16 @@ function TrashSection() {
 export default function SettingsPage() {
   const { t } = useTranslation();
   const { user, updateUser } = useAuthContext();
+  const { projects } = useProjectContext();
 
   if (!user) return null;
+
+  // Trash is no longer admin-only server-side -- an editor of at least one
+  // project can see and act on that project's trashed BRDPs too (the
+  // backend itself scopes what they get back to just those projects, so
+  // no further filtering happens here beyond deciding whether to render
+  // the section at all).
+  const canSeeTrash = user.global_role === 'admin' || projects.some((p) => p.effective_role === 'editor');
 
   return (
     <div className={styles.container}>
@@ -893,7 +901,7 @@ export default function SettingsPage() {
         <ProfileSection user={user} onUserUpdated={updateUser} />
         {user.global_role === 'admin' && <UserManagementSection currentUserId={user.id} />}
         {user.global_role === 'admin' && <ImportEtaSettingsSection />}
-        {user.global_role === 'admin' && <TrashSection />}
+        {canSeeTrash && <TrashSection />}
       </div>
     </div>
   );

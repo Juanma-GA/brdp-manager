@@ -42,3 +42,35 @@ export function useInvalidateImportJob() {
   const queryClient = useQueryClient();
   return (projectId) => queryClient.invalidateQueries({ queryKey: importJobQueryKey(projectId) });
 }
+
+function dismissedImportJobQueryKey(projectId) {
+  return ['dismissed-import-job', projectId];
+}
+
+// Which job.id (if any) the user has explicitly closed via ProjectConfigPage's
+// "Close" button on a finished (completed/failed) job's result panel.
+// Deliberately stored in this same QueryClient cache instead of component
+// state: a plain useState resets every time ProjectConfigPage unmounts
+// (navigating to another page and back), silently resurrecting a result
+// the user already dismissed -- this survives that exactly as long as the
+// job query above already does (same QueryClient instance, created once in
+// App.jsx), while a real tab close + reopen still starts a fresh
+// QueryClient and correctly re-surfaces the last known result.
+//
+// `queryFn` here is never really "fetched" -- it only ever supplies the
+// starting `null` before any Close has happened; every later value comes
+// from useDismissImportJob's setQueryData below.
+export function useDismissedImportJobId(projectId) {
+  const { data } = useQuery({
+    queryKey: dismissedImportJobQueryKey(projectId),
+    queryFn: () => null,
+    enabled: !!projectId,
+    staleTime: Infinity,
+  });
+  return data ?? null;
+}
+
+export function useDismissImportJob() {
+  const queryClient = useQueryClient();
+  return (projectId, jobId) => queryClient.setQueryData(dismissedImportJobQueryKey(projectId), jobId);
+}
