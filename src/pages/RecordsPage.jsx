@@ -24,6 +24,13 @@ const TABLE_PAGE_SIZE = 15;
 const HISTORY_TRANSLATED_FIELDS = {
   rule_status: 'records.rule.states',
   proposal_status: 'records.validationOptions',
+  // "status" is the Trash's own delete/restore audit entry (backend:
+  // brdps.py's delete_brdp/reset_project_data, trash.py's restore_brdp --
+  // all via record_change(..., "status", "active"|"deleted", ...)), not a
+  // real BRDP column -- deliberately absent from REVERTIBLE_HISTORY_FIELDS
+  // below, since "reverting" a delete/restore means going through the
+  // Papelera, not a generic field PATCH.
+  status: 'records.history.statusValues',
 };
 
 function formatHistoryValue(t, fieldName, value) {

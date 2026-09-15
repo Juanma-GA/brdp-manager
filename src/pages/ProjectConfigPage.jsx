@@ -691,10 +691,12 @@ function ResetDataSection({ projectId, canEdit, onDataChanged }) {
   const handleReset = async () => {
     setBusy(true);
     try {
-      const existing = await authFetchJson(`/api/projects/${projectId}/brdps`);
-      for (const b of existing) {
-        await authFetchJson(`/api/projects/${projectId}/brdps/${b.id}`, { method: 'DELETE' });
-      }
+      // One bulk request (backend: brdps.py's reset_project_data, a
+      // single UPDATE ... WHERE project_id = ...) instead of N sequential
+      // per-row DELETEs -- the N+1 this used to be. Still a soft-delete,
+      // same Papelera path as any other delete (docs request: no
+      // hard-delete shortcut here).
+      await authFetchJson(`/api/projects/${projectId}/brdps`, { method: 'DELETE' });
       setShowDialog(false);
       // DataManagementSection is a separate sibling component with its own
       // "N BRDPs available for export" count -- without telling it a reset

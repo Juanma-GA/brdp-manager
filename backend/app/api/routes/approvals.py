@@ -10,6 +10,7 @@ from app.api.deps import require_project_role
 from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
 from app.models import BRDP, RuleApproval, User
+from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.rule_approval import (
     BulkRuleApprovalOut,
     BulkRuleApprovalWithRuleOut,
@@ -31,12 +32,15 @@ project_router = APIRouter(prefix="/api/projects/{project_id}/approvals/{format}
 def _project_approvals_stmt(project_id: uuid.UUID, format: str):
     """Shared by both bulk endpoints below -- the only difference between
     them is the response model (whether rule_xml is serialized out), never
-    the query itself.
+    the query itself. ACTIVE_BRDP_FILTER: a trashed BRDP's rule_approvals
+    row is left alive by a soft-delete (docs request), but must not
+    surface here -- this feeds both RecordsPage's Rule Status column AND
+    Export to Excel, both of which a deleted BRDP must disappear from.
     """
     return (
         select(RuleApproval)
         .join(BRDP, RuleApproval.brdp_id == BRDP.id)
-        .where(BRDP.project_id == project_id, RuleApproval.format == format)
+        .where(BRDP.project_id == project_id, RuleApproval.format == format, ACTIVE_BRDP_FILTER)
     )
 
 

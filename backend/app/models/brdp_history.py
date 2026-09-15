@@ -18,13 +18,19 @@ class BRDPHistory(Base):
     survive the acting user's account being deleted later. user_email is
     a point-in-time snapshot so "who" still shows even once the user is
     gone.
+
+    brdp_id is ALSO ON DELETE SET NULL (changed by migration 0010, the
+    Papelera/Trash round) rather than the original CASCADE it shipped
+    with: the Trash's "Delete permanently" action does a real db.delete()
+    on the BRDP row, and that history must survive it (docs request's own
+    explicit test case) -- CASCADE would have silently wiped it instead.
     """
 
     __tablename__ = "brdp_history"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    brdp_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("brdps.id", ondelete="CASCADE"), nullable=False, index=True
+    brdp_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("brdps.id", ondelete="SET NULL"), nullable=True, index=True
     )
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True

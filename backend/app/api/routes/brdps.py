@@ -1,14 +1,21 @@
 import re
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_httpx_transport, require_project_role
 from app.db.base import get_db
 from app.models import BRDP, BRDPHistory, User
+from app.repositories.brdp_repository import (
+    ACTIVE_BRDP_FILTER,
+    get_active_brdp,
+    get_active_brdp_by_identifier,
+    list_active_brdps,
+)
 from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate, NextExtIdentifierOut
 from app.schemas.brdp_history import BRDPHistoryOut
 from app.services.embeddings import EmbeddingUnavailable, compute_embedding
@@ -62,33 +69,36 @@ async def _compute_brdp_embedding(brdp: BRDP, transport: httpx.AsyncBaseTranspor
 
 
 async def _identifier_taken(project_id: uuid.UUID, identifier: str, db: AsyncSession) -> bool:
-    """Pre-check for the (project_id, identifier) unique constraint --
+    """Pre-check for the (project_id, identifier) partial unique index --
     matches this codebase's existing convention for uniqueness (see
     users.py's email check): a clean 409 from an application-level query,
     not a raw IntegrityError/500 from the DB constraint, which remains the
     actual source of truth for data integrity. identifier is unique WITHIN
     a project only -- the same identifier is valid in a different project.
+    Only ACTIVE rows count (docs request: a trashed BRDP's identifier is
+    free to reuse -- matches the partial index, which only constrains
+    non-deleted rows).
 
     Only ever called from create_brdp now -- identifier is immutable once
     a BRDP exists (BRDPUpdate doesn't accept it), so there is no more
     "renaming to an identifier already in use" case to exclude the row's
     own id from.
     """
-    query = select(BRDP).where(BRDP.project_id == project_id, BRDP.identifier == identifier)
-    existing = (await db.execute(query)).scalar_one_or_none()
-    return existing is not None
+    return await get_active_brdp_by_identifier(project_id, identifier, db) is not None
 
 
 async def _get_owned_brdp(project_id: uuid.UUID, brdp_id: uuid.UUID, db: AsyncSession) -> BRDP:
-    """Fetches a BRDP and verifies it actually belongs to `project_id` --
-    without this, an editor of project A could mutate a BRDP that belongs
-    to project B just by putting A's project_id in the path and B's real
-    brdp_id, since require_project_role only checks the path's project_id,
-    never the resource's own. 404 (not 403) so a caller can't distinguish
-    "wrong project" from "doesn't exist".
+    """Fetches a BRDP, scoped to `project_id` (so a caller can't reach
+    another project's row just by knowing its id) and to ACTIVE rows only
+    -- a trashed BRDP 404s here exactly like one that never existed
+    (docs request: a deleted BRDP must disappear everywhere, including
+    edit/delete/history, not just the Records list). Restoring it from the
+    Papelera is the only way back in; there is no "edit while trashed".
+    404 (not 403) so a caller can't distinguish "wrong project"/"trashed"
+    from "doesn't exist".
     """
-    brdp = await db.get(BRDP, brdp_id)
-    if brdp is None or brdp.project_id != project_id:
+    brdp = await get_active_brdp(project_id, brdp_id, db)
+    if brdp is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BRDP not found")
     return brdp
 
@@ -99,8 +109,7 @@ async def list_brdps(
     _viewer: User = Depends(require_project_role("viewer")),
     db: AsyncSession = Depends(get_db),
 ) -> list[BRDP]:
-    result = await db.execute(select(BRDP).where(BRDP.project_id == project_id))
-    return list(result.scalars().all())
+    return await list_active_brdps(project_id, db)
 
 
 @router.get("/next-ext-identifier", response_model=NextExtIdentifierOut)
@@ -111,8 +120,14 @@ async def get_next_ext_identifier(
 ) -> NextExtIdentifierOut:
     """Powers Add BRDP's pre-filled, locked ID field. Editor-gated since
     it only ever matters to the creation flow, which is itself editor+.
+    Only considers ACTIVE identifiers -- a trashed BRDP-EXT-NNNNN's number
+    is free to be reissued, consistent with the partial unique index.
     """
-    identifiers = (await db.execute(select(BRDP.identifier).where(BRDP.project_id == project_id))).scalars().all()
+    identifiers = (
+        (await db.execute(select(BRDP.identifier).where(BRDP.project_id == project_id, ACTIVE_BRDP_FILTER)))
+        .scalars()
+        .all()
+    )
     highest = 0
     for identifier in identifiers:
         match = _EXT_IDENTIFIER_PATTERN.match(identifier)
@@ -189,11 +204,53 @@ async def update_brdp(
 async def delete_brdp(
     project_id: uuid.UUID,
     brdp_id: uuid.UUID,
-    _editor: User = Depends(require_project_role("editor")),
+    editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    """Soft-delete (Papelera/Trash, docs request): the row stays in
+    Postgres with deleted_at/deleted_by/deleted_by_email set, invisible to
+    every read path that goes through app/repositories/brdp_repository.py
+    -- rule_status/rule_xml/history are untouched, so a later Restore
+    brings everything back exactly as it was. Only Settings > Papelera's
+    "Delete permanently" action ever issues a real db.delete().
+    """
     brdp = await _get_owned_brdp(project_id, brdp_id, db)
-    await db.delete(brdp)
+    brdp.deleted_at = datetime.now(timezone.utc)
+    brdp.deleted_by = editor.id
+    brdp.deleted_by_email = editor.email
+    record_change(db, brdp.id, editor, "status", "active", "deleted")
+    await db.commit()
+
+
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_project_data(
+    project_id: uuid.UUID,
+    editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Project Configuration's "Reset Data" -- soft-deletes every ACTIVE
+    BRDP in the project via one bulk UPDATE (docs request: this used to be
+    N sequential per-row DELETE requests from the frontend, a real N+1;
+    the fix belongs here, not just in how the frontend calls it). Same
+    soft-delete path as the single-row DELETE above, deliberately -- Reset
+    Data is not a hard-delete shortcut, everything it removes lands in the
+    Papelera like any other delete.
+
+    The bulk UPDATE itself stays a single round trip via RETURNING; the
+    per-row brdp_history inserts that follow are staged in the same
+    transaction (db.add(), not a second commit each) so this is still one
+    commit total, not len(returned_ids) + 1.
+    """
+    now = datetime.now(timezone.utc)
+    stmt = (
+        update(BRDP)
+        .where(BRDP.project_id == project_id, ACTIVE_BRDP_FILTER)
+        .values(deleted_at=now, deleted_by=editor.id, deleted_by_email=editor.email)
+        .returning(BRDP.id)
+    )
+    result = await db.execute(stmt)
+    for brdp_id in result.scalars().all():
+        record_change(db, brdp_id, editor, "status", "active", "deleted")
     await db.commit()
 
 

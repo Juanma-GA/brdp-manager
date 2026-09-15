@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, has_project_role
 from app.db.base import get_db
-from app.models import BRDP, SuggestionFeedback, User
+from app.models import SuggestionFeedback, User
+from app.repositories.brdp_repository import get_active_brdp_by_id
 from app.schemas.suggestion_feedback import SuggestionFeedbackCreate, SuggestionFeedbackOut
 
 router = APIRouter(prefix="/api/suggestion-feedback", tags=["suggestion-feedback"])
@@ -25,7 +26,7 @@ async def create_suggestion_feedback(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SuggestionFeedback:
-    brdp = await db.get(BRDP, body.brdp_id)
+    brdp = await get_active_brdp_by_id(body.brdp_id, db)
     if brdp is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BRDP not found")
 

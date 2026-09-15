@@ -4,6 +4,7 @@ import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
 import { useImportEtaSettings, useUpdateImportEtaSettings } from '../hooks/useImportEtaSettings';
+import { usePermanentlyDeleteBrdp, useRestoreBrdp, useTrash } from '../hooks/useTrash';
 import Button from '../components/Button';
 import ChangePasswordForm from '../components/ChangePasswordForm';
 import SortableHeader from '../components/SortableHeader';
@@ -51,8 +52,12 @@ function ProfileSection({ user, onUserUpdated }) {
   };
 
   return (
-    <div className={styles.section}>
-      <h3 className={styles.sectionTitle}>{t('settings.profile.title')}</h3>
+    // Collapsed by default, no exception by role (docs request) -- same
+    // <details>/<summary> pattern as Import Settings below, not a new
+    // component. sectionTitle's styling moves onto the summary itself so
+    // a closed section still reads the same as before it was collapsible.
+    <details className={styles.section}>
+      <summary className={styles.accordionSummary}>{t('settings.profile.title')}</summary>
       <div className={styles.formGroup}>
         <label className={styles.label}>{t('settings.profile.email')}</label>
         <input className={styles.input} value={user.email} disabled />
@@ -87,7 +92,7 @@ function ProfileSection({ user, onUserUpdated }) {
         </Button>
       </form>
       <ChangePasswordForm withDivider />
-    </div>
+    </details>
   );
 }
 
@@ -279,8 +284,8 @@ function UserManagementSection({ currentUserId }) {
       });
 
   return (
-    <div className={styles.section}>
-      <h3 className={styles.sectionTitle}>{t('settings.userManagement.title')}</h3>
+    <details className={styles.section}>
+      <summary className={styles.accordionSummary}>{t('settings.userManagement.title')}</summary>
       {error && <p className={styles.statusInvalid}>{error}</p>}
 
       <form className={styles.formRow} onSubmit={handleCreate} style={{ marginBottom: 12, flexWrap: 'wrap' }}>
@@ -496,7 +501,7 @@ function UserManagementSection({ currentUserId }) {
           onClose={() => setTemporaryPasswordInfo(null)}
         />
       )}
-    </div>
+    </details>
   );
 }
 
@@ -595,6 +600,130 @@ function ImportEtaSettingsSection() {
   );
 }
 
+// Settings > Papelera -- admin-only, cross-project (docs request: lists
+// every project's trash, not just whichever project happens to be
+// selected elsewhere in the app -- this page has no project context of
+// its own). Same collapsed-by-default <details>/<summary> as Import
+// Settings above.
+function TrashSection() {
+  const { t } = useTranslation();
+  const { data, isLoading, isError } = useTrash();
+  const restoreMutation = useRestoreBrdp();
+  const deleteMutation = usePermanentlyDeleteBrdp();
+  const [error, setError] = useState(null);
+  // The Papelera entry pending a SECOND, explicit confirmation before a
+  // real db.delete() -- deliberately a custom modal, not another
+  // window.confirm, so it reads as visibly distinct from the normal
+  // (soft) delete's native browser confirm (docs request: "una segunda
+  // confirmación explícita... distinta a la del borrado normal").
+  const [confirmingId, setConfirmingId] = useState(null);
+
+  const handleRestore = async (entry) => {
+    setError(null);
+    try {
+      await restoreMutation.mutateAsync(entry.id);
+    } catch (err) {
+      // Most notably the identifier-reuse 409 (docs request's own edge
+      // case) -- the backend's detail message already names the
+      // conflicting identifier, shown here as-is.
+      setError(err.message);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    setError(null);
+    try {
+      await deleteMutation.mutateAsync(confirmingId);
+      setConfirmingId(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const confirmingEntry = data?.find((e) => e.id === confirmingId) ?? null;
+
+  return (
+    <details className={styles.section}>
+      <summary className={styles.accordionSummary}>{t('settings.trash.title')}</summary>
+      <p className={styles.fieldDescription}>{t('settings.trash.description')}</p>
+      {error && <p className={styles.statusInvalid}>{error}</p>}
+      {isLoading && <p>…</p>}
+      {isError && <p className={styles.statusInvalid}>{t('settings.trash.loadError')}</p>}
+      {data && data.length === 0 && <p className={styles.fieldDescription}>{t('settings.trash.empty')}</p>}
+      {data && data.length > 0 && (
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>{t('settings.trash.table.identifier')}</th>
+              <th>{t('settings.trash.table.title')}</th>
+              <th>{t('settings.trash.table.project')}</th>
+              <th>{t('settings.trash.table.deletedBy')}</th>
+              <th>{t('settings.trash.table.deletedAt')}</th>
+              <th>{t('settings.trash.table.actions')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((entry) => (
+              <tr key={entry.id}>
+                <td>{entry.identifier}</td>
+                <td>{entry.title || '—'}</td>
+                <td>{entry.project_name}</td>
+                <td>{entry.deleted_by_email || t('settings.trash.unknownUser')}</td>
+                <td>{new Date(entry.deleted_at).toLocaleString()}</td>
+                <td>
+                  <div className={styles.actionsCell}>
+                    <button
+                      type="button"
+                      onClick={() => handleRestore(entry)}
+                      disabled={restoreMutation.isPending}
+                    >
+                      {t('settings.trash.restore')}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.dangerLink}
+                      onClick={() => setConfirmingId(entry.id)}
+                    >
+                      {t('settings.trash.deletePermanently')}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {confirmingEntry && (
+        <div className={styles.modalOverlay} onClick={() => setConfirmingId(null)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.sectionTitle}>{t('settings.trash.confirmTitle')}</h3>
+            <p className={styles.dangerText}>
+              {t('settings.trash.confirmWarning', { identifier: confirmingEntry.identifier })}
+            </p>
+            <p className={styles.dangerText}>{t('settings.trash.confirmIrreversible')}</p>
+            <div className={styles.buttonGroup}>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={handleConfirmDelete}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending
+                  ? t('settings.trash.deleting')
+                  : t('settings.trash.confirmDeleteButton')}
+              </button>
+              <button type="button" onClick={() => setConfirmingId(null)} disabled={deleteMutation.isPending}>
+                {t('settings.trash.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </details>
+  );
+}
+
 export default function SettingsPage() {
   const { t } = useTranslation();
   const { user, updateUser } = useAuthContext();
@@ -608,6 +737,7 @@ export default function SettingsPage() {
         <ProfileSection user={user} onUserUpdated={updateUser} />
         {user.global_role === 'admin' && <UserManagementSection currentUserId={user.id} />}
         {user.global_role === 'admin' && <ImportEtaSettingsSection />}
+        {user.global_role === 'admin' && <TrashSection />}
       </div>
     </div>
   );

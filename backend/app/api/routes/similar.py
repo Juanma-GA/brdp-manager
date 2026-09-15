@@ -14,6 +14,7 @@ from app.api.deps import get_httpx_transport, require_project_role
 from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
 from app.models import BRDP, Project, RuleApproval, User
+from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.similar import SimilarCandidateOut, SimilarOut
 from app.services.embeddings import EmbeddingUnavailable, compute_embedding
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT as _STANDARD_TO_RULE_FORMAT
@@ -79,6 +80,12 @@ async def get_similar(
             BRDP.validation == "Validated",
             BRDP.id != brdp_id,
             BRDP.embedding.is_not(None),
+            # A trashed BRDP must never count as precedent for Suggest
+            # Definition/Proposal/Rule (docs request), even though its
+            # rule_approvals row (for "rule") is left alive by a
+            # soft-delete -- this is the one thing that actually hides it
+            # from that join.
+            ACTIVE_BRDP_FILTER,
         )
     )
     if kind == "rule":

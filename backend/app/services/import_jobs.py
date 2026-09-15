@@ -59,6 +59,7 @@ from app.api.routes.brdp_catalog import _resolve_catalog_standard
 from app.api.routes.brdps import _HISTORY_FIELDS, _compute_brdp_embedding
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, ImportJob, Project, RuleApproval, User
+from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.brdp_import import ImportRowIn, ImportRowResult
 from app.services.history import record_change
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
@@ -195,7 +196,17 @@ async def _load_existing(
     identifiers = [r.identifier.strip() for r in rows if r.identifier.strip()]
     existing_brdps: dict[str, BRDP] = {}
     if identifiers:
-        result = await db.execute(select(BRDP).where(BRDP.project_id == project_id, BRDP.identifier.in_(identifiers)))
+        # ACTIVE_BRDP_FILTER: a trashed BRDP's identifier must read as free
+        # (docs request's soft-delete round) -- without this, importing a
+        # row whose identifier matches a Papelera entry would silently
+        # resurrect/edit that trashed row instead of creating a brand-new
+        # active one, which is what the partial unique index actually
+        # allows.
+        result = await db.execute(
+            select(BRDP).where(
+                BRDP.project_id == project_id, BRDP.identifier.in_(identifiers), ACTIVE_BRDP_FILTER
+            )
+        )
         for b in result.scalars().all():
             existing_brdps[b.identifier] = b
 
