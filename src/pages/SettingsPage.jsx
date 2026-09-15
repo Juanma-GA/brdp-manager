@@ -1,10 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ChevronRight } from 'lucide-react';
 import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
 import { useImportEtaSettings, useUpdateImportEtaSettings } from '../hooks/useImportEtaSettings';
-import { usePermanentlyDeleteBrdp, useRestoreBrdp, useTrash } from '../hooks/useTrash';
+import {
+  useBulkPermanentlyDeleteBrdps,
+  usePermanentlyDeleteBrdp,
+  useRestoreBrdp,
+  useTrash,
+} from '../hooks/useTrash';
 import Button from '../components/Button';
 import ChangePasswordForm from '../components/ChangePasswordForm';
 import SortableHeader from '../components/SortableHeader';
@@ -52,46 +58,52 @@ function ProfileSection({ user, onUserUpdated }) {
   };
 
   return (
-    // Collapsed by default, no exception by role (docs request) -- same
-    // <details>/<summary> pattern as Import Settings below, not a new
-    // component. sectionTitle's styling moves onto the summary itself so
-    // a closed section still reads the same as before it was collapsible.
+    // Collapsed by default, no exception by role (docs request) -- one
+    // row inside SettingsPage's single panel (.sectionsContainer), not
+    // its own floating card. .sectionBody carries the row's content
+    // padding so it only renders (and only costs layout height) while
+    // this row is actually open.
     <details className={styles.section}>
-      <summary className={styles.accordionSummary}>{t('settings.profile.title')}</summary>
-      <div className={styles.formGroup}>
-        <label className={styles.label}>{t('settings.profile.email')}</label>
-        <input className={styles.input} value={user.email} disabled />
+      <summary className={styles.accordionSummary}>
+        <ChevronRight size={16} className={styles.chevron} aria-hidden="true" />
+        {t('settings.profile.title')}
+      </summary>
+      <div className={styles.sectionBody}>
+        <div className={styles.formGroup}>
+          <label className={styles.label}>{t('settings.profile.email')}</label>
+          <input className={styles.input} value={user.email} disabled />
+        </div>
+        <form onSubmit={handleSave}>
+          <div className={styles.formGroup}>
+            <label className={styles.label}>{t('settings.profile.displayName')}</label>
+            <input
+              className={`${styles.input} ${nameError ? styles.inputError : ''}`}
+              value={displayName}
+              onChange={(e) => {
+                setDisplayName(e.target.value);
+                setNameError(false);
+              }}
+            />
+            {nameError && <p className={styles.fieldError}>{t('validation.required')}</p>}
+          </div>
+          <div className={styles.formGroup}>
+            <label className={styles.label}>{t('settings.profile.globalRole')}</label>
+            <input className={styles.input} value={user.global_role} disabled />
+          </div>
+          {error && <p className={styles.statusInvalid}>{error}</p>}
+          {/* Disabled only while the request is in flight -- same rule as
+              Create user's disabled={creating}. Previously also disabled
+              whenever displayName === user.display_name, which meant the
+              button stayed disabled right after a successful save (the
+              local value and the freshly-saved user.display_name are equal
+              at that point), a real bug, not cosmetic: it looked broken
+              until the next edit. */}
+          <Button type="submit" disabled={saving}>
+            {saving ? t('settings.profile.saving') : t('settings.profile.save')}
+          </Button>
+        </form>
+        <ChangePasswordForm withDivider />
       </div>
-      <form onSubmit={handleSave}>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.profile.displayName')}</label>
-          <input
-            className={`${styles.input} ${nameError ? styles.inputError : ''}`}
-            value={displayName}
-            onChange={(e) => {
-              setDisplayName(e.target.value);
-              setNameError(false);
-            }}
-          />
-          {nameError && <p className={styles.fieldError}>{t('validation.required')}</p>}
-        </div>
-        <div className={styles.formGroup}>
-          <label className={styles.label}>{t('settings.profile.globalRole')}</label>
-          <input className={styles.input} value={user.global_role} disabled />
-        </div>
-        {error && <p className={styles.statusInvalid}>{error}</p>}
-        {/* Disabled only while the request is in flight -- same rule as
-            Create user's disabled={creating}. Previously also disabled
-            whenever displayName === user.display_name, which meant the
-            button stayed disabled right after a successful save (the
-            local value and the freshly-saved user.display_name are equal
-            at that point), a real bug, not cosmetic: it looked broken
-            until the next edit. */}
-        <Button type="submit" disabled={saving}>
-          {saving ? t('settings.profile.saving') : t('settings.profile.save')}
-        </Button>
-      </form>
-      <ChangePasswordForm withDivider />
     </details>
   );
 }
@@ -285,7 +297,11 @@ function UserManagementSection({ currentUserId }) {
 
   return (
     <details className={styles.section}>
-      <summary className={styles.accordionSummary}>{t('settings.userManagement.title')}</summary>
+      <summary className={styles.accordionSummary}>
+        <ChevronRight size={16} className={styles.chevron} aria-hidden="true" />
+        {t('settings.userManagement.title')}
+      </summary>
+      <div className={styles.sectionBody}>
       {error && <p className={styles.statusInvalid}>{error}</p>}
 
       <form className={styles.formRow} onSubmit={handleCreate} style={{ marginBottom: 12, flexWrap: 'wrap' }}>
@@ -501,6 +517,7 @@ function UserManagementSection({ currentUserId }) {
           onClose={() => setTemporaryPasswordInfo(null)}
         />
       )}
+      </div>
     </details>
   );
 }
@@ -565,37 +582,42 @@ function ImportEtaSettingsSection() {
 
   return (
     <details className={styles.section}>
-      <summary className={styles.accordionSummary}>{t('settings.importEta.title')}</summary>
-      <p className={styles.fieldDescription}>{t('settings.importEta.description')}</p>
-      {isLoading && <p>…</p>}
-      {isError && <p className={styles.statusInvalid}>{t('settings.importEta.loadError')}</p>}
-      {values && (
-        <form onSubmit={handleSave}>
-          <div className={styles.settingsGrid}>
-            {IMPORT_ETA_FIELDS.map((f) => (
-              <div key={f.key} className={styles.formGroup}>
-                <label className={styles.label} htmlFor={`app-settings-${f.key}`}>
-                  {t(`settings.importEta.fields.${f.labelKey}`)}
-                </label>
-                <input
-                  id={`app-settings-${f.key}`}
-                  className={styles.input}
-                  type="number"
-                  min="0"
-                  value={values[f.key] ?? ''}
-                  onChange={(e) => handleChange(f.key, e.target.value)}
-                />
-                <p className={styles.fieldDescription}>{t(`settings.importEta.fields.${f.hintKey}`)}</p>
-              </div>
-            ))}
-          </div>
-          {updateMutation.isError && <p className={styles.statusInvalid}>{updateMutation.error.message}</p>}
-          <Button type="submit" disabled={updateMutation.isPending}>
-            {updateMutation.isPending ? t('settings.importEta.saving') : t('settings.importEta.save')}
-          </Button>
-          {saved && <span className={styles.statusVerified}> {t('settings.importEta.saved')}</span>}
-        </form>
-      )}
+      <summary className={styles.accordionSummary}>
+        <ChevronRight size={16} className={styles.chevron} aria-hidden="true" />
+        {t('settings.importEta.title')}
+      </summary>
+      <div className={styles.sectionBody}>
+        <p className={styles.fieldDescription}>{t('settings.importEta.description')}</p>
+        {isLoading && <p>…</p>}
+        {isError && <p className={styles.statusInvalid}>{t('settings.importEta.loadError')}</p>}
+        {values && (
+          <form onSubmit={handleSave}>
+            <div className={styles.settingsGrid}>
+              {IMPORT_ETA_FIELDS.map((f) => (
+                <div key={f.key} className={styles.formGroup}>
+                  <label className={styles.label} htmlFor={`app-settings-${f.key}`}>
+                    {t(`settings.importEta.fields.${f.labelKey}`)}
+                  </label>
+                  <input
+                    id={`app-settings-${f.key}`}
+                    className={styles.input}
+                    type="number"
+                    min="0"
+                    value={values[f.key] ?? ''}
+                    onChange={(e) => handleChange(f.key, e.target.value)}
+                  />
+                  <p className={styles.fieldDescription}>{t(`settings.importEta.fields.${f.hintKey}`)}</p>
+                </div>
+              ))}
+            </div>
+            {updateMutation.isError && <p className={styles.statusInvalid}>{updateMutation.error.message}</p>}
+            <Button type="submit" disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? t('settings.importEta.saving') : t('settings.importEta.save')}
+            </Button>
+            {saved && <span className={styles.statusVerified}> {t('settings.importEta.saved')}</span>}
+          </form>
+        )}
+      </div>
     </details>
   );
 }
@@ -610,13 +632,57 @@ function TrashSection() {
   const { data, isLoading, isError } = useTrash();
   const restoreMutation = useRestoreBrdp();
   const deleteMutation = usePermanentlyDeleteBrdp();
+  const bulkDeleteMutation = useBulkPermanentlyDeleteBrdps();
   const [error, setError] = useState(null);
-  // The Papelera entry pending a SECOND, explicit confirmation before a
-  // real db.delete() -- deliberately a custom modal, not another
-  // window.confirm, so it reads as visibly distinct from the normal
-  // (soft) delete's native browser confirm (docs request: "una segunda
-  // confirmación explícita... distinta a la del borrado normal").
-  const [confirmingId, setConfirmingId] = useState(null);
+  // Restore stays per-row (docs request: not requested in bulk). Delete
+  // permanently can be either -- `pendingDelete` is either
+  // { kind: 'single', entry } or { kind: 'bulk', ids }, both routed
+  // through the SAME confirmation modal below (docs request: "el mismo
+  // modal... adaptando el texto"), never two separate modals.
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const headerCheckboxRef = useRef(null);
+
+  // Prunes selectedIds whenever the trash list itself changes (a restore,
+  // a delete, or another admin's own action landing via the next poll/
+  // refetch) -- without this, a row that just left the Papelera would
+  // stay "selected" in memory, and an empty Papelera after a full bulk
+  // delete would otherwise still show a stale, non-empty selection
+  // (docs request's own edge case: "sin residuos de checkboxes
+  // seleccionados").
+  useEffect(() => {
+    if (!data) return;
+    const liveIds = new Set(data.map((e) => e.id));
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => liveIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [data]);
+
+  const allSelected = !!data && data.length > 0 && selectedIds.size === data.length;
+  const someSelected = selectedIds.size > 0 && !allSelected;
+
+  // <input type="checkbox">'s indeterminate visual state has no HTML
+  // attribute -- it's DOM-property-only, so it has to be set imperatively
+  // via a ref rather than through JSX props (docs request: "el checkbox
+  // de cabecera debe reflejar el estado 'parcial' (indeterminate)").
+  useEffect(() => {
+    if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+
+  const toggleSelectAll = () => {
+    if (!data) return;
+    setSelectedIds(allSelected ? new Set() : new Set(data.map((e) => e.id)));
+  };
+
+  const toggleRow = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleRestore = async (entry) => {
     setError(null);
@@ -633,93 +699,135 @@ function TrashSection() {
   const handleConfirmDelete = async () => {
     setError(null);
     try {
-      await deleteMutation.mutateAsync(confirmingId);
-      setConfirmingId(null);
+      if (pendingDelete.kind === 'bulk') {
+        const result = await bulkDeleteMutation.mutateAsync(pendingDelete.ids);
+        // A real race (docs request: "una de las filas seleccionadas fue
+        // restaurada por otro admin justo antes de confirmar") -- the
+        // backend still deletes everything it validly can and reports
+        // the rest, rather than aborting the whole batch over one stale
+        // id. Surfaced, not swallowed.
+        if (result.not_found.length > 0) {
+          setError(t('settings.trash.bulkPartial', { count: result.not_found.length }));
+        }
+        setSelectedIds(new Set());
+      } else {
+        await deleteMutation.mutateAsync(pendingDelete.entry.id);
+      }
+      setPendingDelete(null);
     } catch (err) {
       setError(err.message);
     }
   };
 
-  const confirmingEntry = data?.find((e) => e.id === confirmingId) ?? null;
+  const busy = deleteMutation.isPending || bulkDeleteMutation.isPending;
 
   return (
     <details className={styles.section}>
-      <summary className={styles.accordionSummary}>{t('settings.trash.title')}</summary>
-      <p className={styles.fieldDescription}>{t('settings.trash.description')}</p>
-      {error && <p className={styles.statusInvalid}>{error}</p>}
-      {isLoading && <p>…</p>}
-      {isError && <p className={styles.statusInvalid}>{t('settings.trash.loadError')}</p>}
-      {data && data.length === 0 && <p className={styles.fieldDescription}>{t('settings.trash.empty')}</p>}
-      {data && data.length > 0 && (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>{t('settings.trash.table.identifier')}</th>
-              <th>{t('settings.trash.table.title')}</th>
-              <th>{t('settings.trash.table.project')}</th>
-              <th>{t('settings.trash.table.deletedBy')}</th>
-              <th>{t('settings.trash.table.deletedAt')}</th>
-              <th>{t('settings.trash.table.actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((entry) => (
-              <tr key={entry.id}>
-                <td>{entry.identifier}</td>
-                <td>{entry.title || '—'}</td>
-                <td>{entry.project_name}</td>
-                <td>{entry.deleted_by_email || t('settings.trash.unknownUser')}</td>
-                <td>{new Date(entry.deleted_at).toLocaleString()}</td>
-                <td>
-                  <div className={styles.actionsCell}>
-                    <button
-                      type="button"
-                      onClick={() => handleRestore(entry)}
-                      disabled={restoreMutation.isPending}
-                    >
-                      {t('settings.trash.restore')}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.dangerLink}
-                      onClick={() => setConfirmingId(entry.id)}
-                    >
-                      {t('settings.trash.deletePermanently')}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {confirmingEntry && (
-        <div className={styles.modalOverlay} onClick={() => setConfirmingId(null)}>
-          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h3 className={styles.sectionTitle}>{t('settings.trash.confirmTitle')}</h3>
-            <p className={styles.dangerText}>
-              {t('settings.trash.confirmWarning', { identifier: confirmingEntry.identifier })}
-            </p>
-            <p className={styles.dangerText}>{t('settings.trash.confirmIrreversible')}</p>
-            <div className={styles.buttonGroup}>
+      <summary className={styles.accordionSummary}>
+        <ChevronRight size={16} className={styles.chevron} aria-hidden="true" />
+        {t('settings.trash.title')}
+      </summary>
+      <div className={styles.sectionBody}>
+        <p className={styles.fieldDescription}>{t('settings.trash.description')}</p>
+        {error && <p className={styles.statusInvalid}>{error}</p>}
+        {isLoading && <p>…</p>}
+        {isError && <p className={styles.statusInvalid}>{t('settings.trash.loadError')}</p>}
+        {data && data.length === 0 && <p className={styles.fieldDescription}>{t('settings.trash.empty')}</p>}
+        {data && data.length > 0 && (
+          <>
+            <div className={styles.buttonGroup} style={{ marginTop: 0, marginBottom: 10 }}>
               <button
                 type="button"
-                className={styles.dangerButton}
-                onClick={handleConfirmDelete}
-                disabled={deleteMutation.isPending}
+                className={styles.dangerLink}
+                onClick={() => setPendingDelete({ kind: 'bulk', ids: [...selectedIds] })}
+                disabled={selectedIds.size === 0}
               >
-                {deleteMutation.isPending
-                  ? t('settings.trash.deleting')
-                  : t('settings.trash.confirmDeleteButton')}
-              </button>
-              <button type="button" onClick={() => setConfirmingId(null)} disabled={deleteMutation.isPending}>
-                {t('settings.trash.cancel')}
+                {t('settings.trash.deleteSelected', { count: selectedIds.size })}
               </button>
             </div>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>
+                    <input
+                      ref={headerCheckboxRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleSelectAll}
+                      aria-label={t('settings.trash.selectAll')}
+                    />
+                  </th>
+                  <th>{t('settings.trash.table.identifier')}</th>
+                  <th>{t('settings.trash.table.title')}</th>
+                  <th>{t('settings.trash.table.project')}</th>
+                  <th>{t('settings.trash.table.deletedBy')}</th>
+                  <th>{t('settings.trash.table.deletedAt')}</th>
+                  <th>{t('settings.trash.table.actions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(entry.id)}
+                        onChange={() => toggleRow(entry.id)}
+                        aria-label={t('settings.trash.selectRow', { identifier: entry.identifier })}
+                      />
+                    </td>
+                    <td>{entry.identifier}</td>
+                    <td>{entry.title || '—'}</td>
+                    <td>{entry.project_name}</td>
+                    <td>{entry.deleted_by_email || t('settings.trash.unknownUser')}</td>
+                    <td>{new Date(entry.deleted_at).toLocaleString()}</td>
+                    <td>
+                      <div className={styles.actionsCell}>
+                        <button
+                          type="button"
+                          onClick={() => handleRestore(entry)}
+                          disabled={restoreMutation.isPending}
+                        >
+                          {t('settings.trash.restore')}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.dangerLink}
+                          onClick={() => setPendingDelete({ kind: 'single', entry })}
+                        >
+                          {t('settings.trash.deletePermanently')}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {pendingDelete && (
+          <div className={styles.modalOverlay} onClick={() => setPendingDelete(null)}>
+            <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+              <h3 className={styles.sectionTitle}>{t('settings.trash.confirmTitle')}</h3>
+              <p className={styles.dangerText}>
+                {pendingDelete.kind === 'bulk'
+                  ? t('settings.trash.confirmWarningBulk', { count: pendingDelete.ids.length })
+                  : t('settings.trash.confirmWarning', { identifier: pendingDelete.entry.identifier })}
+              </p>
+              <p className={styles.dangerText}>{t('settings.trash.confirmIrreversible')}</p>
+              <div className={styles.buttonGroup}>
+                <button type="button" className={styles.dangerButton} onClick={handleConfirmDelete} disabled={busy}>
+                  {busy ? t('settings.trash.deleting') : t('settings.trash.confirmDeleteButton')}
+                </button>
+                <button type="button" onClick={() => setPendingDelete(null)} disabled={busy}>
+                  {t('settings.trash.cancel')}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </details>
   );
 }

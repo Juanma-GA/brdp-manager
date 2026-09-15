@@ -1,6 +1,17 @@
 .container {
   padding: 24px;
-  max-width: 100%;
+  /* Fixed reading width, not full-bleed to whatever the sidebar leaves
+     behind (docs request) -- a settings page reads as a list of rows,
+     not a form that benefits from stretching across a wide viewport.
+     NOTE: ProjectConfigPage.module.css's own .page/.card currently have
+     NO max-width at all (confirmed by measuring the rendered form at a
+     1600px viewport: 1500px wide, i.e. full-bleed) -- there was no
+     existing "criterio de ancho" there to replicate. This value is this
+     round's own choice, not a copy of a pre-existing one; flagged rather
+     than silently claimed as consistent with something that doesn't
+     exist yet.
+  */
+  max-width: 720px;
   margin: 0 auto;
   /* AppLayout's .mainContent (App.css) is a fixed-height (100vh) flex
      column with overflow: hidden -- content taller than the viewport is
@@ -30,18 +41,31 @@
   align-items: stretch;
 }
 
+/* One panel (docs request: "patrón estándar de página de ajustes: una
+   tarjeta, divisores internos entre secciones") -- the 4 sections below
+   are rows inside THIS card, not 4 separate floating cards. */
 .sectionsContainer {
   display: flex;
   flex-direction: column;
-  gap: 32px;
-}
-
-.section {
   background: white;
   border-radius: 10px;
   border: 1px solid #e8edf5;
-  padding: 16px;
-  margin-bottom: 0;
+  overflow: hidden; /* clips the last row's content to the panel's own rounded corners */
+}
+
+/* Each section is a <details> row -- no border/radius/background of its
+   own any more (that moved to .sectionsContainer above); a thin
+   border-top separates it from the row before it. The row's padding
+   lives on .accordionSummary (always visible) and .sectionBody (only
+   rendered while open), not here -- .section itself must stay unpadded
+   so a COLLAPSED row costs no extra height for padding around content
+   the browser isn't even rendering. */
+.section {
+  border-top: 1px solid #e8edf5;
+}
+
+.sectionsContainer > .section:first-child {
+  border-top: none;
 }
 
 .sectionTitle {
@@ -255,23 +279,55 @@
   border-color: #fecaca !important;
 }
 
-/* Collapsible admin-only sections (e.g. Import ETA Settings) -- same
-   font treatment as .sectionTitle above so a closed <details> looks like
-   any other section header, just clickable. */
+/* The row header, always visible whether the row is open or closed --
+   same font treatment every accordion row shares. Carries the row's
+   padding (docs request: "16px 20px"), consistent across all 4 sections
+   regardless of role/content. */
 .accordionSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
   font-family: 'Syne', sans-serif;
   font-size: 13px;
   font-weight: 700;
   color: #111827;
   cursor: pointer;
-  padding-bottom: 8px;
-  margin-bottom: 12px;
-  border-bottom: 1px solid #e8edf5;
-  list-style: revert;
+  /* Real <ChevronRight> (lucide-react) below replaces the native
+     disclosure triangle entirely -- list-style: none (not `revert`,
+     which is what left the small, browser-inconsistent default marker
+     showing) plus the two marker-hiding rules below cover every engine
+     this app ships to a browser for. */
+  list-style: none;
+}
+
+.accordionSummary::-webkit-details-marker {
+  display: none;
+}
+
+.accordionSummary::marker {
+  display: none;
 }
 
 .accordionSummary:hover {
   color: #2563eb;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: #9ca3af;
+  transition: transform 0.15s ease;
+}
+
+.section[open] > .accordionSummary .chevron {
+  transform: rotate(90deg);
+}
+
+/* Only rendered content contributes height while a row is open -- see
+   .section's own comment above for why this padding doesn't live there
+   instead. */
+.sectionBody {
+  padding: 0 20px 20px;
 }
 
 /* Delete-permanently confirmation (Papelera) -- deliberately a real modal,
@@ -335,14 +391,12 @@
     margin-bottom: 16px;
   }
 
-  .section {
-    padding: 16px;
+  .accordionSummary {
+    padding: 14px 16px;
   }
 
-  .sectionTitle {
-    font-size: 13px;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
+  .sectionBody {
+    padding: 0 16px 16px;
   }
 
   .formRow {

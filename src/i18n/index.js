@@ -435,8 +435,18 @@ const resources = {
           restore: 'Restore',
           deletePermanently: 'Delete permanently',
           deleting: 'Deleting…',
+          selectAll: 'Select all',
+          selectRow: 'Select {{identifier}}',
+          deleteSelected_one: 'Delete {{count}} permanently',
+          deleteSelected_other: 'Delete {{count}} permanently',
+          bulkPartial_one: '{{count}} selected BRDP could not be deleted -- it may have already been restored.',
+          bulkPartial_other: '{{count}} selected BRDPs could not be deleted -- they may have already been restored.',
           confirmTitle: 'Delete permanently',
           confirmWarning: 'This will permanently delete "{{identifier}}" and everything attached to it (rule, notes).',
+          confirmWarningBulk_one:
+            'This will permanently delete {{count}} selected BRDP and everything attached to it (rule, notes).',
+          confirmWarningBulk_other:
+            'This will permanently delete {{count}} selected BRDPs and everything attached to them (rule, notes).',
           confirmIrreversible: 'This cannot be undone, not even by restoring it -- it will be gone for good.',
           confirmDeleteButton: 'Yes, delete permanently',
           cancel: 'Cancel',
@@ -855,9 +865,21 @@ const resources = {
           restore: 'Restaurar',
           deletePermanently: 'Eliminar permanentemente',
           deleting: 'Eliminando…',
+          selectAll: 'Seleccionar todo',
+          selectRow: 'Seleccionar {{identifier}}',
+          deleteSelected_one: 'Eliminar {{count}} permanentemente',
+          deleteSelected_other: 'Eliminar {{count}} permanentemente',
+          bulkPartial_one:
+            '{{count}} BRDP seleccionada no se pudo eliminar -- puede que ya se haya restaurado.',
+          bulkPartial_other:
+            '{{count}} BRDPs seleccionadas no se pudieron eliminar -- puede que ya se hayan restaurado.',
           confirmTitle: 'Eliminar permanentemente',
           confirmWarning:
             'Esto eliminará permanentemente "{{identifier}}" y todo lo asociado a él (regla, notas).',
+          confirmWarningBulk_one:
+            'Esto eliminará permanentemente {{count}} BRDP seleccionada y todo lo asociado a ella (regla, notas).',
+          confirmWarningBulk_other:
+            'Esto eliminará permanentemente {{count}} BRDPs seleccionadas y todo lo asociado a ellas (regla, notas).',
           confirmIrreversible: 'Esto no se puede deshacer, ni siquiera restaurándolo -- desaparecerá para siempre.',
           confirmDeleteButton: 'Sí, eliminar permanentemente',
           cancel: 'Cancelar',

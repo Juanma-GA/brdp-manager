@@ -294,3 +294,70 @@ async def test_editor_cannot_access_trash_endpoints(client, admin_editor_and_pro
 
     purge_resp = await client.delete(f"/api/trash/{brdp['id']}", headers=editor_headers)
     assert purge_resp.status_code == 403
+
+    bulk_resp = await client.request(
+        "DELETE", "/api/trash", json={"brdp_ids": [brdp["id"]]}, headers=editor_headers
+    )
+    assert bulk_resp.status_code == 403
+
+
+async def test_bulk_delete_only_removes_the_selected_rows(client, admin_editor_and_project):
+    project, admin, editor, admin_headers, editor_headers = admin_editor_and_project
+    created = []
+    for i in range(5):
+        b = await _create_brdp(client, project.id, editor_headers, f"BRDP-BULK-{i}")
+        await client.delete(f"/api/projects/{project.id}/brdps/{b['id']}", headers=editor_headers)
+        created.append(b["id"])
+
+    selected = created[:3]
+    kept = created[3:]
+
+    resp = await client.request("DELETE", "/api/trash", json={"brdp_ids": selected}, headers=admin_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert sorted(body["deleted"]) == sorted(selected)
+    assert body["not_found"] == []
+
+    trash_after = await client.get("/api/trash", headers=admin_headers)
+    remaining_ids = {e["id"] for e in trash_after.json()}
+    for brdp_id in selected:
+        assert brdp_id not in remaining_ids
+    for brdp_id in kept:
+        assert brdp_id in remaining_ids
+
+
+async def test_bulk_delete_real_race_reports_restored_row_without_aborting_rest(
+    client, admin_editor_and_project
+):
+    """Not simulated with SQL (docs request explicit on this) -- an actual
+    second HTTP call (standing in for "another admin") restores one of
+    the 3 selected rows for real, in between the selection and the bulk
+    delete request that follows, exactly the sequence a genuine race would
+    produce.
+    """
+    project, admin, editor, admin_headers, editor_headers = admin_editor_and_project
+    created = []
+    for i in range(3):
+        b = await _create_brdp(client, project.id, editor_headers, f"BRDP-RACE-{i}")
+        await client.delete(f"/api/projects/{project.id}/brdps/{b['id']}", headers=editor_headers)
+        created.append(b["id"])
+
+    selected = list(created)  # snapshot, as the UI would have from its own earlier checkbox selection
+
+    # The real race: this row leaves the Trash for real before the bulk
+    # delete request below is sent.
+    restored_id = selected[1]
+    restore_resp = await client.post(f"/api/trash/{restored_id}/restore", headers=admin_headers)
+    assert restore_resp.status_code == 200
+
+    resp = await client.request("DELETE", "/api/trash", json={"brdp_ids": selected}, headers=admin_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["not_found"] == [restored_id]
+    assert sorted(body["deleted"]) == sorted(x for x in selected if x != restored_id)
+
+    # The restored row is untouched -- still exists, no longer trashed.
+    trash_after = await client.get("/api/trash", headers=admin_headers)
+    assert not any(e["id"] == restored_id for e in trash_after.json())
+    listed = await client.get(f"/api/projects/{project.id}/brdps", headers=editor_headers)
+    assert any(b["id"] == restored_id for b in listed.json())

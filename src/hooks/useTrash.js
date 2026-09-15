@@ -29,3 +29,21 @@ export function usePermanentlyDeleteBrdp() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: TRASH_QUERY_KEY }),
   });
 }
+
+// One bulk request instead of N (docs request: same "single operation"
+// criterion Reset Data already uses) -- returns { deleted, not_found }
+// so a real race (a row restored by someone else between the checkbox
+// selection and this confirm) is reported precisely rather than
+// aborting the whole batch or surfacing a raw error.
+export function useBulkPermanentlyDeleteBrdps() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (brdpIds) =>
+      authFetchJson('/api/trash', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brdp_ids: brdpIds }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: TRASH_QUERY_KEY }),
+  });
+}

@@ -17,9 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.db.base import get_db
 from app.models import User
-from app.repositories.brdp_repository import get_active_brdp_by_identifier, get_trashed_brdp, list_trashed_brdps
+from app.repositories.brdp_repository import (
+    get_active_brdp_by_identifier,
+    get_trashed_brdp,
+    list_trashed_brdps,
+    list_trashed_brdps_by_ids,
+)
 from app.schemas.brdp import BRDPOut
-from app.schemas.trash import TrashedBRDPOut
+from app.schemas.trash import TrashBulkDeleteRequest, TrashBulkDeleteResult, TrashedBRDPOut
 from app.services.history import record_change
 
 router = APIRouter(prefix="/api/trash", tags=["trash"])
@@ -99,3 +104,26 @@ async def delete_brdp_permanently(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trashed BRDP not found")
     await db.delete(brdp)
     await db.commit()
+
+
+@router.delete("", response_model=TrashBulkDeleteResult)
+async def bulk_delete_brdps_permanently(
+    body: TrashBulkDeleteRequest, _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
+) -> TrashBulkDeleteResult:
+    """Bulk 'Delete permanently' (docs request: same single-bulk-operation
+    criterion Reset Data already uses, not N individual DELETEs) -- one
+    SELECT to find which of the requested ids are actually still trashed,
+    then real db.delete() calls against each, all in ONE transaction/
+    commit. An id that comes back missing is never a 500 or a silently
+    partial success: it's reported in `not_found` so the caller can tell
+    the difference, covering the real race the docs request calls out
+    (another admin restoring a row between the checkbox selection and
+    this confirm).
+    """
+    found = await list_trashed_brdps_by_ids(body.brdp_ids, db)
+    found_ids = {b.id for b in found}
+    not_found = [brdp_id for brdp_id in body.brdp_ids if brdp_id not in found_ids]
+    for brdp in found:
+        await db.delete(brdp)
+    await db.commit()
+    return TrashBulkDeleteResult(deleted=list(found_ids), not_found=not_found)
