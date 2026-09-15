@@ -84,15 +84,13 @@ _DEFAULT_PROJECT_CONFIG = {
     "languageIsoCode": "en",
     "countryIsoCode": "US",
     "securityClassification": "01",
-    # Apply/Import ETA settings (HR0/HR8: configurable per project, not a
-    # hardcoded constant) -- same values migration 0007 backfills onto
-    # every pre-existing project, so a brand-new one starts identical
-    # rather than with a silent gap. See ProjectConfigPage.jsx's Import
-    # Settings subsection.
-    "applyEtaMsPerPlainRow": 2,
-    "applyEtaMsPerValidatedRow": 1500,
-    "applyEtaValidatedRowsThreshold": 10,
-    "applyEtaWarningSeconds": 30,
+    # Apply/Import ETA settings used to live here per project (migration
+    # 0007) but moved to a single installation-wide row in app_settings
+    # (migration 0009) -- see app/models/app_settings.py: the per-project
+    # copy was never real per-project variance (an Apply import costs the
+    # same per row everywhere), just the same number duplicated N times.
+    # New projects now read the shared value from GET /api/settings/
+    # import-eta instead of getting their own copy here.
 }
 
 

@@ -6,6 +6,7 @@ import { generateTemplate, importFromExcel, exportToExcel } from '../utils/excel
 import { ruleStateOf } from '../utils/ruleState';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import { useActiveImportJob, useInvalidateImportJob } from '../hooks/useImportJob';
+import { useImportEtaSettings } from '../hooks/useImportEtaSettings';
 import Button from '../components/Button';
 import styles from './ProjectConfigPage.module.css';
 
@@ -45,24 +46,14 @@ function fieldsForStandard(standard) {
 }
 
 // Apply/Import ETA settings (HR0/HR8: every setting needs a UI, nothing
-// hardcoded) -- shown regardless of standard, unlike FULL_FIELDS/
-// DITA_FIELDS above, since importing Excel applies to every project the
-// same way. Same values/keys migration 0007 backfills onto every
-// pre-existing project and _DEFAULT_PROJECT_CONFIG (backend) seeds for a
-// new one -- the DEFAULT_* fallbacks below only ever matter for a
-// project_config that somehow predates both (defensive, not the primary
-// source of truth).
-const IMPORT_ETA_FIELDS = [
-  { key: 'applyEtaMsPerPlainRow', labelKey: 'applyEtaMsPerPlainRow', hintKey: 'applyEtaMsPerPlainRowHint' },
-  { key: 'applyEtaMsPerValidatedRow', labelKey: 'applyEtaMsPerValidatedRow', hintKey: 'applyEtaMsPerValidatedRowHint' },
-  {
-    key: 'applyEtaValidatedRowsThreshold',
-    labelKey: 'applyEtaValidatedRowsThreshold',
-    hintKey: 'applyEtaValidatedRowsThresholdHint',
-  },
-  { key: 'applyEtaWarningSeconds', labelKey: 'applyEtaWarningSeconds', hintKey: 'applyEtaWarningSecondsHint' },
-];
-
+// hardcoded) used to be per-project fields rendered right here (migration
+// 0007 / _DEFAULT_PROJECT_CONFIG). Moved to one installation-wide row
+// (migration 0009, app_settings table), editable only from Settings
+// (admin-only) -- an Apply import costs the same per row in every
+// project, so a copy of the same number duplicated into every project's
+// project_config was never real per-project variance. Fetched below via
+// useImportEtaSettings(); the DEFAULT_* fallbacks only matter for the
+// brief window before that query resolves (or a genuine load failure).
 const DEFAULT_MS_PER_PLAIN_ROW = 2;
 const DEFAULT_MS_PER_VALIDATED_ROW = 1500;
 const DEFAULT_VALIDATED_ROWS_THRESHOLD = 10;
@@ -99,13 +90,14 @@ const EXCEL_CELL_CHAR_LIMIT = 32767;
 // and the confirmation modal (same numbers, same wording, no duplicated
 // logic). Sums BOTH plain-row time AND Validated-row time (bug fix, docs
 // request): a Validated row triggers a real Mistral embedding call, which
-// this project's own measured production rate puts at ~1500ms/row
-// (project_config.applyEtaMsPerValidatedRow) -- omitting it entirely from
-// the total, as the previous version did, understated a 78-Validated-row
-// import as "under 1 minute" when it realistically takes ~2 minutes.
-function computeApplyEta(rows, projectConfig) {
-  const msPerPlainRow = projectConfig?.applyEtaMsPerPlainRow ?? DEFAULT_MS_PER_PLAIN_ROW;
-  const msPerValidatedRow = projectConfig?.applyEtaMsPerValidatedRow ?? DEFAULT_MS_PER_VALIDATED_ROW;
+// real measured production rate puts at ~1500ms/row
+// (etaSettings.applyEtaMsPerValidatedRow, installation-wide -- see
+// useImportEtaSettings) -- omitting it entirely from the total, as the
+// original version did, understated a 78-Validated-row import as "under
+// 1 minute" when it realistically takes ~2 minutes.
+function computeApplyEta(rows, etaSettings) {
+  const msPerPlainRow = etaSettings?.applyEtaMsPerPlainRow ?? DEFAULT_MS_PER_PLAIN_ROW;
+  const msPerValidatedRow = etaSettings?.applyEtaMsPerValidatedRow ?? DEFAULT_MS_PER_VALIDATED_ROW;
   const rowCount = rows?.length || 0;
   const validatedCount = (rows || []).filter(
     (r) => (r.proposal_status || '').toLowerCase().trim() === 'validated'
@@ -138,7 +130,7 @@ function findOversizedExportRows(rows) {
   return rows.filter((row) => fields.some((f) => (row[f] || '').length > EXCEL_CELL_CHAR_LIMIT)).map((row) => row.id);
 }
 
-function DataManagementSection({ projectId, standard, projectConfig, canEdit, dataVersion, onDataChanged }) {
+function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDataChanged }) {
   const { t } = useTranslation();
   const fileInputRef = useRef(null);
   // pendingRows is the EXACT same row array sent to both /analyze and
@@ -186,6 +178,13 @@ function DataManagementSection({ projectId, standard, projectConfig, canEdit, da
   const { data: job } = useActiveImportJob(projectId);
   const invalidateImportJob = useInvalidateImportJob();
   const lastJobStatusRef = useRef(null);
+
+  // Installation-wide (docs request), not this project's own
+  // project_config -- same value regardless of which project's Import
+  // subsection is open. Any authenticated role can read it (see
+  // useImportEtaSettings' docstring); only an admin can change it, from
+  // Settings.
+  const { data: importEtaSettings } = useImportEtaSettings();
 
   const refreshCount = () =>
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => setBrdpCount(data.length));
@@ -304,11 +303,12 @@ function DataManagementSection({ projectId, standard, projectConfig, canEdit, da
   };
 
   const etaConfig = {
-    applyEtaMsPerPlainRow: projectConfig?.applyEtaMsPerPlainRow,
-    applyEtaMsPerValidatedRow: projectConfig?.applyEtaMsPerValidatedRow,
+    applyEtaMsPerPlainRow: importEtaSettings?.apply_eta_ms_per_plain_row,
+    applyEtaMsPerValidatedRow: importEtaSettings?.apply_eta_ms_per_validated_row,
   };
-  const validatedRowsThreshold = projectConfig?.applyEtaValidatedRowsThreshold ?? DEFAULT_VALIDATED_ROWS_THRESHOLD;
-  const etaWarningSeconds = projectConfig?.applyEtaWarningSeconds ?? DEFAULT_APPLY_ETA_WARNING_SECONDS;
+  const validatedRowsThreshold =
+    importEtaSettings?.apply_eta_validated_rows_threshold ?? DEFAULT_VALIDATED_ROWS_THRESHOLD;
+  const etaWarningSeconds = importEtaSettings?.apply_eta_warning_seconds ?? DEFAULT_APPLY_ETA_WARNING_SECONDS;
 
   // Gate in front of handleApplyImport (docs request): only interrupts
   // with a blocking modal when the cost is actually significant (either
@@ -766,10 +766,6 @@ export default function ProjectConfigPage() {
     setSaved(false);
   };
 
-  const handleNumberChange = (key, rawValue) => {
-    handleChange(key, rawValue === '' ? '' : Number(rawValue));
-  };
-
   const handleSave = async (e) => {
     e.preventDefault();
     setIsSaving(true);
@@ -780,10 +776,6 @@ export default function ProjectConfigPage() {
         body: JSON.stringify({ project_config: values }),
       });
       setSaved(true);
-      // Import Settings (below) read from the SAVED project.project_config,
-      // not this form's own draft `values` -- refreshing here is what
-      // makes a changed threshold/estimate take effect immediately,
-      // without a page reload (docs request).
       refreshProject();
     } finally {
       setIsSaving(false);
@@ -816,28 +808,6 @@ export default function ProjectConfigPage() {
           ))}
         </div>
 
-        <h3 className={styles.subsectionHeading}>{t('config.importSettings.title')}</h3>
-        <p className={styles.hint}>{t('config.importSettings.description')}</p>
-        <div className={styles.grid}>
-          {IMPORT_ETA_FIELDS.map((f) => (
-            <div key={f.key} className={styles.field}>
-              <label className={styles.label} htmlFor={`cfg-${f.key}`}>
-                {t(`config.fields.${f.labelKey}`)}
-              </label>
-              <input
-                id={`cfg-${f.key}`}
-                type="number"
-                min="0"
-                className={styles.input}
-                value={values[f.key] ?? ''}
-                onChange={(e) => handleNumberChange(f.key, e.target.value)}
-                disabled={!canEdit}
-              />
-              {f.hintKey && <span className={styles.hint}>{t(`config.fields.${f.hintKey}`)}</span>}
-            </div>
-          ))}
-        </div>
-
         {canEdit && (
           <button type="submit" className={styles.saveBtn} disabled={isSaving}>
             {isSaving ? '…' : t('config.save')}
@@ -850,7 +820,6 @@ export default function ProjectConfigPage() {
       <DataManagementSection
         projectId={projectId}
         standard={project.standard}
-        projectConfig={project.project_config}
         canEdit={canEdit}
         dataVersion={dataVersion}
         onDataChanged={bumpDataVersion}

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.routes.app_settings import router as app_settings_router
 from app.api.routes.approvals import project_router as project_approvals_router
 from app.api.routes.approvals import router as approvals_router
 from app.api.routes.auth import router as auth_router
@@ -39,6 +40,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(projects_router)
 app.include_router(config_router)
+app.include_router(app_settings_router)
 app.include_router(brdp_catalog_router)
 app.include_router(brdp_import_router)
 app.include_router(brdps_router)

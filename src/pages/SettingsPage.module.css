@@ -255,6 +255,25 @@
   border-color: #fecaca !important;
 }
 
+/* Collapsible admin-only sections (e.g. Import ETA Settings) -- same
+   font treatment as .sectionTitle above so a closed <details> looks like
+   any other section header, just clickable. */
+.accordionSummary {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  cursor: pointer;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e8edf5;
+  list-style: revert;
+}
+
+.accordionSummary:hover {
+  color: #2563eb;
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 16px;

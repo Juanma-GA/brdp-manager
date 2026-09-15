@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
+import { useImportEtaSettings, useUpdateImportEtaSettings } from '../hooks/useImportEtaSettings';
 import Button from '../components/Button';
 import ChangePasswordForm from '../components/ChangePasswordForm';
 import SortableHeader from '../components/SortableHeader';
@@ -499,6 +500,101 @@ function UserManagementSection({ currentUserId }) {
   );
 }
 
+// The 4 Apply/Import ETA numbers (docs request: moved out of per-project
+// Project Configuration -- an Apply import costs the same per row in
+// every project, so a value duplicated into every project's
+// project_config was never real per-project variance). Admin-only,
+// installation-wide, backed by GET/PUT /api/settings/import-eta.
+const IMPORT_ETA_FIELDS = [
+  { key: 'apply_eta_ms_per_plain_row', labelKey: 'msPerPlainRow', hintKey: 'msPerPlainRowHint' },
+  {
+    key: 'apply_eta_ms_per_validated_row',
+    labelKey: 'msPerValidatedRow',
+    hintKey: 'msPerValidatedRowHint',
+  },
+  {
+    key: 'apply_eta_validated_rows_threshold',
+    labelKey: 'validatedRowsThreshold',
+    hintKey: 'validatedRowsThresholdHint',
+  },
+  { key: 'apply_eta_warning_seconds', labelKey: 'warningSeconds', hintKey: 'warningSecondsHint' },
+];
+
+// Collapsed by default via <details> with no `open` attribute (docs
+// request: "casi nunca se van a tocar, no deben ocupar espacio
+// permanente en pantalla") -- the same native disclosure widget
+// GenerateModal.jsx/GeneratePage.jsx already use for their own
+// rarely-opened detail sections, not a new pattern for this codebase.
+function ImportEtaSettingsSection() {
+  const { t } = useTranslation();
+  const { data, isLoading, isError } = useImportEtaSettings();
+  const updateMutation = useUpdateImportEtaSettings();
+  const [values, setValues] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (data) setValues(data);
+  }, [data]);
+
+  const handleChange = (key, rawValue) => {
+    setValues((v) => ({ ...v, [key]: rawValue === '' ? '' : Number(rawValue) }));
+    setSaved(false);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaved(false);
+    try {
+      await updateMutation.mutateAsync({
+        apply_eta_ms_per_plain_row: values.apply_eta_ms_per_plain_row,
+        apply_eta_ms_per_validated_row: values.apply_eta_ms_per_validated_row,
+        apply_eta_validated_rows_threshold: values.apply_eta_validated_rows_threshold,
+        apply_eta_warning_seconds: values.apply_eta_warning_seconds,
+      });
+      setSaved(true);
+    } catch {
+      // updateMutation.isError/.error below already reflects the failure --
+      // nothing else to do here.
+    }
+  };
+
+  return (
+    <details className={styles.section}>
+      <summary className={styles.accordionSummary}>{t('settings.importEta.title')}</summary>
+      <p className={styles.fieldDescription}>{t('settings.importEta.description')}</p>
+      {isLoading && <p>…</p>}
+      {isError && <p className={styles.statusInvalid}>{t('settings.importEta.loadError')}</p>}
+      {values && (
+        <form onSubmit={handleSave}>
+          <div className={styles.settingsGrid}>
+            {IMPORT_ETA_FIELDS.map((f) => (
+              <div key={f.key} className={styles.formGroup}>
+                <label className={styles.label} htmlFor={`app-settings-${f.key}`}>
+                  {t(`settings.importEta.fields.${f.labelKey}`)}
+                </label>
+                <input
+                  id={`app-settings-${f.key}`}
+                  className={styles.input}
+                  type="number"
+                  min="0"
+                  value={values[f.key] ?? ''}
+                  onChange={(e) => handleChange(f.key, e.target.value)}
+                />
+                <p className={styles.fieldDescription}>{t(`settings.importEta.fields.${f.hintKey}`)}</p>
+              </div>
+            ))}
+          </div>
+          {updateMutation.isError && <p className={styles.statusInvalid}>{updateMutation.error.message}</p>}
+          <Button type="submit" disabled={updateMutation.isPending}>
+            {updateMutation.isPending ? t('settings.importEta.saving') : t('settings.importEta.save')}
+          </Button>
+          {saved && <span className={styles.statusVerified}> {t('settings.importEta.saved')}</span>}
+        </form>
+      )}
+    </details>
+  );
+}
+
 export default function SettingsPage() {
   const { t } = useTranslation();
   const { user, updateUser } = useAuthContext();
@@ -511,6 +607,7 @@ export default function SettingsPage() {
       <div className={styles.sectionsContainer}>
         <ProfileSection user={user} onUserUpdated={updateUser} />
         {user.global_role === 'admin' && <UserManagementSection currentUserId={user.id} />}
+        {user.global_role === 'admin' && <ImportEtaSettingsSection />}
       </div>
     </div>
   );
