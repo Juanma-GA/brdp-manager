@@ -889,28 +889,20 @@ const resources = {
   },
 };
 
-const LANGUAGE_KEY = 'brdp_v2_language';
-
-function getStoredLanguage() {
-  try {
-    return localStorage.getItem(LANGUAGE_KEY) || 'en';
-  } catch {
-    return 'en';
-  }
-}
-
-export function setLanguage(lng) {
-  try {
-    localStorage.setItem(LANGUAGE_KEY, lng);
-  } catch {
-    // localStorage unavailable -- language choice just won't persist across reloads.
-  }
-  i18n.changeLanguage(lng);
-}
-
+// Language is an account setting now (docs request: Opción B, server-
+// side, not localStorage) -- users.preferred_language, read via
+// GET/PATCH /api/auth/me. i18next boots at the 'en' default below before
+// AuthContext has resolved anything (there's no user yet at import
+// time); AuthContext.jsx then calls i18n.changeLanguage() itself as soon
+// as it knows the real account (on both the mount-time silent-refresh
+// restore AND right after login) -- see its applyPreferredLanguage().
+// No localStorage read/write for language anywhere any more, not even
+// as a fallback/cache: this is the one setting explicitly NOT carved out
+// as an HR1 exception (see AppLayout.jsx's sidebarCollapsed for the one
+// that is, and why).
 i18n.use(initReactI18next).init({
   resources,
-  lng: getStoredLanguage(),
+  lng: 'en',
   fallbackLng: 'en',
   defaultNS: 'common',
   interpolation: { escapeValue: false },

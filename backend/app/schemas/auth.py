@@ -30,15 +30,37 @@ class UserOut(BaseModel):
     # reachable -- true right after Create user or an admin's Reset
     # password, cleared back to False by a successful change-password.
     must_change_password: bool
+    # NULL = no preference chosen yet -- AuthContext falls back to the
+    # frontend's existing 'en' default in that case, same as before this
+    # field existed (docs request's own explicit edge case for accounts
+    # that predate this column, or that just haven't touched the
+    # language switcher).
+    preferred_language: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+_SUPPORTED_LANGUAGES = {"en", "es"}
 
 
 class MeUpdate(BaseModel):
     # email and global_role are deliberately absent -- a user editing their
     # own profile must never be able to touch either, especially not
-    # global_role (self-granting admin). Only display_name is editable here.
-    display_name: str
+    # global_role (self-granting admin).
+    #
+    # Both fields optional + exclude_unset (see update_me in
+    # api/routes/auth.py) so LanguageSwitcher can PATCH just
+    # preferred_language without also having to resend the current
+    # display_name -- same partial-update convention as BRDPUpdate.
+    display_name: str | None = None
+    preferred_language: str | None = None
+
+    @field_validator("preferred_language")
+    @classmethod
+    def _validate_language(cls, value: str | None) -> str | None:
+        if value is not None and value not in _SUPPORTED_LANGUAGES:
+            raise ValueError(f"Unsupported language: {value!r}")
+        return value
 
 
 class ChangePasswordRequest(BaseModel):

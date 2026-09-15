@@ -11,8 +11,12 @@
      than silently claimed as consistent with something that doesn't
      exist yet.
   */
+  width: 100%;
   max-width: 720px;
-  margin: 0 auto;
+  /* Left-aligned, not centered -- matches .page in ProjectConfigPage.module.css
+     and RecordsPage.module.css (docs request: same alignment criterion
+     across the app's config/list pages, not a floating centered panel). */
+  margin: 0;
   /* AppLayout's .mainContent (App.css) is a fixed-height (100vh) flex
      column with overflow: hidden -- content taller than the viewport is
      silently clipped unless a page establishes its own scroll region.
@@ -325,9 +329,17 @@
 
 /* Only rendered content contributes height while a row is open -- see
    .section's own comment above for why this padding doesn't live there
-   instead. */
+   instead. overflow-x: auto -- a real regression caught while verifying
+   the 720px width fix in the browser (not just after a build): User
+   Management's table (Email/Name/Global role/Project roles/Assign/
+   Actions) is wider than 720px minus padding and was visually spilling
+   past the panel's right edge with no way to reach the clipped actions.
+   Scrolling this row's own content horizontally, rather than letting it
+   overflow the panel, is the same pattern this app already uses for any
+   content wider than its container (tables/diagrams/code blocks). */
 .sectionBody {
   padding: 0 20px 20px;
+  overflow-x: auto;
 }
 
 /* Delete-permanently confirmation (Papelera) -- deliberately a real modal,

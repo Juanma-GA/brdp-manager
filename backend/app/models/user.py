@@ -24,4 +24,11 @@ class User(Base):
     # Change Password screen, blocking every other route, until a
     # successful POST /api/auth/change-password clears this back to False.
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # NULL = no preference chosen yet -- the frontend falls back to its
+    # existing default ('en') exactly as it did before this column
+    # existed, for both pre-migration accounts and newly created ones
+    # that haven't touched the language switcher yet (docs request: this
+    # column intentionally has no DB-level default that would erase that
+    # distinction). "en" | "es", the only two languages this app ships.
+    preferred_language: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

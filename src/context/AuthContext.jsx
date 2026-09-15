@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import i18n from '../i18n';
 import {
   authFetchJson,
   configureAuth,
@@ -8,6 +9,20 @@ import {
 } from '../services/apiClient';
 
 const AuthContext = createContext();
+
+// The one place a User's preferred_language turns into the actual active
+// UI language (docs request: server-side account setting, not
+// localStorage) -- called from both places this app ever learns who the
+// current user is: the mount-time silent-refresh restore below, and
+// login(). NULL (no preference chosen yet -- a pre-migration account, or
+// one that just hasn't touched the language switcher) intentionally
+// falls back to the same 'en' i18n/index.js already boots with, so this
+// is a no-op for that case rather than a second competing default.
+function applyPreferredLanguage(me) {
+  if (me?.preferred_language) {
+    i18n.changeLanguage(me.preferred_language);
+  }
+}
 
 export function AuthProvider({ children }) {
   const [accessToken, setAccessTokenState] = useState(null);
@@ -73,7 +88,10 @@ export function AuthProvider({ children }) {
         if (!refreshed) throw new Error('refresh failed');
         if (cancelled) return;
         const me = await authFetchJson('/api/auth/me');
-        if (!cancelled) setUser(me);
+        if (!cancelled) {
+          setUser(me);
+          applyPreferredLanguage(me);
+        }
       } catch {
         if (!cancelled) {
           setAccessToken(null);
@@ -100,6 +118,7 @@ export function AuthProvider({ children }) {
       storeRefreshToken(data.refresh_token);
       const me = await authFetchJson('/api/auth/me');
       setUser(me);
+      applyPreferredLanguage(me);
       return me;
     },
     [setAccessToken]
@@ -112,6 +131,7 @@ export function AuthProvider({ children }) {
   // it's the same context value.
   const updateUser = useCallback((updatedUser) => {
     setUser(updatedUser);
+    applyPreferredLanguage(updatedUser);
   }, []);
 
   const value = {

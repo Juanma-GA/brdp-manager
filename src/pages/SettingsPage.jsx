@@ -642,6 +642,12 @@ function TrashSection() {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const headerCheckboxRef = useRef(null);
+  // The row index a plain (non-Shift) click last landed on -- deliberately
+  // NOT part of selectedIds/React state (it's an interaction anchor, not
+  // selection data, and doesn't need to trigger a re-render on its own).
+  // Standard Gmail/Finder/Explorer semantics: Shift-click fills the range
+  // between this and the row just clicked, inclusive of both ends.
+  const lastClickedIndexRef = useRef(null);
 
   // Prunes selectedIds whenever the trash list itself changes (a restore,
   // a delete, or another admin's own action landing via the next poll/
@@ -657,6 +663,14 @@ function TrashSection() {
       const next = new Set([...prev].filter((id) => liveIds.has(id)));
       return next.size === prev.size ? prev : next;
     });
+    // The list just changed (a restore, a delete, another admin's own
+    // action) -- row indices may no longer mean what they meant a moment
+    // ago, so the Shift-click anchor is reset rather than remapped (docs
+    // request's own edge case: this must never point at a row that no
+    // longer exists). The next click, Shift or not, simply starts a fresh
+    // anchor -- safe, and matches how a real spreadsheet/file browser
+    // behaves after its own list changes underneath a pending selection.
+    lastClickedIndexRef.current = null;
   }, [data]);
 
   const allSelected = !!data && data.length > 0 && selectedIds.size === data.length;
@@ -682,6 +696,39 @@ function TrashSection() {
       else next.add(id);
       return next;
     });
+  };
+
+  // A plain click toggles just this row (existing behavior) and becomes
+  // the new anchor. A Shift-click with a real prior anchor selects (adds
+  // -- never removes) every row between the anchor and this one,
+  // inclusive, regardless of which direction the anchor is in. Shift
+  // held with NO prior anchor (nothing clicked yet this "session") falls
+  // through to a plain toggle instead of doing nothing or throwing (docs
+  // request's own edge case).
+  //
+  // Uses onClick, not onChange: onChange alone can't see the Shift
+  // modifier reliably (it's a plain "change" event, not a MouseEvent).
+  // Deliberately does NOT call event.preventDefault() -- confirmed by
+  // hand (a real, reproducible bug, not a hypothetical) that doing so
+  // breaks this exact controlled checkbox: React's own checked-state
+  // reconciliation for a checkbox input relies on the browser's native
+  // toggle actually happening on click, so preventing it left every row
+  // rendering checked=false forever regardless of what selectedIds said,
+  // even though the state itself (and the "Delete N permanently" count)
+  // was updating correctly underneath. Letting the native toggle happen
+  // is harmless here: selectedIds (add-only for a Shift range, and the
+  // authoritative source either way) overrides it on the very next
+  // render, same as any other controlled input.
+  const handleRowCheckboxClick = (index, id, event) => {
+    if (event.shiftKey && lastClickedIndexRef.current !== null && data) {
+      const start = Math.min(lastClickedIndexRef.current, index);
+      const end = Math.max(lastClickedIndexRef.current, index);
+      const rangeIds = data.slice(start, end + 1).map((e) => e.id);
+      setSelectedIds((prev) => new Set([...prev, ...rangeIds]));
+    } else {
+      toggleRow(id);
+    }
+    lastClickedIndexRef.current = index;
   };
 
   const handleRestore = async (entry) => {
@@ -766,13 +813,14 @@ function TrashSection() {
                 </tr>
               </thead>
               <tbody>
-                {data.map((entry) => (
+                {data.map((entry, index) => (
                   <tr key={entry.id}>
                     <td>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(entry.id)}
-                        onChange={() => toggleRow(entry.id)}
+                        onClick={(e) => handleRowCheckboxClick(index, entry.id, e)}
+                        onChange={() => {}} // selection logic lives in onClick above (needs the Shift modifier); this silences React's "controlled checkbox needs onChange" warning
                         aria-label={t('settings.trash.selectRow', { identifier: entry.identifier })}
                       />
                     </td>

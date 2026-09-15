@@ -127,6 +127,74 @@ async def test_me_update_changes_display_name(client, test_user):
         assert db_user.display_name == "Renamed Self"
 
 
+async def test_me_response_includes_null_preferred_language_for_a_fresh_user(client, test_user):
+    """docs request's own edge case: an account that predates this column
+    (or just hasn't touched the language switcher) must not break login
+    or GET /me -- it reads back as null, not a default that would hide
+    the "no preference chosen yet" state from the frontend.
+    """
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+    response = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {access_token}"})
+    assert response.status_code == 200
+    assert response.json()["preferred_language"] is None
+
+
+async def test_me_update_changes_preferred_language_without_touching_display_name(client, test_user):
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    # Partial update -- LanguageSwitcher.jsx sends ONLY preferred_language,
+    # never display_name alongside it.
+    response = await client.patch("/api/auth/me", json={"preferred_language": "es"}, headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preferred_language"] == "es"
+    assert body["display_name"] == test_user.display_name  # untouched
+
+    async with async_session_factory() as session:
+        db_user = await session.get(User, test_user.id)
+        assert db_user.preferred_language == "es"
+        assert db_user.display_name == test_user.display_name
+
+
+async def test_me_update_rejects_unsupported_language(client, test_user):
+    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    access_token = login.json()["access_token"]
+    response = await client.patch(
+        "/api/auth/me",
+        json={"preferred_language": "fr"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 422
+
+
+async def test_preferred_language_follows_the_account_across_a_fresh_login(client, test_user):
+    """The real edge case behind this feature -- logging in again (this
+    app's stand-in for "a different browser", since a fresh login here is
+    a fully independent token/session with nothing carried over from the
+    first one) must reflect the account's saved language, not a browser
+    default.
+    """
+    first_login = await client.post(
+        "/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD}
+    )
+    await client.patch(
+        "/api/auth/me",
+        json={"preferred_language": "es"},
+        headers={"Authorization": f"Bearer {first_login.json()['access_token']}"},
+    )
+
+    second_login = await client.post(
+        "/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD}
+    )
+    me = await client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {second_login.json()['access_token']}"}
+    )
+    assert me.json()["preferred_language"] == "es"
+
+
 async def test_me_update_ignores_global_role_change(client):
     """A non-admin sending global_role in the PATCH /api/auth/me body must
     NOT become admin -- MeUpdate has no global_role field at all, so this

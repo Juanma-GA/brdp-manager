@@ -103,8 +103,15 @@ async def update_me(
     at all, so neither can be smuggled in here regardless of what the
     request body contains (no admin self-grant possible through this
     endpoint, unlike PATCH /api/users/{id} which is admin-only anyway).
+
+    Partial update (exclude_unset), same convention as BRDPUpdate: lets
+    LanguageSwitcher PATCH just preferred_language without also having to
+    resend the current display_name, and vice versa for ProfileSection.
     """
-    current_user.display_name = body.display_name
+    updates = body.model_dump(exclude_unset=True)
+    for field in ("display_name", "preferred_language"):
+        if field in updates:
+            setattr(current_user, field, updates[field])
     await db.commit()
     await db.refresh(current_user)
     return current_user
