@@ -211,10 +211,11 @@ async def test_admin_reset_password_revokes_the_users_existing_sessions(client, 
         "/api/auth/login", json={"email": non_admin.email, "password": "irrelevant-password"}
     )
     assert login.status_code == 200
-    refresh_token = login.json()["refresh_token"]
+    refresh_token = login.cookies["refresh_token"]
 
     reset = await client.post(f"/api/users/{non_admin.id}/reset-password", headers=_headers(admin))
     assert reset.status_code == 200
 
-    refresh_attempt = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    client.cookies["refresh_token"] = refresh_token
+    refresh_attempt = await client.post("/api/auth/refresh")
     assert refresh_attempt.status_code == 401

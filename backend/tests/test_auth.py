@@ -10,9 +10,11 @@ import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from httpx import ASGITransport, AsyncClient
 
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
+from app.main import app
 from app.models import User
 
 TEST_PASSWORD = "correct-horse-battery-staple"
@@ -44,8 +46,22 @@ async def test_login_with_correct_credentials_succeeds(client, test_user):
     assert response.status_code == 200
     body = response.json()
     assert "access_token" in body
-    assert "refresh_token" in body
     assert body["token_type"] == "bearer"
+
+    # AACF HR1 + "Auth & Storage": the refresh token must never appear in
+    # the JSON body -- only as a Set-Cookie header the browser can't read
+    # back via document.cookie.
+    assert "refresh_token" not in body
+
+    set_cookie = response.headers.get("set-cookie")
+    assert set_cookie is not None
+    assert "refresh_token=" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "Path=/api/auth" in set_cookie
+    # settings.environment defaults to "development" for the test app --
+    # Secure must stay off, or the cookie would be silently dropped by the
+    # browser over plain HTTP local dev.
+    assert "Secure" not in set_cookie
 
 
 async def test_login_with_wrong_password_rejected(client, test_user):
@@ -240,40 +256,69 @@ async def test_me_update_ignores_global_role_change(client):
 
 async def test_refresh_rotates_token_and_invalidates_the_old_one(client, test_user):
     login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
-    old_refresh = login.json()["refresh_token"]
+    old_refresh = login.cookies["refresh_token"]
 
-    refreshed = await client.post("/api/auth/refresh", json={"refresh_token": old_refresh})
+    # No body at all -- the client's cookie jar carries the token, exactly
+    # like a real browser tab that never touched the value directly.
+    refreshed = await client.post("/api/auth/refresh")
     assert refreshed.status_code == 200
-    new_refresh = refreshed.json()["refresh_token"]
+    assert "refresh_token" not in refreshed.json()
+    new_refresh = client.cookies["refresh_token"]
     assert new_refresh != old_refresh
 
-    # The old refresh token was single-use -- reusing it must fail.
-    reused = await client.post("/api/auth/refresh", json={"refresh_token": old_refresh})
+    # The old refresh token was single-use -- force it back onto the
+    # client's own cookie jar (which has already moved on to the rotated
+    # value) and confirm reusing it fails.
+    client.cookies["refresh_token"] = old_refresh
+    reused = await client.post("/api/auth/refresh")
     assert reused.status_code == 401
 
     # The freshly rotated one still works exactly once.
-    second_refresh = await client.post("/api/auth/refresh", json={"refresh_token": new_refresh})
+    client.cookies["refresh_token"] = new_refresh
+    second_refresh = await client.post("/api/auth/refresh")
     assert second_refresh.status_code == 200
 
 
 async def test_refresh_with_unknown_token_rejected(client):
-    response = await client.post("/api/auth/refresh", json={"refresh_token": "not-a-real-token"})
+    client.cookies["refresh_token"] = "not-a-real-token"
+    response = await client.post("/api/auth/refresh")
+    assert response.status_code == 401
+
+
+async def test_refresh_without_any_cookie_rejected_cleanly(client):
+    """docs request's own edge case: calling /refresh with no cookie at all
+    (curl, a session that never logged in) must be a clean 401, not a 500.
+    """
+    response = await client.post("/api/auth/refresh")
     assert response.status_code == 401
 
 
 async def test_logout_revokes_refresh_token(client, test_user):
-    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
-    refresh_token = login.json()["refresh_token"]
+    await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+    assert "refresh_token" in client.cookies
 
-    logout_response = await client.post("/api/auth/logout", json={"refresh_token": refresh_token})
+    logout_response = await client.post("/api/auth/logout")
     assert logout_response.status_code == 204
+    set_cookie = logout_response.headers.get("set-cookie")
+    assert set_cookie is not None
+    assert "refresh_token=" in set_cookie
+    assert "Max-Age=0" in set_cookie or '""' in set_cookie
 
-    reuse_after_logout = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    # httpx's own cookie jar honors the Max-Age=0 expiry, same as a real
+    # browser would -- the next request from this client carries no cookie
+    # at all, not a stale one.
+    reuse_after_logout = await client.post("/api/auth/refresh")
     assert reuse_after_logout.status_code == 401
 
 
 async def test_logout_with_unknown_token_is_a_noop_not_an_error(client):
-    response = await client.post("/api/auth/logout", json={"refresh_token": "never-issued"})
+    client.cookies["refresh_token"] = "never-issued"
+    response = await client.post("/api/auth/logout")
+    assert response.status_code == 204
+
+
+async def test_logout_without_any_cookie_is_a_noop_not_an_error(client):
+    response = await client.post("/api/auth/logout")
     assert response.status_code == 204
 
 
@@ -390,47 +435,59 @@ async def test_change_password_rejects_new_password_shorter_than_minimum(client,
 
 
 async def test_change_password_revokes_other_sessions_but_not_the_current_one(client, test_user):
-    """Two real, independent sessions (docs request's "dos pestañas") --
-    changing the password from session A, naming session A's own refresh
-    token as current_refresh_token, must revoke session B's refresh token
-    while leaving session A's usable.
+    """Two real, independent sessions (docs request's "dos pestañas"), each
+    its own AsyncClient so each gets its own cookie jar -- a single client
+    can't hold two different refresh_token cookie values for the same
+    path at once, same as two separate browser tabs would need to be two
+    separate cookie stores if they weren't sharing one browser profile.
+    Changing the password from session A must revoke session B's refresh
+    token (read from ITS OWN cookie by the endpoint) while leaving
+    session A's (read from the request that made the change) usable.
     """
-    session_a = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
-    session_b = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
-    access_token_a = session_a.json()["access_token"]
-    refresh_a = session_a.json()["refresh_token"]
-    refresh_b = session_b.json()["refresh_token"]
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client_a, AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client_b:
+        session_a = await client_a.post(
+            "/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD}
+        )
+        await client_b.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
+        access_token_a = session_a.json()["access_token"]
 
-    response = await client.post(
-        "/api/auth/change-password",
-        json={
-            "current_password": TEST_PASSWORD,
-            "new_password": "new-correct-password",
-            "current_refresh_token": refresh_a,
-        },
-        headers={"Authorization": f"Bearer {access_token_a}"},
-    )
-    assert response.status_code == 204
+        response = await client_a.post(
+            "/api/auth/change-password",
+            json={"current_password": TEST_PASSWORD, "new_password": "new-correct-password"},
+            headers={"Authorization": f"Bearer {access_token_a}"},
+        )
+        assert response.status_code == 204
 
-    # Session B is forced to re-login on its next refresh -- the whole
-    # point of this feature.
-    session_b_refresh = await client.post("/api/auth/refresh", json={"refresh_token": refresh_b})
-    assert session_b_refresh.status_code == 401
+        # Session B is forced to re-login on its next refresh -- the whole
+        # point of this feature.
+        session_b_refresh = await client_b.post("/api/auth/refresh")
+        assert session_b_refresh.status_code == 401
 
-    # Session A's own refresh token was excluded, so it's still usable.
-    session_a_refresh = await client.post("/api/auth/refresh", json={"refresh_token": refresh_a})
-    assert session_a_refresh.status_code == 200
+        # Session A's own refresh token (read from ITS request's cookie by
+        # the endpoint) was excluded, so it's still usable.
+        session_a_refresh = await client_a.post("/api/auth/refresh")
+        assert session_a_refresh.status_code == 200
 
 
-async def test_change_password_without_current_refresh_token_revokes_every_session(client, test_user):
-    """No current_refresh_token given at all -- every active refresh token
-    for this user gets revoked, current session included (the frontend
-    always sends its own, but the endpoint must not assume that).
+async def test_change_password_without_a_refresh_cookie_revokes_every_session(client, test_user):
+    """change-password called with no refresh_token cookie at all (the
+    access token alone is enough to authenticate the request) -- every
+    active refresh token for this user still gets revoked, current session
+    included, same as the old "no current_refresh_token in the body" case.
     """
     login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
     access_token = login.json()["access_token"]
-    refresh_token = login.json()["refresh_token"]
+    refresh_token = login.cookies["refresh_token"]
 
+    # Drop the cookie from the client's own jar (a per-request `cookies=`
+    # override only ADDS to the jar, it can't suppress an entry already in
+    # it) so this call carries an access token but genuinely no refresh
+    # cookie, as if the caller's had already expired or been cleared --
+    # change-password must not require it to be present.
+    client.cookies.delete("refresh_token")
     response = await client.post(
         "/api/auth/change-password",
         json={"current_password": TEST_PASSWORD, "new_password": "new-correct-password"},
@@ -438,5 +495,6 @@ async def test_change_password_without_current_refresh_token_revokes_every_sessi
     )
     assert response.status_code == 204
 
-    refresh_attempt = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    client.cookies["refresh_token"] = refresh_token
+    refresh_attempt = await client.post("/api/auth/refresh")
     assert refresh_attempt.status_code == 401

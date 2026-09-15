@@ -1,21 +1,18 @@
 .container {
   padding: 24px;
-  /* Fixed reading width, not full-bleed to whatever the sidebar leaves
-     behind (docs request) -- a settings page reads as a list of rows,
-     not a form that benefits from stretching across a wide viewport.
-     NOTE: ProjectConfigPage.module.css's own .page/.card currently have
-     NO max-width at all (confirmed by measuring the rendered form at a
-     1600px viewport: 1500px wide, i.e. full-bleed) -- there was no
-     existing "criterio de ancho" there to replicate. This value is this
-     round's own choice, not a copy of a pre-existing one; flagged rather
-     than silently claimed as consistent with something that doesn't
-     exist yet.
+  /* No max-width -- matches .page in ProjectConfigPage.module.css and
+     RecordsPage.module.css exactly: neither of those caps the outer
+     container's width either, they let it fill the page and have each
+     piece of CONTENT inside decide its own layout (ProjectConfigPage's
+     field grid, its own natural width; a table, however wide it
+     actually needs to be). A 720px cap here first (an earlier round's
+     choice, since corrected) fit Profile's loose text fields fine but
+     clipped User Management's 6-column table at its own right edge --
+     real, measured overflow, not cosmetic. Each section below now
+     handles its own internal width the same way ProjectConfigPage/
+     RecordsPage already do, rather than the page-level container
+     picking one width that can't fit all of them.
   */
-  width: 100%;
-  max-width: 720px;
-  /* Left-aligned, not centered -- matches .page in ProjectConfigPage.module.css
-     and RecordsPage.module.css (docs request: same alignment criterion
-     across the app's config/list pages, not a floating centered panel). */
   margin: 0;
   /* AppLayout's .mainContent (App.css) is a fixed-height (100vh) flex
      column with overflow: hidden -- content taller than the viewport is

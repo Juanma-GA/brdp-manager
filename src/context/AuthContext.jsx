@@ -1,12 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import i18n from '../i18n';
-import {
-  authFetchJson,
-  configureAuth,
-  getStoredRefreshToken,
-  refreshAccessToken,
-  storeRefreshToken,
-} from '../services/apiClient';
+import { authFetchJson, configureAuth, refreshAccessToken } from '../services/apiClient';
 
 const AuthContext = createContext();
 
@@ -39,21 +33,19 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
-    const refreshToken = getStoredRefreshToken();
     setAccessToken(null);
-    storeRefreshToken(null);
     setUser(null);
-    if (refreshToken) {
-      try {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-      } catch {
-        // Best-effort revocation -- the client-side session is already gone
-        // either way (tokens cleared above).
-      }
+    try {
+      // The refresh_token cookie travels with this request on its own
+      // (credentials: 'include') -- the backend reads it, revokes it, and
+      // clears it via Set-Cookie. No body needed any more.
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // Best-effort revocation -- the client-side session is already gone
+      // either way (access token cleared above).
     }
   }, [setAccessToken]);
 
@@ -67,22 +59,21 @@ export function AuthProvider({ children }) {
     });
   }, [setAccessToken]);
 
-  // On mount, try to restore a session from the stored refresh token --
+  // On mount, try to restore a session from the refresh_token cookie --
   // this is what makes "refresh (F5) keeps you logged in" actually true,
-  // instead of just "the route exists". Goes through the shared
-  // refreshAccessToken() (apiClient.js) rather than its own fetch: React 18
-  // StrictMode double-invokes this effect in dev, and refresh tokens
-  // rotate on use, so two independent calls racing on the same stored
-  // token would have the second one legitimately rejected as already
+  // instead of just "the route exists". There's no readable client-side
+  // value any more to check first (the cookie is HttpOnly), so this always
+  // attempts the refresh and lets the backend say yes or no. Goes through
+  // the shared refreshAccessToken() (apiClient.js) rather than its own
+  // fetch: React 18 StrictMode double-invokes this effect in dev, and
+  // refresh tokens rotate on use, so two independent calls racing on the
+  // same cookie would have the second one legitimately rejected as already
   // revoked -- logging out a session that was never actually invalid.
+  // refreshAccessToken() caches the in-flight promise so both callers
+  // await the same network call instead of each firing their own.
   useEffect(() => {
     let cancelled = false;
     async function restore() {
-      const refreshToken = getStoredRefreshToken();
-      if (!refreshToken) {
-        setIsLoading(false);
-        return;
-      }
       try {
         const refreshed = await refreshAccessToken();
         if (!refreshed) throw new Error('refresh failed');
@@ -95,7 +86,6 @@ export function AuthProvider({ children }) {
       } catch {
         if (!cancelled) {
           setAccessToken(null);
-          storeRefreshToken(null);
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -115,7 +105,6 @@ export function AuthProvider({ children }) {
         body: JSON.stringify({ email, password }),
       });
       setAccessToken(data.access_token);
-      storeRefreshToken(data.refresh_token);
       const me = await authFetchJson('/api/auth/me');
       setUser(me);
       applyPreferredLanguage(me);

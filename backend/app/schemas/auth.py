@@ -10,13 +10,8 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
 class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
 
 
@@ -66,12 +61,6 @@ class MeUpdate(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
-    # The caller's OWN current refresh token, if it has one stored -- lets
-    # the endpoint exclude that one session from the "revoke every other
-    # refresh token" step below (docs request: "no el de la sesión
-    # actual"). Optional so a caller with nothing stored still works, it
-    # just revokes everything in that case.
-    current_refresh_token: str | None = None
 
     @field_validator("new_password")
     @classmethod

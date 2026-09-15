@@ -15,6 +15,12 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    # --- Environment ---
+    # Only "production" flips the refresh-token cookie's Secure flag on
+    # (see api/routes/auth.py) -- a Secure cookie is dropped by the browser
+    # over plain HTTP, which is what local dev serves over.
+    environment: str = "development"
+
     # --- Database (Phase 1) ---
     database_url: str = "postgresql+asyncpg://brdp:brdp@localhost:5432/brdp_manager"
 

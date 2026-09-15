@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuthContext } from '../context/AuthContext';
-import { authFetchJson, getStoredRefreshToken } from '../services/apiClient';
+import { authFetchJson } from '../services/apiClient';
 import Button from './Button';
 import styles from './ChangePasswordForm.module.css';
 
@@ -86,7 +86,6 @@ export default function ChangePasswordForm({ withDivider = false, title, descrip
         body: JSON.stringify({
           current_password: currentPassword,
           new_password: newPassword,
-          current_refresh_token: getStoredRefreshToken(),
         }),
       });
       // Same no-separate-success-message pattern as the Display Name form

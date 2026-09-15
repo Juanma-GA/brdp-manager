@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.rate_limit import clear_attempts, is_locked_out, record_failed_attempt
 from app.core.security import (
     create_access_token,
@@ -16,12 +16,32 @@ from app.core.security import (
 )
 from app.db.base import get_db
 from app.models import RefreshToken, User
-from app.schemas.auth import ChangePasswordRequest, LoginRequest, MeUpdate, RefreshRequest, TokenResponse, UserOut
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, MeUpdate, TokenResponse, UserOut
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+REFRESH_COOKIE_NAME = "refresh_token"
+# Scoped to /api/auth (not "/") -- the browser only ever needs to send this
+# cookie to the handful of endpoints here that read it (refresh, logout,
+# change-password); no reason to attach it to every other API request.
+REFRESH_COOKIE_PATH = "/api/auth"
 
-async def _issue_tokens(user: User, db: AsyncSession) -> TokenResponse:
+
+def _set_refresh_cookie(response: Response, raw_refresh: str, settings: Settings) -> None:
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        raw_refresh,
+        httponly=True,
+        # Secure cookies are dropped by the browser over plain HTTP -- only
+        # turn it on in production, where the app is served over HTTPS.
+        secure=settings.environment == "production",
+        samesite="lax",
+        path=REFRESH_COOKIE_PATH,
+        max_age=settings.refresh_token_expire_days * 86400,
+    )
+
+
+async def _issue_tokens(user: User, db: AsyncSession, response: Response) -> TokenResponse:
     settings = get_settings()
     access_token = create_access_token(user.id)
     raw_refresh, refresh_hash = generate_refresh_token()
@@ -33,11 +53,12 @@ async def _issue_tokens(user: User, db: AsyncSession) -> TokenResponse:
         )
     )
     await db.commit()
-    return TokenResponse(access_token=access_token, refresh_token=raw_refresh)
+    _set_refresh_cookie(response, raw_refresh, settings)
+    return TokenResponse(access_token=access_token)
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+async def login(body: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)) -> TokenResponse:
     if is_locked_out(body.email):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -52,16 +73,21 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
         # reveal which one to an unauthenticated caller.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     clear_attempts(body.email)
-    return await _issue_tokens(user, db)
+    return await _issue_tokens(user, db, response)
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
-    token_hash = hash_refresh_token(body.refresh_token)
+async def refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+
+    raw_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if raw_token is None:
+        raise invalid
+
+    token_hash = hash_refresh_token(raw_token)
     result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     stored = result.scalar_one_or_none()
 
-    invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
     if stored is None or stored.revoked_at is not None:
         raise invalid
     if stored.expires_at < datetime.now(timezone.utc):
@@ -75,19 +101,23 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> T
     # the blast radius of a leaked refresh token to a single use.
     stored.revoked_at = datetime.now(timezone.utc)
     await db.commit()
-    return await _issue_tokens(user, db)
+    return await _issue_tokens(user, db, response)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> None:
-    token_hash = hash_refresh_token(body.refresh_token)
-    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
-    stored = result.scalar_one_or_none()
-    if stored is not None and stored.revoked_at is None:
-        stored.revoked_at = datetime.now(timezone.utc)
-        await db.commit()
-    # Logging out an already-revoked or unknown token is a no-op, not an
-    # error -- the caller's goal (no valid session left) is already true.
+async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> None:
+    raw_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if raw_token is not None:
+        token_hash = hash_refresh_token(raw_token)
+        result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+        stored = result.scalar_one_or_none()
+        if stored is not None and stored.revoked_at is None:
+            stored.revoked_at = datetime.now(timezone.utc)
+            await db.commit()
+    # Logging out with an already-revoked, unknown, or absent cookie is a
+    # no-op, not an error -- the caller's goal (no valid session left) is
+    # already true.
+    response.delete_cookie(REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH)
 
 
 @router.get("/me", response_model=UserOut)
@@ -120,6 +150,7 @@ async def update_me(
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     body: ChangePasswordRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -143,10 +174,14 @@ async def change_password(
     # (docs request) -- an access token isn't tied to the password hash at
     # all, so it keeps working until its own short natural expiry either
     # way; this is what actually forces other sessions to re-login, on
-    # their next /refresh.
+    # their next /refresh. The caller's OWN current refresh token (if any)
+    # now comes from the HttpOnly cookie -- the client can no longer read
+    # it to pass it in the body, but the cookie travels with this request
+    # the same way it does to /refresh and /logout.
+    current_refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
     conditions = [RefreshToken.user_id == current_user.id, RefreshToken.revoked_at.is_(None)]
-    if body.current_refresh_token:
-        conditions.append(RefreshToken.token_hash != hash_refresh_token(body.current_refresh_token))
+    if current_refresh_token:
+        conditions.append(RefreshToken.token_hash != hash_refresh_token(current_refresh_token))
     await db.execute(update(RefreshToken).where(*conditions).values(revoked_at=datetime.now(timezone.utc)))
 
     await db.commit()
