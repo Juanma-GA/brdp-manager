@@ -1,29 +1,4 @@
-/**
- * Build headers based on LLM provider
- * @param {string} provider - Provider name ('Anthropic', 'OpenAI', 'Custom')
- * @param {string} apiKey - API key
- * @returns {Object} Headers object
- */
-function buildHeaders(provider, apiKey) {
-  const baseHeaders = {
-    'content-type': 'application/json',
-  };
-
-  if (provider === 'Anthropic') {
-    return {
-      ...baseHeaders,
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    };
-  }
-
-  // OpenAI and Custom providers use Bearer token
-  return {
-    ...baseHeaders,
-    'Authorization': `Bearer ${apiKey}`,
-  };
-}
+import { authFetch } from '../services/apiClient';
 
 /**
  * Build request body based on provider
@@ -106,50 +81,24 @@ export async function sendMessage(
   systemPrompt = "",
   options = {}
 ) {
-  const { temperature = 1, customEndpoint = "" } = options;
+  const { temperature = 1 } = options;
 
-  if (!apiKey || !modelName || !provider) {
-    throw new Error('Missing API configuration. Please configure in Settings.');
-  }
-
-  let endpoint = 'https://api.anthropic.com/v1/messages';
-  if (provider === 'OpenAI') {
-    endpoint = 'https://api.openai.com/v1/chat/completions';
-  }
-  if (provider === 'Mistral') {
-    endpoint = 'https://api.mistral.ai/v1/chat/completions';
-  }
-  if (provider === 'Custom') {
-    endpoint = 'https://api.example.com/v1/messages';
-  }
-  if (customEndpoint && customEndpoint.trim()) {
-    const base = customEndpoint.trim().replace(/\/$/, '');
-    endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
+  if (!modelName || !provider) {
+    throw new Error('Missing model configuration.');
   }
 
-  const realEndpoint = endpoint; // save before proxy override
-
-  if (import.meta.env.PROD) {
-    endpoint = '/api/proxy';
-  } else if (import.meta.env.DEV && customEndpoint && customEndpoint.trim()) {
-    endpoint = '/mistral-proxy/chat/completions';
-  }
-
-  const headers = buildHeaders(provider, apiKey);
+  // v2: the backend resolves the real provider endpoint + API key from its
+  // own server-side config (docs/v2 §4.2 -- closes the SSRF finding by
+  // construction, since targetEndpoint/apiKey never travel from the
+  // client). This is the ONLY thing that changed here versus v1 -- prompt
+  // construction (buildRequestBody/buildSystemPrompt) is untouched.
   const payload = buildRequestBody(provider, modelName, messages, systemPrompt, temperature);
 
-  // In production, wrap the payload with routing metadata for the Express proxy
-  const isProxy = import.meta.env.PROD;
-  const fetchHeaders = isProxy ? { 'Content-Type': 'application/json' } : headers;
-  const fetchBody = isProxy
-    ? JSON.stringify({ targetEndpoint: realEndpoint, apiKey, provider, payload })
-    : JSON.stringify(payload);
-
   try {
-    const response = await fetch(endpoint, {
+    const response = await authFetch('/api/llm-proxy', {
       method: 'POST',
-      headers: fetchHeaders,
-      body: fetchBody,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload }),
     });
 
     if (!response.ok) {
@@ -208,50 +157,19 @@ export async function sendMessageStream(
   abortController,
   options = {}
 ) {
-  const { temperature = 1, customEndpoint = "" } = options;
+  const { temperature = 1 } = options;
 
-  if (!apiKey || !modelName || !provider) {
-    throw new Error('Missing API configuration. Please configure in Settings.');
-  }
-
-  let endpoint = 'https://api.anthropic.com/v1/messages';
-  if (provider === 'OpenAI') {
-    endpoint = 'https://api.openai.com/v1/chat/completions';
-  }
-  if (provider === 'Mistral') {
-    endpoint = 'https://api.mistral.ai/v1/chat/completions';
-  }
-  if (provider === 'Custom') {
-    endpoint = 'https://api.example.com/v1/messages';
-  }
-  if (customEndpoint && customEndpoint.trim()) {
-    const base = customEndpoint.trim().replace(/\/$/, '');
-    endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
+  if (!modelName || !provider) {
+    throw new Error('Missing model configuration.');
   }
 
-  const realEndpoint = endpoint; // save before proxy override
-
-  if (import.meta.env.PROD) {
-    endpoint = '/api/proxy';
-  } else if (import.meta.env.DEV && customEndpoint && customEndpoint.trim()) {
-    endpoint = '/mistral-proxy/chat/completions';
-  }
-
-  const headers = buildHeaders(provider, apiKey);
   const payload = buildRequestBody(provider, modelName, messages, systemPrompt, temperature);
 
-  // In production, wrap the payload with routing metadata for the Express proxy
-  const isProxy = import.meta.env.PROD;
-  const fetchHeaders = isProxy ? { 'Content-Type': 'application/json' } : headers;
-  const fetchBody = isProxy
-    ? JSON.stringify({ targetEndpoint: realEndpoint, apiKey, provider, payload: { ...payload, stream: true } })
-    : JSON.stringify({ ...payload, stream: true });
-
   try {
-    const response = await fetch(endpoint, {
+    const response = await authFetch('/api/llm-proxy', {
       method: 'POST',
-      headers: fetchHeaders,
-      body: fetchBody,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload: { ...payload, stream: true } }),
       signal: abortController?.signal,
     });
 

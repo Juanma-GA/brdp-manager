@@ -1,0 +1,524 @@
+/* .mainContent (App.css) is a bounded-height flex column with
+   overflow:hidden -- .page must be a flex:1 item of it (not auto-height)
+   so its own height is definite too, which is what lets .layout's
+   children below size and scroll independently instead of silently
+   overflowing past the app shell with no scrollbar. */
+.page {
+  padding: 24px;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 4px;
+  color: #0f172a;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0 0 18px;
+}
+
+.layout {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+.tableWrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.createForm {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  flex-shrink: 0;
+}
+
+/* The scrollable middle of tableWrap -- createForm above and tableFooter
+   below stay pinned, only the rows scroll. */
+.tableScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.createForm input {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+/* table-layout: fixed so column widths come from the colgroup below, not
+   from cell content -- otherwise a long Title (or a long value in any
+   other column) reflows every column's width, including ID's, which is
+   exactly the bug this fixes (docs request: ID must never move). */
+.table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  text-align: left;
+  padding: 0;
+  background: #f8fafc;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.plainHeader {
+  padding: 8px 12px;
+}
+
+.table td {
+  padding: 9px 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.table tr {
+  cursor: pointer;
+}
+
+.selectedRow {
+  background: #eaf2fa;
+}
+
+/* Wide enough for "BRDP-S1-00001" (14 chars, the longest identifier the
+   system produces) on one line regardless of what the other columns
+   contain -- fixed width AND min-width so table-layout: fixed can't
+   shrink it either. */
+.colId {
+  width: 150px;
+  min-width: 150px;
+}
+
+.colValidation {
+  width: 130px;
+}
+
+.colRuleStatus {
+  width: 130px;
+}
+
+.colActions {
+  width: 44px;
+}
+
+.mono {
+  font-family: monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Long titles truncate with an ellipsis instead of stretching the row or
+   squeezing neighboring columns -- the full text is still available via
+   the native title="" tooltip set on this <td> in the JSX. */
+.titleCell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.badge_Validated {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.badge_Refused {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.badge_Pending {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+}
+
+.dotFilled {
+  background: #94a3b8;
+  border-color: #94a3b8;
+}
+
+.dotCurrent {
+  background: #2563eb;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px #dbeafe;
+}
+
+.ruleStatusRow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+/* Detail-panel-only Rule Status stepper -- richer than the table's compact
+   .dots (which stays untouched): all 3 stage labels visible, connected by
+   a track line, current stage highlighted in the ATEXIS primary color. */
+.stepper {
+  display: flex;
+  padding: 4px 6px 0;
+}
+
+.stepperStep {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stepperLine {
+  position: absolute;
+  top: 7px;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: #e2e8f0;
+  z-index: 0;
+}
+
+.stepperLineFilled {
+  background: #2e74b5;
+}
+
+.stepperDot {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+}
+
+.stepperDotFilled {
+  background: #2e74b5;
+  border-color: #2e74b5;
+}
+
+.stepperDotCurrent {
+  box-shadow: 0 0 0 4px rgba(46, 116, 181, 0.2);
+}
+
+.stepperLabel {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.stepperLabelReached {
+  color: #475569;
+}
+
+.stepperLabelCurrent {
+  color: #2e74b5;
+  font-weight: 700;
+}
+
+.ruleErrorText {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.ruleEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ruleTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 260px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-family: monospace;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+/* .layout is now a bounded-height flex row (align-items: stretch), so
+   this panel gets a definite height too -- overflow-y: auto lets its own
+   (potentially long: assistant + history) content scroll in place
+   instead of being silently clipped by an ancestor's overflow: hidden. */
+.detailPanel {
+  width: 460px;
+  flex-shrink: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fff;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12.5px;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  margin: 10px 0 4px;
+  text-transform: uppercase;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 50px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+.select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.assistant {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.assistantTitle {
+  font-size: 13.5px;
+  margin: 0 0 8px;
+}
+
+.historySection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.historyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.historyItem {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.historyField {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.historyChange {
+  font-size: 12.5px;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.historyOld {
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
+.historyArrow {
+  margin: 0 6px;
+  color: #94a3b8;
+}
+
+.historyNew {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.historyMeta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.historyRevertButton {
+  margin-top: 6px;
+  font-size: 11.5px;
+  padding: 3px 8px;
+}
+
+.hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.catalogPicker {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.catalogList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.catalogItem {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.catalogItemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.catalogItemTitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.answerBox,
+.suggestionBox {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+
+.suggestionActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 14px 0;
+}
+
+/* Same footer/pagination pattern as v1's BRDPTable.module.css. */
+.tableFooter {
+  flex-shrink: 0;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.tableFooterInfo {
+  flex: 1;
+}
+
+.pagination {
+  display: flex;
+  gap: 8px;
+}
+
+.paginationBtn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.paginationBtn:hover:not(:disabled) {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.paginationBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

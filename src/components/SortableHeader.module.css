@@ -1,0 +1,23 @@
+.sortHeaderBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sortHeaderBtn:hover {
+  color: #2563eb;
+}
+
+.sortIndicator {
+  font-size: 9px;
+  color: #2563eb;
+}
