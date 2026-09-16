@@ -6,15 +6,19 @@ import correctness, not embeddings correctness.
 """
 import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.main import app
 from app.models import BRDPCatalog, ImportJob, Project, RuleApproval, User, UserProjectRole
+from app.schemas.brdp_import import ImportRowIn
+from app.services.import_jobs import STALE_JOB_MINUTES, get_running_job, run_import_job
 
 
 @pytest.fixture(autouse=True)
@@ -595,3 +599,127 @@ async def test_embedding_failure_mid_job_marks_job_failed_and_rolls_back_everyth
 
     listed = await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
     assert listed.json() == []  # BRDP-IMP-FAIL-A's otherwise-successful create rolled back too
+
+
+async def test_run_import_job_marks_failed_on_cancellation(editor_and_project):
+    """Confirmed real (not hypothetical) root cause: asyncio.CancelledError
+    has inherited from BaseException, not Exception, since Python 3.8 --
+    the plain `except Exception` in run_import_job never saw it, so a real
+    interruption (a dev --reload restart mid-job, or a Ctrl+C/SIGTERM)
+    left the import_jobs row 'running' forever, which permanently blocked
+    every future Apply on that project via get_running_job's 409 -- there
+    was no way to recover short of editing Postgres by hand. Cancels the
+    coroutine directly (BackgroundTasks isn't reachable from a test) to
+    exercise the exact `except asyncio.CancelledError` branch, and confirms
+    the row is left 'failed' with a clear message instead of abandoned --
+    and that a fresh Apply is no longer blocked afterward.
+    """
+    project, _editor_headers, _viewer_headers = editor_and_project
+    async with async_session_factory() as session:
+        editor_role = (
+            await session.execute(
+                select(UserProjectRole).where(
+                    UserProjectRole.project_id == project.id, UserProjectRole.role == "editor"
+                )
+            )
+        ).scalar_one()
+        editor_id = editor_role.user_id
+
+        job = ImportJob(project_id=project.id, status="running", total_rows=1)
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    rows = [ImportRowIn(row_number=2, identifier="BRDP-IMP-CANCEL", proposal_status="Validated")]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
+
+    task = asyncio.ensure_future(
+        run_import_job(job_id, project.id, rows, "keep", editor_id, httpx.MockTransport(handler))
+    )
+    await asyncio.sleep(0)  # let the coroutine actually start (reach its first real await)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    async with async_session_factory() as session:
+        db_job = await session.get(ImportJob, job_id)
+        assert db_job.status == "failed"
+        assert "interrupted" in db_job.error.lower()
+
+        # No longer a phantom blocker -- a fresh Apply attempt would go through.
+        assert await get_running_job(project.id, session) is None
+
+
+async def test_apply_allows_new_import_after_stale_running_job_and_marks_it_failed(client, editor_and_project):
+    """The cheap fallback for a hard crash that never runs any cleanup
+    code (a real process kill, simulated here the only way this sandbox
+    can -- inserting the stale row directly, since actually crashing the
+    test's own backend isn't possible from within a test): a `running` job
+    older than STALE_JOB_MINUTES no longer blocks a new Apply, and gets
+    marked `failed` in the same request rather than left dangling.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    stale_started_at = datetime.now(timezone.utc) - timedelta(minutes=STALE_JOB_MINUTES + 1)
+    async with async_session_factory() as session:
+        job = ImportJob(project_id=project.id, status="running", total_rows=1, started_at=stale_started_at)
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        stale_job_id = job.id
+
+    rows = [_row(2, "BRDP-IMP-AFTER-STALE", rule_status="To Do", rule="")]
+    resp = await client.post(
+        f"/api/projects/{project.id}/brdps/import/apply",
+        json={"rows": rows, "conflict_resolution": "keep"},
+        headers=headers,
+    )
+    assert resp.status_code == 202  # not 409 -- the stale job no longer counts as blocking
+
+    async with async_session_factory() as session:
+        stale_job = await session.get(ImportJob, stale_job_id)
+        assert stale_job.status == "failed"
+        assert str(STALE_JOB_MINUTES) in stale_job.error
+        assert stale_job.finished_at is not None
+
+
+async def test_apply_still_blocks_on_a_running_job_under_the_staleness_threshold(client, editor_and_project):
+    """No false positives: a job that's genuinely still running, well
+    under STALE_JOB_MINUTES old, must keep blocking a concurrent Apply
+    exactly as it does today.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    recent_started_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    async with async_session_factory() as session:
+        session.add(ImportJob(project_id=project.id, status="running", total_rows=1, started_at=recent_started_at))
+        await session.commit()
+
+    rows = [_row(2, "BRDP-IMP-STILL-BLOCKED", rule_status="To Do", rule="")]
+    resp = await client.post(
+        f"/api/projects/{project.id}/brdps/import/apply",
+        json={"rows": rows, "conflict_resolution": "keep"},
+        headers=headers,
+    )
+    assert resp.status_code == 409
+
+
+async def test_status_active_reaps_a_stale_running_job_on_its_own(client, editor_and_project):
+    """GET /status/active (get_most_recent_job) must self-heal a stale
+    `running` row on the very next poll, not just after some later Apply
+    attempt happens to trigger the fix via get_running_job -- a page
+    polling this endpoint alone must see the job flip to `failed`.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    stale_started_at = datetime.now(timezone.utc) - timedelta(minutes=STALE_JOB_MINUTES + 30)
+    async with async_session_factory() as session:
+        job = ImportJob(project_id=project.id, status="running", total_rows=1, started_at=stale_started_at)
+        session.add(job)
+        await session.commit()
+
+    resp = await client.get(f"/api/projects/{project.id}/brdps/import/status/active", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert str(STALE_JOB_MINUTES) in body["error"]

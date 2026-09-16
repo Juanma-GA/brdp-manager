@@ -46,8 +46,9 @@ constraint sidesteps entirely, and "wait for the current one" is a
 better user experience than a confusing interleaved result anyway.
 """
 
+import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import HTTPException, status
@@ -72,6 +73,38 @@ _VALID_RULE_STATUSES = {"To Do", "Draft", "Verified"}
 # Terminal states an import_jobs row can settle into -- "running" is the
 # only non-terminal one (get_active_job filters on it).
 _TERMINAL_STATUSES = {"completed", "failed"}
+
+# A "running" job older than this is treated as dead, not actually in
+# progress -- the cheap fallback for a hard process crash/kill that never
+# gets a chance to run any cleanup code (asyncio.CancelledError, caught in
+# run_import_job below, already covers a clean interruption like a dev
+# --reload restart). Deliberately NOT an active heartbeat (a column
+# updated periodically while the job runs) -- decided with the user as
+# overkill for how rarely a hard crash actually happens; a generous
+# fixed margin is enough, since no real import (even thousands of
+# Validated rows, each a Mistral embedding call) plausibly runs this long.
+# Named here, not a bare literal at each call site, so it's a single,
+# obvious place to adjust.
+STALE_JOB_MINUTES = 60
+_STALE_JOB_THRESHOLD = timedelta(minutes=STALE_JOB_MINUTES)
+
+
+async def _reap_if_stale(job: ImportJob, db: AsyncSession) -> ImportJob:
+    """A `running` job whose started_at is older than _STALE_JOB_THRESHOLD
+    is marked `failed` right here, in the same read that noticed it --
+    both get_running_job (the 409 check) and get_most_recent_job (what the
+    UI polls) call this, so neither one goes on trusting a `running` status
+    that can no longer be true, and the UI stops showing it as still alive
+    the moment anyone next asks, not only after some later Apply attempt
+    happens to trigger the fix.
+    """
+    if job.status == "running" and datetime.now(timezone.utc) - job.started_at > _STALE_JOB_THRESHOLD:
+        job.status = "failed"
+        job.error = f"Import likely interrupted — no progress for over {STALE_JOB_MINUTES} minutes"
+        job.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(job)
+    return job
 
 
 async def _get_owned_project(project_id: uuid.UUID, db: AsyncSession) -> Project:
@@ -276,7 +309,10 @@ async def get_running_job(project_id: uuid.UUID, db: AsyncSession) -> ImportJob 
     """Used only for the single-writer-per-project concurrency check
     (POST /apply -> 409 if this returns something) -- deliberately
     stricter than get_most_recent_job below, which a finished job also
-    satisfies.
+    satisfies. A `running` row older than _STALE_JOB_THRESHOLD is reaped
+    (see _reap_if_stale) and no longer counts as running here -- a new
+    Apply is allowed through instead of blocking on a job that's
+    practically certain to be dead.
     """
     result = await db.execute(
         select(ImportJob)
@@ -284,7 +320,11 @@ async def get_running_job(project_id: uuid.UUID, db: AsyncSession) -> ImportJob 
         .order_by(ImportJob.started_at.desc())
         .limit(1)
     )
-    return result.scalar_one_or_none()
+    job = result.scalar_one_or_none()
+    if job is None:
+        return None
+    job = await _reap_if_stale(job, db)
+    return job if job.status == "running" else None
 
 
 async def get_most_recent_job(project_id: uuid.UUID, db: AsyncSession) -> ImportJob | None:
@@ -296,12 +336,18 @@ async def get_most_recent_job(project_id: uuid.UUID, db: AsyncSession) -> Import
     just a running one -- the caller (ProjectConfigPage/Sidebar) decides
     what to render for each status; the Sidebar badge specifically only
     ever renders for status="running", so a long-finished job never
-    lingers as a stale badge.
+    lingers as a stale badge. Also runs the same staleness reap as
+    get_running_job (see _reap_if_stale) -- a caller polling this endpoint
+    sees a stuck job flip to `failed` on its own, without needing some
+    other request to have triggered get_running_job first.
     """
     result = await db.execute(
         select(ImportJob).where(ImportJob.project_id == project_id).order_by(ImportJob.started_at.desc()).limit(1)
     )
-    return result.scalar_one_or_none()
+    job = result.scalar_one_or_none()
+    if job is None:
+        return None
+    return await _reap_if_stale(job, db)
 
 
 async def create_job(
@@ -470,6 +516,23 @@ async def run_import_job(
                 "conflicts_cleared": conflicts_cleared,
             },
         )
+    except asyncio.CancelledError:
+        # Confirmed real (not hypothetical): a dev-server --reload restart
+        # mid-job cancels this coroutine, and CancelledError has inherited
+        # from BaseException (not Exception) since Python 3.8 -- the
+        # except Exception below never sees it, so without this the job
+        # row is abandoned "running" forever (get_running_job then blocks
+        # every future Apply on this project with a 409, indefinitely).
+        # Same rollback/finish as a real failure, then re-raise -- standard
+        # asyncio cancellation hygiene, never swallow a CancelledError.
+        await work_session.rollback()
+        await _finish_job(
+            progress_session,
+            job_id,
+            status_value="failed",
+            error="Import interrupted (server restarted or shut down mid-job)",
+        )
+        raise
     except Exception as exc:  # noqa: BLE001 -- HR7: surface, never swallow
         await work_session.rollback()
         await _finish_job(progress_session, job_id, status_value="failed", error=str(exc))
