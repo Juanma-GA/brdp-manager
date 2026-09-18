@@ -2,6 +2,40 @@
 
 Este fichero describe la arquitectura y patrones del proyecto para que Claude Code tenga contexto completo antes de hacer cualquier cambio.
 
+## ⚠️ Rama actual: `v2-multiproyecto` — backend real distinto al descrito abajo
+
+Todo el resto de este fichero (arquitectura Express+SQLite, sin auth, un solo proyecto) describe **v1**. El trabajo activo desde hace muchas rondas vive en la rama `v2-multiproyecto`, que tiene un backend **completamente distinto**, ya en producción dentro del repo:
+
+- **Backend real**: `backend/` — FastAPI + Postgres (`asyncpg` + SQLAlchemy async) + Alembic (`backend/alembic/versions/`, 12 migraciones a fecha de hoy). Nada de SQLite ni Express para el backend de datos (el frontend sigue siendo Vite/React).
+- **Multi-proyecto real** con auth JWT: access token en el body de `/api/auth/login`, refresh token en cookie HttpOnly (nunca localStorage — ver `backend/app/api/routes/auth.py`). Roles `admin` / `editor` / `viewer` por proyecto vía `UserProjectRole` (`backend/app/models/user_project_role.py`) — un admin global puede todo, un editor solo en sus proyectos.
+- **Estructura backend**: `backend/app/models/*` (BRDP, Project, User, UserProjectRole, RuleApproval, BRDPHistory, BRDPCatalog, ImportJob, AppSettings, RefreshToken), `backend/app/api/routes/*` (un fichero por recurso: `projects.py`, `brdps.py`, `approvals.py`, `brdp_import.py`, `trash.py`, `brdp_catalog.py`, `auth.py`, `users.py`, `app_settings.py`, `similar.py`, `suggestion_feedback.py`, `llm_proxy.py`, `notes.py`, `config.py`, `validate_brex.py`), `backend/app/services/*` (`import_jobs.py`, `embeddings.py`, `history.py`, `rule_formats.py`), `backend/app/repositories/brdp_repository.py` (capa de acceso a BRDP — todas las queries pasan por aquí, incluido el filtro de soft-delete `ACTIVE_BRDP_FILTER`).
+- **Soft-delete real**: borrar una BRDP la manda a Papelera (`deleted_at`/`deleted_by`), no la elimina. Borrado permanente vía `/api/trash/{id}` (admin, o editor si es de su proyecto).
+- **Import de Excel** (`backend/app/services/import_jobs.py` + `backend/app/schemas/brdp_import.py`) es un job asíncrono en background (`BackgroundTasks`, no bloqueante): `/import/analyze` (fase 1, solo lectura, devuelve avisos) → `/import/apply` (fase 2, devuelve `job_id`, se sondea `/import/status/{job_id}`). Un `running` job antiguo (>60 min, `STALE_JOB_MINUTES`) se marca `failed` automáticamente al leerlo (`_reap_if_stale`) — cubre crashes; una interrupción limpia (`asyncio.CancelledError`, p.ej. un `--reload` de uvicorn) tiene su propio handler explícito porque `CancelledError` hereda de `BaseException`, no de `Exception`, desde Python 3.8.
+- **Documentación de diseño original** (útil como contexto histórico, pero YA DESACTUALIZADA frente al código real tras ~106 rondas de iteración — no la trates como fuente de verdad, el código y los tests son la fuente de verdad): `docs/v2/01-arquitectura-y-estructura.md` (snapshot de v1, la base de la decisión de reescribir), `docs/v2/02-analisis-aacf-requisitos-no-cumplidos.md`, `docs/v2/03-especificacion-v2-para-claude-code.md` (spec original de v2).
+
+### Cómo levantar el entorno de desarrollo real (v2)
+
+```bash
+service postgresql start   # o `service postgresql status` si ya está arrancado
+cd backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000   # backend, puerto 8000
+cd /home/user/brdp-manager && npx vite --port 5173 --strictPort                              # frontend, puerto 5173
+```
+
+El `.venv` de `backend/` ya existe con todas las dependencias instaladas. `uvicorn` normalmente se lanza SIN `--reload` en este entorno — si editas código Python del backend con el servidor ya arrancado, hay que reiniciarlo a mano (matar el proceso real, `ps aux | grep "[u]vicorn app.main:app"` para el PID exacto — `pkill -f uvicorn` se automata a sí mismo porque su propio argv contiene el patrón) para que recoja los cambios; Vite sí hace HMR normal sobre `src/`.
+
+Hay un proyecto de desarrollo sembrado ("Demo Project (S1000D 4.2)") y un admin de pruebas (`admin@example.com` / `AdminTest123!`, ver `backend/scripts/seed_dev_data.py`) — usarlos para verificación con navegador real en vez de crear datos nuevos cada vez, salvo que el propio caso de prueba lo requiera (y luego limpiar lo creado).
+
+### Cómo verificar cambios (no hay test runner JS)
+
+- **Backend**: `cd backend && source .venv/bin/activate && python -m pytest -q` (a fecha de hoy: 198 tests, Postgres real, sin mocks salvo el transporte HTTP de Mistral).
+- **Frontend**: no existe vitest/jest ni script `test` en `package.json`. Toda verificación de UI se hace con scripts Node ad hoc usando `playwright-core` (Chromium real en `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`) contra el Vite dev server real y Postgres real — login real, `fetch` con refresh de cookie, screenshots. No inventar un framework de test nuevo; seguir ese patrón.
+- `npm run lint` (ESLint) y `npm run build` (Vite) deben quedar limpios antes de dar por cerrada cualquier tarea de frontend.
+
+### Últimos cambios relevantes (para no repetir investigación)
+
+- **`_normSpace()` en `brexToSchematron.js`** ahora respeta el contenido entre comillas (no colapsa espacios significativos dentro de literales de cadena), reutilizando el patrón de escaneo "char a char, trackeando si se está dentro de comillas" que ya usan `_isSafePattern`/`_splitTopLevel` en el mismo fichero. Si aparece otro sitio del código que normaliza espacios sobre texto que puede contener literales entre comillas, reutilizar esta misma técnica, no inventar otra.
+- **`rule_override`** en `ImportRowResult` (`backend/app/schemas/brdp_import.py` + `_classify_row` en `backend/app/services/import_jobs.py`): mismo patrón que `catalog_override` ya existente, pero para la columna Rule — avisa en la fase de análisis si un `action == "update"` va a reemplazar una Rule ya existente por una distinta (comparación normalizando espacios). Frontend: `ProjectConfigPage.jsx` (`ruleOverrideRows`), i18n en `src/i18n/index.js` (`config.dataManagement.ruleOverride*`, `summaryRuleOverrides`).
+
 ## Qué es esta app
 
 BRDP Manager es una app React + Express para gestionar Business Rules Decision Points (BRDPs) de proyectos S1000D/DITA. Sus funciones principales son:
