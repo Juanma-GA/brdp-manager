@@ -8,7 +8,46 @@
 function _quote(value) {
   return "'" + String(value == null ? '' : value).replace(/'/g, "''") + "'";
 }
-function _normSpace(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+// Confirmed real bug (SOPTE, 2828-rule project, comparing against the
+// customer's reference .SCH): the old regex-based `replace(/\s+/g, ' ')`
+// collapsed whitespace INSIDE quoted string literals too -- a rule
+// comparing against a two-space literal (' ', forbidding double space in
+// text) lost one of its two spaces in the generated Schematron. Structural
+// XPath whitespace (indentation/newlines between tokens) does need
+// collapsing to a single space; whitespace inside a quoted literal is
+// significant DATA, not formatting, and must survive untouched. Same
+// "scan char-by-char, track whether inside a quoted string" approach
+// _isSafePattern/_splitTopLevel already use below, reused here rather than
+// inventing a second way to do it.
+function _normSpace(s) {
+  const str = String(s == null ? '' : s);
+  let out = '';
+  let inStr = false;
+  let q = '';
+  let pendingSpace = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inStr) {
+      out += ch;
+      if (ch === q) inStr = false;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      if (pendingSpace) { out += ' '; pendingSpace = false; }
+      inStr = true;
+      q = ch;
+      out += ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace) { out += ' '; pendingSpace = false; }
+    out += ch;
+  }
+  return out.trim();
+}
 function _isPathExpression(path) {
   const t = _normSpace(path);
   return t.startsWith('/') || t.startsWith('//');

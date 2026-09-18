@@ -355,6 +355,10 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // shown up front (same place/detail level as rejected rows) so the
   // Title/Definition override is visible before confirming, not after.
   const catalogOverrideRows = analysis?.results.filter((r) => r.catalog_override) ?? [];
+  // Same idea as catalogOverrideRows above, for the Rule column -- a row
+  // that will replace an existing Rule with different content, shown
+  // alongside (not instead of) a catalog override on the same row.
+  const ruleOverrideRows = analysis?.results.filter((r) => r.rule_override) ?? [];
 
   const handleExport = async () => {
     setBusy(true);
@@ -543,6 +547,12 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                         {t('config.dataManagement.summaryCatalogOverrides', { count: catalogOverrideRows.length })}
                       </>
                     )}
+                    {ruleOverrideRows.length > 0 && (
+                      <>
+                        {' · '}
+                        {t('config.dataManagement.summaryRuleOverrides', { count: ruleOverrideRows.length })}
+                      </>
+                    )}
                   </p>
 
                   {rejectedRows.length > 0 && (
@@ -571,6 +581,24 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                         {catalogOverrideRows.map((r) => (
                           <li key={r.row_number}>
                             {t('config.dataManagement.catalogOverrideRow', {
+                              row: r.row_number,
+                              identifier: r.identifier,
+                            })}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
+                  {ruleOverrideRows.length > 0 && (
+                    <>
+                      <h4 className={styles.subsectionHeading}>
+                        {t('config.dataManagement.ruleOverrideListTitle')}
+                      </h4>
+                      <ul className={styles.warningList}>
+                        {ruleOverrideRows.map((r) => (
+                          <li key={r.row_number}>
+                            {t('config.dataManagement.ruleOverrideRow', {
                               row: r.row_number,
                               identifier: r.identifier,
                             })}

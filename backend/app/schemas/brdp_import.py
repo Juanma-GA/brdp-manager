@@ -41,6 +41,16 @@ class ImportRowResult(BaseModel):
     # happen to equal the catalog's -- predictable, not conditional on
     # whether anything would actually change.
     catalog_override: bool = False
+    # True when this row will REPLACE an existing Rule in Postgres with
+    # different content (docs request, same pattern as catalog_override
+    # above) -- a warning, not a rejection. Only ever set for action ==
+    # "update" with a real, normalized-whitespace difference between the
+    # file's Rule and the one already stored for this BRDP+format; a
+    # brand-new BRDP (action == "create") or a re-import of the same Rule
+    # (identical once normalized) has nothing to warn about. Never set for
+    # the "conflict" outcome (file says "no rule" but one exists) -- that
+    # case already has its own, unrelated warning via existing_rule_status.
+    rule_override: bool = False
 
 
 class ImportAnalyzeRequest(BaseModel):

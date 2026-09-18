@@ -427,6 +427,128 @@ async def test_catalog_match_is_standard_specific(client, editor_and_project, ca
             await session.commit()
 
 
+async def test_rule_override_warns_when_reimporting_a_different_rule(client, editor_and_project):
+    """Same idea as catalog_override, for the Rule column (docs request):
+    reimporting an identifier that already has an approved rule, bringing
+    a DIFFERENT Rule, must warn before Apply replaces it -- confirmed
+    missing today (a targeted fix reimport gave outcome="ok" with no
+    warning at all).
+    """
+    project, headers, _viewer_headers = editor_and_project
+    other_rule = '<structureObjectRule id="y"><objectPath allowedObjectFlag="1">//y</objectPath></structureObjectRule>'
+    created = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-IMP-RULEOVERRIDE"}, headers=headers)
+    ).json()
+    approve_url = f"/api/projects/{project.id}/brdps/{created['id']}/approvals/BREX-4.2"
+    await client.put(approve_url, json={"rule_xml": VALID_RULE, "source": "llm"}, headers=headers)
+    await client.post(approve_url + "/approve", headers=headers)
+
+    rows = [_row(2, "BRDP-IMP-RULEOVERRIDE", rule_status="Verified", rule=other_rule)]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["rule_override"] is True
+
+    await _apply_and_wait(client, project.id, headers, rows)
+    approval_after = (await client.get(approve_url, headers=headers)).json()
+    assert approval_after["rule_xml"] == other_rule  # the warned-about replacement did happen
+
+
+async def test_rule_override_does_not_warn_when_rule_is_unchanged(client, editor_and_project):
+    """Edge case (a): identical (or whitespace-only-different) Rule ->
+    no warning, same "don't cry wolf" standard catalog_override already
+    applies to Title/Definition.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    created = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-IMP-RULESAME"}, headers=headers)
+    ).json()
+    approve_url = f"/api/projects/{project.id}/brdps/{created['id']}/approvals/BREX-4.2"
+    await client.put(approve_url, json={"rule_xml": VALID_RULE, "source": "llm"}, headers=headers)
+    await client.post(approve_url + "/approve", headers=headers)
+
+    # Same rule, but with different (irrelevant) surrounding whitespace --
+    # must not count as a real difference.
+    reformatted_rule = f"  {VALID_RULE}  \n"
+    rows = [_row(2, "BRDP-IMP-RULESAME", rule_status="Verified", rule=reformatted_rule)]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["rule_override"] is False
+
+
+async def test_rule_override_never_fires_for_a_new_brdp(client, editor_and_project):
+    """Edge case (b): action == "create" (the BRDP doesn't exist yet) ->
+    nothing to overwrite, so this must never fire regardless of the
+    incoming Rule.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    rows = [_row(2, "BRDP-IMP-RULENEW", rule_status="Verified", rule=VALID_RULE)]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["action"] == "create"
+    assert analyzed["rule_override"] is False
+
+
+async def test_rule_override_and_catalog_override_both_fire_together(client, editor_and_project, catalog_entry):
+    """Edge case (c): a row that triggers both warnings at once must show
+    both, neither suppressing the other.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    other_rule = '<structureObjectRule id="z"><objectPath allowedObjectFlag="1">//z</objectPath></structureObjectRule>'
+    created = (
+        await client.post(
+            f"/api/projects/{project.id}/brdps", json={"identifier": catalog_entry.identifier}, headers=headers
+        )
+    ).json()
+    approve_url = f"/api/projects/{project.id}/brdps/{created['id']}/approvals/BREX-4.2"
+    await client.put(approve_url, json={"rule_xml": VALID_RULE, "source": "llm"}, headers=headers)
+    await client.post(approve_url + "/approve", headers=headers)
+
+    rows = [
+        _row(
+            2,
+            catalog_entry.identifier,
+            title="Excel title (should be ignored)",
+            definition="Excel definition (should be ignored)",
+            rule_status="Verified",
+            rule=other_rule,
+        )
+    ]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["catalog_override"] is True
+    assert analyzed["rule_override"] is True
+
+
+async def test_rule_override_does_not_interfere_with_existing_conflict_case(client, editor_and_project):
+    """Edge case (d): the pre-existing conflict case (file says "no rule",
+    a real one already exists) must keep working exactly as before --
+    rule_override is meaningless there (rule_xml is empty) and must stay
+    False, never masking or replacing the conflict outcome.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    created = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-IMP-CONFLICT3"}, headers=headers)
+    ).json()
+    approve_url = f"/api/projects/{project.id}/brdps/{created['id']}/approvals/BREX-4.2"
+    await client.put(approve_url, json={"rule_xml": VALID_RULE, "source": "llm"}, headers=headers)
+    await client.post(approve_url + "/approve", headers=headers)
+
+    rows = [_row(2, "BRDP-IMP-CONFLICT3", rule_status="To Do", rule="")]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "conflict"
+    assert analyzed["rule_override"] is False
+
+
 async def test_apply_is_editor_gated_viewer_gets_403_and_writes_nothing(client, editor_and_project):
     project, _editor_headers, viewer_headers = editor_and_project
     rows = [_row(2, "BRDP-IMP-AUTH", rule_status="To Do", rule="")]

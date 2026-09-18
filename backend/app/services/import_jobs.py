@@ -47,6 +47,7 @@ better user experience than a confusing interleaved result anyway.
 """
 
 import asyncio
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -105,6 +106,17 @@ async def _reap_if_stale(job: ImportJob, db: AsyncSession) -> ImportJob:
         await db.commit()
         await db.refresh(job)
     return job
+
+
+def _normalize_for_comparison(text: str) -> str:
+    """Collapses any run of whitespace to a single space and strips the
+    ends -- used only to decide whether an incoming Rule is a REAL change
+    from what's already stored (rule_override below), not a naive
+    character-by-character comparison that would fire on irrelevant
+    formatting differences (indentation, line breaks) between two XML
+    documents that are otherwise identical.
+    """
+    return re.sub(r"\s+", " ", text or "").strip()
 
 
 async def _get_owned_project(project_id: uuid.UUID, db: AsyncSession) -> Project:
@@ -217,7 +229,30 @@ def _classify_row(
             catalog_override=catalog_override,
         )
 
-    return ImportRowResult(row_number=row.row_number, identifier=identifier, outcome="ok", action=action, catalog_override=catalog_override)
+    # Same idea as catalog_override above, for the Rule column: warn when
+    # this update is about to REPLACE an existing Rule with different
+    # content, rather than silently overwriting it. Only fires for a real
+    # update of a BRDP that already has an approval row for this format,
+    # bringing a non-empty Rule that actually differs (normalized -- same
+    # "don't warn over irrelevant whitespace" standard as the well-formed
+    # XML the file brings vs. what's stored) from what's already there. A
+    # brand-new BRDP (action == "create") never reaches here with
+    # existing_approval set, so it can never trigger this on its own.
+    rule_override = (
+        action == "update"
+        and existing_approval is not None
+        and bool(rule_xml)
+        and _normalize_for_comparison(existing_approval.rule_xml) != _normalize_for_comparison(rule_xml)
+    )
+
+    return ImportRowResult(
+        row_number=row.row_number,
+        identifier=identifier,
+        outcome="ok",
+        action=action,
+        catalog_override=catalog_override,
+        rule_override=rule_override,
+    )
 
 
 async def _load_existing(
