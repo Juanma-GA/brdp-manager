@@ -2,6 +2,14 @@
 
 Este fichero describe la arquitectura y patrones del proyecto para que Claude Code tenga contexto completo antes de hacer cualquier cambio.
 
+## ⚠️ El AACF (framework ATEXIS) tiene prioridad sobre este fichero
+
+Este proyecto está sujeto al **ATEXIS AI-Assisted Coding Framework (AACF)** (repo `Juanma-GA/cursoFSD`, carpeta `Proyecto-CCMS-Nav/aacf/`; copia local leída el 2026-09-18, `aacf/VERSION = 2.0.1`). **Donde el AACF y este `CLAUDE.md` entren en conflicto, gana el AACF** — este fichero se corrige para reflejarlo, nunca al revés.
+
+- **Hard Rules HR0–HR21** (`aacf/rules/atexis-hard-rules.md`) son no negociables — autocomprobar cualquier cambio contra ellas antes de darlo por terminado (ver también `aacf/agents/code-reviewer.agent.md` y `security-reviewer.agent.md` para el criterio de revisión). Resumen relevante para este proyecto: HR1 (nunca localStorage/sessionStorage para estado autoritativo — Postgres es la fuente de verdad), HR6 (nunca truncar contenido de calidad, resumir con LLM), HR7 (nunca un fallback que degrade silenciosamente, escalar), HR8 (nada hardcodeado), HR9 (soft-delete / confirmación explícita antes de borrar), HR10 (deep-merge, nunca shallow-merge de config anidada), HR15/HR21 (i18n + humanizar texto de UI, nunca tokens crudos), HR20 (UI de mutación optimista).
+- El framework se sirve normalmente vía el MCP `aacf_fetch` (`http://10.117.139.1:8200/mcp`, solo red corporativa/VPN); esa herramienta **no está disponible en este entorno de ejecución remoto**, así que se trabaja con la copia local del repo `cursoFSD` — puede estar desactualizada. Verificar `aacf/VERSION` contra el MCP en cuanto haya acceso, y no mezclar ficheros de versiones distintas del framework si difiere.
+- **Conflicto detectado y todavía sin resolver**: el patrón "Hooks de datos" descrito más abajo en este fichero (ver "Patrones a seguir") usa localStorage como caché de estado autoritativo, lo que viola HR1. No se ha tocado código todavía — ver "Auditoría de cumplimiento AACF (pendiente)" al final de este fichero para el detalle y el plan.
+
 ## ⚠️ Rama actual: `v2-multiproyecto` — backend real distinto al descrito abajo
 
 Todo el resto de este fichero (arquitectura Express+SQLite, sin auth, un solo proyecto) describe **v1**. El trabajo activo desde hace muchas rondas vive en la rama `v2-multiproyecto`, que tiene un backend **completamente distinto**, ya en producción dentro del repo:
@@ -212,6 +220,8 @@ Extrae BRDPs desde un documento o texto pegado.
 
 ### Hooks de datos
 
+> ⚠️ **Este patrón viola HR1 del AACF** ("no localStorage/sessionStorage para estado autoritativo o persistente — Postgres es la fuente de verdad"). Se documenta tal cual está implementado hoy, no como recomendación a seguir en código nuevo. Ver "Auditoría de cumplimiento AACF (pendiente)" al final de este fichero — la reconciliación se hace en una ronda dedicada, no de forma ad hoc.
+
 1. Estado inicial desde localStorage (carga instantánea).
 2. `useEffect` que hace fetch a la API al montar (fuente de verdad).
 3. Saves van a la API + localStorage en paralelo.
@@ -261,3 +271,30 @@ Añadir un nuevo formato BREX requiere: nuevo generador + schema JSON + rama en 
 - Migración automática de localStorage a SQLite en primera ejecución.
 - Autenticación (no necesaria para uso local single-user).
 - Docker con SQLite (el docker-compose actual usa nginx sin backend).
+
+## Auditoría de cumplimiento AACF (pendiente — no tocar sin luz verde)
+
+Primera pasada de lectura completa del AACF (2026-09-18) contra el código real de `v2-multiproyecto`. Esto son **hallazgos, no fixes** — se abordarán en una ronda dedicada cuando el usuario dé la prioridad; no se ha modificado ningún fichero de código fuente en esta ronda.
+
+### HR1 — localStorage como estado autoritativo (conflicto confirmado)
+
+Contradice tanto la Hard Rule HR1 como `SECURITY_CONTEXT.md` del propio framework ("no data persists in localStorage/sessionStorage — database only"). Afecta a:
+
+- `src/context/BRDPContext.jsx` y `src/hooks/useBRDPs.js` — cachean el dataset completo de BRDPs.
+- `src/hooks/useProjectConfig.js` — cachea la config del proyecto.
+- `src/hooks/useLocalNotes.js` — notas.
+- `src/hooks/useAPIKey.js` + `src/components/AIExtractModal/AIExtractModal.jsx` — **guardan la API key del LLM en localStorage** (además de HR1, roza la gestión de secretos de `ai-output-safety.mdc`: un secreto persistido sin cifrar en el navegador).
+- `src/layouts/AppLayout.jsx` (`sidebarCollapsed`) — preferencia de UI pura, probablemente el único caso defendible tal cual (no es "estado autoritativo o persistente" en el sentido de la regla).
+
+El propio patrón "Hooks de datos" de la sección "Patrones a seguir" de este fichero es la causa raíz: documenta explícitamente el patrón que el AACF prohíbe. Al reconciliar: la API (Postgres) debe quedar como única fuente de verdad; localStorage, si se conserva para algo, solo como cache explícitamente no autoritativo (con invalidación clara), nunca como estado del que la app depende para funcionar sin red.
+
+### Otros puntos a revisar (menor prioridad, sin confirmar aún como violación real)
+
+- **HR20 (UI de mutación optimista)** — no verificado todavía si las mutaciones de BRDP reflejan el cambio antes de la respuesta del servidor o esperan al round-trip completo.
+- **HR21 (humanizar texto de UI)** — parcialmente cubierto (hay capa i18n real, ver `src/i18n/index.js`), pero no se ha auditado si se renderiza en algún sitio un token crudo (enum, slug, snake_case) sin pasar por humanización.
+- **AI Extract / HR6** — el límite de 3000 caracteres en texto pegado es una validación de entrada con escalado explícito al usuario (subir como fichero en su lugar), no un truncado silencioso de contenido de calidad — probablemente conforme con HR6 tal cual está, pero pendiente de una revisión más amplia por si hay otro punto del código que sí trunque contenido en vez de resumir.
+- **Design system (`styles/design-system.md`, `ui-kit.md`, `branding.md`)** — el AACF asume shadcn/ui + Tailwind + tokens DTCG (OKLCH) + Zustand como "golden path" de UI; este proyecto no usa nada de eso. No es en sí una violación de una Hard Rule, pero es una divergencia del framework que el usuario debe decidir si adoptar (migración de UI, coste alto) o mantener como excepción documentada.
+
+### Nota de seguridad fuera del alcance de este repo (informativa)
+
+Al leer `aacf/agents/codebase-hardening.agent.md` del repo `cursoFSD` (público en GitHub) se encontró una API key en texto plano embebida en el fichero (`RAG_MCP_KEY` para el MCP de políticas corporativas en `10.117.139.1:8200`). No se ha usado ni se usará esa clave desde aquí. Se avisó directamente al usuario en la conversación; no aplica ninguna acción sobre `brdp-manager`, se deja constancia aquí solo para no perder el hallazgo.
