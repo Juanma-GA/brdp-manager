@@ -47,17 +47,16 @@ better user experience than a confusing interleaved result anyway.
 """
 
 import asyncio
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import HTTPException, status
+from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.approvals import _rule_state, _xml_well_formed_error
-from app.api.routes.brdp_catalog import _resolve_catalog_standard
 from app.api.routes.brdps import _HISTORY_FIELDS, _compute_brdp_embedding
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, ImportJob, Project, RuleApproval, User
@@ -108,15 +107,60 @@ async def _reap_if_stale(job: ImportJob, db: AsyncSession) -> ImportJob:
     return job
 
 
-def _normalize_for_comparison(text: str) -> str:
-    """Collapses any run of whitespace to a single space and strips the
-    ends -- used only to decide whether an incoming Rule is a REAL change
-    from what's already stored (rule_override below), not a naive
-    character-by-character comparison that would fire on irrelevant
-    formatting differences (indentation, line breaks) between two XML
-    documents that are otherwise identical.
+def _blank(text: str | None) -> bool:
+    return text is None or text.strip() == ""
+
+
+def _elements_structurally_equal(a: etree._Element, b: etree._Element) -> bool:
+    """Tag, attributes, and non-blank text/tail compared exactly -- only
+    pure-whitespace text/tail (indentation/line breaks between sibling
+    elements) is ignored. See _rule_xml_structurally_equal for why.
     """
-    return re.sub(r"\s+", " ", text or "").strip()
+    if a.tag != b.tag:
+        return False
+    if dict(a.attrib) != dict(b.attrib):
+        return False
+    if _blank(a.text) != _blank(b.text) or (not _blank(a.text) and a.text != b.text):
+        return False
+    if _blank(a.tail) != _blank(b.tail) or (not _blank(a.tail) and a.tail != b.tail):
+        return False
+    children_a, children_b = list(a), list(b)
+    if len(children_a) != len(children_b):
+        return False
+    return all(_elements_structurally_equal(ca, cb) for ca, cb in zip(children_a, children_b))
+
+
+def _rule_xml_structurally_equal(a: str, b: str) -> bool:
+    """Real structural comparison of two Rule XML fragments -- used to
+    decide whether an incoming Rule is a REAL change from what's already
+    stored (rule_override below), not the naive `re.sub(r"\\s+", " ", ...)`
+    this replaces: a global whitespace collapse over the raw string made
+    two DIFFERENT attribute values compare as equal (e.g.
+    val1="...SISTEMAS DE  SISTEMAS..." vs "...SISTEMAS DE SISTEMAS...",
+    the real BRDP-EXT-01516/02609 case this was reimporting), because it
+    collapsed the significant double space inside the attribute value
+    right along with the insignificant indentation between tags.
+
+    Attribute values and element text content are therefore NEVER
+    normalized here -- compared byte-for-byte via _elements_structurally_equal.
+    The only thing ignored is text/tail that is PURELY whitespace, which is
+    exactly the indentation/line breaks an LLM or a human editor introduces
+    between sibling elements and carries no real meaning.
+
+    Fragments are wrapped in a throwaway <root> the same tolerant way as
+    _xml_well_formed_error (app/api/routes/approvals.py) -- a Rule cell can
+    legitimately have multiple XML-sibling roots (a loose
+    structureObjectRule alongside one or more contextRules blocks). Both
+    sides already passed well-formedness checks before reaching here in
+    practice; if parsing somehow still failed, that can't be evidence of
+    equality, so it's treated as "different" rather than raised.
+    """
+    try:
+        root_a = etree.fromstring(f"<root>{a}</root>".encode("utf-8"))
+        root_b = etree.fromstring(f"<root>{b}</root>".encode("utf-8"))
+    except etree.XMLSyntaxError:
+        return False
+    return _elements_structurally_equal(root_a, root_b)
 
 
 async def _get_owned_project(project_id: uuid.UUID, db: AsyncSession) -> Project:
@@ -242,7 +286,7 @@ def _classify_row(
         action == "update"
         and existing_approval is not None
         and bool(rule_xml)
-        and _normalize_for_comparison(existing_approval.rule_xml) != _normalize_for_comparison(rule_xml)
+        and not _rule_xml_structurally_equal(existing_approval.rule_xml, rule_xml)
     )
 
     return ImportRowResult(
@@ -293,13 +337,7 @@ async def _load_existing(
 async def _load_catalog(
     rows: list[ImportRowIn], catalog_standard: str, db: AsyncSession
 ) -> dict[str, BRDPCatalog]:
-    """One batch query, exactly like _load_existing above -- never N+1.
-    catalog_standard is already resolved (see _resolve_catalog_standard):
-    "Schematron 1.0 -- S1000D" shares its catalog with "BREX -- S1000D
-    3.0.1" rather than having its own, so the lookup has to go through the
-    same alias Create Project's own catalog count/seed already uses, or a
-    Schematron project would never match anything.
-    """
+    """One batch query, exactly like _load_existing above -- never N+1."""
     identifiers = [r.identifier.strip() for r in rows if r.identifier.strip()]
     catalog_by_identifier: dict[str, BRDPCatalog] = {}
     if identifiers:
@@ -319,7 +357,7 @@ async def analyze_rows(
     project = await _get_owned_project(project_id, db)
     rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
     existing_brdps, existing_approvals = await _load_existing(project_id, rows, rule_format, db)
-    catalog_by_identifier = await _load_catalog(rows, _resolve_catalog_standard(project.standard), db)
+    catalog_by_identifier = await _load_catalog(rows, project.standard, db)
 
     results = []
     for row in rows:

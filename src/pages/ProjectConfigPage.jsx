@@ -25,9 +25,11 @@ const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified'
 // Confirmed by reading generateBREX.js/generateBREX41.js/generateBREX301.js
 // directly: all three read exactly these 9 projectConfig keys (only how
 // each volcarga them into XML attribute names differs, never which fields
-// exist) -- generateBREXSch.js reuses generateBREX301.js internally, so
-// "Schematron 1.0 — S1000D" needs this same set too. One shared field
-// list for all 4 of those standards, no per-standard branching.
+// exist) -- generateBREXSch.js reuses whichever of those three matches the
+// project's real standard internally (see GeneratePage.jsx's BREX/
+// Schematron selector), so Schematron output needs this same set too. One
+// shared field list for all three S1000D standards, no per-standard
+// branching.
 const FULL_FIELDS = [
   { key: 'projectName', labelKey: 'projectName' },
   { key: 'modelIdentCode', labelKey: 'modelIdentCode', hintKey: 'modelIdentCodeHint' },
@@ -47,7 +49,7 @@ const FULL_FIELDS = [
 const DITA_FIELDS = [{ key: 'projectName', labelKey: 'projectName' }];
 
 function fieldsForStandard(standard) {
-  return standard === 'Schematron 1.0 — DITA' ? DITA_FIELDS : FULL_FIELDS;
+  return standard === 'DITA 1.3' ? DITA_FIELDS : FULL_FIELDS;
 }
 
 // Apply/Import ETA settings (HR0/HR8: every setting needs a UI, nothing
@@ -378,8 +380,8 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
       const brdps = await authFetchJson(`/api/projects/${projectId}/brdps`);
-      // No rule format at all for this standard (Schematron 1.0 -- DITA,
-      // see STANDARD_TO_RULE_FORMAT) -- skip the fetch entirely rather
+      // No rule format at all for this standard (DITA 1.3, see
+      // STANDARD_TO_RULE_FORMAT) -- skip the fetch entirely rather
       // than call an endpoint with an undefined format; every row falls
       // back to "To Do"/empty Rule, same as RecordsPage's own convention.
       const ruleFormat = STANDARD_TO_RULE_FORMAT[standard];

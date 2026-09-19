@@ -280,7 +280,7 @@ async def test_editor_of_a_cannot_create_a_project_even_with_catalog_seed(client
     """
     response = await client.post(
         "/api/projects",
-        json={"name": "Editor Should Not Create This", "standard": "BREX — S1000D 4.2", "seed_from_catalog": True},
+        json={"name": "Editor Should Not Create This", "standard": "S1000D 4.2", "seed_from_catalog": True},
         headers=_headers(scenario["editor_a"]),
     )
     assert response.status_code == 403

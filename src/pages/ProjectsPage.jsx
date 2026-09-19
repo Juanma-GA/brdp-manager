@@ -7,19 +7,21 @@ import { authFetchJson } from '../services/apiClient';
 import SortableHeader from '../components/SortableHeader';
 import styles from './ProjectsPage.module.css';
 
-// The 7 exact standards the project can be created with (fixed forever
-// once created, docs/v2 §2) -- "BREX — S1000D 5.0"/"6.0" are listed but
+// The 6 exact standards the project can be created with (fixed forever
+// once created, docs/v2 §2) -- "S1000D 5.0"/"6.0" are listed but
 // disabled: no generation engine exists for them yet, same criterion
 // CLAUDE.md already documents for v1 ("Lo que NO está implementado
-// todavía"), not being built in this round either.
+// todavía"), not being built in this round either. There is no longer a
+// separate "Schematron 1.0 — S1000D" standard -- Schematron for S1000D is
+// now a Generate-page output selector on the S1000D 3.0.1/4.1/4.2
+// standards (see GeneratePage.jsx), not its own project standard.
 const STANDARD_OPTIONS = [
-  { value: 'BREX — S1000D 3.0.1', comingSoon: false },
-  { value: 'BREX — S1000D 4.1', comingSoon: false },
-  { value: 'BREX — S1000D 4.2', comingSoon: false },
-  { value: 'BREX — S1000D 5.0', comingSoon: true },
-  { value: 'BREX — S1000D 6.0', comingSoon: true },
-  { value: 'Schematron 1.0 — S1000D', comingSoon: false },
-  { value: 'Schematron 1.0 — DITA', comingSoon: false },
+  { value: 'S1000D 3.0.1', comingSoon: false },
+  { value: 'S1000D 4.1', comingSoon: false },
+  { value: 'S1000D 4.2', comingSoon: false },
+  { value: 'S1000D 5.0', comingSoon: true },
+  { value: 'S1000D 6.0', comingSoon: true },
+  { value: 'DITA 1.3', comingSoon: false },
 ];
 
 function CreateProjectForm({ onCreated, onCancel }) {

@@ -15,24 +15,26 @@ import styles from './GeneratePage.module.css';
 // because this page fetches approvals itself (see below) instead of
 // letting the generator do it.
 // docs/v2 §1/§2: project.standard is fixed at project creation, is one of
-// the 7 exact display strings the Create Project dropdown offers, and IS
-// the generation format directly -- "Generate BREX/Schematron no ofrece
-// selector, genera directamente el formato del proyecto", one project
-// standard maps to exactly one generation format, never an open choice at
-// generate time. "Schematron 1.0 — S1000D" generates via generateBREXSch,
-// which reuses generateBREX301 internally to build a real BREX 3.0.1 and
-// converts it deterministically (brexToSchematron.js, see CLAUDE.md) --
-// same reasoning already applied to routes/similar.py's kind='rule'
-// standard->format mapping on the backend, kept consistent here. S1000D
-// 5.0/6.0 have no entry: no generation engine exists for them yet
-// (CLAUDE.md "Lo que NO está implementado todavía").
-const FORMAT_DEFS = {
-  'BREX — S1000D 4.2': { approvalsFormat: 'BREX-4.2', xsdFormat: '4.2', run: generateBREX },
-  'BREX — S1000D 4.1': { approvalsFormat: 'BREX-4.1', xsdFormat: '4.1', run: generateBREX41 },
-  'BREX — S1000D 3.0.1': { approvalsFormat: 'BREX-3.0.1', xsdFormat: '3.0.1', run: generateBREX301 },
-  'Schematron 1.0 — S1000D': { approvalsFormat: 'SCH-S1000D', xsdFormat: null, run: generateBREXSch },
-  'Schematron 1.0 — DITA': { approvalsFormat: 'SCH-DITA', xsdFormat: null, run: generateSchematronDITA },
+// the 6 exact display strings the Create Project dropdown offers. For the
+// three real S1000D standards it no longer maps to exactly one generation
+// format: the page offers a BREX / Schematron output selector fed by the
+// SAME BREX-format approved rules either way (docs request, confirmed with
+// the user) -- there is no independent "Schematron 1.0 — S1000D" standard
+// or approval format any more. Schematron output reuses generateBREXSch,
+// which generates a real BREX via whichever of these three run functions
+// matches the project's standard and converts it deterministically
+// (brexToSchematron.js, see CLAUDE.md) -- same reasoning already applied to
+// routes/similar.py's kind='rule' standard->format mapping on the backend,
+// kept consistent here. S1000D 5.0/6.0 have no entry: no generation engine
+// exists for them yet (CLAUDE.md "Lo que NO está implementado todavía").
+// DITA 1.3 has its own fixed format, no selector (no BREX equivalent).
+const BREX_STANDARDS = {
+  'S1000D 4.2': { approvalsFormat: 'BREX-4.2', xsdFormat: '4.2', run: generateBREX },
+  'S1000D 4.1': { approvalsFormat: 'BREX-4.1', xsdFormat: '4.1', run: generateBREX41 },
+  'S1000D 3.0.1': { approvalsFormat: 'BREX-3.0.1', xsdFormat: '3.0.1', run: generateBREX301 },
 };
+
+const DITA_FORMAT_DEF = { approvalsFormat: 'SCH-DITA', xsdFormat: null, run: generateSchematronDITA };
 
 // generateBREX()/generateBREX41()/generateBREX301()/generateBREXSch()/
 // generateSchematronDITA() are the untouched core engine (CLAUDE.md) --
@@ -96,8 +98,12 @@ export default function GeneratePage() {
   const { projectId } = useParams();
   const { project } = useOutletContext();
 
-  // Fixed by the project's own standard, never user-selectable (docs/v2 §1).
-  const format = project.standard;
+  const isDITA = project.standard === 'DITA 1.3';
+  const brexDef = BREX_STANDARDS[project.standard];
+  // Only the three real S1000D standards offer the BREX/Schematron output
+  // choice -- DITA 1.3 has no BREX equivalent, and an unimplemented
+  // standard (S1000D 5.0/6.0) has nothing to choose between either.
+  const hasOutputSelector = !!brexDef;
 
   const [brdps, setBrdps] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -105,13 +111,35 @@ export default function GeneratePage() {
   // Docs request: an independent AND filter on Rule Status -- both boxes
   // checked by default (same criterion as onlyValidated's own default).
   const [onlyVerified, setOnlyVerified] = useState(true);
+  // 'brex' | 'schematron' -- only meaningful when hasOutputSelector; not
+  // persisted anywhere (docs request: switching back and forth in the same
+  // session must not require re-approval, but there's no requirement to
+  // survive a reload either, and both outputs read the SAME approved rules
+  // regardless of this choice, so there is nothing to lose by resetting it).
+  const [outputKind, setOutputKind] = useState('brex');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
   const [xsdValidation, setXsdValidation] = useState(null);
   const generationRef = useRef(0);
 
-  const formatDef = FORMAT_DEFS[format];
+  const isSchematronOutput = hasOutputSelector && outputKind === 'schematron';
+
+  // The approvals format is always the project's BREX format id, regardless
+  // of outputKind -- a single approved-rules set feeds both outputs (docs
+  // request), so switching the selector never re-fetches or invalidates it.
+  const formatDef = isDITA
+    ? DITA_FORMAT_DEF
+    : !brexDef
+    ? undefined
+    : isSchematronOutput
+    ? {
+        approvalsFormat: brexDef.approvalsFormat,
+        xsdFormat: null,
+        run: (brdpsArg, projectConfigArg, options) =>
+          generateBREXSch(brdpsArg, projectConfigArg, { ...options, baseGenerator: brexDef.run }),
+      }
+    : brexDef;
   const isImplemented = !!formatDef;
 
   // Loaded once on page entry (docs request), not just at Generate time --
@@ -130,7 +158,7 @@ export default function GeneratePage() {
   useEffect(() => {
     setResult(null);
     setXsdValidation(null);
-  }, [onlyValidated, onlyVerified]);
+  }, [onlyValidated, onlyVerified, outputKind]);
 
   // Proposal Status AND Rule Status, each only applied if its own
   // checkbox is on (docs request: two independent AND conditions, not a
@@ -189,13 +217,11 @@ export default function GeneratePage() {
     if (!result?.xml) return;
     const dateStr = new Date().toISOString().slice(0, 10);
     const mic = project.project_config?.modelIdentCode || 'UNKNOWN';
-    const isSchDITA = format === 'Schematron 1.0 — DITA';
-    const isSchS1000D = format === 'Schematron 1.0 — S1000D';
-    const isBREX301 = format === 'BREX — S1000D 3.0.1';
-    const isBREX41 = format === 'BREX — S1000D 4.1';
-    const filename = isSchDITA
+    const isBREX301 = project.standard === 'S1000D 3.0.1' && !isSchematronOutput;
+    const isBREX41 = project.standard === 'S1000D 4.1' && !isSchematronOutput;
+    const filename = isDITA
       ? `${mic}_${dateStr}_dita.sch`
-      : isSchS1000D
+      : isSchematronOutput
       ? `${mic}_${dateStr}_s1000d.sch`
       : isBREX301
       ? `DMC-${mic}-00-00-00-00A-022A-D_${dateStr}_301.xml`
@@ -211,8 +237,6 @@ export default function GeneratePage() {
     URL.revokeObjectURL(url);
   };
 
-  const isSchDITA = format === 'Schematron 1.0 — DITA';
-
   return (
     <div className={styles.page}>
       <h1 className={styles.title}>{t('nav.generate')}</h1>
@@ -222,9 +246,32 @@ export default function GeneratePage() {
 
       <div className={styles.card}>
         <label className={styles.fieldLabel}>{t('generate.formatLabel')}</label>
-        <p className={styles.fixedFormat}>{format || t('generate.noFormatFor', { standard: project.standard })}</p>
+        <p className={styles.fixedFormat}>{project.standard || t('generate.noFormatFor', { standard: project.standard })}</p>
         {!isImplemented && (
           <p className={styles.warning}>⚠ {t('generate.notImplemented', { standard: project.standard })}</p>
+        )}
+
+        {hasOutputSelector && (
+          <>
+            <label className={styles.fieldLabel}>{t('generate.outputKindLabel')}</label>
+            <div className={styles.outputKindGroup}>
+              <button
+                type="button"
+                className={`${styles.outputKindOption} ${outputKind === 'brex' ? styles.outputKindOptionActive : ''}`}
+                onClick={() => setOutputKind('brex')}
+              >
+                {t('generate.outputKindBrex')}
+              </button>
+              <button
+                type="button"
+                className={`${styles.outputKindOption} ${outputKind === 'schematron' ? styles.outputKindOptionActive : ''}`}
+                onClick={() => setOutputKind('schematron')}
+              >
+                {t('generate.outputKindSchematron')}
+              </button>
+            </div>
+            <p className={styles.hint}>{t('generate.outputKindHint')}</p>
+          </>
         )}
 
         <label className={styles.checkboxLabel}>
@@ -293,7 +340,7 @@ export default function GeneratePage() {
             </div>
           )}
 
-          {isSchDITA && result.xml && result.vocabularyWarnings?.length > 0 && (
+          {isDITA && result.xml && result.vocabularyWarnings?.length > 0 && (
             <details className={styles.xsdSection}>
               <summary className={styles.badgePending}>
                 ⚠ {t('generate.vocabularyWarnings', { count: result.vocabularyWarnings.length })}

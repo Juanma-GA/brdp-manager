@@ -29,7 +29,7 @@ async def _make_user(global_role: str = "user") -> User:
         return user
 
 
-async def _make_project(standard: str = "BREX — S1000D 4.2") -> Project:
+async def _make_project(standard: str = "S1000D 4.2") -> Project:
     async with async_session_factory() as session:
         project = Project(name=f"Project Test {uuid.uuid4()}", standard=standard)
         session.add(project)
@@ -62,7 +62,7 @@ async def test_create_project_seeds_default_config_values(client):
     try:
         response = await client.post(
             "/api/projects",
-            json={"name": f"Defaults Test {uuid.uuid4()}", "standard": "BREX — S1000D 4.2"},
+            json={"name": f"Defaults Test {uuid.uuid4()}", "standard": "S1000D 4.2"},
             headers=_headers(admin),
         )
         assert response.status_code == 201
@@ -98,7 +98,7 @@ async def test_create_project_caller_supplied_config_overrides_defaults(client):
             "/api/projects",
             json={
                 "name": f"Defaults Override Test {uuid.uuid4()}",
-                "standard": "BREX — S1000D 4.2",
+                "standard": "S1000D 4.2",
                 "project_config": {"systemDiffCode": "Z", "projectName": "Explicit Name"},
             },
             headers=_headers(admin),
@@ -121,7 +121,7 @@ async def test_create_project_caller_supplied_config_overrides_defaults(client):
 
 
 async def test_rename_updates_name_but_never_standard(client):
-    project = await _make_project(standard="BREX — S1000D 3.0.1")
+    project = await _make_project(standard="S1000D 3.0.1")
     editor = await _make_user()
     await _assign_role(editor.id, project.id, "editor")
     try:
@@ -131,12 +131,12 @@ async def test_rename_updates_name_but_never_standard(client):
         assert response.status_code == 200
         body = response.json()
         assert body["name"] == "Renamed Project"
-        assert body["standard"] == "BREX — S1000D 3.0.1"  # untouched
+        assert body["standard"] == "S1000D 3.0.1"  # untouched
 
         async with async_session_factory() as session:
             db_project = await session.get(Project, project.id)
             assert db_project.name == "Renamed Project"
-            assert db_project.standard == "BREX — S1000D 3.0.1"
+            assert db_project.standard == "S1000D 3.0.1"
     finally:
         async with async_session_factory() as session:
             db_project = await session.get(Project, project.id)
@@ -151,17 +151,17 @@ async def test_rename_rejects_a_standard_field_if_sent(client):
     ignored (extra fields), not silently applied. Belt-and-suspenders
     check that standard truly cannot be changed through this endpoint.
     """
-    project = await _make_project(standard="BREX — S1000D 4.1")
+    project = await _make_project(standard="S1000D 4.1")
     editor = await _make_user()
     await _assign_role(editor.id, project.id, "editor")
     try:
         response = await client.patch(
             f"/api/projects/{project.id}",
-            json={"name": "Still Renamed", "standard": "BREX — S1000D 4.2"},
+            json={"name": "Still Renamed", "standard": "S1000D 4.2"},
             headers=_headers(editor),
         )
         assert response.status_code == 200
-        assert response.json()["standard"] == "BREX — S1000D 4.1"
+        assert response.json()["standard"] == "S1000D 4.1"
     finally:
         async with async_session_factory() as session:
             db_project = await session.get(Project, project.id)

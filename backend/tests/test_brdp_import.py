@@ -40,7 +40,7 @@ async def editor_and_project():
     # project.standard, it isn't passed in the URL like approvals.py's
     # routes.
     async with async_session_factory() as session:
-        project = Project(name=f"Import Test Project {uuid.uuid4()}", standard="BREX — S1000D 4.2")
+        project = Project(name=f"Import Test Project {uuid.uuid4()}", standard="S1000D 4.2")
         editor = User(
             email=f"import-editor-{uuid.uuid4()}@example.com",
             password_hash=hash_password("irrelevant-password"),
@@ -79,14 +79,14 @@ async def editor_and_project():
 
 @pytest.fixture
 async def catalog_entry():
-    """A single brdp_catalog row for "BREX — S1000D 4.2" (matches
+    """A single brdp_catalog row for "S1000D 4.2" (matches
     editor_and_project's fixture standard exactly) -- global reference
     data, not project-scoped, so it's seeded/torn down independently.
     """
     identifier = f"BRDP-CAT-{uuid.uuid4()}"
     async with async_session_factory() as session:
         entry = BRDPCatalog(
-            standard="BREX — S1000D 4.2",
+            standard="S1000D 4.2",
             identifier=identifier,
             title="Catalog title",
             definition="Catalog definition",
@@ -384,15 +384,14 @@ async def test_catalog_match_with_identical_values_applies_but_does_not_warn(cli
 
 async def test_catalog_match_is_standard_specific(client, editor_and_project, catalog_entry):
     """The same identifier exists in the catalog under a DIFFERENT standard
-    ("BREX — S1000D 4.1") -- editor_and_project's project is "BREX —
-    S1000D 4.2", so this must NOT match (docs request: the filter is the
-    project's exact standard, not any standard the identifier happens to
-    appear under).
+    ("S1000D 4.1") -- editor_and_project's project is "S1000D 4.2", so this
+    must NOT match (docs request: the filter is the project's exact
+    standard, not any standard the identifier happens to appear under).
     """
     project, headers, _viewer_headers = editor_and_project
     async with async_session_factory() as session:
         other_standard_entry = BRDPCatalog(
-            standard="BREX — S1000D 4.1",
+            standard="S1000D 4.1",
             identifier=catalog_entry.identifier,
             title="Wrong-standard catalog title",
             definition="Wrong-standard catalog definition",
@@ -472,6 +471,64 @@ async def test_rule_override_does_not_warn_when_rule_is_unchanged(client, editor
     # must not count as a real difference.
     reformatted_rule = f"  {VALID_RULE}  \n"
     rows = [_row(2, "BRDP-IMP-RULESAME", rule_status="Verified", rule=reformatted_rule)]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["rule_override"] is False
+
+
+async def test_rule_override_fires_on_a_whitespace_only_attribute_value_change(client, editor_and_project):
+    """Real case found reimporting BRDP-EXT-01516/02609: a correction that
+    only changes a run of whitespace INSIDE an attribute value (double
+    space -> single space in val1) is a REAL content change and must warn
+    -- the old naive `re.sub(r"\\s+", " ", ...)` over the raw string
+    collapsed the significant space in the attribute right along with the
+    insignificant indentation between tags, so this case went undetected.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    original_rule = (
+        '<structureObjectRule id="w"><objectPath allowedObjectFlag="1" '
+        'val1="SISTEMAS DE  SISTEMAS">//w</objectPath></structureObjectRule>'
+    )
+    corrected_rule = (
+        '<structureObjectRule id="w"><objectPath allowedObjectFlag="1" '
+        'val1="SISTEMAS DE SISTEMAS">//w</objectPath></structureObjectRule>'
+    )
+    created = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-IMP-ATTRWS"}, headers=headers)
+    ).json()
+    approve_url = f"/api/projects/{project.id}/brdps/{created['id']}/approvals/BREX-4.2"
+    await client.put(approve_url, json={"rule_xml": original_rule, "source": "llm"}, headers=headers)
+    await client.post(approve_url + "/approve", headers=headers)
+
+    rows = [_row(2, "BRDP-IMP-ATTRWS", rule_status="Verified", rule=corrected_rule)]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["rule_override"] is True
+
+
+async def test_rule_override_does_not_fire_for_indentation_only_difference(client, editor_and_project):
+    """Same Rule, pretty-printed with newlines/indentation between the
+    structureObjectRule and objectPath tags -- purely cosmetic whitespace
+    BETWEEN elements (not inside an attribute value or real text), must
+    still be ignored, same as the flat-string case
+    test_rule_override_does_not_warn_when_rule_is_unchanged already covers.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    pretty_printed_rule = (
+        '<structureObjectRule id="x">\n  <objectPath allowedObjectFlag="1">//x</objectPath>\n</structureObjectRule>'
+    )
+    created = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-IMP-INDENTONLY"}, headers=headers)
+    ).json()
+    approve_url = f"/api/projects/{project.id}/brdps/{created['id']}/approvals/BREX-4.2"
+    await client.put(approve_url, json={"rule_xml": VALID_RULE, "source": "llm"}, headers=headers)
+    await client.post(approve_url + "/approve", headers=headers)
+
+    rows = [_row(2, "BRDP-IMP-INDENTONLY", rule_status="Verified", rule=pretty_printed_rule)]
 
     analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
     (analyzed,) = analyze_resp.json()["results"]
@@ -668,7 +725,7 @@ async def test_status_job_id_rejects_a_job_from_another_project(client, editor_a
     """
     project, headers, _viewer_headers = editor_and_project
     async with async_session_factory() as session:
-        other_project = Project(name="Other Project", standard="BREX — S1000D 4.2")
+        other_project = Project(name="Other Project", standard="S1000D 4.2")
         session.add(other_project)
         await session.flush()
         job = ImportJob(project_id=other_project.id, status="completed", total_rows=1, processed_rows=1)

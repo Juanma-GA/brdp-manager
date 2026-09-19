@@ -29,7 +29,7 @@ def _mock_embeddings_transport():
 @pytest.fixture
 async def admin_editor_and_project():
     async with async_session_factory() as session:
-        project = Project(name=f"Trash Test Project {uuid.uuid4()}", standard="BREX — S1000D 4.2")
+        project = Project(name=f"Trash Test Project {uuid.uuid4()}", standard="S1000D 4.2")
         admin = User(
             email=f"trash-admin-{uuid.uuid4()}@example.com",
             password_hash=hash_password("irrelevant-password"),
@@ -355,7 +355,7 @@ async def test_editor_of_project_a_cannot_touch_project_bs_trash(client, admin_e
     project_a, admin, editor_a, admin_headers, editor_a_headers = admin_editor_and_project
 
     async with async_session_factory() as session:
-        project_b = Project(name=f"Trash Test Project B {uuid.uuid4()}", standard="BREX — S1000D 4.2")
+        project_b = Project(name=f"Trash Test Project B {uuid.uuid4()}", standard="S1000D 4.2")
         session.add(project_b)
         await session.commit()
         await session.refresh(project_b)

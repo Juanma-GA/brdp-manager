@@ -469,9 +469,10 @@ function pruneEmptyContainers301(xml) {
 // Pure deterministic assembler -- no LLM call, ever. See generateBREX.js's
 // generateBREX() for the full design rationale. generateSingleRule301 and
 // the prompt builders above still exist, unchanged, for the BRDP Assistant's
-// "Suggest Rule" mode and for generateBREXSch.js (which reuses this same
-// function with approvalsFormat: 'SCH-S1000D' -- its simplification is
-// inherited automatically from this one, nothing else needed there).
+// "Suggest Rule" mode and for generateBREXSch.js (which can reuse this same
+// function, or generateBREX41/generateBREX depending on the project's real
+// standard, as its base generator -- its simplification is inherited
+// automatically from whichever one runs, nothing else needed there).
 export async function generateBREX301(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,

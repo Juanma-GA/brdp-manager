@@ -1,12 +1,14 @@
-"""project.standard (one of the 7 exact display strings the Create Project
+"""project.standard (one of the 6 exact display strings the Create Project
 dropdown offers) -> rule_approvals format id. Mirrors
 src/constants/ruleFormats.js exactly -- keep both in sync if a new
-standard/format is ever added. "Schematron 1.0 — S1000D" is keyed under
-its OWN format id (SCH-S1000D), not BREX-3.0.1: generateBREXSch.js
-generates a real BREX 3.0.1 under the hood and converts it deterministically,
-but freezes its own approvals under the Schematron format id. DITA has no
-rule-kind precedent at all -- there is no BREX equivalent for it, so it is
-deliberately absent from this map.
+standard/format is ever added. There is no longer a separate "Schematron
+1.0 — S1000D" standard/format: Schematron for S1000D is a Generate-page
+output selector on top of the S1000D 3.0.1/4.1/4.2 standards (generateBREXSch.js
+generates a real BREX under the hood and converts it deterministically), and
+the SAME BREX-format approved rules feed both the BREX and the Schematron
+output -- there is no independent SCH-S1000D approval set any more. DITA
+has no rule-kind precedent at all -- there is no BREX equivalent for it, so
+it is deliberately absent from this map.
 
 Previously duplicated inline in app/api/routes/similar.py as its own
 module-level `_STANDARD_TO_RULE_FORMAT` -- extracted here so the BRDP
@@ -15,8 +17,7 @@ mapping instead of a third copy.
 """
 
 STANDARD_TO_RULE_FORMAT = {
-    "BREX — S1000D 4.2": "BREX-4.2",
-    "BREX — S1000D 4.1": "BREX-4.1",
-    "BREX — S1000D 3.0.1": "BREX-3.0.1",
-    "Schematron 1.0 — S1000D": "SCH-S1000D",
+    "S1000D 4.2": "BREX-4.2",
+    "S1000D 4.1": "BREX-4.1",
+    "S1000D 3.0.1": "BREX-3.0.1",
 }

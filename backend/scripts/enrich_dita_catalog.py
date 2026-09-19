@@ -1,8 +1,8 @@
 """Phase 1 of the DITA 1.3 BRDP catalog enrichment (docs request):
 generates a REVIEW file only -- writes nothing to Postgres. Phase 2
-(the real import into brdp_catalog with standard="Schematron 1.0 —
-DITA") is a separate step that must not run until a human has reviewed
-this file and explicitly approved it.
+(the real import into brdp_catalog with standard="DITA 1.3") is a
+separate step that must not run until a human has reviewed this file
+and explicitly approved it.
 
     cd backend && python scripts/enrich_dita_catalog.py
 

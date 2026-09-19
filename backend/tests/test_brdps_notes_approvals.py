@@ -139,7 +139,7 @@ async def test_same_identifier_is_allowed_in_a_different_project(client, editor_
     """
     project_a, headers_a = editor_and_project
     async with async_session_factory() as session:
-        project_b = Project(name=f"CRUD Test Project B {uuid.uuid4()}", standard="BREX — S1000D 4.2")
+        project_b = Project(name=f"CRUD Test Project B {uuid.uuid4()}", standard="S1000D 4.2")
         user_b = User(
             email=f"crud-b-{uuid.uuid4()}@example.com",
             password_hash=hash_password("irrelevant-password"),

@@ -6,7 +6,7 @@ seed_dev_data.py:
     cd backend && python scripts/import_brdp_catalog.py <path.xlsx> "<standard>"
 
 Example:
-    python scripts/import_brdp_catalog.py catalog_sources/s1000d_4.2.xlsx "BREX — S1000D 4.2"
+    python scripts/import_brdp_catalog.py catalog_sources/s1000d_4.2.xlsx "S1000D 4.2"
 
 Reads the "Auto-gen Decisions" sheet, columns ID / Title / Definition
 (header row 1, data from row 2), skipping any row whose ID cell is
@@ -39,19 +39,21 @@ from app.models import BRDPCatalog
 
 SHEET_NAME = "Auto-gen Decisions"
 
-# Mirrors the 7 exact standards ProjectsPage.jsx's STANDARD_OPTIONS offers
+# Mirrors the 6 exact standards ProjectsPage.jsx's STANDARD_OPTIONS offers
 # (docs/v2 §2) -- kept in sync manually, same as this project's other
 # cross-file standard lists (e.g. STANDARD_TO_RULE_FORMAT). A typo'd
 # standard here would silently create an orphan catalog no project could
-# ever match, so this is checked rather than trusted blindly.
+# ever match, so this is checked rather than trusted blindly. There is no
+# separate "Schematron 1.0 — S1000D" standard any more -- Schematron for
+# S1000D is now a Generate-page output selector on the S1000D 3.0.1/4.1/4.2
+# standards, not its own project standard, so it has no catalog of its own.
 _KNOWN_STANDARDS = {
-    "BREX — S1000D 3.0.1",
-    "BREX — S1000D 4.1",
-    "BREX — S1000D 4.2",
-    "BREX — S1000D 5.0",
-    "BREX — S1000D 6.0",
-    "Schematron 1.0 — S1000D",
-    "Schematron 1.0 — DITA",
+    "S1000D 3.0.1",
+    "S1000D 4.1",
+    "S1000D 4.2",
+    "S1000D 5.0",
+    "S1000D 6.0",
+    "DITA 1.3",
 }
 
 
@@ -90,7 +92,7 @@ async def main() -> None:
         sys.exit(1)
     if standard not in _KNOWN_STANDARDS:
         print(
-            f"{standard!r} is not one of the 7 canonical standards: {sorted(_KNOWN_STANDARDS)}",
+            f"{standard!r} is not one of the 6 canonical standards: {sorted(_KNOWN_STANDARDS)}",
             file=sys.stderr,
         )
         sys.exit(1)

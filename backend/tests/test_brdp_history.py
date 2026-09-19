@@ -36,7 +36,7 @@ def _mock_embeddings_transport():
 @pytest.fixture
 async def editor_viewer_and_project():
     async with async_session_factory() as session:
-        project = Project(name=f"History Test Project {uuid.uuid4()}", standard="BREX — S1000D 4.2")
+        project = Project(name=f"History Test Project {uuid.uuid4()}", standard="S1000D 4.2")
         editor = User(
             email=f"history-editor-{uuid.uuid4()}@example.com",
             password_hash=hash_password("irrelevant-password"),
