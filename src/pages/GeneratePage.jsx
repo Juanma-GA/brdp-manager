@@ -170,19 +170,27 @@ export default function GeneratePage() {
     if (onlyVerified && ruleStateOf(approvalsByBrdpId.get(b.id) ?? null) !== 'verified') return false;
     return true;
   }).length;
-  // DITA 1.3's Project Configuration page only ever shows/saves projectName
-  // (generateSchematronDITA.js reads nothing else from projectConfig) --
-  // modelIdentCode is never displayed for that standard, so gating on it
-  // regardless of standard left this button permanently disabled for every
-  // DITA project (confirmed live: a freshly created DITA project's
-  // project_config never gets a modelIdentCode key, through the UI or the
-  // backend's own creation defaults, so this was unreachable, not just
-  // unlikely). generateBREX/41/301.js's own hard requirement on
-  // modelIdentCode (dmCode construction) is unchanged for the three real
-  // S1000D standards.
-  const isConfigComplete = isDITA
-    ? !!project.project_config?.projectName
-    : !!project.project_config?.modelIdentCode;
+  // Single source of truth for "which project_config field identifies this
+  // project" per standard -- DITA 1.3's Project Configuration page only
+  // ever shows/saves projectName (generateSchematronDITA.js reads nothing
+  // else from projectConfig); the three real S1000D standards use
+  // modelIdentCode (their dmCode construction requires it, and it's the
+  // only field their config page ever asks for that identifies the
+  // project by name/code). Reused below by isConfigComplete AND
+  // handleDownload's filename -- both used to hardcode modelIdentCode
+  // regardless of standard, which is exactly what left the Generate button
+  // permanently disabled for every DITA project (confirmed live: a freshly
+  // created DITA project's project_config never gets a modelIdentCode key,
+  // through the UI or the backend's own creation defaults) and, separately,
+  // made every DITA download filename read "UNKNOWN_<date>_dita.sch" no
+  // matter what the project was actually named (confirmed with a real
+  // file -- the .sch's own internal <sch:title> had the real name, only
+  // the filename didn't). One shared value here so this "which field per
+  // standard" mapping never gets a third, possibly-diverging copy.
+  const configIdentifierValue = isDITA
+    ? project.project_config?.projectName
+    : project.project_config?.modelIdentCode;
+  const isConfigComplete = !!configIdentifierValue;
 
   const handleGenerate = useCallback(async () => {
     if (!formatDef) return;
@@ -228,7 +236,12 @@ export default function GeneratePage() {
   const handleDownload = () => {
     if (!result?.xml) return;
     const dateStr = new Date().toISOString().slice(0, 10);
-    const mic = project.project_config?.modelIdentCode || 'UNKNOWN';
+    // configIdentifierValue (projectName for DITA, modelIdentCode for the
+    // three S1000D standards -- see its own comment above) -- was
+    // previously always modelIdentCode here regardless of standard, which
+    // for DITA is never set, so every DITA download silently fell back to
+    // "UNKNOWN" no matter the project's real name.
+    const mic = configIdentifierValue || 'UNKNOWN';
     const isBREX301 = project.standard === 'S1000D 3.0.1' && !isSchematronOutput;
     const isBREX41 = project.standard === 'S1000D 4.1' && !isSchematronOutput;
     const filename = isDITA

@@ -242,7 +242,14 @@ function buildTraceabilityComment(brdp, reason) {
   // fragments) -- a literal "--" in the surrounding boilerplate text itself
   // is just as fatal to XML well-formedness as one in `why`/`desc`, and this
   // was in fact the real bug: the boilerplate wording used a raw "--".
-  const inner = `${brdp.id}: no se pudo generar una regla Schematron automatable (${why}); pendiente de revision manual. Definition: ${desc}`;
+  // brdp.identifier is the human-readable id (BRDP-EXT-00010, BRDP-D1-...);
+  // brdp.id is Postgres's internal UUID -- confirmed real (a generated .sch
+  // showed raw UUIDs in its traceability comments) that this used to read
+  // brdp.id here. The single caller (generateSchematronDITA()'s main loop)
+  // passes objects straight from GET /api/projects/{id}/brdps (BRDPOut),
+  // which always has both fields -- .identifier is what a reviewer actually
+  // needs to look up.
+  const inner = `${brdp.identifier}: no se pudo generar una regla Schematron automatable (${why}); pendiente de revision manual. Definition: ${desc}`;
   return `<!-- ${sanitizeForXmlComment(inner)} -->`;
 }
 

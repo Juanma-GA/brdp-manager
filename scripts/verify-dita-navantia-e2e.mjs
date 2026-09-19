@@ -259,17 +259,42 @@ async function main() {
       }
       assert(xmlNormalized.includes(needle), `generated .sch contains ${vr.identifier}'s real rule VERBATIM`);
     }
-    // Spot-check: a To Do BRDP's real database uuid appears only inside an
-    // XML comment (buildTraceabilityComment uses brdp.id, the uuid, not the
-    // human identifier) -- never as a real <pattern> block.
-    const spotTodo = brdpById.get(brdps.find((b) => b.identifier === todoRows[1].identifier)?.id);
-    const todoUuid = spotTodo.id;
-    const commentRe = new RegExp(`<!--[^]*?${todoUuid}[^]*?-->`);
-    assert(commentRe.test(xml), `To Do BRDP ${todoRows[1].identifier}'s uuid (${todoUuid}) appears inside an XML traceability comment`);
-    const patternWithTodoUuid = new RegExp(`<pattern[^]*?${todoUuid}[^]*?</pattern>`);
-    assert(!patternWithTodoUuid.test(xml), `To Do BRDP ${todoRows[1].identifier} never appears as a real <pattern> block`);
+    // Every To Do BRDP's traceability comment must show its real, human
+    // identifier (BRDP-EXT-000NN), never its Postgres uuid -- confirmed
+    // real bug (buildTraceabilityComment used brdp.id, the uuid, not
+    // brdp.identifier). Checked against ALL 28 To Do rows, not just one --
+    // "has the shape of BRDP-EXT-something" is not the same as "is the
+    // CORRECT one for that specific BRDP".
+    // Tempered-greedy-token match: stops at the FIRST </pattern> without
+    // crossing into another <pattern -- a naive "<pattern[^]*?X[^]*?</pattern>"
+    // can jump clean over an intervening pattern/comment pair and falsely
+    // "find" X inside a totally unrelated block (hit this for real: BRDP-EXT-
+    // 00004's own identifier, sitting in ITS traceability comment between two
+    // real pattern blocks, was making that naive regex match end-to-end).
+    const patternBlocks = xml.match(/<pattern\b(?:(?!<pattern\b)[\s\S])*?<\/pattern>/g) || [];
+    for (const todo of todoRows) {
+      const idComment = new RegExp(`<!--[^]*?\\b${todo.identifier}\\b[^]*?-->`);
+      assert(idComment.test(xml), `To Do BRDP ${todo.identifier}'s own traceability comment shows its real identifier`);
+      const appearsInsideAPattern = patternBlocks.some((block) => block.includes(todo.identifier));
+      assert(!appearsInsideAPattern, `To Do BRDP ${todo.identifier} never appears as a real <pattern> block`);
+    }
+    // And no raw Postgres uuid (of ANY BRDP in this project) ever leaks into
+    // the generated document -- the previous bug's exact symptom.
+    const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    assert(!uuidRe.test(xml), "generated .sch contains no raw Postgres uuid anywhere (traceability comments use identifiers, not ids)");
 
-    console.log(`Generated .sch is ${xml.length} chars, contains all 8 real Verified rules verbatim.`);
+    console.log(`Generated .sch is ${xml.length} chars, contains all 8 real Verified rules verbatim and all 28 To Do identifiers (not uuids) in traceability comments.`);
+
+    // ---- Filename fix: Download uses the real project name, not "UNKNOWN" ----
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.click('button:has-text("Download")'),
+    ]);
+    const downloadedFilename = download.suggestedFilename();
+    console.log("Downloaded filename:", downloadedFilename);
+    assert(!downloadedFilename.startsWith("UNKNOWN"), `download filename does not fall back to UNKNOWN (got "${downloadedFilename}")`);
+    assert(downloadedFilename.includes("Navantia S80"), `download filename contains the real project name (got "${downloadedFilename}")`);
+    assert(downloadedFilename.endsWith("_dita.sch"), `download filename keeps the _dita.sch suffix (got "${downloadedFilename}")`);
 
     // ---- 6. Suggest Rule now returns real precedent ----
     const suggestSourceBrdp = brdps.find((b) => b.identifier === todoRows[2].identifier);
