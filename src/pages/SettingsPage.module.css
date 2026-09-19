@@ -1,7 +1,28 @@
 .container {
   padding: 24px;
-  max-width: 100%;
-  margin: 0 auto;
+  /* No max-width -- matches .page in ProjectConfigPage.module.css and
+     RecordsPage.module.css exactly: neither of those caps the outer
+     container's width either, they let it fill the page and have each
+     piece of CONTENT inside decide its own layout (ProjectConfigPage's
+     field grid, its own natural width; a table, however wide it
+     actually needs to be). A 720px cap here first (an earlier round's
+     choice, since corrected) fit Profile's loose text fields fine but
+     clipped User Management's 6-column table at its own right edge --
+     real, measured overflow, not cosmetic. Each section below now
+     handles its own internal width the same way ProjectConfigPage/
+     RecordsPage already do, rather than the page-level container
+     picking one width that can't fit all of them.
+  */
+  margin: 0;
+  /* AppLayout's .mainContent (App.css) is a fixed-height (100vh) flex
+     column with overflow: hidden -- content taller than the viewport is
+     silently clipped unless a page establishes its own scroll region.
+     flex: 1 + min-height: 0 let this shrink below its content height
+     inside that flex column (the default min-height: auto would instead
+     let it grow past the viewport, defeating overflow-y: auto entirely). */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .title {
@@ -21,18 +42,31 @@
   align-items: stretch;
 }
 
+/* One panel (docs request: "patrón estándar de página de ajustes: una
+   tarjeta, divisores internos entre secciones") -- the 4 sections below
+   are rows inside THIS card, not 4 separate floating cards. */
 .sectionsContainer {
   display: flex;
   flex-direction: column;
-  gap: 0;
-}
-
-.section {
   background: white;
   border-radius: 10px;
   border: 1px solid #e8edf5;
-  padding: 16px;
-  margin-bottom: 0;
+  overflow: hidden; /* clips the last row's content to the panel's own rounded corners */
+}
+
+/* Each section is a <details> row -- no border/radius/background of its
+   own any more (that moved to .sectionsContainer above); a thin
+   border-top separates it from the row before it. The row's padding
+   lives on .accordionSummary (always visible) and .sectionBody (only
+   rendered while open), not here -- .section itself must stay unpadded
+   so a COLLAPSED row costs no extra height for padding around content
+   the browser isn't even rendering. */
+.section {
+  border-top: 1px solid #e8edf5;
+}
+
+.sectionsContainer > .section:first-child {
+  border-top: none;
 }
 
 .sectionTitle {
@@ -137,8 +171,14 @@
   color: #991b1b;
 }
 
-.statusSaved {
-  color: #2563eb;
+.inputError {
+  border-color: #dc2626;
+}
+
+.fieldError {
+  color: #dc2626;
+  font-size: 11px;
+  margin: 4px 0 0;
 }
 
 .formRow {
@@ -156,12 +196,7 @@
   font-size: 12px;
   color: #6b7280;
   margin-top: 4px;
-}
-
-.divider {
-  height: 1px;
-  background: #e8edf5;
-  margin: 16px 0;
+  margin-bottom: 8px;
 }
 
 .buttonGroup {
@@ -174,6 +209,187 @@
   flex: 1;
 }
 
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th {
+  text-align: left;
+  padding: 8px 10px;
+  background: #f8fafc;
+  font-size: 11px;
+  color: #64748b;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.table td {
+  padding: 8px 10px;
+  border-top: 1px solid #e8edf5;
+  vertical-align: top;
+}
+
+.roleTag {
+  font-size: 11.5px;
+  color: #374151;
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 2px 6px;
+  margin: 0 4px 4px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.roleTag button {
+  border: none;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+}
+
+.roleTag button:hover {
+  color: #dc2626;
+}
+
+.actionsCell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.actionsCell button {
+  font-size: 12px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid #dde3ec;
+  background: #fff;
+  cursor: pointer;
+}
+
+.actionsCell button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerLink {
+  color: #dc2626 !important;
+  border-color: #fecaca !important;
+}
+
+/* The row header, always visible whether the row is open or closed --
+   same font treatment every accordion row shares. Carries the row's
+   padding (docs request: "16px 20px"), consistent across all 4 sections
+   regardless of role/content. */
+.accordionSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  cursor: pointer;
+  /* Real <ChevronRight> (lucide-react) below replaces the native
+     disclosure triangle entirely -- list-style: none (not `revert`,
+     which is what left the small, browser-inconsistent default marker
+     showing) plus the two marker-hiding rules below cover every engine
+     this app ships to a browser for. */
+  list-style: none;
+}
+
+.accordionSummary::-webkit-details-marker {
+  display: none;
+}
+
+.accordionSummary::marker {
+  display: none;
+}
+
+.accordionSummary:hover {
+  color: #2563eb;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: #9ca3af;
+  transition: transform 0.15s ease;
+}
+
+.section[open] > .accordionSummary .chevron {
+  transform: rotate(90deg);
+}
+
+/* Only rendered content contributes height while a row is open -- see
+   .section's own comment above for why this padding doesn't live there
+   instead. overflow-x: auto -- a real regression caught while verifying
+   the 720px width fix in the browser (not just after a build): User
+   Management's table (Email/Name/Global role/Project roles/Assign/
+   Actions) is wider than 720px minus padding and was visually spilling
+   past the panel's right edge with no way to reach the clipped actions.
+   Scrolling this row's own content horizontally, rather than letting it
+   overflow the panel, is the same pattern this app already uses for any
+   content wider than its container (tables/diagrams/code blocks). */
+.sectionBody {
+  padding: 0 20px 20px;
+  overflow-x: auto;
+}
+
+/* Delete-permanently confirmation (Papelera) -- deliberately a real modal,
+   not a second window.confirm, so it reads as visibly distinct from the
+   normal (soft) delete's browser-native confirm dialog. Same shape as
+   ProjectConfigPage.module.css's modalOverlay/modal, kept local here
+   rather than shared since the two pages don't otherwise share styles. */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.dangerText {
+  font-size: 12.5px;
+  color: #991b1b;
+  margin: 0 0 10px;
+}
+
+.dangerButton {
+  padding: 8px 16px;
+  border-radius: 7px;
+  background: #dc2626;
+  border: none;
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.dangerButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 16px;
@@ -184,14 +400,12 @@
     margin-bottom: 16px;
   }
 
-  .section {
-    padding: 16px;
+  .accordionSummary {
+    padding: 14px 16px;
   }
 
-  .sectionTitle {
-    font-size: 13px;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
+  .sectionBody {
+    padding: 0 16px 16px;
   }
 
   .formRow {
