@@ -380,10 +380,13 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
       const brdps = await authFetchJson(`/api/projects/${projectId}/brdps`);
-      // No rule format at all for this standard (DITA 1.3, see
-      // STANDARD_TO_RULE_FORMAT) -- skip the fetch entirely rather
-      // than call an endpoint with an undefined format; every row falls
-      // back to "To Do"/empty Rule, same as RecordsPage's own convention.
+      // S1000D 5.0/6.0 have no rule format at all (no generation engine
+      // exists for them yet, see STANDARD_TO_RULE_FORMAT) -- skip the
+      // fetch entirely rather than call an endpoint with an undefined
+      // format; every row falls back to "To Do"/empty Rule, same as
+      // RecordsPage's own convention. Every other standard, DITA 1.3
+      // included (SCH-DITA), has a real format and exports real Rule/
+      // Rule Status content.
       const ruleFormat = STANDARD_TO_RULE_FORMAT[standard];
       let approvalsByBrdpId = {};
       if (ruleFormat) {

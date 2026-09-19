@@ -56,7 +56,7 @@ from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routes.approvals import _rule_state, _xml_well_formed_error
+from app.api.routes.approvals import _rule_state, _wrap_rule_xml_fragment, _xml_well_formed_error
 from app.api.routes.brdps import _HISTORY_FIELDS, _compute_brdp_embedding
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, ImportJob, Project, RuleApproval, User
@@ -147,17 +147,20 @@ def _rule_xml_structurally_equal(a: str, b: str) -> bool:
     exactly the indentation/line breaks an LLM or a human editor introduces
     between sibling elements and carries no real meaning.
 
-    Fragments are wrapped in a throwaway <root> the same tolerant way as
-    _xml_well_formed_error (app/api/routes/approvals.py) -- a Rule cell can
-    legitimately have multiple XML-sibling roots (a loose
-    structureObjectRule alongside one or more contextRules blocks). Both
-    sides already passed well-formedness checks before reaching here in
-    practice; if parsing somehow still failed, that can't be evidence of
-    equality, so it's treated as "different" rather than raised.
+    Fragments are wrapped via _wrap_rule_xml_fragment (app/api/routes/
+    approvals.py) -- the same tolerant multi-root handling AND dynamic
+    namespace-prefix declaration _xml_well_formed_error uses, needed here
+    too: a native Schematron rule_xml (sch:pattern/sch:rule/sch:assert)
+    only declares xmlns:sch on the final assembled document, not on the
+    stored fragment, so comparing two such fragments needs the same dummy
+    binding to parse at all. Both sides already passed well-formedness
+    checks before reaching here in practice; if parsing somehow still
+    failed, that can't be evidence of equality, so it's treated as
+    "different" rather than raised.
     """
     try:
-        root_a = etree.fromstring(f"<root>{a}</root>".encode("utf-8"))
-        root_b = etree.fromstring(f"<root>{b}</root>".encode("utf-8"))
+        root_a = etree.fromstring(_wrap_rule_xml_fragment(a).encode("utf-8"))
+        root_b = etree.fromstring(_wrap_rule_xml_fragment(b).encode("utf-8"))
     except etree.XMLSyntaxError:
         return False
     return _elements_structurally_equal(root_a, root_b)
@@ -208,10 +211,12 @@ def _classify_row(
             reason=f"Invalid Rule Status value {row.rule_status!r} -- must be exactly 'To Do', 'Draft', or 'Verified'",
         )
 
-    # This project's standard has no rule-approval format at all (e.g.
-    # Schematron 1.0 -- DITA) -- there is nothing a Rule/Rule Status
-    # column could legitimately claim, so any row that tries is rejected
-    # rather than silently ignored.
+    # This project's standard has no rule-approval format at all (S1000D
+    # 5.0/6.0 -- no generation engine exists for them yet; every other
+    # standard, DITA 1.3 included since it got its own SCH-DITA format,
+    # has one) -- there is nothing a Rule/Rule Status column could
+    # legitimately claim, so any row that tries is rejected rather than
+    # silently ignored.
     if rule_format is None and (rule_xml or rule_status != "To Do"):
         return ImportRowResult(
             row_number=row.row_number,
@@ -277,11 +282,12 @@ def _classify_row(
     # this update is about to REPLACE an existing Rule with different
     # content, rather than silently overwriting it. Only fires for a real
     # update of a BRDP that already has an approval row for this format,
-    # bringing a non-empty Rule that actually differs (normalized -- same
-    # "don't warn over irrelevant whitespace" standard as the well-formed
-    # XML the file brings vs. what's stored) from what's already there. A
-    # brand-new BRDP (action == "create") never reaches here with
-    # existing_approval set, so it can never trigger this on its own.
+    # bringing a non-empty Rule that actually differs -- structurally
+    # (see _rule_xml_structurally_equal above), not byte-for-byte, so
+    # irrelevant formatting differences (indentation, line breaks) between
+    # the file's Rule and what's stored don't cry wolf. A brand-new BRDP
+    # (action == "create") never reaches here with existing_approval set,
+    # so it can never trigger this on its own.
     rule_override = (
         action == "update"
         and existing_approval is not None

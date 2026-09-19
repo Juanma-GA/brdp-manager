@@ -78,6 +78,42 @@ async def editor_and_project():
 
 
 @pytest.fixture
+async def dita_editor_and_project():
+    """Same shape as editor_and_project, but standard="DITA 1.3" -- used to
+    confirm the generic import path (well-formedness, Rule/Rule Status
+    combinations, rule_override) behaves identically for native Schematron
+    content (SCH-DITA format) as it does for BREX-shaped XML, now that
+    DITA 1.3 has a rule_format at all (see rule_formats.py).
+    """
+    async with async_session_factory() as session:
+        project = Project(name=f"DITA Import Test Project {uuid.uuid4()}", standard="DITA 1.3")
+        editor = User(
+            email=f"dita-import-editor-{uuid.uuid4()}@example.com",
+            password_hash=hash_password("irrelevant-password"),
+            display_name="DITA Import Test Editor",
+            global_role="user",
+        )
+        session.add_all([project, editor])
+        await session.flush()
+        session.add(UserProjectRole(user_id=editor.id, project_id=project.id, role="editor"))
+        await session.commit()
+        await session.refresh(project)
+        await session.refresh(editor)
+
+    editor_headers = {"Authorization": f"Bearer {create_access_token(editor.id)}"}
+    yield project, editor_headers
+
+    async with async_session_factory() as session:
+        db_project = await session.get(Project, project.id)
+        if db_project is not None:
+            await session.delete(db_project)
+        db_user = await session.get(User, editor.id)
+        if db_user is not None:
+            await session.delete(db_user)
+        await session.commit()
+
+
+@pytest.fixture
 async def catalog_entry():
     """A single brdp_catalog row for "S1000D 4.2" (matches
     editor_and_project's fixture standard exactly) -- global reference
@@ -534,6 +570,91 @@ async def test_rule_override_does_not_fire_for_indentation_only_difference(clien
     (analyzed,) = analyze_resp.json()["results"]
     assert analyzed["outcome"] == "ok"
     assert analyzed["rule_override"] is False
+
+
+DITA_RULE = '<sch:pattern><sch:rule context="task"><sch:assert role="error" id="x" test="@id">msg</sch:assert></sch:rule></sch:pattern>'
+DITA_RULE_CHANGED = '<sch:pattern><sch:rule context="task"><sch:assert role="error" id="x" test="@id and @conref">msg</sch:assert></sch:rule></sch:pattern>'
+
+
+async def test_dita_project_accepts_native_schematron_rule_and_verified_lands_approved(client, dita_editor_and_project):
+    """Confirms the real gap this round closes: before DITA 1.3 had an
+    entry in STANDARD_TO_RULE_FORMAT, ANY row bringing Rule/Rule Status
+    content for a DITA project was rejected outright ("This project's
+    standard has no rule format"), regardless of how well-formed the XML
+    was -- no DITA BRDP could ever reach 'approved'. Also confirms the
+    real Apply behavior for a Verified row: it lands as status='approved'
+    directly, no separate manual approval step (docs request).
+    """
+    project, headers = dita_editor_and_project
+    rows = [_row(2, "BRDP-DITA-001", rule_status="Verified", rule=DITA_RULE)]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok", analyzed  # would have been "rejected" before this round
+    assert analyzed["action"] == "create"
+
+    await _apply_and_wait(client, project.id, headers, rows)
+    created = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
+    (brdp,) = created
+    approval = (
+        await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/SCH-DITA", headers=headers)
+    ).json()
+    assert approval["rule_xml"] == DITA_RULE
+    assert approval["status"] == "approved"  # Verified -> approved directly, confirmed
+
+
+async def test_dita_project_todo_rule_status_still_rejects_stray_rule_content(client, dita_editor_and_project):
+    """Edge case: To Do + non-empty Rule is still a rejection for DITA,
+    same generic combination check BREX projects get -- nothing about
+    accepting SCH-DITA loosens the well-formedness/combination rules.
+    """
+    project, headers = dita_editor_and_project
+    rows = [_row(2, "BRDP-DITA-TODO", rule_status="To Do", rule=DITA_RULE)]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "rejected"
+    assert "claims no rule exists, but one does" in analyzed["reason"]
+
+
+async def test_dita_project_rejects_malformed_native_schematron(client, dita_editor_and_project):
+    """The well-formedness check is generic XML validation, not BREX-shaped
+    -- confirmed here with real (broken) Schematron rather than assumed.
+    """
+    project, headers = dita_editor_and_project
+    rows = [_row(2, "BRDP-DITA-BROKEN", rule_status="Verified", rule="<sch:pattern><unclosed>")]
+
+    analyze_resp = await client.post(f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": rows}, headers=headers)
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "rejected"
+    assert "not well-formed XML" in analyzed["reason"]
+
+
+async def test_dita_rule_override_fires_on_reimport_with_changed_native_schematron(client, dita_editor_and_project):
+    """rule_override (today's structural-comparison fix) must work
+    identically for native Schematron as it does for BREX/S1000D content
+    -- no special-casing by format anywhere in _classify_row.
+    """
+    project, headers = dita_editor_and_project
+    rows = [_row(2, "BRDP-DITA-OVERRIDE", rule_status="Verified", rule=DITA_RULE)]
+    await _apply_and_wait(client, project.id, headers, rows)
+
+    changed_rows = [_row(2, "BRDP-DITA-OVERRIDE", rule_status="Verified", rule=DITA_RULE_CHANGED)]
+    analyze_resp = await client.post(
+        f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": changed_rows}, headers=headers
+    )
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["outcome"] == "ok"
+    assert analyzed["rule_override"] is True
+
+    # And re-importing the SAME rule (only reformatted) must NOT fire --
+    # same structural-not-literal comparison BREX gets.
+    reformatted_rows = [_row(2, "BRDP-DITA-OVERRIDE", rule_status="Verified", rule=f"  {DITA_RULE}  \n")]
+    analyze_resp2 = await client.post(
+        f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": reformatted_rows}, headers=headers
+    )
+    (analyzed2,) = analyze_resp2.json()["results"]
+    assert analyzed2["rule_override"] is False
 
 
 async def test_rule_override_never_fires_for_a_new_brdp(client, editor_and_project):

@@ -6,18 +6,22 @@ standard/format is ever added. There is no longer a separate "Schematron
 output selector on top of the S1000D 3.0.1/4.1/4.2 standards (generateBREXSch.js
 generates a real BREX under the hood and converts it deterministically), and
 the SAME BREX-format approved rules feed both the BREX and the Schematron
-output -- there is no independent SCH-S1000D approval set any more. DITA
-has no rule-kind precedent at all -- there is no BREX equivalent for it, so
-it is deliberately absent from this map.
+output -- there is no independent SCH-S1000D approval set any more.
 
-Previously duplicated inline in app/api/routes/similar.py as its own
-module-level `_STANDARD_TO_RULE_FORMAT` -- extracted here so the BRDP
-import endpoints (app/api/routes/brdp_import.py) can use the exact same
-mapping instead of a third copy.
+DITA 1.3 -> "SCH-DITA": DITA has no BREX equivalent, but it DOES have its
+own native Schematron rule-kind -- generateSchematronDITA.js's real
+generation path is a purely deterministic assembler (no LLM call in it),
+injecting each approved SCH-DITA rule_approvals row's rule_xml verbatim
+and falling back to a traceability comment for anything not approved.
+Without an entry here, no DITA BRDP could ever reach `approved` at all
+(import_jobs.py's rule_format lookup would stay None, and any row
+bringing Rule/Rule Status content was rejected outright) -- this was a
+real gap, not an intentional "DITA has no rule format" design choice.
 """
 
 STANDARD_TO_RULE_FORMAT = {
     "S1000D 4.2": "BREX-4.2",
     "S1000D 4.1": "BREX-4.1",
     "S1000D 3.0.1": "BREX-3.0.1",
+    "DITA 1.3": "SCH-DITA",
 }

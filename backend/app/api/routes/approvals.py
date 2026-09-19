@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -95,6 +96,46 @@ def _rule_state(approval: RuleApproval | None) -> str:
     return "verified" if approval.status == "approved" else "draft"
 
 
+# Matches a qualified-name-shaped `prefix:local` occurrence (tag or
+# attribute name) -- deliberately requires a letter/underscore start on
+# BOTH sides so it can't mistake something like a bare "12:34" for a
+# namespace prefix (an NCName can't start with a digit). See
+# _wrap_rule_xml_fragment() for why this is needed.
+_QNAME_RE = re.compile(r"\b([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)")
+
+
+def _wrap_rule_xml_fragment(xml_text: str) -> str:
+    """Wraps a Rule XML fragment in a throwaway <root> for parsing -- a
+    rule_xml value here is always a fragment, never a full <?xml ...?>
+    document, and since the rulesContext round it can legitimately have
+    multiple XML-sibling roots (a loose structureObjectRule alongside one
+    or more complete <contextRules rulesContext="..."> blocks in the same
+    cell, e.g. BRDP-S1-00006). Confirmed empirically that lxml's
+    etree.fromstring() otherwise rejects that with "Extra content at the
+    end of the document" -- wrapping fixes it.
+
+    Also declares (with a dummy, well-formedness-only URI) any namespace
+    prefix the fragment actually USES but never declares itself --
+    confirmed empirically necessary for real native Schematron content
+    (<sch:pattern>/<sch:rule>/<sch:assert>): generateSchematronDITA.js's
+    finalizeSchematronDocument() only ever declares xmlns:sch on the outer
+    <sch:schema> wrapper, so an approved rule_xml fragment is only valid
+    XML once embedded there -- checked standalone (here, or in
+    _rule_xml_structurally_equal in import_jobs.py) it would otherwise
+    fail with "Namespace prefix sch is not defined" even though the exact
+    same content is perfectly well-formed in its real, final context.
+    Detected generically by scanning for any `prefix:name` usage rather
+    than hardcoding "sch" specifically -- so it also covers a BREX
+    document using another prefix (e.g. "ns2", see brexToSchematron.js's
+    _buildHeader for the same idea applied to a full assembled document
+    instead of one fragment), and costs nothing for a prefix-free BREX
+    fragment (no match -> no extra declaration, unchanged from before).
+    """
+    prefixes = {m.group(1) for m in _QNAME_RE.finditer(xml_text)} - {"xml", "xmlns"}
+    ns_decls = "".join(f' xmlns:{p}="urn:x-wellformed-check:{p}"' for p in sorted(prefixes))
+    return f"<root{ns_decls}>{xml_text}</root>"
+
+
 def _xml_well_formed_error(xml_text: str) -> str | None:
     """Well-formedness only -- not a full XSD validation (that already
     happens later, in the browser, against the actual generated document).
@@ -106,18 +147,11 @@ def _xml_well_formed_error(xml_text: str) -> str | None:
     the frontend's checkWellFormed() (src/api/generateBREX.js) so the API
     enforces the same rule even for a caller that skips the UI.
 
-    A rule_xml value here is always a fragment, never a full <?xml ...?>
-    document -- and since this round's rulesContext support, it can
-    legitimately have multiple XML-sibling roots (a loose
-    structureObjectRule alongside one or more complete <contextRules
-    rulesContext="..."> blocks in the same cell, e.g. BRDP-S1-00006).
-    Confirmed empirically that lxml's etree.fromstring() otherwise rejects
-    that with "Extra content at the end of the document" -- wrapping in a
-    throwaway <root> fixes it. Mirrors the same fragment/document split
-    checkWellFormed() now applies client-side, for the same reason.
+    See _wrap_rule_xml_fragment() for the fragment-wrapping/namespace
+    details.
     """
     try:
-        wrapped = xml_text if xml_text.lstrip().startswith("<?xml") else f"<root>{xml_text}</root>"
+        wrapped = xml_text if xml_text.lstrip().startswith("<?xml") else _wrap_rule_xml_fragment(xml_text)
         etree.fromstring(wrapped.encode("utf-8"))
         return None
     except etree.XMLSyntaxError as exc:

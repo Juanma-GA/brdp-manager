@@ -438,3 +438,68 @@ async def test_propose_accepts_multi_root_rulescontext_rule_xml(client, editor_a
     )
     assert broken_response.status_code == 422
     assert "not well-formed" in broken_response.json()["detail"]
+
+
+async def test_propose_accepts_native_schematron_rule_xml_for_dita_project(client):
+    """Real bug found verifying DITA 1.3's new SCH-DITA rule format: a
+    native Schematron rule_xml fragment (<sch:pattern>/<sch:rule>/
+    <sch:assert>) uses the "sch" namespace prefix but never declares it
+    itself -- generateSchematronDITA.js's finalizeSchematronDocument()
+    only ever declares xmlns:sch on the outer <sch:schema> wrapper it adds
+    at the very end. _xml_well_formed_error's old plain `<root>...</root>`
+    wrap has no such declaration either, so lxml rejected EVERY real
+    Schematron rule_xml with "Namespace prefix sch is not defined" even
+    though the exact same content is well-formed in its real, final
+    context. Fixed by _wrap_rule_xml_fragment declaring (with a dummy
+    well-formedness-only URI) any namespace prefix the fragment actually
+    uses -- confirmed here against the manual editor's real write path,
+    not just assumed generic because BREX fragments happen not to need it.
+    """
+    async with async_session_factory() as session:
+        project = Project(name=f"DITA Approvals Test Project {uuid.uuid4()}", standard="DITA 1.3")
+        editor = User(
+            email=f"dita-approvals-{uuid.uuid4()}@example.com",
+            password_hash=hash_password("irrelevant-password"),
+            display_name="DITA Approvals Editor",
+            global_role="user",
+        )
+        session.add_all([project, editor])
+        await session.flush()
+        session.add(UserProjectRole(user_id=editor.id, project_id=project.id, role="editor"))
+        await session.commit()
+        await session.refresh(project)
+        await session.refresh(editor)
+    headers = {"Authorization": f"Bearer {create_access_token(editor.id)}"}
+
+    try:
+        brdp = (
+            await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DITA-APPR-001"}, headers=headers)
+        ).json()
+        url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/SCH-DITA"
+
+        rule_xml = (
+            '<sch:pattern><sch:rule context="task">'
+            '<sch:assert role="error" id="BRDP-DITA-APPR-001" test="@id">Every task must carry an id.</sch:assert>'
+            "</sch:rule></sch:pattern>"
+        )
+        response = await client.put(url, json={"rule_xml": rule_xml, "source": "manual"}, headers=headers)
+        assert response.status_code == 200, response.json()  # would have been a false 422 before the fix
+        assert response.json()["rule_xml"] == rule_xml
+
+        # A genuinely malformed native Schematron fragment must still be
+        # rejected -- declaring xmlns:sch dynamically must not relax real
+        # well-formedness errors, only allow the sch: prefix to resolve.
+        broken_response = await client.put(
+            url, json={"rule_xml": "<sch:pattern><sch:rule context=\"task\">", "source": "manual"}, headers=headers
+        )
+        assert broken_response.status_code == 422
+        assert "not well-formed" in broken_response.json()["detail"]
+    finally:
+        async with async_session_factory() as session:
+            db_project = await session.get(Project, project.id)
+            if db_project is not None:
+                await session.delete(db_project)
+            db_user = await session.get(User, editor.id)
+            if db_user is not None:
+                await session.delete(db_user)
+            await session.commit()

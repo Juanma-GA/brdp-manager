@@ -91,7 +91,11 @@ async def _make_source_brdp(project_id: uuid.UUID) -> BRDP:
 
 
 async def _make_validated_candidate(
-    project_id: uuid.UUID, embedding: list[float], identifier: str, rule_xml: str | None = None
+    project_id: uuid.UUID,
+    embedding: list[float],
+    identifier: str,
+    rule_xml: str | None = None,
+    rule_format: str = "BREX-4.2",
 ) -> BRDP:
     async with async_session_factory() as session:
         brdp = BRDP(
@@ -106,7 +110,7 @@ async def _make_validated_candidate(
         await session.flush()
         if rule_xml is not None:
             session.add(
-                RuleApproval(brdp_id=brdp.id, format="BREX-4.2", rule_xml=rule_xml, source="manual", status="approved")
+                RuleApproval(brdp_id=brdp.id, format=rule_format, rule_xml=rule_xml, source="manual", status="approved")
             )
         await session.commit()
         await session.refresh(brdp)
@@ -272,8 +276,46 @@ async def test_kind_rule_maps_project_standard_to_rule_format(client):
         await _cleanup(project, [editor])
 
 
-async def test_kind_rule_unsupported_standard_returns_400(client):
+async def test_kind_rule_maps_dita_standard_to_sch_dita_format(client):
+    """DITA 1.3 has no BREX equivalent, but it DOES have its own native
+    Schematron rule-kind (generateSchematronDITA.js's deterministic
+    assembler, approved rows frozen under format 'SCH-DITA') -- confirms
+    Suggest Rule now returns real precedent for a DITA project instead of
+    the previous hard 400 (see test_kind_rule_unsupported_standard_returns_400
+    below, which used to use DITA 1.3 as ITS example of an unsupported
+    standard before this format was added).
+    """
     project = await _make_project(standard="DITA 1.3")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    candidates = [
+        await _make_validated_candidate(
+            project.id, _SAME_DIRECTION, f"BRDP-DITARULE-{i}", rule_xml=f"<sch:pattern id='{i}'/>", rule_format="SCH-DITA"
+        )
+        for i in range(3)
+    ]
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["sufficient_precedent"] is True
+        assert body["format"] == "SCH-DITA"
+        texts = {c["text"] for c in body["candidates"]}
+        assert texts == {f"<sch:pattern id='{i}'/>" for i in range(3)}
+        assert len(candidates) == 3  # sanity on the fixture itself
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_kind_rule_unsupported_standard_returns_400(client):
+    """S1000D 5.0/6.0 are real dropdown values (docs/v2 §2) but have no
+    generation engine and no rule_approvals format at all -- confirmed
+    genuinely unsupported, unlike DITA 1.3 (see the test above), which
+    this test used before DITA got its own SCH-DITA format.
+    """
+    project = await _make_project(standard="S1000D 5.0")
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     try:

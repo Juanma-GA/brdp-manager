@@ -8,10 +8,16 @@
 // generates a real BREX under the hood and converts it deterministically
 // via brexToSchematron.js), and the SAME BREX-format approved rules feed
 // both the BREX and the Schematron output (see CLAUDE.md) -- there is no
-// independent SCH-S1000D approval set any more. DITA has no rule-kind
-// precedent at all -- there is no BREX equivalent for it.
+// independent SCH-S1000D approval set any more.
+//
+// DITA 1.3 -> 'SCH-DITA': DITA has no BREX equivalent, but it DOES have its
+// own native Schematron rule-kind -- generateSchematronDITA.js's real
+// generation path is a purely deterministic assembler (no LLM call in it),
+// injecting each approved SCH-DITA rule_approvals row's rule_xml verbatim.
+// Without this entry no DITA BRDP could ever reach 'approved' at all.
 export const STANDARD_TO_RULE_FORMAT = {
   'S1000D 4.2': 'BREX-4.2',
   'S1000D 4.1': 'BREX-4.1',
   'S1000D 3.0.1': 'BREX-3.0.1',
+  'DITA 1.3': 'SCH-DITA',
 };
