@@ -246,41 +246,6 @@ function buildTraceabilityComment(brdp, reason) {
   return `<!-- ${sanitizeForXmlComment(inner)} -->`;
 }
 
-// ===== Deterministic escaping (second layer -- never rely on the LLM alone) =====
-// Same philosophy as forceIssueType() in generateBREX.js: the prompt now tells
-// the model not to do these two things (STRICT RULES 16/17), but a real run
-// against 100 BRDPs showed it still does them often enough that a code-level
-// guarantee is required regardless of prompt compliance.
-
-// Attribute values follow XML's AttValue grammar, which (unlike element text)
-// explicitly forbids a literal "<" and requires "&" to be part of a
-// recognized reference. A raw "count(...) < 2" from the LLM is invalid XML
-// even though the surrounding tags are otherwise fine.
-function escapeAttrLiteral(value) {
-  return value
-    .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, "&amp;")
-    .replace(/</g, "&lt;");
-}
-
-// Also covers sch:let/@value (STRICT RULE 19's column-header lookup is
-// itself an XPath expression stored in an XML attribute, exactly the same
-// escaping hazard as test/context) -- "value" only ever appears as a literal
-// attribute name here on sch:let in the assembled document, so widening the
-// match is safe.
-function escapeSchTestAttributes(xml) {
-  return xml.replace(/\b(test|context|value)="([^"]*)"/g, (full, attrName, value) => (
-    `${attrName}="${escapeAttrLiteral(value)}"`
-  ));
-}
-
-// Re-sanitizes every XML comment's body regardless of whether it came from
-// buildTraceabilityComment() (already sanitized once) or directly from the
-// LLM (rule 12 output, never passed through buildTraceabilityComment at
-// all) -- this is the actual majority case found in a real 100-BRDP run.
-function sanitizeXmlCommentBodies(xml) {
-  return xml.replace(/<!--([\s\S]*?)-->/g, (full, body) => `<!--${sanitizeForXmlComment(body)}-->`);
-}
-
 // Splits raw LLM output into pattern blocks (dropping any whose ids don't map
 // to a real target BRDP -- hallucinated/invented patterns) and traceability
 // comments, and reports which of the expected BRDPs remain uncovered.
@@ -356,9 +321,21 @@ export async function generateSingleRule(brdp, schemaSummary, callLLM) {
 
 function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
   const header = (schemaSummary && schemaSummary.sch_header) || {};
+  // Declares BOTH the sch: prefix AND the same URI as the default namespace
+  // (legal XML -- an element can be in scope for a prefix and the default
+  // binding to the same namespace name at once). Without the default
+  // binding, a verbatim-injected block using unprefixed <pattern>/<rule>/
+  // <assert> (confirmed real-world style: Navantia's own .sch files use no
+  // prefix at all, unlike the sch:-prefixed curated few-shots) would land in
+  // "no namespace" once nested inside this sch:-prefixed wrapper -- still
+  // well-formed XML, but invisible to any real Schematron/XSLT2 processor,
+  // which only recognizes pattern/rule/assert in the Schematron namespace.
+  // Confirmed with lxml against real Navantia content: without this default
+  // binding, `<pattern>` parses as a bare no-namespace element instead of
+  // `{http://purl.oclc.org/dsdl/schematron}pattern`.
   const open =
     header.root_open ||
-    '<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">';
+    '<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" xmlns="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">';
   const close = header.root_close || "</sch:schema>";
   const projectTitle = escapeXmlText(
     (projectConfig && (projectConfig.projectName || projectConfig.modelIdentCode)) || "Project"
@@ -368,20 +345,33 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
     "<sch:title>{PROJECT_TITLE} Business Rules Schematron (BRDP-D1)</sch:title>"
   ).replace("{PROJECT_TITLE}", projectTitle);
 
-  let xml = [
+  // No document-wide "fix what the source got wrong" pass here anymore
+  // (used to run escapeSchTestAttributes/sanitizeXmlCommentBodies over the
+  // whole joined string) -- both block producers already guarantee valid,
+  // final content on their own: buildDeterministicBlockFromFewShot's
+  // entry.rule_xml is a verbatim passthrough of a rule_approvals row that
+  // can only ever reach status "approved" after passing the SAME
+  // well-formedness check server-side (propose_approval/import_jobs.py's
+  // _xml_well_formed_error) and client-side (RecordsPage's checkWellFormed
+  // before save), and buildTraceabilityComment() already sanitizes its own
+  // generated text via sanitizeForXmlComment(). Confirmed live with real
+  // Navantia data that a blanket comment-body pass here actively broke the
+  // "verbatim" guarantee: a real approved rule's OWN internal explanatory
+  // comment (e.g. "<!-- La columna de exención ... -->") got silently
+  // re-trimmed (losing its leading/trailing space) by the very sanitizer
+  // meant only for freshly-generated text, even though the source content
+  // was already valid and already approved as-is. That defense belonged to
+  // an earlier architecture where finalizeSchematronDocument() still
+  // assembled raw LLM chunk output directly; the main path is 100%
+  // deterministic now (see generateSchematronDITA()'s own docstring), so
+  // there is nothing left here for it to defend against.
+  return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     open,
     title,
     ...blocks,
     close,
   ].join("\n");
-
-  // Second layer of defense (rules 16/17 are the prompt-side first layer):
-  // force-correct escaping regardless of whether the LLM actually complied.
-  xml = escapeSchTestAttributes(xml);
-  xml = sanitizeXmlCommentBodies(xml);
-
-  return xml;
 }
 
 // ===== checkWellFormedSchematron() =====
@@ -403,6 +393,18 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
 // time, each bounded by its own matching quote -- so a > or < inside a value
 // can never be mistaken for the tag's closing bracket.
 const ATTR_LIST = String.raw`(?:\s+[A-Za-z_][\w:.-]*\s*=\s*(?:"[^"]*"|'[^']*'))*`;
+
+// Optional "sch:" prefix for pattern/rule/assert/report/let element names in
+// the checks below (everything except checkRootHeader, which only ever
+// matches the deterministic wrapper this file itself emits, always
+// sch:-prefixed). A curated few-shot's verbatim rule_xml uses the sch:
+// prefix, but a real imported/manually-saved Rule can legitimately be
+// unprefixed (confirmed real-world style: Navantia's own .sch files use no
+// prefix at all) -- without this, these regexes silently match zero
+// patterns/rules/checks for that content and report a clean 0
+// errors/warnings not because it's confirmed correct, but because the
+// checks never looked at it at all.
+const SCH = "(?:sch:)?";
 
 function getAttr(attrs, name) {
   const m = attrs.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`));
@@ -452,7 +454,7 @@ function checkRootHeader(xml) {
 }
 
 function checkDuplicateIds(xml) {
-  const re = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+  const re = new RegExp(`<${SCH}(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
   const ids = [...xml.matchAll(re)].map((m) => getAttr(m[1], "id")).filter(Boolean);
   const seen = new Set();
   const dupes = new Set();
@@ -469,11 +471,11 @@ const KNOWN_ROLES = new Set(["error", "warning", "info", "fatal"]);
 
 function checkRulesAndChecks(xml) {
   const errors = [];
-  const patternRe = new RegExp(`<sch:pattern\\b${ATTR_LIST}\\s*>([\\s\\S]*?)</sch:pattern>`, "g");
+  const patternRe = new RegExp(`<${SCH}pattern\\b${ATTR_LIST}\\s*>([\\s\\S]*?)</${SCH}pattern>`, "g");
   for (const pm of xml.matchAll(patternRe)) {
     const patternBody = pm[1];
     let ruleCount = 0;
-    const ruleRe = new RegExp(`<sch:rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</sch:rule>`, "g");
+    const ruleRe = new RegExp(`<${SCH}rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}rule>`, "g");
     for (const rm of patternBody.matchAll(ruleRe)) {
       ruleCount++;
       const attrs = rm[1];
@@ -485,7 +487,7 @@ function checkRulesAndChecks(xml) {
         errors.push(`sch:rule context is not a valid Schematron match pattern: "${ctx}"`);
       }
       let checkCount = 0;
-      const checkRe = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+      const checkRe = new RegExp(`<${SCH}(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
       for (const cm of ruleBody.matchAll(checkRe)) {
         checkCount++;
         const cAttrs = cm[1];
@@ -522,6 +524,11 @@ const XPATH_FUNCTIONS = new Set([
   "ends-with", "substring",
   // document($href, .) -- STRICT RULE 20's cross-file lookup function.
   "document",
+  // Confirmed real usage in the Navantia S80 dataset (native, non-curated
+  // XPath 2.0 Schematron -- see CLAUDE.md): standard XPath 2.0 functions,
+  // not DITA vocabulary, so they belong here rather than in the confirmed
+  // element/attribute set.
+  "string-join", "number", "doc-available",
 ]);
 const XPATH_AXES = new Set([
   "ancestor", "ancestor-or-self", "parent", "child", "descendant",
@@ -535,6 +542,10 @@ const XPATH_AXES = new Set([
 const XPATH_KEYWORDS = new Set([
   "and", "or", "not", "true", "false", "div", "mod",
   "every", "some", "satisfies", "let", "return", "in",
+  // Confirmed real usage in the Navantia S80 dataset: XPath 2.0's
+  // conditional ("if (...) then ... else ...") and "for $x in ... return"
+  // expression keywords -- same rationale as the quantifier keywords above.
+  "if", "then", "else", "for",
 ]);
 
 const EXTRA_KNOWN_NAMES = [
@@ -660,12 +671,12 @@ function lintVocabulary(xml, schemaSummary) {
     warnings.push(`${id}: uses unconfirmed element/attribute '${name}'`);
   };
 
-  const ruleRe = new RegExp(`<sch:rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</sch:rule>`, "g");
+  const ruleRe = new RegExp(`<${SCH}rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}rule>`, "g");
   for (const rm of xml.matchAll(ruleRe)) {
     const ctx = getAttr(rm[1], "context") || "";
     const ruleBody = rm[2];
 
-    const checkRe = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+    const checkRe = new RegExp(`<${SCH}(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
     const checks = [...ruleBody.matchAll(checkRe)]
       .map((cm) => ({ id: getAttr(cm[1], "id"), test: getAttr(cm[1], "test") || "" }))
       .filter((c) => c.id);
@@ -688,7 +699,7 @@ function lintVocabulary(xml, schemaSummary) {
     // most. Same attribution rule as context: a sch:let is scoped to the
     // whole sch:rule, so an unknown name in it applies to every check in
     // that rule.
-    const letRe = new RegExp(`<sch:let\\b(${ATTR_LIST})\\s*/?>`, "g");
+    const letRe = new RegExp(`<${SCH}let\\b(${ATTR_LIST})\\s*/?>`, "g");
     for (const lm of ruleBody.matchAll(letRe)) {
       const letValue = getAttr(lm[1], "value") || "";
       if (!letValue) continue;

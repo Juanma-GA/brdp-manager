@@ -170,7 +170,19 @@ export default function GeneratePage() {
     if (onlyVerified && ruleStateOf(approvalsByBrdpId.get(b.id) ?? null) !== 'verified') return false;
     return true;
   }).length;
-  const isConfigComplete = !!project.project_config?.modelIdentCode;
+  // DITA 1.3's Project Configuration page only ever shows/saves projectName
+  // (generateSchematronDITA.js reads nothing else from projectConfig) --
+  // modelIdentCode is never displayed for that standard, so gating on it
+  // regardless of standard left this button permanently disabled for every
+  // DITA project (confirmed live: a freshly created DITA project's
+  // project_config never gets a modelIdentCode key, through the UI or the
+  // backend's own creation defaults, so this was unreachable, not just
+  // unlikely). generateBREX/41/301.js's own hard requirement on
+  // modelIdentCode (dmCode construction) is unchanged for the three real
+  // S1000D standards.
+  const isConfigComplete = isDITA
+    ? !!project.project_config?.projectName
+    : !!project.project_config?.modelIdentCode;
 
   const handleGenerate = useCallback(async () => {
     if (!formatDef) return;
