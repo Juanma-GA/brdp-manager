@@ -1,5 +1,27 @@
+/* Same fix as RecordsPage.module.css/ProjectConfigPage.module.css: AppLayout's
+   .mainContent (App.css) is a fixed-height flex column with overflow: hidden
+   by design, so a page taller than the viewport is silently clipped unless
+   it establishes its own scroll region. flex: 1 + min-height: 0 let .page
+   shrink to the space .mainContent actually has (the default min-height:
+   auto would instead let it grow past the viewport and defeat any inner
+   overflow entirely) -- .outputCard below is the flex-grow item that
+   actually scrolls in the normal case (a long result at a typical laptop
+   viewport never needs .page itself to scroll to reach the form/button).
+   overflow-y: auto here is a fallback only, not the primary mechanism --
+   it never engages while .card + .outputCard's flex-distributed height
+   fit .page (the common case), but it's what keeps the resize edge case
+   safe: if the viewport ever gets shorter than .card's own natural height
+   (.card never shrinks -- see its own comment), the page scrolls instead
+   of silently clipping content with no way to reach it.
+*/
 .page {
   padding: 24px;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
 }
 
 .title {
@@ -21,6 +43,10 @@
   border-radius: 10px;
   background: #fff;
   padding: 18px;
+  /* Stays its natural, compact size -- .outputCard below is the flex-grow
+     item that takes whatever height this leaves in .page (same pattern as
+     RecordsPage.module.css's .createForm next to .tableScroll). */
+  flex-shrink: 0;
 }
 
 .fieldLabel {
@@ -142,6 +168,15 @@
   cursor: not-allowed;
 }
 
+/* The flex-grow item of .page -- takes whatever vertical space .card
+   above doesn't use, exactly like RecordsPage.module.css's .tableWrap.
+   display: flex + flex-direction: column turns outputMeta/xsdSection/
+   xmlOutput/outputActions below into ITS OWN flex items, so xmlOutput
+   (the only one with flex: 1) is what actually grows/scrolls -- the
+   badges above it and the Copy/Download buttons below stay pinned at
+   their natural size. overflow: hidden keeps the rounded corners clean
+   the same way .tableWrap's does.
+*/
 .outputCard {
   max-width: 900px;
   margin-top: 18px;
@@ -149,6 +184,11 @@
   border-radius: 10px;
   background: #fff;
   padding: 18px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .outputMeta {
@@ -156,6 +196,7 @@
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .badgeOk {
@@ -192,6 +233,7 @@
 
 .xsdSection {
   margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .errorList {
@@ -205,6 +247,14 @@
   margin-bottom: 4px;
 }
 
+/* Was max-height: 420px (an arbitrary fixed number, unrelated to the real
+   viewport) -- flex: 1 + min-height: 0 make it fill whatever height
+   .outputCard actually has left instead, so a short viewport never needs
+   a page-level scroll to reach Regenerate/the form above, and a tall one
+   isn't wasted on a fixed 420px box when more of a long result could be
+   shown. overflow: auto (unchanged) is what scrolls when the real result
+   still doesn't fit even at that height.
+*/
 .xmlOutput {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -212,7 +262,8 @@
   padding: 14px;
   font-size: 12px;
   font-family: 'Menlo', 'Consolas', monospace;
-  max-height: 420px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   white-space: pre;
   color: #111827;
@@ -222,6 +273,7 @@
 .outputActions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .errorBox {
