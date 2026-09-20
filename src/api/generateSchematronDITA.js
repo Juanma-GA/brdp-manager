@@ -350,7 +350,7 @@ export async function generateSingleRule(brdp, schemaSummary, callLLM, queryBind
 // DITA -- this header assembly is the only deterministic step in the whole
 // pipeline, so it carries more weight than its BREX counterpart) =====
 
-function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding = "xslt2") {
+function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding = "xslt2", sharedLets = []) {
   const header = (schemaSummary && schemaSummary.sch_header) || {};
   // Declares BOTH the sch: prefix AND the same URI as the default namespace
   // (legal XML -- an element can be in scope for a prefix and the default
@@ -405,10 +405,24 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryB
   // assembled raw LLM chunk output directly; the main path is 100%
   // deterministic now (see generateSchematronDITA()'s own docstring), so
   // there is nothing left here for it to defend against.
+  // sharedLets (DITA 1.3 Xpath3.0 only -- see dedupeSharedLets() below):
+  // hoisted (name, value) sch:let pairs that were duplicated across two or
+  // more approved rules' own copies, now declared exactly once here.
+  // Placed right after the title and before the first pattern -- the
+  // closest equivalent in this assembled document to "after the sch:ns
+  // declarations, before the first sch:pattern" in a hand-written file
+  // (this document has no sch:ns declarations of its own to anchor to,
+  // since each block already carries its own inline xmlns:xs etc.).
+  // ISO Schematron scopes a schema-level sch:let to the WHOLE document, so
+  // every rule that used to declare its own copy can still reference it by
+  // the same $name -- nothing downstream of assembly needs to change.
+  const sharedLetsXml = sharedLets.map((l) => `  <sch:let name="${l.name}" value="${l.value}"/>`);
+
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     open,
     title,
+    ...sharedLetsXml,
     ...blocks,
     close,
   ].join("\n");
@@ -845,6 +859,28 @@ function lintVocabulary(xml, schemaSummary, queryBinding = "xslt2") {
     }
   }
 
+  // Schema-level sch:let -- not inside any sch:pattern/sch:rule. The only
+  // way one of these exists is dedupeSharedLets() below hoisting a shared
+  // helper-function definition out of every rule that used it (DITA 1.3
+  // Xpath3.0 only). Without this pass, hoisting would silently stop
+  // checking vocabulary inside that definition altogether -- before
+  // dedup, the SAME content was scanned once per rule that had its own
+  // copy (via the ruleRe loop above); losing that coverage the moment it
+  // moves to schema level would be exactly the kind of silent degradation
+  // this lint exists to avoid. Warnings are attributed to "shared:<name>"
+  // rather than a BRDP id, since a hoisted let by definition no longer
+  // belongs to one specific rule.
+  const withoutPatterns = xml.replace(new RegExp(`<${SCH}pattern\\b[\\s\\S]*?</${SCH}pattern>`, "g"), "");
+  const schemaLevelLetRe = new RegExp(`<${SCH}let\\b(${ATTR_LIST})\\s*/>`, "g");
+  for (const lm of withoutPatterns.matchAll(schemaLevelLetRe)) {
+    const letName = getAttr(lm[1], "name") || "shared";
+    const letValue = getAttr(lm[1], "value") || "";
+    if (!letValue) continue;
+    for (const name of findUnknownNames(letValue, known)) {
+      addWarning(`shared:${letName}`, name);
+    }
+  }
+
   return warnings;
 }
 
@@ -873,6 +909,103 @@ function checkWellFormedSchematron(xml, schemaSummary, queryBinding = "xslt2") {
   const vocabularyWarnings = lintVocabulary(xml, schemaSummary, queryBinding);
 
   return { valid: errors.length === 0, errors, vocabularyWarnings };
+}
+
+// ===== Shared <sch:let> deduplication (DITA 1.3 Xpath3.0 only) =====
+// Confirmed real problem in the Navantia Xpath3.0 project: each approved
+// Rule is a self-contained <sch:pattern> (STRICT RULE 2 -- one BRDP, one
+// pattern, one rule), so a project-wide shared helper function (valor,
+// colDe, colPart, docFicha, etc -- declared via a top-level sch:let whose
+// value is an inline XPath 3.0 function-item expression, see
+// XPATH3_ONLY_VOCAB's "function" entry) ends up with its OWN declaration
+// repeated in every single rule that calls it, instead of being declared
+// once for the whole document: valor/colDe/colPart repeated 5 times each,
+// docFicha 4 times, other helpers repeated twice -- 62 sch:let total where
+// a hand-written document would have each helper exactly once. This is
+// functionally harmless (ISO Schematron scopes a rule-level sch:let to
+// that rule only, so duplicate copies never conflict with each other) but
+// far from how the document would look if authored by hand.
+// XPath 2.0 has no equivalent: inline function-item expressions
+// ("function($x as type) as type {...}") do not exist in 2.0's grammar at
+// all, so there is nothing to hoist for an Xpath2.0 project -- this only
+// ever runs for queryBinding === "xslt3" (see generateSchematronDITA()'s
+// call site below, which skips it entirely otherwise).
+const RULE_RE_G = new RegExp(`<${SCH}rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}rule>`, "g");
+const LET_RE_G = new RegExp(`\\s*<${SCH}let\\b(${ATTR_LIST})\\s*/>`, "g");
+
+// blocks: the array of already-assembled per-BRDP strings (a verbatim
+// approved <sch:pattern>...</sch:pattern>, or a traceability comment --
+// comments never contain a sch:rule, so they pass through untouched, no
+// special-casing needed). Returns the same shape blocks came in, plus the
+// hoisted { name, value } pairs to render once at document level, plus any
+// non-blocking name-collision warnings.
+function dedupeSharedLets(blocks) {
+  // Pass 1: collect every first-level sch:let (name, value) pair, grouped
+  // by name, counting each DISTINCT rule that declares it -- "first-level"
+  // here means "a direct child of some sch:rule" (STRICT RULE 2 means one
+  // rule per block for generated/approved content, so scanning ruleBody
+  // rather than the whole block also naturally excludes anything that
+  // might otherwise appear outside a rule).
+  const byName = new Map(); // name -> Map(exact value string -> occurrence count)
+  for (const block of blocks) {
+    for (const rm of block.matchAll(RULE_RE_G)) {
+      const ruleBody = rm[2];
+      for (const lm of ruleBody.matchAll(LET_RE_G)) {
+        const name = getAttr(lm[1], "name");
+        const value = getAttr(lm[1], "value");
+        if (!name || value == null) continue;
+        if (!byName.has(name)) byName.set(name, new Map());
+        const valueCounts = byName.get(name);
+        valueCounts.set(value, (valueCounts.get(value) || 0) + 1);
+      }
+    }
+  }
+
+  // Pass 2: a name with exactly one distinct value used more than once is a
+  // clean shared candidate, hoisted verbatim (grouped by "(name, value) --
+  // same name AND same exact content", never normalized/trimmed -- the
+  // same anti-pattern already fixed once in _normSpace(), collapsing
+  // whitespace that is significant inside a literal, is not repeated
+  // here). A name with MORE THAN ONE distinct value across rules is a
+  // genuine collision -- NEVER merged (fusing different content under the
+  // same name would silently change what one of the rules actually does),
+  // each copy stays exactly where it was, and a non-blocking warning flags
+  // the coincidence for manual review.
+  const sharedValueByName = new Map(); // name -> the one value to hoist
+  const warnings = [];
+  for (const [name, valueCounts] of byName) {
+    if (valueCounts.size > 1) {
+      warnings.push(
+        `Shared sch:let name '${name}' is declared with ${valueCounts.size} different values across approved rules -- none were merged, each kept in its own rule; verify this isn't a real authoring mistake.`
+      );
+      continue;
+    }
+    const [[value, count]] = valueCounts;
+    if (count > 1) sharedValueByName.set(name, value);
+  }
+
+  if (sharedValueByName.size === 0) {
+    return { blocks, sharedLets: [], warnings };
+  }
+
+  // Pass 3: strip every hoisted (name, value) sch:let from every rule that
+  // had it. The removal criterion (exact name+value match against the
+  // hoist set) doesn't depend on which specific rule an occurrence sits
+  // in, so a single whole-block regex pass is sufficient and never needs
+  // to reconstruct the surrounding <sch:rule>/</sch:rule> tags (which
+  // would otherwise have to account for the sch:/unprefixed variance SCH
+  // already handles elsewhere) -- nothing else in a block (the assert/
+  // report, message text, other sch:let entries) is touched.
+  const newBlocks = blocks.map((block) =>
+    block.replace(LET_RE_G, (fullMatch, attrs) => {
+      const name = getAttr(attrs, "name");
+      const value = getAttr(attrs, "value");
+      return name && sharedValueByName.get(name) === value ? "" : fullMatch;
+    })
+  );
+
+  const sharedLets = [...sharedValueByName.entries()].map(([name, value]) => ({ name, value }));
+  return { blocks: newBlocks, sharedLets, warnings };
 }
 
 // ===== Main entry point =====
@@ -923,7 +1056,7 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     ? (approvalsOverride instanceof Map ? approvalsOverride : new Map(approvalsOverride.map((a) => [a.brdp_id, a])))
     : await fetchApprovalsMap(approvalsFormat);
 
-  const blocks = [];
+  let blocks = [];
   for (const brdp of targetBRDPs) {
     const approvalEntry = approvalById.get(brdp.id);
     if (approvalEntry && approvalEntry.status === "approved") {
@@ -933,10 +1066,34 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     }
   }
 
-  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding);
+  // Shared sch:let deduplication (see dedupeSharedLets() above): Xpath3.0
+  // only -- Xpath2.0 has no inline function-item expressions to share
+  // across rules in the first place, so there is nothing to hoist and
+  // running this unconditionally would just be a no-op pass every time.
+  let sharedLets = [];
+  let dedupWarnings = [];
+  if (queryBinding === "xslt3") {
+    const deduped = dedupeSharedLets(blocks);
+    blocks = deduped.blocks;
+    sharedLets = deduped.sharedLets;
+    dedupWarnings = deduped.warnings;
+  }
+
+  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding, sharedLets);
   const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary, queryBinding);
 
-  return { xml: finalXml, valid, errors, vocabularyWarnings, brdpCount: targetBRDPs.length };
+  return {
+    xml: finalXml,
+    valid,
+    errors,
+    // Same non-blocking, informational surface as vocabularyWarnings
+    // (rendered together in the same UI panel) -- a name-collision warning
+    // is a different KIND of note (an authoring-consistency flag, not an
+    // unconfirmed-vocabulary flag) but shares the exact same "worth a
+    // human look, never blocks generation or download" semantics.
+    vocabularyWarnings: [...vocabularyWarnings, ...dedupWarnings],
+    brdpCount: targetBRDPs.length,
+  };
 }
 
-export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument, queryBindingForStandard };
+export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument, queryBindingForStandard, dedupeSharedLets };
