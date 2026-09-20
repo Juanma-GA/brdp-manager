@@ -575,6 +575,19 @@ const XPATH_FUNCTIONS = new Set([
   // not DITA vocabulary, so they belong here rather than in the confirmed
   // element/attribute set.
   "string-join", "number", "doc-available",
+  // Confirmed real usage in the Navantia-Xpath3.0 dataset
+  // (nav_dtm_xpath3_import.xlsx, migration 0013_split_dita_xpath_standards.py):
+  // all five are standard XPath 2.0 functions (NOT 3.0-specific -- unlike
+  // fn:head below, these exist in 2.0 too), so added here unconditionally
+  // rather than gated to XPATH3_ONLY_VOCAB, same rationale as the
+  // string-join/number/doc-available entries above.
+  "exists", "empty", "distinct-values", "analyze-string", "local-name",
+  // element() -- a node-kind test, not a function, but "text" above is
+  // already (loosely) categorized here for the same reason: NAME_TOKEN_RE
+  // tokenizes "element(" the same way it tokenizes a function call. Valid
+  // since XPath 1.0, confirmed real usage in the same dataset ("as element()"
+  // inline function parameter typing).
+  "element",
 ]);
 const XPATH_AXES = new Set([
   "ancestor", "ancestor-or-self", "parent", "child", "descendant",
@@ -592,6 +605,10 @@ const XPATH_KEYWORDS = new Set([
   // conditional ("if (...) then ... else ...") and "for $x in ... return"
   // expression keywords -- same rationale as the quantifier keywords above.
   "if", "then", "else", "for",
+  // Confirmed real usage in the Navantia-Xpath3.0 dataset: "as" (sequence
+  // type declaration, e.g. "$t as element()") is valid XPath since 2.0's
+  // SequenceType matching -- not 3.0-specific -- so added unconditionally.
+  "as",
 ]);
 
 const EXTRA_KNOWN_NAMES = [
@@ -737,7 +754,16 @@ const XMETAL_AMBITO_MAPA_VOCAB = new Set(["dosier", "ficha", "mapa", "exists"]);
 // actually turns out to use -- do not add speculative entries here without
 // confirming against real content first, the same standard already applied
 // to XPATH_FUNCTIONS/XPATH_KEYWORDS.
-const XPATH3_ONLY_VOCAB = new Set(["array"]);
+//
+// Two more confirmed by nav_dtm_xpath3_import.xlsx (real Navantia
+// Xpath3.0 data, BRDP-EXT-00004/00007/00008/00009's sch:let values):
+// "head" (fn:head -- introduced in Functions & Operators 3.0, absent from
+// 2.0, unlike distinct-values/exists/empty/analyze-string/local-name above
+// which are 2.0+3.0 and so went into the unconditional XPATH_FUNCTIONS
+// instead) and "function" (the "function($t as element()) as xs:string {
+// ... }" inline function-item expression -- function items/higher-order
+// functions are a 3.0 feature, absent from 2.0's grammar entirely).
+const XPATH3_ONLY_VOCAB = new Set(["array", "head", "function"]);
 
 // One warning per (BRDP id, unconfirmed name) pair, in English to match the
 // rest of the UI -- a global "these names are unconfirmed somewhere" list
