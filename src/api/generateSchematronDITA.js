@@ -588,6 +588,18 @@ const XPATH_FUNCTIONS = new Set([
   // since XPath 1.0, confirmed real usage in the same dataset ("as element()"
   // inline function parameter typing).
   "element",
+  // Confirmed real usage in the Navantia-Xpath3.0 project once its Rule
+  // content grew to include the shared helper function definitions
+  // themselves (valor/docFicha/etc., not just their $-prefixed call
+  // sites) -- 45 non-blocking warnings, none of them 3.0-specific: root,
+  // substring-before, substring-after, base-uri, resolve-uri and doc are
+  // XPath 1.0/2.0 functions, document-node() a node-kind test since 2.0
+  // (same category as element()/text() above). Added unconditionally,
+  // same rationale as every entry above this point -- none of these are
+  // gated to XPATH3_ONLY_VOCAB because none are exclusive to 3.0, and an
+  // Xpath2.0 project's Rule can equally well call fn:doc() or fn:root().
+  "document-node", "substring-before", "substring-after", "resolve-uri",
+  "base-uri", "doc", "root",
 ]);
 const XPATH_AXES = new Set([
   "ancestor", "ancestor-or-self", "parent", "child", "descendant",
@@ -609,6 +621,10 @@ const XPATH_KEYWORDS = new Set([
   // type declaration, e.g. "$t as element()") is valid XPath since 2.0's
   // SequenceType matching -- not 3.0-specific -- so added unconditionally.
   "as",
+  // "ge" -- one of the general comparison operators (eq/ne/lt/le/gt/ge),
+  // XPath 2.0, confirmed real usage alongside the helper-function
+  // definitions above. Not 3.0-specific either.
+  "ge",
 ]);
 
 const EXTRA_KNOWN_NAMES = [
