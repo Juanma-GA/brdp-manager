@@ -283,9 +283,12 @@ async def test_kind_rule_maps_dita_standard_to_sch_dita_format(client):
     Suggest Rule now returns real precedent for a DITA project instead of
     the previous hard 400 (see test_kind_rule_unsupported_standard_returns_400
     below, which used to use DITA 1.3 as ITS example of an unsupported
-    standard before this format was added).
+    standard before this format was added). Uses "DITA 1.3 Xpath2.0" (the
+    single "DITA 1.3" standard split in two by migration
+    0013_split_dita_xpath_standards.py) -- both flavors map to the same
+    SCH-DITA format either way, so which one this test uses is arbitrary.
     """
-    project = await _make_project(standard="DITA 1.3")
+    project = await _make_project(standard="DITA 1.3 Xpath2.0")
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     candidates = [

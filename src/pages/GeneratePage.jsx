@@ -98,11 +98,18 @@ export default function GeneratePage() {
   const { projectId } = useParams();
   const { project } = useOutletContext();
 
-  const isDITA = project.standard === 'DITA 1.3';
+  // Both DITA standards (migration 0013_split_dita_xpath_standards.py --
+  // the Rule content is hand-authored XPath 2.0 vs 3.0 separately per
+  // project, no shared conversion step) go through the same DITA_FORMAT_DEF;
+  // the flavor only matters inside generateSchematronDITA.js itself, which
+  // derives the assembled document's queryBinding from project.standard
+  // (passed through in the run() call below), not from anything here.
+  const isDITA = project.standard === 'DITA 1.3 Xpath2.0' || project.standard === 'DITA 1.3 Xpath3.0';
   const brexDef = BREX_STANDARDS[project.standard];
   // Only the three real S1000D standards offer the BREX/Schematron output
-  // choice -- DITA 1.3 has no BREX equivalent, and an unimplemented
-  // standard (S1000D 5.0/6.0) has nothing to choose between either.
+  // choice -- neither DITA standard has a BREX equivalent, and an
+  // unimplemented standard (S1000D 5.0/6.0) has nothing to choose between
+  // either.
   const hasOutputSelector = !!brexDef;
 
   const [brdps, setBrdps] = useState([]);
@@ -206,7 +213,16 @@ export default function GeneratePage() {
       // regardless of onlyVerified. onlyVerified only ever affects the
       // live counter above, giving an honest preview of what the engine
       // will actually do, never the generation call itself.
-      const output = await formatDef.run(brdps, project.project_config, { onlyValidated, approvals: approvalsByBrdpId });
+      // standard: only generateSchematronDITA.js reads this (to pick
+      // "xslt2"/"xslt3" for the assembled document's queryBinding and to
+      // gate the XPath-3.0-only vocabulary) -- harmless extra key for the
+      // BREX/BREX-Schematron generators, which destructure only what they
+      // need from this options object.
+      const output = await formatDef.run(brdps, project.project_config, {
+        onlyValidated,
+        approvals: approvalsByBrdpId,
+        standard: project.standard,
+      });
       setResult(output);
 
       if (output?.xml && formatDef.xsdFormat) {
@@ -224,7 +240,7 @@ export default function GeneratePage() {
     } finally {
       setGenerating(false);
     }
-  }, [brdps, project.project_config, onlyValidated, formatDef, approvalsByBrdpId]);
+  }, [brdps, project.project_config, project.standard, onlyValidated, formatDef, approvalsByBrdpId]);
 
   const handleCopy = () => {
     if (!result?.xml) return;

@@ -45,11 +45,15 @@ const FULL_FIELDS = [
 // generateSchematronDITA.js reads only projectConfig.projectName (with
 // modelIdentCode as a fallback if projectName is empty) -- confirmed by
 // reading the file, nothing else from projectConfig is ever touched for
-// this standard, so the other 8 fields would be pure dead UI.
+// either DITA standard, so the other 8 fields would be pure dead UI.
 const DITA_FIELDS = [{ key: 'projectName', labelKey: 'projectName' }];
 
+// Both "DITA 1.3 Xpath2.0" and "DITA 1.3 Xpath3.0" (migration
+// 0013_split_dita_xpath_standards.py) use the SAME config fields -- the
+// XPath flavor only affects generateSchematronDITA.js's assembled
+// document queryBinding, never what Project Configuration shows/saves.
 function fieldsForStandard(standard) {
-  return standard === 'DITA 1.3' ? DITA_FIELDS : FULL_FIELDS;
+  return standard.startsWith('DITA 1.3') ? DITA_FIELDS : FULL_FIELDS;
 }
 
 // Apply/Import ETA settings (HR0/HR8: every setting needs a UI, nothing
@@ -399,9 +403,9 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       // exists for them yet, see STANDARD_TO_RULE_FORMAT) -- skip the
       // fetch entirely rather than call an endpoint with an undefined
       // format; every row falls back to "To Do"/empty Rule, same as
-      // RecordsPage's own convention. Every other standard, DITA 1.3
-      // included (SCH-DITA), has a real format and exports real Rule/
-      // Rule Status content.
+      // RecordsPage's own convention. Every other standard, both DITA 1.3
+      // flavors included (SCH-DITA), has a real format and exports real
+      // Rule/Rule Status content.
       const ruleFormat = STANDARD_TO_RULE_FORMAT[standard];
       let approvalsByBrdpId = {};
       if (ruleFormat) {

@@ -7,6 +7,20 @@ import { getApprovalsForFormat } from "./approvals.js";
 // CLAUDE.md's rule_approvals design (Phase 1).
 const FORMAT_ID = "SCH-DITA";
 
+// Both DITA standards (migration 0013_split_dita_xpath_standards.py) share
+// this one FORMAT_ID/generator -- the only thing that genuinely differs is
+// the assembled document's queryBinding attribute, since each real project
+// hand-authors XPath 2.0 vs 3.0 Rule content separately (no shared
+// deterministic conversion step, unlike BREX->Schematron for S1000D).
+// Defaults to "xslt2" for the old, still-valid bare "DITA 1.3" string (a
+// caller that hasn't been updated yet, or a standard value from before
+// this migration) and for anything else unrecognized -- never silently
+// guesses "xslt3", since that's the one flavor that actually changes
+// generated output.
+function queryBindingForStandard(standard) {
+  return standard === "DITA 1.3 Xpath3.0" ? "xslt3" : "xslt2";
+}
+
 let _schemaSummaryCache = null;
 
 async function loadSchemaSummary() {
@@ -151,12 +165,22 @@ const STRICT_RULES = `STRICT RULES:
 19. Row-by-row cross-column check inside a DITA/CALS table (tgroup/tbody/row/entry) -> resolve the target column by its header TEXT, never by position: add an <sch:let name="colX" value="tgroup/thead/row[1]/entry[normalize-space(.) = 'Header Text']/@colname"/> as a direct child of sch:rule, placed BEFORE the sch:assert/sch:report, then reference it as $colX inside test. CALS/DITA tables identify columns by @colname, not by ordinal position — entry[2]-style positional predicates silently break if columns are reordered. Express the "for every row" condition with the XPath 2.0 quantifier "every $row in tgroup/tbody/row satisfies (...)" — never simulate this with count()/positional indexing, which cannot express a per-row condition that depends on another column's value in that same row.
 20. Cross-file consistency check (a value declared once, e.g. in the .ditamap via keydef/keyword, must match its real usage inside a topic referenced from elsewhere) -> use document($hrefExpr, .) inside an <sch:let> to resolve and read the OTHER file's content; the second argument (a node, typically ".") anchors the relative href to the document currently being validated -- never call document() with only one argument when the href is relative. Resolve which topic to open via its own reference (e.g. //topicref[@navtitle = '...' or topicmeta/navtitle = '...']/@href), never by guessing a filename. When the assert's message should show the actual mismatched values (not just "these don't match"), embed <sch:value-of select="$var"/> directly inside the message content -- this requires setting "messageIsRawXml": true on the few-shot entry (see renderMessage()), since a plain message string is XML-escaped and would turn a real <sch:value-of> into inert text. This category is inherently less portable than rule 19's: it only works when the Schematron engine validates with real file-system access to the referenced topic (e.g. validating the .ditamap, not an isolated topic file) -- note that limitation explicitly in the BRDP's own documentation rather than assuming it always applies.`;
 
-function buildSchematronPrompt(chunkBRDPs, schemaSummary) {
+// queryBinding defaults to "xslt2": this LLM-fallback prompt builder is
+// used only by generateSingleRule() below, whose own real call chain
+// (generateSuggestedRule.js's SCH-DITA case <- useChat.js <- ChatPanel.jsx)
+// is confirmed NOT reachable from any current UI -- RecordsPage.jsx's real
+// "Suggest Rule" button builds its own generic few-shot prompt from
+// /similar precedent directly (see requestSuggestion() there) and never
+// calls this file's prompt builder at all. Fixed here anyway (the same
+// hardcoded "xslt2" bug as finalizeSchematronDocument/checkRootHeader) so
+// this dead code doesn't carry a wrong assumption if it's ever reconnected,
+// but there is no live caller today that could pass "xslt3" through it.
+function buildSchematronPrompt(chunkBRDPs, schemaSummary, queryBinding = "xslt2") {
   const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
   const schemaJSON = JSON.stringify(schemaSummaryWithoutExamples, null, 2);
   const fewShotBlock = buildFewShotBlock(schemaSummary);
 
-  const system = `You are a DITA 1.3 Schematron business-rules expert. Generate sch:pattern blocks (ISO Schematron, xslt2 queryBinding) implementing the given BRDPs (Business Rules Decision Points), each already classified as checkable XML structure.
+  const system = `You are a DITA 1.3 Schematron business-rules expert. Generate sch:pattern blocks (ISO Schematron, ${queryBinding} queryBinding) implementing the given BRDPs (Business Rules Decision Points), each already classified as checkable XML structure.
 
 Reference structure (6 topic types + real confirmed element vocabulary per domain):
 ${schemaJSON}
@@ -306,8 +330,8 @@ async function fetchApprovalsMap(format) {
   }
 }
 
-export async function generateSingleRule(brdp, schemaSummary, callLLM) {
-  const { system, user } = buildSchematronPrompt([brdp], schemaSummary);
+export async function generateSingleRule(brdp, schemaSummary, callLLM, queryBinding = "xslt2") {
+  const { system, user } = buildSchematronPrompt([brdp], schemaSummary, queryBinding);
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const raw = await callLLM(system, user);
     if (!raw) continue;
@@ -326,7 +350,7 @@ export async function generateSingleRule(brdp, schemaSummary, callLLM) {
 // DITA -- this header assembly is the only deterministic step in the whole
 // pipeline, so it carries more weight than its BREX counterpart) =====
 
-function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
+function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding = "xslt2") {
   const header = (schemaSummary && schemaSummary.sch_header) || {};
   // Declares BOTH the sch: prefix AND the same URI as the default namespace
   // (legal XML -- an element can be in scope for a prefix and the default
@@ -340,9 +364,18 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
   // Confirmed with lxml against real Navantia content: without this default
   // binding, `<pattern>` parses as a bare no-namespace element instead of
   // `{http://purl.oclc.org/dsdl/schematron}pattern`.
-  const open =
+  //
+  // queryBinding is NOT hardcoded here (real bug found and fixed: it used
+  // to always be "xslt2", so a real XPath 3.0 project -- DITA 1.3
+  // Xpath3.0, migration 0013_split_dita_xpath_standards.py -- would get a
+  // wrong header on its own assembled document). {QUERY_BINDING} follows
+  // the exact same placeholder convention title_template already uses for
+  // {PROJECT_TITLE} below, so a custom root_open from the schema summary
+  // JSON stays parametrizable too, not just this JS fallback.
+  const openTemplate =
     header.root_open ||
-    '<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" xmlns="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">';
+    '<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" xmlns="http://purl.oclc.org/dsdl/schematron" queryBinding="{QUERY_BINDING}">';
+  const open = openTemplate.replace("{QUERY_BINDING}", queryBinding);
   const close = header.root_close || "</sch:schema>";
   const projectTitle = escapeXmlText(
     (projectConfig && (projectConfig.projectName || projectConfig.modelIdentCode)) || "Project"
@@ -445,7 +478,7 @@ function checkTagBalance(xml) {
   return { valid: true, error: null };
 }
 
-function checkRootHeader(xml) {
+function checkRootHeader(xml, queryBinding) {
   const m = xml.match(new RegExp(`<sch:schema\\b${ATTR_LIST}\\s*>`));
   if (!m) return { valid: false, error: "Missing <sch:schema> root element" };
   if (xml.trim().indexOf(m[0]) > 200) {
@@ -454,8 +487,14 @@ function checkRootHeader(xml) {
   if (!/xmlns:sch="http:\/\/purl\.oclc\.org\/dsdl\/schematron"/.test(m[0])) {
     return { valid: false, error: "<sch:schema> is missing the required xmlns:sch namespace declaration" };
   }
-  if (!/queryBinding="xslt2"/.test(m[0])) {
-    return { valid: false, error: '<sch:schema> is missing queryBinding="xslt2"' };
+  // The expected value is the CALLER's queryBinding (project.standard's
+  // XPath flavor -- "xslt3" for DITA 1.3 Xpath3.0, "xslt2" for everything
+  // else, see generateSchematronDITA()'s own queryBindingForStandard()) --
+  // this deterministic wrapper is the only place that ever writes this
+  // attribute, so it must be checked against whichever value THIS document
+  // was actually finalized with, never a bare hardcoded "xslt2".
+  if (!new RegExp(`queryBinding="${queryBinding}"`).test(m[0])) {
+    return { valid: false, error: `<sch:schema> is missing queryBinding="${queryBinding}"` };
   }
   return { valid: true, error: null };
 }
@@ -679,11 +718,35 @@ function findUnknownNames(value, known) {
 // manually", never "this IS ambito-mapa", to stay honest about that.
 const XMETAL_AMBITO_MAPA_VOCAB = new Set(["dosier", "ficha", "mapa", "exists"]);
 
+// Real XPath 3.0-only syntax absent from 2.0, gated to queryBinding ===
+// "xslt3" (DITA 1.3 Xpath3.0 projects only, migration
+// 0013_split_dita_xpath_standards.py) so an Xpath2.0 project's known
+// vocabulary is never widened without reason. Two constructs named in the
+// encargo, "=>" (arrow operator) and "map{...}"/"array{...}" (map/array
+// constructors), turn out NOT to need an entry here at all: "=>" is pure
+// punctuation NAME_TOKEN_RE never tokenizes as a name in the first place
+// (nothing to silence), and "map" is already unconditionally known (it's
+// also the real DITA root <map> element, in EXTRA_KNOWN_NAMES) -- only
+// "array" was a genuine gap (confirmed by the same regex reasoning: a
+// space-separated "array {...}" construct tokenizes as the name "array",
+// which was not previously known). string-join's single-argument XPath 3.0
+// form needs no entry either -- XPATH_FUNCTIONS already recognizes the bare
+// function name regardless of how many arguments it's called with. Extend
+// this set (not EXTRA_KNOWN_NAMES/XPATH_FUNCTIONS directly, so it never
+// leaks into Xpath2.0 projects) with whatever else real Xpath3.0 content
+// actually turns out to use -- do not add speculative entries here without
+// confirming against real content first, the same standard already applied
+// to XPATH_FUNCTIONS/XPATH_KEYWORDS.
+const XPATH3_ONLY_VOCAB = new Set(["array"]);
+
 // One warning per (BRDP id, unconfirmed name) pair, in English to match the
 // rest of the UI -- a global "these names are unconfirmed somewhere" list
 // isn't actionable; the reviewer needs to know exactly which rule to check.
-function lintVocabulary(xml, schemaSummary) {
+function lintVocabulary(xml, schemaSummary, queryBinding = "xslt2") {
   const known = buildKnownVocabulary(schemaSummary);
+  if (queryBinding === "xslt3") {
+    for (const name of XPATH3_ONLY_VOCAB) known.add(name);
+  }
   const warnings = [];
   const seen = new Set();
 
@@ -743,7 +806,7 @@ function lintVocabulary(xml, schemaSummary) {
   return warnings;
 }
 
-function checkWellFormedSchematron(xml, schemaSummary) {
+function checkWellFormedSchematron(xml, schemaSummary, queryBinding = "xslt2") {
   const errors = [];
 
   const tagCheck = checkTagBalance(xml);
@@ -752,7 +815,7 @@ function checkWellFormedSchematron(xml, schemaSummary) {
   // Remaining checks assume a document that's at least tag-balanced; still
   // run them defensively (regex-based, won't throw either way) but the caller
   // should treat tagCheck failure as the primary signal.
-  const rootCheck = checkRootHeader(xml);
+  const rootCheck = checkRootHeader(xml, queryBinding);
   if (!rootCheck.valid) errors.push(rootCheck.error);
 
   const dupeCheck = checkDuplicateIds(xml);
@@ -765,7 +828,7 @@ function checkWellFormedSchematron(xml, schemaSummary) {
     errors.push(`Unresolved placeholder(s) found: ${placeholders.join(", ")}`);
   }
 
-  const vocabularyWarnings = lintVocabulary(xml, schemaSummary);
+  const vocabularyWarnings = lintVocabulary(xml, schemaSummary, queryBinding);
 
   return { valid: errors.length === 0, errors, vocabularyWarnings };
 }
@@ -796,7 +859,9 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     approvals: approvalsOverride,
     approvalsFormat = FORMAT_ID,
     schemaSummary: schemaSummaryOverride,
+    standard,
   } = options;
+  const queryBinding = queryBindingForStandard(standard);
 
   const targetBRDPs = onlyValidated
     ? brdps.filter((b) => b.validation?.toLowerCase().trim() === "validated")
@@ -826,10 +891,10 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     }
   }
 
-  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary);
-  const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary);
+  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding);
+  const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary, queryBinding);
 
   return { xml: finalXml, valid, errors, vocabularyWarnings, brdpCount: targetBRDPs.length };
 }
 
-export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument };
+export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument, queryBindingForStandard };

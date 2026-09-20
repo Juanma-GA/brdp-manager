@@ -39,7 +39,7 @@ from app.models import BRDPCatalog
 
 SHEET_NAME = "Auto-gen Decisions"
 
-# Mirrors the 6 exact standards ProjectsPage.jsx's STANDARD_OPTIONS offers
+# Mirrors the 7 exact standards ProjectsPage.jsx's STANDARD_OPTIONS offers
 # (docs/v2 §2) -- kept in sync manually, same as this project's other
 # cross-file standard lists (e.g. STANDARD_TO_RULE_FORMAT). A typo'd
 # standard here would silently create an orphan catalog no project could
@@ -47,13 +47,22 @@ SHEET_NAME = "Auto-gen Decisions"
 # separate "Schematron 1.0 — S1000D" standard any more -- Schematron for
 # S1000D is now a Generate-page output selector on the S1000D 3.0.1/4.1/4.2
 # standards, not its own project standard, so it has no catalog of its own.
+# "DITA 1.3" split into "DITA 1.3 Xpath2.0"/"DITA 1.3 Xpath3.0" (migration
+# 0013_split_dita_xpath_standards.py) -- a catalog entry's Title/Definition
+# don't depend on XPath flavor, but the catalog match itself is a plain
+# equality on project.standard (import_jobs.py's _load_catalog), so a
+# catalog previously imported under the old "DITA 1.3" string needs
+# reimporting under whichever of the two real strings the target project
+# actually uses (the migration itself renames any ALREADY-imported catalog
+# rows to Xpath2.0, matching the one real DITA project that existed).
 _KNOWN_STANDARDS = {
     "S1000D 3.0.1",
     "S1000D 4.1",
     "S1000D 4.2",
     "S1000D 5.0",
     "S1000D 6.0",
-    "DITA 1.3",
+    "DITA 1.3 Xpath2.0",
+    "DITA 1.3 Xpath3.0",
 }
 
 
@@ -92,7 +101,7 @@ async def main() -> None:
         sys.exit(1)
     if standard not in _KNOWN_STANDARDS:
         print(
-            f"{standard!r} is not one of the 6 canonical standards: {sorted(_KNOWN_STANDARDS)}",
+            f"{standard!r} is not one of the {len(_KNOWN_STANDARDS)} canonical standards: {sorted(_KNOWN_STANDARDS)}",
             file=sys.stderr,
         )
         sys.exit(1)

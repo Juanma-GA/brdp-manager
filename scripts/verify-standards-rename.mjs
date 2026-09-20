@@ -4,11 +4,12 @@
 // Not part of the app, not wired into anything, throwaway.
 //
 // Verifies:
-//   1. Create Project dropdown offers exactly the 6 renamed standards
-//      (S1000D 3.0.1/4.1/4.2, S1000D 5.0/6.0 disabled, DITA 1.3), no
-//      "Schematron 1.0 — S1000D" entry anywhere.
+//   1. Create Project dropdown offers exactly the 7 renamed standards
+//      (S1000D 3.0.1/4.1/4.2, S1000D 5.0/6.0 disabled, DITA 1.3 Xpath2.0,
+//      DITA 1.3 Xpath3.0 -- migration 0013_split_dita_xpath_standards.py),
+//      no "Schematron 1.0 — S1000D" entry anywhere, no bare "DITA 1.3".
 //   2. Generate page shows the BREX / Schematron selector for the three
-//      real S1000D standards, and NOT for DITA 1.3.
+//      real S1000D standards, and for NEITHER DITA standard.
 //   3. A real S1000D 4.2 project with one approved rule generates correct
 //      BREX AND (after switching the selector, no reload) correct
 //      Schematron -- proving generateBREXSch.js now picks the 4.2 base
@@ -47,14 +48,14 @@ async function main() {
     await page.waitForSelector("text=/Projects|Proyectos/i", { timeout: 10000 });
     console.log("Logged in as admin.");
 
-    // ---- 1. Dropdown offers exactly the 6 renamed standards ----
+    // ---- 1. Dropdown offers exactly the 7 renamed standards ----
     await page.goto(`${BASE_URL}/`);
     await page.click('button:has-text("Create project")');
     await page.waitForSelector("select", { timeout: 10000 });
     const options = await page.locator("form select").first().locator("option").allTextContents();
     console.log("Dropdown options:", options);
     const cleaned = options.map((o) => o.replace(/\s+/g, " ").trim());
-    for (const expected of ["S1000D 3.0.1", "S1000D 4.1", "S1000D 4.2", "DITA 1.3"]) {
+    for (const expected of ["S1000D 3.0.1", "S1000D 4.1", "S1000D 4.2", "DITA 1.3 Xpath2.0", "DITA 1.3 Xpath3.0"]) {
       assert(
         cleaned.some((o) => o === expected),
         `dropdown includes "${expected}"`
@@ -72,12 +73,16 @@ async function main() {
       !cleaned.some((o) => o.includes("Schematron")),
       'dropdown has NO "Schematron 1.0 — S1000D" (or any Schematron) entry'
     );
-    assert(cleaned.length === 6, `dropdown has exactly 6 options (got ${cleaned.length})`);
+    assert(
+      !cleaned.some((o) => o === "DITA 1.3"),
+      'dropdown has NO bare "DITA 1.3" entry any more (split into Xpath2.0/Xpath3.0)'
+    );
+    assert(cleaned.length === 7, `dropdown has exactly 7 options (got ${cleaned.length})`);
 
-    // ---- Create one project per renamed S1000D standard + DITA 1.3 ----
+    // ---- Create one project per renamed S1000D standard + both DITA standards ----
     const createdNames = {};
     const suffix = Math.random().toString(36).slice(2, 8);
-    for (const standard of ["S1000D 3.0.1", "S1000D 4.1", "S1000D 4.2", "DITA 1.3"]) {
+    for (const standard of ["S1000D 3.0.1", "S1000D 4.1", "S1000D 4.2", "DITA 1.3 Xpath2.0", "DITA 1.3 Xpath3.0"]) {
       const name = `Verify ${standard} ${suffix}`;
       createdNames[standard] = name;
       await page.locator("form input").first().fill(name);
@@ -92,9 +97,9 @@ async function main() {
     await page.click('button:has-text("Cancel")').catch(() => {});
     await page.screenshot({ path: "/tmp/verify-1-projects-list.png", fullPage: true });
 
-    // ---- 2. Generate-page selector: present for the 3 S1000D standards, absent for DITA ----
+    // ---- 2. Generate-page selector: present for the 3 S1000D standards, absent for both DITA standards ----
     const projectIds = {};
-    for (const standard of ["S1000D 3.0.1", "S1000D 4.1", "S1000D 4.2", "DITA 1.3"]) {
+    for (const standard of ["S1000D 3.0.1", "S1000D 4.1", "S1000D 4.2", "DITA 1.3 Xpath2.0", "DITA 1.3 Xpath3.0"]) {
       const name = createdNames[standard];
       const row = page.locator("tr", { hasText: name });
       await row.getByRole("button", { name: "Generate BREX / Schematron" }).click();
@@ -111,11 +116,11 @@ async function main() {
       // the selector avoids a race against React's render commit order.
       await page.waitForSelector(`p:has-text("${standard}")`, { timeout: 10000 });
       let selectorVisible;
-      if (standard === "DITA 1.3") {
+      if (standard.startsWith("DITA 1.3")) {
         // Give the page a beat to settle, then confirm it never appears.
         await page.waitForTimeout(500);
         selectorVisible = await page.locator('button:has-text("Schematron (XPath 2.0)")').count();
-        assert(selectorVisible === 0, "DITA 1.3 Generate page has NO BREX/Schematron selector");
+        assert(selectorVisible === 0, `${standard} Generate page has NO BREX/Schematron selector`);
       } else {
         await page.waitForSelector('button:has-text("Schematron (XPath 2.0)")', { timeout: 10000 });
         selectorVisible = await page.locator('button:has-text("Schematron (XPath 2.0)")').count();

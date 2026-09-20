@@ -79,14 +79,15 @@ async def editor_and_project():
 
 @pytest.fixture
 async def dita_editor_and_project():
-    """Same shape as editor_and_project, but standard="DITA 1.3" -- used to
-    confirm the generic import path (well-formedness, Rule/Rule Status
-    combinations, rule_override) behaves identically for native Schematron
-    content (SCH-DITA format) as it does for BREX-shaped XML, now that
-    DITA 1.3 has a rule_format at all (see rule_formats.py).
+    """Same shape as editor_and_project, but standard="DITA 1.3 Xpath2.0" --
+    used to confirm the generic import path (well-formedness, Rule/Rule
+    Status combinations, rule_override) behaves identically for native
+    Schematron content (SCH-DITA format) as it does for BREX-shaped XML,
+    now that both DITA standards have a rule_format at all (see
+    rule_formats.py).
     """
     async with async_session_factory() as session:
-        project = Project(name=f"DITA Import Test Project {uuid.uuid4()}", standard="DITA 1.3")
+        project = Project(name=f"DITA Import Test Project {uuid.uuid4()}", standard="DITA 1.3 Xpath2.0")
         editor = User(
             email=f"dita-import-editor-{uuid.uuid4()}@example.com",
             password_hash=hash_password("irrelevant-password"),

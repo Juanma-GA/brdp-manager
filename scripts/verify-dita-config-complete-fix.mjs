@@ -34,7 +34,7 @@ async function main() {
     await page.click('button:has-text("Create project")');
     await page.waitForSelector("form select", { timeout: 10000 });
     await page.locator("form input").first().fill(name);
-    await page.locator("form select").first().selectOption("DITA 1.3");
+    await page.locator("form select").first().selectOption("DITA 1.3 Xpath2.0");
     await page.click('form button[type="submit"]');
     await page.waitForSelector(`text=${name}`, { timeout: 10000 });
 

@@ -8,20 +8,34 @@ generates a real BREX under the hood and converts it deterministically), and
 the SAME BREX-format approved rules feed both the BREX and the Schematron
 output -- there is no independent SCH-S1000D approval set any more.
 
-DITA 1.3 -> "SCH-DITA": DITA has no BREX equivalent, but it DOES have its
-own native Schematron rule-kind -- generateSchematronDITA.js's real
-generation path is a purely deterministic assembler (no LLM call in it),
-injecting each approved SCH-DITA rule_approvals row's rule_xml verbatim
-and falling back to a traceability comment for anything not approved.
-Without an entry here, no DITA BRDP could ever reach `approved` at all
-(import_jobs.py's rule_format lookup would stay None, and any row
-bringing Rule/Rule Status content was rejected outright) -- this was a
-real gap, not an intentional "DITA has no rule format" design choice.
+DITA 1.3 Xpath2.0 / DITA 1.3 Xpath3.0 -> "SCH-DITA" (both): DITA has no
+BREX equivalent, but it DOES have its own native Schematron rule-kind --
+generateSchematronDITA.js's real generation path is a purely deterministic
+assembler (no LLM call in it), injecting each approved SCH-DITA
+rule_approvals row's rule_xml verbatim and falling back to a traceability
+comment for anything not approved. Without an entry here, no DITA BRDP
+could ever reach `approved` at all (import_jobs.py's rule_format lookup
+would stay None, and any row bringing Rule/Rule Status content was
+rejected outright) -- this was a real gap, not an intentional "DITA has no
+rule format" design choice.
+
+The single "DITA 1.3" standard split into two (migration
+0013_split_dita_xpath_standards.py) because a project's hand-authored
+Rule content is genuinely different XPath 2.0 vs 3.0 syntax -- unlike the
+Schematron-for-S1000D merge above, there is no shared deterministic
+conversion step here to hide that behind a single standard, so two real,
+separate project standards exist. Both still map to the SAME rule_approvals
+format ("SCH-DITA") -- the assembly/approval machinery (this map, the
+import validation, Suggest Rule's precedent lookup) is identical either
+way; only generateSchematronDITA.js's assembled document's queryBinding
+attribute ("xslt2" vs "xslt3") differs, derived from project.standard at
+generation time, not from this map.
 """
 
 STANDARD_TO_RULE_FORMAT = {
     "S1000D 4.2": "BREX-4.2",
     "S1000D 4.1": "BREX-4.1",
     "S1000D 3.0.1": "BREX-3.0.1",
-    "DITA 1.3": "SCH-DITA",
+    "DITA 1.3 Xpath2.0": "SCH-DITA",
+    "DITA 1.3 Xpath3.0": "SCH-DITA",
 }

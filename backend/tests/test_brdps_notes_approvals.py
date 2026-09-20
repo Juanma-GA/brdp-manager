@@ -456,7 +456,7 @@ async def test_propose_accepts_native_schematron_rule_xml_for_dita_project(clien
     not just assumed generic because BREX fragments happen not to need it.
     """
     async with async_session_factory() as session:
-        project = Project(name=f"DITA Approvals Test Project {uuid.uuid4()}", standard="DITA 1.3")
+        project = Project(name=f"DITA Approvals Test Project {uuid.uuid4()}", standard="DITA 1.3 Xpath2.0")
         editor = User(
             email=f"dita-approvals-{uuid.uuid4()}@example.com",
             password_hash=hash_password("irrelevant-password"),

@@ -7,7 +7,7 @@ import { authFetchJson } from '../services/apiClient';
 import SortableHeader from '../components/SortableHeader';
 import styles from './ProjectsPage.module.css';
 
-// The 6 exact standards the project can be created with (fixed forever
+// The 7 exact standards the project can be created with (fixed forever
 // once created, docs/v2 §2) -- "S1000D 5.0"/"6.0" are listed but
 // disabled: no generation engine exists for them yet, same criterion
 // CLAUDE.md already documents for v1 ("Lo que NO está implementado
@@ -15,13 +15,22 @@ import styles from './ProjectsPage.module.css';
 // separate "Schematron 1.0 — S1000D" standard -- Schematron for S1000D is
 // now a Generate-page output selector on the S1000D 3.0.1/4.1/4.2
 // standards (see GeneratePage.jsx), not its own project standard.
+//
+// "DITA 1.3" split into "DITA 1.3 Xpath2.0"/"DITA 1.3 Xpath3.0" (migration
+// 0013_split_dita_xpath_standards.py) -- unlike the Schematron-for-S1000D
+// merge above, each BRDP's Rule here is genuinely different hand-authored
+// XPath 2.0 vs 3.0 syntax with no shared deterministic conversion step, so
+// two real, separate standards exist rather than one config field, and
+// which flavor a project uses is visible right in this table's own
+// "Project standard" column without opening it.
 const STANDARD_OPTIONS = [
   { value: 'S1000D 3.0.1', comingSoon: false },
   { value: 'S1000D 4.1', comingSoon: false },
   { value: 'S1000D 4.2', comingSoon: false },
   { value: 'S1000D 5.0', comingSoon: true },
   { value: 'S1000D 6.0', comingSoon: true },
-  { value: 'DITA 1.3', comingSoon: false },
+  { value: 'DITA 1.3 Xpath2.0', comingSoon: false },
+  { value: 'DITA 1.3 Xpath3.0', comingSoon: false },
 ];
 
 function CreateProjectForm({ onCreated, onCancel }) {

@@ -1,8 +1,14 @@
 """Phase 1 of the DITA 1.3 BRDP catalog enrichment (docs request):
 generates a REVIEW file only -- writes nothing to Postgres. Phase 2
-(the real import into brdp_catalog with standard="DITA 1.3") is a
+(the real import into brdp_catalog via import_brdp_catalog.py) is a
 separate step that must not run until a human has reviewed this file
-and explicitly approved it.
+and explicitly approved it. Since migration 0013_split_dita_xpath_standards.py,
+"DITA 1.3" is no longer a valid project standard -- Phase 2 must pass
+whichever of "DITA 1.3 Xpath2.0"/"DITA 1.3 Xpath3.0" the target project
+actually uses (this enrichment's Title/Definition content itself doesn't
+depend on XPath flavor, but import_brdp_catalog.py's catalog match does a
+plain equality against project.standard, so the same reviewed rows would
+need importing once per flavor if both kinds of DITA project exist).
 
     cd backend && python scripts/enrich_dita_catalog.py
 

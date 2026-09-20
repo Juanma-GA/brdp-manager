@@ -17,14 +17,20 @@ from app.api.routes.similar import _STANDARD_TO_RULE_FORMAT as BACKEND_RULE_FORM
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The 6 exact standards the Create Project dropdown offers (docs/v2 §2 --
+# The 7 exact standards the Create Project dropdown offers (docs/v2 §2 --
 # fixed forever once a project is created). "S1000D 5.0"/"6.0" are
 # listed there but have no generation engine, so they correctly never
 # appear in either STANDARD_TO_RULE_FORMAT map. There is no longer a
 # separate "Schematron 1.0 — S1000D" standard -- Schematron for S1000D is
 # a Generate-page output selector on the S1000D 3.0.1/4.1/4.2 standards,
 # fed by their own BREX-format approved rules, not an independent standard.
-EXPECTED_STANDARD_COUNT = 6
+# "DITA 1.3" was a single standard until migration 0013, which split it
+# into "DITA 1.3 Xpath2.0" and "DITA 1.3 Xpath3.0" (Rule content is
+# separately hand-authored native Schematron per XPath flavor with no
+# shared conversion step, unlike S1000D's BREX->Schematron path -- see
+# 0013_split_dita_xpath_standards.py) -- back up to 7 from the 6 that
+# 0012_rename_project_standards.py had produced.
+EXPECTED_STANDARD_COUNT = 7
 
 
 def _extract_project_standards() -> list[str]:

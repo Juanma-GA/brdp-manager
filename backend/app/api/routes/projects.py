@@ -108,10 +108,10 @@ async def create_project(
     standard (see generateBREX.js/generateBREX41.js/generateBREX301.js --
     confirmed identical field set); projectName/modelIdentCode/
     enterpriseCode stay unset for the user to fill in. Harmless no-op for a
-    DITA 1.3 project, whose Project Configuration page only
-    ever shows/reads projectName (generateSchematronDITA.js reads nothing
-    else) -- these defaults are simply never displayed there. Any value
-    the caller does supply in body.project_config wins over the default.
+    DITA 1.3 Xpath2.0/Xpath3.0 project, whose Project Configuration page
+    only ever shows/reads projectName (generateSchematronDITA.js reads
+    nothing else) -- these defaults are simply never displayed there. Any
+    value the caller does supply in body.project_config wins over the default.
     """
     project_config = {**_DEFAULT_PROJECT_CONFIG, **body.project_config}
     project = Project(name=body.name, standard=body.standard, project_config=project_config)
