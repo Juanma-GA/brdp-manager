@@ -102,12 +102,20 @@ const EXCEL_CELL_CHAR_LIMIT = 32767;
 // useImportEtaSettings) -- omitting it entirely from the total, as the
 // original version did, understated a 78-Validated-row import as "under
 // 1 minute" when it realistically takes ~2 minutes.
-function computeApplyEta(rows, etaSettings) {
+function computeApplyEta(rows, etaSettings, rowResults) {
   const msPerPlainRow = etaSettings?.applyEtaMsPerPlainRow ?? DEFAULT_MS_PER_PLAIN_ROW;
   const msPerValidatedRow = etaSettings?.applyEtaMsPerValidatedRow ?? DEFAULT_MS_PER_VALIDATED_ROW;
   const rowCount = rows?.length || 0;
+  // A row Apply will skip entirely (see ImportRowResult.unchanged -- all
+  // four core fields already match what's stored) never triggers a real
+  // Mistral embedding call, regardless of its own Proposal Status --
+  // excluded here so the estimate reflects what Apply will actually do on
+  // a no-op reimport, not what the raw file's Proposal Status column alone
+  // implies (confirmed real: this used to overstate a same-file reimport
+  // as costing as much as the original import).
+  const unchangedRowNumbers = new Set((rowResults || []).filter((r) => r.unchanged).map((r) => r.row_number));
   const validatedCount = (rows || []).filter(
-    (r) => (r.proposal_status || '').toLowerCase().trim() === 'validated'
+    (r) => (r.proposal_status || '').toLowerCase().trim() === 'validated' && !unchangedRowNumbers.has(r.row_number)
   ).length;
   const plainCount = rowCount - validatedCount;
   const seconds = Math.max(1, Math.ceil((plainCount * msPerPlainRow + validatedCount * msPerValidatedRow) / 1000));
@@ -328,7 +336,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // threshold tripped) AND the user hasn't already waved it off this
   // session -- otherwise Apply runs immediately, same as before.
   const handleApplyClick = () => {
-    const eta = computeApplyEta(pendingRows, etaConfig);
+    const eta = computeApplyEta(pendingRows, etaConfig, analysis?.results);
     const isCostly = eta.validatedCount > validatedRowsThreshold || eta.seconds > etaWarningSeconds;
     if (isCostly && !dontAskAgain) {
       setModalDontAskChecked(false);
@@ -348,7 +356,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     setShowApplyConfirm(false);
   };
 
-  const applyEtaPreview = pendingRows ? computeApplyEta(pendingRows, etaConfig) : null;
+  const applyEtaPreview = pendingRows ? computeApplyEta(pendingRows, etaConfig, analysis?.results) : null;
 
   const okCount = analysis?.results.filter((r) => r.outcome === 'ok').length ?? 0;
   const rejectedRows = analysis?.results.filter((r) => r.outcome === 'rejected') ?? [];
@@ -361,6 +369,13 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // that will replace an existing Rule with different content, shown
   // alongside (not instead of) a catalog override on the same row.
   const ruleOverrideRows = analysis?.results.filter((r) => r.rule_override) ?? [];
+  // Purely informational (docs request), never a warning like the two
+  // above -- rows Apply will skip touching entirely because all four core
+  // fields already match what's stored (no field write, no history entry,
+  // no real Mistral embedding call). Shown up front so a reimport of an
+  // otherwise-unchanged file doesn't leave the user guessing why the ETA
+  // estimate is much lower than a first-time import of the same size.
+  const unchangedRows = analysis?.results.filter((r) => r.unchanged) ?? [];
 
   const handleExport = async () => {
     setBusy(true);
@@ -483,6 +498,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                   <ul className={styles.summaryList}>
                     <li>{t('config.dataManagement.resultCreated', { count: job.result.created })}</li>
                     <li>{t('config.dataManagement.resultUpdated', { count: job.result.updated })}</li>
+                    <li>{t('config.dataManagement.resultUnchanged', { count: job.result.unchanged })}</li>
                     <li>{t('config.dataManagement.resultRejected', { count: job.result.rejected })}</li>
                     {job.result.conflicts_kept > 0 && (
                       <li>{t('config.dataManagement.resultConflictsKept', { count: job.result.conflicts_kept })}</li>
@@ -546,6 +562,12 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                     {t('config.dataManagement.summaryRejected', { count: rejectedRows.length })}
                     {' · '}
                     {t('config.dataManagement.summaryConflicts', { count: conflictRows.length })}
+                    {unchangedRows.length > 0 && (
+                      <>
+                        {' · '}
+                        {t('config.dataManagement.summaryUnchanged', { count: unchangedRows.length })}
+                      </>
+                    )}
                     {catalogOverrideRows.length > 0 && (
                       <>
                         {' · '}

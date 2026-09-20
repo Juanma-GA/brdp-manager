@@ -16,7 +16,7 @@ from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.main import app
-from app.models import BRDPCatalog, ImportJob, Project, RuleApproval, User, UserProjectRole
+from app.models import BRDP, BRDPCatalog, BRDPHistory, ImportJob, Project, RuleApproval, User, UserProjectRole
 from app.schemas.brdp_import import ImportRowIn
 from app.services.import_jobs import STALE_JOB_MINUTES, get_running_job, run_import_job
 
@@ -460,6 +460,141 @@ async def test_catalog_match_is_standard_specific(client, editor_and_project, ca
             if db_entry is not None:
                 await session.delete(db_entry)
             await session.commit()
+
+
+async def test_reimport_fully_unchanged_row_skips_embedding_recompute_and_history(client, editor_and_project):
+    """The real, confirmed-in-code bug: reimporting a file with no actual
+    changes used to unconditionally recompute a real Mistral embedding for
+    every row importing as Proposal Status "Validated", regardless of
+    whether title/definition/proposal/validation had actually changed --
+    on a project with thousands of Validated rows this meant reimporting
+    the SAME file cost the same ~70 minutes of wasted embedding calls as
+    the original import. First import of a Validated row: exactly one real
+    embedding call, outcome "created". Reimporting the EXACT same row:
+    outcome must flip to "unchanged" (not "updated"), and critically there
+    must be ZERO additional embedding calls and ZERO brdp_history rows
+    written for it -- a genuinely a no-op import.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    embed_call_count = 0
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal embed_call_count
+        embed_call_count += 1
+        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(counting_handler)
+
+    row = _row(
+        2,
+        "BRDP-IMP-UNCHANGED",
+        proposal_status="Validated",
+        title="Same title",
+        definition="Same definition",
+        proposal="Same proposal",
+    )
+
+    first = await _apply_and_wait(client, project.id, headers, [row])
+    assert first["result"]["created"] == 1
+    assert first["result"]["unchanged"] == 0
+    assert embed_call_count == 1
+
+    second = await _apply_and_wait(client, project.id, headers, [row])
+    assert second["result"]["created"] == 0
+    assert second["result"]["updated"] == 0
+    assert second["result"]["unchanged"] == 1
+    assert embed_call_count == 1, "reimporting the exact same row must NOT trigger a second embedding call"
+
+    async with async_session_factory() as session:
+        db_brdp = (await session.execute(select(BRDP).where(BRDP.identifier == "BRDP-IMP-UNCHANGED"))).scalar_one()
+        history_rows = (
+            await session.execute(select(BRDPHistory).where(BRDPHistory.brdp_id == db_brdp.id))
+        ).scalars().all()
+        assert history_rows == [], "an unchanged reimport must write no brdp_history entries at all"
+
+
+async def test_reimport_changing_only_rule_never_recomputes_embedding(client, editor_and_project):
+    """Edge case explicitly called out in the encargo: a row that changes
+    ONLY its Rule (title/definition/proposal/validation all identical)
+    must still count as core-fields "unchanged" and skip the embedding
+    recompute -- the embedding depends on the BRDP's textual content, never
+    on its Rule. The Rule change itself must still go through untouched
+    (independent, existing rule_override machinery).
+    """
+    project, headers, _viewer_headers = editor_and_project
+    embed_call_count = 0
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal embed_call_count
+        embed_call_count += 1
+        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(counting_handler)
+
+    base_row = _row(
+        2,
+        "BRDP-IMP-RULEONLYCHANGE",
+        proposal_status="Validated",
+        title="Same title",
+        definition="Same definition",
+        proposal="Same proposal",
+        rule_status="Verified",
+        rule=VALID_RULE,
+    )
+    first = await _apply_and_wait(client, project.id, headers, [base_row])
+    assert first["result"]["created"] == 1
+    assert embed_call_count == 1
+
+    other_rule = '<structureObjectRule id="z"><objectPath allowedObjectFlag="1">//z</objectPath></structureObjectRule>'
+    changed_rule_row = {**base_row, "rule": other_rule}
+
+    analyze_resp = await client.post(
+        f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": [changed_rule_row]}, headers=headers
+    )
+    (analyzed,) = analyze_resp.json()["results"]
+    assert analyzed["unchanged"] is True, "core fields are identical even though Rule differs"
+    assert analyzed["rule_override"] is True, "the Rule change itself is still reported, independently"
+
+    second = await _apply_and_wait(client, project.id, headers, [changed_rule_row])
+    assert second["result"]["unchanged"] == 1
+    assert second["result"]["updated"] == 0
+    assert embed_call_count == 1, "a Rule-only change must NOT trigger an embedding recompute"
+
+    brdp = (
+        await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
+    ).json()[0]
+    approval = (
+        await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2", headers=headers)
+    ).json()
+    assert approval["rule_xml"] == other_rule, "the Rule change itself still applies despite the core fields being unchanged"
+
+
+async def test_reimport_with_a_real_field_change_still_recomputes_embedding(client, editor_and_project):
+    """Control case: a genuine change to one of the four core fields must
+    still recompute the embedding and count as "updated", not "unchanged"
+    -- proves the new skip is scoped to true no-ops, not a blanket
+    "never recompute on reimport" regression.
+    """
+    project, headers, _viewer_headers = editor_and_project
+    embed_call_count = 0
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal embed_call_count
+        embed_call_count += 1
+        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(counting_handler)
+
+    row = _row(2, "BRDP-IMP-REALCHANGE", proposal_status="Validated", proposal="Original proposal")
+    first = await _apply_and_wait(client, project.id, headers, [row])
+    assert first["result"]["created"] == 1
+    assert embed_call_count == 1
+
+    changed_row = {**row, "proposal": "A genuinely different proposal"}
+    second = await _apply_and_wait(client, project.id, headers, [changed_row])
+    assert second["result"]["updated"] == 1
+    assert second["result"]["unchanged"] == 0
+    assert embed_call_count == 2, "a real field change must still recompute the embedding"
 
 
 async def test_rule_override_warns_when_reimporting_a_different_rule(client, editor_and_project):

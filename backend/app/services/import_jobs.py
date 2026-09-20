@@ -251,6 +251,24 @@ def _classify_row(
 
     action = "update" if existing_brdp is not None else "create"
 
+    # Same title/definition resolution run_import_job actually writes
+    # (catalog match wins unconditionally, see catalog_override below) --
+    # needed here to compare against what's already stored, so "unchanged"
+    # means identical to what would actually be written, not to the raw
+    # file's own Title/Definition columns.
+    resolved_title = catalog_entry.title if catalog_entry is not None else row.title
+    resolved_definition = catalog_entry.definition if catalog_entry is not None else row.definition
+    # True only for an existing BRDP whose four core fields already equal
+    # the value this row would write -- see ImportRowResult.unchanged's own
+    # docstring. Independent of the Rule column entirely (catalog_override/
+    # rule_override below are separate, unrelated checks).
+    unchanged = existing_brdp is not None and (
+        existing_brdp.title == resolved_title
+        and existing_brdp.definition == resolved_definition
+        and existing_brdp.proposal == row.proposal
+        and existing_brdp.validation == row.proposal_status
+    )
+
     # The Title/Definition substitution itself (run_import_job below)
     # always happens on a catalog match, unconditionally. This flag is
     # only about whether to SURFACE that as a warning: correction (docs
@@ -276,6 +294,7 @@ def _classify_row(
             action=action,
             existing_rule_status=_rule_state(existing_approval).capitalize(),
             catalog_override=catalog_override,
+            unchanged=unchanged,
         )
 
     # Same idea as catalog_override above, for the Rule column: warn when
@@ -302,6 +321,7 @@ def _classify_row(
         action=action,
         catalog_override=catalog_override,
         rule_override=rule_override,
+        unchanged=unchanged,
     )
 
 
@@ -491,7 +511,7 @@ async def run_import_job(
         )
         rows_by_number = {r.row_number: r for r in rows}
 
-        created = updated = rejected = conflicts_kept = conflicts_cleared = 0
+        created = updated = rejected = conflicts_kept = conflicts_cleared = unchanged = 0
         processed = 0
 
         for result in results:
@@ -530,6 +550,22 @@ async def run_import_job(
                     brdp.embedding = await _compute_brdp_embedding(brdp, transport)
                 created += 1
                 outcome = "created"
+            elif result.unchanged:
+                # Title/definition/proposal/validation are already exactly
+                # what this row would write (see ImportRowResult.unchanged
+                # and _classify_row's own computation of the same four-field
+                # comparison, reused here rather than duplicated) -- no
+                # field reassignment, no brdp_history entry, and critically
+                # no _compute_brdp_embedding call. This is the actual fix
+                # for a real, confirmed problem: reimporting an unchanged
+                # file with many Validated rows used to recompute a real
+                # Mistral embedding for every single one regardless of
+                # whether anything had changed (~70 minutes wasted on a
+                # several-thousand-row project). Entirely independent of
+                # the Rule column -- rule_override/conflict handling below
+                # still runs exactly as before for this same row.
+                unchanged += 1
+                outcome = "unchanged"
             else:
                 was_validated = brdp.validation == "Validated"
                 old_values = {field: getattr(brdp, field) for field in _HISTORY_FIELDS}
@@ -593,6 +629,7 @@ async def run_import_job(
                 "rejected": rejected,
                 "conflicts_kept": conflicts_kept,
                 "conflicts_cleared": conflicts_cleared,
+                "unchanged": unchanged,
             },
         )
     except asyncio.CancelledError:

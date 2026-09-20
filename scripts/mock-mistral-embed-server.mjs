@@ -12,10 +12,29 @@ import http from "node:http";
 const EMBEDDING_DIM = 1024;
 const embedding = new Array(EMBEDDING_DIM).fill(0.1);
 
+let callCount = 0;
+
 const server = http.createServer((req, res) => {
+  // A one-line-per-call counter endpoint, plumbed through so verification
+  // scripts can assert "N real embedding calls happened" (or didn't)
+  // around a reimport, without parsing server logs -- GET /calls returns
+  // the running total, POST /reset-calls zeroes it back to 0.
+  if (req.method === "GET" && req.url === "/calls") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ count: callCount }));
+    return;
+  }
+  if (req.method === "POST" && req.url === "/reset-calls") {
+    callCount = 0;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ count: callCount }));
+    return;
+  }
   let body = "";
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
+    callCount += 1;
+    console.log(`embed call #${callCount}`);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ data: [{ embedding, index: 0 }] }));
   });

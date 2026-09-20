@@ -51,6 +51,21 @@ class ImportRowResult(BaseModel):
     # the "conflict" outcome (file says "no rule" but one exists) -- that
     # case already has its own, unrelated warning via existing_rule_status.
     rule_override: bool = False
+    # True when this row's four core fields (title/definition/proposal/
+    # proposal_status -- title/definition already catalog-resolved, same
+    # values run_import_job would actually write) are byte-for-byte
+    # identical to what's already stored for this BRDP. Only ever set for
+    # action == "update" -- a brand-new BRDP (action == "create") has
+    # nothing stored yet to compare against, so it is never "unchanged".
+    # Completely independent of Rule/rule_override (a different pair of
+    # columns) and of the Draft/Verified rule content: reimporting the
+    # exact same Validated file used to unconditionally recompute a real
+    # Mistral embedding for every "Validated" row regardless of whether
+    # anything had actually changed -- confirmed real, ~70 minutes of
+    # wasted calls on a several-thousand-row project. When true,
+    # run_import_job skips the field reassignment, the brdp_history write,
+    # and the embedding recompute entirely for this row.
+    unchanged: bool = False
 
 
 class ImportAnalyzeRequest(BaseModel):
@@ -96,6 +111,18 @@ class ImportApplyResultSummary(BaseModel):
     rejected: int
     conflicts_kept: int
     conflicts_cleared: int
+    # See ImportRowResult.unchanged -- a row whose four core fields were
+    # already byte-for-byte identical to what's stored, so nothing was
+    # reassigned, no history entry was written, and no embedding was
+    # recomputed for it. Deliberately its own category, not folded into
+    # "updated" -- an honest summary has to be able to say "this reimport
+    # touched nothing" rather than implying N real updates happened.
+    # Defaults to 0 (not required) so an already-persisted ImportJob.result
+    # JSON blob from before this field existed still deserializes -- an old
+    # completed job genuinely never distinguished "unchanged" from
+    # "updated", so 0 here means "not tracked at the time", not a false
+    # claim that nothing was unchanged.
+    unchanged: int = 0
 
 
 class ImportApplyResponse(BaseModel):

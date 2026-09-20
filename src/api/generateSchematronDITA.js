@@ -663,6 +663,22 @@ function findUnknownNames(value, known) {
   return unknown;
 }
 
+// Confirmed real vocabulary of XMetal's "ambito-mapa" ditamap second-pass
+// mechanism (ambito-mapa.sch -- a virtual-dossier construct built on top of
+// DITA, not part of it) -- dosier/ficha/mapa navigation names plus the
+// `exists` check that mechanism uses. These are NOT core DITA vocabulary,
+// so vocabulary_by_domain (built from the real DITA XSDs) has no way to
+// confirm them, but for a project that legitimately uses this mechanism a
+// bare "unconfirmed element/attribute" warning is misleading -- it reads
+// as "might not exist" when this is the mechanism's expected, real
+// vocabulary. Deliberately kept OUT of EXTRA_KNOWN_NAMES/known (that would
+// silence the warning outright) -- it stays visible, just with an expanded
+// message, because there is no way to tell from the rule alone whether a
+// given project actually uses ambito-mapa or these names just happen to
+// coincide with something else; the message says "expected... verify
+// manually", never "this IS ambito-mapa", to stay honest about that.
+const XMETAL_AMBITO_MAPA_VOCAB = new Set(["dosier", "ficha", "mapa", "exists"]);
+
 // One warning per (BRDP id, unconfirmed name) pair, in English to match the
 // rest of the UI -- a global "these names are unconfirmed somewhere" list
 // isn't actionable; the reviewer needs to know exactly which rule to check.
@@ -675,7 +691,11 @@ function lintVocabulary(xml, schemaSummary) {
     const key = `${id}|${name}`;
     if (seen.has(key)) return;
     seen.add(key);
-    warnings.push(`${id}: uses unconfirmed element/attribute '${name}'`);
+    warnings.push(
+      XMETAL_AMBITO_MAPA_VOCAB.has(name)
+        ? `${id}: uses '${name}' — expected in the XMetal ditamap second-pass mechanism (ambito-mapa.sch), not core DITA vocabulary; verify manually if this project doesn't use that mechanism`
+        : `${id}: uses unconfirmed element/attribute '${name}'`
+    );
   };
 
   const ruleRe = new RegExp(`<${SCH}rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}rule>`, "g");
