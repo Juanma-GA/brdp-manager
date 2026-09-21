@@ -301,6 +301,7 @@ const resources = {
             proposal_status: 'Proposal Status',
             rule_status: 'Rule Status',
             status: 'Status',
+            refusal_reason: 'Reason for refusal',
           },
           statusValues: {
             active: 'Active',
@@ -750,6 +751,7 @@ const resources = {
             proposal_status: 'Estado de propuesta',
             rule_status: 'Estado de la regla',
             status: 'Estado',
+            refusal_reason: 'Motivo de rechazo',
           },
           statusValues: {
             active: 'Activo',

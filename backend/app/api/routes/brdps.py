@@ -54,6 +54,9 @@ _HISTORY_FIELDS = {
     "definition": "definition",
     "proposal": "proposal",
     "validation": "proposal_status",
+    # DB column is "comments"; the UI only ever surfaces it as the Refused
+    # reason textbox, so the history entry reads "refusal_reason" too.
+    "comments": "refusal_reason",
 }
 
 # Deliberately its own numbering, scoped to ONLY this exact prefix -- NOT

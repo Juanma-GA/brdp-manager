@@ -226,6 +226,87 @@ async def test_viewer_can_read_history_but_not_trigger_writes(client, editor_vie
     assert denied.status_code == 403
 
 
+async def test_setting_refused_with_a_reason_logs_a_refusal_reason_entry(client, editor_viewer_and_project):
+    """The comments column (DB name) is exposed under its audit name
+    "refusal_reason", matching how the Refused-only textbox in
+    RecordsPage.jsx labels it -- not the raw column name.
+    """
+    project, _editor, editor_headers, _viewer_headers = editor_viewer_and_project
+    brdp = (
+        await client.post(
+            f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-HIST-008"}, headers=editor_headers
+        )
+    ).json()
+
+    response = await client.put(
+        f"/api/projects/{project.id}/brdps/{brdp['id']}",
+        json={"validation": "Refused", "comments": "Conflicts with BRDP-S1-00042."},
+        headers=editor_headers,
+    )
+    assert response.status_code == 200
+
+    history = (
+        await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=editor_headers)
+    ).json()
+    reason_entries = [h for h in history if h["field_name"] == "refusal_reason"]
+    assert len(reason_entries) == 1
+    assert reason_entries[0]["old_value"] == ""
+    assert reason_entries[0]["new_value"] == "Conflicts with BRDP-S1-00042."
+
+
+async def test_editing_the_reason_of_an_already_refused_brdp_also_logs_an_entry(client, editor_viewer_and_project):
+    """Editing just the reason text (status unchanged, already Refused)
+    must log its own entry too -- same behavior "proposal" already has
+    when edited alone, without a validation change alongside it.
+    """
+    project, _editor, editor_headers, _viewer_headers = editor_viewer_and_project
+    brdp = (
+        await client.post(
+            f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-HIST-009"}, headers=editor_headers
+        )
+    ).json()
+    await client.put(
+        f"/api/projects/{project.id}/brdps/{brdp['id']}",
+        json={"validation": "Refused", "comments": "First reason."},
+        headers=editor_headers,
+    )
+
+    response = await client.put(
+        f"/api/projects/{project.id}/brdps/{brdp['id']}",
+        json={"comments": "Updated reason, status unchanged."},
+        headers=editor_headers,
+    )
+    assert response.status_code == 200
+
+    history = (
+        await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=editor_headers)
+    ).json()
+    reason_entries = [h for h in history if h["field_name"] == "refusal_reason"]
+    assert len(reason_entries) == 2
+    assert reason_entries[0]["old_value"] == "First reason."
+    assert reason_entries[0]["new_value"] == "Updated reason, status unchanged."
+
+
+async def test_a_brdp_never_marked_refused_has_no_refusal_reason_history(client, editor_viewer_and_project):
+    project, _editor, editor_headers, _viewer_headers = editor_viewer_and_project
+    brdp = (
+        await client.post(
+            f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-HIST-010"}, headers=editor_headers
+        )
+    ).json()
+
+    await client.put(
+        f"/api/projects/{project.id}/brdps/{brdp['id']}",
+        json={"title": "Touched", "definition": "Touched too"},
+        headers=editor_headers,
+    )
+
+    history = (
+        await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=editor_headers)
+    ).json()
+    assert not any(h["field_name"] == "refusal_reason" for h in history)
+
+
 async def test_history_survives_the_acting_users_account_being_deleted(client, editor_viewer_and_project):
     """user_id is ON DELETE SET NULL specifically so the audit trail
     outlives the account that made the change -- user_email is the
