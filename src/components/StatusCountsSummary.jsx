@@ -27,11 +27,17 @@ export function ProposalStatusSummary({ counts }) {
   )}: ${counts.pending}, ${t('records.validationOptions.Refused')}: ${counts.refused}`;
   return (
     <span className={styles.summary} title={tooltip}>
-      <span className={styles.validated}>V {counts.validated}</span>
+      <span className={styles.validated}>
+        V <span className={styles.num}>{counts.validated}</span>
+      </span>
       <span className={styles.sep}>·</span>
-      <span className={styles.pending}>P {counts.pending}</span>
+      <span className={styles.pending}>
+        P <span className={styles.num}>{counts.pending}</span>
+      </span>
       <span className={styles.sep}>·</span>
-      <span className={styles.refused}>R {counts.refused}</span>
+      <span className={styles.refused}>
+        R <span className={styles.num}>{counts.refused}</span>
+      </span>
     </span>
   );
 }
@@ -43,11 +49,17 @@ export function RuleStatusSummary({ counts }) {
   )}: ${counts.draft}, ${t('records.rule.states.todo')}: ${counts.to_do}`;
   return (
     <span className={styles.summary} title={tooltip}>
-      <span className={styles.verified}>V {counts.verified}</span>
+      <span className={styles.verified}>
+        V <span className={styles.num}>{counts.verified}</span>
+      </span>
       <span className={styles.sep}>·</span>
-      <span className={styles.draft}>D {counts.draft}</span>
+      <span className={styles.draft}>
+        D <span className={styles.num}>{counts.draft}</span>
+      </span>
       <span className={styles.sep}>·</span>
-      <span className={styles.todo}>T {counts.to_do}</span>
+      <span className={styles.todo}>
+        T <span className={styles.num}>{counts.to_do}</span>
+      </span>
     </span>
   );
 }

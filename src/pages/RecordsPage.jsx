@@ -720,34 +720,6 @@ export default function RecordsPage() {
               onChange={(e) => handleTableSearchChange(e.target.value)}
               placeholder={t('records.searchPlaceholder')}
             />
-            <select
-              className={styles.filterSelect}
-              value={proposalStatusFilter}
-              onChange={(e) => setProposalStatusFilter(e.target.value)}
-              aria-label={t('records.filters.proposalStatusLabel')}
-              title={t('records.filters.proposalStatusLabel')}
-            >
-              <option value="">{t('records.filters.all')}</option>
-              {VALIDATION_OPTIONS.map((v) => (
-                <option key={v} value={v}>
-                  {t(`records.validationOptions.${v}`)}
-                </option>
-              ))}
-            </select>
-            <select
-              className={styles.filterSelect}
-              value={ruleStatusFilter}
-              onChange={(e) => setRuleStatusFilter(e.target.value)}
-              aria-label={t('records.filters.ruleStatusLabel')}
-              title={t('records.filters.ruleStatusLabel')}
-            >
-              <option value="">{t('records.filters.all')}</option>
-              {RULE_STATES.map((s) => (
-                <option key={s} value={s}>
-                  {t(`records.rule.states.${s}`)}
-                </option>
-              ))}
-            </select>
             {canEdit && (
               <button type="button" onClick={openCreatePanel}>
                 {t('records.addButton')}
@@ -781,6 +753,49 @@ export default function RecordsPage() {
                     <SortableHeader field="ruleStatus" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
                       {t('records.table.ruleStatus')}
                     </SortableHeader>
+                    {canEdit && <th className={styles.plainHeader}></th>}
+                  </tr>
+                  {/* Filters live in a second header row, in the SAME table as
+                      the columns they filter -- the colgroup above is the only
+                      thing that has to agree with itself for these to stay
+                      aligned with Proposal Status/Rule Status, unlike the old
+                      layout (two separate flex rows whose widths had to be
+                      kept in sync by coincidence, which broke under longer
+                      Spanish option text). */}
+                  <tr className={styles.filterRow}>
+                    <th className={styles.plainHeader} colSpan={2}></th>
+                    <th className={styles.filterHeaderCell}>
+                      <select
+                        className={styles.filterSelect}
+                        value={proposalStatusFilter}
+                        onChange={(e) => setProposalStatusFilter(e.target.value)}
+                        aria-label={t('records.filters.proposalStatusLabel')}
+                        title={t('records.filters.proposalStatusLabel')}
+                      >
+                        <option value="">{t('records.filters.all')}</option>
+                        {VALIDATION_OPTIONS.map((v) => (
+                          <option key={v} value={v}>
+                            {t(`records.validationOptions.${v}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </th>
+                    <th className={styles.filterHeaderCell}>
+                      <select
+                        className={styles.filterSelect}
+                        value={ruleStatusFilter}
+                        onChange={(e) => setRuleStatusFilter(e.target.value)}
+                        aria-label={t('records.filters.ruleStatusLabel')}
+                        title={t('records.filters.ruleStatusLabel')}
+                      >
+                        <option value="">{t('records.filters.all')}</option>
+                        {RULE_STATES.map((s) => (
+                          <option key={s} value={s}>
+                            {t(`records.rule.states.${s}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </th>
                     {canEdit && <th className={styles.plainHeader}></th>}
                   </tr>
                 </thead>

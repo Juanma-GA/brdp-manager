@@ -12,6 +12,24 @@
   font-weight: 400;
 }
 
+/* Fixed-width numeric part so P/R (or D/T) start at the same horizontal
+   position on every row regardless of how many digits the value before
+   them has -- e.g. SOPTE's "V 2819" next to Navantia's "V 2" on an
+   adjacent row in BRDP Projects' table. Right-aligned so the digits
+   themselves also line up, not just the separator that follows.
+   font-variant-numeric keeps digit widths uniform within IBM Plex Sans
+   (it doesn't default to tabular figures), so min-width holds exactly
+   -- without it, e.g. "1" can render narrower than "8" even at the same
+   digit count, undermining the whole fix. 4 characters covers today's
+   largest real count (SOPTE, ~2819) with one digit of headroom; widen
+   this if a future project's count grows a 5th digit. */
+.num {
+  display: inline-block;
+  min-width: 4ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Proposal Status -- exact same hex values as RecordsPage.module.css's
    .badge_Validated/.badge_Pending/.badge_Refused, never a new palette. */
 .validated {
