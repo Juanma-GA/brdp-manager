@@ -13,12 +13,16 @@ import styles from './SortableHeader.module.css';
  * `field` identifies this column to the caller's own sort state -- the
  * caller owns sortField/sortDir/onSort entirely, this component only
  * renders based on whether `field` is the currently active one.
+ *
+ * `rowSpan` is optional passthrough for a two-level <thead> (ProjectsPage's
+ * Proposal/Rule Status group headers) -- undefined by default, so every
+ * existing single-row-header caller is unaffected.
  */
-export default function SortableHeader({ field, sortField, sortDir, onSort, children }) {
+export default function SortableHeader({ field, sortField, sortDir, onSort, children, rowSpan }) {
   const { t } = useTranslation();
   const active = sortField === field;
   return (
-    <th aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+    <th rowSpan={rowSpan} aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button type="button" className={styles.sortHeaderBtn} onClick={() => onSort(field)}>
         {children}
         {active && (

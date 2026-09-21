@@ -1,13 +1,23 @@
 import { useTranslation } from 'react-i18next';
 import styles from './StatusCountsSummary.module.css';
 
-// Compact "V 120 · P 45 · R 3"-style summaries -- shared by ProjectsPage's
-// two new table columns (Part 1) and RecordsPage's header summary (Part
-// 2), so the same real backend counts (GET /api/projects's
-// proposal_status_counts/rule_status_counts, GET /brdps/stats) always
-// render identically wherever they appear. Full labels only ever live in
-// the title/tooltip -- three separate columns per state would be far too
-// wide for BRDP Projects' table (docs request).
+// Shared by two very different call sites, hence the `variant` prop
+// (docs request: one component per status type, not duplicated ones) --
+// 'full' (default, RecordsPage's header: only one project at a time, so
+// the full label reads fine -- "Validated: 36, Pending: 0, Refused: 0")
+// vs 'numbersOnly' (ProjectsPage's table: repeating "V"/"P"/"R" on every
+// one of 10 rows was pure repetition once the fixed-width columns already
+// let the browser's own <colgroup>-free table layout keep numbers
+// aligned -- the labels now live once, in the two-level <thead> that
+// ProjectsPage.jsx itself owns, not here).
+//
+// 'numbersOnly' renders the three values as bare <td> siblings (a
+// Fragment, no wrapping element) -- it's meant to be spread directly
+// inside a <tr>, one <td> per leaf column of that two-level header, so
+// real table column layout is what keeps every row's numbers aligned
+// (the previous round's <span>-based min-width/tabular-nums trick doesn't
+// apply here: each value is its own table cell now, not sharing a cell
+// with the other two).
 //
 // Colors reuse the app's EXISTING palette, never a new one: Proposal
 // Status reuses the exact hex values RecordsPage.module.css's
@@ -20,46 +30,54 @@ import styles from './StatusCountsSummary.module.css';
 // plus one intermediate slate shade from the same Tailwind slate family
 // already used throughout (#64748b, already used for subtitle text) for
 // the middle "Draft" state.
-export function ProposalStatusSummary({ counts }) {
+function useProposalStatusFields(counts) {
   const { t } = useTranslation();
-  const tooltip = `${t('records.validationOptions.Validated')}: ${counts.validated}, ${t(
-    'records.validationOptions.Pending'
-  )}: ${counts.pending}, ${t('records.validationOptions.Refused')}: ${counts.refused}`;
+  return [
+    { key: 'validated', label: 'V', className: styles.validated, value: counts.validated, fullLabel: t('records.validationOptions.Validated') },
+    { key: 'pending', label: 'P', className: styles.pending, value: counts.pending, fullLabel: t('records.validationOptions.Pending') },
+    { key: 'refused', label: 'R', className: styles.refused, value: counts.refused, fullLabel: t('records.validationOptions.Refused') },
+  ];
+}
+
+function useRuleStatusFields(counts) {
+  const { t } = useTranslation();
+  return [
+    { key: 'verified', label: 'V', className: styles.verified, value: counts.verified, fullLabel: t('records.rule.states.verified') },
+    { key: 'draft', label: 'D', className: styles.draft, value: counts.draft, fullLabel: t('records.rule.states.draft') },
+    { key: 'todo', label: 'T', className: styles.todo, value: counts.to_do, fullLabel: t('records.rule.states.todo') },
+  ];
+}
+
+function NumberCells({ fields }) {
+  return fields.map((f) => (
+    <td key={f.key} className={styles.numCell} title={f.fullLabel}>
+      <span className={f.className}>{f.value}</span>
+    </td>
+  ));
+}
+
+function FullSummary({ fields }) {
+  const tooltip = fields.map((f) => `${f.fullLabel}: ${f.value}`).join(', ');
   return (
     <span className={styles.summary} title={tooltip}>
-      <span className={styles.validated}>
-        V <span className={styles.num}>{counts.validated}</span>
-      </span>
-      <span className={styles.sep}>·</span>
-      <span className={styles.pending}>
-        P <span className={styles.num}>{counts.pending}</span>
-      </span>
-      <span className={styles.sep}>·</span>
-      <span className={styles.refused}>
-        R <span className={styles.num}>{counts.refused}</span>
-      </span>
+      {fields.map((f, i) => (
+        <span key={f.key}>
+          <span className={f.className}>
+            {f.fullLabel}: {f.value}
+          </span>
+          {i < fields.length - 1 && <span className={styles.sep}>, </span>}
+        </span>
+      ))}
     </span>
   );
 }
 
-export function RuleStatusSummary({ counts }) {
-  const { t } = useTranslation();
-  const tooltip = `${t('records.rule.states.verified')}: ${counts.verified}, ${t(
-    'records.rule.states.draft'
-  )}: ${counts.draft}, ${t('records.rule.states.todo')}: ${counts.to_do}`;
-  return (
-    <span className={styles.summary} title={tooltip}>
-      <span className={styles.verified}>
-        V <span className={styles.num}>{counts.verified}</span>
-      </span>
-      <span className={styles.sep}>·</span>
-      <span className={styles.draft}>
-        D <span className={styles.num}>{counts.draft}</span>
-      </span>
-      <span className={styles.sep}>·</span>
-      <span className={styles.todo}>
-        T <span className={styles.num}>{counts.to_do}</span>
-      </span>
-    </span>
-  );
+export function ProposalStatusSummary({ counts, variant = 'full' }) {
+  const fields = useProposalStatusFields(counts);
+  return variant === 'numbersOnly' ? <NumberCells fields={fields} /> : <FullSummary fields={fields} />;
+}
+
+export function RuleStatusSummary({ counts, variant = 'full' }) {
+  const fields = useRuleStatusFields(counts);
+  return variant === 'numbersOnly' ? <NumberCells fields={fields} /> : <FullSummary fields={fields} />;
 }

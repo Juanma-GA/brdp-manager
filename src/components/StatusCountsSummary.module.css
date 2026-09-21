@@ -7,27 +7,28 @@
   white-space: nowrap;
 }
 
+/* Only used by the 'full' variant now (RecordsPage's header) -- a comma
+   between "Validated: 36" and "Pending: 0", not the old "·" bullet
+   between bare "V 36"/"P 0", since numbersOnly no longer shares a single
+   <span> across all three values (each is its own <td> -- see NumberCells
+   below). */
 .sep {
   color: #cbd5e1;
   font-weight: 400;
 }
 
-/* Fixed-width numeric part so P/R (or D/T) start at the same horizontal
-   position on every row regardless of how many digits the value before
-   them has -- e.g. SOPTE's "V 2819" next to Navantia's "V 2" on an
-   adjacent row in BRDP Projects' table. Right-aligned so the digits
-   themselves also line up, not just the separator that follows.
-   font-variant-numeric keeps digit widths uniform within IBM Plex Sans
-   (it doesn't default to tabular figures), so min-width holds exactly
-   -- without it, e.g. "1" can render narrower than "8" even at the same
-   digit count, undermining the whole fix. 4 characters covers today's
-   largest real count (SOPTE, ~2819) with one digit of headroom; widen
-   this if a future project's count grows a 5th digit. */
-.num {
-  display: inline-block;
-  min-width: 4ch;
-  text-align: right;
+/* numbersOnly variant (ProjectsPage's table): each value is a real <td>,
+   so cross-row alignment comes from the browser's own table column
+   layout, not from a min-width trick inside a shared cell (the previous
+   round's fix, now obsolete for this variant since there's no longer a
+   shared cell to misalign within). Centered + tabular-nums just keeps
+   the digits themselves crisp within their own narrow column. */
+.numCell {
+  text-align: center;
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 
 /* Proposal Status -- exact same hex values as RecordsPage.module.css's

@@ -328,16 +328,35 @@ export default function ProjectsPage() {
       {!isLoading && projects.length > 0 && (
         <table className={styles.table}>
           <thead>
+            {/* Two-level header (docs request): with 10 project rows,
+                repeating "V"/"P"/"R" (and "V"/"D"/"T") on every single row
+                was the same 3+3 labels said 10 times over -- they now live
+                once, as the leaf sub-header of a colSpan={3} group header,
+                and the data rows below show only the (still color-coded)
+                numbers. rowSpan={2} on Name/Standard/Actions keeps them
+                from being pushed down by the second header row. */}
             <tr>
-              <SortableHeader field="name" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+              <SortableHeader field="name" sortField={sortField} sortDir={sortDir} onSort={toggleSort} rowSpan={2}>
                 {t('projects.name')}
               </SortableHeader>
-              <SortableHeader field="standard" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
+              <SortableHeader field="standard" sortField={sortField} sortDir={sortDir} onSort={toggleSort} rowSpan={2}>
                 {t('projects.standard')}
               </SortableHeader>
-              <th>{t('projects.proposalStatus')}</th>
-              <th>{t('projects.ruleStatus')}</th>
-              <th>{t('projects.actions')}</th>
+              <th colSpan={3}>{t('projects.proposalStatus')}</th>
+              <th colSpan={3}>{t('projects.ruleStatus')}</th>
+              <th rowSpan={2}>{t('projects.actions')}</th>
+            </tr>
+            <tr>
+              {/* Order matches StatusCountsSummary's own field order
+                  (validated/pending/refused, verified/draft/to_do) -- the
+                  data cells below are rendered by that same component, so
+                  these two orders must never drift apart. */}
+              <th scope="col" className={styles.subHeader}>V</th>
+              <th scope="col" className={styles.subHeader}>P</th>
+              <th scope="col" className={styles.subHeader}>R</th>
+              <th scope="col" className={styles.subHeader}>V</th>
+              <th scope="col" className={styles.subHeader}>D</th>
+              <th scope="col" className={styles.subHeader}>T</th>
             </tr>
           </thead>
           <tbody>
@@ -360,12 +379,8 @@ export default function ProjectsPage() {
                 <td>
                   <span className={styles.badge}>{p.standard}</span>
                 </td>
-                <td>
-                  <ProposalStatusSummary counts={p.proposal_status_counts} />
-                </td>
-                <td>
-                  <RuleStatusSummary counts={p.rule_status_counts} />
-                </td>
+                <ProposalStatusSummary counts={p.proposal_status_counts} variant="numbersOnly" />
+                <RuleStatusSummary counts={p.rule_status_counts} variant="numbersOnly" />
                 <td>
                   <div className={styles.actions}>
                     <button className={styles.navAction} onClick={() => navigate(`/projects/${p.id}/config`)}>{t('nav.config')}</button>

@@ -14,18 +14,27 @@
 
 /* Same title-left/summary-right flex row as ProjectsPage.module.css's own
    .header/.headerActions -- reused verbatim so the two pages' header
-   layouts read the same way. */
+   layouts read the same way. flex-wrap on both (docs request: the
+   summary now reads as full labels -- "Validated: 36, Pending: 0,
+   Refused: 0" -- not the old compact "V 36 · P 0 · R 0", and Spanish's
+   own labels run longer still) so a narrower window drops the
+   Proposal/Rule summaries onto their own line(s) under the title instead
+   of overflowing the header row -- the exact way the filter-alignment
+   bug happened last round, from assuming fixed English-length text. */
 .header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 24px;
   margin-bottom: 18px;
 }
 
 .headerActions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 6px 14px;
   flex-shrink: 0;
   padding-top: 2px;
 }
