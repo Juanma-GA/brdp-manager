@@ -20,8 +20,31 @@ const FIELD_MAP = {
   Rule: 'rule',
 };
 
+// Real, curated per-standard templates (10 real BRDPs each, Rule Status
+// Verified with a real Rule already filled in) -- public/ assets, same
+// naming convention as the existing brex-schema-summary-*.json files (dots
+// in a version number become dashes). ProjectConfigPage.jsx's
+// handleDownloadTemplate is the one and only place that reads this map (see
+// its own comment) -- do not duplicate this mapping anywhere else.
+// S1000D 5.0/6.0 have no generation engine yet (GeneratePage.jsx's
+// "Coming soon"), so there is nothing real to show for them -- they, and
+// any future standard added here without a curated file yet, fall through
+// to generateTemplate() below.
+export const CURATED_TEMPLATE_BY_STANDARD = {
+  'S1000D 3.0.1': '/brdp-template-3-0-1.xlsx',
+  'S1000D 4.1': '/brdp-template-4-1.xlsx',
+  'S1000D 4.2': '/brdp-template-4-2.xlsx',
+  'DITA 1.3 Xpath2.0': '/brdp-template-dita-xpath2.xlsx',
+  'DITA 1.3 Xpath3.0': '/brdp-template-dita-xpath3.xlsx',
+};
+
 /**
- * Generate Excel template with headers and mock data
+ * Generate a GENERIC Excel template with headers and mock data -- fallback
+ * only, for a standard with no curated file in CURATED_TEMPLATE_BY_STANDARD
+ * above (today: S1000D 5.0/6.0, "Coming soon", no generation engine to show
+ * a real Rule for yet). Kept, not deleted, for exactly that fallback role
+ * and for any future standard that ships before a curated template exists
+ * for it.
  * @returns {Blob} Excel file blob
  */
 export function generateTemplate() {

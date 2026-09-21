@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authFetchJson } from '../services/apiClient';
-import { generateTemplate, importFromExcel, exportToExcel } from '../utils/excelUtils';
+import { generateTemplate, importFromExcel, exportToExcel, CURATED_TEMPLATE_BY_STANDARD } from '../utils/excelUtils';
 import { ruleStateOf } from '../utils/ruleState';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import {
@@ -237,14 +237,31 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.status]);
 
-  const handleDownloadTemplate = () => {
-    const blob = new Blob([generateTemplate()], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
+  // Real, curated template per standard (10 real BRDPs, Rule Status Verified,
+  // Rule already filled in -- CURATED_TEMPLATE_BY_STANDARD's own comment)
+  // when one exists for this project's standard; S1000D 5.0/6.0 (no
+  // generation engine yet) and any future standard without a curated file
+  // fall back to the generic generateTemplate() mock, exactly as before
+  // this feature existed.
+  const handleDownloadTemplate = async () => {
+    const curatedPath = CURATED_TEMPLATE_BY_STANDARD[standard];
+    let blob;
+    let filename;
+    if (curatedPath) {
+      const res = await fetch(curatedPath);
+      if (!res.ok) throw new Error(`Could not load template ${curatedPath}`);
+      blob = await res.blob();
+      filename = curatedPath.slice(1); // drop the leading "/"
+    } else {
+      blob = new Blob([generateTemplate()], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      filename = 'brdp-template.xlsx';
+    }
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'brdp-template.xlsx';
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
