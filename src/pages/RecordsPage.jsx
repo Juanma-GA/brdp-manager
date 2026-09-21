@@ -811,7 +811,10 @@ export default function RecordsPage() {
                         {b.title || <span className={styles.muted}>—</span>}
                       </td>
                       <td>
-                        <span className={styles[`badge_${b.validation}`] || ''}>
+                        <span
+                          className={styles[`badge_${b.validation}`] || ''}
+                          title={b.validation === 'Refused' && b.comments ? b.comments : undefined}
+                        >
                           {t(`records.validationOptions.${b.validation}`, { defaultValue: b.validation })}
                         </span>
                       </td>
@@ -1006,6 +1009,31 @@ export default function RecordsPage() {
                   </option>
                 ))}
               </select>
+
+              {/* Wires up brdps.comments -- already existed end-to-end in
+                  the backend model/schemas (create/update/out), just never
+                  exposed anywhere in the frontend until now (docs request,
+                  confirmed zero references before this). Optional: nothing
+                  blocks saving Refused with it left empty, same as every
+                  other free-text field here. Only shown for Refused --
+                  switching away hides the textbox again but does NOT clear
+                  whatever was already saved (docs request explicit edge
+                  case), so a later look back at a re-Refused BRDP still has
+                  its old reason. */}
+              {selected.validation === 'Refused' && (
+                <>
+                  <label className={styles.fieldLabel}>{t('records.fieldRefusalReason')}</label>
+                  <textarea
+                    className={styles.textarea}
+                    value={selected.comments}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, comments: e.target.value } : b)))
+                    }
+                    onBlur={(e) => canEdit && handleUpdate(selected.id, { comments: e.target.value })}
+                  />
+                </>
+              )}
 
               <label className={styles.fieldLabel}>{t('records.fieldRuleStatus')}</label>
               {!ruleFormat ? (

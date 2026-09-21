@@ -342,21 +342,24 @@ export default function ProjectsPage() {
               <SortableHeader field="standard" sortField={sortField} sortDir={sortDir} onSort={toggleSort} rowSpan={2}>
                 {t('projects.standard')}
               </SortableHeader>
-              <th colSpan={3}>{t('projects.proposalStatus')}</th>
-              <th colSpan={3}>{t('projects.ruleStatus')}</th>
+              <th colSpan={3} className={styles.groupHeader}>{t('projects.proposalStatus')}</th>
+              <th colSpan={3} className={styles.groupHeader}>{t('projects.ruleStatus')}</th>
               <th rowSpan={2}>{t('projects.actions')}</th>
             </tr>
             <tr>
               {/* Order matches StatusCountsSummary's own field order
                   (validated/pending/refused, verified/draft/to_do) -- the
                   data cells below are rendered by that same component, so
-                  these two orders must never drift apart. */}
-              <th scope="col" className={styles.subHeader}>V</th>
-              <th scope="col" className={styles.subHeader}>P</th>
-              <th scope="col" className={styles.subHeader}>R</th>
-              <th scope="col" className={styles.subHeader}>V</th>
-              <th scope="col" className={styles.subHeader}>D</th>
-              <th scope="col" className={styles.subHeader}>T</th>
+                  these two orders must never drift apart. `title` on each
+                  (docs request) since the same letter means something
+                  different per group -- "V" is Validated here but Verified
+                  three columns over. */}
+              <th scope="col" className={styles.subHeader} title={t('records.validationOptions.Validated')}>V</th>
+              <th scope="col" className={styles.subHeader} title={t('records.validationOptions.Pending')}>P</th>
+              <th scope="col" className={styles.subHeader} title={t('records.validationOptions.Refused')}>R</th>
+              <th scope="col" className={styles.subHeader} title={t('records.rule.states.verified')}>V</th>
+              <th scope="col" className={styles.subHeader} title={t('records.rule.states.draft')}>D</th>
+              <th scope="col" className={styles.subHeader} title={t('records.rule.states.todo')}>T</th>
             </tr>
           </thead>
           <tbody>

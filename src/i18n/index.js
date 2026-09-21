@@ -245,6 +245,7 @@ const resources = {
         fieldDefinition: 'Definition',
         fieldProposal: 'Proposal',
         fieldValidation: 'Proposal Status',
+        fieldRefusalReason: 'Reason for refusal',
         fieldRuleStatus: 'Rule Status',
         validationOptions: {
           Pending: 'Pending',
@@ -693,6 +694,7 @@ const resources = {
         fieldDefinition: 'Definición',
         fieldProposal: 'Propuesta',
         fieldValidation: 'Estado de propuesta',
+        fieldRefusalReason: 'Motivo de rechazo',
         fieldRuleStatus: 'Estado de la regla',
         validationOptions: {
           Pending: 'Pendiente',

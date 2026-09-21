@@ -62,6 +62,15 @@
   color: #64748b;
 }
 
+/* Group headers (docs request: was left-aligned by default -- .table
+   th's own text-align:left -- so "Proposal Status"/"Rule Status" sat over
+   only the first of their 3 columns instead of the whole colSpan={3}
+   group). Centered so the label reads as spanning all 3 leaf columns
+   below it, matching them and the centered numbers in the data rows. */
+.groupHeader {
+  text-align: center;
+}
+
 /* Leaf sub-headers (V/P/R, V/D/T) under the Proposal/Rule Status group
    headers -- centered and tighter since each holds a single letter over
    a narrow, number-only column, not a left-aligned column name. */
