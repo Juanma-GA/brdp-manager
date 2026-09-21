@@ -8,6 +8,7 @@ import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import { RULE_STATES, ruleStateOf } from '../utils/ruleState';
 import SortableHeader from '../components/SortableHeader';
+import { ProposalStatusSummary, RuleStatusSummary } from '../components/StatusCountsSummary';
 import styles from './RecordsPage.module.css';
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
@@ -148,6 +149,22 @@ export default function RecordsPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [tableSearchQuery, setTableSearchQuery] = useState('');
   const [tablePage, setTablePage] = useState(1);
+  // '' = "All" -- omitted from the GET /brdps query entirely (no filter),
+  // matching Proposal Status's real "validation" values / Rule Status's
+  // RULE_STATES keys exactly, so no separate translation layer is needed
+  // between the <select>'s value and the API's own query param vocabulary.
+  const [proposalStatusFilter, setProposalStatusFilter] = useState('');
+  const [ruleStatusFilter, setRuleStatusFilter] = useState('');
+  // The project's REAL totals (GET /brdps/stats) for the header summary --
+  // deliberately independent of proposalStatusFilter/ruleStatusFilter
+  // above (see brdps.py's get_brdp_stats docstring): the header always
+  // shows the whole project's counts, never "count of the currently
+  // filtered view". Zeroed by default so a brand-new project's header
+  // never shows undefined/NaN before the first real fetch resolves.
+  const [stats, setStats] = useState({
+    proposal_status_counts: { pending: 0, validated: 0, refused: 0 },
+    rule_status_counts: { to_do: 0, draft: 0, verified: 0 },
+  });
   // null = unsorted (API order). Sorting is applied to the FULL filtered
   // dataset before pagination (docs request), not just the visible page.
   const [sortField, setSortField] = useState(null);
@@ -218,18 +235,52 @@ export default function RecordsPage() {
   const [history, setHistory] = useState([]);
   const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
 
-  const refresh = () =>
-    authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => {
+  // proposalStatusFilter/ruleStatusFilter reduce the result set in SQL
+  // itself (brdps.py's list_brdps -> list_active_brdps), not just in this
+  // page's already-existing client-side filteredBrdps/pagedBrdps below --
+  // a real, if partial, server-side row-count reduction. Unfiltered
+  // ('' for both) is unchanged from before: the full project list, still
+  // paginated client-side.
+  const refresh = () => {
+    const params = new URLSearchParams();
+    if (proposalStatusFilter) params.set('proposal_status', proposalStatusFilter);
+    if (ruleStatusFilter) params.set('rule_status', ruleStatusFilter);
+    const qs = params.toString();
+    return authFetchJson(`/api/projects/${projectId}/brdps${qs ? `?${qs}` : ''}`).then((data) => {
       setBrdps(data);
       setIsLoading(false);
     });
+  };
+
+  // Always the project's REAL, unfiltered totals (GET .../stats never takes
+  // proposalStatusFilter/ruleStatusFilter) -- the header summary must never
+  // read as "count of the currently filtered view".
+  const refreshStats = () =>
+    authFetchJson(`/api/projects/${projectId}/brdps/stats`).then(setStats).catch(() => {});
+
+  useEffect(() => {
+    setProposalStatusFilter('');
+    setRuleStatusFilter('');
+    authFetchJson('/api/config/ai-provider').then(setAiProvider).catch(() => setAiProvider(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   useEffect(() => {
     refresh();
-    authFetchJson('/api/config/ai-provider').then(setAiProvider).catch(() => setAiProvider(null));
+    refreshStats();
     setTablePage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, proposalStatusFilter, ruleStatusFilter]);
+
+  // Rule Status counts in the header can change from a rule-approval
+  // action (Verify/Revoke/manual save/accepted suggestion) alone, with no
+  // BRDP field PUT and therefore no other refresh() call site touching it
+  // -- approvalsRefreshToken is already the shared signal those actions
+  // bump today (see RuleStatusCell/the detail panel's own fetch above).
+  useEffect(() => {
+    refreshStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [approvalsRefreshToken]);
 
   const selected = brdps.find((b) => b.id === selectedId) || null;
 
@@ -480,6 +531,7 @@ export default function RecordsPage() {
       });
       setIsCreatingNew(false);
       await refresh();
+      refreshStats();
       setSelectedId(created.id);
     } catch (err) {
       // (project_id, identifier) uniqueness is enforced server-side --
@@ -499,6 +551,7 @@ export default function RecordsPage() {
     });
     setHistoryRefreshToken((n) => n + 1);
     refresh();
+    refreshStats();
   };
 
   // Fields to consider for a History "Revert to this" action -- scoped to
@@ -530,6 +583,7 @@ export default function RecordsPage() {
     await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, { method: 'DELETE' });
     if (selectedId === brdpId) setSelectedId(null);
     refresh();
+    refreshStats();
   };
 
   const askGeneric = async () => {
@@ -645,10 +699,18 @@ export default function RecordsPage() {
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.title}>{t('nav.records')}</h1>
-      <p className={styles.subtitle}>
-        {t('records.subtitle', { name: project.name, standard: project.standard, count: brdps.length })}
-      </p>
+      <div className={styles.header}>
+        <div>
+          <h1 className={styles.title}>{t('nav.records')}</h1>
+          <p className={styles.subtitle}>
+            {t('records.subtitle', { name: project.name, standard: project.standard, count: brdps.length })}
+          </p>
+        </div>
+        <div className={styles.headerActions}>
+          <ProposalStatusSummary counts={stats.proposal_status_counts} />
+          <RuleStatusSummary counts={stats.rule_status_counts} />
+        </div>
+      </div>
 
       <div className={styles.layout}>
         <div className={styles.tableWrap}>
@@ -658,6 +720,34 @@ export default function RecordsPage() {
               onChange={(e) => handleTableSearchChange(e.target.value)}
               placeholder={t('records.searchPlaceholder')}
             />
+            <select
+              className={styles.filterSelect}
+              value={proposalStatusFilter}
+              onChange={(e) => setProposalStatusFilter(e.target.value)}
+              aria-label={t('records.filters.proposalStatusLabel')}
+              title={t('records.filters.proposalStatusLabel')}
+            >
+              <option value="">{t('records.filters.all')}</option>
+              {VALIDATION_OPTIONS.map((v) => (
+                <option key={v} value={v}>
+                  {t(`records.validationOptions.${v}`)}
+                </option>
+              ))}
+            </select>
+            <select
+              className={styles.filterSelect}
+              value={ruleStatusFilter}
+              onChange={(e) => setRuleStatusFilter(e.target.value)}
+              aria-label={t('records.filters.ruleStatusLabel')}
+              title={t('records.filters.ruleStatusLabel')}
+            >
+              <option value="">{t('records.filters.all')}</option>
+              {RULE_STATES.map((s) => (
+                <option key={s} value={s}>
+                  {t(`records.rule.states.${s}`)}
+                </option>
+              ))}
+            </select>
             {canEdit && (
               <button type="button" onClick={openCreatePanel}>
                 {t('records.addButton')}

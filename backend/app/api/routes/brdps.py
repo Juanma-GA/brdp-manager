@@ -3,23 +3,43 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_httpx_transport, require_project_role
 from app.db.base import get_db
-from app.models import BRDP, BRDPHistory, User
+from app.models import BRDP, BRDPHistory, Project, User
 from app.repositories.brdp_repository import (
     ACTIVE_BRDP_FILTER,
+    compute_status_counts,
     get_active_brdp,
     get_active_brdp_by_identifier,
     list_active_brdps,
 )
 from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate, NextExtIdentifierOut
 from app.schemas.brdp_history import BRDPHistoryOut
+from app.schemas.status_counts import ProposalStatusCounts, RuleStatusCounts
 from app.services.embeddings import EmbeddingUnavailable, compute_embedding
 from app.services.history import record_change
+from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
+from pydantic import BaseModel
+
+
+class BRDPStatsOut(BaseModel):
+    """GET /brdps/stats's response -- BRDP Records' header summary. Kept as
+    its own small endpoint rather than embedded in list_brdps' response
+    (see that endpoint's own docstring for why): counts always reflect the
+    project's REAL total, independent of whatever proposal_status/
+    rule_status filter the list call is currently using.
+    """
+
+    proposal_status_counts: ProposalStatusCounts
+    rule_status_counts: RuleStatusCounts
+
+
+_PROPOSAL_STATUS_VALUES = {"Pending", "Validated", "Refused"}
+_RULE_STATUS_VALUES = {"todo", "draft", "verified"}
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps", tags=["brdps"])
 
@@ -106,10 +126,78 @@ async def _get_owned_brdp(project_id: uuid.UUID, brdp_id: uuid.UUID, db: AsyncSe
 @router.get("", response_model=list[BRDPOut])
 async def list_brdps(
     project_id: uuid.UUID,
+    proposal_status: str | None = Query(
+        None, description="Filter by Proposal Status (brdps.validation): Pending | Validated | Refused"
+    ),
+    rule_status: str | None = Query(
+        None, description="Filter by Rule Status (rule_approvals, this project's own format): todo | draft | verified"
+    ),
     _viewer: User = Depends(require_project_role("viewer")),
     db: AsyncSession = Depends(get_db),
 ) -> list[BRDP]:
-    return await list_active_brdps(project_id, db)
+    """BRDP Records' table -- and, when neither filter is given, every
+    other caller (Export to Excel, Generate BREX/Schematron's dataset
+    fetch, the Delete-project confirmation count, ...), all of which get
+    the exact same unfiltered list as before these two params existed.
+
+    Both filters are applied in SQL (list_active_brdps -> a WHERE/JOIN,
+    never a Python-side filter over an already-fetched list) -- with
+    SOPTE's 2819 rows across 188 client-side pages, fetching everything
+    and filtering in memory would defeat the point.
+    """
+    if proposal_status is not None and proposal_status not in _PROPOSAL_STATUS_VALUES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"proposal_status must be one of {sorted(_PROPOSAL_STATUS_VALUES)}",
+        )
+    if rule_status is not None and rule_status not in _RULE_STATUS_VALUES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"rule_status must be one of {sorted(_RULE_STATUS_VALUES)}",
+        )
+
+    rule_format = None
+    if rule_status is not None:
+        project = await db.get(Project, project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
+
+    return await list_active_brdps(
+        project_id, db, proposal_status=proposal_status, rule_status=rule_status, rule_format=rule_format
+    )
+
+
+@router.get("/stats", response_model=BRDPStatsOut)
+async def get_brdp_stats(
+    project_id: uuid.UUID,
+    _viewer: User = Depends(require_project_role("viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> BRDPStatsOut:
+    """BRDP Records' header summary -- reuses compute_status_counts(), the
+    exact same aggregation GET /api/projects uses for its own per-project
+    columns, scoped to this one project (a 1-element list). A brand-new
+    project with zero BRDPs gets all-zero counts, not a missing field or
+    a 404.
+
+    A SEPARATE endpoint rather than metadata bundled into GET /brdps'
+    response: that endpoint's response is `list[BRDPOut]` (a bare array,
+    consumed as one directly by several existing callers -- Export to
+    Excel, GeneratePage's dataset fetch, the Delete-project confirmation
+    count); wrapping it in an object to carry stats alongside the rows
+    would be a breaking change to every one of those. It would also be
+    the wrong VALUE even if it weren't breaking: the header must show the
+    project's real totals regardless of whichever proposal_status/
+    rule_status filter the list call above is currently using, not a
+    count of the currently-filtered subset -- so bundling them together
+    would need this exact same unfiltered aggregation computed a second
+    time internally anyway the moment a filter is active.
+    """
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    counts = (await compute_status_counts(db, [project]))[project.id]
+    return BRDPStatsOut(**counts)
 
 
 @router.get("/next-ext-identifier", response_model=NextExtIdentifierOut)

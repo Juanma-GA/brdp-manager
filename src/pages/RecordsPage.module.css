@@ -12,6 +12,24 @@
   flex-direction: column;
 }
 
+/* Same title-left/summary-right flex row as ProjectsPage.module.css's own
+   .header/.headerActions -- reused verbatim so the two pages' header
+   layouts read the same way. */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
 .title {
   font-size: 20px;
   font-weight: 800;
@@ -22,7 +40,7 @@
 .subtitle {
   font-size: 13px;
   color: #64748b;
-  margin: 0 0 18px;
+  margin: 0;
 }
 
 .layout {
@@ -67,6 +85,18 @@
   padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid #e2e8f0;
+}
+
+/* Distinct from .select below (width:100%, for the stacked detail-panel
+   fields) -- these sit inline in the search row alongside the "Add BRDP"
+   button, so they size to content instead of fighting the search input
+   for width. */
+.filterSelect {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
 }
 
 /* table-layout: fixed so column widths come from the colgroup below, not

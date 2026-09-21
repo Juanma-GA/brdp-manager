@@ -5,6 +5,7 @@ import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
 import SortableHeader from '../components/SortableHeader';
+import { ProposalStatusSummary, RuleStatusSummary } from '../components/StatusCountsSummary';
 import styles from './ProjectsPage.module.css';
 
 // The 7 exact standards the project can be created with (fixed forever
@@ -334,6 +335,8 @@ export default function ProjectsPage() {
               <SortableHeader field="standard" sortField={sortField} sortDir={sortDir} onSort={toggleSort}>
                 {t('projects.standard')}
               </SortableHeader>
+              <th>{t('projects.proposalStatus')}</th>
+              <th>{t('projects.ruleStatus')}</th>
               <th>{t('projects.actions')}</th>
             </tr>
           </thead>
@@ -356,6 +359,12 @@ export default function ProjectsPage() {
                 </td>
                 <td>
                   <span className={styles.badge}>{p.standard}</span>
+                </td>
+                <td>
+                  <ProposalStatusSummary counts={p.proposal_status_counts} />
+                </td>
+                <td>
+                  <RuleStatusSummary counts={p.rule_status_counts} />
                 </td>
                 <td>
                   <div className={styles.actions}>

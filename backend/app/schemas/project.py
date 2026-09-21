@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.status_counts import ProposalStatusCounts, RuleStatusCounts
+
 
 class ProjectCreate(BaseModel):
     name: str
@@ -44,5 +46,12 @@ class ProjectOut(BaseModel):
     # compares this single field (effective_role === 'editor'), never the
     # caller's global_role.
     effective_role: str
+    # BRDP Projects' new Proposal Status/Rule Status columns -- one
+    # aggregated query for every project in the response
+    # (compute_status_counts(), app/repositories/brdp_repository.py),
+    # never one query per project. A brand-new project with zero BRDPs
+    # gets all-zero counts here, never a missing field.
+    proposal_status_counts: ProposalStatusCounts
+    rule_status_counts: RuleStatusCounts
 
     model_config = {"from_attributes": True}

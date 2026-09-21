@@ -66,6 +66,8 @@ const resources = {
         name: 'Project name',
         standard: 'Project standard',
         count: 'Number of BRDPs',
+        proposalStatus: 'Proposal Status',
+        ruleStatus: 'Rule Status',
         actions: 'Actions',
         create: {
           button: 'Create project',
@@ -219,6 +221,11 @@ const resources = {
         searchPlaceholder: 'Search by ID or Title…',
         addButton: 'Add BRDP',
         selectHint: 'Select a BRDP from the table.',
+        filters: {
+          proposalStatusLabel: 'Filter by Proposal Status',
+          ruleStatusLabel: 'Filter by Rule Status',
+          all: 'All',
+        },
         pagination: {
           info_one: '{{count}} BRDP · Page {{page}} of {{totalPages}}',
           info_other: '{{count}} BRDPs · Page {{page}} of {{totalPages}}',
@@ -507,6 +514,8 @@ const resources = {
         name: 'Nombre del proyecto',
         standard: 'Estándar del proyecto',
         count: 'Número de BRDPs',
+        proposalStatus: 'Estado de la propuesta',
+        ruleStatus: 'Estado de la regla',
         actions: 'Acciones',
         create: {
           button: 'Crear proyecto',
@@ -660,6 +669,11 @@ const resources = {
         searchPlaceholder: 'Buscar por ID o Título…',
         addButton: 'Añadir BRDP',
         selectHint: 'Selecciona un BRDP de la tabla.',
+        filters: {
+          proposalStatusLabel: 'Filtrar por Estado de la propuesta',
+          ruleStatusLabel: 'Filtrar por Estado de la regla',
+          all: 'Todos',
+        },
         pagination: {
           info_one: '{{count}} BRDP · Página {{page}} de {{totalPages}}',
           info_other: '{{count}} BRDPs · Página {{page}} de {{totalPages}}',

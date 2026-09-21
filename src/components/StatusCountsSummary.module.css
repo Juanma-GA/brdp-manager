@@ -1,0 +1,43 @@
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sep {
+  color: #cbd5e1;
+  font-weight: 400;
+}
+
+/* Proposal Status -- exact same hex values as RecordsPage.module.css's
+   .badge_Validated/.badge_Pending/.badge_Refused, never a new palette. */
+.validated {
+  color: #16a34a;
+}
+
+.pending {
+  color: #d97706;
+}
+
+.refused {
+  color: #dc2626;
+}
+
+/* Rule Status -- same blue as RecordsPage.module.css's .dotCurrent /
+   ProjectsPage.module.css's .button (the app's one "current/primary"
+   accent) for Verified, and two tones from the same slate family already
+   used throughout for Draft/To Do. */
+.verified {
+  color: #2563eb;
+}
+
+.draft {
+  color: #64748b;
+}
+
+.todo {
+  color: #94a3b8;
+}

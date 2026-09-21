@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, require_project_role
 from app.db.base import get_db
 from app.models import BRDP, BRDPCatalog, Project, User, UserProjectRole
+from app.repositories.brdp_repository import compute_status_counts
 from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut, ProjectRename
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -18,7 +19,19 @@ def _require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-def _to_out(project: Project, effective_role: str) -> ProjectOut:
+async def _to_out(db: AsyncSession, project: Project, effective_role: str, counts: dict | None = None) -> ProjectOut:
+    """counts (a compute_status_counts() entry) is precomputed by the
+    caller for the bulk list_projects case -- one query pair for EVERY
+    project being serialized, never one per project. The single-object
+    endpoints below (create/rename/config update) don't have a precomputed
+    batch to pull from and call this far less often (once per explicit
+    user action, not once per project in a list), so they let this
+    function compute its own 1-project counts rather than duplicate this
+    fallback at each call site.
+    """
+    if counts is None:
+        computed = await compute_status_counts(db, [project])
+        counts = computed[project.id]
     return ProjectOut(
         id=project.id,
         name=project.name,
@@ -26,6 +39,8 @@ def _to_out(project: Project, effective_role: str) -> ProjectOut:
         project_config=project.project_config,
         created_at=project.created_at,
         effective_role=effective_role,
+        proposal_status_counts=counts["proposal_status_counts"],
+        rule_status_counts=counts["rule_status_counts"],
     )
 
 
@@ -65,7 +80,10 @@ async def list_projects(
     if current_user.global_role == "admin":
         result = await db.execute(select(Project))
         projects = list(result.scalars().all())
-        return [_to_out(p, _resolve_effective_role(current_user, None)) for p in projects]
+        counts_by_id = await compute_status_counts(db, projects)
+        return [
+            await _to_out(db, p, _resolve_effective_role(current_user, None), counts_by_id[p.id]) for p in projects
+        ]
 
     result = await db.execute(
         select(Project)
@@ -74,7 +92,14 @@ async def list_projects(
     )
     projects = list(result.scalars().all())
     role_map = await _get_role_map(db, current_user.id, [p.id for p in projects])
-    return [_to_out(p, _resolve_effective_role(current_user, role_map.get(p.id))) for p in projects]
+    # Same single-pass counts computation regardless of how many projects
+    # this user can see -- 2 queries total (compute_status_counts), plus
+    # the project/role queries above, never one pair per project.
+    counts_by_id = await compute_status_counts(db, projects)
+    return [
+        await _to_out(db, p, _resolve_effective_role(current_user, role_map.get(p.id)), counts_by_id[p.id])
+        for p in projects
+    ]
 
 
 _DEFAULT_PROJECT_CONFIG = {
@@ -136,7 +161,7 @@ async def create_project(
 
     await db.commit()
     await db.refresh(project)
-    return _to_out(project, _resolve_effective_role(_admin, None))
+    return await _to_out(db, project, _resolve_effective_role(_admin, None))
 
 
 @router.get("/{project_id}/config", response_model=ProjectOut)
@@ -152,7 +177,7 @@ async def get_project_config(
     # Skip the lookup entirely for admin -- _resolve_effective_role ignores
     # raw_role for them anyway (there is no user_project_roles row to find).
     role_map = {} if current_user.global_role == "admin" else await _get_role_map(db, current_user.id, [project_id])
-    return _to_out(project, _resolve_effective_role(current_user, role_map.get(project_id)))
+    return await _to_out(db, project, _resolve_effective_role(current_user, role_map.get(project_id)))
 
 
 @router.put("/{project_id}/config", response_model=ProjectOut)
@@ -171,7 +196,7 @@ async def update_project_config(
 
     # require_project_role("editor") above already guarantees the caller is
     # either admin or has a real "editor" row -- both resolve to "editor".
-    return _to_out(project, _resolve_effective_role(current_user, "editor"))
+    return await _to_out(db, project, _resolve_effective_role(current_user, "editor"))
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -192,7 +217,7 @@ async def rename_project(
     project.name = body.name
     await db.commit()
     await db.refresh(project)
-    return _to_out(project, _resolve_effective_role(current_user, "editor"))
+    return await _to_out(db, project, _resolve_effective_role(current_user, "editor"))
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
