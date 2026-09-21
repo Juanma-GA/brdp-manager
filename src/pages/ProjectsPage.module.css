@@ -62,19 +62,26 @@
   color: #64748b;
 }
 
-/* Group headers (docs request: was left-aligned by default -- .table
-   th's own text-align:left -- so "Proposal Status"/"Rule Status" sat over
-   only the first of their 3 columns instead of the whole colSpan={3}
-   group). Centered so the label reads as spanning all 3 leaf columns
-   below it, matching them and the centered numbers in the data rows. */
-.groupHeader {
+/* Group headers (docs request: was left-aligned -- ".table th"'s own
+   text-align:left, at specificity (0,1,1) [one class + one element],
+   was silently beating ".groupHeader" alone, at (0,1,0) [one class, no
+   element] -- a real cascade bug, not just "add centering and assume it
+   applies": a lower-specificity class selector can NEVER override a
+   higher-specificity one regardless of source order, confirmed by
+   rendering this, not just reading the CSS. Selectors below now match
+   ".table th"'s own specificity shape (one class + the "th" element) so
+   they win on equal footing, no !important needed. Centered so each
+   label reads as spanning all 3 leaf columns below it, matching them and
+   the centered numbers in the data rows. */
+.table th.groupHeader {
   text-align: center;
 }
 
 /* Leaf sub-headers (V/P/R, V/D/T) under the Proposal/Rule Status group
    headers -- centered and tighter since each holds a single letter over
-   a narrow, number-only column, not a left-aligned column name. */
-.subHeader {
+   a narrow, number-only column, not a left-aligned column name. Same
+   specificity fix as .groupHeader above. */
+.table th.subHeader {
   text-align: center;
   padding: 4px 8px 8px;
   font-weight: 700;
