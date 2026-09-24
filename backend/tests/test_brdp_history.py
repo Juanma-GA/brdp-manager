@@ -2,35 +2,18 @@
 brdp_history table -- not v1's unused brdps.history JSONB blob). Covers:
 a real diff writes exactly one row per changed field, a no-op save
 writes nothing, rule_status transitions get logged from approvals.py,
-and a viewer can read but not write.
+and a viewer can read but not write. A "Validated" proposal_status change
+no longer triggers an embedding call at all (on-demand embeddings, docs
+request), so there's nothing to mock here any more.
 """
 import uuid
 
-import httpx
 import pytest
 from sqlalchemy import select
 
-from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
-from app.main import app
 from app.models import BRDPHistory, Project, User, UserProjectRole
-
-
-@pytest.fixture(autouse=True)
-def _mock_embeddings_transport():
-    """A "Validated" proposal_status change triggers a real embedding call
-    (docs/v2 §3 point 1) -- mocked here for the same reason
-    test_brdps_notes_approvals.py mocks it: this file's job is the audit
-    trail, not embeddings correctness.
-    """
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
-
-    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
-    yield
-    app.dependency_overrides.pop(get_httpx_transport, None)
 
 
 @pytest.fixture

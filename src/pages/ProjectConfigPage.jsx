@@ -11,7 +11,6 @@ import {
   useDismissedImportJobId,
   useInvalidateImportJob,
 } from '../hooks/useImportJob';
-import { useImportEtaSettings } from '../hooks/useImportEtaSettings';
 import Button from '../components/Button';
 import styles from './ProjectConfigPage.module.css';
 
@@ -56,20 +55,6 @@ function fieldsForStandard(standard) {
   return standard.startsWith('DITA 1.3') ? DITA_FIELDS : FULL_FIELDS;
 }
 
-// Apply/Import ETA settings (HR0/HR8: every setting needs a UI, nothing
-// hardcoded) used to be per-project fields rendered right here (migration
-// 0007 / _DEFAULT_PROJECT_CONFIG). Moved to one installation-wide row
-// (migration 0009, app_settings table), editable only from Settings
-// (admin-only) -- an Apply import costs the same per row in every
-// project, so a copy of the same number duplicated into every project's
-// project_config was never real per-project variance. Fetched below via
-// useImportEtaSettings(); the DEFAULT_* fallbacks only matter for the
-// brief window before that query resolves (or a genuine load failure).
-const DEFAULT_MS_PER_PLAIN_ROW = 2;
-const DEFAULT_MS_PER_VALIDATED_ROW = 1500;
-const DEFAULT_VALIDATED_ROWS_THRESHOLD = 10;
-const DEFAULT_APPLY_ETA_WARNING_SECONDS = 30;
-
 // Export's own shape (ID/Title/Definition/Proposal/Proposal Status/Rule
 // Status/Rule, in that order, "Comment" dropped). ruleApproval is the
 // matching row from the project-wide bulk export endpoint (or null -- no
@@ -96,51 +81,6 @@ function brdpToExportRow(brdp, ruleApproval) {
 // BRDP(s) are affected, never download a partial/corrupt file).
 const EXCEL_CELL_CHAR_LIMIT = 32767;
 
-// Single source of truth for the Apply time/cost estimate -- used by the
-// always-visible inline alert (Phase 1, before Apply is even clickable)
-// and the confirmation modal (same numbers, same wording, no duplicated
-// logic). Sums BOTH plain-row time AND Validated-row time (bug fix, docs
-// request): a Validated row triggers a real Mistral embedding call, which
-// real measured production rate puts at ~1500ms/row
-// (etaSettings.applyEtaMsPerValidatedRow, installation-wide -- see
-// useImportEtaSettings) -- omitting it entirely from the total, as the
-// original version did, understated a 78-Validated-row import as "under
-// 1 minute" when it realistically takes ~2 minutes.
-function computeApplyEta(rows, etaSettings, rowResults) {
-  const msPerPlainRow = etaSettings?.applyEtaMsPerPlainRow ?? DEFAULT_MS_PER_PLAIN_ROW;
-  const msPerValidatedRow = etaSettings?.applyEtaMsPerValidatedRow ?? DEFAULT_MS_PER_VALIDATED_ROW;
-  const rowCount = rows?.length || 0;
-  // A row Apply will skip entirely (see ImportRowResult.unchanged -- all
-  // four core fields already match what's stored) never triggers a real
-  // Mistral embedding call, regardless of its own Proposal Status --
-  // excluded here so the estimate reflects what Apply will actually do on
-  // a no-op reimport, not what the raw file's Proposal Status column alone
-  // implies (confirmed real: this used to overstate a same-file reimport
-  // as costing as much as the original import).
-  const unchangedRowNumbers = new Set((rowResults || []).filter((r) => r.unchanged).map((r) => r.row_number));
-  const validatedCount = (rows || []).filter(
-    (r) => (r.proposal_status || '').toLowerCase().trim() === 'validated' && !unchangedRowNumbers.has(r.row_number)
-  ).length;
-  const plainCount = rowCount - validatedCount;
-  const seconds = Math.max(1, Math.ceil((plainCount * msPerPlainRow + validatedCount * msPerValidatedRow) / 1000));
-  return { seconds, validatedCount, hasValidatedRows: validatedCount > 0 };
-}
-
-// Shared text for the inline alert and the modal -- see computeApplyEta().
-// The Validated caveat is now a safety margin (Mistral latency can still
-// vary call to call), not an excuse for an unmeasured number -- the
-// estimate itself already accounts for the real per-row cost.
-function applyEtaMessage(t, { seconds, hasValidatedRows }) {
-  const timeText =
-    seconds < 60
-      ? t('config.dataManagement.applyEtaUnderMinute')
-      : t('config.dataManagement.applyEtaEstimate', { minutes: Math.ceil(seconds / 60) });
-  const caveatText = hasValidatedRows
-    ? t('config.dataManagement.applyEtaValidatedCaveat')
-    : t('config.dataManagement.applyEtaNoEmbeddingCalls');
-  return `${timeText} ${caveatText}`;
-}
-
 // Checked client-side BEFORE calling exportToExcel() -- the raw SheetJS
 // exception carries no row/column information at all, so this is the
 // only way to name the actual offending BRDP(s) in the error message.
@@ -166,16 +106,6 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // (docs request), tracked via the job below, never this flag.
   const [busy, setBusy] = useState(false);
   const [brdpCount, setBrdpCount] = useState(null);
-  // Confirmation modal for costly Apply operations. dontAskAgain is
-  // deliberately plain component state, not sessionStorage -- it needs to
-  // survive across repeated imports within the same page load (component
-  // doesn't unmount between them) but reset on an actual page reload,
-  // which sessionStorage would NOT do (it survives same-tab reloads).
-  // Plain React state resets exactly when the component remounts, i.e.
-  // exactly on reload -- matches the required behavior directly.
-  const [dontAskAgain, setDontAskAgain] = useState(false);
-  const [showApplyConfirm, setShowApplyConfirm] = useState(false);
-  const [modalDontAskChecked, setModalDontAskChecked] = useState(false);
   // True only while the POST /apply request itself is in flight (a real,
   // short-lived network round trip) -- once it returns 202, the actual
   // import's progress comes from `job` below, polled from Postgres, never
@@ -203,13 +133,6 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const { data: job } = useActiveImportJob(projectId);
   const invalidateImportJob = useInvalidateImportJob();
   const lastJobStatusRef = useRef(null);
-
-  // Installation-wide (docs request), not this project's own
-  // project_config -- same value regardless of which project's Import
-  // subsection is open. Any authenticated role can read it (see
-  // useImportEtaSettings' docstring); only an admin can change it, from
-  // Settings.
-  const { data: importEtaSettings } = useImportEtaSettings();
 
   const refreshCount = () =>
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => setBrdpCount(data.length));
@@ -344,41 +267,6 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     }
   };
 
-  const etaConfig = {
-    applyEtaMsPerPlainRow: importEtaSettings?.apply_eta_ms_per_plain_row,
-    applyEtaMsPerValidatedRow: importEtaSettings?.apply_eta_ms_per_validated_row,
-  };
-  const validatedRowsThreshold =
-    importEtaSettings?.apply_eta_validated_rows_threshold ?? DEFAULT_VALIDATED_ROWS_THRESHOLD;
-  const etaWarningSeconds = importEtaSettings?.apply_eta_warning_seconds ?? DEFAULT_APPLY_ETA_WARNING_SECONDS;
-
-  // Gate in front of handleApplyImport (docs request): only interrupts
-  // with a blocking modal when the cost is actually significant (either
-  // threshold tripped) AND the user hasn't already waved it off this
-  // session -- otherwise Apply runs immediately, same as before.
-  const handleApplyClick = () => {
-    const eta = computeApplyEta(pendingRows, etaConfig, analysis?.results);
-    const isCostly = eta.validatedCount > validatedRowsThreshold || eta.seconds > etaWarningSeconds;
-    if (isCostly && !dontAskAgain) {
-      setModalDontAskChecked(false);
-      setShowApplyConfirm(true);
-      return;
-    }
-    handleApplyImport();
-  };
-
-  const handleConfirmProceed = () => {
-    if (modalDontAskChecked) setDontAskAgain(true);
-    setShowApplyConfirm(false);
-    handleApplyImport();
-  };
-
-  const handleConfirmCancel = () => {
-    setShowApplyConfirm(false);
-  };
-
-  const applyEtaPreview = pendingRows ? computeApplyEta(pendingRows, etaConfig, analysis?.results) : null;
-
   const okCount = analysis?.results.filter((r) => r.outcome === 'ok').length ?? 0;
   const rejectedRows = analysis?.results.filter((r) => r.outcome === 'rejected') ?? [];
   const conflictRows = analysis?.results.filter((r) => r.outcome === 'conflict') ?? [];
@@ -392,10 +280,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const ruleOverrideRows = analysis?.results.filter((r) => r.rule_override) ?? [];
   // Purely informational (docs request), never a warning like the two
   // above -- rows Apply will skip touching entirely because all four core
-  // fields already match what's stored (no field write, no history entry,
-  // no real Mistral embedding call). Shown up front so a reimport of an
-  // otherwise-unchanged file doesn't leave the user guessing why the ETA
-  // estimate is much lower than a first-time import of the same size.
+  // fields already match what's stored (no field write, no history entry).
   const unchangedRows = analysis?.results.filter((r) => r.unchanged) ?? [];
 
   const handleExport = async () => {
@@ -497,20 +382,13 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
           {showingJobPanel ? (
             <div>
               {job.status === 'running' && (
-                <>
-                  <p className={styles.hint}>
-                    <span className={styles.spinner} aria-hidden="true" />
-                    {t('config.dataManagement.jobRunning', {
-                      processed: job.processed_rows,
-                      total: job.total_rows,
-                    })}
-                  </p>
-                  {job.validated_rows_total > 0 && (
-                    <p className={styles.hint}>
-                      {t('config.dataManagement.jobValidatedContext', { count: job.validated_rows_total })}
-                    </p>
-                  )}
-                </>
+                <p className={styles.hint}>
+                  <span className={styles.spinner} aria-hidden="true" />
+                  {t('config.dataManagement.jobRunning', {
+                    processed: job.processed_rows,
+                    total: job.total_rows,
+                  })}
+                </p>
               )}
 
               {job.status === 'completed' && (
@@ -697,20 +575,8 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                     </>
                   )}
 
-                  {/* Always visible as soon as the Phase 1 summary is (docs
-                      request) -- not tucked below the button where it's only
-                      seen after Apply has already been clicked. Recalculated
-                      from pendingRows on every render, so it stays accurate
-                      if the user re-analyzes a different file or edits the
-                      Import Settings fields below without reloading. */}
-                  {applyEtaPreview && (
-                    <p className={styles.warning}>
-                      {applyEtaPreview.hasValidatedRows ? '⚠️' : 'ℹ️'} {applyEtaMessage(t, applyEtaPreview)}
-                    </p>
-                  )}
-
                   <div className={styles.actionsRow}>
-                    <Button onClick={handleApplyClick} disabled={applying}>
+                    <Button onClick={handleApplyImport} disabled={applying}>
                       {applying && <span className={styles.spinner} aria-hidden="true" />}
                       {applying ? t('config.dataManagement.applying') : t('config.dataManagement.applyButton')}
                     </Button>
@@ -723,34 +589,6 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                       {t('config.dataManagement.cancel')}
                     </button>
                   </div>
-
-                  {showApplyConfirm && (
-                    <div className={styles.modalOverlay} onClick={handleConfirmCancel}>
-                      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-                        <h3 className={styles.sectionHeading}>{t('config.dataManagement.applyConfirmTitle')}</h3>
-                        <p className={styles.warning}>
-                          {applyEtaPreview?.hasValidatedRows ? '⚠️' : 'ℹ️'}{' '}
-                          {applyEtaPreview && applyEtaMessage(t, applyEtaPreview)}
-                        </p>
-                        <label className={styles.checkboxLabel}>
-                          <input
-                            type="checkbox"
-                            checked={modalDontAskChecked}
-                            onChange={(e) => setModalDontAskChecked(e.target.checked)}
-                          />
-                          {t('config.dataManagement.applyConfirmDontAskAgain')}
-                        </label>
-                        <div className={styles.actionsRow}>
-                          <Button onClick={handleConfirmProceed}>
-                            {t('config.dataManagement.applyConfirmProceed')}
-                          </Button>
-                          <button type="button" className={styles.secondaryButton} onClick={handleConfirmCancel}>
-                            {t('config.dataManagement.cancel')}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </>

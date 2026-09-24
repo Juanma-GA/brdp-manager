@@ -15,21 +15,27 @@ Runs via FastAPI's BackgroundTasks -- confirmed the right mechanism here
 over a separate task queue (Celery/RQ): this app has no worker process or
 message broker, and BackgroundTasks already executes on the same asyncio
 event loop FastAPI serves requests on, correctly interleaving with other
-requests as long as this coroutine keeps awaiting real I/O (httpx to
-Mistral, asyncpg to Postgres) rather than blocking synchronously -- which
-it already does throughout, unchanged from the old synchronous path. The
-one adjustment BackgroundTasks requires: the request's own `db:
-AsyncSession` dependency is torn down right after the response is sent,
-before the background task body runs -- so run_import_job() NEVER reuses
-that session, it opens its own via async_session_factory() for the whole
-job lifetime.
+requests as long as this coroutine keeps awaiting real I/O (asyncpg to
+Postgres) rather than blocking synchronously -- which it already does
+throughout, unchanged from the old synchronous path. The one adjustment
+BackgroundTasks requires: the request's own `db: AsyncSession` dependency
+is torn down right after the response is sent, before the background task
+body runs -- so run_import_job() NEVER reuses that session, it opens its
+own via async_session_factory() for the whole job lifetime.
+
+Never calls Mistral any more (docs request: on-demand embeddings) -- a
+Validated row here just gets no embedding yet, which is exactly "pending"
+for the separate embedding_jobs background job to pick up later. Still a
+background job, not a blocking request: a several-thousand-row Postgres
+apply is fast without the embedding calls, but still real work a page
+reload shouldn't be able to reset progress on.
 
 Two separate sessions per job, not one:
   - `work_session` holds the actual BRDP/RuleApproval/BRDPHistory writes,
     uncommitted until the very end, or rolled back whole on any failure
-    -- HR7: a mid-job failure (e.g. Mistral down) must never leave a row
-    in an ambiguous partial state, exactly like the old synchronous path
-    (one commit for the whole apply, or none).
+    -- HR7: a mid-job failure must never leave a row in an ambiguous
+    partial state, exactly like the old synchronous path (one commit for
+    the whole apply, or none).
   - `progress_session` commits the import_jobs row's processed_rows after
     every row, independently of work_session's still-open transaction --
     this is what makes progress visible to a poller in a different
@@ -50,14 +56,13 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import httpx
 from fastapi import HTTPException, status
 from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.approvals import _rule_state, _wrap_rule_xml_fragment, _xml_well_formed_error
-from app.api.routes.brdps import _HISTORY_FIELDS, _compute_brdp_embedding
+from app.api.routes.brdps import _HISTORY_FIELDS
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, ImportJob, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
@@ -395,15 +400,6 @@ async def analyze_rows(
     return project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier
 
 
-def count_validated_rows(rows: list[ImportRowIn]) -> int:
-    """Rows claiming Proposal Status "Validated" -- the ones that will
-    trigger a real Mistral embedding call each once applied (matching the
-    same literal "Validated" comparison run_import_job/brdps.py use, not
-    the frontend's case-insensitive convenience check).
-    """
-    return sum(1 for r in rows if r.proposal_status == "Validated")
-
-
 async def get_running_job(project_id: uuid.UUID, db: AsyncSession) -> ImportJob | None:
     """Used only for the single-writer-per-project concurrency check
     (POST /apply -> 409 if this returns something) -- deliberately
@@ -457,7 +453,6 @@ async def create_job(
         started_by=started_by,
         status="running",
         total_rows=len(rows),
-        validated_rows_total=count_validated_rows(rows),
     )
     db.add(job)
     await db.commit()
@@ -496,7 +491,6 @@ async def run_import_job(
     rows: list[ImportRowIn],
     conflict_resolution: str,
     started_by: uuid.UUID,
-    transport: httpx.AsyncBaseTransport | None,
 ) -> None:
     """The actual Apply work, run in the background after POST /apply has
     already returned job_id to the caller. See module docstring for the
@@ -546,8 +540,10 @@ async def run_import_job(
                 # only applies it at flush, so a rule_approvals row below
                 # (which needs a real brdp_id) requires flushing first.
                 await work_session.flush()
-                if brdp.validation == "Validated":
-                    brdp.embedding = await _compute_brdp_embedding(brdp, transport)
+                # No embedding compute here any more (docs request:
+                # on-demand embeddings) -- a newly-created Validated BRDP
+                # simply has no embedding yet, which is exactly "pending"
+                # (app/services/embedding_jobs.py's is_pending).
                 created += 1
                 outcome = "created"
             elif result.unchanged:
@@ -555,19 +551,13 @@ async def run_import_job(
                 # what this row would write (see ImportRowResult.unchanged
                 # and _classify_row's own computation of the same four-field
                 # comparison, reused here rather than duplicated) -- no
-                # field reassignment, no brdp_history entry, and critically
-                # no _compute_brdp_embedding call. This is the actual fix
-                # for a real, confirmed problem: reimporting an unchanged
-                # file with many Validated rows used to recompute a real
-                # Mistral embedding for every single one regardless of
-                # whether anything had changed (~70 minutes wasted on a
-                # several-thousand-row project). Entirely independent of
-                # the Rule column -- rule_override/conflict handling below
-                # still runs exactly as before for this same row.
+                # field reassignment and no brdp_history entry for this row.
+                # Entirely independent of the Rule column -- rule_override/
+                # conflict handling below still runs exactly as before for
+                # this same row.
                 unchanged += 1
                 outcome = "unchanged"
             else:
-                was_validated = brdp.validation == "Validated"
                 old_values = {field: getattr(brdp, field) for field in _HISTORY_FIELDS}
                 brdp.title = title
                 brdp.definition = definition
@@ -575,10 +565,10 @@ async def run_import_job(
                 brdp.validation = row.proposal_status
                 for field, history_name in _HISTORY_FIELDS.items():
                     record_change(work_session, brdp.id, editor, history_name, old_values[field], getattr(brdp, field))
-                if brdp.validation == "Validated":
-                    brdp.embedding = await _compute_brdp_embedding(brdp, transport)
-                elif was_validated:
-                    brdp.embedding = None
+                # No embedding compute/clear here either (docs request) --
+                # embedding_text_hash-based pending-detection naturally
+                # marks this row pending again once its text has changed,
+                # without needing this code path to know that happened.
                 updated += 1
                 outcome = "updated"
 

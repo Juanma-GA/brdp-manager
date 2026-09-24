@@ -29,3 +29,13 @@ class SimilarOut(BaseModel):
     # format to PUT it to as a new pending_review approval, without having
     # to duplicate routes/similar.py's standard->format mapping itself.
     format: str | None = None
+    # Docs request (on-demand embeddings, HR7 -- never silently degrade):
+    # a Validated BRDP in another project of the same standard, with no
+    # embedding yet, is invisible to this precedent search -- computing it
+    # is scoped to ITS OWN project's editors launching a job there, not to
+    # whichever project happens to call /similar. Rather than let that
+    # exclusion be silent, this counts how many were left out for exactly
+    # that reason, so the frontend can say so explicitly. Always 0 when
+    # every other project's Validated BRDPs of this standard are already
+    # embedded (the common case once each project has run its job once).
+    excluded_pending_other_projects: int = 0

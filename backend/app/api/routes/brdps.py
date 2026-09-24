@@ -2,12 +2,11 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_httpx_transport, require_project_role
+from app.api.deps import require_project_role
 from app.db.base import get_db
 from app.models import BRDP, BRDPHistory, Project, User
 from app.repositories.brdp_repository import (
@@ -20,7 +19,6 @@ from app.repositories.brdp_repository import (
 from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate, NextExtIdentifierOut
 from app.schemas.brdp_history import BRDPHistoryOut
 from app.schemas.status_counts import ProposalStatusCounts, RuleStatusCounts
-from app.services.embeddings import EmbeddingUnavailable, compute_embedding
 from app.services.history import record_change
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 from pydantic import BaseModel
@@ -70,25 +68,6 @@ _HISTORY_FIELDS = {
 # mixed-prefix bug and will need the identical fix when that feature is
 # revisited -- not done here, out of scope for this round.
 _EXT_IDENTIFIER_PATTERN = re.compile(r"^BRDP-EXT-(\d+)$")
-
-
-async def _compute_brdp_embedding(brdp: BRDP, transport: httpx.AsyncBaseTransport | None) -> list[float]:
-    """docs/v2 §3 point 1: embedding text is definition+proposal
-    concatenated. A failure here must fail the whole request (never let a
-    BRDP become 'Validated' with a stale-or-missing embedding, which would
-    silently and permanently exclude it from every future similarity
-    search with no indication why -- HR7) -- the caller must call this
-    BEFORE db.commit() so an uncaught HTTPException here rolls back the
-    validation change along with it, not just skip the embedding.
-    """
-    text = f"{brdp.definition}\n\n{brdp.proposal}"
-    try:
-        return await compute_embedding(text, transport=transport)
-    except EmbeddingUnavailable as err:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Could not compute embedding for validated BRDP: {err}",
-        )
 
 
 async def _identifier_taken(project_id: uuid.UUID, identifier: str, db: AsyncSession) -> bool:
@@ -233,7 +212,6 @@ async def create_brdp(
     body: BRDPCreate,
     _editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
-    transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> BRDP:
     if await _identifier_taken(project_id, body.identifier, db):
         raise HTTPException(
@@ -241,8 +219,10 @@ async def create_brdp(
             detail=f"A BRDP with identifier {body.identifier!r} already exists in this project",
         )
     brdp = BRDP(project_id=project_id, **body.model_dump())
-    if brdp.validation == "Validated":
-        brdp.embedding = await _compute_brdp_embedding(brdp, transport)
+    # Embeddings are computed on demand by the embedding_jobs background
+    # job (docs request), never inline here any more -- a newly-Validated
+    # BRDP simply has no embedding/embedding_text_hash yet, which is
+    # exactly "pending" (app/services/embedding_jobs.py's is_pending).
     db.add(brdp)
     await db.commit()
     await db.refresh(brdp)
@@ -256,11 +236,9 @@ async def update_brdp(
     body: BRDPUpdate,
     editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
-    transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> BRDP:
     brdp = await _get_owned_brdp(project_id, brdp_id, db)
     updates = body.model_dump(exclude_unset=True)
-    was_validated = brdp.validation == "Validated"
     # Snapshot old values BEFORE mutating, only for fields actually present
     # in this request -- record_change() below then does the real old-vs-
     # new diff and only stages a row when the value genuinely changed.
@@ -271,20 +249,12 @@ async def update_brdp(
         if field in old_values:
             record_change(db, brdp.id, editor, history_name, old_values[field], getattr(brdp, field))
 
-    if brdp.validation == "Validated":
-        # docs/v2 §3 point 1: compute on first validation, recompute on
-        # any edit to an already-validated BRDP -- unconditional on every
-        # edit while Validated, not just definition/proposal changes,
-        # matching the spec's literal "recalcular si se edita" rather than
-        # guessing which fields matter enough to justify the extra call.
-        brdp.embedding = await _compute_brdp_embedding(brdp, transport)
-    elif was_validated:
-        # No longer Validated -- clear the now-stale embedding rather than
-        # leave it around. The similarity query already filters on
-        # validation='Validated' so this isn't reachable today, but a
-        # stale vector surviving an un-validate is a footgun for any
-        # future query that forgets that filter.
-        brdp.embedding = None
+    # No inline embedding compute/clear here any more (docs request) -- a
+    # stale embedding left after an edit is exactly what
+    # embedding_text_hash-based pending-detection is for: editing title/
+    # definition/proposal changes the hash of the CURRENT text, so it stops
+    # matching the stored embedding_text_hash and the row is pending again
+    # without anything here needing to know that happened.
 
     await db.commit()
     await db.refresh(brdp)

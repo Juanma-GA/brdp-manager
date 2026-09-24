@@ -9,13 +9,54 @@ the request/response shape (a single "input" list, a "data[0].embedding"
 array) is specific to embeddings, not chat completions.
 """
 
+import hashlib
 import logging
+from typing import Protocol
 
 import httpx
 
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+class _HasBRDPText(Protocol):
+    title: str
+    definition: str
+    proposal: str
+
+
+class _HasCatalogText(Protocol):
+    title: str
+    definition: str
+
+
+def brdp_embedding_text(brdp: _HasBRDPText) -> str:
+    """Composition for a BRDP's embedding (docs request): title+definition+
+    proposal. Used both to compute what actually gets stored
+    (embedding_jobs.py) and to build the query embedding at /similar time
+    (routes/similar.py) -- the two MUST share this exact composition, or a
+    query embedded under one text shape would be compared against vectors
+    embedded under another.
+    """
+    return f"{brdp.title}\n\n{brdp.definition}\n\n{brdp.proposal}"
+
+
+def catalog_embedding_text(entry: _HasCatalogText) -> str:
+    """Composition for a catalog entry's embedding (docs request): title+
+    definition only -- BRDPCatalog has no proposal column at all.
+    """
+    return f"{entry.title}\n\n{entry.definition}"
+
+
+def compute_text_hash(text: str) -> str:
+    """SHA-256 hex digest of the exact text a row's `embedding` was
+    computed from, stored alongside it (embedding_text_hash) so pending-
+    detection can compare it against a hash of the row's CURRENT text
+    without re-embedding anything just to check (embedding_jobs.py's
+    is_pending).
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class EmbeddingUnavailable(Exception):

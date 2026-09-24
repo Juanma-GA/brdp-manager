@@ -537,6 +537,17 @@
   white-space: pre-wrap;
 }
 
+.progressBar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 6px;
+  /* Same blue already used across the app for a primary/progress accent
+     (StatusCountsSummary.module.css's Verified tone, ProjectsPage's
+     primary button) -- no new color introduced. */
+  accent-color: #2563eb;
+}
+
 /* Compact defaults for react-markdown's output inside .answerBox -- the
    browser's default <p>/<ul>/<pre> margins are sized for a full document,
    not this narrow side panel. */

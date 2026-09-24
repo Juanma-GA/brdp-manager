@@ -330,6 +330,82 @@ async def test_kind_rule_unsupported_standard_returns_400(client):
         await _cleanup(project, [editor])
 
 
+async def test_excluded_pending_other_projects_counts_other_projects_without_embedding(client):
+    """HR7 -- on-demand embeddings (docs request): a Validated BRDP in
+    ANOTHER project of the same standard that hasn't been through ITS OWN
+    project's embedding job yet (embedding IS NULL) is invisible to this
+    search; the response must say how many were excluded for exactly that
+    reason, never silently return fewer candidates with no explanation.
+    Scoped to OTHER projects only -- a pending BRDP in the CURRENT project
+    is not counted here (it's blocked from ever reaching Suggest at all by
+    the frontend's own disabled-while-pending rule, so counting it would
+    double up with that).
+    """
+    project_a = await _make_project(standard="S1000D 4.2")
+    project_b = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project_a.id)
+    source = await _make_source_brdp(project_a.id)
+    # 3 real candidates in project_a itself (sufficient precedent) plus one
+    # more Validated-but-pending BRDP in project_a -- must NOT be counted,
+    # since it's the current project, not "another" one.
+    for i in range(3):
+        await _make_validated_candidate(project_a.id, _SAME_DIRECTION, f"BRDP-OWN-{i}")
+    async with async_session_factory() as session:
+        session.add(
+            BRDP(
+                project_id=project_a.id,
+                identifier="BRDP-OWNPROJ-PENDING",
+                definition="text",
+                proposal="text",
+                validation="Validated",
+            )
+        )
+        await session.commit()
+    # In project_b: one Validated BRDP WITH an embedding (a real candidate
+    # elsewhere, never pending) and two Validated BRDPs with NO embedding
+    # yet (pending -- excluded from this search, and counted).
+    await _make_validated_candidate(project_b.id, _SAME_DIRECTION, "BRDP-OTHERPROJ-EMBEDDED")
+    async with async_session_factory() as session:
+        for i in range(2):
+            session.add(
+                BRDP(
+                    project_id=project_b.id,
+                    identifier=f"BRDP-OTHERPROJ-PENDING-{i}",
+                    definition="text",
+                    proposal="text",
+                    validation="Validated",
+                )
+            )
+        await session.commit()
+    try:
+        response = await client.get(
+            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["sufficient_precedent"] is True
+        assert body["excluded_pending_other_projects"] == 2
+    finally:
+        await _cleanup(project_a, [editor])
+        await _cleanup(project_b)
+
+
+async def test_excluded_pending_other_projects_is_zero_when_nothing_pending(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    for i in range(3):
+        await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-NOPEND-{i}")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        assert response.json()["excluded_pending_other_projects"] == 0
+    finally:
+        await _cleanup(project, [editor])
+
+
 async def test_viewer_can_read_similar_but_requires_authentication(client):
     project = await _make_project()
     source = await _make_source_brdp(project.id)

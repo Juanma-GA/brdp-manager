@@ -57,10 +57,24 @@ class BRDP(Base):
     validation: Mapped[str] = mapped_column(String, nullable=False, default="Pending")
     comments: Mapped[str] = mapped_column(Text, nullable=False, default="")
     history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    # Populated/refreshed only when validation == 'Validated' (see §3 point 1
-    # — computed from definition+proposal). NULL until then, so a similarity
-    # query naturally excludes never-validated and not-yet-embedded rows.
+    # Computed on demand by the embedding_jobs background job (never on
+    # create/update/import any more -- see app/services/embedding_jobs.py),
+    # from title+definition+proposal (embeddings.py's brdp_embedding_text).
+    # NULL until a Validated BRDP has actually been through that job at
+    # least once, so a similarity query naturally excludes never-embedded
+    # rows -- same guarantee as before, just populated on a different
+    # schedule.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    # The SHA-256 hex digest of the exact text that was embedded, set
+    # alongside `embedding` by the SAME job run, never independently --
+    # this is "what got embedded", not "what should be embedded right
+    # now". A row is pending re-embedding whenever this hash no longer
+    # matches a hash computed fresh from the BRDP's CURRENT title/
+    # definition/proposal (embedding_jobs.py's is_pending) -- editing the
+    # title after validation is exactly the case this is for: the stored
+    # embedding is now stale even though `embedding` itself is still a
+    # real (non-NULL) vector.
+    embedding_text_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

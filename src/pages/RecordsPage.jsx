@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
@@ -10,10 +10,33 @@ import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import { RULE_STATES, ruleStateOf } from '../utils/ruleState';
 import SortableHeader from '../components/SortableHeader';
 import { ProposalStatusSummary, RuleStatusSummary } from '../components/StatusCountsSummary';
+import {
+  useActiveEmbeddingJob,
+  useComputeEmbeddings,
+  useInvalidatePendingEmbeddings,
+  usePendingEmbeddings,
+} from '../hooks/useEmbeddingJob';
 import styles from './RecordsPage.module.css';
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
 const SUGGEST_KINDS = ['definition', 'proposal', 'rule'];
+
+// Live estimate from the job's OWN observed rate so far (elapsed time /
+// items processed), not a pre-configured ms-per-item setting -- the
+// Apply/Import ETA mechanism this replaces (Settings > Import Settings,
+// removed this same round) was exactly that kind of static config, and
+// embeddings have no equivalent knob any more (HR8: nothing hardcoded).
+// Returns null until at least one item has been processed (no rate to
+// extrapolate from yet) or once nothing remains.
+function estimateEmbeddingEtaSeconds(job) {
+  if (!job || job.processed_items <= 0 || job.total_items <= 0) return null;
+  const remaining = job.total_items - job.processed_items;
+  if (remaining <= 0) return 0;
+  const elapsedMs = Date.now() - new Date(job.started_at).getTime();
+  if (elapsedMs <= 0) return null;
+  const msPerItem = elapsedMs / job.processed_items;
+  return Math.max(1, Math.ceil((remaining * msPerItem) / 1000));
+}
 // v1's BRDPTable/useTableLogic used 25 rows/page (see src/hooks/useTableLogic.js)
 // -- this docs request specifically asks for 15 here, same prev/next pattern.
 const TABLE_PAGE_SIZE = 15;
@@ -226,6 +249,33 @@ export default function RecordsPage() {
   // to 'editor' there, docs/v2 §4.3) -- never re-derive the admin bypass here.
   const canEdit = project.effective_role === 'editor';
   const ruleFormat = STANDARD_TO_RULE_FORMAT[project.standard];
+
+  // On-demand embeddings (docs request): Suggest Definition/Proposal/Rule
+  // needs real pgvector precedent, so it stays gated behind whatever is
+  // still pending for this project or its standard's catalog -- Ask a
+  // Question doesn't use embeddings at all and is never gated by this.
+  const { data: pendingEmbeddings } = usePendingEmbeddings(projectId);
+  const { data: embeddingJob } = useActiveEmbeddingJob(projectId);
+  const computeEmbeddings = useComputeEmbeddings(projectId);
+  const invalidatePendingEmbeddings = useInvalidatePendingEmbeddings();
+  const embeddingJobRunning = embeddingJob?.status === 'running';
+  const totalPendingEmbeddings = (pendingEmbeddings?.project_pending ?? 0) + (pendingEmbeddings?.catalog_pending ?? 0);
+  const hasPendingEmbeddings = totalPendingEmbeddings > 0;
+  const suggestDisabledByEmbeddings = hasPendingEmbeddings || embeddingJobRunning;
+  const prevEmbeddingJobStatusRef = useRef(null);
+
+  // Fires exactly once per job completion (not on every poll tick while
+  // already completed) -- refreshes the pending count so the banner/button
+  // disappears the moment the job that cleared it actually finishes,
+  // mirroring ProjectConfigPage's own import-job completion effect.
+  useEffect(() => {
+    const prevStatus = prevEmbeddingJobStatusRef.current;
+    prevEmbeddingJobStatusRef.current = embeddingJob?.status ?? null;
+    if (embeddingJob?.status === 'completed' && prevStatus !== 'completed') {
+      invalidatePendingEmbeddings(projectId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embeddingJob?.status]);
 
   const [brdps, setBrdps] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -839,8 +889,18 @@ export default function RecordsPage() {
       const similar = await authFetchJson(
         `/api/projects/${projectId}/brdps/${selected.id}/similar?kind=${kind}`
       );
+      // HR7 -- never silently degrade: a Validated BRDP in another project
+      // of this same standard that hasn't been through ITS OWN project's
+      // embedding job yet is invisible to this search; surfaced regardless
+      // of whether precedent ended up sufficient or not.
+      const excludedPendingOtherProjects = similar.excluded_pending_other_projects || 0;
       if (!similar.sufficient_precedent) {
-        setSuggestion({ kind, insufficientPrecedent: true, count: similar.candidates.length });
+        setSuggestion({
+          kind,
+          insufficientPrecedent: true,
+          count: similar.candidates.length,
+          excludedPendingOtherProjects,
+        });
         return;
       }
 
@@ -870,6 +930,7 @@ export default function RecordsPage() {
         text: res.content,
         sourceBrdpIds: similar.candidates.map((c) => c.id),
         format: similar.format,
+        excludedPendingOtherProjects,
       });
     } catch (err) {
       setSuggestion({ kind, text: `Error: ${err.message}`, sourceBrdpIds: [] });
@@ -877,6 +938,14 @@ export default function RecordsPage() {
       setBusy(false);
     }
   };
+
+  // Editor-only (backend enforces this too -- see embedding_jobs.py's
+  // require_project_role('editor')): launches the background job. 409 (a
+  // second editor already started one, docs request's own edge case) reads
+  // fine as-is from the backend's own detail message via computeEmbeddings
+  // .error; the mutation always invalidates the job query on settle
+  // either way, so the UI reflects whatever IS actually running.
+  const handleComputeEmbeddings = () => computeEmbeddings.mutate();
 
   const logSuggestionFeedback = (outcome) =>
     authFetchJson('/api/suggestion-feedback', {
@@ -1470,15 +1539,85 @@ export default function RecordsPage() {
 
                 <hr className={styles.hr} />
 
+                {/* On-demand embeddings (docs request): Suggest needs real
+                    pgvector precedent, so a pending project/catalog backlog
+                    (or a job already running) is shown here, next to the
+                    buttons it gates -- never in the Ask panel above, which
+                    doesn't use embeddings at all. */}
+                {embeddingJobRunning ? (
+                  <div className={styles.suggestionBox}>
+                    <p className={styles.hint}>
+                      {t('records.assistant.embeddingJobRunning', {
+                        processed: embeddingJob.processed_items,
+                        total: embeddingJob.total_items,
+                      })}
+                    </p>
+                    <progress
+                      className={styles.progressBar}
+                      value={embeddingJob.processed_items}
+                      max={embeddingJob.total_items || 1}
+                    />
+                    {(() => {
+                      const etaSeconds = estimateEmbeddingEtaSeconds(embeddingJob);
+                      return (
+                        <p className={styles.hint}>
+                          {etaSeconds === null
+                            ? t('records.assistant.embeddingJobEtaEstimating')
+                            : etaSeconds < 60
+                              ? t('records.assistant.embeddingJobEtaUnderMinute')
+                              : t('records.assistant.embeddingJobEtaEstimate', {
+                                  minutes: Math.ceil(etaSeconds / 60),
+                                })}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  hasPendingEmbeddings && (
+                    <div className={styles.suggestionBox}>
+                      <span className={styles.muted}>
+                        ⚠ {t('records.assistant.pendingEmbeddings', { count: totalPendingEmbeddings })}
+                      </span>
+                      {canEdit && (
+                        <div className={styles.suggestionActions}>
+                          <button onClick={handleComputeEmbeddings} disabled={computeEmbeddings.isPending}>
+                            {computeEmbeddings.isPending
+                              ? '…'
+                              : t('records.assistant.computeEmbeddings')}
+                          </button>
+                        </div>
+                      )}
+                      {computeEmbeddings.isError && (
+                        <p className={styles.muted}>{computeEmbeddings.error.message}</p>
+                      )}
+                    </div>
+                  )
+                )}
+
                 <div className={styles.suggestionActions}>
                   {SUGGEST_KINDS.map((kind) => (
-                    <button key={kind} onClick={() => requestSuggestion(kind)} disabled={busy || !aiProvider}>
+                    <button
+                      key={kind}
+                      onClick={() => requestSuggestion(kind)}
+                      disabled={busy || !aiProvider || suggestDisabledByEmbeddings}
+                    >
                       {busy && suggestion?.kind === kind
                         ? '…'
                         : t(`records.assistant.suggest${kind.charAt(0).toUpperCase()}${kind.slice(1)}`)}
                     </button>
                   ))}
                 </div>
+
+                {suggestion?.excludedPendingOtherProjects > 0 && (
+                  <div className={styles.suggestionBox}>
+                    <span className={styles.muted}>
+                      ⚠{' '}
+                      {t('records.assistant.excludedPendingOtherProjects', {
+                        count: suggestion.excludedPendingOtherProjects,
+                      })}
+                    </span>
+                  </div>
+                )}
 
                 {suggestion?.insufficientPrecedent && (
                   <div className={styles.suggestionBox}>

@@ -1,7 +1,13 @@
 """Papelera (Trash): soft-delete via DELETE /brdps/{id} and the bulk
 Reset Data path, GET/restore/permanent-delete under /api/trash. Real
-Postgres, no mocking except the Mistral embeddings call (Phase 5's
-existing precedent) triggered by validating a BRDP.
+Postgres throughout -- validating/editing a BRDP no longer calls Mistral
+at all (on-demand embeddings, docs request), so embeddings for the one
+test here that needs real precedent (test_deleted_brdp_excluded_from_
+similar_precedent) are set directly on BRDP rows via the DB session, same
+pattern as test_similar.py. GET .../similar itself still computes a real
+query embedding for the source BRDP, so that one test mocks
+get_httpx_transport for its own duration only -- not file-wide, since
+nothing else here touches /similar.
 """
 import uuid
 
@@ -13,17 +19,7 @@ from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.main import app
-from app.models import BRDPHistory, Project, RuleApproval, User, UserProjectRole
-
-
-@pytest.fixture(autouse=True)
-def _mock_embeddings_transport():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
-
-    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
-    yield
-    app.dependency_overrides.pop(get_httpx_transport, None)
+from app.models import BRDP, BRDPHistory, Project, RuleApproval, User, UserProjectRole
 
 
 @pytest.fixture
@@ -95,52 +91,75 @@ async def test_soft_delete_hides_from_list_and_appears_in_trash(client, admin_ed
 
 
 async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor_and_project):
+    """Validating a BRDP no longer computes an embedding inline (on-demand
+    embeddings, docs request) -- the 3 precedent BRDPs' embeddings are set
+    directly on their rows via the DB session (same pattern as
+    test_similar.py), and only GET .../similar's own real query-embedding
+    call (for the source BRDP) is mocked, scoped to this one test.
+    """
     project, admin, editor, admin_headers, editor_headers = admin_editor_and_project
 
-    # 3 Validated BRDPs, all with the same (mocked) embedding -- exactly
-    # MIN_CANDIDATES (similar.py), so sufficient_precedent starts True.
-    validated_ids = []
-    for i in range(3):
-        b = await _create_brdp(client, project.id, editor_headers, f"BRDP-PREC-{i}")
-        upd = await client.put(
-            f"/api/projects/{project.id}/brdps/{b['id']}",
-            json={"definition": "same definition text", "proposal": "same proposal text", "validation": "Validated"},
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
+    try:
+        # 3 Validated BRDPs, all with the same embedding -- exactly
+        # MIN_CANDIDATES (similar.py), so sufficient_precedent starts True.
+        validated_ids = []
+        for i in range(3):
+            b = await _create_brdp(client, project.id, editor_headers, f"BRDP-PREC-{i}")
+            upd = await client.put(
+                f"/api/projects/{project.id}/brdps/{b['id']}",
+                json={
+                    "definition": "same definition text",
+                    "proposal": "same proposal text",
+                    "validation": "Validated",
+                },
+                headers=editor_headers,
+            )
+            assert upd.status_code == 200
+            validated_ids.append(b["id"])
+
+        async with async_session_factory() as session:
+            for brdp_id in validated_ids:
+                db_brdp = await session.get(BRDP, uuid.UUID(brdp_id))
+                db_brdp.embedding = [0.1] * 1024
+            await session.commit()
+
+        query_brdp = await _create_brdp(client, project.id, editor_headers, "BRDP-PREC-QUERY")
+        await client.put(
+            f"/api/projects/{project.id}/brdps/{query_brdp['id']}",
+            json={"definition": "same definition text", "proposal": "same proposal text"},
             headers=editor_headers,
         )
-        assert upd.status_code == 200
-        validated_ids.append(b["id"])
 
-    query_brdp = await _create_brdp(client, project.id, editor_headers, "BRDP-PREC-QUERY")
-    await client.put(
-        f"/api/projects/{project.id}/brdps/{query_brdp['id']}",
-        json={"definition": "same definition text", "proposal": "same proposal text"},
-        headers=editor_headers,
-    )
+        before = await client.get(
+            f"/api/projects/{project.id}/brdps/{query_brdp['id']}/similar",
+            params={"kind": "definition"},
+            headers=editor_headers,
+        )
+        assert before.status_code == 200
+        assert before.json()["sufficient_precedent"] is True
+        assert len(before.json()["candidates"]) == 3
 
-    before = await client.get(
-        f"/api/projects/{project.id}/brdps/{query_brdp['id']}/similar",
-        params={"kind": "definition"},
-        headers=editor_headers,
-    )
-    assert before.status_code == 200
-    assert before.json()["sufficient_precedent"] is True
-    assert len(before.json()["candidates"]) == 3
+        # Soft-delete one of the 3 precedents -- must drop out of the
+        # candidate set even though its embedding/validation are untouched.
+        del_resp = await client.delete(
+            f"/api/projects/{project.id}/brdps/{validated_ids[0]}", headers=editor_headers
+        )
+        assert del_resp.status_code == 204
 
-    # Soft-delete one of the 3 precedents -- must drop out of the
-    # candidate set even though its embedding/validation are untouched.
-    del_resp = await client.delete(
-        f"/api/projects/{project.id}/brdps/{validated_ids[0]}", headers=editor_headers
-    )
-    assert del_resp.status_code == 204
-
-    after = await client.get(
-        f"/api/projects/{project.id}/brdps/{query_brdp['id']}/similar",
-        params={"kind": "definition"},
-        headers=editor_headers,
-    )
-    assert after.status_code == 200
-    assert len(after.json()["candidates"]) == 2
-    assert after.json()["sufficient_precedent"] is False
+        after = await client.get(
+            f"/api/projects/{project.id}/brdps/{query_brdp['id']}/similar",
+            params={"kind": "definition"},
+            headers=editor_headers,
+        )
+        assert after.status_code == 200
+        assert len(after.json()["candidates"]) == 2
+        assert after.json()["sufficient_precedent"] is False
+    finally:
+        app.dependency_overrides.pop(get_httpx_transport, None)
 
 
 async def test_deleted_brdp_excluded_from_approvals_export_but_rule_approval_survives(

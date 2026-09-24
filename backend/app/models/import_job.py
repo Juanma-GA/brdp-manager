@@ -37,7 +37,6 @@ class ImportJob(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="running")
     total_rows: Mapped[int] = mapped_column(Integer, nullable=False)
     processed_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    validated_rows_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # HR7: a failure must be visible and explained, never a silent
     # degradation -- this is that explanation, surfaced verbatim to the
     # user via the status endpoint/badge.

@@ -58,13 +58,10 @@ class ImportRowResult(BaseModel):
     # action == "update" -- a brand-new BRDP (action == "create") has
     # nothing stored yet to compare against, so it is never "unchanged".
     # Completely independent of Rule/rule_override (a different pair of
-    # columns) and of the Draft/Verified rule content: reimporting the
-    # exact same Validated file used to unconditionally recompute a real
-    # Mistral embedding for every "Validated" row regardless of whether
-    # anything had actually changed -- confirmed real, ~70 minutes of
-    # wasted calls on a several-thousand-row project. When true,
-    # run_import_job skips the field reassignment, the brdp_history write,
-    # and the embedding recompute entirely for this row.
+    # columns) and of the Draft/Verified rule content. When true,
+    # run_import_job skips the field reassignment and the brdp_history
+    # write entirely for this row -- an honest "this reimport touched
+    # nothing" rather than a no-op update recorded as if something changed.
     unchanged: bool = False
 
 
@@ -113,10 +110,10 @@ class ImportApplyResultSummary(BaseModel):
     conflicts_cleared: int
     # See ImportRowResult.unchanged -- a row whose four core fields were
     # already byte-for-byte identical to what's stored, so nothing was
-    # reassigned, no history entry was written, and no embedding was
-    # recomputed for it. Deliberately its own category, not folded into
-    # "updated" -- an honest summary has to be able to say "this reimport
-    # touched nothing" rather than implying N real updates happened.
+    # reassigned and no history entry was written. Deliberately its own
+    # category, not folded into "updated" -- an honest summary has to be
+    # able to say "this reimport touched nothing" rather than implying N
+    # real updates happened.
     # Defaults to 0 (not required) so an already-persisted ImportJob.result
     # JSON blob from before this field existed still deserializes -- an old
     # completed job genuinely never distinguished "unchanged" from
@@ -144,7 +141,6 @@ class ImportJobStatusOut(BaseModel):
     status: str  # "running" | "completed" | "failed"
     total_rows: int
     processed_rows: int
-    validated_rows_total: int
     error: str | None = None
     started_at: datetime
     finished_at: datetime | None = None

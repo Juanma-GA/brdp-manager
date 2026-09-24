@@ -7,7 +7,7 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_httpx_transport, require_project_role
@@ -16,7 +16,7 @@ from app.db.base import get_db
 from app.models import BRDP, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.similar import SimilarCandidateOut, SimilarOut
-from app.services.embeddings import EmbeddingUnavailable, compute_embedding
+from app.services.embeddings import EmbeddingUnavailable, brdp_embedding_text, compute_embedding
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT as _STANDARD_TO_RULE_FORMAT
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps/{brdp_id}/similar", tags=["similar"])
@@ -60,10 +60,16 @@ async def get_similar(
             )
 
     # Computed fresh from the SOURCE BRDP's current text, not read from
-    # brdp.embedding -- that column is only populated for Validated BRDPs
-    # (docs/v2 §3 point 1), but the whole point of Suggest Definition/
-    # Proposal/Rule is helping with a BRDP that ISN'T validated yet.
-    query_text = f"{brdp.definition}\n\n{brdp.proposal}"
+    # brdp.embedding -- that column is only ever populated by the
+    # embedding_jobs background job for a Validated BRDP (docs request:
+    # on-demand embeddings), but the whole point of Suggest Definition/
+    # Proposal/Rule is helping with a BRDP that ISN'T validated yet, so a
+    # stored embedding usually doesn't even exist here. Must use the exact
+    # same composition (title+definition+proposal) the job stores under,
+    # via the shared brdp_embedding_text() helper -- a query embedded
+    # under a different text shape than the candidates would compare
+    # cosine distance across two incompatible embedding spaces.
+    query_text = brdp_embedding_text(brdp)
     try:
         query_embedding = await compute_embedding(query_text, transport=transport)
     except EmbeddingUnavailable as err:
@@ -127,6 +133,29 @@ async def get_similar(
             )
         )
 
+    # HR7 -- never silently degrade: a Validated BRDP in ANOTHER project of
+    # this same standard that hasn't been through its own project's
+    # embedding job yet is invisible to the query above (BRDP.embedding.
+    # is_not(None) excludes it), and nothing else here would ever surface
+    # that it was left out. Scoped to other projects only -- this project's
+    # own pending BRDPs already block Suggest entirely via the frontend's
+    # disabled-while-pending rule, so they can never actually reach this
+    # query in practice.
+    excluded_pending_other_projects = (
+        await db.execute(
+            select(func.count())
+            .select_from(BRDP)
+            .join(Project, BRDP.project_id == Project.id)
+            .where(
+                Project.standard == project.standard,
+                Project.id != project_id,
+                BRDP.validation == "Validated",
+                BRDP.embedding.is_(None),
+                ACTIVE_BRDP_FILTER,
+            )
+        )
+    ).scalar_one()
+
     sufficient = len(candidates) >= MIN_CANDIDATES
     message = (
         None
@@ -138,5 +167,10 @@ async def get_similar(
         )
     )
     return SimilarOut(
-        kind=kind, sufficient_precedent=sufficient, candidates=candidates, message=message, format=rule_format
+        kind=kind,
+        sufficient_precedent=sufficient,
+        candidates=candidates,
+        message=message,
+        format=rule_format,
+        excluded_pending_other_projects=excluded_pending_other_projects,
     )

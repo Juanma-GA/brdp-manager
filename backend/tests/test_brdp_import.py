@@ -1,34 +1,21 @@
 """Two-phase (analyze/apply) Excel import of Rule/Rule Status (docs
-request). Real Postgres, no mocking except the Mistral embeddings call
-triggered by a row importing as validation="Validated" (Phase 5's existing
-precedent, not new to this file) -- mocked here because this file's job is
-import correctness, not embeddings correctness.
+request). Real Postgres throughout -- import never calls Mistral at all
+any more (on-demand embeddings, docs request: embeddings are computed by
+the separate embedding_jobs background job, never inline during import),
+so unlike this file's earlier version there's nothing here left to mock.
 """
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import httpx
 import pytest
 from sqlalchemy import select
 
-from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
-from app.main import app
 from app.models import BRDP, BRDPCatalog, BRDPHistory, ImportJob, Project, RuleApproval, User, UserProjectRole
 from app.schemas.brdp_import import ImportRowIn
 from app.services.import_jobs import STALE_JOB_MINUTES, get_running_job, run_import_job
-
-
-@pytest.fixture(autouse=True)
-def _mock_embeddings_transport():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
-
-    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
-    yield
-    app.dependency_overrides.pop(get_httpx_transport, None)
 
 
 @pytest.fixture
@@ -463,29 +450,16 @@ async def test_catalog_match_is_standard_specific(client, editor_and_project, ca
             await session.commit()
 
 
-async def test_reimport_fully_unchanged_row_skips_embedding_recompute_and_history(client, editor_and_project):
-    """The real, confirmed-in-code bug: reimporting a file with no actual
-    changes used to unconditionally recompute a real Mistral embedding for
-    every row importing as Proposal Status "Validated", regardless of
-    whether title/definition/proposal/validation had actually changed --
-    on a project with thousands of Validated rows this meant reimporting
-    the SAME file cost the same ~70 minutes of wasted embedding calls as
-    the original import. First import of a Validated row: exactly one real
-    embedding call, outcome "created". Reimporting the EXACT same row:
-    outcome must flip to "unchanged" (not "updated"), and critically there
-    must be ZERO additional embedding calls and ZERO brdp_history rows
-    written for it -- a genuinely a no-op import.
+async def test_reimport_fully_unchanged_row_skips_history_write(client, editor_and_project):
+    """A row whose four core fields already match what's stored is a
+    genuine no-op (docs request): outcome flips from "created" to
+    "unchanged" on reimport, and no brdp_history entries are written for
+    it. Import never calls Mistral at all any more regardless of Proposal
+    Status (see test_import_never_calls_mistral_regardless_of_validated_rows
+    below) -- this test only needs to cover the still-real history-skip
+    behavior, independent of embeddings entirely.
     """
     project, headers, _viewer_headers = editor_and_project
-    embed_call_count = 0
-
-    def counting_handler(request: httpx.Request) -> httpx.Response:
-        nonlocal embed_call_count
-        embed_call_count += 1
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
-
-    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(counting_handler)
-
     row = _row(
         2,
         "BRDP-IMP-UNCHANGED",
@@ -498,13 +472,11 @@ async def test_reimport_fully_unchanged_row_skips_embedding_recompute_and_histor
     first = await _apply_and_wait(client, project.id, headers, [row])
     assert first["result"]["created"] == 1
     assert first["result"]["unchanged"] == 0
-    assert embed_call_count == 1
 
     second = await _apply_and_wait(client, project.id, headers, [row])
     assert second["result"]["created"] == 0
     assert second["result"]["updated"] == 0
     assert second["result"]["unchanged"] == 1
-    assert embed_call_count == 1, "reimporting the exact same row must NOT trigger a second embedding call"
 
     async with async_session_factory() as session:
         db_brdp = (await session.execute(select(BRDP).where(BRDP.identifier == "BRDP-IMP-UNCHANGED"))).scalar_one()
@@ -514,88 +486,45 @@ async def test_reimport_fully_unchanged_row_skips_embedding_recompute_and_histor
         assert history_rows == [], "an unchanged reimport must write no brdp_history entries at all"
 
 
-async def test_reimport_changing_only_rule_never_recomputes_embedding(client, editor_and_project):
-    """Edge case explicitly called out in the encargo: a row that changes
-    ONLY its Rule (title/definition/proposal/validation all identical)
-    must still count as core-fields "unchanged" and skip the embedding
-    recompute -- the embedding depends on the BRDP's textual content, never
-    on its Rule. The Rule change itself must still go through untouched
-    (independent, existing rule_override machinery).
+async def test_import_never_calls_mistral_regardless_of_validated_rows(client, editor_and_project, monkeypatch):
+    """Docs request's own SOPTE edge case: importing (or reimporting) rows
+    with Proposal Status "Validated" must never call Mistral -- embeddings
+    are computed on demand by the separate embedding_jobs background job,
+    never inline during import any more. compute_embedding is monkeypatched
+    to raise if called at all, a harder guarantee than just checking the
+    call count of an installed mock transport (which a future regression
+    could silently skip installing and still pass); no get_httpx_transport
+    override is installed at all for this test, matching production, where
+    apply_import() no longer even accepts that dependency.
     """
+
+    async def _fail_if_called(*args, **kwargs):
+        raise AssertionError("import must never call compute_embedding -- embeddings are computed on demand now")
+
+    monkeypatch.setattr("app.services.embeddings.compute_embedding", _fail_if_called)
+
     project, headers, _viewer_headers = editor_and_project
-    embed_call_count = 0
+    rows = [
+        _row(2, "BRDP-IMP-NOMISTRAL-1", proposal_status="Validated", title="A", definition="B", proposal="C"),
+        _row(3, "BRDP-IMP-NOMISTRAL-2", proposal_status="Validated", title="D", definition="E", proposal="F"),
+    ]
+    first = await _apply_and_wait(client, project.id, headers, rows)
+    assert first["result"]["created"] == 2
 
-    def counting_handler(request: httpx.Request) -> httpx.Response:
-        nonlocal embed_call_count
-        embed_call_count += 1
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
-
-    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(counting_handler)
-
-    base_row = _row(
-        2,
-        "BRDP-IMP-RULEONLYCHANGE",
-        proposal_status="Validated",
-        title="Same title",
-        definition="Same definition",
-        proposal="Same proposal",
-        rule_status="Verified",
-        rule=VALID_RULE,
-    )
-    first = await _apply_and_wait(client, project.id, headers, [base_row])
-    assert first["result"]["created"] == 1
-    assert embed_call_count == 1
-
-    other_rule = '<structureObjectRule id="z"><objectPath allowedObjectFlag="1">//z</objectPath></structureObjectRule>'
-    changed_rule_row = {**base_row, "rule": other_rule}
-
-    analyze_resp = await client.post(
-        f"/api/projects/{project.id}/brdps/import/analyze", json={"rows": [changed_rule_row]}, headers=headers
-    )
-    (analyzed,) = analyze_resp.json()["results"]
-    assert analyzed["unchanged"] is True, "core fields are identical even though Rule differs"
-    assert analyzed["rule_override"] is True, "the Rule change itself is still reported, independently"
-
-    second = await _apply_and_wait(client, project.id, headers, [changed_rule_row])
-    assert second["result"]["unchanged"] == 1
-    assert second["result"]["updated"] == 0
-    assert embed_call_count == 1, "a Rule-only change must NOT trigger an embedding recompute"
-
-    brdp = (
-        await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
-    ).json()[0]
-    approval = (
-        await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2", headers=headers)
-    ).json()
-    assert approval["rule_xml"] == other_rule, "the Rule change itself still applies despite the core fields being unchanged"
-
-
-async def test_reimport_with_a_real_field_change_still_recomputes_embedding(client, editor_and_project):
-    """Control case: a genuine change to one of the four core fields must
-    still recompute the embedding and count as "updated", not "unchanged"
-    -- proves the new skip is scoped to true no-ops, not a blanket
-    "never recompute on reimport" regression.
-    """
-    project, headers, _viewer_headers = editor_and_project
-    embed_call_count = 0
-
-    def counting_handler(request: httpx.Request) -> httpx.Response:
-        nonlocal embed_call_count
-        embed_call_count += 1
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
-
-    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(counting_handler)
-
-    row = _row(2, "BRDP-IMP-REALCHANGE", proposal_status="Validated", proposal="Original proposal")
-    first = await _apply_and_wait(client, project.id, headers, [row])
-    assert first["result"]["created"] == 1
-    assert embed_call_count == 1
-
-    changed_row = {**row, "proposal": "A genuinely different proposal"}
-    second = await _apply_and_wait(client, project.id, headers, [changed_row])
+    changed = [{**rows[0], "proposal": "Changed"}, rows[1]]
+    second = await _apply_and_wait(client, project.id, headers, changed)
     assert second["result"]["updated"] == 1
-    assert second["result"]["unchanged"] == 0
-    assert embed_call_count == 2, "a real field change must still recompute the embedding"
+    assert second["result"]["unchanged"] == 1
+
+    async with async_session_factory() as session:
+        db_brdps = (
+            await session.execute(
+                select(BRDP).where(BRDP.identifier.in_(["BRDP-IMP-NOMISTRAL-1", "BRDP-IMP-NOMISTRAL-2"]))
+            )
+        ).scalars().all()
+        for b in db_brdps:
+            assert b.embedding is None, "import must never populate embedding -- that's the embedding_jobs job's work"
+            assert b.embedding_text_hash is None
 
 
 async def test_rule_override_warns_when_reimporting_a_different_rule(client, editor_and_project):
@@ -921,7 +850,7 @@ async def test_status_active_returns_the_running_job_for_the_project(client, edi
     """
     project, headers, _viewer_headers = editor_and_project
     async with async_session_factory() as session:
-        job = ImportJob(project_id=project.id, status="running", total_rows=5, processed_rows=2, validated_rows_total=1)
+        job = ImportJob(project_id=project.id, status="running", total_rows=5, processed_rows=2)
         session.add(job)
         await session.commit()
         await session.refresh(job)
@@ -960,7 +889,6 @@ async def test_status_active_returns_the_finished_job_after_it_completes(client,
             status="completed",
             total_rows=3,
             processed_rows=3,
-            validated_rows_total=1,
             result={"created": 3, "updated": 0, "rejected": 0, "conflicts_kept": 0, "conflicts_cleared": 0},
         )
         session.add(job)
@@ -1006,37 +934,6 @@ async def test_status_job_id_rejects_a_job_from_another_project(client, editor_a
             await session.commit()
 
 
-async def test_embedding_failure_mid_job_marks_job_failed_and_rolls_back_everything(client, editor_and_project):
-    """HR7: a mid-job failure must be visible and explained, never a
-    silent degradation, and must never leave rows in an ambiguous partial
-    state -- the whole job's writes are one Postgres transaction,
-    uncommitted until the very end, so a failure on a LATER row rolls back
-    an EARLIER row's otherwise-successful create too. Simulated here
-    (this sandbox has no route to api.mistral.ai) with a mock transport
-    that fails the embedding call outright, exactly the shape a real
-    Mistral outage would take.
-    """
-    project, headers, _viewer_headers = editor_and_project
-    rows = [
-        _row(2, "BRDP-IMP-FAIL-A", proposal_status="Pending", rule_status="To Do", rule=""),
-        _row(3, "BRDP-IMP-FAIL-B", proposal_status="Validated", rule_status="To Do", rule=""),
-    ]
-
-    def failing_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(502, json={"error": "simulated Mistral outage"})
-
-    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(failing_handler)
-
-    body = await _apply_and_wait(client, project.id, headers, rows)
-
-    assert body["status"] == "failed"
-    assert body["error"]
-    assert body["result"] is None
-
-    listed = await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
-    assert listed.json() == []  # BRDP-IMP-FAIL-A's otherwise-successful create rolled back too
-
-
 async def test_run_import_job_marks_failed_on_cancellation(editor_and_project):
     """Confirmed real (not hypothetical) root cause: asyncio.CancelledError
     has inherited from BaseException, not Exception, since Python 3.8 --
@@ -1069,12 +966,7 @@ async def test_run_import_job_marks_failed_on_cancellation(editor_and_project):
 
     rows = [ImportRowIn(row_number=2, identifier="BRDP-IMP-CANCEL", proposal_status="Validated")]
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
-
-    task = asyncio.ensure_future(
-        run_import_job(job_id, project.id, rows, "keep", editor_id, httpx.MockTransport(handler))
-    )
+    task = asyncio.ensure_future(run_import_job(job_id, project.id, rows, "keep", editor_id))
     await asyncio.sleep(0)  # let the coroutine actually start (reach its first real await)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):

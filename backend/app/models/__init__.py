@@ -4,10 +4,10 @@ Imported here so Alembic's autogenerate (env.py: `target_metadata = Base.metadat
 sees every table without each caller needing to import every module by hand.
 """
 
-from app.models.app_settings import AppSettings
 from app.models.brdp import BRDP
 from app.models.brdp_catalog import BRDPCatalog
 from app.models.brdp_history import BRDPHistory
+from app.models.embedding_job import EmbeddingJob
 from app.models.import_job import ImportJob
 from app.models.note import Note
 from app.models.project import Project
@@ -18,10 +18,10 @@ from app.models.user import User
 from app.models.user_project_role import UserProjectRole
 
 __all__ = [
-    "AppSettings",
     "BRDP",
     "BRDPCatalog",
     "BRDPHistory",
+    "EmbeddingJob",
     "ImportJob",
     "Note",
     "Project",

@@ -1,10 +1,9 @@
 import uuid
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_httpx_transport, require_project_role
+from app.api.deps import require_project_role
 from app.db.base import get_db
 from app.models import ImportJob, User
 from app.schemas.brdp_import import (
@@ -45,7 +44,6 @@ async def apply_import(
     background_tasks: BackgroundTasks,
     editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
-    transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> ImportJobAccepted:
     """Phase 2 (docs request) -- now asynchronous: creates the import_jobs
     row and hands the real work off to run_import_job() via
@@ -78,9 +76,7 @@ async def apply_import(
         )
 
     job = await create_job(project_id, editor.id, body.rows, db)
-    background_tasks.add_task(
-        run_import_job, job.id, project_id, body.rows, body.conflict_resolution, editor.id, transport
-    )
+    background_tasks.add_task(run_import_job, job.id, project_id, body.rows, body.conflict_resolution, editor.id)
     return ImportJobAccepted(job_id=job.id)
 
 

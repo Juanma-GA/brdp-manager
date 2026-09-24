@@ -109,13 +109,6 @@ _DEFAULT_PROJECT_CONFIG = {
     "languageIsoCode": "en",
     "countryIsoCode": "US",
     "securityClassification": "01",
-    # Apply/Import ETA settings used to live here per project (migration
-    # 0007) but moved to a single installation-wide row in app_settings
-    # (migration 0009) -- see app/models/app_settings.py: the per-project
-    # copy was never real per-project variance (an Apply import costs the
-    # same per row everywhere), just the same number duplicated N times.
-    # New projects now read the shared value from GET /api/settings/
-    # import-eta instead of getting their own copy here.
 }
 
 

@@ -9,30 +9,19 @@
   - GET /api/projects/{id}/brdps's new proposal_status/rule_status query
     params (Part 3), applied in SQL.
 
-Real Postgres, no mocking except the Mistral embeddings call triggered by
-validating a BRDP (same convention as test_brdps_notes_approvals.py).
+Real Postgres throughout -- validating a BRDP no longer calls Mistral at
+all (on-demand embeddings, docs request), so there's nothing left to mock
+here.
 """
 import uuid
 
-import httpx
 import pytest
 from sqlalchemy import event
 
-from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory, engine
 from app.main import app
 from app.models import BRDP, Project, RuleApproval, User
-
-
-@pytest.fixture(autouse=True)
-def _mock_embeddings_transport():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
-
-    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
-    yield
-    app.dependency_overrides.pop(get_httpx_transport, None)
 
 
 class QueryCounter:
