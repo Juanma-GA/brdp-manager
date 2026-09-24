@@ -63,7 +63,7 @@ function ruleTextForAsk(state, ruleXml) {
 // Rule/Rule Status, which askGeneric previously never sent at all -- plus
 // an optional second BRDP (from Records or the official catalog) when the
 // user has picked one to compare against.
-function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp) {
+function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard) {
   const ruleState = ruleStateOf(ruleApproval);
   let prompt = `You are an S1000D and DITA business-rules expert assistant embedded in
 BRDP Manager. You answer questions strictly about the single BRDP shown
@@ -82,6 +82,11 @@ if you're not certain rather than inventing a plausible-sounding
 reference.
 
 Answer in the same language as the question.
+
+This project uses the standard: ${standard}.
+Answer strictly in terms of this standard and version — use its element
+names, rule vocabulary and conventions, and do not mix in other versions
+of S1000D or DITA unless the user explicitly asks for a comparison.
 
 Current BRDP context:
 ID: ${brdp.identifier}
@@ -732,7 +737,7 @@ export default function RecordsPage() {
     setAnswer('');
     setAskError(null);
     try {
-      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp);
+      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard);
       // One turn of chaining (docs request): the previous Q/A, if any,
       // goes in first as real conversation history so a follow-up like
       // "and why?" resolves correctly, then the new question.
