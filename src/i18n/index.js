@@ -288,6 +288,15 @@ const resources = {
             'Insufficient precedent: only {{count}} Validated BRDP of the same standard meets the similarity threshold (minimum 3 required). Suggestions built without enough precedent are not offered automatically — review manually instead.',
           insufficientPrecedent_other:
             'Insufficient precedent: only {{count}} Validated BRDPs of the same standard meet the similarity threshold (minimum 3 required). Suggestions built without enough precedent are not offered automatically — review manually instead.',
+          clear: 'Clear',
+          compareLink: '+ Compare with another BRDP',
+          compareSearchPlaceholder: 'Search by ID or title…',
+          compareEmpty: 'No matching BRDPs.',
+          compareTruncated: 'Showing 50 of {{count}} matches — refine your search.',
+          compareSourceRecords: 'Records',
+          compareSourceCatalog: 'Catalog',
+          comparingWith: 'Comparing with: {{identifier}}',
+          compareRemove: 'Remove comparison',
         },
         history: {
           title: 'History',
@@ -738,6 +747,15 @@ const resources = {
             'Precedente insuficiente: solo {{count}} BRDP validado del mismo estándar supera el umbral de similitud (mínimo 3 requeridos). Las sugerencias sin precedente suficiente no se ofrecen automáticamente — revísalo manualmente.',
           insufficientPrecedent_other:
             'Precedente insuficiente: solo {{count}} BRDPs validados del mismo estándar superan el umbral de similitud (mínimo 3 requeridos). Las sugerencias sin precedente suficiente no se ofrecen automáticamente — revísalo manualmente.',
+          clear: 'Borrar',
+          compareLink: '+ Comparar con otro BRDP',
+          compareSearchPlaceholder: 'Buscar por ID o título…',
+          compareEmpty: 'No hay BRDPs que coincidan.',
+          compareTruncated: 'Mostrando 50 de {{count}} coincidencias — afina la búsqueda.',
+          compareSourceRecords: 'Records',
+          compareSourceCatalog: 'Catálogo',
+          comparingWith: 'Comparando con: {{identifier}}',
+          compareRemove: 'Quitar comparación',
         },
         history: {
           title: 'Historial',

@@ -529,6 +529,51 @@
   white-space: pre-wrap;
 }
 
+/* Small text-link style, no border/background -- used by "+ Compare with
+   another BRDP" and "Clear" (docs request: both "enlace pequeño"), same
+   ATEXIS blue as the rest of the app's primary actions. */
+.linkButton {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.compareChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eaf2fa;
+  border: 1px solid #c7ddf0;
+  font-size: 12px;
+  color: #245c90;
+}
+
+.compareChipRemove {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: #245c90;
+  cursor: pointer;
+}
+
+.compareSourceTag {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #94a3b8;
+}
+
 .suggestionActions {
   display: flex;
   gap: 6px;

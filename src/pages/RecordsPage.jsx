@@ -40,6 +40,83 @@ function formatHistoryValue(t, fieldName, value) {
   return value || '—';
 }
 
+// Same local map as ProjectConfigPage.jsx/GenerateBREXdocPage.jsx (not
+// centralized -- established convention in this codebase, see CLAUDE.md).
+const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified' };
+
+// A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
+// examples with inline function expressions run well past this) -- rather
+// than risk silently blowing max_tokens/context on a huge prompt (HR7:
+// never degrade silently), cut it and say so explicitly IN the prompt
+// itself, never just drop it.
+const ASK_RULE_MAX_CHARS = 6000;
+
+function ruleTextForAsk(state, ruleXml) {
+  if (state === 'todo' || !ruleXml) return 'Not yet defined';
+  if (ruleXml.length <= ASK_RULE_MAX_CHARS) return ruleXml;
+  return `${ruleXml.slice(0, ASK_RULE_MAX_CHARS)}\n[Rule truncated at ${ASK_RULE_MAX_CHARS} characters]`;
+}
+
+// Builds the "Ask a Question" system prompt: strictly scoped to the
+// selected BRDP (docs request), with its full live context -- including
+// Rule/Rule Status, which askGeneric previously never sent at all -- plus
+// an optional second BRDP (from Records or the official catalog) when the
+// user has picked one to compare against.
+function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp) {
+  const ruleState = ruleStateOf(ruleApproval);
+  let prompt = `You are an S1000D and DITA business-rules expert assistant embedded in
+BRDP Manager. You answer questions strictly about the single BRDP shown
+below${compareBrdp ? ' (and the BRDP being compared against, if one is shown below)' : ''} — not general questions, not questions about other BRDPs.
+
+If the question is not about this specific BRDP, say so plainly and ask
+the user to select the right BRDP (or rephrase) before asking again —
+do not attempt to answer a question unrelated to the BRDP below.
+
+Answer in at most 3 short paragraphs — be direct, no padding, no
+restating the question back to the user.
+
+When you cite a specific S1000D chapter, DITA element, or specification
+detail, only cite ones you're genuinely confident about — say so plainly
+if you're not certain rather than inventing a plausible-sounding
+reference.
+
+Answer in the same language as the question.
+
+Current BRDP context:
+ID: ${brdp.identifier}
+Title: ${brdp.title}
+Definition: ${brdp.definition}
+Proposal: ${brdp.proposal}
+Proposal Status: ${brdp.validation}`;
+
+  if (brdp.validation === 'Refused' && brdp.comments) {
+    prompt += `\nRefusal reason: ${brdp.comments}`;
+  }
+
+  prompt += `
+Rule Status: ${RULE_STATUS_LABELS[ruleState]}
+Rule: ${ruleTextForAsk(ruleState, ruleApproval?.rule_xml)}`;
+
+  if (compareBrdp) {
+    prompt += `\n\nBRDP being compared against (source: ${
+      compareBrdp.source === 'records' ? 'Records' : 'Catalog'
+    }):
+ID: ${compareBrdp.identifier}
+Title: ${compareBrdp.title}
+Definition: ${compareBrdp.definition}`;
+    if (compareBrdp.source === 'records') {
+      prompt += `
+Proposal: ${compareBrdp.proposal}
+Proposal Status: ${compareBrdp.validation}
+Rule Status: ${RULE_STATUS_LABELS[compareBrdp.ruleState]}
+Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
+    }
+    prompt += `\n\nThe user may ask you to compare the current BRDP with the one above; in that case both are in scope.`;
+  }
+
+  return prompt;
+}
+
 // Each dot always carries its own state name as title/aria-label (not
 // color alone) per the accessibility requirement -- the current step is
 // additionally marked via aria-current and a filled style.
@@ -197,6 +274,23 @@ export default function RecordsPage() {
   const [aiProvider, setAiProvider] = useState(null);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
+  // The single previous Ask turn ({ question, answer }), or null -- one
+  // turn of chaining only (docs request), not unlimited history, so cost
+  // and context stay bounded. Cleared by Clear or by switching BRDP.
+  const [prevTurn, setPrevTurn] = useState(null);
+  // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
+  // the chosen entry ({ source: 'records'|'catalog', identifier, title,
+  // definition, and for 'records' also proposal/validation/ruleState/
+  // ruleXml }) or null. compareCatalogEntries is fetched lazily, once,
+  // the first time the search opens (same lazy-load pattern as Add BRDP's
+  // catalog picker) -- it's global reference data keyed only by the
+  // project's standard, so it stays valid across switching BRDPs and
+  // doesn't need to be refetched per selection.
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareQuery, setCompareQuery] = useState('');
+  const [compareCatalogEntries, setCompareCatalogEntries] = useState([]);
+  const [compareBrdp, setCompareBrdp] = useState(null);
+  const [compareBusy, setCompareBusy] = useState(false);
   // null, or { kind, text, sourceBrdpIds, format? } for a real suggestion,
   // or { kind, insufficientPrecedent: true, count } when /similar (§3
   // point 3) reports fewer than its minimum candidates -- shown as an
@@ -389,6 +483,20 @@ export default function RecordsPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, ruleFormat, approvalsRefreshToken]);
+
+  // Bug fix (docs request): switching the selected BRDP must reset the Ask
+  // panel entirely -- previously `answer`/`question` just sat there, so a
+  // stale answer (built from and about the PREVIOUS BRDP's context) stayed
+  // visible, and the next question would have chained onto it as if it
+  // were still about the newly selected BRDP.
+  useEffect(() => {
+    setQuestion('');
+    setAnswer('');
+    setPrevTurn(null);
+    setCompareOpen(false);
+    setCompareQuery('');
+    setCompareBrdp(null);
+  }, [selected?.id]);
 
   useEffect(() => {
     if (!selected) {
@@ -586,26 +694,94 @@ export default function RecordsPage() {
     refreshStats();
   };
 
+  // The Ask panel only ever renders inside the `selected` branch of the
+  // detail panel (see the JSX below), so `selected` is always set here --
+  // no `selected ?` guard needed the way the old context-string ever had.
   const askGeneric = async () => {
-    if (!question.trim() || !aiProvider) return;
+    if (!question.trim() || !aiProvider || !selected) return;
     setBusy(true);
+    const askedQuestion = question;
     setAnswer('');
     try {
-      const context = selected ? `\n\nBRDP context:\nID: ${selected.identifier}\nDefinition: ${selected.definition}` : '';
-      const res = await sendMessage(
-        [{ role: 'user', content: question + context }],
-        null,
-        aiProvider.model,
-        aiProvider.provider,
-        'You are an S1000D/DITA BRDP expert assistant.'
-      );
+      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp);
+      // One turn of chaining (docs request): the previous Q/A, if any,
+      // goes in first as real conversation history so a follow-up like
+      // "and why?" resolves correctly, then the new question.
+      const messages = [];
+      if (prevTurn) {
+        messages.push({ role: 'user', content: prevTurn.question });
+        messages.push({ role: 'assistant', content: prevTurn.answer });
+      }
+      messages.push({ role: 'user', content: askedQuestion });
+
+      const res = await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt);
       setAnswer(res.content);
+      setPrevTurn({ question: askedQuestion, answer: res.content });
     } catch (err) {
       setAnswer(`Error: ${err.message}`);
     } finally {
       setBusy(false);
     }
   };
+
+  const clearAsk = () => {
+    setQuestion('');
+    setAnswer('');
+    setPrevTurn(null);
+  };
+
+  const openCompareSearch = () => {
+    setCompareOpen(true);
+    if (compareCatalogEntries.length === 0) {
+      // Global reference data, not project-scoped (same source/pattern as
+      // openCreatePanel's catalog fetch above) -- fetched once, lazily, the
+      // first time the search actually opens.
+      authFetchJson(`/api/brdp-catalog?standard=${encodeURIComponent(project.standard)}`)
+        .then(setCompareCatalogEntries)
+        .catch(() => setCompareCatalogEntries([]));
+    }
+  };
+
+  const closeCompareSearch = () => {
+    setCompareOpen(false);
+    setCompareQuery('');
+  };
+
+  // Rule Status/Rule for a Records candidate live in rule_approvals, not on
+  // the BRDP row itself (same architecture as the stepper above) -- the
+  // bulk-fetched ruleApprovalsById only carries `status` (enough to sort
+  // by), not `rule_xml`, so a dedicated fetch is needed here, same endpoint
+  // and shape the main ruleApproval effect above already uses.
+  const chooseCompareBrdp = async (candidate) => {
+    if (candidate.source === 'catalog') {
+      const { entry } = candidate;
+      setCompareBrdp({ source: 'catalog', identifier: entry.identifier, title: entry.title, definition: entry.definition });
+      closeCompareSearch();
+      return;
+    }
+    const { entry } = candidate;
+    setCompareBusy(true);
+    try {
+      const approval = ruleFormat
+        ? await authFetchJson(`/api/projects/${projectId}/brdps/${entry.id}/approvals/${ruleFormat}`)
+        : null;
+      setCompareBrdp({
+        source: 'records',
+        identifier: entry.identifier,
+        title: entry.title,
+        definition: entry.definition,
+        proposal: entry.proposal,
+        validation: entry.validation,
+        ruleState: ruleStateOf(approval),
+        ruleXml: approval?.rule_xml ?? null,
+      });
+    } finally {
+      setCompareBusy(false);
+    }
+    closeCompareSearch();
+  };
+
+  const clearCompareBrdp = () => setCompareBrdp(null);
 
   // docs/v2 §3: real few-shot precedent from the project's own validated
   // BRDPs, via GET .../similar (pure data, no LLM call in the backend --
@@ -1128,10 +1304,99 @@ export default function RecordsPage() {
                   onChange={(e) => setQuestion(e.target.value)}
                   placeholder={t('records.assistant.askPlaceholder')}
                 />
-                <button onClick={askGeneric} disabled={busy || !question.trim() || !aiProvider}>
-                  {busy ? '…' : t('records.assistant.ask')}
-                </button>
-                {answer && <div className={styles.answerBox}>{answer}</div>}
+
+                {compareBrdp ? (
+                  <div className={styles.compareChip}>
+                    <span>{t('records.assistant.comparingWith', { identifier: compareBrdp.identifier })}</span>
+                    <button
+                      type="button"
+                      className={styles.compareChipRemove}
+                      onClick={clearCompareBrdp}
+                      aria-label={t('records.assistant.compareRemove')}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={compareOpen ? closeCompareSearch : openCompareSearch}
+                  >
+                    {t('records.assistant.compareLink')}
+                  </button>
+                )}
+
+                {compareOpen &&
+                  !compareBrdp &&
+                  (() => {
+                    const q = compareQuery.trim().toLowerCase();
+                    const recordsMatches = brdps
+                      .filter((b) => b.id !== selected.id)
+                      .filter(
+                        (b) => !q || b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q)
+                      )
+                      .map((entry) => ({ source: 'records', entry }));
+                    const catalogMatches = compareCatalogEntries
+                      .filter((c) => !q || c.identifier.toLowerCase().includes(q) || c.title.toLowerCase().includes(q))
+                      .map((entry) => ({ source: 'catalog', entry }));
+                    const allMatches = [...recordsMatches, ...catalogMatches];
+                    return (
+                      <div className={styles.catalogPicker}>
+                        <input
+                          className={styles.input}
+                          value={compareQuery}
+                          onChange={(e) => setCompareQuery(e.target.value)}
+                          placeholder={t('records.assistant.compareSearchPlaceholder')}
+                          autoFocus
+                        />
+                        <ul className={styles.catalogList}>
+                          {allMatches.length === 0 && (
+                            <li className={styles.muted}>{t('records.assistant.compareEmpty')}</li>
+                          )}
+                          {allMatches.slice(0, 50).map((candidate) => (
+                            <li key={`${candidate.source}-${candidate.entry.id}`} className={styles.catalogItem}>
+                              <div className={styles.catalogItemHeader}>
+                                <span className={styles.mono}>{candidate.entry.identifier}</span>
+                                <span className={styles.compareSourceTag}>
+                                  {t(
+                                    candidate.source === 'records'
+                                      ? 'records.assistant.compareSourceRecords'
+                                      : 'records.assistant.compareSourceCatalog'
+                                  )}
+                                </span>
+                                <button type="button" disabled={compareBusy} onClick={() => chooseCompareBrdp(candidate)}>
+                                  {t('records.newBrdp.catalogChoose')}
+                                </button>
+                              </div>
+                              <div className={styles.catalogItemTitle}>{candidate.entry.title}</div>
+                            </li>
+                          ))}
+                        </ul>
+                        {allMatches.length > 50 && (
+                          <p className={styles.hint}>
+                            {t('records.assistant.compareTruncated', { count: allMatches.length })}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                <div>
+                  <button onClick={askGeneric} disabled={busy || !question.trim() || !aiProvider}>
+                    {busy ? '…' : t('records.assistant.ask')}
+                  </button>
+                </div>
+                {answer && (
+                  <div className={styles.answerBox}>
+                    {answer}
+                    <div>
+                      <button type="button" className={styles.linkButton} onClick={clearAsk}>
+                        {t('records.assistant.clear')}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <hr className={styles.hr} />
 
