@@ -27,6 +27,17 @@ function isOffTopic(text) {
   return /what'?s the weather|qué tiempo hace|weather like/i.test(text || "");
 }
 
+// Two deterministic triggers, checked by the verify script for markdown
+// rendering and for the "raw HTML in the answer must render as literal
+// text, never be interpreted" edge case (same principle as the Generate
+// Report HTML-injection fix, commit 90b7e12).
+function isMarkdownTest(text) {
+  return /MARKDOWN_TEST/.test(text || "");
+}
+function isHtmlTest(text) {
+  return /HTML_TEST/.test(text || "");
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -58,10 +69,28 @@ const server = http.createServer((req, res) => {
     const userText = lastUser?.content || "";
     const hasPriorTurn = nonSystem.length > 1; // prev user+assistant, plus the new question
 
+    // Deterministic failure trigger -- exercises askGeneric's catch branch
+    // (the real network-failure path) without relying on a flaky real
+    // network condition.
+    if (/ERROR_TEST/.test(userText)) {
+      console.log("chat call -- simulated 500 (ERROR_TEST)");
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "simulated failure for ERROR_TEST" }));
+      return;
+    }
+
     let reply;
     if (isOffTopic(userText)) {
       reply =
         "MOCK-OFFTOPIC: That question is not about this BRDP. Please select the correct BRDP, or rephrase your question so it's about this one.";
+    } else if (isMarkdownTest(userText)) {
+      reply =
+        "**MOCK-MARKDOWN** answer with real structure:\n\n" +
+        "- First point about `allowedObjectFlag`\n" +
+        "- Second point, *emphasized*\n\n" +
+        "Use `objectPath` for the context.";
+    } else if (isHtmlTest(userText)) {
+      reply = "MOCK-HTML-TEST: the element <table> and the tag <originator> must render as literal text, never as real HTML.";
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
     } else {

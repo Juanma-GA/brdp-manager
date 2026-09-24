@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { checkWellFormed } from '../api/generateBREX.js';
@@ -272,11 +273,29 @@ export default function RecordsPage() {
   const [createError, setCreateError] = useState(null);
 
   const [aiProvider, setAiProvider] = useState(null);
+  // `question` is only ever the live DRAFT in the textarea -- it auto-
+  // clears on a successful answer (docs request: feel like a mini
+  // conversation, not a submitted form) and is intentionally left alone on
+  // error, so the user never loses what they typed. The exchange actually
+  // shown/asked lives in the fields below, decoupled from the draft.
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
+  const [askError, setAskError] = useState(null);
+  // The question belonging to the CURRENTLY DISPLAYED exchange (pending,
+  // answered, or errored) -- null when there's nothing to show yet. Only
+  // one exchange is ever shown, matching the one-turn chaining already in
+  // place: what's on screen and what's sent to the LLM as history must
+  // always be the same single turn.
+  const [lastAsked, setLastAsked] = useState(null);
+  // True only while THIS specific request is in flight -- kept separate
+  // from the shared `busy` flag (also used by the Suggest buttons below)
+  // so a Suggest call never makes the Ask exchange look like it's loading.
+  const [askPending, setAskPending] = useState(false);
   // The single previous Ask turn ({ question, answer }), or null -- one
   // turn of chaining only (docs request), not unlimited history, so cost
-  // and context stay bounded. Cleared by Clear or by switching BRDP.
+  // and context stay bounded. Set only on a SUCCESSFUL answer (an errored
+  // question never becomes something the LLM "remembers"). Cleared by
+  // Clear or by switching BRDP.
   const [prevTurn, setPrevTurn] = useState(null);
   // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
   // the chosen entry ({ source: 'records'|'catalog', identifier, title,
@@ -492,6 +511,8 @@ export default function RecordsPage() {
   useEffect(() => {
     setQuestion('');
     setAnswer('');
+    setAskError(null);
+    setLastAsked(null);
     setPrevTurn(null);
     setCompareOpen(false);
     setCompareQuery('');
@@ -699,9 +720,17 @@ export default function RecordsPage() {
   // no `selected ?` guard needed the way the old context-string ever had.
   const askGeneric = async () => {
     if (!question.trim() || !aiProvider || !selected) return;
-    setBusy(true);
     const askedQuestion = question;
+    setBusy(true);
+    setAskPending(true);
+    // Shown immediately (docs request: "mostrar la pregunta enviada ya en
+    // la zona de intercambio con un indicador de carga") -- and this is
+    // also the point where the exchange on screen switches to the NEW
+    // question, replacing whatever was shown before, matching exactly what
+    // gets sent as history below (only ever one turn, never both).
+    setLastAsked(askedQuestion);
     setAnswer('');
+    setAskError(null);
     try {
       const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp);
       // One turn of chaining (docs request): the previous Q/A, if any,
@@ -717,16 +746,21 @@ export default function RecordsPage() {
       const res = await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt);
       setAnswer(res.content);
       setPrevTurn({ question: askedQuestion, answer: res.content });
+      // Auto-clear on success only (docs request) -- an errored question
+      // stays in the textarea below so the user never loses what they typed.
+      setQuestion('');
     } catch (err) {
-      setAnswer(`Error: ${err.message}`);
+      setAskError(err.message);
     } finally {
       setBusy(false);
+      setAskPending(false);
     }
   };
 
   const clearAsk = () => {
-    setQuestion('');
     setAnswer('');
+    setAskError(null);
+    setLastAsked(null);
     setPrevTurn(null);
   };
 
@@ -1297,12 +1331,53 @@ export default function RecordsPage() {
                 {!aiProvider && <p className={styles.muted}>{t('records.assistant.noProvider')}</p>}
 
                 <label className={styles.fieldLabel}>{t('records.assistant.askLabel')}</label>
+
+                {/* The last exchange -- question + answer/error/loading --
+                    always ABOVE the textarea (docs request: feel like a
+                    mini conversation, not a submitted form). Only ever ONE
+                    exchange shown, matching the one-turn chaining already
+                    sent to the LLM: what's on screen and what it remembers
+                    are always the same turn. */}
+                {lastAsked && (
+                  <div className={styles.exchange}>
+                    <p className={styles.exchangeQuestion}>
+                      <span className={styles.exchangeYou}>{t('records.assistant.you')}:</span> {lastAsked}
+                    </p>
+                    {askPending ? (
+                      <div className={styles.answerBox}>
+                        <span className={styles.muted}>{t('records.assistant.thinking')}</span>
+                      </div>
+                    ) : askError ? (
+                      <div className={styles.answerBox} role="alert">
+                        {t('records.assistant.errorPrefix')}: {askError}
+                      </div>
+                    ) : (
+                      <div className={styles.answerBox}>
+                        <ReactMarkdown>{answer}</ReactMarkdown>
+                      </div>
+                    )}
+                    {!askPending && (
+                      <button type="button" className={styles.linkButton} onClick={clearAsk}>
+                        {t('records.assistant.clear')}
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <textarea
                   className={styles.textarea}
                   rows={2}
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  placeholder={t('records.assistant.askPlaceholder')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !busy) {
+                      e.preventDefault();
+                      askGeneric();
+                    }
+                  }}
+                  placeholder={t(
+                    prevTurn ? 'records.assistant.askFollowupPlaceholder' : 'records.assistant.askPlaceholder'
+                  )}
                 />
 
                 {compareBrdp ? (
@@ -1387,16 +1462,6 @@ export default function RecordsPage() {
                     {busy ? '…' : t('records.assistant.ask')}
                   </button>
                 </div>
-                {answer && (
-                  <div className={styles.answerBox}>
-                    {answer}
-                    <div>
-                      <button type="button" className={styles.linkButton} onClick={clearAsk}>
-                        {t('records.assistant.clear')}
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 <hr className={styles.hr} />
 

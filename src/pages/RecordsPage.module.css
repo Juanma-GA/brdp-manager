@@ -526,7 +526,66 @@
   border-radius: 6px;
   background: #f8fafc;
   font-size: 12.5px;
+}
+
+/* .suggestionBox is always raw plain text (a Suggest Definition/Proposal/
+   Rule result), so it keeps preserving the LLM's own line breaks.
+   .answerBox now renders real markdown (react-markdown, docs request) --
+   its paragraphs/lists already carry their own line breaks, so pre-wrap
+   would double them up. */
+.suggestionBox {
   white-space: pre-wrap;
+}
+
+/* Compact defaults for react-markdown's output inside .answerBox -- the
+   browser's default <p>/<ul>/<pre> margins are sized for a full document,
+   not this narrow side panel. */
+.answerBox p {
+  margin: 0 0 6px;
+}
+.answerBox p:last-child {
+  margin-bottom: 0;
+}
+.answerBox ul,
+.answerBox ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+.answerBox li {
+  margin: 2px 0;
+}
+.answerBox code {
+  background: #eef2f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 11.5px;
+}
+.answerBox pre {
+  background: #eef2f7;
+  border-radius: 6px;
+  padding: 8px;
+  overflow-x: auto;
+}
+.answerBox pre code {
+  background: none;
+  padding: 0;
+}
+
+/* The mini-thread's last exchange (docs request): the user's own question
+   in a discrete/muted style ("Tú: ..."), the answer/error/loading state
+   directly below it. */
+.exchange {
+  margin-top: 8px;
+}
+
+.exchangeQuestion {
+  margin: 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.exchangeYou {
+  font-weight: 600;
 }
 
 /* Small text-link style, no border/background -- used by "+ Compare with
