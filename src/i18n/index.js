@@ -283,6 +283,11 @@ const resources = {
             'Insufficient precedent: only {{count}} Validated BRDP of the same standard meets the similarity threshold (minimum 3 required). Suggestions built without enough precedent are not offered automatically — review manually instead.',
           insufficientPrecedent_other:
             'Insufficient precedent: only {{count}} Validated BRDPs of the same standard meet the similarity threshold (minimum 3 required). Suggestions built without enough precedent are not offered automatically — review manually instead.',
+          suggestDefinitionCatalogDisabled: 'Official definition from the standard catalog',
+          definitionNoReferences: 'Definition generated without reference BRDPs',
+          definitionSimilarGroup: 'Similar',
+          definitionStyleReferencesGroup: 'Style references',
+          definitionSimilarity: 'similarity {{score}}',
           pendingEmbeddings_one: '{{count}} BRDP pending embedding',
           pendingEmbeddings_other: '{{count}} BRDPs pending embedding',
           computeEmbeddings: 'Compute embeddings',
@@ -729,6 +734,11 @@ const resources = {
             'Precedente insuficiente: solo {{count}} BRDP validado del mismo estándar supera el umbral de similitud (mínimo 3 requeridos). Las sugerencias sin precedente suficiente no se ofrecen automáticamente — revísalo manualmente.',
           insufficientPrecedent_other:
             'Precedente insuficiente: solo {{count}} BRDPs validados del mismo estándar superan el umbral de similitud (mínimo 3 requeridos). Las sugerencias sin precedente suficiente no se ofrecen automáticamente — revísalo manualmente.',
+          suggestDefinitionCatalogDisabled: 'Definición oficial del catálogo del standard',
+          definitionNoReferences: 'Definición generada sin BRDPs de referencia',
+          definitionSimilarGroup: 'Similares',
+          definitionStyleReferencesGroup: 'Referencias de estilo',
+          definitionSimilarity: 'similitud {{score}}',
           pendingEmbeddings_one: '{{count}} BRDP pendiente de embedding',
           pendingEmbeddings_other: '{{count}} BRDPs pendientes de embedding',
           computeEmbeddings: 'Calcular embeddings',

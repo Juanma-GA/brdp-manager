@@ -13,6 +13,18 @@ class SimilarCandidateOut(BaseModel):
     # distance pgvector's `<=>` returns, since "higher is better" is the
     # intuitive direction for a frontend to sort/display on.
     score: float
+    # kind='definition' only (docs request -- Suggest Definition corpus
+    # with catalog): the candidate's Title, needed alongside `text`
+    # (Definition) to build the "Title: … / Definition: …" reference block
+    # the frontend's buildSuggestDefinitionPrompt() renders. Empty for
+    # proposal/rule -- their prompt never needed the title.
+    title: str = ""
+    # kind='definition' only: human-readable precedent origin, since this
+    # kind's candidate pool spans BOTH this standard's other projects
+    # (Records) and its official catalog (Catalog) and the UI/prompt must
+    # say which -- "Records — <project name>" or "Catalog". Empty for
+    # proposal/rule, whose candidates are never labeled by origin.
+    source: str = ""
 
 
 class SimilarOut(BaseModel):
@@ -21,8 +33,20 @@ class SimilarOut(BaseModel):
     # fewer than MIN_CANDIDATES passed the similarity threshold. The
     # frontend must surface `message` explicitly in that case rather than
     # quietly building a few-shot prompt from weak/unrelated precedent.
+    # kind='definition' (docs request): MIN_CANDIDATES no longer applies
+    # -- this is always True and `message` is always None for that kind,
+    # since the LLM is now always called regardless of precedent count.
     sufficient_precedent: bool
+    # kind='definition': the "Similar" list -- up to 5 candidates meeting
+    # MIN_SIMILARITY, across this standard's other projects AND its
+    # catalog. kind='proposal'/'rule': unchanged, up to CANDIDATE_LIMIT
+    # from this project's own standard-wide search.
     candidates: list[SimilarCandidateOut]
+    # kind='definition' only: up to 3 "different in content, same style"
+    # references (the 3 candidates with the LOWEST similarity in the whole
+    # corpus), added ONLY when `candidates` above has fewer than 3 entries
+    # -- never for proposal/rule (always empty there).
+    style_references: list[SimilarCandidateOut] = []
     message: str | None = None
     # kind='rule' only: the rule_approvals format these candidates' rule_xml
     # came from, so a frontend that accepts a suggested rule knows which

@@ -96,6 +96,12 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
     directly on their rows via the DB session (same pattern as
     test_similar.py), and only GET .../similar's own real query-embedding
     call (for the source BRDP) is mocked, scoped to this one test.
+
+    kind='proposal' (not 'definition') -- this test is about
+    ACTIVE_BRDP_FILTER excluding a soft-deleted BRDP from the candidate
+    set, not about kind='definition''s own corpus logic (which no longer
+    has a sufficient_precedent/MIN_CANDIDATES concept at all, see the
+    Suggest Definition corpus round tests in test_similar.py).
     """
     project, admin, editor, admin_headers, editor_headers = admin_editor_and_project
 
@@ -136,7 +142,7 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
 
         before = await client.get(
             f"/api/projects/{project.id}/brdps/{query_brdp['id']}/similar",
-            params={"kind": "definition"},
+            params={"kind": "proposal"},
             headers=editor_headers,
         )
         assert before.status_code == 200
@@ -152,7 +158,7 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
 
         after = await client.get(
             f"/api/projects/{project.id}/brdps/{query_brdp['id']}/similar",
-            params={"kind": "definition"},
+            params={"kind": "proposal"},
             headers=editor_headers,
         )
         assert after.status_code == 200

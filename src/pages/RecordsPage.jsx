@@ -146,6 +146,73 @@ Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
   return prompt;
 }
 
+// Suggest Definition's own system prompt (docs request, Suggest Definition
+// corpus round) -- a dedicated function, not inline in requestSuggestion,
+// same precedent as buildAskSystemPrompt above. Built ENTIRELY from
+// /similar's structured `candidates`/`style_references` arrays (never from
+// the LLM) -- the reference list the UI renders under the suggestion comes
+// from those exact same arrays, so what the user sees always matches what
+// the LLM actually saw. `similar`/`styleReferences` entries carry `source`
+// already formatted by the backend ("Records: <project name>" / "Catalog"
+// -- similar.py's _get_definition_similar), reused verbatim here and in
+// the UI rather than reformatted a second, possibly-diverging way.
+function buildSuggestDefinitionPrompt(brdp, standard, similar, styleReferences) {
+  const referenceBlock = (c) => `Title: ${c.title}\nDefinition: ${c.text}`;
+
+  let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
+Decision Points), assisting in BRDP Manager.
+
+Your task: write the Definition for the BRDP below. A Definition states
+the decision point — WHAT must be decided and its scope — in neutral,
+concise terms. It does not state the chosen answer (that is the
+Proposal) and does not describe XML implementation details (that is
+the Rule).
+
+Use this project's standard only: ${standard}. Use its terminology and
+element names; do not mix in other versions of S1000D or DITA.
+
+`;
+
+  if (similar.length > 0) {
+    prompt += `SIMILAR BRDPs — validated decision points closest in meaning to this
+one. Follow their style, length and level of detail:
+${similar
+  .map((c) => `[${c.identifier} | ${c.source} | similarity ${c.score.toFixed(2)}]\n${referenceBlock(c)}`)
+  .join('\n\n')}
+
+`;
+  }
+
+  if (styleReferences.length > 0) {
+    prompt += `STYLE REFERENCES — validated decision points that are DIFFERENT in
+content. Use them only to see how Definitions are written in this
+standard; do not copy or reuse their content:
+${styleReferences.map((c) => `[${c.identifier} | ${c.source}]\n${referenceBlock(c)}`).join('\n\n')}
+
+`;
+  }
+
+  if (similar.length === 0 && styleReferences.length === 0) {
+    prompt += `No reference BRDPs are available; write the Definition from your
+knowledge of ${standard} alone.
+
+`;
+  }
+
+  prompt += `Write in the same language as the BRDP's Title and Proposal.
+Do not cite specification chapter numbers you are not sure of.
+Return ONLY the Definition text — no preamble, no references list,
+no quotes, no markdown.
+
+BRDP to define:
+ID: ${brdp.identifier}
+Title: ${brdp.title}
+Current Definition: ${brdp.definition || 'empty'}
+Proposal: ${brdp.proposal || 'empty'}`;
+
+  return prompt;
+}
+
 // Each dot always carries its own state name as title/aria-label (not
 // color alone) per the accessibility requirement -- the current step is
 // additionally marked via aria-current and a filled style.
@@ -371,6 +438,13 @@ export default function RecordsPage() {
   // explicit notice instead of ever calling the LLM with weak/no few-shot.
   const [suggestion, setSuggestion] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Suggest Definition catalog guard (docs request, Suggest Definition
+  // corpus round): identifiers of this standard's official catalog,
+  // fetched once per project (eagerly, unlike catalogEntries/
+  // compareCatalogEntries above which only load lazily when their own
+  // panel opens) -- needed as soon as a row is selected, to decide
+  // whether to disable the button at all, not just when a picker is open.
+  const [catalogIdentifierSet, setCatalogIdentifierSet] = useState(new Set());
 
   // Rule Status stepper state for the SELECTED BRDP -- the manual editor
   // and Edit/Verify/Revoke actions live here in the detail panel (v1's
@@ -430,6 +504,9 @@ export default function RecordsPage() {
     setProposalStatusFilter('');
     setRuleStatusFilter('');
     authFetchJson('/api/config/ai-provider').then(setAiProvider).catch(() => setAiProvider(null));
+    authFetchJson(`/api/brdp-catalog?standard=${encodeURIComponent(project.standard)}`)
+      .then((entries) => setCatalogIdentifierSet(new Set(entries.map((e) => e.identifier))))
+      .catch(() => setCatalogIdentifierSet(new Set()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -894,6 +971,34 @@ export default function RecordsPage() {
       // embedding job yet is invisible to this search; surfaced regardless
       // of whether precedent ended up sufficient or not.
       const excludedPendingOtherProjects = similar.excluded_pending_other_projects || 0;
+
+      // kind='definition' (docs request, Suggest Definition corpus round):
+      // its own dedicated prompt + corpus shape (Similar/Style references,
+      // no MIN_CANDIDATES gate) -- diverges completely from proposal/rule
+      // below, which are untouched by this round.
+      if (kind === 'definition') {
+        const referenceSimilar = similar.candidates;
+        const referenceStyle = similar.style_references || [];
+        const systemPrompt = buildSuggestDefinitionPrompt(selected, project.standard, referenceSimilar, referenceStyle);
+        const res = await sendMessage(
+          [{ role: 'user', content: 'Write the Definition for this BRDP.' }],
+          null,
+          aiProvider.model,
+          aiProvider.provider,
+          systemPrompt,
+          { temperature: 0.3 }
+        );
+        setSuggestion({
+          kind,
+          text: res.content,
+          sourceBrdpIds: referenceSimilar.map((c) => c.id),
+          similar: referenceSimilar,
+          styleReferences: referenceStyle,
+          excludedPendingOtherProjects,
+        });
+        return;
+      }
+
       if (!similar.sufficient_precedent) {
         setSuggestion({
           kind,
@@ -1595,17 +1700,27 @@ export default function RecordsPage() {
                 )}
 
                 <div className={styles.suggestionActions}>
-                  {SUGGEST_KINDS.map((kind) => (
-                    <button
-                      key={kind}
-                      onClick={() => requestSuggestion(kind)}
-                      disabled={busy || !aiProvider || suggestDisabledByEmbeddings}
-                    >
-                      {busy && suggestion?.kind === kind
-                        ? '…'
-                        : t(`records.assistant.suggest${kind.charAt(0).toUpperCase()}${kind.slice(1)}`)}
-                    </button>
-                  ))}
+                  {SUGGEST_KINDS.map((kind) => {
+                    // docs request (Suggest Definition corpus round), point
+                    // 1: an official catalog BRDP already has a standard-
+                    // issued Definition -- checked against the real
+                    // catalog table (catalogIdentifierSet), never by
+                    // identifier prefix. Only Suggest Definition is gated
+                    // by this; Suggest Proposal/Rule are unaffected.
+                    const catalogDisabled = kind === 'definition' && catalogIdentifierSet.has(selected.identifier);
+                    return (
+                      <button
+                        key={kind}
+                        onClick={() => requestSuggestion(kind)}
+                        disabled={busy || !aiProvider || suggestDisabledByEmbeddings || catalogDisabled}
+                        title={catalogDisabled ? t('records.assistant.suggestDefinitionCatalogDisabled') : undefined}
+                      >
+                        {busy && suggestion?.kind === kind
+                          ? '…'
+                          : t(`records.assistant.suggest${kind.charAt(0).toUpperCase()}${kind.slice(1)}`)}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {suggestion?.excludedPendingOtherProjects > 0 && (
@@ -1640,6 +1755,52 @@ export default function RecordsPage() {
                       </button>
                       <button onClick={discardSuggestion}>{t('records.assistant.discard')}</button>
                     </div>
+
+                    {/* docs request (Suggest Definition corpus round): the
+                        reference list is app-generated from /similar's own
+                        structured data -- the exact same `similar`/
+                        `styleReferences` arrays buildSuggestDefinitionPrompt
+                        used -- NEVER text the LLM produced, and the
+                        accepted text above never includes it. */}
+                    {suggestion.kind === 'definition' && (
+                      <div className={styles.suggestionReferences}>
+                        {suggestion.similar.length === 0 && suggestion.styleReferences.length === 0 ? (
+                          <p className={styles.hint}>{t('records.assistant.definitionNoReferences')}</p>
+                        ) : (
+                          <>
+                            {suggestion.similar.length > 0 && (
+                              <div>
+                                <h4 className={styles.referencesGroupTitle}>
+                                  {t('records.assistant.definitionSimilarGroup')}
+                                </h4>
+                                <ul className={styles.referencesList}>
+                                  {suggestion.similar.map((c) => (
+                                    <li key={`similar-${c.id}`}>
+                                      <span className={styles.mono}>{c.identifier}</span> — {c.source} —{' '}
+                                      {t('records.assistant.definitionSimilarity', { score: c.score.toFixed(2) })}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {suggestion.styleReferences.length > 0 && (
+                              <div>
+                                <h4 className={styles.referencesGroupTitle}>
+                                  {t('records.assistant.definitionStyleReferencesGroup')}
+                                </h4>
+                                <ul className={styles.referencesList}>
+                                  {suggestion.styleReferences.map((c) => (
+                                    <li key={`style-${c.id}`}>
+                                      <span className={styles.mono}>{c.identifier}</span> — {c.source}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

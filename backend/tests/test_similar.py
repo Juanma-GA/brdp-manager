@@ -9,6 +9,16 @@ independent of any real Mistral call. The route's OWN query-embedding
 call (for the source BRDP) is mocked via get_httpx_transport to always
 return the same fixed vector, so "similarity to the query" is just
 "similarity to that fixed vector" -- exact and reproducible.
+
+Suggest Definition corpus round (docs request): MIN_CANDIDATES/
+sufficient_precedent/candidate-cap-10 semantics below no longer apply to
+kind='definition' at all (its own corpus/threshold logic lives in
+_get_definition_similar, tested separately further down this file) --
+the generic tests that exercise those semantics (standard filtering,
+self-exclusion, the pending-embedding exclusion count, the insufficient-
+precedent degrade) were switched to kind='proposal' here, which keeps
+the old behavior byte-for-byte. Only tests that were never actually
+about that gating (self-exclusion, auth) were left on kind='definition'.
 """
 import uuid
 
@@ -19,7 +29,7 @@ from app.api.deps import get_httpx_transport
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.main import app
-from app.models import BRDP, Project, RuleApproval, User, UserProjectRole
+from app.models import BRDP, BRDPCatalog, Project, RuleApproval, User, UserProjectRole
 from app.models.brdp import EMBEDDING_DIM
 
 # Two orthogonal unit vectors -- cosine_similarity(SAME, SAME) == 1.0,
@@ -90,6 +100,49 @@ async def _make_source_brdp(project_id: uuid.UUID) -> BRDP:
         return brdp
 
 
+async def _make_source_brdp_with_identifier(project_id: uuid.UUID, identifier: str) -> BRDP:
+    """Same as _make_source_brdp, but with a caller-chosen identifier --
+    needed to test the catalog-BRDP rejection (docs request, Suggest
+    Definition corpus round), which is keyed on identifier.
+    """
+    async with async_session_factory() as session:
+        brdp = BRDP(
+            project_id=project_id,
+            identifier=identifier,
+            definition="Some definition text",
+            proposal="Some proposal text",
+            validation="Pending",
+        )
+        session.add(brdp)
+        await session.commit()
+        await session.refresh(brdp)
+        return brdp
+
+
+async def _make_catalog_entry(standard: str, embedding: list[float] | None, identifier: str) -> BRDPCatalog:
+    async with async_session_factory() as session:
+        entry = BRDPCatalog(
+            standard=standard,
+            identifier=identifier,
+            title=f"Catalog title for {identifier}",
+            definition=f"Catalog definition for {identifier}",
+            embedding=embedding,
+        )
+        session.add(entry)
+        await session.commit()
+        await session.refresh(entry)
+        return entry
+
+
+async def _cleanup_catalog(entries: list[BRDPCatalog]) -> None:
+    async with async_session_factory() as session:
+        for entry in entries:
+            db_entry = await session.get(BRDPCatalog, entry.id)
+            if db_entry is not None:
+                await session.delete(db_entry)
+        await session.commit()
+
+
 async def _make_validated_candidate(
     project_id: uuid.UUID,
     embedding: list[float],
@@ -141,7 +194,7 @@ async def test_zero_candidates_reports_insufficient_precedent(client):
     source = await _make_source_brdp(project.id)
     try:
         response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -168,7 +221,7 @@ async def test_two_passing_candidates_reports_insufficient_precedent(client):
     far_one = await _make_validated_candidate(project.id, _ORTHOGONAL_DIRECTION, "BRDP-FAR-1")
     try:
         response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -190,7 +243,7 @@ async def test_fifteen_plus_candidates_reports_sufficient_precedent_capped_at_te
         await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-MANY-{i}")
     try:
         response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -242,7 +295,7 @@ async def test_different_standard_is_excluded_from_candidates(client):
         await _make_validated_candidate(project_b.id, _SAME_DIRECTION, f"BRDP-OTHERSTD-{i}")
     try:
         response = await client.get(
-            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -379,7 +432,7 @@ async def test_excluded_pending_other_projects_counts_other_projects_without_emb
         await session.commit()
     try:
         response = await client.get(
-            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -398,7 +451,7 @@ async def test_excluded_pending_other_projects_is_zero_when_nothing_pending(clie
         await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-NOPEND-{i}")
     try:
         response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
         )
         assert response.status_code == 200
         assert response.json()["excluded_pending_other_projects"] == 0
@@ -412,3 +465,235 @@ async def test_viewer_can_read_similar_but_requires_authentication(client):
     unauthenticated = await client.get(f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition")
     assert unauthenticated.status_code == 401
     await _cleanup(project)
+
+
+# ---- kind='definition' corpus (docs request, Suggest Definition round) ----
+#
+# Its own MIN_CANDIDATES-free, catalog-including corpus logic
+# (_get_definition_similar), tested independently of the generic
+# proposal/rule tests above (which were switched to kind='proposal' and
+# keep asserting the OLD, still-current behavior for those two kinds).
+
+
+async def test_definition_never_reports_insufficient_precedent_even_with_zero_candidates(client):
+    """docs request: MIN_CANDIDATES is gone for kind='definition' -- the
+    LLM is always called, with 0, 1, or more references. sufficient_
+    precedent stays True and message stays None even with a totally empty
+    corpus (no Validated BRDPs anywhere, no catalog for this standard).
+    """
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["sufficient_precedent"] is True
+        assert body["message"] is None
+        assert body["candidates"] == []
+        assert body["style_references"] == []
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_definition_candidates_include_catalog_and_other_projects_records_with_source_labels(client):
+    """docs request point 2: candidates = Validated BRDPs of the same
+    standard from ALL projects (excluding the source's own) + catalog
+    entries of that standard -- each labeled by origin.
+    """
+    project_a = await _make_project(standard="S1000D 4.2")
+    project_b = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project_a.id)
+    source = await _make_source_brdp(project_a.id)
+    other_project_candidate = await _make_validated_candidate(project_b.id, _SAME_DIRECTION, "BRDP-OTHERPROJ-1")
+    catalog_entry = await _make_catalog_entry("S1000D 4.2", _SAME_DIRECTION, "BRDP-CAT-1")
+    try:
+        response = await client.get(
+            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        by_identifier = {c["identifier"]: c for c in body["candidates"]}
+        assert set(by_identifier) == {"BRDP-OTHERPROJ-1", "BRDP-CAT-1"}
+        assert by_identifier["BRDP-OTHERPROJ-1"]["source"] == f"Records: {project_b.name}"
+        assert by_identifier["BRDP-CAT-1"]["source"] == "Catalog"
+        assert by_identifier["BRDP-CAT-1"]["title"] == catalog_entry.title
+        assert by_identifier["BRDP-CAT-1"]["text"] == catalog_entry.definition
+        # <3 similar -> style references would normally kick in, but the
+        # whole corpus is these same 2 entries -- nothing left to add.
+        assert body["style_references"] == []
+    finally:
+        await _cleanup(project_a, [editor])
+        await _cleanup(project_b)
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_definition_similar_capped_at_five(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    for i in range(7):
+        await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-MANY-{i}")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["candidates"]) == 5  # DEFINITION_SIMILAR_LIMIT, not all 7
+        assert all(c["score"] == pytest.approx(1.0) for c in body["candidates"])
+        assert body["style_references"] == []  # 5 similar -- never <3, so none added
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_definition_style_references_added_only_below_three_similar(client):
+    """docs request point 2: style references (the 3 lowest-similarity
+    candidates in the whole corpus) are added ONLY when fewer than 3
+    passed the similarity threshold -- never repeating one already in
+    `candidates`.
+    """
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    close_one = await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-CLOSE-1")
+    far_ones = [
+        await _make_validated_candidate(project.id, _ORTHOGONAL_DIRECTION, f"BRDP-FAR-{i}") for i in range(4)
+    ]
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert [c["identifier"] for c in body["candidates"]] == ["BRDP-CLOSE-1"]
+        assert len(body["style_references"]) == 3  # DEFINITION_STYLE_REFERENCE_LIMIT, out of 4 available
+        style_ids = {c["id"] for c in body["style_references"]}  # JSON -- UUIDs serialize as strings
+        assert str(close_one.id) not in style_ids  # never repeats one already in `candidates`
+        assert style_ids <= {str(b.id) for b in far_ones}
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_definition_style_references_empty_when_three_or_more_similar(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    for i in range(3):
+        await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-CLOSE-{i}")
+    # Dissimilar candidates present too -- must NOT be added as style
+    # references just because they exist; only the <3-similar trigger
+    # matters, and there are exactly 3 similar here.
+    for i in range(2):
+        await _make_validated_candidate(project.id, _ORTHOGONAL_DIRECTION, f"BRDP-FAR-{i}")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["candidates"]) == 3
+        assert body["style_references"] == []
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_definition_style_references_never_duplicate_similar_in_tiny_corpus(client):
+    """Edge case: the whole corpus has fewer than 3 candidates total, all
+    of them already in `candidates` -- style references must end up
+    empty, not repeat them (docs request: "sin repetir ninguna ya
+    incluida").
+    """
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-ONLY-1")
+    await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-ONLY-2")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["candidates"]) == 2
+        assert body["style_references"] == []
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_definition_candidates_exclude_catalog_of_a_different_standard(client):
+    project = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    other_standard_entry = await _make_catalog_entry("S1000D 3.0.1", _SAME_DIRECTION, "BRDP-OTHERSTD-CAT")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        assert response.json()["candidates"] == []
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([other_standard_entry])
+
+
+async def test_definition_rejects_source_brdp_that_is_itself_a_catalog_entry(client):
+    """docs request point 1: an official catalog BRDP already has a
+    standard-issued Definition -- Suggest Definition is rejected with 400
+    (the frontend's own disabled-button defense is separate; this is the
+    server-side one). Checked against the real table by (standard,
+    identifier), never by prefix -- see the next test.
+    """
+    project = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project.id)
+    catalog_entry = await _make_catalog_entry("S1000D 4.2", None, "BRDP-S1-00070")
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00070")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 400
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_definition_catalog_rejection_is_by_exact_table_match_not_prefix(client):
+    """The identifier LOOKS like a catalog-style identifier (same prefix
+    convention) but is genuinely not one of the entries in the table --
+    must be allowed, proving the check is a real (standard, identifier)
+    lookup, not a prefix heuristic.
+    """
+    project = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project.id)
+    catalog_entry = await _make_catalog_entry("S1000D 4.2", None, "BRDP-S1-00070")
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00099")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_definition_catalog_rejection_scoped_to_this_project_standard_only(client):
+    """The same identifier exists in the catalog, but for a DIFFERENT
+    standard than this project's -- must not be rejected (the catalog
+    check is (standard, identifier), not identifier alone).
+    """
+    project = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project.id)
+    catalog_entry = await _make_catalog_entry("S1000D 3.0.1", None, "BRDP-S1-00070")
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00070")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([catalog_entry])

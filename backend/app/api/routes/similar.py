@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_httpx_transport, require_project_role
 from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
-from app.models import BRDP, Project, RuleApproval, User
+from app.models import BRDP, BRDPCatalog, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.similar import SimilarCandidateOut, SimilarOut
 from app.services.embeddings import EmbeddingUnavailable, brdp_embedding_text, compute_embedding
@@ -24,16 +24,24 @@ router = APIRouter(prefix="/api/projects/{project_id}/brdps/{brdp_id}/similar", 
 # docs/v2 §3 point 3 -- HR7, never silently degrade: below this many
 # passing candidates, the response says so explicitly instead of padding
 # with weak matches. Starting value, not empirically tuned yet (§3 point 5
-# -- revisit after real usage, same as the rest of the mechanism).
+# -- revisit after real usage, same as the rest of the mechanism). Applies
+# to kind='proposal'/'rule' only -- docs request removed this gate for
+# kind='definition' (its corpus round), which always calls the LLM now.
 MIN_CANDIDATES = 3
 
 # Minimum cosine similarity (1 - pgvector cosine distance) to count as a
 # real match at all, independent of MIN_CANDIDATES -- without this, a
 # project with only 3 total Validated BRDPs would always report
-# "sufficient precedent" even if none of them are actually similar.
+# "sufficient precedent" even if none of them are actually similar. Also
+# the threshold for kind='definition''s "Similar" list (docs request).
 MIN_SIMILARITY = 0.5
 
 CANDIDATE_LIMIT = 10
+
+# kind='definition' only (docs request): "up to 5 similar" / "3 lowest-
+# similarity style references, only when fewer than 3 similar".
+DEFINITION_SIMILAR_LIMIT = 5
+DEFINITION_STYLE_REFERENCE_LIMIT = 3
 
 
 @router.get("", response_model=SimilarOut)
@@ -59,6 +67,31 @@ async def get_similar(
                 detail=f"Rule suggestions are not available for project standard {project.standard!r}",
             )
 
+    # docs request (Suggest Definition corpus round), point 1 -- "Prohibido
+    # sobre BRDPs de catálogo": an official catalog BRDP already HAS a
+    # standard-issued Definition, so suggesting one is nonsensical. The
+    # frontend disables the button for this case; this is the server-side
+    # defense (checked against the real table, never by identifier prefix
+    # -- a project can legitimately have non-EXT identifiers that aren't
+    # catalog entries, and vice versa). Cheap enough to do before the real
+    # embedding call below, so a direct API call never pays for one either.
+    if kind == "definition":
+        is_catalog_brdp = (
+            await db.execute(
+                select(func.count())
+                .select_from(BRDPCatalog)
+                .where(BRDPCatalog.standard == project.standard, BRDPCatalog.identifier == brdp.identifier)
+            )
+        ).scalar_one() > 0
+        if is_catalog_brdp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"BRDP {brdp.identifier!r} already has an official definition from the "
+                    f"{project.standard!r} catalog -- Suggest Definition is not available for it."
+                ),
+            )
+
     # Computed fresh from the SOURCE BRDP's current text, not read from
     # brdp.embedding -- that column is only ever populated by the
     # embedding_jobs background job for a Validated BRDP (docs request:
@@ -76,6 +109,9 @@ async def get_similar(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not compute query embedding: {err}"
         )
+
+    if kind == "definition":
+        return await _get_definition_similar(db, project, project_id, brdp_id, query_embedding)
 
     distance_col = BRDP.embedding.cosine_distance(query_embedding).label("distance")
     stmt = (
@@ -121,12 +157,9 @@ async def get_similar(
         similarity = 1 - distance
         if similarity < MIN_SIMILARITY:
             continue  # rows are ordered by distance ascending -- no later row can pass either
-        if kind == "definition":
-            text = candidate_brdp.definition
-        elif kind == "proposal":
-            text = candidate_brdp.proposal
-        else:
-            text = rule_text_by_brdp_id.get(candidate_brdp.id, "")
+        # kind == "definition" never reaches here -- it returns early via
+        # _get_definition_similar() above, with its own corpus logic.
+        text = candidate_brdp.proposal if kind == "proposal" else rule_text_by_brdp_id.get(candidate_brdp.id, "")
         candidates.append(
             SimilarCandidateOut(
                 id=candidate_brdp.id, identifier=candidate_brdp.identifier, text=text, score=similarity
@@ -172,5 +205,140 @@ async def get_similar(
         candidates=candidates,
         message=message,
         format=rule_format,
+        excluded_pending_other_projects=excluded_pending_other_projects,
+    )
+
+
+async def _get_definition_similar(
+    db: AsyncSession,
+    project: Project,
+    project_id: uuid.UUID,
+    brdp_id: uuid.UUID,
+    query_embedding: list[float],
+) -> SimilarOut:
+    """kind='definition' corpus (docs request, Suggest Definition round):
+    unlike proposal/rule, candidates come from BOTH this standard's other
+    Validated BRDPs (across every project, same as proposal/rule already
+    do) AND its official catalog -- and MIN_CANDIDATES no longer applies,
+    since the LLM is always called for this kind regardless of precedent.
+
+    The "top N" / "bottom N" queries below are each independently LIMITed
+    and merged in Python -- correct because the true global top-N (or
+    bottom-N) across two sorted sources can never include an item outside
+    either source's own top-N (or bottom-N): a source can contribute at
+    most N items to the global N, so anything past its own Nth-best could
+    never make the cut. This avoids pulling a whole standard's corpus
+    (thousands of rows for a SOPTE-scale deployment) into Python just to
+    pick 5 + 3 candidates.
+    """
+    brdp_distance = BRDP.embedding.cosine_distance(query_embedding).label("distance")
+    brdp_base = (
+        select(BRDP, Project.name.label("project_name"), brdp_distance)
+        .join(Project, BRDP.project_id == Project.id)
+        .where(
+            Project.standard == project.standard,
+            BRDP.validation == "Validated",
+            BRDP.id != brdp_id,
+            BRDP.embedding.is_not(None),
+            # Same as proposal/rule: a trashed BRDP is never precedent.
+            ACTIVE_BRDP_FILTER,
+        )
+    )
+    brdp_top_rows = (
+        await db.execute(brdp_base.order_by(brdp_distance, BRDP.id).limit(DEFINITION_SIMILAR_LIMIT))
+    ).all()
+    brdp_bottom_rows = (
+        await db.execute(brdp_base.order_by(brdp_distance.desc(), BRDP.id).limit(DEFINITION_STYLE_REFERENCE_LIMIT))
+    ).all()
+
+    catalog_distance = BRDPCatalog.embedding.cosine_distance(query_embedding).label("distance")
+    catalog_base = select(BRDPCatalog, catalog_distance).where(
+        BRDPCatalog.standard == project.standard, BRDPCatalog.embedding.is_not(None)
+    )
+    catalog_top_rows = (
+        await db.execute(catalog_base.order_by(catalog_distance, BRDPCatalog.id).limit(DEFINITION_SIMILAR_LIMIT))
+    ).all()
+    catalog_bottom_rows = (
+        await db.execute(
+            catalog_base.order_by(catalog_distance.desc(), BRDPCatalog.id).limit(DEFINITION_STYLE_REFERENCE_LIMIT)
+        )
+    ).all()
+
+    def brdp_candidate(row) -> tuple[tuple[str, uuid.UUID], float, SimilarCandidateOut]:
+        b, project_name, distance = row.BRDP, row.project_name, row.distance
+        similarity = 1 - distance
+        candidate = SimilarCandidateOut(
+            id=b.id,
+            identifier=b.identifier,
+            text=b.definition,
+            title=b.title or "",
+            score=similarity,
+            # "Records: <project name>" / "Catalog" -- the exact origin
+            # label format the docs request's own prompt template uses
+            # ({Records: project name | Catalog}), rendered verbatim into
+            # both the LLM prompt and the UI's reference list.
+            source=f"Records: {project_name}",
+        )
+        return (("brdp", b.id), similarity, candidate)
+
+    def catalog_candidate(row) -> tuple[tuple[str, uuid.UUID], float, SimilarCandidateOut]:
+        c, distance = row.BRDPCatalog, row.distance
+        similarity = 1 - distance
+        candidate = SimilarCandidateOut(
+            id=c.id, identifier=c.identifier, text=c.definition, title=c.title or "", score=similarity, source="Catalog"
+        )
+        return (("catalog", c.id), similarity, candidate)
+
+    top_pool = [brdp_candidate(r) for r in brdp_top_rows] + [catalog_candidate(r) for r in catalog_top_rows]
+    top_pool.sort(key=lambda entry: entry[1], reverse=True)
+    top_filtered = [
+        (key, candidate) for key, score, candidate in top_pool if score >= MIN_SIMILARITY
+    ][:DEFINITION_SIMILAR_LIMIT]
+    similar: list[SimilarCandidateOut] = [candidate for _key, candidate in top_filtered]
+    similar_keys = {key for key, _candidate in top_filtered}
+
+    style_references: list[SimilarCandidateOut] = []
+    # DEFINITION_STYLE_REFERENCE_LIMIT doubles as both "how many style
+    # references to add" and "the 'similar' count below which they kick
+    # in" -- both are the same number (3) in the docs request, deliberately.
+    if len(similar) < DEFINITION_STYLE_REFERENCE_LIMIT:
+        bottom_pool = [brdp_candidate(r) for r in brdp_bottom_rows] + [
+            catalog_candidate(r) for r in catalog_bottom_rows
+        ]
+        bottom_pool.sort(key=lambda entry: entry[1])  # ascending -- least similar first
+        seen_keys = set(similar_keys)
+        for key, _score, candidate in bottom_pool:
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            style_references.append(candidate)
+            if len(style_references) >= DEFINITION_STYLE_REFERENCE_LIMIT:
+                break
+
+    # Same computation as the proposal/rule path above (HR7 -- never
+    # silently degrade): a Validated BRDP in another project of this
+    # standard with no embedding yet is invisible to the searches above.
+    excluded_pending_other_projects = (
+        await db.execute(
+            select(func.count())
+            .select_from(BRDP)
+            .join(Project, BRDP.project_id == Project.id)
+            .where(
+                Project.standard == project.standard,
+                Project.id != project_id,
+                BRDP.validation == "Validated",
+                BRDP.embedding.is_(None),
+                ACTIVE_BRDP_FILTER,
+            )
+        )
+    ).scalar_one()
+
+    return SimilarOut(
+        kind="definition",
+        sufficient_precedent=True,
+        candidates=similar,
+        style_references=style_references,
+        message=None,
+        format=None,
         excluded_pending_other_projects=excluded_pending_other_projects,
     )
