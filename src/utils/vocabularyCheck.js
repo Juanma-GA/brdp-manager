@@ -5,13 +5,35 @@
 // vocabulary.py from the actual XSDs (never guessed, never LLM-judged --
 // see checkAgainstVocabulary below).
 //
-// Two independent extraction paths, unioned (3.3 of the docs request):
-//   (a) extractContextCandidates() -- deterministic, no LLM call.
+// Two independent extraction paths, unioned by checkAgainstVocabulary
+// (3.3 of the docs request):
+//   (a) extractContextCandidates() -- deterministic, no LLM call. Explicit
+//       `<x>`/`@x` markup and the context-phrase/camelCase heuristics.
 //   (b) extractVocabCandidatesViaLLM() -- a SEPARATE, prior LLM call
 //       (temperature 0) that only extracts what the text is TALKING
 //       ABOUT as an element/attribute name -- it is never told the real
 //       vocabulary and never judges whether a name is valid. That
 //       decision is made by checkAgainstVocabulary() alone, deterministically.
+//
+// Real-Mistral follow-up round ("falsos positivos del extractor LLM y
+// aviso de tipo equivocado"): a real model, given ambiguous natural-
+// language text with no markup ("el pokemon ese que va dentro del step"),
+// over-extracted nearly every word (articles, pronouns, prepositions)
+// as if each were an element name. Two independent defenses, per the
+// encargo -- a better prompt is NOT trusted alone to fix this:
+//   - a deterministic stopword filter, applied ONLY to the LLM path's
+//     own output (never to (a), and never to an explicitly-marked
+//     `<x>`/`@x` even if it happens to be a stopword spelling -- see
+//     filterLLMStopwords below);
+//   - a confidence split in what gets shown: a name (a) found via
+//     context/explicit markup is shown as "Not found" (checkAgainstVocabulary
+//     already had real evidence the text meant it as a name); a name only
+//     the LLM guessed is shown as "Possibly not in" (weaker claim, since
+//     the LLM path can still be wrong despite the filter and the tighter
+//     prompt -- HR7, never overstate confidence the app doesn't have).
+// Also new: a wrong-KIND check -- a name used as an element that doesn't
+// exist as an element but DOES exist as an attribute (or vice versa) gets
+// its own message instead of being lumped in as merely "not found".
 import { sendMessage } from '../api/llmAPI.js';
 
 // DITA (sources/D1.3/schema) and, since sources/SchemasS1000D/{3.0.1,4.1,
@@ -66,6 +88,8 @@ export async function loadSchemaVocabulary(standard) {
 //       trigger instead, so the word actually captured is the one right
 //       after the trigger that's closest to it.
 //     - lower-camelCase words (e.g. "proceduralStep").
+// This entire path is never touched by the stopword filter below -- an
+// explicit `<del>` is still checked, even though "del" is a stopword.
 const ELEMENT_ATTR_TAG_RE = /<\/?([A-Za-z][\w-]*)[^>]*>/g;
 const ATTR_MARKER_RE = /@([A-Za-z][\w-]*)/g;
 const WORD_RE = /[A-Za-z][\w-]*/g;
@@ -115,6 +139,11 @@ export function extractContextCandidates(text) {
 // 3.3(b) -- the extraction call's own system prompt. Deliberately never
 // mentions or includes the real vocabulary -- existence is never this
 // call's job (checkAgainstVocabulary decides that, deterministically).
+// Tightened after real-Mistral over-extraction (articles/pronouns/
+// prepositions treated as candidate names for ambiguous text with no
+// markup) -- explicit negative instruction + the three worked examples
+// from the encargo, including the "generic noun describing a construct
+// kind" trap ("in the text element" must NOT yield "text").
 export function buildVocabExtractionPrompt() {
   return `You extract candidate XML element and attribute names from a short
 piece of business-rule text (a BRDP's Title/Definition/Proposal).
@@ -125,6 +154,16 @@ attribute actually exists in any real schema. Do NOT judge whether a
 name is real, valid, or well-known; that is decided elsewhere, by a
 different process, not by you. You are only extracting what the text is
 talking about as an element/attribute name.
+
+Only include a word if the text uses it as the NAME of an XML element
+or attribute. Articles, pronouns, prepositions, conjunctions, verbs,
+adverbs and ordinary words used with their normal meaning are never
+names. When unsure, leave the word out.
+
+Examples:
+"el pokemon ese que va dentro del step" -> {"elements": ["pokemon", "step"], "attributes": []}
+"Decidir si se usa la lista numerada" -> {"elements": [], "attributes": []}
+"Use of the attribute emphasisType in the text element" -> {"elements": [], "attributes": ["emphasisType"]}
 
 Return ONLY a JSON object, nothing else -- no markdown, no code fences,
 no explanation -- in exactly this shape:
@@ -155,10 +194,59 @@ export function parseVocabExtractionResponse(raw) {
   return { elements, attributes };
 }
 
+// Point 2 of the follow-up encargo: a deterministic safety net, applied
+// ONLY to the LLM path's own output -- never to extractContextCandidates()
+// (an explicit `<del>` must still be checked), and never relied on as the
+// only defense (the prompt above is the first line of defense; this is
+// the second, for when the model over-extracts anyway). Spanish+English
+// articles, pronouns, prepositions, conjunctions and common auxiliary
+// verbs/adverbs -- the exact class of word the real-Mistral report showed
+// leaking through ("del", "dentro", "el", "ese", "que", "va").
+const STOPWORDS = new Set([
+  // Spanish
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'al',
+  'a', 'ante', 'bajo', 'con', 'contra', 'desde', 'en', 'entre', 'hacia',
+  'hasta', 'para', 'por', 'según', 'segun', 'sin', 'so', 'sobre', 'tras',
+  'que', 'quien', 'quienes', 'cual', 'cuales', 'cuyo', 'cuya', 'este',
+  'esta', 'estos', 'estas', 'ese', 'esa', 'esos', 'esas', 'aquel',
+  'aquella', 'aquellos', 'aquellas', 'y', 'o', 'u', 'e', 'ni', 'pero',
+  'mas', 'más', 'sino', 'porque', 'pues', 'si', 'sí', 'no', 'se', 'le',
+  'les', 'lo', 'su', 'sus', 'mi', 'mis', 'tu', 'tus', 'yo', 'tú', 'tu',
+  'él', 'el', 'ella', 'ellos', 'ellas', 'nosotros', 'vosotros', 'ustedes',
+  'es', 'son', 'fue', 'fueron', 'ser', 'estar', 'está', 'esta', 'están',
+  'va', 'van', 'ir', 'hay', 'había', 'habia', 'muy', 'menos', 'también',
+  'tambien', 'ya', 'aún', 'aun', 'dentro', 'fuera', 'arriba', 'abajo',
+  'aquí', 'aqui', 'allí', 'alli', 'así', 'asi', 'ese',
+  // English
+  'the', 'an', 'of', 'in', 'on', 'at', 'to', 'from', 'with', 'without',
+  'for', 'and', 'or', 'but', 'if', 'then', 'else', 'when', 'where',
+  'which', 'who', 'whom', 'whose', 'as', 'by', 'into', 'it', 'its',
+  "it's", 'not', 'is', 'are', 'be', 'this', 'that', 'these', 'those',
+  'was', 'were', 'has', 'have', 'had', 'do', 'does', 'did', 'will',
+  'would', 'can', 'could', 'should', 'may', 'might', 'must', 'yes',
+]);
+
+export function isStopword(name) {
+  return STOPWORDS.has((name || '').toLowerCase());
+}
+
+// Filters a { elements, attributes } pair (the LLM path's own shape) --
+// never applied to extractContextCandidates()'s output, per the encargo.
+export function filterLLMStopwords(llmCandidates) {
+  if (!llmCandidates) return llmCandidates;
+  return {
+    elements: (llmCandidates.elements || []).filter((n) => !isStopword(n)),
+    attributes: (llmCandidates.attributes || []).filter((n) => !isStopword(n)),
+  };
+}
+
 // Runs the extraction call for real. Never throws -- a failed call or an
 // invalid response degrades to `unavailable: true` (HR7: the caller must
 // show "Extended name check unavailable" explicitly, per 3.3, rather than
-// silently proceeding as if nothing was extracted).
+// silently proceeding as if nothing was extracted). The stopword filter
+// (point 2) is applied here, right after parsing, so every caller of this
+// function automatically gets the filtered result -- there is no path
+// that reaches checkAgainstVocabulary with raw, unfiltered LLM output.
 export async function extractVocabCandidatesViaLLM({ title, definition, proposal, aiProvider }) {
   if (!aiProvider) return { elements: [], attributes: [], unavailable: true };
   const userMessage = `Title: ${title || ''}\nDefinition: ${definition || ''}\nProposal: ${proposal || ''}`;
@@ -173,7 +261,8 @@ export async function extractVocabCandidatesViaLLM({ title, definition, proposal
     );
     const parsed = parseVocabExtractionResponse(res.content);
     if (!parsed) return { elements: [], attributes: [], unavailable: true };
-    return { elements: parsed.elements, attributes: parsed.attributes, unavailable: false };
+    const filtered = filterLLMStopwords(parsed);
+    return { elements: filtered.elements, attributes: filtered.attributes, unavailable: false };
   } catch {
     return { elements: [], attributes: [], unavailable: true };
   }
@@ -182,41 +271,95 @@ export async function extractVocabCandidatesViaLLM({ title, definition, proposal
 // 3.4 -- the only step that decides existence, purely deterministically
 // against the real vocabulary (never the LLM). `vocabulary` is what
 // loadSchemaVocabulary() returns, or null if not available for this
-// standard. `candidates` is the UNION of (a) and (b)'s output, already
-// merged by the caller (mergeCandidates below).
+// standard.
 //
-// Display form is picked by where the name came from: `<name>` for an
-// element-context match, `@name` for an attribute-context match, bare
-// for an ambiguous one -- and deduped by the underlying name (not
-// display form), since the same name can surface from more than one
-// path (e.g. "<pokemon>" also tokenizes into the ambiguous camelCase/
-// phrase scan) -- the more specific `<x>`/`@x` form wins over a bare one.
-export function checkAgainstVocabulary(candidates, vocabulary) {
-  if (!vocabulary) return { available: false, unknownNames: [] };
-  const unknown = new Map();
-  for (const name of candidates.elements) {
-    if (!vocabulary.elements.has(name) && !unknown.has(name)) unknown.set(name, `<${name}>`);
+// Follow-up round: takes `contextCandidates` (3.3a's own shape) and
+// `llmCandidates` (3.3b's, already stopword-filtered by
+// extractVocabCandidatesViaLLM -- pass `null` or `{unavailable:true}` if
+// the extraction call failed) SEPARATELY rather than pre-merged, because
+// the confidence split (point 3) and the wrong-kind check (point 4) both
+// need to know where a name came from and what kind it was used as --
+// information a flat merged list would have already thrown away.
+//
+// Returns:
+//   { available, notFound, possiblyNotFound, wrongType }
+// - `notFound`: display strings (`<x>`/`@x`/bare) for names found via
+//   context extraction or explicit `<x>`/`@x` markup -- real evidence the
+//   text meant it as a name, so shown as a flat claim ("Not found").
+// - `possiblyNotFound`: display strings for names the LLM path alone
+//   surfaced -- weaker claim ("Possibly not in"), since despite the
+//   filter and the tighter prompt the LLM path can still be wrong.
+// - `wrongType`: `{ name, usedAs, actualAs }` for a name used as one kind
+//   (element/attribute) that doesn't exist as that kind but DOES exist as
+//   the other -- reported instead of (never in addition to) notFound/
+//   possiblyNotFound for that name.
+// A name found in both the context and LLM paths is high-confidence
+// (`notFound`), per the encargo ("vía por contexto o marcados
+// explícitamente" is one category regardless of the LLM path also
+// surfacing it).
+export function checkAgainstVocabulary(contextCandidates, llmCandidates, vocabulary) {
+  if (!vocabulary) return { available: false, notFound: [], possiblyNotFound: [], wrongType: [] };
+
+  const contextNames = new Set([...contextCandidates.elements, ...contextCandidates.attributes, ...contextCandidates.ambiguous]);
+
+  const notFound = new Map();
+  const possiblyNotFound = new Map();
+  const wrongType = new Map();
+
+  const considerTyped = (name, type) => {
+    const vocabSet = type === 'element' ? vocabulary.elements : vocabulary.attributes;
+    const otherSet = type === 'element' ? vocabulary.attributes : vocabulary.elements;
+    if (vocabSet.has(name)) return; // known as the kind it was used as -- fine
+    if (otherSet.has(name)) {
+      if (!wrongType.has(name)) {
+        wrongType.set(name, { name, usedAs: type, actualAs: type === 'element' ? 'attribute' : 'element' });
+      }
+      return;
+    }
+    const display = type === 'element' ? `<${name}>` : `@${name}`;
+    const bucket = contextNames.has(name) ? notFound : possiblyNotFound;
+    if (!bucket.has(name)) bucket.set(name, display);
+  };
+
+  const considerAmbiguous = (name) => {
+    if (vocabulary.elements.has(name) || vocabulary.attributes.has(name)) return;
+    if (!notFound.has(name)) notFound.set(name, name); // ambiguous is always context-path -> high confidence
+  };
+
+  for (const name of contextCandidates.elements) considerTyped(name, 'element');
+  for (const name of contextCandidates.attributes) considerTyped(name, 'attribute');
+  for (const name of contextCandidates.ambiguous) considerAmbiguous(name);
+  if (llmCandidates && !llmCandidates.unavailable) {
+    for (const name of llmCandidates.elements) considerTyped(name, 'element');
+    for (const name of llmCandidates.attributes) considerTyped(name, 'attribute');
   }
-  for (const name of candidates.attributes) {
-    if (!vocabulary.attributes.has(name) && !unknown.has(name)) unknown.set(name, `@${name}`);
+
+  // A wrong-kind finding is its own, more specific message -- never also
+  // listed as merely "not found"/"possibly not found" for the same name.
+  for (const name of wrongType.keys()) {
+    notFound.delete(name);
+    possiblyNotFound.delete(name);
   }
-  for (const name of candidates.ambiguous) {
-    if (vocabulary.elements.has(name) || vocabulary.attributes.has(name)) continue;
-    if (!unknown.has(name)) unknown.set(name, name);
-  }
-  return { available: true, unknownNames: [...unknown.values()].sort() };
+  // Context-path evidence (notFound) outranks an LLM-only guess for the
+  // same name -- don't show the same name twice at two confidence levels.
+  for (const name of notFound.keys()) possiblyNotFound.delete(name);
+
+  return {
+    available: true,
+    notFound: [...notFound.values()].sort(),
+    possiblyNotFound: [...possiblyNotFound.values()].sort(),
+    wrongType: [...wrongType.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  };
 }
 
-// Unions (a)'s and (b)'s candidate sets into the single shape
-// checkAgainstVocabulary expects -- (b)'s own elements/attributes are
-// folded in as their own typed buckets (the LLM WAS asked to classify
-// them), not dumped into `ambiguous`.
-export function mergeCandidates(contextCandidates, llmCandidates) {
-  return {
-    elements: [...new Set([...contextCandidates.elements, ...(llmCandidates?.elements || [])])],
-    attributes: [...new Set([...contextCandidates.attributes, ...(llmCandidates?.attributes || [])])],
-    ambiguous: contextCandidates.ambiguous,
-  };
+// Formats one wrongType entry into the exact sentence shape the encargo
+// asks for. Exported so the UI and buildUnknownNamesBlock format it
+// identically (never two independently-drifting copies).
+export function formatWrongTypeMessage(standard, entry) {
+  const usedDisplay = entry.usedAs === 'element' ? `<${entry.name}>` : `@${entry.name}`;
+  const actualDisplay = entry.actualAs === 'element' ? `element <${entry.name}>` : `attribute @${entry.name}`;
+  // Both "element" and "attribute" start with a vowel sound -- "an" either way.
+  return `${usedDisplay} is not an ${entry.usedAs} in ${standard} — it exists as ${actualDisplay}.`;
 }
 
 // A cheap, stable, non-cryptographic hash of the three text fields --

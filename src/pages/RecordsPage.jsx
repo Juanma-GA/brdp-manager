@@ -20,9 +20,9 @@ import {
   checkAgainstVocabulary,
   extractContextCandidates,
   extractVocabCandidatesViaLLM,
+  formatWrongTypeMessage,
   hashVocabInputText,
   loadSchemaVocabulary,
-  mergeCandidates,
 } from '../utils/vocabularyCheck.js';
 import styles from './RecordsPage.module.css';
 
@@ -89,14 +89,32 @@ function ruleTextForAsk(state, ruleXml) {
   return `${ruleXml.slice(0, ASK_RULE_MAX_CHARS)}\n[Rule truncated at ${ASK_RULE_MAX_CHARS} characters]`;
 }
 
-// Docs request (schema vocabulary check round), 3.5: shared by all three
-// prompts that get this block (Ask, Suggest Definition, Suggest Proposal
-// -- never Suggest Rule, unchanged). `unknownNames` is
-// checkAgainstVocabulary()'s own output -- already deduped and formatted
-// (`<x>`/`@x`/bare) -- appended verbatim, never reformatted a second way.
-function buildUnknownNamesBlock(standard, unknownNames) {
-  if (!unknownNames || unknownNames.length === 0) return '';
-  return `\n\nThe following names do NOT exist in the ${standard} schema: ${unknownNames.join(', ')}. Point this out explicitly; do not treat them as valid elements or attributes.`;
+// Docs request (schema vocabulary check round), 3.5, extended by the
+// real-Mistral follow-up round: shared by all three prompts that get this
+// block (Ask, Suggest Definition, Suggest Proposal -- never Suggest Rule,
+// unchanged). `vocabCheck` is checkAgainstVocabulary()'s own output
+// (notFound/possiblyNotFound/wrongType) -- already deduped and formatted,
+// appended verbatim, never reformatted a second way. Three independent
+// paragraphs (any subset may be present): a flat claim for names with
+// real evidence (context/explicit markup), a hedged one for LLM-only
+// guesses (the LLM path can still be wrong despite the stopword filter
+// and the tighter prompt -- HR7, never overstate confidence the app
+// doesn't have), and the wrong-kind case reported with its own message.
+function buildUnknownNamesBlock(standard, vocabCheck) {
+  if (!vocabCheck) return '';
+  const { notFound, possiblyNotFound, wrongType } = vocabCheck;
+  let block = '';
+  if (notFound && notFound.length > 0) {
+    block += `\n\nThe following names do NOT exist in the ${standard} schema: ${notFound.join(', ')}. Point this out explicitly; do not treat them as valid elements or attributes.`;
+  }
+  if (possiblyNotFound && possiblyNotFound.length > 0) {
+    block += `\n\nThe following names could not be confirmed against the ${standard} schema (this is an uncertain guess, not a confirmed absence): ${possiblyNotFound.join(', ')}. Mention this uncertainty if relevant; do not assert they are invalid, but do not treat them as confirmed valid either.`;
+  }
+  if (wrongType && wrongType.length > 0) {
+    const lines = wrongType.map((w) => formatWrongTypeMessage(standard, w));
+    block += `\n\nThe following names were used as the wrong kind in the text: ${lines.join(' ')}`;
+  }
+  return block;
 }
 
 // Builds the "Ask a Question" system prompt: strictly scoped to the
@@ -104,7 +122,7 @@ function buildUnknownNamesBlock(standard, unknownNames) {
 // Rule/Rule Status, which askGeneric previously never sent at all -- plus
 // an optional second BRDP (from Records or the official catalog) when the
 // user has picked one to compare against.
-function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, unknownNames) {
+function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, vocabCheck) {
   const ruleState = ruleStateOf(ruleApproval);
   let prompt = `You are an S1000D and DITA business-rules expert assistant embedded in
 BRDP Manager. You answer questions strictly about the single BRDP shown
@@ -161,7 +179,7 @@ Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
     prompt += `\n\nThe user may ask you to compare the current BRDP with the one above; in that case both are in scope.`;
   }
 
-  prompt += buildUnknownNamesBlock(standard, unknownNames);
+  prompt += buildUnknownNamesBlock(standard, vocabCheck);
 
   return prompt;
 }
@@ -176,7 +194,7 @@ Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
 // already formatted by the backend ("Records: <project name>" / "Catalog"
 // -- similar.py's _get_definition_similar), reused verbatim here and in
 // the UI rather than reformatted a second, possibly-diverging way.
-function buildSuggestDefinitionPrompt(brdp, standard, similar, styleReferences, unknownNames) {
+function buildSuggestDefinitionPrompt(brdp, standard, similar, styleReferences, vocabCheck) {
   const referenceBlock = (c) => `Title: ${c.title}\nDefinition: ${c.text}`;
 
   let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
@@ -238,7 +256,7 @@ Title: ${brdp.title}
 Current Definition: ${brdp.definition || 'empty'}
 Proposal: ${brdp.proposal || 'empty'}`;
 
-  prompt += buildUnknownNamesBlock(standard, unknownNames);
+  prompt += buildUnknownNamesBlock(standard, vocabCheck);
 
   return prompt;
 }
@@ -254,7 +272,7 @@ Proposal: ${brdp.proposal || 'empty'}`;
 // backend 400s Suggest Proposal on an empty Definition before this is
 // ever called), so unlike buildSuggestDefinitionPrompt's own fields,
 // `brdp.definition` needs no `|| 'empty'` fallback.
-function buildSuggestProposalPrompt(brdp, standard, sameBrdp, similar, thisProject, unknownNames) {
+function buildSuggestProposalPrompt(brdp, standard, sameBrdp, similar, thisProject, vocabCheck) {
   let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
 Decision Points), assisting in BRDP Manager.
 
@@ -347,7 +365,7 @@ If the Title language is unclear, use the language of the Definition.
 Return ONLY the Proposal text — no preamble, no references list,
 no quotes, no markdown.`;
 
-  prompt += buildUnknownNamesBlock(standard, unknownNames);
+  prompt += buildUnknownNamesBlock(standard, vocabCheck);
 
   return prompt;
 }
@@ -1178,12 +1196,13 @@ export default function RecordsPage() {
         aiProvider,
       }),
     ]);
-    const merged = mergeCandidates(contextCandidates, llmCandidates.unavailable ? null : llmCandidates);
-    const checked = checkAgainstVocabulary(merged, vocabulary);
+    const checked = checkAgainstVocabulary(contextCandidates, llmCandidates, vocabulary);
     const result = {
       brdpId: brdp.id,
       available: checked.available,
-      unknownNames: checked.unknownNames,
+      notFound: checked.notFound,
+      possiblyNotFound: checked.possiblyNotFound,
+      wrongType: checked.wrongType,
       unavailable: llmCandidates.unavailable,
     };
     vocabCacheRef.current.set(cacheKey, result);
@@ -1209,7 +1228,7 @@ export default function RecordsPage() {
     setAskError(null);
     try {
       const vocab = await ensureVocabularyChecked(selected);
-      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard, vocab.unknownNames);
+      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard, vocab);
       // One turn of chaining (docs request): the previous Q/A, if any,
       // goes in first as real conversation history so a follow-up like
       // "and why?" resolves correctly, then the new question.
@@ -1349,7 +1368,7 @@ export default function RecordsPage() {
           project.standard,
           referenceSimilar,
           referenceStyle,
-          vocab.unknownNames
+          vocab
         );
         const res = await sendMessage(
           [{ role: 'user', content: 'Write the Definition for this BRDP.' }],
@@ -1389,7 +1408,7 @@ export default function RecordsPage() {
           referenceSameBrdp,
           referenceSimilar,
           referenceThisProject,
-          vocab.unknownNames
+          vocab
         );
         const res = await sendMessage(
           [{ role: 'user', content: 'Write the Proposal for this BRDP.' }],
@@ -1956,13 +1975,17 @@ export default function RecordsPage() {
                 <h3 className={styles.assistantTitle}>{t('records.assistant.title')}</h3>
                 {!aiProvider && <p className={styles.muted}>{t('records.assistant.noProvider')}</p>}
 
-                {/* Docs request (schema vocabulary check round): runs once
-                    Ask/a Suggest is first used on this BRDP (never on its
-                    own) -- non-blocking, HR7-safe (never a false "not
-                    found": a standard without a generated vocabulary shows
-                    the "not available" notice instead of guessing). Guarded
-                    by brdpId so a result from a PREVIOUS BRDP never shows
-                    here after switching rows. */}
+                {/* Docs request (schema vocabulary check round), extended by
+                    the real-Mistral follow-up round: runs once Ask/a
+                    Suggest is first used on this BRDP (never on its own)
+                    -- non-blocking, HR7-safe (never a false "not found": a
+                    standard without a generated vocabulary shows the "not
+                    available" notice instead of guessing). Three warning
+                    kinds, all red -- but with different confidence-aware
+                    wording -- plus the neutral/muted "not
+                    available"/"extended check unavailable" notices.
+                    Guarded by brdpId so a result from a PREVIOUS BRDP
+                    never shows here after switching rows. */}
                 {vocabResult && vocabResult.brdpId === selected.id && (
                   <div className={styles.vocabNotice}>
                     {!vocabResult.available && (
@@ -1970,15 +1993,36 @@ export default function RecordsPage() {
                         {t('records.assistant.vocabCheckUnavailable', { standard: project.standard })}
                       </p>
                     )}
-                    {vocabResult.available && vocabResult.unknownNames.length > 0 && (
-                      <p className={styles.muted}>
+                    {vocabResult.available && vocabResult.notFound.length > 0 && (
+                      <p className={styles.vocabWarning}>
                         ⚠{' '}
                         {t('records.assistant.vocabUnknownNames', {
                           standard: project.standard,
-                          names: vocabResult.unknownNames.join(', '),
+                          names: vocabResult.notFound.join(', '),
                         })}
                       </p>
                     )}
+                    {vocabResult.available && vocabResult.possiblyNotFound.length > 0 && (
+                      <p className={styles.vocabWarning}>
+                        ⚠{' '}
+                        {t('records.assistant.vocabPossiblyUnknownNames', {
+                          standard: project.standard,
+                          names: vocabResult.possiblyNotFound.join(', '),
+                        })}
+                      </p>
+                    )}
+                    {vocabResult.available &&
+                      vocabResult.wrongType.map((w) => (
+                        <p key={w.name} className={styles.vocabWarning}>
+                          ⚠{' '}
+                          {t(
+                            w.usedAs === 'element'
+                              ? 'records.assistant.vocabWrongTypeAsElement'
+                              : 'records.assistant.vocabWrongTypeAsAttribute',
+                            { standard: project.standard, name: w.name }
+                          )}
+                        </p>
+                      ))}
                     {vocabResult.unavailable && (
                       <p className={styles.muted}>{t('records.assistant.vocabExtendedCheckUnavailable')}</p>
                     )}

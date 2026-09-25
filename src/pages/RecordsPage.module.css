@@ -418,10 +418,12 @@
 
 /* Docs request (schema vocabulary check round): the unknown-names/not-
    available/extended-check-unavailable notices below the assistant
-   title -- non-blocking, so a small stacked block of muted text is
-   enough, no border/background (unlike the Same-BRDP red box, which is
-   a deliberately stronger callout for a different, decision-relevant
-   signal). */
+   title. Real-Mistral feedback round: the "not found" line itself is a
+   genuine warning (unlike "not available"/"extended check unavailable",
+   which are informational, not a defect to flag), so it gets the SAME
+   red callout treatment already used for Same BRDP / .ruleErrorText
+   (border #fecaca, background #fef2f2, text #b91c1c) -- not a new
+   palette, just the third real place this exact combination is used. */
 .vocabNotice {
   margin-bottom: 10px;
   display: flex;
@@ -432,6 +434,15 @@
 .vocabNotice p {
   margin: 0;
   font-size: 12px;
+}
+
+.vocabWarning {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 600;
 }
 
 .assistantTitle {
