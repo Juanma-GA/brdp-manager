@@ -86,20 +86,30 @@ async function main() {
     body: JSON.stringify({ name: `Suggest Persist Verify ${suffix}`, standard: "S1000D 4.2" }),
   }).then((r) => r.json());
 
+  // Non-empty Definition on all 3 -- a LATER round (Suggest Proposal
+  // corpus) added an UNRELATED gate, "Suggest Proposal disabled while
+  // Definition is empty", that this script never accounted for (it
+  // predates that round). With an empty Definition, B/C's own Suggest
+  // Proposal button would show as disabled for that unrelated reason,
+  // breaking this script's "B/C's 3 buttons are all active/inactive
+  // together" assertions -- a pre-existing gap in THIS SCRIPT, found and
+  // fixed while re-running it as a regression check for the "aviso ligado
+  // al texto" round, not a bug in the app (confirmed: the empty-Definition
+  // gate is correct, documented behavior).
   const brdpA = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
-    body: JSON.stringify({ identifier: "BRDP-PERSIST-A", title: "Row A", definition: "", proposal: "", validation: "Pending" }),
+    body: JSON.stringify({ identifier: "BRDP-PERSIST-A", title: "Row A", definition: "Definition for row A.", proposal: "", validation: "Pending" }),
   }).then((r) => r.json());
   const brdpB = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
-    body: JSON.stringify({ identifier: "BRDP-PERSIST-B", title: "Row B", definition: "", proposal: "", validation: "Pending" }),
+    body: JSON.stringify({ identifier: "BRDP-PERSIST-B", title: "Row B", definition: "Definition for row B.", proposal: "", validation: "Pending" }),
   }).then((r) => r.json());
   const brdpC = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
-    body: JSON.stringify({ identifier: "BRDP-PERSIST-C", title: "Row C (to be deleted)", definition: "", proposal: "", validation: "Pending" }),
+    body: JSON.stringify({ identifier: "BRDP-PERSIST-C", title: "Row C (to be deleted)", definition: "Definition for row C.", proposal: "", validation: "Pending" }),
   }).then((r) => r.json());
   console.log("Seeded Project (S1000D 4.2): 3 Pending BRDPs (A, B, C)");
 
@@ -191,8 +201,25 @@ async function main() {
     await page.getByRole("button", { name: "Accept" }).click();
     await page.waitForTimeout(500);
     assert((await page.getByRole("button", { name: "Accept" }).count()) === 0, "A's suggestion box is gone after Accept");
+    // "Aviso ligado al texto" round: Accept now ALSO recomputes the
+    // deterministic vocabulary check against the just-accepted text
+    // (orthogonal to this step's own concern, the pending-suggestion
+    // block). The fixed MOCK-LONG-DEFINITION reply this script accepts
+    // here happens to contain "attribute across every..." -- "attribute"
+    // is one of the context extractor's own trigger words, and "across"
+    // (not a connector) is the word right after it, so it's picked up as
+    // a genuine (if accidental) ambiguous candidate -- correctly flagged
+    // notFound, since "across" obviously isn't S1000D vocabulary. That's
+    // this round's new feature working as intended, not a regression, so
+    // checked here via the TOOLTIP rather than an unconditional "no
+    // button is disabled" -- the pending-suggestion reason must be gone,
+    // even if an unrelated vocab block now applies instead.
     states = await suggestButtonsDisabled(page);
-    assert(states.every((d) => !d), "A's 3 Suggest buttons are active again after Accept");
+    const tooltipAfterAccept = await page.getByRole("button", { name: "Suggest Proposal" }).getAttribute("title");
+    assert(
+      tooltipAfterAccept !== "Accept or discard the pending suggestion first",
+      `A's buttons are no longer blocked for the PENDING-suggestion reason after Accept (got tooltip: ${tooltipAfterAccept})`
+    );
     assert(!(await rowHasSparkle(page, "BRDP-PERSIST-A")), "row A's ✨ is gone after Accept");
     // No single-BRDP GET endpoint exists (brdps.py only has list/stats/
     // next-ext-identifier/history) -- list and find by id, same as the
@@ -228,6 +255,23 @@ async function main() {
     // to build up 3+ Validated precedent BRDPs for kind=proposal/rule.
     await page.locator("tr", { hasText: "BRDP-PERSIST-B" }).click();
     await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
+    // The reload in step 5 wiped the in-memory vocabLlmCacheRef, so B's
+    // vocabulary check has no cached extraction anymore. Without a
+    // warm-up, arming /error-next below would be consumed by
+    // ensureVocabularyChecked's OWN extraction call (its own error path
+    // degrades gracefully to unavailable:true, never surfacing as the UI
+    // error this step means to test) instead of the main Suggest
+    // Definition call -- a real interaction between this pre-existing
+    // reload and the vocabulary-check round's extraction call, exposed
+    // (not introduced) by this round's more thorough regression run. A
+    // quick, unarmed Ask first re-populates the cache for B's current
+    // (unchanged) text, so the extraction is already done by the time
+    // /error-next is armed -- only the main call is left to fail.
+    await resetMock();
+    await page.fill('textarea[placeholder="Ask about this BRDP…"]', "warm up the vocab cache");
+    await page.getByRole("button", { name: "Ask" }).click();
+    await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
+    await page.getByRole("button", { name: "Clear" }).click();
     await resetMock();
     await armErrorNext();
     await page.getByRole("button", { name: "Suggest Definition" }).click();

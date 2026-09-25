@@ -252,8 +252,8 @@ async function main() {
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this decision point well scoped?");
     await page.getByRole("button", { name: "Ask" }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
-    await page.waitForSelector("text=/Not found in the DITA 1.3 Xpath2.0 schema/", { timeout: 5000 });
-    const bannerLocator = page.locator("text=/Not found in the DITA 1.3 Xpath2.0 schema/").first();
+    await page.waitForSelector("text=/This BRDP mentions names not found in the DITA 1.3 Xpath2.0 schema/", { timeout: 5000 });
+    const bannerLocator = page.locator("text=/This BRDP mentions names not found in the DITA 1.3 Xpath2.0 schema/").first();
     const bannerText = await bannerLocator.textContent();
     assert(bannerText.includes("<pokemon>"), `banner names <pokemon> as unknown (got: ${bannerText})`);
     assert(!bannerText.includes("topic") && !bannerText.includes("conref"), "known names (topic/conref) never appear in the unknown-names banner");
@@ -292,8 +292,8 @@ async function main() {
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this decision point well scoped?");
     await page.getByRole("button", { name: "Ask" }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
-    await page.waitForSelector("text=/Possibly not in the DITA 1.3 Xpath2.0 schema/", { timeout: 5000 });
-    const possiblyLocator = page.locator("text=/Possibly not in the DITA 1.3 Xpath2.0 schema/").first();
+    await page.waitForSelector("text=/This BRDP mentions names possibly not in the DITA 1.3 Xpath2.0 schema/", { timeout: 5000 });
+    const possiblyLocator = page.locator("text=/This BRDP mentions names possibly not in the DITA 1.3 Xpath2.0 schema/").first();
     const possiblyText = await possiblyLocator.textContent();
     // "step" IS a real DITA element (confirmed by grep of schema-
     // vocabulary-dita.json before writing this) -- checkAgainstVocabulary
@@ -308,7 +308,7 @@ async function main() {
     // substring test that a coincidental match could pass by accident.
     assert(!possiblyText.includes("<el>"), 'stopword "el" specifically never survives as its own <el> candidate');
     assert(
-      (await page.locator("text=/Not found in the DITA 1.3 Xpath2.0 schema/").count()) === 0,
+      (await page.locator("text=/This BRDP mentions names not found in the DITA 1.3 Xpath2.0 schema/").count()) === 0,
       "no high-confidence notFound banner for an LLM-only-sourced phrase (no context-path evidence at all)"
     );
     const possiblyColor = await possiblyLocator.evaluate((el) => getComputedStyle(el).color);
@@ -333,7 +333,8 @@ async function main() {
     await page.getByRole("button", { name: "Ask" }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     assert(
-      (await page.locator("text=/Not found in the DITA/").count()) === 0 && (await page.locator("text=/Possibly not in the DITA/").count()) === 0,
+      (await page.locator("text=/This BRDP mentions names not found in the DITA/").count()) === 0 &&
+        (await page.locator("text=/This BRDP mentions names possibly not in the DITA/").count()) === 0,
       "worked example 2 (\"Decidir si se usa la lista numerada\") -> zero warnings of any kind"
     );
     const reqNoWarning = await lastMockRequest();
@@ -344,15 +345,32 @@ async function main() {
     );
     await page.getByRole("button", { name: "Clear" }).click();
 
-    // ==== 4b. Suggest Definition: "never rename" line + unknown-names block ====
-    // Back to BRDP-VOCAB-01 -- the follow-up round's insertions above
-    // navigated through BRDP-03/04 in between, so this section (which
-    // expects the <pokemon> unknown-names block, specific to BRDP-01's
-    // own fixture) needs its own explicit re-navigation now, rather than
-    // reusing whatever page state the previous section left behind.
+    // ==== "Aviso ligado al texto" round, point 4: BRDP-VOCAB-01's own
+    // <pokemon> is explicit markup -> high-confidence notFound -> ALL
+    // THREE Suggest buttons are now blocked here, a real behavior change
+    // from this round (previously this BRDP was exactly where Suggest
+    // Definition/Proposal's unknown-names block used to be exercised --
+    // that path is now genuinely UNREACHABLE via the UI on a notFound
+    // BRDP, by design; the divergence between Ask's and Suggest's blocks
+    // is instead verified on a reachable possiblyNotFound-only BRDP in
+    // scripts/verify-vocab-linked-to-text.mjs). ====
     await openRecords(`Vocab Verify D ${suffix}`, "BRDP-VOCAB-01");
+    for (const kind of ["Definition", "Proposal", "Rule"]) {
+      const btn = page.getByRole("button", { name: `Suggest ${kind}`, exact: true });
+      assert(await btn.isDisabled(), `Suggest ${kind} is blocked on BRDP-VOCAB-01 (explicit <pokemon>, notFound)`);
+      assert(
+        (await btn.getAttribute("title")) === "Fix the names not found in the DITA 1.3 Xpath2.0 schema first",
+        `Suggest ${kind}'s tooltip is the vocab-block message`
+      );
+    }
+
+    // ==== 4b. Suggest Definition: "never rename" line, no unknown-names
+    // block on a CLEAN BRDP (BRDP-VOCAB-04, zero vocab candidates -- see
+    // the "worked example 2" check above -- so both Suggest buttons stay
+    // reachable here). ====
+    await openRecords(`Vocab Verify D ${suffix}`, "BRDP-VOCAB-04");
     await resetMock();
-    const suggestDefButton = page.getByRole("button", { name: "Suggest Definition" });
+    const suggestDefButton = page.getByRole("button", { name: "Suggest Definition", exact: true });
     await suggestDefButton.click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     const reqDef = await lastMockRequest();
@@ -361,16 +379,13 @@ async function main() {
       sysDef.includes("Keep element and attribute names exactly as written in the BRDP's\nTitle — never rename them."),
       "Suggest Definition prompt carries the exact never-rename line"
     );
-    assert(
-      sysDef.includes("The following names do NOT exist in the DITA 1.3 Xpath2.0 schema: <pokemon>."),
-      "Suggest Definition prompt also carries the unknown-names block"
-    );
-    await page.getByRole("button", { name: "Discard" }).click();
+    assert(!sysDef.includes("The BRDP mentions names that may not exist"), "no unknown-names block on a clean BRDP");
+    await page.getByRole("button", { name: "Discard", exact: true }).click();
     await page.waitForTimeout(200);
 
     // ==== 2. Suggest Proposal: fill-in-template block replaces PROJECT-SPECIFIC VALUES ====
     await resetMock();
-    await page.getByRole("button", { name: "Suggest Proposal" }).click();
+    await page.getByRole("button", { name: "Suggest Proposal", exact: true }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     const reqProp = await lastMockRequest();
     const sysProp = reqProp.messages.find((m) => m.role === "system").content;
@@ -394,12 +409,9 @@ async function main() {
       sysProp.includes("Keep element and attribute names exactly as written in the BRDP's Title\nand Definition — never rename them."),
       "Suggest Proposal prompt also carries its own never-rename line"
     );
-    assert(
-      sysProp.includes("The following names do NOT exist in the DITA 1.3 Xpath2.0 schema: <pokemon>."),
-      "Suggest Proposal prompt also carries the unknown-names block"
-    );
+    assert(!sysProp.includes("The BRDP mentions names that may not exist"), "no unknown-names block on a clean BRDP");
     console.log("\n===== Suggest Proposal system prompt (template check) =====\n" + sysProp + "\n=====\n");
-    await page.getByRole("button", { name: "Discard" }).click();
+    await page.getByRole("button", { name: "Discard", exact: true }).click();
     await page.waitForTimeout(200);
 
     // ==== extraction failure -> "Extended name check unavailable", context-only still works ====
@@ -429,7 +441,7 @@ async function main() {
     // a false one either) -- matches the docs request's own edge case
     // ("el pokemon ese que va dentro del step" needs the LLM path).
     assert(
-      (await page.locator("text=/Not found in the DITA 1.3 Xpath2.0 schema/").count()) === 0,
+      (await page.locator("text=/This BRDP mentions names not found in the DITA 1.3 Xpath2.0 schema/").count()) === 0,
       "no unknown-names warning when context-only extraction found nothing and the LLM path failed"
     );
     await page.screenshot({ path: "/tmp/vocab-check-extraction-unavailable.png", fullPage: true });
@@ -446,7 +458,7 @@ async function main() {
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this well scoped?");
     await page.getByRole("button", { name: "Ask" }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
-    const bannerLocatorS1000D = page.locator("text=/Not found in the S1000D 4.2 schema/").first();
+    const bannerLocatorS1000D = page.locator("text=/This BRDP mentions names not found in the S1000D 4.2 schema/").first();
     const bannerTextS1000D = await bannerLocatorS1000D.textContent();
     assert(bannerTextS1000D.includes("<pokemon>"), `S1000D 4.2 real vocabulary flags <pokemon> as unknown (got: ${bannerTextS1000D})`);
     assert(
@@ -484,8 +496,8 @@ async function main() {
     // @label (correct usage) never shows up as ANY kind of warning --
     // neither notFound/possiblyNotFound nor a second wrong-kind entry.
     assert(
-      (await page.locator("text=/Not found in the S1000D 4.2 schema/").count()) === 0 &&
-        (await page.locator("text=/Possibly not in the S1000D 4.2 schema/").count()) === 0 &&
+      (await page.locator("text=/This BRDP mentions names not found in the S1000D 4.2 schema/").count()) === 0 &&
+        (await page.locator("text=/This BRDP mentions names possibly not in the S1000D 4.2 schema/").count()) === 0 &&
         (await page.locator("text=/is not an attribute in S1000D 4.2/").count()) === 0,
       "@label (correct usage, same Definition) triggers zero warnings of any kind"
     );
@@ -517,17 +529,35 @@ async function main() {
       .evaluate((el) => getComputedStyle(el).color);
     assert(notAvailableColor === "rgb(148, 163, 184)", `"not available" notice stays muted, not red (got ${notAvailableColor})`);
     assert(
-      (await page.locator("text=/Not found in the S1000D 5.0 schema/").count()) === 0,
+      (await page.locator("text=/This BRDP mentions names not found in the S1000D 5.0 schema/").count()) === 0,
       "no false 'not found' claim for a standard with no vocabulary at all"
     );
     const reqAskS0 = await lastMockRequest();
     const sysAskS0 = reqAskS0.messages.find((m) => m.role === "system").content;
     assert(!sysAskS0.includes("do NOT exist in the S1000D 5.0 schema"), "prompt never gets the unknown-names block when the standard has no vocabulary");
 
+    // "Aviso ligado al texto" round: brdpS1's Definition still has the
+    // explicit <pokemon> used for the 4c check above -- now a
+    // high-confidence notFound that blocks Suggest Proposal, needed
+    // reachable below for the Same-BRDP-highlight check. Fix it via a
+    // real API PUT (same effect as editing+saving through the UI) and
+    // confirm the fix is picked up on reload without any Ask/Suggest
+    // click -- reinforcing point 1 on a second real BRDP, not just BRDP-A
+    // in verify-vocab-linked-to-text.mjs.
+    await fetch(`${API}/api/projects/${projS.id}/brdps/${brdpS1.id}`, {
+      method: "PUT",
+      headers: auth,
+      body: JSON.stringify({ definition: "Definition confirming proceduralStep numbering stays consistent." }),
+    });
+
     // ==== 3. Same BRDP group highlighted red ====
     await openRecords(`Vocab Verify S ${suffix}`, SAME_ID);
+    assert(
+      (await page.locator("text=/This BRDP mentions names not found in the S1000D 4.2 schema/").count()) === 0,
+      "removing <pokemon> from brdpS1's Definition clears the notice on reload, no Ask/Suggest needed"
+    );
     await resetMock();
-    const suggestPropButtonS = page.getByRole("button", { name: "Suggest Proposal" });
+    const suggestPropButtonS = page.getByRole("button", { name: "Suggest Proposal", exact: true });
     assert(await suggestPropButtonS.isEnabled(), "Suggest Proposal enabled (Definition is present)");
     await suggestPropButtonS.click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });

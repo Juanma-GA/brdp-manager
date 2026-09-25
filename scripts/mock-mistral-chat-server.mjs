@@ -67,6 +67,19 @@ function isSuggestRule(text) {
 // is simpler and more reliable than a content marker here.
 const SLOW_RESPONSE_DELAY_MS = 2500;
 let slowNextArmed = false;
+// "Aviso ligado al texto" round: content-independent trigger, armed via
+// POST /step-next (one-shot, same convention as /slow-next/-error-next
+// above) -- Suggest Definition/Rule's own fixed messages already own a
+// dedicated reply (long-text-wrap / long-XML tests, never touched here),
+// and Suggest Proposal's fixed user message ("Write the Proposal for this
+// BRDP.") carries no room for a content marker either, so this is the
+// only way to make ONE Suggest Proposal call return a specific, real
+// `<step>`-bearing reply on demand -- needed to actually ACCEPT that text
+// into a BRDP's Proposal and observe the vocabulary notice react. Applies
+// to whichever call comes next regardless of its own content, exactly
+// like /slow-next/-error-next; unarmed, Suggest Proposal keeps its
+// existing generic "MOCK-ANSWER: ..." fallback reply unchanged.
+let stepNextArmed = false;
 // "Suggest: la sugerencia se queda en su BRDP" round (docs request):
 // content-independent error trigger, armed via POST /error-next
 // (one-shot, like /slow-next). ERROR_TEST above only fires if the
@@ -109,6 +122,7 @@ const server = http.createServer((req, res) => {
     lastRequest = null;
     slowNextArmed = false;
     errorNextArmed = false;
+    stepNextArmed = false;
     extractionCallCount = 0;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
@@ -127,6 +141,12 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && req.url === "/error-next") {
     errorNextArmed = true;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.method === "POST" && req.url === "/step-next") {
+    stepNextArmed = true;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -218,7 +238,10 @@ const server = http.createServer((req, res) => {
     }
 
     let reply;
-    if (isOffTopic(userText)) {
+    if (stepNextArmed) {
+      stepNextArmed = false; // one-shot -- doesn't affect the next unrelated call
+      reply = "MOCK-STEP-PROPOSAL: The <step> [YES/NO] be used.";
+    } else if (isOffTopic(userText)) {
       reply =
         "MOCK-OFFTOPIC: That question is not about this BRDP. Please select the correct BRDP, or rephrase your question so it's about this one.";
     } else if (isMarkdownTest(userText)) {

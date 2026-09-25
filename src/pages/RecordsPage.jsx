@@ -117,6 +117,33 @@ function buildUnknownNamesBlock(standard, vocabCheck) {
   return block;
 }
 
+// "Aviso ligado al texto" round, point 3: Suggest Definition/Proposal get
+// a DIFFERENT unknown-names block from Ask's buildUnknownNamesBlock above
+// -- real-Mistral feedback showed the model, given the Ask-style "point
+// this out explicitly" instruction, wrote user-facing commentary INTO the
+// Proposal text itself ("The element <pokemon> does not exist... and will
+// not be used.") and, worse, decided the outcome -- exactly what "DO NOT
+// MAKE THE DECISION" (buildSuggestProposalPrompt's own template block)
+// already forbids for everything else. Ask is a conversation where
+// pointing out an unknown name is the point; a Suggest's OUTPUT becomes
+// the BRDP's own Title/Definition/Proposal field verbatim, where a stray
+// comment or a snuck-in decision would corrupt the record. Never split by
+// confidence here (unlike the banner) -- regardless of whether a name is
+// notFound/possiblyNotFound/wrongType, the instruction is identical: say
+// nothing about it, decide nothing, just write the text as instructed.
+function buildSuggestUnknownNamesBlock(standard, vocabCheck) {
+  if (!vocabCheck) return '';
+  const names = [
+    ...new Set([
+      ...(vocabCheck.notFound || []),
+      ...(vocabCheck.possiblyNotFound || []),
+      ...(vocabCheck.wrongType || []).map((w) => (w.usedAs === 'element' ? `<${w.name}>` : `@${w.name}`)),
+    ]),
+  ];
+  if (names.length === 0) return '';
+  return `\n\nThe BRDP mentions names that may not exist in the ${standard} schema: ${names.join(', ')}. The user has already been warned in the interface. Do NOT mention their validity in your output, do not add comments or notes, and do not take any decision about them -- write the text exactly as instructed above.`;
+}
+
 // Builds the "Ask a Question" system prompt: strictly scoped to the
 // selected BRDP (docs request), with its full live context -- including
 // Rule/Rule Status, which askGeneric previously never sent at all -- plus
@@ -256,7 +283,7 @@ Title: ${brdp.title}
 Current Definition: ${brdp.definition || 'empty'}
 Proposal: ${brdp.proposal || 'empty'}`;
 
-  prompt += buildUnknownNamesBlock(standard, vocabCheck);
+  prompt += buildSuggestUnknownNamesBlock(standard, vocabCheck);
 
   return prompt;
 }
@@ -365,7 +392,7 @@ If the Title language is unclear, use the language of the Definition.
 Return ONLY the Proposal text — no preamble, no references list,
 no quotes, no markdown.`;
 
-  prompt += buildUnknownNamesBlock(standard, vocabCheck);
+  prompt += buildSuggestUnknownNamesBlock(standard, vocabCheck);
 
   return prompt;
 }
@@ -650,17 +677,25 @@ export default function RecordsPage() {
   const [compareBrdp, setCompareBrdp] = useState(null);
   const [compareBusy, setCompareBusy] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Docs request (schema vocabulary check round): the last-run check's
-  // result -- { brdpId, available, unknownNames, unavailable } -- or
+  // Docs request (schema vocabulary check round), extended by the "aviso
+  // ligado al texto" round: the CURRENT check's result -- { brdpId, hash,
+  // available, notFound, possiblyNotFound, wrongType, unavailable } -- or
   // null before anything has run yet. Guarded by `brdpId` at render time
   // (never explicitly cleared on BRDP change) so a stale result from a
-  // PREVIOUS BRDP simply never displays once `selected` moves on. Cached
-  // in a ref, not state, keyed by `${brdpId}:${hash of title+definition+
-  // proposal}` -- "mismo texto dos veces -> una sola llamada de
-  // extracción" (docs request) -- never localStorage (HR1), lost on
-  // reload same as every other in-memory Suggest/Ask state on this page.
+  // PREVIOUS BRDP simply never displays once `selected` moves on. `hash`
+  // is the text (title+definition+proposal) this result reflects -- used
+  // by recomputeVocabResult/ensureVocabularyChecked to know whether a
+  // cached LLM extraction still applies (see vocabLlmCacheRef below).
   const [vocabResult, setVocabResult] = useState(null);
-  const vocabCacheRef = useRef(new Map());
+  // Keyed by brdpId, ONE entry per BRDP -- the most recent LLM extraction
+  // call's raw result plus the hash of the text it was run against. Never
+  // localStorage (HR1), lost on reload same as every other in-memory
+  // Suggest/Ask state on this page. Deliberately keyed by brdpId alone
+  // (not `${brdpId}:${hash}` as in the previous round) and always
+  // OVERWRITTEN, never appended to: the docs request is explicit that an
+  // LLM result must be discarded the moment the text it was computed
+  // against changes, not kept around in case the text reverts later.
+  const vocabLlmCacheRef = useRef(new Map());
   // Suggest: one pending/loaded suggestion PER BRDP, kept until Accept or
   // Discard (docs request -- the suggestion belongs to the BRDP it was
   // requested for and survives switching rows; the previous round's
@@ -962,6 +997,13 @@ export default function RecordsPage() {
     setCompareOpen(false);
     setCompareQuery('');
     setCompareBrdp(null);
+    // "Aviso ligado al texto" round, point 1: the deterministic vocabulary
+    // check reflects whichever BRDP just became selected as soon as it's
+    // selected -- never requiring an Ask/Suggest click first (a BRDP whose
+    // Title already has, say, <cocacola> shows the notice, and its Suggest
+    // buttons are already blocked, the moment it's opened).
+    recomputeVocabResult(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id]);
 
   useEffect(() => {
@@ -1126,6 +1168,23 @@ export default function RecordsPage() {
     setHistoryRefreshToken((n) => n + 1);
     refresh();
     refreshStats();
+    // "Aviso ligado al texto" round, point 1: a save touching Title/
+    // Definition/Proposal invalidates whatever vocabulary notice is
+    // showing -- recompute the deterministic part immediately (no LLM
+    // call) against the text JUST saved, so the notice/Suggest-blocking
+    // update without needing another Ask/Suggest click. Covers BOTH "al
+    // guardar" (any direct field edit, which flows through this same
+    // function) and "al aceptar una sugerencia" (acceptSuggestion's
+    // Definition/Proposal branch is itself a call to handleUpdate).
+    // Merges onto the row's own pre-update fields (closure -- may be one
+    // render behind the `refresh()` just kicked off above) since `patch`
+    // alone may only carry ONE of the three fields; that's fine, only
+    // title/definition/proposal/id matter here, and `patch` always holds
+    // the authoritative new value for whichever of those three it touches.
+    if (brdpId === selectedId && ('title' in patch || 'definition' in patch || 'proposal' in patch)) {
+      const priorBrdp = brdps.find((b) => b.id === brdpId) || {};
+      recomputeVocabResult({ ...priorBrdp, ...patch, id: brdpId });
+    }
   };
 
   // Fields to consider for a History "Revert to this" action -- scoped to
@@ -1167,45 +1226,81 @@ export default function RecordsPage() {
     refreshStats();
   };
 
+  // "Aviso ligado al texto" round, point 1: the DETERMINISTIC half of the
+  // vocabulary check (context extraction + comparison, no LLM call) --
+  // fast enough to run on every selection change and every save, so the
+  // notice/Suggest-blocking always reflects the BRDP's CURRENT text, never
+  // a stale one from whenever Ask/Suggest last happened to run. Reuses a
+  // cached LLM extraction ONLY if its hash still matches the current text
+  // (vocabLlmCacheRef); if the text changed since that extraction, the LLM
+  // part is simply absent here (never "unavailable" -- that specific state
+  // means an extraction call was attempted and failed, not "not yet run
+  // for this text") until the next real Ask/Suggest recomputes it.
+  const recomputeVocabResult = async (brdp) => {
+    if (!brdp) {
+      setVocabResult(null);
+      return null;
+    }
+    const hash = hashVocabInputText(brdp.title, brdp.definition, brdp.proposal);
+    const vocabulary = await loadSchemaVocabulary(project.standard).catch(() => null);
+    const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
+    const cachedLlm = vocabLlmCacheRef.current.get(brdp.id);
+    const llmCandidates = cachedLlm && cachedLlm.hash === hash ? cachedLlm.llmCandidates : null;
+    const checked = checkAgainstVocabulary(contextCandidates, llmCandidates, vocabulary);
+    const result = {
+      brdpId: brdp.id,
+      hash,
+      available: checked.available,
+      notFound: checked.notFound,
+      possiblyNotFound: checked.possiblyNotFound,
+      wrongType: checked.wrongType,
+      unavailable: !!(llmCandidates && llmCandidates.unavailable),
+    };
+    setVocabResult(result);
+    return result;
+  };
+
   // Docs request (schema vocabulary check round), 3.3-3.4: runs the two
   // independent extraction paths (deterministic context scan + a SEPARATE
   // prior LLM call, temperature 0, that never sees the real vocabulary),
   // unions them, and checks the union against the project standard's
   // real generated vocabulary -- entirely deterministic, the LLM never
-  // decides existence. Cached per `brdpId + hash(title+definition+
-  // proposal)` so asking/suggesting twice on unchanged text never pays
-  // for a second extraction call. Called from askGeneric/requestSuggestion
-  // BEFORE building their system prompt, so the unknown-names block (if
-  // any) can be included in that same call -- this IS the "llamada
-  // previa y separada" the docs request describes.
+  // decides existence. Called from askGeneric/requestSuggestion BEFORE
+  // building their system prompt, so the unknown-names block (if any) can
+  // be included in that same call -- this IS the "llamada previa y
+  // separada" the docs request describes. The LLM extraction itself is
+  // skipped (reusing vocabLlmCacheRef's entry) only when the text hasn't
+  // changed since the last one -- "mismo texto dos veces -> una sola
+  // llamada de extracción" -- otherwise a fresh call runs and its result
+  // replaces (never appends to) that BRDP's single cache entry, per the
+  // "aviso ligado al texto" round's explicit discard-on-change rule.
   const ensureVocabularyChecked = async (brdp) => {
     const hash = hashVocabInputText(brdp.title, brdp.definition, brdp.proposal);
-    const cacheKey = `${brdp.id}:${hash}`;
-    const cached = vocabCacheRef.current.get(cacheKey);
-    if (cached) {
-      setVocabResult(cached);
-      return cached;
-    }
-    const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
+    const cachedLlm = vocabLlmCacheRef.current.get(brdp.id);
+    const needsExtraction = !(cachedLlm && cachedLlm.hash === hash);
     const [vocabulary, llmCandidates] = await Promise.all([
       loadSchemaVocabulary(project.standard).catch(() => null),
-      extractVocabCandidatesViaLLM({
-        title: brdp.title,
-        definition: brdp.definition,
-        proposal: brdp.proposal,
-        aiProvider,
-      }),
+      needsExtraction
+        ? extractVocabCandidatesViaLLM({
+            title: brdp.title,
+            definition: brdp.definition,
+            proposal: brdp.proposal,
+            aiProvider,
+          })
+        : Promise.resolve(cachedLlm.llmCandidates),
     ]);
+    if (needsExtraction) vocabLlmCacheRef.current.set(brdp.id, { hash, llmCandidates });
+    const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
     const checked = checkAgainstVocabulary(contextCandidates, llmCandidates, vocabulary);
     const result = {
       brdpId: brdp.id,
+      hash,
       available: checked.available,
       notFound: checked.notFound,
       possiblyNotFound: checked.possiblyNotFound,
       wrongType: checked.wrongType,
       unavailable: llmCandidates.unavailable,
     };
-    vocabCacheRef.current.set(cacheKey, result);
     setVocabResult(result);
     return result;
   };
@@ -2242,6 +2337,20 @@ export default function RecordsPage() {
                     // buttons, not just the matching kind -- Discard (or
                     // Accept) first to regenerate, even the same kind.
                     const pendingBlocked = !!selectedSuggestion;
+                    // "Aviso ligado al texto" round, point 4: a name in the
+                    // HIGH-confidence category (notFound -- context/explicit
+                    // markup, real evidence) blocks all three Suggest
+                    // buttons, including Rule (which never gets the
+                    // unknown-names prompt block at all -- this is a UI-
+                    // level gate, independent of prompt-building). A
+                    // possiblyNotFound (LLM-only guess) or wrongType name
+                    // never blocks -- only notFound, per the encargo's own
+                    // wording ("Con solo... tipo equivocado, no se
+                    // bloquea"). vocabResult may be null (vocabulary not
+                    // yet loaded) or for a different BRDP (stale async
+                    // resolve) -- guarded the same way the banner already is.
+                    const vocabBlocksSuggest =
+                      !!vocabResult && vocabResult.brdpId === selected.id && vocabResult.notFound.length > 0;
                     return (
                       <button
                         key={kind}
@@ -2250,17 +2359,20 @@ export default function RecordsPage() {
                           pendingBlocked ||
                           !aiProvider ||
                           suggestDisabledByEmbeddings ||
+                          vocabBlocksSuggest ||
                           catalogDisabled ||
                           definitionEmptyForProposal
                         }
                         title={
                           pendingBlocked
                             ? t('records.assistant.pendingSuggestionBlocksNew')
-                            : catalogDisabled
-                              ? t('records.assistant.suggestDefinitionCatalogDisabled')
-                              : definitionEmptyForProposal
-                                ? t('records.assistant.suggestProposalNeedsDefinition')
-                                : undefined
+                            : vocabBlocksSuggest
+                              ? t('records.assistant.vocabBlocksSuggest', { standard: project.standard })
+                              : catalogDisabled
+                                ? t('records.assistant.suggestDefinitionCatalogDisabled')
+                                : definitionEmptyForProposal
+                                  ? t('records.assistant.suggestProposalNeedsDefinition')
+                                  : undefined
                         }
                       >
                         {selectedSuggestion?.loading && selectedSuggestion.kind === kind
