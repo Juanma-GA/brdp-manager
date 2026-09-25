@@ -7,6 +7,7 @@ pattern as test_similar.py), since this file's job is job-management/
 pending-detection correctness, not embeddings correctness.
 """
 import asyncio
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -18,7 +19,7 @@ from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.main import app
 from app.models import BRDP, BRDPCatalog, EmbeddingJob, Project, User, UserProjectRole
-from app.services.embedding_jobs import STALE_JOB_MINUTES, get_running_job, run_embedding_job
+from app.services.embedding_jobs import EMBED_BATCH_SIZE, STALE_JOB_MINUTES, get_running_job, run_embedding_job
 from app.services.embeddings import brdp_embedding_text, catalog_embedding_text, compute_text_hash
 
 
@@ -67,11 +68,19 @@ def _mock_embeddings_transport():
     """A real, deterministic Mistral response -- what actual vector is
     returned doesn't matter for this file (job-management/pending-
     detection correctness, not similarity correctness), only that
-    compute_embedding() succeeds and embedding_text_hash gets set.
+    compute_embeddings_batch() succeeds and embedding_text_hash gets set.
+    Batch embeddings (docs request): must return exactly one data item
+    PER text in the request's "input" list (a real batch call, unlike a
+    single compute_embedding call, can carry more than one) -- returning
+    only ever one item regardless of batch size, like this fixture did
+    before the batching round, would make every test that embeds more
+    than one pending row at once fail with a real index-mismatch error.
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
+        sent = json.loads(request.content)
+        count = len(sent["input"])
+        return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": i} for i in range(count)]})
 
     app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
     yield
@@ -401,3 +410,91 @@ async def test_unauthenticated_request_rejected(client, editor_and_project):
     project, _editor, _editor_headers, _viewer_headers = editor_and_project
     resp = await client.get(f"/api/projects/{project.id}/embeddings/pending")
     assert resp.status_code == 401
+
+
+async def test_63_pending_brdps_makes_exactly_two_batch_requests_of_32_and_31(client, editor_and_project):
+    """Docs request's own closing check: batching must cut the number of
+    real HTTP requests, not just move the same one-per-item cost around --
+    63 pending BRDPs at EMBED_BATCH_SIZE=32 must be exactly 2 requests
+    (32 + 31), never 63.
+    """
+    project, _editor, editor_headers, _viewer_headers = editor_and_project
+    for i in range(63):
+        await _make_validated_brdp(project.id, f"BRDP-EMB-BATCH-{i:02d}")
+
+    call_sizes = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        call_sizes.append(len(sent["input"]))
+        return httpx.Response(
+            200, json={"data": [{"embedding": [0.1] * 1024, "index": i} for i in range(len(sent["input"]))]}
+        )
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
+
+    body = await _compute_and_wait(client, project.id, editor_headers)
+    assert body["status"] == "completed"
+    assert body["result"]["brdps_embedded"] == 63
+    assert call_sizes == [EMBED_BATCH_SIZE, 63 - EMBED_BATCH_SIZE]
+
+
+async def test_1_pending_brdp_makes_exactly_one_batch_request(client, editor_and_project):
+    project, _editor, editor_headers, _viewer_headers = editor_and_project
+    await _make_validated_brdp(project.id, "BRDP-EMB-SINGLE")
+
+    call_sizes = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        call_sizes.append(len(sent["input"]))
+        return httpx.Response(
+            200, json={"data": [{"embedding": [0.1] * 1024, "index": i} for i in range(len(sent["input"]))]}
+        )
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
+
+    body = await _compute_and_wait(client, project.id, editor_headers)
+    assert body["status"] == "completed"
+    assert call_sizes == [1]
+
+
+async def test_batch_assigns_the_vector_matching_each_brdps_own_text(client, editor_and_project):
+    """The docs request's own closing verification method: a per-text
+    deterministic mock lets us independently know what vector EACH BRDP
+    should end up with, and confirm the one actually stored really is
+    that one -- not another row's, and not scrambled by a response that
+    comes back in a different order than it was sent (the mock here
+    deliberately reverses it).
+    """
+    project, _editor, editor_headers, _viewer_headers = editor_and_project
+    brdps = [
+        await _make_validated_brdp(
+            project.id, f"BRDP-EMB-ASSIGN-{i}", title=f"T{i}", definition=f"D{i}", proposal=f"P{i}"
+        )
+        for i in range(5)
+    ]
+
+    def vector_for_text(text: str) -> list[float]:
+        # A distinct-but-valid-dimension vector per text (pgvector enforces
+        # the real column dimension, so this can't just be a short list).
+        value = (sum(ord(c) for c in text) % 997) / 997
+        return [value] * 1024
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        texts = sent["input"]
+        data = [{"embedding": vector_for_text(t), "index": i} for i, t in enumerate(texts)]
+        data.reverse()  # out-of-order response -- must still land by index, not response position
+        return httpx.Response(200, json={"data": data})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
+
+    body = await _compute_and_wait(client, project.id, editor_headers)
+    assert body["status"] == "completed"
+
+    async with async_session_factory() as session:
+        for brdp in brdps:
+            db_brdp = await session.get(BRDP, brdp.id)
+            expected = vector_for_text(brdp_embedding_text(db_brdp))
+            assert list(db_brdp.embedding) == pytest.approx(expected), f"{brdp.identifier} got the wrong vector"
