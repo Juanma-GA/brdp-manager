@@ -535,6 +535,8 @@ async def test_definition_candidates_include_catalog_and_other_projects_records_
         assert by_identifier["BRDP-CAT-1"]["source"] == "Catalog"
         assert by_identifier["BRDP-CAT-1"]["title"] == catalog_entry.title
         assert by_identifier["BRDP-CAT-1"]["text"] == catalog_entry.definition
+        assert by_identifier["BRDP-CAT-1"]["definition"] == catalog_entry.definition
+        assert by_identifier["BRDP-OTHERPROJ-1"]["definition"] == other_project_candidate.definition
         # <3 similar -> style references would normally kick in, but the
         # whole corpus is these same 2 entries -- nothing left to add.
         assert body["style_references"] == []
@@ -583,10 +585,16 @@ async def test_definition_style_references_added_only_below_three_similar(client
         assert response.status_code == 200
         body = response.json()
         assert [c["identifier"] for c in body["candidates"]] == ["BRDP-CLOSE-1"]
+        assert body["candidates"][0]["definition"] == close_one.definition
         assert len(body["style_references"]) == 3  # DEFINITION_STYLE_REFERENCE_LIMIT, out of 4 available
         style_ids = {c["id"] for c in body["style_references"]}  # JSON -- UUIDs serialize as strings
         assert str(close_one.id) not in style_ids  # never repeats one already in `candidates`
         assert style_ids <= {str(b.id) for b in far_ones}
+        # docs request (readable references round): `definition` travels
+        # in the response for style_references too, not just candidates.
+        far_by_id = {str(b.id): b for b in far_ones}
+        for c in body["style_references"]:
+            assert c["definition"] == far_by_id[c["id"]].definition
     finally:
         await _cleanup(project, [editor])
 

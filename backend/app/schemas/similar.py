@@ -19,6 +19,14 @@ class SimilarCandidateOut(BaseModel):
     # the frontend's buildSuggestDefinitionPrompt() renders. Empty for
     # proposal/rule -- their prompt never needed the title.
     title: str = ""
+    # kind='definition' only (docs request -- readable references round):
+    # the candidate's Definition, under its own name so the frontend's
+    # expandable reference row has a clean field to render instead of
+    # reaching for `text` (which for kind='definition' happens to hold the
+    # same string, but is otherwise a generic per-kind payload -- proposal
+    # text or rule_xml -- not something a reference-list UI should read
+    # semantics into). Empty for proposal/rule, same as `title`.
+    definition: str = ""
     # kind='definition' only: human-readable precedent origin, since this
     # kind's candidate pool spans BOTH this standard's other projects
     # (Records) and its official catalog (Catalog) and the UI/prompt must

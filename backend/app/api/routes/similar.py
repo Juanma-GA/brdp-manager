@@ -299,6 +299,7 @@ async def _get_definition_similar(
             identifier=b.identifier,
             text=b.definition,
             title=b.title or "",
+            definition=b.definition,
             score=similarity,
             # "Records: <project name>" / "Catalog" -- the exact origin
             # label format the docs request's own prompt template uses
@@ -312,7 +313,13 @@ async def _get_definition_similar(
         c, distance = row.BRDPCatalog, row.distance
         similarity = 1 - distance
         candidate = SimilarCandidateOut(
-            id=c.id, identifier=c.identifier, text=c.definition, title=c.title or "", score=similarity, source="Catalog"
+            id=c.id,
+            identifier=c.identifier,
+            text=c.definition,
+            title=c.title or "",
+            definition=c.definition,
+            score=similarity,
+            source="Catalog",
         )
         return (("catalog", c.id), similarity, candidate)
 

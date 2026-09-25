@@ -218,6 +218,32 @@ Proposal: ${brdp.proposal || 'empty'}`;
   return prompt;
 }
 
+// One row of Suggest Definition's reference list (docs request, readable
+// references round): identifier (clickable, toggles the Definition open
+// below), Title truncated to one line with the full text in `title=`, the
+// origin, and -- only for the "Similar" group, never "Style references" --
+// the similarity score. Never navigates anywhere; expand/collapse is pure
+// local UI state owned by the parent (several rows can be open at once).
+function ReferenceRow({ candidate, showScore, expanded, onToggle }) {
+  return (
+    <li>
+      <div className={styles.referenceRow}>
+        <button type="button" className={styles.referenceIdentifierButton} onClick={onToggle}>
+          {candidate.identifier}
+        </button>
+        <span className={styles.referenceTitle} title={candidate.title}>
+          — {candidate.title}
+        </span>
+        <span className={styles.referenceMeta}>
+          — {candidate.source}
+          {showScore ? ` — ${candidate.score.toFixed(2)}` : ''}
+        </span>
+      </div>
+      {expanded && <div className={styles.referenceDefinition}>{candidate.definition}</div>}
+    </li>
+  );
+}
+
 // Each dot always carries its own state name as title/aria-label (not
 // color alone) per the accessibility requirement -- the current step is
 // additionally marked via aria-current and a filled style.
@@ -443,6 +469,20 @@ export default function RecordsPage() {
   // explicit notice instead of ever calling the LLM with weak/no few-shot.
   const [suggestion, setSuggestion] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Suggest Definition's reference rows (docs request, readable references
+  // round): which candidate ids currently have their Definition expanded
+  // below the row -- several can be open at once. Starts empty and is
+  // cleared both when a new suggestion is requested (see requestSuggestion)
+  // and when the selected BRDP changes (effect below), per the docs
+  // request's explicit "se reinician" requirement.
+  const [expandedReferenceIds, setExpandedReferenceIds] = useState(new Set());
+  const toggleReferenceExpanded = (id) =>
+    setExpandedReferenceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   // Suggest Definition catalog guard (docs request, Suggest Definition
   // corpus round): identifiers of this standard's official catalog,
   // fetched once per project (eagerly, unlike catalogEntries/
@@ -654,6 +694,7 @@ export default function RecordsPage() {
     setCompareOpen(false);
     setCompareQuery('');
     setCompareBrdp(null);
+    setExpandedReferenceIds(new Set());
   }, [selected?.id]);
 
   useEffect(() => {
@@ -967,6 +1008,10 @@ export default function RecordsPage() {
     if (!selected || !aiProvider) return;
     setBusy(true);
     setSuggestion(null);
+    // docs request (readable references round): a fresh suggestion always
+    // starts with every reference row collapsed, never carrying over which
+    // ones happened to be open for a previous request.
+    setExpandedReferenceIds(new Set());
     try {
       const similar = await authFetchJson(
         `/api/projects/${projectId}/brdps/${selected.id}/similar?kind=${kind}`
@@ -1782,10 +1827,13 @@ export default function RecordsPage() {
                                 </h4>
                                 <ul className={styles.referencesList}>
                                   {suggestion.similar.map((c) => (
-                                    <li key={`similar-${c.id}`}>
-                                      <span className={styles.mono}>{c.identifier}</span> — {c.source} —{' '}
-                                      {t('records.assistant.definitionSimilarity', { score: c.score.toFixed(2) })}
-                                    </li>
+                                    <ReferenceRow
+                                      key={`similar-${c.id}`}
+                                      candidate={c}
+                                      showScore
+                                      expanded={expandedReferenceIds.has(c.id)}
+                                      onToggle={() => toggleReferenceExpanded(c.id)}
+                                    />
                                   ))}
                                 </ul>
                               </div>
@@ -1797,9 +1845,13 @@ export default function RecordsPage() {
                                 </h4>
                                 <ul className={styles.referencesList}>
                                   {suggestion.styleReferences.map((c) => (
-                                    <li key={`style-${c.id}`}>
-                                      <span className={styles.mono}>{c.identifier}</span> — {c.source}
-                                    </li>
+                                    <ReferenceRow
+                                      key={`style-${c.id}`}
+                                      candidate={c}
+                                      showScore={false}
+                                      expanded={expandedReferenceIds.has(c.id)}
+                                      onToggle={() => toggleReferenceExpanded(c.id)}
+                                    />
                                   ))}
                                 </ul>
                               </div>
