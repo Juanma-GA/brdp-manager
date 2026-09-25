@@ -13,13 +13,19 @@
 //      vocabulary) flags an unknown name (<pokemon>) in the assistant
 //      panel and in the Ask/Suggest Definition/Suggest Proposal prompts,
 //      while a known name (<topic>, @conref) never triggers a warning;
-//      an S1000D project (no vocabulary in this sandbox -- SchemasS1000D
-//      does not exist here) shows "not available", never a false
-//      positive, and the prompt never gets the unknown-names block;
-//      the extraction call is genuinely cached (same text -> one call);
-//      a failed extraction call degrades to "Extended name check
-//      unavailable" while context-only detection still works; the hint
-//      text under Title/Definition/Proposal is visible.
+//      an S1000D 4.2 project -- sources/SchemasS1000D/{3.0.1,4.1,4.2}
+//      arrived MID-ROUND with a full data-module schema set per Issue
+//      (descript/proced/ipd/crew.xsd all confirmed present, not just
+//      brex.xsd), so it now ALSO has a real generated vocabulary --
+//      flags <pokemon> for real too, and recognizes proceduralStep (no
+//      <>, the docs request's own S1000D 4.2 litmus case) as valid; an
+//      S1000D 5.0 project (genuinely no schema anywhere in this repo)
+//      shows "not available", never a false positive, and the prompt
+//      never gets the unknown-names block; the extraction call is
+//      genuinely cached (same text -> one call); a failed extraction
+//      call degrades to "Extended name check unavailable" while
+//      context-only detection still works; the hint text under
+//      Title/Definition/Proposal is visible.
 //
 // Prerequisites: mock-mistral-embed-server.mjs on :8901 (already the
 // .env default), mock-mistral-chat-server.mjs on :8902 (now also serving
@@ -112,12 +118,18 @@ async function main() {
   });
   console.log("Seeded Project D (DITA 1.3 Xpath2.0): 2 BRDPs for the vocabulary check");
 
-  // ---- Project S (S1000D 4.2): no generated vocabulary in this sandbox ----
+  // ---- Project S (S1000D 4.2): sources/SchemasS1000D/4.2 arrived mid-
+  // round (real, complete -- descript/proced/ipd/crew.xsd all present,
+  // confirmed before generating anything) -- S1000D 4.2 now HAS a real
+  // generated vocabulary too, so this BRDP exercises both an unknown
+  // name (<pokemon>) AND a real known one WITHOUT <> (proceduralStep,
+  // the encargo's own S1000D 4.2 litmus case) in the same Definition.
   const projS = await makeProject(auth, `Vocab Verify S ${suffix}`, "S1000D 4.2");
   const brdpS1 = await makeBrdp(auth, projS.id, {
     identifier: SAME_ID,
     title: "Fuel line clamp spacing decision (source)",
-    definition: "Definition mentioning <pokemon> as a placeholder element that should never exist.",
+    definition:
+      "Definition mentioning <pokemon> as a placeholder that should never really exist, and confirming proceduralStep numbering stays consistent.",
     proposal: "",
     validation: "Pending",
   });
@@ -133,6 +145,18 @@ async function main() {
     validation: "Validated",
   });
   console.log("Seeded Project S (S1000D 4.2) + Project S2 sharing the catalog identifier");
+
+  // ---- Project S0 (S1000D 5.0): genuinely no schema in this repo at all
+  // (only 3.0.1/4.1/4.2 arrived) -- the real "not available" case now.
+  const projS0 = await makeProject(auth, `Vocab Verify S0 ${suffix}`, "S1000D 5.0");
+  const brdpS0 = await makeBrdp(auth, projS0.id, {
+    identifier: "BRDP-VOCAB-S0-01",
+    title: "A BRDP under a standard with no schema at all",
+    definition: "Mentions <pokemon> too, but this standard has no generated vocabulary to check it against.",
+    proposal: "",
+    validation: "Pending",
+  });
+  console.log("Seeded Project S0 (S1000D 5.0): no schema in this repo -- real 'not available' case");
 
   const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1400 } });
@@ -271,26 +295,51 @@ async function main() {
     console.log("Screenshot (extraction unavailable): /tmp/vocab-check-extraction-unavailable.png");
     await page.getByRole("button", { name: "Clear" }).click();
 
-    // ==== 4c. S1000D project: no vocabulary -> "not available", never a false positive ====
+    // ==== 4c. S1000D 4.2 project: REAL generated vocabulary (sources/
+    // SchemasS1000D/4.2 arrived mid-round -- descript/proced/ipd/crew.xsd
+    // all confirmed present, so the check is genuinely active here, not
+    // "not available") -- <pokemon> unknown, proceduralStep (no <>, the
+    // encargo's own S1000D 4.2 litmus case) recognized as real. ====
     await openRecords(`Vocab Verify S ${suffix}`, SAME_ID);
     await resetMock();
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this well scoped?");
     await page.getByRole("button", { name: "Ask" }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
+    const bannerTextS1000D = await page.locator("text=/Not found in the S1000D 4.2 schema/").first().textContent();
+    assert(bannerTextS1000D.includes("<pokemon>"), `S1000D 4.2 real vocabulary flags <pokemon> as unknown (got: ${bannerTextS1000D})`);
     assert(
-      (await page.locator("text=Schema vocabulary check not available for S1000D 4.2.").count()) > 0,
-      '"not available" notice shown for S1000D 4.2 (no SchemasS1000D in this sandbox)'
-    );
-    assert(
-      (await page.locator("text=/Not found in the S1000D 4.2 schema/").count()) === 0,
-      "no false 'not found' claim for a standard with no vocabulary at all"
+      !bannerTextS1000D.includes("proceduralStep"),
+      "proceduralStep (no <>, real S1000D 4.2 element) is NOT flagged -- recognized against the real schema"
     );
     const reqAskS1000D = await lastMockRequest();
     const sysAskS1000D = reqAskS1000D.messages.find((m) => m.role === "system").content;
-    assert(!sysAskS1000D.includes("do NOT exist in the S1000D 4.2 schema"), "prompt never gets the unknown-names block when the standard has no vocabulary");
+    assert(
+      sysAskS1000D.includes("The following names do NOT exist in the S1000D 4.2 schema: <pokemon>."),
+      "Ask prompt carries the exact unknown-names block for real S1000D 4.2 vocabulary"
+    );
     await page.getByRole("button", { name: "Clear" }).click();
 
+    // ==== 4d. S1000D 5.0 project: genuinely no schema in this repo ->
+    // "not available", never a false positive. ====
+    await openRecords(`Vocab Verify S0 ${suffix}`, "BRDP-VOCAB-S0-01");
+    await resetMock();
+    await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this well scoped?");
+    await page.getByRole("button", { name: "Ask" }).click();
+    await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
+    assert(
+      (await page.locator("text=Schema vocabulary check not available for S1000D 5.0.").count()) > 0,
+      '"not available" notice shown for S1000D 5.0 (no schema at all in this repo for it)'
+    );
+    assert(
+      (await page.locator("text=/Not found in the S1000D 5.0 schema/").count()) === 0,
+      "no false 'not found' claim for a standard with no vocabulary at all"
+    );
+    const reqAskS0 = await lastMockRequest();
+    const sysAskS0 = reqAskS0.messages.find((m) => m.role === "system").content;
+    assert(!sysAskS0.includes("do NOT exist in the S1000D 5.0 schema"), "prompt never gets the unknown-names block when the standard has no vocabulary");
+
     // ==== 3. Same BRDP group highlighted red ====
+    await openRecords(`Vocab Verify S ${suffix}`, SAME_ID);
     await resetMock();
     const suggestPropButtonS = page.getByRole("button", { name: "Suggest Proposal" });
     assert(await suggestPropButtonS.isEnabled(), "Suggest Proposal enabled (Definition is present)");
@@ -331,7 +380,7 @@ async function main() {
     console.log("\nALL CHECKS PASSED\n");
   } finally {
     await browser.close();
-    for (const proj of [projD, projS, projS2]) {
+    for (const proj of [projD, projS, projS2, projS0]) {
       await fetch(`${API}/api/projects/${proj.id}`, { method: "DELETE", headers: auth }).catch(() => {});
     }
     console.log("Cleaned up the 3 seeded projects.");

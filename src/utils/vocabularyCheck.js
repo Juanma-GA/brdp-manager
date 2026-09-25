@@ -14,19 +14,21 @@
 //       decision is made by checkAgainstVocabulary() alone, deterministically.
 import { sendMessage } from '../api/llmAPI.js';
 
-// Only DITA has a full schema available in this repo (sources/D1.3/schema)
-// -- see backend/scripts/generate_schema_vocabulary.py and CLAUDE.md's
-// closeout note on SchemasS1000D (not present in this sandbox at all, so
-// no S1000D standard has a generated vocabulary file yet). Both DITA
-// flavors share the same schema (the XPath dialect only affects Rule
-// authoring, never the topic/element vocabulary), so both map to the
-// same file. Adding a real S1000D vocabulary later is just: run the
-// generator against a real, complete SchemasS1000D issue folder, add the
-// resulting public/schema-vocabulary-<issue>.json here -- no other code
-// change needed.
+// DITA (sources/D1.3/schema) and, since sources/SchemasS1000D/{3.0.1,4.1,
+// 4.2} arrived mid-round with a full data-module schema set per Issue
+// (descript/proced/ipd/crew.xsd confirmed present for all three, not
+// just brex.xsd), all three real S1000D Issues too -- see
+// backend/scripts/generate_schema_vocabulary.py and CLAUDE.md's closeout
+// note. S1000D 5.0/6.0 have no schema at all in this repo -- correctly
+// absent here, "not available" for them. Both DITA flavors share the
+// same schema (the XPath dialect only affects Rule authoring, never the
+// topic/element vocabulary), so both map to the same file.
 const STANDARD_TO_VOCABULARY_FILE = {
   'DITA 1.3 Xpath2.0': 'schema-vocabulary-dita.json',
   'DITA 1.3 Xpath3.0': 'schema-vocabulary-dita.json',
+  'S1000D 3.0.1': 'schema-vocabulary-3-0-1.json',
+  'S1000D 4.1': 'schema-vocabulary-4-1.json',
+  'S1000D 4.2': 'schema-vocabulary-4-2.json',
 };
 
 const _vocabularyCache = new Map();
