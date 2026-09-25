@@ -5,47 +5,37 @@
 // vocabulary.py from the actual XSDs (never guessed, never LLM-judged --
 // see checkAgainstVocabulary below).
 //
-// Two independent extraction paths, unioned by checkAgainstVocabulary
-// (3.3 of the docs request):
-//   (a) extractContextCandidates() -- deterministic, no LLM call. Explicit
-//       `<x>`/`@x` markup and the context-phrase/camelCase heuristics.
-//   (b) extractVocabCandidatesViaLLM() -- a SEPARATE, prior LLM call
-//       (temperature 0) that only extracts what the text is TALKING
-//       ABOUT as an element/attribute name -- it is never told the real
-//       vocabulary and never judges whether a name is valid. That
-//       decision is made by checkAgainstVocabulary() alone, deterministically.
+// Real-Mistral follow-up round ("solo determinista, sin bloqueo, sin
+// referencias inventadas"): a SEPARATE prior LLM-extraction path used to
+// exist here (a temperature-0 call that guessed which words the text was
+// "talking about" as element/attribute names, before this function ever
+// judged existence). It is REMOVED entirely in this round -- confirmed
+// real with Mistral, it flagged ordinary technical-English vocabulary and
+// attribute VALUES from a real, correct catalog entry (BRDP-S1-00053:
+// "Data module change/revised ratio" -> `<change>`, `<data>`, `<marks>`,
+// `<module>`, `@changed`, `@revised`, none of which the text actually
+// names as an element/attribute) -- since almost the entire catalog is
+// written in ordinary technical English, that false-positive rate made
+// the "Possibly not in..." warning fire on most BRDPs regardless of the
+// stopword filter that used to sit in front of it. There is no
+// replacement heuristic for "guess what a word might mean" -- only the
+// deterministic path below, which requires actual evidence in the text
+// (`<x>`/`@x` markup, or a name explicitly introduced via "element .../
+// attribute ...") before ever calling a name a candidate at all.
 //
-// Real-Mistral follow-up round ("falsos positivos del extractor LLM y
-// aviso de tipo equivocado"): a real model, given ambiguous natural-
-// language text with no markup ("el pokemon ese que va dentro del step"),
-// over-extracted nearly every word (articles, pronouns, prepositions)
-// as if each were an element name. Two independent defenses, per the
-// encargo -- a better prompt is NOT trusted alone to fix this:
-//   - a deterministic stopword filter, applied ONLY to the LLM path's
-//     own output (never to (a), and never to an explicitly-marked
-//     `<x>`/`@x` even if it happens to be a stopword spelling -- see
-//     filterLLMStopwords below);
-//   - a confidence split in what gets shown: a name (a) found via
-//     context/explicit markup is shown as "Not found" (checkAgainstVocabulary
-//     already had real evidence the text meant it as a name); a name only
-//     the LLM guessed is shown as "Possibly not in" (weaker claim, since
-//     the LLM path can still be wrong despite the filter and the tighter
-//     prompt -- HR7, never overstate confidence the app doesn't have).
-// Also new: a wrong-KIND check -- a name used as an element that doesn't
-// exist as an element but DOES exist as an attribute (or vice versa) gets
-// its own message instead of being lumped in as merely "not found".
-import { sendMessage } from '../api/llmAPI.js';
-
-// DITA (sources/D1.3/schema) and, since sources/SchemasS1000D/{3.0.1,4.1,
-// 4.2} arrived mid-round with a full data-module schema set per Issue
-// (descript/proced/ipd/crew.xsd confirmed present for all three, not
-// just brex.xsd), all three real S1000D Issues too -- see
-// backend/scripts/generate_schema_vocabulary.py and CLAUDE.md's closeout
-// note. S1000D 5.0/6.0 have no schema at all in this repo -- correctly
-// absent here, "not available" for them. Both DITA flavors share the
-// same schema (the XPath dialect only affects Rule authoring, never the
-// topic/element vocabulary), so both map to the same file.
-const STANDARD_TO_VOCABULARY_FILE = {
+// Same follow-up round, second real report (a real BRDP titled "lA
+// ETIQUETA <table> no lleva atributo de tipo cl, pl y de tipo ip si es de
+// valor 23"): the deterministic path itself had two real false positives
+// -- "lA" (an all-but-one-letter capitalized word, never intended as a
+// name) came from an over-loose camelCase pattern, and "tipo" (the
+// Spanish word for "type", not a name) came from the phrase-trigger
+// heuristic capturing the word immediately after "atributo de" without
+// skipping it. Neither is guessed at with an LLM; both are fixed
+// deterministically below (tighter camelCase pattern, a wider set of
+// words skipped after the trigger, and list capture so "atributo de tipo
+// cl, pl y de tipo ip" -- interleaved "de tipo" and all -- correctly
+// yields cl/pl/ip, not "tipo" or nothing at all).
+export const STANDARD_TO_VOCABULARY_FILE = {
   'DITA 1.3 Xpath2.0': 'schema-vocabulary-dita.json',
   'DITA 1.3 Xpath3.0': 'schema-vocabulary-dita.json',
   'S1000D 3.0.1': 'schema-vocabulary-3-0-1.json',
@@ -71,52 +61,22 @@ export async function loadSchemaVocabulary(standard) {
   return parsed;
 }
 
-// 3.3(a) -- deterministic context extraction, no LLM involved.
+// Deterministic context extraction -- the ONLY extraction path now.
 // - `elements`: whatever appears between `<...>` (opening or closing tag
 //   form), e.g. `<pokemon>`/`</pokemon>` -> "pokemon".
 // - `attributes`: whatever appears after `@`, e.g. `@conref` -> "conref".
-// - `ambiguous`: two further heuristics whose category (element vs
-//   attribute) the surrounding natural-language text doesn't pin down
-//   with confidence, so (per 3.4) they get checked against the UNION of
-//   both lists rather than guessing which one:
-//     - the word following "elemento(s)/element(s)/atributo(s)/
-//       attribute(s)", skipping over articles/connectors
-//       (el/la/los/las/del/de/un/una/unos/unas/the/of/a/an) that sit
-//       between the trigger word and the real candidate -- if a SECOND
-//       trigger word is hit while skipping connectors (e.g. "atributos
-//       del elemento pokemon"), the scan re-anchors on that later
-//       trigger instead, so the word actually captured is the one right
-//       after the trigger that's closest to it.
-//     - lower-camelCase words (e.g. "proceduralStep").
-// This entire path is never touched by the stopword filter below -- an
-// explicit `<del>` is still checked, even though "del" is a stopword.
-const ELEMENT_ATTR_TAG_RE = /<\/?([A-Za-z][\w-]*)[^>]*>/g;
-const ATTR_MARKER_RE = /@([A-Za-z][\w-]*)/g;
-const WORD_RE = /[A-Za-z][\w-]*/g;
-const CAMEL_CASE_RE = /^[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*$/;
-
-const TRIGGER_WORDS = new Set(['elemento', 'elementos', 'element', 'elements', 'atributo', 'atributos', 'attribute', 'attributes']);
-const CONNECTOR_WORDS = new Set(['el', 'la', 'los', 'las', 'del', 'de', 'un', 'una', 'unos', 'unas', 'the', 'of', 'a', 'an']);
-
-function extractPhraseCandidates(text) {
-  const tokens = text.match(WORD_RE) || [];
-  const candidates = [];
-  for (let i = 0; i < tokens.length; i++) {
-    if (!TRIGGER_WORDS.has(tokens[i].toLowerCase())) continue;
-    let j = i + 1;
-    while (j < tokens.length && CONNECTOR_WORDS.has(tokens[j].toLowerCase())) j++;
-    if (j >= tokens.length) continue;
-    if (TRIGGER_WORDS.has(tokens[j].toLowerCase())) continue; // re-anchor: let the outer loop reach this trigger itself
-    candidates.push(tokens[j]);
-  }
-  return candidates;
-}
-
-function extractCamelCaseCandidates(text) {
-  const tokens = text.match(WORD_RE) || [];
-  return tokens.filter((t) => CAMEL_CASE_RE.test(t));
-}
-
+// - `ambiguous`: candidates whose category (element vs attribute) the
+//   surrounding text doesn't pin down with confidence, so (per
+//   checkAgainstVocabulary) they get checked against the UNION of both
+//   lists rather than guessing which one -- phrase-triggered words (see
+//   extractPhraseCandidates) and lower-camelCase words.
+// - `renamable`: the SAME phrase-triggered candidates as `ambiguous`, but
+//   WITH the type the trigger word itself implied ("elemento"/"element" ->
+//   'element', "atributo"/"attribute" -> 'attribute') and excluding any
+//   name that's already properly marked up elsewhere in the same text
+//   (already present in `elements`/`attributes`) -- used only for the
+//   "Did you mean `<x>`?" contextual correction, never for existence
+//   checking (that stays on `ambiguous`, unioned, exactly as before).
 export function extractContextCandidates(text) {
   const source = text || '';
   const elements = new Set();
@@ -130,180 +90,154 @@ export function extractContextCandidates(text) {
   ATTR_MARKER_RE.lastIndex = 0;
   while ((match = ATTR_MARKER_RE.exec(source))) attributes.add(match[1]);
 
-  for (const w of extractPhraseCandidates(source)) ambiguous.add(w);
+  const phraseCandidates = extractPhraseCandidates(source);
+  for (const c of phraseCandidates) ambiguous.add(c.name);
   for (const w of extractCamelCaseCandidates(source)) ambiguous.add(w);
 
-  return { elements: [...elements], attributes: [...attributes], ambiguous: [...ambiguous] };
-}
-
-// 3.3(b) -- the extraction call's own system prompt. Deliberately never
-// mentions or includes the real vocabulary -- existence is never this
-// call's job (checkAgainstVocabulary decides that, deterministically).
-// Tightened after real-Mistral over-extraction (articles/pronouns/
-// prepositions treated as candidate names for ambiguous text with no
-// markup) -- explicit negative instruction + the three worked examples
-// from the encargo, including the "generic noun describing a construct
-// kind" trap ("in the text element" must NOT yield "text").
-export function buildVocabExtractionPrompt() {
-  return `You extract candidate XML element and attribute names from a short
-piece of business-rule text (a BRDP's Title/Definition/Proposal).
-
-Read the text and list every word the text uses AS the name of an XML
-element or attribute -- regardless of whether such an element or
-attribute actually exists in any real schema. Do NOT judge whether a
-name is real, valid, or well-known; that is decided elsewhere, by a
-different process, not by you. You are only extracting what the text is
-talking about as an element/attribute name.
-
-Only include a word if the text uses it as the NAME of an XML element
-or attribute. Articles, pronouns, prepositions, conjunctions, verbs,
-adverbs and ordinary words used with their normal meaning are never
-names. When unsure, leave the word out.
-
-Examples:
-"el pokemon ese que va dentro del step" -> {"elements": ["pokemon", "step"], "attributes": []}
-"Decidir si se usa la lista numerada" -> {"elements": [], "attributes": []}
-"Use of the attribute emphasisType in the text element" -> {"elements": [], "attributes": ["emphasisType"]}
-
-Return ONLY a JSON object, nothing else -- no markdown, no code fences,
-no explanation -- in exactly this shape:
-{"elements": ["name1", "name2"], "attributes": ["name3"]}
-
-If there are none of one kind, return an empty array for it. If there
-are none at all, return {"elements": [], "attributes": []}.`;
-}
-
-// Tolerant JSON parse: strips a markdown code fence if the model added one
-// anyway, and validates the shape. Returns null (never throws) on
-// anything that doesn't parse into the expected shape.
-export function parseVocabExtractionResponse(raw) {
-  if (typeof raw !== 'string') return null;
-  let text = raw.trim();
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenceMatch) text = fenceMatch[1].trim();
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
+  const renamable = [];
+  const seenRenamable = new Set();
+  for (const c of phraseCandidates) {
+    if (elements.has(c.name) || attributes.has(c.name)) continue; // already marked up somewhere in this text
+    const key = `${c.type}:${c.name}`;
+    if (seenRenamable.has(key)) continue;
+    seenRenamable.add(key);
+    renamable.push({ name: c.name, type: c.type });
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-  const elements = Array.isArray(parsed.elements) ? parsed.elements.filter((x) => typeof x === 'string') : null;
-  const attributes = Array.isArray(parsed.attributes) ? parsed.attributes.filter((x) => typeof x === 'string') : null;
-  if (elements === null || attributes === null) return null;
-  return { elements, attributes };
+
+  return { elements: [...elements], attributes: [...attributes], ambiguous: [...ambiguous], renamable };
 }
 
-// Point 2 of the follow-up encargo: a deterministic safety net, applied
-// ONLY to the LLM path's own output -- never to extractContextCandidates()
-// (an explicit `<del>` must still be checked), and never relied on as the
-// only defense (the prompt above is the first line of defense; this is
-// the second, for when the model over-extracts anyway). Spanish+English
-// articles, pronouns, prepositions, conjunctions and common auxiliary
-// verbs/adverbs -- the exact class of word the real-Mistral report showed
-// leaking through ("del", "dentro", "el", "ese", "que", "va").
-const STOPWORDS = new Set([
-  // Spanish
-  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'al',
-  'a', 'ante', 'bajo', 'con', 'contra', 'desde', 'en', 'entre', 'hacia',
-  'hasta', 'para', 'por', 'según', 'segun', 'sin', 'so', 'sobre', 'tras',
-  'que', 'quien', 'quienes', 'cual', 'cuales', 'cuyo', 'cuya', 'este',
-  'esta', 'estos', 'estas', 'ese', 'esa', 'esos', 'esas', 'aquel',
-  'aquella', 'aquellos', 'aquellas', 'y', 'o', 'u', 'e', 'ni', 'pero',
-  'mas', 'más', 'sino', 'porque', 'pues', 'si', 'sí', 'no', 'se', 'le',
-  'les', 'lo', 'su', 'sus', 'mi', 'mis', 'tu', 'tus', 'yo', 'tú', 'tu',
-  'él', 'el', 'ella', 'ellos', 'ellas', 'nosotros', 'vosotros', 'ustedes',
-  'es', 'son', 'fue', 'fueron', 'ser', 'estar', 'está', 'esta', 'están',
-  'va', 'van', 'ir', 'hay', 'había', 'habia', 'muy', 'menos', 'también',
-  'tambien', 'ya', 'aún', 'aun', 'dentro', 'fuera', 'arriba', 'abajo',
-  'aquí', 'aqui', 'allí', 'alli', 'así', 'asi', 'ese',
-  // English
-  'the', 'an', 'of', 'in', 'on', 'at', 'to', 'from', 'with', 'without',
-  'for', 'and', 'or', 'but', 'if', 'then', 'else', 'when', 'where',
-  'which', 'who', 'whom', 'whose', 'as', 'by', 'into', 'it', 'its',
-  "it's", 'not', 'is', 'are', 'be', 'this', 'that', 'these', 'those',
-  'was', 'were', 'has', 'have', 'had', 'do', 'does', 'did', 'will',
-  'would', 'can', 'could', 'should', 'may', 'might', 'must', 'yes',
+// Rewrites `text` to wrap the first bare (not already `<...>`/`@...`-marked)
+// occurrence of `suggestion.name` with the markup its `type` implies --
+// the "Did you mean `<pokemon>`?" fix-it action. Word-boundary match, case
+// as written by the user (never re-cased). A no-op (returns `text`
+// unchanged) if the name can no longer be found bare -- the caller re-runs
+// extractContextCandidates after applying anyway, so a suggestion that's
+// gone stale simply stops appearing rather than throwing.
+export function applyRenameSuggestion(text, suggestion) {
+  const source = text || '';
+  const escaped = suggestion.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?<![<@\\w])${escaped}(?!\\w)`);
+  const m = re.exec(source);
+  if (!m) return source;
+  const replacement = suggestion.type === 'element' ? `<${suggestion.name}>` : `@${suggestion.name}`;
+  return source.slice(0, m.index) + replacement + source.slice(m.index + suggestion.name.length);
+}
+
+const ELEMENT_ATTR_TAG_RE = /<\/?([A-Za-z][\w-]*)[^>]*>/g;
+const ATTR_MARKER_RE = /@([A-Za-z][\w-]*)/g;
+const WORD_RE = /[A-Za-z][\w-]*|,/g;
+// Follow-up round, point 2: requires at least two lowercase letters before
+// the first uppercase one, AND a minimum total length of 5 -- "lA" (1
+// lowercase, then uppercase) no longer matches; "dmCode"/"dmRef"/
+// "proceduralStep"/"applicRefId" still do.
+const CAMEL_CASE_RE = /^[a-z]{2,}[A-Z][A-Za-z0-9]*$/;
+const CAMEL_CASE_MIN_LENGTH = 5;
+
+const TRIGGER_WORDS = new Set(['elemento', 'elementos', 'element', 'elements', 'atributo', 'atributos', 'attribute', 'attributes']);
+// Words skipped between a trigger word and the real candidate -- the
+// original connectors (articles/prepositions) PLUS, per the follow-up
+// round, the descriptive words a real report showed leaking through as
+// false-positive candidates ("atributo de tipo cl" must yield "cl", never
+// "tipo").
+const SKIP_WORDS = new Set([
+  'el', 'la', 'los', 'las', 'del', 'de', 'un', 'una', 'unos', 'unas', 'the', 'of', 'a', 'an',
+  'tipo', 'type', 'llamado', 'llamada', 'named', 'called', 'nombre', 'name',
 ]);
+// Words that continue a list right after a just-captured candidate ("cl,
+// pl ni ip" / "cl, pl and ip") -- only interpreted as continuators
+// immediately after a candidate, never elsewhere in the sentence.
+const LIST_CONTINUATION_WORDS = new Set(['y', 'o', 'ni', 'and', 'or']);
 
-export function isStopword(name) {
-  return STOPWORDS.has((name || '').toLowerCase());
-}
-
-// Filters a { elements, attributes } pair (the LLM path's own shape) --
-// never applied to extractContextCandidates()'s output, per the encargo.
-export function filterLLMStopwords(llmCandidates) {
-  if (!llmCandidates) return llmCandidates;
-  return {
-    elements: (llmCandidates.elements || []).filter((n) => !isStopword(n)),
-    attributes: (llmCandidates.attributes || []).filter((n) => !isStopword(n)),
-  };
-}
-
-// Runs the extraction call for real. Never throws -- a failed call or an
-// invalid response degrades to `unavailable: true` (HR7: the caller must
-// show "Extended name check unavailable" explicitly, per 3.3, rather than
-// silently proceeding as if nothing was extracted). The stopword filter
-// (point 2) is applied here, right after parsing, so every caller of this
-// function automatically gets the filtered result -- there is no path
-// that reaches checkAgainstVocabulary with raw, unfiltered LLM output.
-export async function extractVocabCandidatesViaLLM({ title, definition, proposal, aiProvider }) {
-  if (!aiProvider) return { elements: [], attributes: [], unavailable: true };
-  const userMessage = `Title: ${title || ''}\nDefinition: ${definition || ''}\nProposal: ${proposal || ''}`;
-  try {
-    const res = await sendMessage(
-      [{ role: 'user', content: userMessage }],
-      null,
-      aiProvider.model,
-      aiProvider.provider,
-      buildVocabExtractionPrompt(),
-      { temperature: 0 }
-    );
-    const parsed = parseVocabExtractionResponse(res.content);
-    if (!parsed) return { elements: [], attributes: [], unavailable: true };
-    const filtered = filterLLMStopwords(parsed);
-    return { elements: filtered.elements, attributes: filtered.attributes, unavailable: false };
-  } catch {
-    return { elements: [], attributes: [], unavailable: true };
+function tokenize(text) {
+  const out = [];
+  let m;
+  WORD_RE.lastIndex = 0;
+  while ((m = WORD_RE.exec(text))) {
+    out.push(m[0] === ',' ? { type: 'comma' } : { type: 'word', value: m[0] });
   }
+  return out;
 }
 
-// 3.4 -- the only step that decides existence, purely deterministically
-// against the real vocabulary (never the LLM). `vocabulary` is what
-// loadSchemaVocabulary() returns, or null if not available for this
-// standard.
+// Skips over SKIP_WORDS starting at `idx`; stops (without consuming) at a
+// trigger word, a comma, or anything else.
+function skipSkipWords(tokens, idx) {
+  let i = idx;
+  while (i < tokens.length && tokens[i].type === 'word' && SKIP_WORDS.has(tokens[i].value.toLowerCase())) i++;
+  return i;
+}
+
+// Phrase-trigger extraction with list capture (follow-up round, point 2):
+// the word following "elemento(s)/element(s)/atributo(s)/attribute(s)",
+// skipping SKIP_WORDS between the trigger and the real candidate -- if a
+// SECOND trigger word is hit while skipping, the scan re-anchors on that
+// later trigger instead (e.g. "atributos del elemento pokemon" captures
+// "pokemon", tied to "elemento"). Once the first candidate is found, the
+// scan continues capturing a comma/conjunction-separated list ("cl, pl ni
+// ip"), skipping SKIP_WORDS again between each list separator and its
+// word, and stops at the first word that isn't a clean list continuation.
+// Each returned candidate carries `type` ('element' | 'attribute') from
+// the trigger word that started its list.
+function extractPhraseCandidates(text) {
+  const tokens = tokenize(text);
+  const candidates = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type !== 'word' || !TRIGGER_WORDS.has(t.value.toLowerCase())) continue;
+    const type = t.value.toLowerCase().startsWith('atributo') || t.value.toLowerCase().startsWith('attribute')
+      ? 'attribute'
+      : 'element';
+
+    let j = skipSkipWords(tokens, i + 1);
+    if (j >= tokens.length || tokens[j].type !== 'word') continue;
+    if (TRIGGER_WORDS.has(tokens[j].value.toLowerCase())) continue; // re-anchor: let the outer loop reach this trigger itself
+
+    candidates.push({ name: tokens[j].value, type });
+    let k = j + 1;
+    // List continuation: comma or a list conjunction, then (skipping
+    // SKIP_WORDS again) another word -- repeat until the pattern breaks.
+    while (true) {
+      let k2 = k;
+      let isContinuator = false;
+      if (tokens[k2] && tokens[k2].type === 'comma') {
+        k2++;
+        isContinuator = true;
+      } else if (tokens[k2] && tokens[k2].type === 'word' && LIST_CONTINUATION_WORDS.has(tokens[k2].value.toLowerCase())) {
+        k2++;
+        isContinuator = true;
+      }
+      if (!isContinuator) break;
+      k2 = skipSkipWords(tokens, k2);
+      if (k2 >= tokens.length || tokens[k2].type !== 'word' || TRIGGER_WORDS.has(tokens[k2].value.toLowerCase())) break;
+      candidates.push({ name: tokens[k2].value, type });
+      k = k2 + 1;
+    }
+    i = k - 1; // avoid rescanning consumed list words as fresh triggers
+  }
+  return candidates;
+}
+
+function extractCamelCaseCandidates(text) {
+  const tokens = (text.match(/[A-Za-z][\w-]*/g) || []);
+  return tokens.filter((t) => t.length >= CAMEL_CASE_MIN_LENGTH && CAMEL_CASE_RE.test(t));
+}
+
+// The only step that decides existence, purely deterministically against
+// the real vocabulary. `vocabulary` is what loadSchemaVocabulary() returns,
+// or null if not available for this standard.
 //
-// Follow-up round: takes `contextCandidates` (3.3a's own shape) and
-// `llmCandidates` (3.3b's, already stopword-filtered by
-// extractVocabCandidatesViaLLM -- pass `null` or `{unavailable:true}` if
-// the extraction call failed) SEPARATELY rather than pre-merged, because
-// the confidence split (point 3) and the wrong-kind check (point 4) both
-// need to know where a name came from and what kind it was used as --
-// information a flat merged list would have already thrown away.
-//
-// Returns:
-//   { available, notFound, possiblyNotFound, wrongType }
+// Returns { available, notFound, wrongType }:
 // - `notFound`: display strings (`<x>`/`@x`/bare) for names found via
-//   context extraction or explicit `<x>`/`@x` markup -- real evidence the
-//   text meant it as a name, so shown as a flat claim ("Not found").
-// - `possiblyNotFound`: display strings for names the LLM path alone
-//   surfaced -- weaker claim ("Possibly not in"), since despite the
-//   filter and the tighter prompt the LLM path can still be wrong.
+//   context extraction or explicit `<x>`/`@x` markup -- the only source of
+//   candidates now, so every finding here has real evidence in the text.
 // - `wrongType`: `{ name, usedAs, actualAs }` for a name used as one kind
 //   (element/attribute) that doesn't exist as that kind but DOES exist as
-//   the other -- reported instead of (never in addition to) notFound/
-//   possiblyNotFound for that name.
-// A name found in both the context and LLM paths is high-confidence
-// (`notFound`), per the encargo ("vía por contexto o marcados
-// explícitamente" is one category regardless of the LLM path also
-// surfacing it).
-export function checkAgainstVocabulary(contextCandidates, llmCandidates, vocabulary) {
-  if (!vocabulary) return { available: false, notFound: [], possiblyNotFound: [], wrongType: [] };
-
-  const contextNames = new Set([...contextCandidates.elements, ...contextCandidates.attributes, ...contextCandidates.ambiguous]);
+//   the other -- reported instead of (never in addition to) notFound for
+//   that name.
+export function checkAgainstVocabulary(contextCandidates, vocabulary) {
+  if (!vocabulary) return { available: false, notFound: [], wrongType: [] };
 
   const notFound = new Map();
-  const possiblyNotFound = new Map();
   const wrongType = new Map();
 
   const considerTyped = (name, type) => {
@@ -317,37 +251,25 @@ export function checkAgainstVocabulary(contextCandidates, llmCandidates, vocabul
       return;
     }
     const display = type === 'element' ? `<${name}>` : `@${name}`;
-    const bucket = contextNames.has(name) ? notFound : possiblyNotFound;
-    if (!bucket.has(name)) bucket.set(name, display);
+    if (!notFound.has(name)) notFound.set(name, display);
   };
 
   const considerAmbiguous = (name) => {
     if (vocabulary.elements.has(name) || vocabulary.attributes.has(name)) return;
-    if (!notFound.has(name)) notFound.set(name, name); // ambiguous is always context-path -> high confidence
+    if (!notFound.has(name)) notFound.set(name, name);
   };
 
   for (const name of contextCandidates.elements) considerTyped(name, 'element');
   for (const name of contextCandidates.attributes) considerTyped(name, 'attribute');
   for (const name of contextCandidates.ambiguous) considerAmbiguous(name);
-  if (llmCandidates && !llmCandidates.unavailable) {
-    for (const name of llmCandidates.elements) considerTyped(name, 'element');
-    for (const name of llmCandidates.attributes) considerTyped(name, 'attribute');
-  }
 
   // A wrong-kind finding is its own, more specific message -- never also
-  // listed as merely "not found"/"possibly not found" for the same name.
-  for (const name of wrongType.keys()) {
-    notFound.delete(name);
-    possiblyNotFound.delete(name);
-  }
-  // Context-path evidence (notFound) outranks an LLM-only guess for the
-  // same name -- don't show the same name twice at two confidence levels.
-  for (const name of notFound.keys()) possiblyNotFound.delete(name);
+  // listed as merely "not found" for the same name.
+  for (const name of wrongType.keys()) notFound.delete(name);
 
   return {
     available: true,
     notFound: [...notFound.values()].sort(),
-    possiblyNotFound: [...possiblyNotFound.values()].sort(),
     wrongType: [...wrongType.values()].sort((a, b) => a.name.localeCompare(b.name)),
   };
 }
@@ -363,8 +285,8 @@ export function formatWrongTypeMessage(standard, entry) {
 }
 
 // A cheap, stable, non-cryptographic hash of the three text fields --
-// only used as an in-memory cache key ("mismo texto dos veces -> una
-// sola llamada de extracción"), never for anything security-sensitive.
+// only used as an in-memory key to avoid recomputing when nothing changed,
+// never for anything security-sensitive.
 export function hashVocabInputText(title, definition, proposal) {
   const s = `${title || ''}\u0000${definition || ''}\u0000${proposal || ''}`;
   let hash = 0;

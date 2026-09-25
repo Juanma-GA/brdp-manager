@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { authFetchJson } from '../services/apiClient';
+import { useAuthContext } from '../context/AuthContext';
 import { sendMessage } from '../api/llmAPI';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
@@ -17,9 +18,9 @@ import {
   usePendingEmbeddings,
 } from '../hooks/useEmbeddingJob';
 import {
+  applyRenameSuggestion,
   checkAgainstVocabulary,
   extractContextCandidates,
-  extractVocabCandidatesViaLLM,
   formatWrongTypeMessage,
   hashVocabInputText,
   loadSchemaVocabulary,
@@ -89,26 +90,22 @@ function ruleTextForAsk(state, ruleXml) {
   return `${ruleXml.slice(0, ASK_RULE_MAX_CHARS)}\n[Rule truncated at ${ASK_RULE_MAX_CHARS} characters]`;
 }
 
-// Docs request (schema vocabulary check round), 3.5, extended by the
-// real-Mistral follow-up round: shared by all three prompts that get this
-// block (Ask, Suggest Definition, Suggest Proposal -- never Suggest Rule,
-// unchanged). `vocabCheck` is checkAgainstVocabulary()'s own output
-// (notFound/possiblyNotFound/wrongType) -- already deduped and formatted,
-// appended verbatim, never reformatted a second way. Three independent
-// paragraphs (any subset may be present): a flat claim for names with
-// real evidence (context/explicit markup), a hedged one for LLM-only
-// guesses (the LLM path can still be wrong despite the stopword filter
-// and the tighter prompt -- HR7, never overstate confidence the app
-// doesn't have), and the wrong-kind case reported with its own message.
+// Docs request (schema vocabulary check round), 3.5. Shared by all three
+// prompts that get this block (Ask, Suggest Definition, Suggest Proposal
+// -- never Suggest Rule, unchanged). `vocabCheck` is
+// checkAgainstVocabulary()'s own output (notFound/wrongType) -- already
+// deduped and formatted, appended verbatim, never reformatted a second
+// way. "Solo determinista" round: the LLM-guess path (and the hedged
+// "possibly not in" paragraph it fed) is gone entirely -- every name here
+// has real evidence in the text (`<x>`/`@x` markup, or an explicit
+// "element .../attribute ..." introduction), so there is only one
+// confidence level left.
 function buildUnknownNamesBlock(standard, vocabCheck) {
   if (!vocabCheck) return '';
-  const { notFound, possiblyNotFound, wrongType } = vocabCheck;
+  const { notFound, wrongType } = vocabCheck;
   let block = '';
   if (notFound && notFound.length > 0) {
     block += `\n\nThe following names do NOT exist in the ${standard} schema: ${notFound.join(', ')}. Point this out explicitly; do not treat them as valid elements or attributes.`;
-  }
-  if (possiblyNotFound && possiblyNotFound.length > 0) {
-    block += `\n\nThe following names could not be confirmed against the ${standard} schema (this is an uncertain guess, not a confirmed absence): ${possiblyNotFound.join(', ')}. Mention this uncertainty if relevant; do not assert they are invalid, but do not treat them as confirmed valid either.`;
   }
   if (wrongType && wrongType.length > 0) {
     const lines = wrongType.map((w) => formatWrongTypeMessage(standard, w));
@@ -127,16 +124,14 @@ function buildUnknownNamesBlock(standard, vocabCheck) {
 // already forbids for everything else. Ask is a conversation where
 // pointing out an unknown name is the point; a Suggest's OUTPUT becomes
 // the BRDP's own Title/Definition/Proposal field verbatim, where a stray
-// comment or a snuck-in decision would corrupt the record. Never split by
-// confidence here (unlike the banner) -- regardless of whether a name is
-// notFound/possiblyNotFound/wrongType, the instruction is identical: say
+// comment or a snuck-in decision would corrupt the record. Regardless of
+// whether a name is notFound/wrongType, the instruction is identical: say
 // nothing about it, decide nothing, just write the text as instructed.
 function buildSuggestUnknownNamesBlock(standard, vocabCheck) {
   if (!vocabCheck) return '';
   const names = [
     ...new Set([
       ...(vocabCheck.notFound || []),
-      ...(vocabCheck.possiblyNotFound || []),
       ...(vocabCheck.wrongType || []).map((w) => (w.usedAs === 'element' ? `<${w.name}>` : `@${w.name}`)),
     ]),
   ];
@@ -162,10 +157,12 @@ do not attempt to answer a question unrelated to the BRDP below.
 Answer in at most 3 short paragraphs — be direct, no padding, no
 restating the question back to the user.
 
-When you cite a specific S1000D chapter, DITA element, or specification
-detail, only cite ones you're genuinely confident about — say so plainly
-if you're not certain rather than inventing a plausible-sounding
-reference.
+Never state or suggest specification chapter, section or paragraph
+numbers, not even as possibilities ("it might be in chapter X"),
+unless the exact number appears in the BRDP content above. If the user
+asks where something is defined, say that you cannot give the exact
+location, and name the concept or element to look up in the ${standard}
+specification instead.
 
 Answer in the same language as the question.
 
@@ -264,7 +261,11 @@ knowledge of ${standard} alone.
 `;
   }
 
-  prompt += `Do not cite specification chapter numbers you are not sure of.
+  prompt += `Never state or suggest specification chapter, section or paragraph
+numbers, not even as possibilities ("it might be in chapter X"), unless
+the exact number appears in the BRDP content above. If you would
+otherwise need to point to a location in the ${standard} specification,
+name the concept or element to look up instead.
 
 Keep element and attribute names exactly as written in the BRDP's
 Title — never rename them.
@@ -375,6 +376,13 @@ example options. Examples:
 - Permitted characters: [CHARACTERS: ...].
 Example options may come from the reference BRDPs, but never present
 another project's choice as this project's decision.
+
+Never state or suggest specification chapter, section or paragraph
+numbers, not even as possibilities ("it might be in chapter X"), unless
+the exact number appears in the BRDP content above. If you would
+otherwise need to point to a location in the ${standard} specification,
+name the concept or element to look up instead.
+
 Keep element and attribute names exactly as written in the BRDP's Title
 and Definition — never rename them.
 
@@ -451,6 +459,68 @@ function ReferenceRow({ candidate, showScore, showProposal, danger, expanded, on
         </div>
       )}
     </li>
+  );
+}
+
+// Naming-convention tip round: pure wrapper around
+// extractContextCandidates(text).renamable, so every field that wants the
+// "Did you mean `<x>`?" correction (docs request point 8) calls the same
+// one function rather than each re-deriving it -- never gated by the
+// session tip's dismissed state (a concrete correction, not the general
+// hint), so it's computed straight from the field's own text on every
+// render (cheap, pure regex work, same as elsewhere on this page).
+function renameSuggestionsFor(text) {
+  return extractContextCandidates(text || '').renamable;
+}
+
+// Docs request (naming-convention tip round), 5-7: a discreet, non-modal
+// box shown next to a field the FIRST time the user focuses/types into
+// Title, Definition, Proposal (BRDP panel or Add BRDP) or the Ask
+// question -- once per session (state owned by the caller, see
+// namingTipAnchor below), unless permanently dismissed. "Got it" hides it
+// until the next session; "Don't show again" persists server-side (per
+// account, HR1 -- never localStorage) via PATCH /api/auth/me and never
+// shows again on any device until reversed from Settings > Profile.
+function NamingTip({ standard, onGotIt, onDontShowAgain }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.namingTip}>
+      <p>{t('records.namingTip.text', { standard })}</p>
+      <div className={styles.namingTipActions}>
+        <button type="button" className={styles.linkButton} onClick={onGotIt}>
+          {t('records.namingTip.gotIt')}
+        </button>
+        <button type="button" className={styles.linkButton} onClick={onDontShowAgain}>
+          {t('records.namingTip.dontShowAgain')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// One "Did you mean `<x>`?" chip per renamable candidate -- applying it
+// rewrites `text` (wrapping the first bare occurrence) via the passed
+// setter, which for the BRDP detail panel is a combined local-state-plus-
+// save (see the title/definition/proposal fields below) so the big
+// vocabulary notice updates immediately, matching the docs request's own
+// edge case ("el aviso de vocabulario se actualiza").
+function RenameSuggestions({ text, onApply }) {
+  const { t } = useTranslation();
+  const suggestions = renameSuggestionsFor(text);
+  if (suggestions.length === 0) return null;
+  return (
+    <div className={styles.renameSuggestions}>
+      {suggestions.map((s) => (
+        <button
+          key={`${s.type}:${s.name}`}
+          type="button"
+          className={styles.linkButton}
+          onClick={() => onApply(applyRenameSuggestion(text, s))}
+        >
+          {t('records.didYouMean', { suggestion: s.type === 'element' ? `<${s.name}>` : `@${s.name}` })}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -557,6 +627,49 @@ export default function RecordsPage() {
   // to 'editor' there, docs/v2 §4.3) -- never re-derive the admin bypass here.
   const canEdit = project.effective_role === 'editor';
   const ruleFormat = STANDARD_TO_RULE_FORMAT[project.standard];
+
+  // Naming-convention tip round: `user.hide_naming_tip` is the permanent,
+  // server-side "Don't show again" (HR1 -- never localStorage), read from
+  // the same AuthContext SettingsPage already uses for Display name/
+  // Language. `namingTipAnchor` is which field (if any) is CURRENTLY
+  // showing the tip -- 'title' | 'definition' | 'proposal' | 'ask' | null,
+  // at most one at a time. `namingTipSessionSeenRef` is the "once per
+  // session" latch (docs request: "una sola vez por sesión" is ONE tip
+  // total, not one per field -- confirmed by the edge case "primera
+  // escritura -> aparece; segunda -> no", which doesn't say "segunda en
+  // OTRO campo"): set the instant the tip is triggered anywhere, so no
+  // other field can trigger a second one later in the same session, with
+  // or without the user ever dismissing the first.
+  const { user, updateUser } = useAuthContext();
+  const [namingTipAnchor, setNamingTipAnchor] = useState(null);
+  const namingTipSessionSeenRef = useRef(false);
+
+  const triggerNamingTip = (field) => {
+    if (namingTipSessionSeenRef.current || user?.hide_naming_tip) return;
+    namingTipSessionSeenRef.current = true;
+    setNamingTipAnchor(field);
+  };
+
+  const dismissNamingTipForSession = () => setNamingTipAnchor(null);
+
+  const dismissNamingTipForever = async () => {
+    setNamingTipAnchor(null);
+    try {
+      const updated = await authFetchJson('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hide_naming_tip: true }),
+      });
+      updateUser(updated);
+    } catch {
+      // Best-effort: the tip is already hidden for the rest of this
+      // session either way (namingTipSessionSeenRef is already latched,
+      // setNamingTipAnchor(null) already ran above) -- only the
+      // cross-session/cross-device persistence would be missing, and the
+      // user can always dismiss it again next session if this PATCH
+      // failed silently.
+    }
+  };
 
   // On-demand embeddings (docs request): Suggest Definition/Proposal/Rule
   // needs real pgvector precedent, so it stays gated behind whatever is
@@ -678,24 +791,17 @@ export default function RecordsPage() {
   const [compareBusy, setCompareBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   // Docs request (schema vocabulary check round), extended by the "aviso
-  // ligado al texto" round: the CURRENT check's result -- { brdpId, hash,
-  // available, notFound, possiblyNotFound, wrongType, unavailable } -- or
-  // null before anything has run yet. Guarded by `brdpId` at render time
-  // (never explicitly cleared on BRDP change) so a stale result from a
-  // PREVIOUS BRDP simply never displays once `selected` moves on. `hash`
-  // is the text (title+definition+proposal) this result reflects -- used
-  // by recomputeVocabResult/ensureVocabularyChecked to know whether a
-  // cached LLM extraction still applies (see vocabLlmCacheRef below).
+  // ligado al texto" round and by the "solo determinista" follow-up: the
+  // CURRENT check's result -- { brdpId, hash, available, notFound,
+  // wrongType } -- or null before anything has run yet. Guarded by
+  // `brdpId` at render time (never explicitly cleared on BRDP change) so a
+  // stale result from a PREVIOUS BRDP simply never displays once
+  // `selected` moves on. `hash` is the text (title+definition+proposal)
+  // this result reflects. Entirely deterministic now (no LLM call, no
+  // cache to invalidate) -- recomputeVocabResult is cheap enough to run on
+  // every selection change and every save, so the notice always reflects
+  // the BRDP's CURRENT text.
   const [vocabResult, setVocabResult] = useState(null);
-  // Keyed by brdpId, ONE entry per BRDP -- the most recent LLM extraction
-  // call's raw result plus the hash of the text it was run against. Never
-  // localStorage (HR1), lost on reload same as every other in-memory
-  // Suggest/Ask state on this page. Deliberately keyed by brdpId alone
-  // (not `${brdpId}:${hash}` as in the previous round) and always
-  // OVERWRITTEN, never appended to: the docs request is explicit that an
-  // LLM result must be discarded the moment the text it was computed
-  // against changes, not kept around in case the text reverts later.
-  const vocabLlmCacheRef = useRef(new Map());
   // Suggest: one pending/loaded suggestion PER BRDP, kept until Accept or
   // Discard (docs request -- the suggestion belongs to the BRDP it was
   // requested for and survives switching rows; the previous round's
@@ -1226,16 +1332,14 @@ export default function RecordsPage() {
     refreshStats();
   };
 
-  // "Aviso ligado al texto" round, point 1: the DETERMINISTIC half of the
-  // vocabulary check (context extraction + comparison, no LLM call) --
-  // fast enough to run on every selection change and every save, so the
-  // notice/Suggest-blocking always reflects the BRDP's CURRENT text, never
-  // a stale one from whenever Ask/Suggest last happened to run. Reuses a
-  // cached LLM extraction ONLY if its hash still matches the current text
-  // (vocabLlmCacheRef); if the text changed since that extraction, the LLM
-  // part is simply absent here (never "unavailable" -- that specific state
-  // means an extraction call was attempted and failed, not "not yet run
-  // for this text") until the next real Ask/Suggest recomputes it.
+  // "Aviso ligado al texto" round, point 1, simplified by the "solo
+  // determinista" follow-up: the vocabulary check (context extraction +
+  // comparison against the real schema, no LLM call anywhere) -- fast
+  // enough to run on every selection change and every save, so the notice
+  // always reflects the BRDP's CURRENT text. Also called from
+  // askGeneric/requestSuggestion BEFORE building their system prompt, so
+  // the unknown-names block (if any) can be included in that same call --
+  // there is now only ONE vocabulary-check function, used everywhere.
   const recomputeVocabResult = async (brdp) => {
     if (!brdp) {
       setVocabResult(null);
@@ -1244,62 +1348,13 @@ export default function RecordsPage() {
     const hash = hashVocabInputText(brdp.title, brdp.definition, brdp.proposal);
     const vocabulary = await loadSchemaVocabulary(project.standard).catch(() => null);
     const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
-    const cachedLlm = vocabLlmCacheRef.current.get(brdp.id);
-    const llmCandidates = cachedLlm && cachedLlm.hash === hash ? cachedLlm.llmCandidates : null;
-    const checked = checkAgainstVocabulary(contextCandidates, llmCandidates, vocabulary);
+    const checked = checkAgainstVocabulary(contextCandidates, vocabulary);
     const result = {
       brdpId: brdp.id,
       hash,
       available: checked.available,
       notFound: checked.notFound,
-      possiblyNotFound: checked.possiblyNotFound,
       wrongType: checked.wrongType,
-      unavailable: !!(llmCandidates && llmCandidates.unavailable),
-    };
-    setVocabResult(result);
-    return result;
-  };
-
-  // Docs request (schema vocabulary check round), 3.3-3.4: runs the two
-  // independent extraction paths (deterministic context scan + a SEPARATE
-  // prior LLM call, temperature 0, that never sees the real vocabulary),
-  // unions them, and checks the union against the project standard's
-  // real generated vocabulary -- entirely deterministic, the LLM never
-  // decides existence. Called from askGeneric/requestSuggestion BEFORE
-  // building their system prompt, so the unknown-names block (if any) can
-  // be included in that same call -- this IS the "llamada previa y
-  // separada" the docs request describes. The LLM extraction itself is
-  // skipped (reusing vocabLlmCacheRef's entry) only when the text hasn't
-  // changed since the last one -- "mismo texto dos veces -> una sola
-  // llamada de extracción" -- otherwise a fresh call runs and its result
-  // replaces (never appends to) that BRDP's single cache entry, per the
-  // "aviso ligado al texto" round's explicit discard-on-change rule.
-  const ensureVocabularyChecked = async (brdp) => {
-    const hash = hashVocabInputText(brdp.title, brdp.definition, brdp.proposal);
-    const cachedLlm = vocabLlmCacheRef.current.get(brdp.id);
-    const needsExtraction = !(cachedLlm && cachedLlm.hash === hash);
-    const [vocabulary, llmCandidates] = await Promise.all([
-      loadSchemaVocabulary(project.standard).catch(() => null),
-      needsExtraction
-        ? extractVocabCandidatesViaLLM({
-            title: brdp.title,
-            definition: brdp.definition,
-            proposal: brdp.proposal,
-            aiProvider,
-          })
-        : Promise.resolve(cachedLlm.llmCandidates),
-    ]);
-    if (needsExtraction) vocabLlmCacheRef.current.set(brdp.id, { hash, llmCandidates });
-    const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
-    const checked = checkAgainstVocabulary(contextCandidates, llmCandidates, vocabulary);
-    const result = {
-      brdpId: brdp.id,
-      hash,
-      available: checked.available,
-      notFound: checked.notFound,
-      possiblyNotFound: checked.possiblyNotFound,
-      wrongType: checked.wrongType,
-      unavailable: llmCandidates.unavailable,
     };
     setVocabResult(result);
     return result;
@@ -1322,7 +1377,7 @@ export default function RecordsPage() {
     setAnswer('');
     setAskError(null);
     try {
-      const vocab = await ensureVocabularyChecked(selected);
+      const vocab = await recomputeVocabResult(selected);
       const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard, vocab);
       // One turn of chaining (docs request): the previous Q/A, if any,
       // goes in first as real conversation history so a follow-up like
@@ -1457,7 +1512,7 @@ export default function RecordsPage() {
       if (kind === 'definition') {
         const referenceSimilar = similar.candidates;
         const referenceStyle = similar.style_references || [];
-        const vocab = await ensureVocabularyChecked(selected);
+        const vocab = await recomputeVocabResult(selected);
         const systemPrompt = buildSuggestDefinitionPrompt(
           selected,
           project.standard,
@@ -1496,7 +1551,7 @@ export default function RecordsPage() {
         const referenceSameBrdp = similar.same_brdp || [];
         const referenceSimilar = similar.candidates;
         const referenceThisProject = similar.this_project || [];
-        const vocab = await ensureVocabularyChecked(selected);
+        const vocab = await recomputeVocabResult(selected);
         const systemPrompt = buildSuggestProposalPrompt(
           selected,
           project.standard,
@@ -1829,22 +1884,58 @@ export default function RecordsPage() {
               <input
                 className={styles.input}
                 value={newBrdpTitle}
-                onChange={(e) => setNewBrdpTitle(e.target.value)}
+                onFocus={() => triggerNamingTip('title')}
+                onChange={(e) => {
+                  triggerNamingTip('title');
+                  setNewBrdpTitle(e.target.value);
+                }}
               />
+              {namingTipAnchor === 'title' && (
+                <NamingTip
+                  standard={project.standard}
+                  onGotIt={dismissNamingTipForSession}
+                  onDontShowAgain={dismissNamingTipForever}
+                />
+              )}
+              <RenameSuggestions text={newBrdpTitle} onApply={setNewBrdpTitle} />
 
               <label className={styles.fieldLabel}>{t('records.fieldDefinition')}</label>
               <textarea
                 className={styles.textarea}
                 value={newBrdpDefinition}
-                onChange={(e) => setNewBrdpDefinition(e.target.value)}
+                onFocus={() => triggerNamingTip('definition')}
+                onChange={(e) => {
+                  triggerNamingTip('definition');
+                  setNewBrdpDefinition(e.target.value);
+                }}
               />
+              {namingTipAnchor === 'definition' && (
+                <NamingTip
+                  standard={project.standard}
+                  onGotIt={dismissNamingTipForSession}
+                  onDontShowAgain={dismissNamingTipForever}
+                />
+              )}
+              <RenameSuggestions text={newBrdpDefinition} onApply={setNewBrdpDefinition} />
 
               <label className={styles.fieldLabel}>{t('records.fieldProposal')}</label>
               <textarea
                 className={styles.textarea}
                 value={newBrdpProposal}
-                onChange={(e) => setNewBrdpProposal(e.target.value)}
+                onFocus={() => triggerNamingTip('proposal')}
+                onChange={(e) => {
+                  triggerNamingTip('proposal');
+                  setNewBrdpProposal(e.target.value);
+                }}
               />
+              {namingTipAnchor === 'proposal' && (
+                <NamingTip
+                  standard={project.standard}
+                  onGotIt={dismissNamingTipForSession}
+                  onDontShowAgain={dismissNamingTipForever}
+                />
+              )}
+              <RenameSuggestions text={newBrdpProposal} onApply={setNewBrdpProposal} />
               <p className={styles.hint}>{t('records.vocabHint')}</p>
 
               <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
@@ -1925,25 +2016,85 @@ export default function RecordsPage() {
                 className={styles.input}
                 value={selected.title}
                 disabled={!canEdit}
-                onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, title: e.target.value } : b)))}
+                onFocus={() => triggerNamingTip('title')}
+                onChange={(e) => {
+                  triggerNamingTip('title');
+                  setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, title: e.target.value } : b)));
+                }}
                 onBlur={(e) => canEdit && handleUpdate(selected.id, { title: e.target.value })}
               />
+              {namingTipAnchor === 'title' && (
+                <NamingTip
+                  standard={project.standard}
+                  onGotIt={dismissNamingTipForSession}
+                  onDontShowAgain={dismissNamingTipForever}
+                />
+              )}
+              {canEdit && (
+                <RenameSuggestions
+                  text={selected.title}
+                  onApply={(newText) => {
+                    setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, title: newText } : b)));
+                    handleUpdate(selected.id, { title: newText });
+                  }}
+                />
+              )}
               <label className={styles.fieldLabel}>{t('records.fieldDefinition')}</label>
               <textarea
                 className={styles.textarea}
                 value={selected.definition}
                 disabled={!canEdit}
-                onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, definition: e.target.value } : b)))}
+                onFocus={() => triggerNamingTip('definition')}
+                onChange={(e) => {
+                  triggerNamingTip('definition');
+                  setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, definition: e.target.value } : b)));
+                }}
                 onBlur={(e) => canEdit && handleUpdate(selected.id, { definition: e.target.value })}
               />
+              {namingTipAnchor === 'definition' && (
+                <NamingTip
+                  standard={project.standard}
+                  onGotIt={dismissNamingTipForSession}
+                  onDontShowAgain={dismissNamingTipForever}
+                />
+              )}
+              {canEdit && (
+                <RenameSuggestions
+                  text={selected.definition}
+                  onApply={(newText) => {
+                    setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, definition: newText } : b)));
+                    handleUpdate(selected.id, { definition: newText });
+                  }}
+                />
+              )}
               <label className={styles.fieldLabel}>{t('records.fieldProposal')}</label>
               <textarea
                 className={styles.textarea}
                 value={selected.proposal}
                 disabled={!canEdit}
-                onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: e.target.value } : b)))}
+                onFocus={() => triggerNamingTip('proposal')}
+                onChange={(e) => {
+                  triggerNamingTip('proposal');
+                  setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: e.target.value } : b)));
+                }}
                 onBlur={(e) => canEdit && handleUpdate(selected.id, { proposal: e.target.value })}
               />
+              {namingTipAnchor === 'proposal' && (
+                <NamingTip
+                  standard={project.standard}
+                  onGotIt={dismissNamingTipForSession}
+                  onDontShowAgain={dismissNamingTipForever}
+                />
+              )}
+              {canEdit && (
+                <RenameSuggestions
+                  text={selected.proposal}
+                  onApply={(newText) => {
+                    setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: newText } : b)));
+                    handleUpdate(selected.id, { proposal: newText });
+                  }}
+                />
+              )}
               <p className={styles.hint}>{t('records.vocabHint')}</p>
 
               <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
@@ -2070,17 +2221,15 @@ export default function RecordsPage() {
                 <h3 className={styles.assistantTitle}>{t('records.assistant.title')}</h3>
                 {!aiProvider && <p className={styles.muted}>{t('records.assistant.noProvider')}</p>}
 
-                {/* Docs request (schema vocabulary check round), extended by
-                    the real-Mistral follow-up round: runs once Ask/a
-                    Suggest is first used on this BRDP (never on its own)
-                    -- non-blocking, HR7-safe (never a false "not found": a
+                {/* Docs request (schema vocabulary check round), simplified
+                    by the "solo determinista" follow-up: entirely
+                    deterministic now, recomputed on selection/save -- non-
+                    blocking, HR7-safe (never a false "not found": a
                     standard without a generated vocabulary shows the "not
-                    available" notice instead of guessing). Three warning
-                    kinds, all red -- but with different confidence-aware
-                    wording -- plus the neutral/muted "not
-                    available"/"extended check unavailable" notices.
-                    Guarded by brdpId so a result from a PREVIOUS BRDP
-                    never shows here after switching rows. */}
+                    available" notice instead of guessing). Two warning
+                    kinds, both red, plus the neutral/muted "not available"
+                    notice. Guarded by brdpId so a result from a PREVIOUS
+                    BRDP never shows here after switching rows. */}
                 {vocabResult && vocabResult.brdpId === selected.id && (
                   <div className={styles.vocabNotice}>
                     {!vocabResult.available && (
@@ -2097,15 +2246,6 @@ export default function RecordsPage() {
                         })}
                       </p>
                     )}
-                    {vocabResult.available && vocabResult.possiblyNotFound.length > 0 && (
-                      <p className={styles.vocabWarning}>
-                        ⚠{' '}
-                        {t('records.assistant.vocabPossiblyUnknownNames', {
-                          standard: project.standard,
-                          names: vocabResult.possiblyNotFound.join(', '),
-                        })}
-                      </p>
-                    )}
                     {vocabResult.available &&
                       vocabResult.wrongType.map((w) => (
                         <p key={w.name} className={styles.vocabWarning}>
@@ -2118,9 +2258,6 @@ export default function RecordsPage() {
                           )}
                         </p>
                       ))}
-                    {vocabResult.unavailable && (
-                      <p className={styles.muted}>{t('records.assistant.vocabExtendedCheckUnavailable')}</p>
-                    )}
                   </div>
                 )}
 
@@ -2162,7 +2299,11 @@ export default function RecordsPage() {
                   className={styles.textarea}
                   rows={2}
                   value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
+                  onFocus={() => triggerNamingTip('ask')}
+                  onChange={(e) => {
+                    triggerNamingTip('ask');
+                    setQuestion(e.target.value);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey && !busy) {
                       e.preventDefault();
@@ -2173,6 +2314,13 @@ export default function RecordsPage() {
                     prevTurn ? 'records.assistant.askFollowupPlaceholder' : 'records.assistant.askPlaceholder'
                   )}
                 />
+                {namingTipAnchor === 'ask' && (
+                  <NamingTip
+                    standard={project.standard}
+                    onGotIt={dismissNamingTipForSession}
+                    onDontShowAgain={dismissNamingTipForever}
+                  />
+                )}
 
                 {compareBrdp ? (
                   <div className={styles.compareChip}>
@@ -2337,20 +2485,6 @@ export default function RecordsPage() {
                     // buttons, not just the matching kind -- Discard (or
                     // Accept) first to regenerate, even the same kind.
                     const pendingBlocked = !!selectedSuggestion;
-                    // "Aviso ligado al texto" round, point 4: a name in the
-                    // HIGH-confidence category (notFound -- context/explicit
-                    // markup, real evidence) blocks all three Suggest
-                    // buttons, including Rule (which never gets the
-                    // unknown-names prompt block at all -- this is a UI-
-                    // level gate, independent of prompt-building). A
-                    // possiblyNotFound (LLM-only guess) or wrongType name
-                    // never blocks -- only notFound, per the encargo's own
-                    // wording ("Con solo... tipo equivocado, no se
-                    // bloquea"). vocabResult may be null (vocabulary not
-                    // yet loaded) or for a different BRDP (stale async
-                    // resolve) -- guarded the same way the banner already is.
-                    const vocabBlocksSuggest =
-                      !!vocabResult && vocabResult.brdpId === selected.id && vocabResult.notFound.length > 0;
                     return (
                       <button
                         key={kind}
@@ -2359,20 +2493,17 @@ export default function RecordsPage() {
                           pendingBlocked ||
                           !aiProvider ||
                           suggestDisabledByEmbeddings ||
-                          vocabBlocksSuggest ||
                           catalogDisabled ||
                           definitionEmptyForProposal
                         }
                         title={
                           pendingBlocked
                             ? t('records.assistant.pendingSuggestionBlocksNew')
-                            : vocabBlocksSuggest
-                              ? t('records.assistant.vocabBlocksSuggest', { standard: project.standard })
-                              : catalogDisabled
-                                ? t('records.assistant.suggestDefinitionCatalogDisabled')
-                                : definitionEmptyForProposal
-                                  ? t('records.assistant.suggestProposalNeedsDefinition')
-                                  : undefined
+                            : catalogDisabled
+                              ? t('records.assistant.suggestDefinitionCatalogDisabled')
+                              : definitionEmptyForProposal
+                                ? t('records.assistant.suggestProposalNeedsDefinition')
+                                : undefined
                         }
                       >
                         {selectedSuggestion?.loading && selectedSuggestion.kind === kind

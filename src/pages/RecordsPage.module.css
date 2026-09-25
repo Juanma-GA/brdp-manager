@@ -521,6 +521,47 @@
   color: #94a3b8;
 }
 
+/* Naming-convention tip round: a discreet, non-modal box shown next to a
+   field (docs request: "no modal, no roba el foco") -- reuses the same
+   light-blue "informational chip" palette already established by
+   .compareChip (#eaf2fa/#c7ddf0/#245c90), not a new color. */
+.namingTip {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #eaf2fa;
+  border: 1px solid #c7ddf0;
+  color: #245c90;
+  font-size: 12px;
+}
+
+.namingTip p {
+  margin: 0;
+}
+
+.namingTipActions {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.namingTipActions .linkButton {
+  margin-top: 0;
+}
+
+/* "Did you mean `<x>`?" chips (docs request point 8) -- one .linkButton
+   per candidate, never gated by the naming tip's own dismissed state. */
+.renameSuggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.renameSuggestions .linkButton {
+  margin-top: 4px;
+}
+
 .catalogPicker {
   margin-top: 18px;
   padding-top: 14px;

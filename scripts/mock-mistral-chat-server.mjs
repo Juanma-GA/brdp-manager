@@ -91,27 +91,6 @@ let stepNextArmed = false;
 // flag forces the NEXT call to fail regardless of its content.
 let errorNextArmed = false;
 
-// Schema vocabulary check round (docs request, 3.3(b)), extended by the
-// real-Mistral follow-up round: the extraction call's own system prompt
-// (buildVocabExtractionPrompt() in vocabularyCheck.js) is distinctive
-// enough to detect and branch on -- unlike Ask/Suggest, whose triggers
-// key off the user message, this one keys off the SYSTEM prompt, since
-// the extraction call's user message is always "Title: ...\nDefinition:
-// ...\nProposal: ..." regardless of which BRDP or app action triggered
-// it. A deterministic stand-in for a real LLM's extraction -- see the
-// three branches inline below (over-extraction phrase / "label" wrong-
-// kind / plain "pokemon") -- exercises the SAME code path a real model
-// would (JSON out, no vocabulary given, no existence judgment) without
-// depending on real language understanding. GET /extraction-calls
-// exposes a count separate from the main /calls-equivalent (there isn't
-// one on this mock) so a verification script can assert "N genuinely
-// separate extraction calls happened" -- e.g. confirming the "mismo
-// texto dos veces -> una sola llamada" caching case for real.
-let extractionCallCount = 0;
-function isVocabExtractionSystemPrompt(systemPrompt) {
-  return /You extract candidate XML element and attribute names/.test(systemPrompt || "");
-}
-
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -123,14 +102,8 @@ const server = http.createServer((req, res) => {
     slowNextArmed = false;
     errorNextArmed = false;
     stepNextArmed = false;
-    extractionCallCount = 0;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
-    return;
-  }
-  if (req.method === "GET" && req.url === "/extraction-calls") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ count: extractionCallCount }));
     return;
   }
   if (req.method === "POST" && req.url === "/slow-next") {
@@ -165,60 +138,10 @@ const server = http.createServer((req, res) => {
     }
     lastRequest = parsed;
     const messages = parsed.messages || [];
-    const systemPrompt = messages.find((m) => m.role === "system")?.content || "";
     const nonSystem = messages.filter((m) => m.role !== "system");
     const lastUser = [...nonSystem].reverse().find((m) => m.role === "user");
     const userText = lastUser?.content || "";
     const hasPriorTurn = nonSystem.length > 1; // prev user+assistant, plus the new question
-
-    // Schema vocabulary check round: the extraction call, detected by its
-    // own distinctive system prompt -- handled before ERROR_TEST/
-    // errorNextArmed below so /error-next (armed before an Ask/Suggest
-    // click) fails THIS call first, exactly the "la llamada de
-    // extracción falla" edge case a verification script needs to exercise.
-    if (isVocabExtractionSystemPrompt(systemPrompt)) {
-      extractionCallCount += 1;
-      if (/ERROR_TEST/.test(userText) || errorNextArmed) {
-        errorNextArmed = false; // one-shot, same as the main-call path below
-        console.log(`extraction call #${extractionCallCount} -- simulated failure`);
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "simulated extraction failure" }));
-        return;
-      }
-      // Real-Mistral follow-up round ("falsos positivos del extractor LLM
-      // y aviso de tipo equivocado"): three deterministic branches, most
-      // specific first.
-      //   1. The exact ambiguous phrase from the encargo's own edge case
-      //      -- simulates the WORST-CASE real-Mistral behavior reported
-      //      by the user (every word, including Spanish stopwords,
-      //      treated as a candidate) so a verification script can prove
-      //      the client-side stopword filter (filterLLMStopwords) reduces
-      //      this to just "pokemon"/"step" regardless of what the model
-      //      itself returns -- the filter is the real defense, not the
-      //      prompt wording, which this mock deliberately does NOT model
-      //      well (a real model's improved-prompt behavior can only be
-      //      judged by the user against the real provider).
-      //   2. "label" -- S1000D 4.2's real generated vocabulary has
-      //      "label" as an attribute only (confirmed by grepping schema-
-      //      vocabulary-4-2.json), never as an element -- reported as an
-      //      element candidate here to exercise the wrong-kind check for
-      //      real, with real vocabulary data, not a synthetic fixture.
-      //   3. otherwise, the original "pokemon" substring check.
-      let elements = [];
-      const attributes = [];
-      if (/el pokemon ese que va dentro del step/i.test(userText)) {
-        elements = ["del", "dentro", "el", "ese", "pokemon", "que", "step", "va"];
-      } else if (/\blabel\b/i.test(userText)) {
-        elements = ["label"];
-      } else if (/pokemon/i.test(userText)) {
-        elements = ["pokemon"];
-      }
-      const body = JSON.stringify({ elements, attributes });
-      console.log(`extraction call #${extractionCallCount} -- elements=${JSON.stringify(elements)}`);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { content: body } }] }));
-      return;
-    }
 
     // Deterministic failure trigger -- exercises askGeneric's catch branch
     // (the real network-failure path) without relying on a flaky real
