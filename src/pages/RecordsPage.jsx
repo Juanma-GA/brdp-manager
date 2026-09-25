@@ -469,6 +469,15 @@ export default function RecordsPage() {
   // explicit notice instead of ever calling the LLM with weak/no few-shot.
   const [suggestion, setSuggestion] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Bug fix (docs request): a Suggest request in flight when the selected
+  // BRDP changes must never land on the wrong BRDP -- neither showing its
+  // result nor letting a stale `finally` clear `busy` for a NEWER request
+  // that's since started. Bumped on every BRDP-change reset (below) and by
+  // each new requestSuggestion() call; a request only commits its result
+  // (or resets `busy`) if this still matches the token it captured when it
+  // started -- a soft cancel, since the real fetch/sendMessage calls can't
+  // be aborted mid-flight here.
+  const suggestRequestGenerationRef = useRef(0);
   // Suggest Definition's reference rows (docs request, readable references
   // round): which candidate ids currently have their Definition expanded
   // below the row -- several can be open at once. Starts empty and is
@@ -685,6 +694,15 @@ export default function RecordsPage() {
   // stale answer (built from and about the PREVIOUS BRDP's context) stayed
   // visible, and the next question would have chained onto it as if it
   // were still about the newly selected BRDP.
+  //
+  // Same bug existed for Suggest Definition/Proposal/Rule (docs request,
+  // this round): the suggested text/references/notices stuck around after
+  // switching rows, and Accept would have written it to the NEW BRDP.
+  // Bumping the generation token here invalidates any Suggest request
+  // still in flight for the row just left -- see requestSuggestion, whose
+  // own `finally` only resets `busy` if its captured token still matches,
+  // so a stale in-flight request can never clear `busy` out from under a
+  // newer request already running for the row just selected.
   useEffect(() => {
     setQuestion('');
     setAnswer('');
@@ -694,7 +712,10 @@ export default function RecordsPage() {
     setCompareOpen(false);
     setCompareQuery('');
     setCompareBrdp(null);
+    setSuggestion(null);
+    setBusy(false);
     setExpandedReferenceIds(new Set());
+    suggestRequestGenerationRef.current += 1;
   }, [selected?.id]);
 
   useEffect(() => {
@@ -1006,6 +1027,16 @@ export default function RecordsPage() {
   // translated like everything else on this page.
   const requestSuggestion = async (kind) => {
     if (!selected || !aiProvider) return;
+    // Bug fix (docs request): a request in flight when the user switches to
+    // a different BRDP must never land on the new one -- neither showing
+    // its (now stale) result, nor letting a stale `finally` clear `busy`
+    // out from under a newer request already running for the row just
+    // selected. Bumping the token here (in addition to the bump on BRDP
+    // change, above) also invalidates any earlier in-flight request for
+    // THIS SAME BRDP -- a fresh Suggest click always wins.
+    const requestToken = (suggestRequestGenerationRef.current += 1);
+    const requestedBrdpId = selected.id;
+    const isStale = () => suggestRequestGenerationRef.current !== requestToken;
     setBusy(true);
     setSuggestion(null);
     // docs request (readable references round): a fresh suggestion always
@@ -1014,8 +1045,9 @@ export default function RecordsPage() {
     setExpandedReferenceIds(new Set());
     try {
       const similar = await authFetchJson(
-        `/api/projects/${projectId}/brdps/${selected.id}/similar?kind=${kind}`
+        `/api/projects/${projectId}/brdps/${requestedBrdpId}/similar?kind=${kind}`
       );
+      if (isStale()) return;
       // HR7 -- never silently degrade: a Validated BRDP in another project
       // of this same standard that hasn't been through ITS OWN project's
       // embedding job yet is invisible to this search; surfaced regardless
@@ -1038,8 +1070,10 @@ export default function RecordsPage() {
           systemPrompt,
           { temperature: 0.3 }
         );
+        if (isStale()) return;
         setSuggestion({
           kind,
+          brdpId: requestedBrdpId,
           text: res.content,
           sourceBrdpIds: referenceSimilar.map((c) => c.id),
           similar: referenceSimilar,
@@ -1052,6 +1086,7 @@ export default function RecordsPage() {
       if (!similar.sufficient_precedent) {
         setSuggestion({
           kind,
+          brdpId: requestedBrdpId,
           insufficientPrecedent: true,
           count: similar.candidates.length,
           excludedPendingOtherProjects,
@@ -1080,17 +1115,20 @@ export default function RecordsPage() {
         aiProvider.provider,
         systemPrompt
       );
+      if (isStale()) return;
       setSuggestion({
         kind,
+        brdpId: requestedBrdpId,
         text: res.content,
         sourceBrdpIds: similar.candidates.map((c) => c.id),
         format: similar.format,
         excludedPendingOtherProjects,
       });
     } catch (err) {
-      setSuggestion({ kind, text: `Error: ${err.message}`, sourceBrdpIds: [] });
+      if (isStale()) return;
+      setSuggestion({ kind, brdpId: requestedBrdpId, text: `Error: ${err.message}`, sourceBrdpIds: [] });
     } finally {
-      setBusy(false);
+      if (!isStale()) setBusy(false);
     }
   };
 
@@ -1117,6 +1155,14 @@ export default function RecordsPage() {
 
   const acceptSuggestion = async () => {
     if (!selected || !suggestion?.text) return;
+    // Defense in depth (docs request): even though switching BRDPs already
+    // clears `suggestion` and discards a stale in-flight request's result,
+    // Accept double-checks the suggestion it's about to write actually
+    // belongs to the currently selected BRDP before touching anything.
+    if (suggestion.brdpId !== selected.id) {
+      setSuggestion(null);
+      return;
+    }
     if (suggestion.kind === 'rule') {
       await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${suggestion.format}`, {
         method: 'PUT',

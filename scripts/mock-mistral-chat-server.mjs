@@ -56,6 +56,18 @@ function isSuggestRule(text) {
   return /Suggest a Suggest Rule for BRDP/.test(text || "");
 }
 
+// "Suggest: clear state on BRDP change" round (docs request): opt-in
+// per-call delay, armed via POST /slow-next (disarms itself after being
+// consumed once) so a verification script has a real window to switch to
+// a different BRDP row (or back again) BEFORE a Suggest request resolves
+// -- exercising the stale-response-discard path for real instead of
+// relying on timing luck. Not tied to any particular BRDP's content
+// (Suggest Definition's user message is always the same fixed string
+// regardless of which BRDP it's for), so a flag armed/consumed per call
+// is simpler and more reliable than a content marker here.
+const SLOW_RESPONSE_DELAY_MS = 2500;
+let slowNextArmed = false;
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -64,8 +76,15 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && req.url === "/reset") {
     lastRequest = null;
+    slowNextArmed = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.method === "POST" && req.url === "/slow-next") {
+    slowNextArmed = true;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, delayMs: SLOW_RESPONSE_DELAY_MS }));
     return;
   }
 
@@ -123,11 +142,20 @@ const server = http.createServer((req, res) => {
     }
 
     console.log(`chat call -- offTopic=${isOffTopic(userText)} hasPriorTurn=${hasPriorTurn}`);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    // OpenAI/Mistral-compatible shape -- matches what llmAPI.js's
-    // sendMessage() parses for any non-Anthropic provider:
-    // data.choices[0].message.content
-    res.end(JSON.stringify({ choices: [{ message: { content: reply } }] }));
+    const send = () => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      // OpenAI/Mistral-compatible shape -- matches what llmAPI.js's
+      // sendMessage() parses for any non-Anthropic provider:
+      // data.choices[0].message.content
+      res.end(JSON.stringify({ choices: [{ message: { content: reply } }] }));
+    };
+    if (slowNextArmed) {
+      slowNextArmed = false; // one-shot -- doesn't affect the next unrelated call
+      console.log(`chat call -- delaying ${SLOW_RESPONSE_DELAY_MS}ms (armed via /slow-next)`);
+      setTimeout(send, SLOW_RESPONSE_DELAY_MS);
+    } else {
+      send();
+    }
   });
 });
 

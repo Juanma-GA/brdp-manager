@@ -19,6 +19,28 @@ self-exclusion, the pending-embedding exclusion count, the insufficient-
 precedent degrade) were switched to kind='proposal' here, which keeps
 the old behavior byte-for-byte. Only tests that were never actually
 about that gating (self-exclusion, auth) were left on kind='definition'.
+
+Test isolation from real data (docs request, "tests que dependen de los
+datos existentes" round): candidate search here scans ALL projects (and,
+for kind='definition', the catalog) of a given STANDARD -- so a test that
+hardcodes a real standard string ("S1000D 4.2", etc.) and then asserts an
+EXACT candidate count/set is only correct by accident, in an environment
+that happens to have no other real data for that standard. An earlier
+round hit this directly: 3 tests here started failing the moment this
+sandbox picked up real, persistent catalog fixtures under "S1000D 4.2"
+from an unrelated verification round, and were "fixed" by moving them to
+"S1000D 4.1" -- which only postpones the same failure to whichever
+environment (this sandbox once 4.1 is loaded too, or any real deployment)
+has data for THAT standard instead. The real fix: _make_project() below
+defaults to a fresh, per-call synthetic standard string (never a real
+S1000D/DITA standard) when no `standard=` is given, so a test that just
+needs "some standard, consistently used within itself" is isolated by
+construction from whatever real data exists in the environment, and the
+whole suite passes the same way whether the DB's catalog is empty or
+fully loaded for every real standard. Tests that genuinely need a REAL
+standard (kind='rule' format-mapping) still pass one explicitly, and
+their candidate assertions are subset checks (their own known rows are
+present), never exact-set equality against the full candidate list.
 """
 import uuid
 
@@ -55,7 +77,17 @@ def _mock_query_embedding_transport():
     app.dependency_overrides.pop(get_httpx_transport, None)
 
 
-async def _make_project(standard: str = "S1000D 4.2") -> Project:
+async def _make_project(standard: str | None = None) -> Project:
+    """`standard` defaults to a fresh, per-call synthetic string (never a
+    real S1000D/DITA standard) -- most tests here just need SOME standard,
+    consistently used within that one test, and must never accidentally
+    collide with real catalog/BRDP data for a real standard that might
+    already exist in this environment. Tests that genuinely need a REAL
+    standard (the kind='rule' format-mapping tests) still pass one
+    explicitly.
+    """
+    if standard is None:
+        standard = f"TEST-STANDARD-{uuid.uuid4()}"
     async with async_session_factory() as session:
         project = Project(name=f"Similar Test Project {uuid.uuid4()}", standard=standard)
         session.add(project)
@@ -288,8 +320,8 @@ async def test_source_brdp_never_appears_in_its_own_candidates(client):
 
 
 async def test_different_standard_is_excluded_from_candidates(client):
-    project_a = await _make_project(standard="S1000D 4.2")
-    project_b = await _make_project(standard="S1000D 3.0.1")
+    project_a = await _make_project()
+    project_b = await _make_project()
     editor = await _make_editor(project_a.id)
     source = await _make_source_brdp(project_a.id)
     # Enough close candidates in project_b to pass MIN_CANDIDATES on their
@@ -325,8 +357,13 @@ async def test_kind_rule_maps_project_standard_to_rule_format(client):
         body = response.json()
         assert body["sufficient_precedent"] is True
         assert body["format"] == "BREX-4.2"
+        # Subset, not exact-set equality (docs request): this test needs a
+        # REAL standard to exercise the real STANDARD_TO_RULE_FORMAT
+        # mapping, so it can't isolate itself from other real approved
+        # BREX-4.2 rules that may already exist for this standard in the
+        # environment -- it only has to prove OUR 3 rows are present.
         texts = {c["text"] for c in body["candidates"]}
-        assert texts == {f"<rule id='{i}'/>" for i in range(3)}
+        assert {f"<rule id='{i}'/>" for i in range(3)} <= texts
         assert len(candidates) == 3  # sanity on the fixture itself
     finally:
         await _cleanup(project, [editor])
@@ -361,8 +398,10 @@ async def test_kind_rule_maps_dita_standard_to_sch_dita_format(client):
         body = response.json()
         assert body["sufficient_precedent"] is True
         assert body["format"] == "SCH-DITA"
+        # Subset, not exact-set equality -- same reasoning as the S1000D
+        # 4.2 rule-mapping test above (docs request).
         texts = {c["text"] for c in body["candidates"]}
-        assert texts == {f"<sch:pattern id='{i}'/>" for i in range(3)}
+        assert {f"<sch:pattern id='{i}'/>" for i in range(3)} <= texts
         assert len(candidates) == 3  # sanity on the fixture itself
     finally:
         await _cleanup(project, [editor])
@@ -397,8 +436,9 @@ async def test_excluded_pending_other_projects_counts_other_projects_without_emb
     the frontend's own disabled-while-pending rule, so counting it would
     double up with that).
     """
-    project_a = await _make_project(standard="S1000D 4.2")
-    project_b = await _make_project(standard="S1000D 4.2")
+    shared_standard = f"TEST-STANDARD-{uuid.uuid4()}"
+    project_a = await _make_project(standard=shared_standard)
+    project_b = await _make_project(standard=shared_standard)
     editor = await _make_editor(project_a.id)
     source = await _make_source_brdp(project_a.id)
     # 3 real candidates in project_a itself (sufficient precedent) plus one
@@ -484,13 +524,11 @@ async def test_definition_never_reports_insufficient_precedent_even_with_zero_ca
     precedent stays True and message stays None even with a totally empty
     corpus (no Validated BRDPs anywhere, no catalog for this standard).
 
-    Uses 'S1000D 4.1', not the default 'S1000D 4.2' -- this dev sandbox
-    has real, intentionally-persistent catalog fixtures seeded under
-    'S1000D 4.2' (seed_ask_compare_catalog.py/seed_suggest_definition_
-    catalog.py, documented in CLAUDE.md as reusable), which would make
-    "zero candidates" false in this specific environment.
+    _make_project()'s default standard is a fresh synthetic string per
+    call, so "zero candidates" holds regardless of what real catalog/BRDP
+    data exists for any real standard in this environment.
     """
-    project = await _make_project(standard="S1000D 4.1")
+    project = await _make_project()
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     try:
@@ -512,17 +550,18 @@ async def test_definition_candidates_include_catalog_and_other_projects_records_
     standard from ALL projects (excluding the source's own) + catalog
     entries of that standard -- each labeled by origin.
 
-    Uses 'S1000D 4.1', not 'S1000D 4.2' -- this dev sandbox has real,
-    intentionally-persistent catalog fixtures seeded under 'S1000D 4.2'
-    (see the note on the zero-candidates test above), which would leak
-    into `by_identifier` here and break the exact-set assertion below.
+    project_a/project_b/the catalog entry all share ONE fresh synthetic
+    standard (never a real one), so the exact-set assertion below can
+    never leak in or be diluted by real catalog/BRDP data for any real
+    standard in this environment.
     """
-    project_a = await _make_project(standard="S1000D 4.1")
-    project_b = await _make_project(standard="S1000D 4.1")
+    shared_standard = f"TEST-STANDARD-{uuid.uuid4()}"
+    project_a = await _make_project(standard=shared_standard)
+    project_b = await _make_project(standard=shared_standard)
     editor = await _make_editor(project_a.id)
     source = await _make_source_brdp(project_a.id)
     other_project_candidate = await _make_validated_candidate(project_b.id, _SAME_DIRECTION, "BRDP-OTHERPROJ-1")
-    catalog_entry = await _make_catalog_entry("S1000D 4.1", _SAME_DIRECTION, "BRDP-CAT-1")
+    catalog_entry = await _make_catalog_entry(shared_standard, _SAME_DIRECTION, "BRDP-CAT-1")
     try:
         response = await client.get(
             f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
@@ -627,13 +666,8 @@ async def test_definition_style_references_never_duplicate_similar_in_tiny_corpu
     of them already in `candidates` -- style references must end up
     empty, not repeat them (docs request: "sin repetir ninguna ya
     incluida").
-
-    Uses 'S1000D 4.1', not the default 'S1000D 4.2' -- this dev sandbox
-    has real, intentionally-persistent catalog fixtures seeded under
-    'S1000D 4.2' (see the note on the zero-candidates test above), which
-    would populate style_references here and break this assertion.
     """
-    project = await _make_project(standard="S1000D 4.1")
+    project = await _make_project()
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-ONLY-1")
@@ -651,10 +685,11 @@ async def test_definition_style_references_never_duplicate_similar_in_tiny_corpu
 
 
 async def test_definition_candidates_exclude_catalog_of_a_different_standard(client):
-    project = await _make_project(standard="S1000D 4.2")
+    project = await _make_project()
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
-    other_standard_entry = await _make_catalog_entry("S1000D 3.0.1", _SAME_DIRECTION, "BRDP-OTHERSTD-CAT")
+    other_standard = f"TEST-STANDARD-OTHER-{uuid.uuid4()}"
+    other_standard_entry = await _make_catalog_entry(other_standard, _SAME_DIRECTION, "BRDP-OTHERSTD-CAT")
     try:
         response = await client.get(
             f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
@@ -672,10 +707,17 @@ async def test_definition_rejects_source_brdp_that_is_itself_a_catalog_entry(cli
     (the frontend's own disabled-button defense is separate; this is the
     server-side one). Checked against the real table by (standard,
     identifier), never by prefix -- see the next test.
+
+    The identifier ("BRDP-S1-00070") deliberately follows a realistic
+    S1000D naming convention, but the catalog row is created under
+    project.standard -- _make_project()'s fresh synthetic standard, never
+    a real one -- so this (standard, identifier) pair can never already
+    exist in this environment's real catalog data, however realistic the
+    identifier looks.
     """
-    project = await _make_project(standard="S1000D 4.2")
+    project = await _make_project()
     editor = await _make_editor(project.id)
-    catalog_entry = await _make_catalog_entry("S1000D 4.2", None, "BRDP-S1-00070")
+    catalog_entry = await _make_catalog_entry(project.standard, None, "BRDP-S1-00070")
     source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00070")
     try:
         response = await client.get(
@@ -693,9 +735,9 @@ async def test_definition_catalog_rejection_is_by_exact_table_match_not_prefix(c
     must be allowed, proving the check is a real (standard, identifier)
     lookup, not a prefix heuristic.
     """
-    project = await _make_project(standard="S1000D 4.2")
+    project = await _make_project()
     editor = await _make_editor(project.id)
-    catalog_entry = await _make_catalog_entry("S1000D 4.2", None, "BRDP-S1-00070")
+    catalog_entry = await _make_catalog_entry(project.standard, None, "BRDP-S1-00070")
     source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00099")
     try:
         response = await client.get(
@@ -712,9 +754,10 @@ async def test_definition_catalog_rejection_scoped_to_this_project_standard_only
     standard than this project's -- must not be rejected (the catalog
     check is (standard, identifier), not identifier alone).
     """
-    project = await _make_project(standard="S1000D 4.2")
+    project = await _make_project()
     editor = await _make_editor(project.id)
-    catalog_entry = await _make_catalog_entry("S1000D 3.0.1", None, "BRDP-S1-00070")
+    other_standard = f"TEST-STANDARD-OTHER-{uuid.uuid4()}"
+    catalog_entry = await _make_catalog_entry(other_standard, None, "BRDP-S1-00070")
     source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00070")
     try:
         response = await client.get(
@@ -736,12 +779,12 @@ async def test_definition_dedupes_records_candidate_matching_catalog_by_identica
     only the Catalog one should survive, so it doesn't spend two of the 5
     'similar' slots on the same content.
     """
-    project = await _make_project(standard="S1000D 4.2")
+    project = await _make_project()
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     shared_text = "Shared torque calibration definition, identical byte for byte."
     catalog_entry = await _make_catalog_entry(
-        "S1000D 4.2", _SAME_DIRECTION, "BRDP-DUP-001", definition=shared_text
+        project.standard, _SAME_DIRECTION, "BRDP-DUP-001", definition=shared_text
     )
     records_dup = await _make_validated_candidate(
         project.id, _SAME_DIRECTION, "BRDP-DUP-001", definition=shared_text
@@ -766,11 +809,11 @@ async def test_definition_keeps_both_when_catalog_and_records_definitions_differ
     ADAPTED the wording -- genuinely different precedent, both must
     survive.
     """
-    project = await _make_project(standard="S1000D 4.2")
+    project = await _make_project()
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     catalog_entry = await _make_catalog_entry(
-        "S1000D 4.2", _SAME_DIRECTION, "BRDP-DUP-002", definition="Official catalog wording."
+        project.standard, _SAME_DIRECTION, "BRDP-DUP-002", definition="Official catalog wording."
     )
     records_adapted = await _make_validated_candidate(
         project.id, _SAME_DIRECTION, "BRDP-DUP-002", definition="Project-adapted wording, different from the catalog."
@@ -796,7 +839,7 @@ async def test_definition_dedup_also_applies_to_style_references(client):
     similar), not just the 'similar' list -- a duplicate there would
     waste one of the 3 style-reference slots the same way.
     """
-    project = await _make_project(standard="S1000D 4.2")
+    project = await _make_project()
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     # 1 close candidate -- keeps len(similar) at 1, below 3, so style
@@ -804,7 +847,7 @@ async def test_definition_dedup_also_applies_to_style_references(client):
     close_one = await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-DUP-CLOSE")
     shared_far_text = "Identical far-away definition text, duplicated on purpose."
     far_catalog = await _make_catalog_entry(
-        "S1000D 4.2", _ORTHOGONAL_DIRECTION, "BRDP-DUP-FAR", definition=shared_far_text
+        project.standard, _ORTHOGONAL_DIRECTION, "BRDP-DUP-FAR", definition=shared_far_text
     )
     far_records_dup = await _make_validated_candidate(
         project.id, _ORTHOGONAL_DIRECTION, "BRDP-DUP-FAR", definition=shared_far_text

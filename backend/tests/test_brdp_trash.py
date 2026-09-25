@@ -24,8 +24,16 @@ from app.models import BRDP, BRDPHistory, Project, RuleApproval, User, UserProje
 
 @pytest.fixture
 async def admin_editor_and_project():
+    """A fresh synthetic standard per test run, not a real one (docs
+    request, "tests que dependen de los datos existentes" round):
+    test_deleted_brdp_excluded_from_similar_precedent below hits a real
+    cross-project GET .../similar query scoped by this standard, at the
+    exact MIN_CANDIDATES boundary -- only correct if no other real
+    Validated BRDP for that standard, anywhere, happens to score above
+    MIN_SIMILARITY against the test's fixed query vector.
+    """
     async with async_session_factory() as session:
-        project = Project(name=f"Trash Test Project {uuid.uuid4()}", standard="S1000D 4.2")
+        project = Project(name=f"Trash Test Project {uuid.uuid4()}", standard=f"TEST-TRASH-STANDARD-{uuid.uuid4()}")
         admin = User(
             email=f"trash-admin-{uuid.uuid4()}@example.com",
             password_hash=hash_password("irrelevant-password"),

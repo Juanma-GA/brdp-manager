@@ -25,8 +25,16 @@ from app.services.embeddings import brdp_embedding_text, catalog_embedding_text,
 
 @pytest.fixture
 async def editor_and_project():
+    """The standard is a fresh synthetic string per test run, not a real
+    one (docs request, "tests que dependen de los datos existentes"
+    round): most tests below assert EXACT pending/embedded counts, which
+    only hold if no other real catalog/BRDP data for that standard exists
+    in the environment -- true by construction for a standard nothing
+    else ever uses, false for any real standard string the moment this
+    sandbox (or the user's own environment) has data for it.
+    """
     async with async_session_factory() as session:
-        project = Project(name=f"Embedding Test Project {uuid.uuid4()}", standard="S1000D 4.2")
+        project = Project(name=f"Embedding Test Project {uuid.uuid4()}", standard=f"TEST-EMBED-STANDARD-{uuid.uuid4()}")
         editor = User(
             email=f"embed-editor-{uuid.uuid4()}@example.com",
             password_hash=hash_password("irrelevant-password"),
