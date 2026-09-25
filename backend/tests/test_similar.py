@@ -119,13 +119,15 @@ async def _make_source_brdp_with_identifier(project_id: uuid.UUID, identifier: s
         return brdp
 
 
-async def _make_catalog_entry(standard: str, embedding: list[float] | None, identifier: str) -> BRDPCatalog:
+async def _make_catalog_entry(
+    standard: str, embedding: list[float] | None, identifier: str, definition: str | None = None
+) -> BRDPCatalog:
     async with async_session_factory() as session:
         entry = BRDPCatalog(
             standard=standard,
             identifier=identifier,
             title=f"Catalog title for {identifier}",
-            definition=f"Catalog definition for {identifier}",
+            definition=definition if definition is not None else f"Catalog definition for {identifier}",
             embedding=embedding,
         )
         session.add(entry)
@@ -149,12 +151,13 @@ async def _make_validated_candidate(
     identifier: str,
     rule_xml: str | None = None,
     rule_format: str = "BREX-4.2",
+    definition: str | None = None,
 ) -> BRDP:
     async with async_session_factory() as session:
         brdp = BRDP(
             project_id=project_id,
             identifier=identifier,
-            definition=f"Definition for {identifier}",
+            definition=definition if definition is not None else f"Definition for {identifier}",
             proposal=f"Proposal for {identifier}",
             validation="Validated",
             embedding=embedding,
@@ -480,8 +483,14 @@ async def test_definition_never_reports_insufficient_precedent_even_with_zero_ca
     LLM is always called, with 0, 1, or more references. sufficient_
     precedent stays True and message stays None even with a totally empty
     corpus (no Validated BRDPs anywhere, no catalog for this standard).
+
+    Uses 'S1000D 4.1', not the default 'S1000D 4.2' -- this dev sandbox
+    has real, intentionally-persistent catalog fixtures seeded under
+    'S1000D 4.2' (seed_ask_compare_catalog.py/seed_suggest_definition_
+    catalog.py, documented in CLAUDE.md as reusable), which would make
+    "zero candidates" false in this specific environment.
     """
-    project = await _make_project()
+    project = await _make_project(standard="S1000D 4.1")
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     try:
@@ -502,13 +511,18 @@ async def test_definition_candidates_include_catalog_and_other_projects_records_
     """docs request point 2: candidates = Validated BRDPs of the same
     standard from ALL projects (excluding the source's own) + catalog
     entries of that standard -- each labeled by origin.
+
+    Uses 'S1000D 4.1', not 'S1000D 4.2' -- this dev sandbox has real,
+    intentionally-persistent catalog fixtures seeded under 'S1000D 4.2'
+    (see the note on the zero-candidates test above), which would leak
+    into `by_identifier` here and break the exact-set assertion below.
     """
-    project_a = await _make_project(standard="S1000D 4.2")
-    project_b = await _make_project(standard="S1000D 4.2")
+    project_a = await _make_project(standard="S1000D 4.1")
+    project_b = await _make_project(standard="S1000D 4.1")
     editor = await _make_editor(project_a.id)
     source = await _make_source_brdp(project_a.id)
     other_project_candidate = await _make_validated_candidate(project_b.id, _SAME_DIRECTION, "BRDP-OTHERPROJ-1")
-    catalog_entry = await _make_catalog_entry("S1000D 4.2", _SAME_DIRECTION, "BRDP-CAT-1")
+    catalog_entry = await _make_catalog_entry("S1000D 4.1", _SAME_DIRECTION, "BRDP-CAT-1")
     try:
         response = await client.get(
             f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
@@ -605,8 +619,13 @@ async def test_definition_style_references_never_duplicate_similar_in_tiny_corpu
     of them already in `candidates` -- style references must end up
     empty, not repeat them (docs request: "sin repetir ninguna ya
     incluida").
+
+    Uses 'S1000D 4.1', not the default 'S1000D 4.2' -- this dev sandbox
+    has real, intentionally-persistent catalog fixtures seeded under
+    'S1000D 4.2' (see the note on the zero-candidates test above), which
+    would populate style_references here and break this assertion.
     """
-    project = await _make_project()
+    project = await _make_project(standard="S1000D 4.1")
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-ONLY-1")
@@ -697,3 +716,104 @@ async def test_definition_catalog_rejection_scoped_to_this_project_standard_only
     finally:
         await _cleanup(project, [editor])
         await _cleanup_catalog([catalog_entry])
+
+
+# ---- kind='definition' catalog/records dedup (docs request, Suggest ----
+# Definition language/wrap/dedup round), point 3 -----------------------
+
+
+async def test_definition_dedupes_records_candidate_matching_catalog_by_identical_text(client):
+    """A catalog entry and a Records BRDP sharing an identifier AND
+    byte-identical Definition text are the same precedent shown twice --
+    only the Catalog one should survive, so it doesn't spend two of the 5
+    'similar' slots on the same content.
+    """
+    project = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    shared_text = "Shared torque calibration definition, identical byte for byte."
+    catalog_entry = await _make_catalog_entry(
+        "S1000D 4.2", _SAME_DIRECTION, "BRDP-DUP-001", definition=shared_text
+    )
+    records_dup = await _make_validated_candidate(
+        project.id, _SAME_DIRECTION, "BRDP-DUP-001", definition=shared_text
+    )
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        matching = [c for c in body["candidates"] if c["identifier"] == "BRDP-DUP-001"]
+        assert len(matching) == 1, f"expected exactly 1 surviving candidate for BRDP-DUP-001, got {matching}"
+        assert matching[0]["source"] == "Catalog", "the Catalog entry is kept, not the Records one"
+        assert str(records_dup.id) not in {c["id"] for c in body["candidates"]}
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_definition_keeps_both_when_catalog_and_records_definitions_differ(client):
+    """Same identifier in both Catalog and Records, but the project
+    ADAPTED the wording -- genuinely different precedent, both must
+    survive.
+    """
+    project = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    catalog_entry = await _make_catalog_entry(
+        "S1000D 4.2", _SAME_DIRECTION, "BRDP-DUP-002", definition="Official catalog wording."
+    )
+    records_adapted = await _make_validated_candidate(
+        project.id, _SAME_DIRECTION, "BRDP-DUP-002", definition="Project-adapted wording, different from the catalog."
+    )
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        matching = [c for c in body["candidates"] if c["identifier"] == "BRDP-DUP-002"]
+        assert len(matching) == 2, f"different text -- both must survive, got {matching}"
+        sources = {c["source"] for c in matching}
+        assert sources == {"Catalog", f"Records: {project.name}"}
+        assert str(records_adapted.id) in {c["id"] for c in body["candidates"]}
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_definition_dedup_also_applies_to_style_references(client):
+    """The same dedup rule applies to the style-references pool (<3
+    similar), not just the 'similar' list -- a duplicate there would
+    waste one of the 3 style-reference slots the same way.
+    """
+    project = await _make_project(standard="S1000D 4.2")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    # 1 close candidate -- keeps len(similar) at 1, below 3, so style
+    # references kick in.
+    close_one = await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-DUP-CLOSE")
+    shared_far_text = "Identical far-away definition text, duplicated on purpose."
+    far_catalog = await _make_catalog_entry(
+        "S1000D 4.2", _ORTHOGONAL_DIRECTION, "BRDP-DUP-FAR", definition=shared_far_text
+    )
+    far_records_dup = await _make_validated_candidate(
+        project.id, _ORTHOGONAL_DIRECTION, "BRDP-DUP-FAR", definition=shared_far_text
+    )
+    # A third, genuinely distinct far candidate so the style-reference
+    # pool still has something real to fill with after the dup collapses.
+    far_other = await _make_validated_candidate(project.id, _ORTHOGONAL_DIRECTION, "BRDP-DUP-FAR-OTHER")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=definition", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        matching = [c for c in body["style_references"] if c["identifier"] == "BRDP-DUP-FAR"]
+        assert len(matching) == 1, f"expected exactly 1 surviving style reference for BRDP-DUP-FAR, got {matching}"
+        assert matching[0]["source"] == "Catalog"
+        assert str(far_records_dup.id) not in {c["id"] for c in body["style_references"]}
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([far_catalog])

@@ -209,6 +209,33 @@ async def get_similar(
     )
 
 
+_DefinitionPoolEntry = tuple[tuple[str, uuid.UUID], float, SimilarCandidateOut]
+
+
+def _dedupe_records_matching_catalog(pool: list[_DefinitionPoolEntry]) -> list[_DefinitionPoolEntry]:
+    """docs request (Suggest Definition language/wrap/dedup round), point 3:
+    a catalog entry and a Records BRDP that share an identifier AND have
+    byte-identical Definition text are the same precedent shown twice --
+    drop the Records one (prefer Catalog, the official source) so it
+    doesn't spend one of the 5 'similar' slots (or 3 'style reference'
+    slots) on content already shown once. If a project adapted the
+    wording, the text differs, so BOTH are kept -- genuinely different
+    precedent, not a duplicate.
+    """
+    catalog_texts_by_identifier: dict[str, set[str]] = {}
+    for key, _score, candidate in pool:
+        if key[0] == "catalog":
+            catalog_texts_by_identifier.setdefault(candidate.identifier, set()).add(candidate.text)
+    return [
+        entry
+        for entry in pool
+        if not (
+            entry[0][0] == "brdp"
+            and entry[2].text in catalog_texts_by_identifier.get(entry[2].identifier, set())
+        )
+    ]
+
+
 async def _get_definition_similar(
     db: AsyncSession,
     project: Project,
@@ -264,7 +291,7 @@ async def _get_definition_similar(
         )
     ).all()
 
-    def brdp_candidate(row) -> tuple[tuple[str, uuid.UUID], float, SimilarCandidateOut]:
+    def brdp_candidate(row) -> _DefinitionPoolEntry:
         b, project_name, distance = row.BRDP, row.project_name, row.distance
         similarity = 1 - distance
         candidate = SimilarCandidateOut(
@@ -281,7 +308,7 @@ async def _get_definition_similar(
         )
         return (("brdp", b.id), similarity, candidate)
 
-    def catalog_candidate(row) -> tuple[tuple[str, uuid.UUID], float, SimilarCandidateOut]:
+    def catalog_candidate(row) -> _DefinitionPoolEntry:
         c, distance = row.BRDPCatalog, row.distance
         similarity = 1 - distance
         candidate = SimilarCandidateOut(
@@ -289,7 +316,9 @@ async def _get_definition_similar(
         )
         return (("catalog", c.id), similarity, candidate)
 
-    top_pool = [brdp_candidate(r) for r in brdp_top_rows] + [catalog_candidate(r) for r in catalog_top_rows]
+    top_pool = _dedupe_records_matching_catalog(
+        [brdp_candidate(r) for r in brdp_top_rows] + [catalog_candidate(r) for r in catalog_top_rows]
+    )
     top_pool.sort(key=lambda entry: entry[1], reverse=True)
     top_filtered = [
         (key, candidate) for key, score, candidate in top_pool if score >= MIN_SIMILARITY
@@ -302,9 +331,9 @@ async def _get_definition_similar(
     # references to add" and "the 'similar' count below which they kick
     # in" -- both are the same number (3) in the docs request, deliberately.
     if len(similar) < DEFINITION_STYLE_REFERENCE_LIMIT:
-        bottom_pool = [brdp_candidate(r) for r in brdp_bottom_rows] + [
-            catalog_candidate(r) for r in catalog_bottom_rows
-        ]
+        bottom_pool = _dedupe_records_matching_catalog(
+            [brdp_candidate(r) for r in brdp_bottom_rows] + [catalog_candidate(r) for r in catalog_bottom_rows]
+        )
         bottom_pool.sort(key=lambda entry: entry[1])  # ascending -- least similar first
         seen_keys = set(similar_keys)
         for key, _score, candidate in bottom_pool:

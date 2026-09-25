@@ -535,6 +535,33 @@
    would double them up. */
 .suggestionBox {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* docs request (Suggest Definition line/wrap round): the suggested-text
+   node inside .suggestionBox used to reuse .mono (monospace + nowrap,
+   meant for short identifiers elsewhere on this page) for ALL THREE
+   kinds -- its `white-space: nowrap` overrode .suggestionBox's own
+   pre-wrap above, so a long Definition/Proposal line ran off the right
+   edge of the panel instead of wrapping. .suggestionText (Definition/
+   Proposal, prose) wraps like ordinary text, breaking mid-word if it has
+   to (a long unbroken token, e.g. a URL, must never force the panel to
+   scroll horizontally). .suggestionCode (Rule, XML) keeps a monospace,
+   unwrapped rendering -- breaking mid-tag would make it unreadable -- but
+   scoped to its OWN horizontal scrollbar via overflow-x, bounded by
+   max-width:100% of its container, so it can never widen the panel. */
+.suggestionText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.suggestionCode {
+  display: block;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .progressBar {

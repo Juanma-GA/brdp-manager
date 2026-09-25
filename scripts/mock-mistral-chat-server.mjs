@@ -38,6 +38,24 @@ function isHtmlTest(text) {
   return /HTML_TEST/.test(text || "");
 }
 
+// Suggest Definition always sends this exact fixed user message (docs
+// request round: language/wrap/dedup) -- used here, not a trigger phrase
+// inside it (there's no room for one), to return a deliberately LONG,
+// unbroken reply so a verification script can confirm the suggestion box
+// actually wraps it instead of cutting it off at the panel's right edge.
+function isSuggestDefinition(text) {
+  return text === "Write the Definition for this BRDP.";
+}
+
+// Suggest Rule (proposal/rule kind, unchanged path -- requestSuggestion's
+// generic prompt) -- returns a deliberately LONG, unbroken XML line so a
+// verification script can confirm the suggestion box's Rule/XML rendering
+// (.suggestionCode) keeps its own horizontal scrollbar instead of
+// overflowing the panel, same round as the Definition wrap fix above.
+function isSuggestRule(text) {
+  return /Suggest a Suggest Rule for BRDP/.test(text || "");
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -91,6 +109,13 @@ const server = http.createServer((req, res) => {
         "Use `objectPath` for the context.";
     } else if (isHtmlTest(userText)) {
       reply = "MOCK-HTML-TEST: the element <table> and the tag <originator> must render as literal text, never as real HTML.";
+    } else if (isSuggestDefinition(userText)) {
+      reply =
+        "MOCK-LONG-DEFINITION: This decision point governs the applicability and scope of the allowedObjectFlag attribute across every structureObjectRule and nonContextRule in the data module, including split-rule variants, and must be evaluated consistently for every objectPath regardless of dmCode context or system differences. " +
+        "Alsounabrokenverylongsingletokenwithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    } else if (isSuggestRule(userText)) {
+      reply =
+        '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath></structureObjectRule>';
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
     } else {

@@ -199,8 +199,13 @@ knowledge of ${standard} alone.
 `;
   }
 
-  prompt += `Write in the same language as the BRDP's Title and Proposal.
-Do not cite specification chapter numbers you are not sure of.
+  prompt += `Do not cite specification chapter numbers you are not sure of.
+
+LANGUAGE: Write the Definition in the same language as the BRDP's
+Title ("${brdp.title}"). This takes priority over everything else — the
+reference BRDPs may be in a different language; do not follow theirs.
+If the Title language is unclear, use the language of the Proposal.
+
 Return ONLY the Definition text — no preamble, no references list,
 no quotes, no markdown.
 
@@ -1744,7 +1749,9 @@ export default function RecordsPage() {
 
                 {suggestion?.text && (
                   <div className={styles.suggestionBox}>
-                    <div className={styles.mono}>{suggestion.text}</div>
+                    <div className={suggestion.kind === 'rule' ? styles.suggestionCode : styles.suggestionText}>
+                      {suggestion.text}
+                    </div>
                     <div className={styles.suggestionActions}>
                       <button
                         onClick={acceptSuggestion}
