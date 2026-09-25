@@ -20,6 +20,7 @@ from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.main import app
 from app.models import BRDP, BRDPHistory, Project, RuleApproval, User, UserProjectRole
+from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 
 
 @pytest.fixture
@@ -98,20 +99,29 @@ async def test_soft_delete_hides_from_list_and_appears_in_trash(client, admin_ed
     assert entry["deleted_by_email"] == editor.email
 
 
-async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor_and_project):
+async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor_and_project, monkeypatch):
     """Validating a BRDP no longer computes an embedding inline (on-demand
     embeddings, docs request) -- the 3 precedent BRDPs' embeddings are set
     directly on their rows via the DB session (same pattern as
     test_similar.py), and only GET .../similar's own real query-embedding
     call (for the source BRDP) is mocked, scoped to this one test.
 
-    kind='proposal' (not 'definition') -- this test is about
+    kind='rule' (not 'definition'/'proposal') -- this test is about
     ACTIVE_BRDP_FILTER excluding a soft-deleted BRDP from the candidate
-    set, not about kind='definition''s own corpus logic (which no longer
-    has a sufficient_precedent/MIN_CANDIDATES concept at all, see the
-    Suggest Definition corpus round tests in test_similar.py).
+    set, a GENERIC mechanism, not either of those two kinds' own corpus
+    logic. Neither still has a sufficient_precedent/MIN_CANDIDATES concept
+    at all any more (kind='definition': see the Suggest Definition corpus
+    round tests in test_similar.py; kind='proposal': see the Suggest
+    Proposal corpus round tests there too) -- 'rule' is the only kind left
+    where dropping a precedent below MIN_CANDIDATES actually flips
+    sufficient_precedent to False, which is the whole point of this test.
+    Needs a rule format mapped to this project's (synthetic) standard --
+    monkeypatched fresh per test run, same isolation pattern as
+    test_similar.py's own _fake_rule_format().
     """
     project, admin, editor, admin_headers, editor_headers = admin_editor_and_project
+    rule_format = f"TEST-RULE-FORMAT-{uuid.uuid4()}"
+    monkeypatch.setitem(STANDARD_TO_RULE_FORMAT, project.standard, rule_format)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"data": [{"embedding": [0.1] * 1024, "index": 0}]})
@@ -120,6 +130,9 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
     try:
         # 3 Validated BRDPs, all with the same embedding -- exactly
         # MIN_CANDIDATES (similar.py), so sufficient_precedent starts True.
+        # Each also gets an approved RuleApproval under the mapped format
+        # -- kind='rule' candidates require one (unlike proposal/
+        # definition, which read straight off the BRDP row).
         validated_ids = []
         for i in range(3):
             b = await _create_brdp(client, project.id, editor_headers, f"BRDP-PREC-{i}")
@@ -139,6 +152,12 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
             for brdp_id in validated_ids:
                 db_brdp = await session.get(BRDP, uuid.UUID(brdp_id))
                 db_brdp.embedding = [0.1] * 1024
+                session.add(
+                    RuleApproval(
+                        brdp_id=db_brdp.id, format=rule_format, rule_xml=f"<rule id='{brdp_id}'/>",
+                        source="manual", status="approved",
+                    )
+                )
             await session.commit()
 
         query_brdp = await _create_brdp(client, project.id, editor_headers, "BRDP-PREC-QUERY")
@@ -150,7 +169,7 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
 
         before = await client.get(
             f"/api/projects/{project.id}/brdps/{query_brdp['id']}/similar",
-            params={"kind": "proposal"},
+            params={"kind": "rule"},
             headers=editor_headers,
         )
         assert before.status_code == 200
@@ -166,7 +185,7 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
 
         after = await client.get(
             f"/api/projects/{project.id}/brdps/{query_brdp['id']}/similar",
-            params={"kind": "proposal"},
+            params={"kind": "rule"},
             headers=editor_headers,
         )
         assert after.status_code == 200

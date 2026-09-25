@@ -20,6 +20,21 @@ precedent degrade) were switched to kind='proposal' here, which keeps
 the old behavior byte-for-byte. Only tests that were never actually
 about that gating (self-exclusion, auth) were left on kind='definition'.
 
+Suggest Proposal corpus round (docs request): kind='proposal' ALSO gets
+its own dedicated corpus now (_get_proposal_similar, tested separately
+further down this file, mirroring the definition corpus's own section) --
+MIN_CANDIDATES/candidate-cap-10/insufficient-precedent no longer apply to
+it either. The remaining tests of those GENERIC semantics (zero/two/
+fifteen-plus candidates, standard filtering) move one more time, to
+kind='rule' -- the only kind left with the old behavior. kind='rule'
+needs a real, mapped project standard (STANDARD_TO_RULE_FORMAT), which
+would normally reintroduce the exact real-standard-data fragility a
+previous round eliminated -- avoided here with `_fake_rule_format()`
+below, which monkeypatches a fresh, per-test SYNTHETIC format string onto
+_make_project()'s already-synthetic standard, so these tests stay just as
+isolated from real approved rules in the environment as every other test
+in this file that doesn't genuinely need a real standard.
+
 Test isolation from real data (docs request, "tests que dependen de los
 datos existentes" round): candidate search here scans ALL projects (and,
 for kind='definition', the catalog) of a given STANDARD -- so a test that
@@ -53,6 +68,7 @@ from app.db.base import async_session_factory
 from app.main import app
 from app.models import BRDP, BRDPCatalog, Project, RuleApproval, User, UserProjectRole
 from app.models.brdp import EMBEDDING_DIM
+from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 
 # Two orthogonal unit vectors -- cosine_similarity(SAME, SAME) == 1.0,
 # cosine_similarity(SAME, OTHER) == 0.0. Crisp, easy-to-reason-about
@@ -205,6 +221,21 @@ async def _make_validated_candidate(
         return brdp
 
 
+def _fake_rule_format(monkeypatch: pytest.MonkeyPatch, standard: str) -> str:
+    """Registers a fresh, per-call synthetic rule format for `standard`
+    (itself already a synthetic, per-test standard from _make_project())
+    so a kind='rule' test can exercise the real format-mapped code path
+    without needing a real S1000D/DITA standard -- and therefore without
+    any risk of a test's exact-count assertion colliding with real
+    approved rules already in this environment under a real format like
+    "BREX-4.2". Reverted automatically by pytest's monkeypatch fixture
+    teardown, so it never leaks into another test.
+    """
+    fmt = f"TEST-RULE-FORMAT-{uuid.uuid4()}"
+    monkeypatch.setitem(STANDARD_TO_RULE_FORMAT, standard, fmt)
+    return fmt
+
+
 def _headers(user: User) -> dict:
     return {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
@@ -223,13 +254,14 @@ async def _cleanup(project: Project, extra_users: list[User] | None = None) -> N
             await session.commit()
 
 
-async def test_zero_candidates_reports_insufficient_precedent(client):
+async def test_zero_candidates_reports_insufficient_precedent(client, monkeypatch):
     project = await _make_project()
+    _fake_rule_format(monkeypatch, project.standard)
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     try:
         response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -240,23 +272,29 @@ async def test_zero_candidates_reports_insufficient_precedent(client):
         await _cleanup(project, [editor])
 
 
-async def test_two_passing_candidates_reports_insufficient_precedent(client):
+async def test_two_passing_candidates_reports_insufficient_precedent(client, monkeypatch):
     """Below MIN_CANDIDATES (3) even though the two DO pass the
     similarity threshold -- the "not enough precedent" rule is about
     COUNT, not just quality.
     """
     project = await _make_project()
+    fmt = _fake_rule_format(monkeypatch, project.standard)
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     close_ones = [
-        await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-CLOSE-{i}") for i in range(2)
+        await _make_validated_candidate(
+            project.id, _SAME_DIRECTION, f"BRDP-CLOSE-{i}", rule_xml=f"<rule id='{i}'/>", rule_format=fmt
+        )
+        for i in range(2)
     ]
     # A dissimilar one too, to prove it's correctly excluded rather than
     # padding the response up to 3.
-    far_one = await _make_validated_candidate(project.id, _ORTHOGONAL_DIRECTION, "BRDP-FAR-1")
+    far_one = await _make_validated_candidate(
+        project.id, _ORTHOGONAL_DIRECTION, "BRDP-FAR-1", rule_xml="<rule id='far'/>", rule_format=fmt
+    )
     try:
         response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -270,15 +308,18 @@ async def test_two_passing_candidates_reports_insufficient_precedent(client):
         await _cleanup(project, [editor])
 
 
-async def test_fifteen_plus_candidates_reports_sufficient_precedent_capped_at_ten(client):
+async def test_fifteen_plus_candidates_reports_sufficient_precedent_capped_at_ten(client, monkeypatch):
     project = await _make_project()
+    fmt = _fake_rule_format(monkeypatch, project.standard)
     editor = await _make_editor(project.id)
     source = await _make_source_brdp(project.id)
     for i in range(15):
-        await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-MANY-{i}")
+        await _make_validated_candidate(
+            project.id, _SAME_DIRECTION, f"BRDP-MANY-{i}", rule_xml=f"<rule id='{i}'/>", rule_format=fmt
+        )
     try:
         response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -319,18 +360,24 @@ async def test_source_brdp_never_appears_in_its_own_candidates(client):
         await _cleanup(project, [editor])
 
 
-async def test_different_standard_is_excluded_from_candidates(client):
+async def test_different_standard_is_excluded_from_candidates(client, monkeypatch):
     project_a = await _make_project()
     project_b = await _make_project()
+    fmt_a = _fake_rule_format(monkeypatch, project_a.standard)
     editor = await _make_editor(project_a.id)
     source = await _make_source_brdp(project_a.id)
     # Enough close candidates in project_b to pass MIN_CANDIDATES on their
-    # own, IF the standard filter were broken.
+    # own, IF the standard filter were broken -- registered under
+    # project_a's OWN rule format on purpose: project_b's real Project.
+    # standard column still differs (its own fresh synthetic value), so
+    # this proves standard filtering catches it regardless of format.
     for i in range(5):
-        await _make_validated_candidate(project_b.id, _SAME_DIRECTION, f"BRDP-OTHERSTD-{i}")
+        await _make_validated_candidate(
+            project_b.id, _SAME_DIRECTION, f"BRDP-OTHERSTD-{i}", rule_xml=f"<rule id='{i}'/>", rule_format=fmt_a
+        )
     try:
         response = await client.get(
-            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
         )
         assert response.status_code == 200
         body = response.json()
@@ -868,3 +915,336 @@ async def test_definition_dedup_also_applies_to_style_references(client):
     finally:
         await _cleanup(project, [editor])
         await _cleanup_catalog([far_catalog])
+
+
+# ---- kind='proposal' corpus (docs request, Suggest Proposal round) -------
+#
+# Three disjoint groups (_get_proposal_similar), tested independently of
+# the generic proposal/rule semantics above (now exercised via kind='rule'
+# only). The catalog never enters this corpus at all -- it has no Proposal
+# -- so these tests never need _make_catalog_entry for embeddings, only
+# for the plain (standard, identifier) existence check that gates
+# same_brdp.
+
+
+async def test_proposal_same_brdp_group_matches_other_projects_by_identifier(client):
+    """docs request point 1: identifier exists in the catalog -> up to 5
+    Validated BRDPs from OTHER projects sharing that EXACT identifier, via
+    a direct lookup (no embeddings needed on either side).
+    """
+    project = await _make_project()
+    catalog_entry = await _make_catalog_entry(project.standard, None, "BRDP-S1-00070")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00070")
+    other_project = await _make_project(standard=project.standard)
+    # _SAME_DIRECTION (not orthogonal) on purpose: this candidate would
+    # ALSO pass the "Similar decisions" similarity search on its own
+    # merits, so its absence from `candidates` below actually proves the
+    # cross-group dedup, not just that a dissimilar row was never a
+    # candidate to begin with.
+    match = await _make_validated_candidate(
+        other_project.id, _SAME_DIRECTION, "BRDP-S1-00070", definition="Other project's definition"
+    )
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["sufficient_precedent"] is True
+        assert len(body["same_brdp"]) == 1
+        entry = body["same_brdp"][0]
+        assert entry["id"] == str(match.id)
+        assert entry["identifier"] == "BRDP-S1-00070"
+        assert entry["text"] == match.proposal  # `text` is the Proposal for this kind
+        assert entry["definition"] == "Other project's definition"
+        assert entry["source"] == other_project.name  # bare project name, never "Records: "-prefixed
+        assert str(match.id) not in {c["id"] for c in body["candidates"]}  # not double-counted in "Similar decisions"
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other_project)
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_proposal_same_brdp_group_capped_at_five(client):
+    project = await _make_project()
+    catalog_entry = await _make_catalog_entry(project.standard, None, "BRDP-S1-00099")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00099")
+    other_projects = [await _make_project(standard=project.standard) for _ in range(7)]
+    for i, other_project in enumerate(other_projects):
+        await _make_validated_candidate(other_project.id, _ORTHOGONAL_DIRECTION, "BRDP-S1-00099")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        assert len(response.json()["same_brdp"]) == 5  # PROPOSAL_SAME_BRDP_AND_SIMILAR_LIMIT, not all 7
+    finally:
+        await _cleanup(project, [editor])
+        for other_project in other_projects:
+            await _cleanup(other_project)
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_proposal_same_brdp_group_empty_for_ext_identifier(client):
+    """docs request edge case: an EXT identifier never has a same_brdp
+    group, even if another project happens to share the exact string --
+    identifier matching is only meaningful for a real catalog-issued id.
+    """
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-EXT-00007")
+    other_project = await _make_project(standard=project.standard)
+    # Same identifier string, purely coincidental (both projects' own
+    # auto-generated EXT sequence happened to reach 00007) -- must NOT
+    # match, since "BRDP-EXT-00007" is not in the catalog at all.
+    await _make_validated_candidate(other_project.id, _SAME_DIRECTION, "BRDP-EXT-00007")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["same_brdp"] == []
+        # It's still a real, valid "Similar decisions" match though (same
+        # identifier coincidentally also means max similarity here) --
+        # confirms this ISN'T a blanket exclusion of that BRDP, only of
+        # the same_brdp *group* for a non-catalog identifier.
+        assert len(body["candidates"]) == 1
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other_project)
+
+
+async def test_proposal_similar_group_provides_all_five_when_same_brdp_empty(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-EXT-00001")
+    other_project = await _make_project(standard=project.standard)
+    for i in range(7):
+        await _make_validated_candidate(other_project.id, _SAME_DIRECTION, f"BRDP-EXT-OTHER-{i}")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["same_brdp"] == []
+        assert len(body["candidates"]) == 5  # capped at PROPOSAL_SAME_BRDP_AND_SIMILAR_LIMIT, all from "similar"
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other_project)
+
+
+async def test_proposal_similar_group_tops_up_same_brdp_to_combined_five(client):
+    """docs request point 1: "si es de catálogo, solo se usan para
+    completar hasta 5 en total con el grupo anterior" -- 2 in same_brdp
+    (capped by a real limit of 2 available) + candidates fills the
+    remaining 3 slots, never exceeding 5 combined.
+    """
+    project = await _make_project()
+    catalog_entry = await _make_catalog_entry(project.standard, None, "BRDP-S1-00042")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00042")
+    same_id_projects = [await _make_project(standard=project.standard) for _ in range(2)]
+    for other_project in same_id_projects:
+        await _make_validated_candidate(other_project.id, _ORTHOGONAL_DIRECTION, "BRDP-S1-00042")
+    similar_project = await _make_project(standard=project.standard)
+    for i in range(6):
+        await _make_validated_candidate(similar_project.id, _SAME_DIRECTION, f"BRDP-SIMILAR-{i}")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["same_brdp"]) == 2
+        assert len(body["candidates"]) == 3  # 5 - 2, not the full 5 and not all 6 available
+    finally:
+        await _cleanup(project, [editor])
+        for other_project in same_id_projects:
+            await _cleanup(other_project)
+        await _cleanup(similar_project)
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_proposal_this_project_group_capped_at_three(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    for i in range(5):
+        await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-OWN-{i}")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["this_project"]) == 3  # PROPOSAL_THIS_PROJECT_LIMIT, not all 5
+        assert body["this_project"][0]["source"] == ""  # never named -- "this project" is implied
+        assert body["same_brdp"] == []
+        assert body["candidates"] == []  # own-project candidates never leak into the "other projects" groups
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_proposal_candidates_below_similarity_threshold_excluded_from_all_groups(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    other_project = await _make_project(standard=project.standard)
+    far_other = await _make_validated_candidate(other_project.id, _ORTHOGONAL_DIRECTION, "BRDP-FAR-OTHER")
+    far_own = await _make_validated_candidate(project.id, _ORTHOGONAL_DIRECTION, "BRDP-FAR-OWN")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["candidates"] == []
+        assert body["this_project"] == []
+        assert body["sufficient_precedent"] is True  # no MIN_CANDIDATES gate, even with zero real matches
+        assert body["message"] is None
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other_project)
+
+
+async def test_proposal_excludes_candidates_with_empty_proposal(client):
+    """docs request point 1: "Solo BRDPs Validated (con Proposal no
+    vacía)" -- a Validated BRDP with an empty Proposal must never appear
+    in ANY group, even if it would otherwise qualify (same identifier,
+    high similarity, own project).
+    """
+    project = await _make_project()
+    catalog_entry = await _make_catalog_entry(project.standard, None, "BRDP-S1-00050")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00050")
+    other_project = await _make_project(standard=project.standard)
+    async with async_session_factory() as session:
+        # Same identifier as source (would qualify for same_brdp) but
+        # empty Proposal.
+        session.add(
+            BRDP(
+                project_id=other_project.id,
+                identifier="BRDP-S1-00050",
+                definition="text",
+                proposal="",
+                validation="Validated",
+                embedding=_ORTHOGONAL_DIRECTION,
+            )
+        )
+        # High similarity (would qualify for "This project") but empty
+        # Proposal.
+        session.add(
+            BRDP(
+                project_id=project.id,
+                identifier="BRDP-EMPTY-PROPOSAL-OWN",
+                definition="text",
+                proposal="",
+                validation="Validated",
+                embedding=_SAME_DIRECTION,
+            )
+        )
+        await session.commit()
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["same_brdp"] == []
+        assert body["candidates"] == []
+        assert body["this_project"] == []
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other_project)
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_proposal_rejects_when_definition_is_empty(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    async with async_session_factory() as session:
+        source = BRDP(
+            project_id=project.id,
+            identifier="BRDP-NODEF-001",
+            definition="",
+            proposal="",
+            validation="Pending",
+        )
+        session.add(source)
+        await session.commit()
+        await session.refresh(source)
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 400
+        assert "definition" in response.json()["detail"].lower()
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_proposal_allowed_on_catalog_sourced_brdp(client):
+    """Unlike kind='definition', a catalog-sourced BRDP is explicitly
+    ALLOWED for Suggest Proposal (docs request point 2) -- the catalog
+    only ever supplies the official Definition, never a Proposal, which
+    is always this project's own decision to make.
+    """
+    project = await _make_project()
+    catalog_entry = await _make_catalog_entry(project.standard, None, "BRDP-S1-00077")
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00077")
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_proposal_excluded_pending_other_projects_scoped_to_non_empty_proposal(client):
+    """docs request point 1 (\"Se mantiene el recuento de excluidas por
+    falta de embedding\"), scoped correctly: a Validated-but-unembedded
+    BRDP in another project with an EMPTY Proposal must not inflate this
+    count -- it was never going to be a candidate anyway (missing
+    Proposal, not missing embedding), so counting it would overstate the
+    embedding gap's real impact.
+    """
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)
+    other_project = await _make_project(standard=project.standard)
+    async with async_session_factory() as session:
+        session.add(
+            BRDP(
+                project_id=other_project.id,
+                identifier="BRDP-PENDING-WITH-PROPOSAL",
+                definition="text",
+                proposal="A real proposal",
+                validation="Validated",
+            )
+        )
+        session.add(
+            BRDP(
+                project_id=other_project.id,
+                identifier="BRDP-PENDING-NO-PROPOSAL",
+                definition="text",
+                proposal="",
+                validation="Validated",
+            )
+        )
+        await session.commit()
+    try:
+        response = await client.get(
+            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=proposal", headers=_headers(editor)
+        )
+        assert response.status_code == 200
+        assert response.json()["excluded_pending_other_projects"] == 1
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other_project)

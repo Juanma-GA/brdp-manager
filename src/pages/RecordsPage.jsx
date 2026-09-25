@@ -218,13 +218,120 @@ Proposal: ${brdp.proposal || 'empty'}`;
   return prompt;
 }
 
+// Suggest Proposal's own system prompt (docs request, Suggest Proposal
+// round) -- same architecture as buildSuggestDefinitionPrompt above, built
+// ENTIRELY from /similar's structured same_brdp/candidates/this_project
+// arrays (never from the LLM), so what the UI's reference list shows is
+// exactly what the LLM saw. `source` already carries the bare project
+// name (similar.py's _get_proposal_similar) for same_brdp/candidates, and
+// is empty for this_project (that group is never labeled -- "this
+// project" is already implied). Definition is never empty here (the
+// backend 400s Suggest Proposal on an empty Definition before this is
+// ever called), so unlike buildSuggestDefinitionPrompt's own fields,
+// `brdp.definition` needs no `|| 'empty'` fallback.
+function buildSuggestProposalPrompt(brdp, standard, sameBrdp, similar, thisProject) {
+  let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
+Decision Points), assisting in BRDP Manager.
+
+Your task: write the Proposal for the BRDP below. A Proposal states the
+decision THIS project takes for the decision point described in the
+Definition — the concrete answer, in concise normative terms (e.g.
+"... shall not be used", "... shall be limited to ..."). Do not restate
+the Definition and do not describe XML implementation details (that is
+the Rule).
+
+Use this project's standard only: ${standard}. Use its terminology and
+element names; do not mix in other versions of S1000D or DITA.
+
+`;
+
+  if (sameBrdp.length > 0) {
+    prompt += `SAME BRDP IN OTHER PROJECTS — how other projects decided this exact
+decision point. Use them to understand the usual options; do not copy
+their project-specific values:
+${sameBrdp.map((c) => `[${c.identifier} | ${c.source}] Proposal: ${c.text}`).join('\n\n')}
+
+`;
+  }
+
+  if (similar.length > 0) {
+    prompt += `SIMILAR DECISIONS IN OTHER PROJECTS — related decision points and how
+they were decided:
+${similar
+  .map(
+    (c) =>
+      `[${c.identifier} | ${c.source} | similarity ${c.score.toFixed(2)}]\nDefinition: ${c.definition} / Proposal: ${c.text}`
+  )
+  .join('\n\n')}
+
+`;
+  }
+
+  if (thisProject.length > 0) {
+    prompt += `THIS PROJECT'S RELATED DECISIONS — already validated in this project.
+Your Proposal must be consistent with them and must not contradict them:
+${thisProject
+  .map(
+    (c) => `[${c.identifier} | similarity ${c.score.toFixed(2)}]\nDefinition: ${c.definition} / Proposal: ${c.text}`
+  )
+  .join('\n\n')}
+
+`;
+  }
+
+  if (sameBrdp.length === 0 && similar.length === 0 && thisProject.length === 0) {
+    prompt += `No reference BRDPs are available; write the Proposal from your
+knowledge of ${standard} alone.
+
+`;
+  }
+
+  if (brdp.validation === 'Refused') {
+    prompt += `THE PREVIOUS PROPOSAL WAS REFUSED.
+Refused proposal: ${brdp.proposal || 'empty'}
+Reason for refusal: ${brdp.comments || 'not given'}
+Your Proposal must address the reason for refusal.
+
+`;
+  }
+
+  prompt += `PROJECT-SPECIFIC VALUES: never invent or copy from other projects
+concrete values specific to this project (company names, CAGE codes,
+codes, dates, contact data, numeric limits not stated in this BRDP).
+Write a visible placeholder instead, e.g. [to be defined: CAGE codes].
+
+BRDP:
+ID: ${brdp.identifier}
+Title: ${brdp.title}
+Definition: ${brdp.definition}
+Current Proposal: ${brdp.proposal || 'empty'}
+
+LANGUAGE: Write the Proposal in the same language as the BRDP's Title
+("${brdp.title}"). This takes priority over everything else — the
+reference BRDPs may be in a different language; do not follow theirs.
+If the Title language is unclear, use the language of the Definition.
+
+Return ONLY the Proposal text — no preamble, no references list,
+no quotes, no markdown.`;
+
+  return prompt;
+}
+
 // One row of Suggest Definition's reference list (docs request, readable
 // references round): identifier (clickable, toggles the Definition open
 // below), Title truncated to one line with the full text in `title=`, the
 // origin, and -- only for the "Similar" group, never "Style references" --
 // the similarity score. Never navigates anywhere; expand/collapse is pure
 // local UI state owned by the parent (several rows can be open at once).
-function ReferenceRow({ candidate, showScore, expanded, onToggle }) {
+// `showProposal` (docs request, Suggest Proposal round): when set, the
+// expanded panel shows BOTH Definition and Proposal, labeled -- used by
+// all three of Suggest Proposal's reference groups, even "Same BRDP in
+// other projects" (whose PROMPT block only ever cites Proposal -- the UI
+// is more generous, per the docs request's explicit "despliega su
+// Definition y su Proposal"). Suggest Definition's own two groups leave
+// this unset and keep showing Definition alone, unchanged.
+function ReferenceRow({ candidate, showScore, showProposal, expanded, onToggle }) {
+  const { t } = useTranslation();
   return (
     <li>
       <div className={styles.referenceRow}>
@@ -235,11 +342,30 @@ function ReferenceRow({ candidate, showScore, expanded, onToggle }) {
           — {candidate.title}
         </span>
         <span className={styles.referenceMeta}>
-          — {candidate.source}
+          {/* Suggest Proposal's "This project" group (docs request) never
+              carries a `source` -- the project is already implied, never
+              named -- so the leading " — " is skipped rather than shown
+              with nothing after it. */}
+          {candidate.source ? ` — ${candidate.source}` : ''}
           {showScore ? ` — ${candidate.score.toFixed(2)}` : ''}
         </span>
       </div>
-      {expanded && <div className={styles.referenceDefinition}>{candidate.definition}</div>}
+      {expanded && (
+        <div className={styles.referenceDefinition}>
+          {showProposal ? (
+            <>
+              <div>
+                <strong>{t('records.assistant.referenceDefinitionLabel')}:</strong> {candidate.definition}
+              </div>
+              <div>
+                <strong>{t('records.assistant.referenceProposalLabel')}:</strong> {candidate.text}
+              </div>
+            </>
+          ) : (
+            candidate.definition
+          )}
+        </div>
+      )}
     </li>
   );
 }
@@ -1120,8 +1246,7 @@ export default function RecordsPage() {
 
       // kind='definition' (docs request, Suggest Definition corpus round):
       // its own dedicated prompt + corpus shape (Similar/Style references,
-      // no MIN_CANDIDATES gate) -- diverges completely from proposal/rule
-      // below, which are untouched by this round.
+      // no MIN_CANDIDATES gate) -- diverges completely from rule below.
       if (kind === 'definition') {
         const referenceSimilar = similar.candidates;
         const referenceStyle = similar.style_references || [];
@@ -1142,6 +1267,45 @@ export default function RecordsPage() {
           sourceBrdpIds: referenceSimilar.map((c) => c.id),
           similar: referenceSimilar,
           styleReferences: referenceStyle,
+          excludedPendingOtherProjects,
+          expandedReferenceIds: new Set(),
+        });
+        return;
+      }
+
+      // kind='proposal' (docs request, Suggest Proposal round): its own
+      // three-group corpus (Same BRDP in other projects / Similar
+      // decisions / This project), no MIN_CANDIDATES gate, own prompt --
+      // same architecture as kind='definition' above, diverges completely
+      // from kind='rule' below, which is untouched by this round.
+      if (kind === 'proposal') {
+        const referenceSameBrdp = similar.same_brdp || [];
+        const referenceSimilar = similar.candidates;
+        const referenceThisProject = similar.this_project || [];
+        const systemPrompt = buildSuggestProposalPrompt(
+          selected,
+          project.standard,
+          referenceSameBrdp,
+          referenceSimilar,
+          referenceThisProject
+        );
+        const res = await sendMessage(
+          [{ role: 'user', content: 'Write the Proposal for this BRDP.' }],
+          null,
+          aiProvider.model,
+          aiProvider.provider,
+          systemPrompt,
+          { temperature: 0.3 }
+        );
+        commit({
+          brdpId,
+          kind,
+          loading: false,
+          text: res.content,
+          sourceBrdpIds: [...referenceSameBrdp, ...referenceSimilar, ...referenceThisProject].map((c) => c.id),
+          sameBrdp: referenceSameBrdp,
+          similar: referenceSimilar,
+          thisProject: referenceThisProject,
           excludedPendingOtherProjects,
           expandedReferenceIds: new Set(),
         });
@@ -1887,6 +2051,15 @@ export default function RecordsPage() {
                     // identifier prefix. Only Suggest Definition is gated
                     // by this; Suggest Proposal/Rule are unaffected.
                     const catalogDisabled = kind === 'definition' && catalogIdentifierSet.has(selected.identifier);
+                    // docs request (Suggest Proposal corpus round): Proposal
+                    // is built ON TOP OF the Definition (the prompt cites it
+                    // as fixed context) -- an empty Definition means there is
+                    // nothing to build on, so the button is disabled here
+                    // (the backend also rejects with 400, belt-and-braces).
+                    // Allowed on catalog BRDPs -- the Proposal is the
+                    // PROJECT's own, unlike Definition which the catalog
+                    // already provides.
+                    const definitionEmptyForProposal = kind === 'proposal' && !selected.definition?.trim();
                     // docs request (per-BRDP suggestion round): ANY pending
                     // or resolved entry for this BRDP blocks ALL THREE
                     // buttons, not just the matching kind -- Discard (or
@@ -1896,13 +2069,21 @@ export default function RecordsPage() {
                       <button
                         key={kind}
                         onClick={() => requestSuggestion(kind)}
-                        disabled={pendingBlocked || !aiProvider || suggestDisabledByEmbeddings || catalogDisabled}
+                        disabled={
+                          pendingBlocked ||
+                          !aiProvider ||
+                          suggestDisabledByEmbeddings ||
+                          catalogDisabled ||
+                          definitionEmptyForProposal
+                        }
                         title={
                           pendingBlocked
                             ? t('records.assistant.pendingSuggestionBlocksNew')
                             : catalogDisabled
                               ? t('records.assistant.suggestDefinitionCatalogDisabled')
-                              : undefined
+                              : definitionEmptyForProposal
+                                ? t('records.assistant.suggestProposalNeedsDefinition')
+                                : undefined
                         }
                       >
                         {selectedSuggestion?.loading && selectedSuggestion.kind === kind
@@ -2003,6 +2184,84 @@ export default function RecordsPage() {
                                       key={`style-${c.id}`}
                                       candidate={c}
                                       showScore={false}
+                                      expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
+                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
+                                    />
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* docs request (Suggest Proposal corpus round): same
+                        app-generated-references principle as Definition
+                        above, now across THREE groups instead of two --
+                        Same BRDP in other projects / Similar decisions /
+                        This project -- each row expands to show BOTH
+                        Definition and Proposal (showProposal), since the
+                        "Same BRDP" prompt block cites only Proposal but the
+                        docs request still wants both visible on expand. */}
+                    {selectedSuggestion.kind === 'proposal' && (
+                      <div className={styles.suggestionReferences}>
+                        {selectedSuggestion.sameBrdp.length === 0 &&
+                        selectedSuggestion.similar.length === 0 &&
+                        selectedSuggestion.thisProject.length === 0 ? (
+                          <p className={styles.hint}>{t('records.assistant.proposalNoReferences')}</p>
+                        ) : (
+                          <>
+                            {selectedSuggestion.sameBrdp.length > 0 && (
+                              <div>
+                                <h4 className={styles.referencesGroupTitle}>
+                                  {t('records.assistant.proposalSameBrdpGroup')}
+                                </h4>
+                                <ul className={styles.referencesList}>
+                                  {selectedSuggestion.sameBrdp.map((c) => (
+                                    <ReferenceRow
+                                      key={`same-brdp-${c.id}`}
+                                      candidate={c}
+                                      showScore={false}
+                                      showProposal
+                                      expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
+                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
+                                    />
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {selectedSuggestion.similar.length > 0 && (
+                              <div>
+                                <h4 className={styles.referencesGroupTitle}>
+                                  {t('records.assistant.proposalSimilarGroup')}
+                                </h4>
+                                <ul className={styles.referencesList}>
+                                  {selectedSuggestion.similar.map((c) => (
+                                    <ReferenceRow
+                                      key={`similar-${c.id}`}
+                                      candidate={c}
+                                      showScore
+                                      showProposal
+                                      expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
+                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
+                                    />
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {selectedSuggestion.thisProject.length > 0 && (
+                              <div>
+                                <h4 className={styles.referencesGroupTitle}>
+                                  {t('records.assistant.proposalThisProjectGroup')}
+                                </h4>
+                                <ul className={styles.referencesList}>
+                                  {selectedSuggestion.thisProject.map((c) => (
+                                    <ReferenceRow
+                                      key={`this-project-${c.id}`}
+                                      candidate={c}
+                                      showScore
+                                      showProposal
                                       expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
                                       onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
                                     />
