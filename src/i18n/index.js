@@ -238,6 +238,7 @@ const resources = {
         fieldValidation: 'Proposal Status',
         fieldRefusalReason: 'Reason for refusal',
         fieldRuleStatus: 'Rule Status',
+        vocabHint: 'Write element names as <element> and attributes as @attribute',
         validationOptions: {
           Pending: 'Pending',
           Validated: 'Validated',
@@ -266,6 +267,9 @@ const resources = {
         assistant: {
           title: '✨ BRDP Assistant',
           noProvider: 'AI provider not configured on the server.',
+          vocabCheckUnavailable: 'Schema vocabulary check not available for {{standard}}.',
+          vocabUnknownNames: 'Not found in the {{standard}} schema: {{names}}',
+          vocabExtendedCheckUnavailable: 'Extended name check unavailable',
           askLabel: 'Ask a question',
           askPlaceholder: 'Ask about this BRDP…',
           askFollowupPlaceholder: 'Ask a follow-up about this BRDP…',
@@ -702,6 +706,7 @@ const resources = {
         fieldValidation: 'Estado de propuesta',
         fieldRefusalReason: 'Motivo de rechazo',
         fieldRuleStatus: 'Estado de la regla',
+        vocabHint: 'Escribe los nombres de elemento como <elemento> y los de atributo como @atributo',
         validationOptions: {
           Pending: 'Pendiente',
           Validated: 'Validado',
@@ -730,6 +735,9 @@ const resources = {
         assistant: {
           title: '✨ Asistente de BRDP',
           noProvider: 'El proveedor de IA no está configurado en el servidor.',
+          vocabCheckUnavailable: 'Comprobación de vocabulario del esquema no disponible para {{standard}}.',
+          vocabUnknownNames: 'No encontrado en el esquema de {{standard}}: {{names}}',
+          vocabExtendedCheckUnavailable: 'Comprobación extendida de nombres no disponible',
           askLabel: 'Haz una pregunta',
           askPlaceholder: 'Pregunta sobre este BRDP…',
           askFollowupPlaceholder: 'Haz una pregunta de seguimiento sobre este BRDP…',

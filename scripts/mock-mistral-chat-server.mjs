@@ -78,6 +78,27 @@ let slowNextArmed = false;
 // flag forces the NEXT call to fail regardless of its content.
 let errorNextArmed = false;
 
+// Schema vocabulary check round (docs request, 3.3(b)): the extraction
+// call's own system prompt (buildVocabExtractionPrompt() in
+// vocabularyCheck.js) is distinctive enough to detect and branch on --
+// unlike Ask/Suggest, whose triggers key off the user message, this one
+// keys off the SYSTEM prompt, since the extraction call's user message
+// is always "Title: ...\nDefinition: ...\nProposal: ..." regardless of
+// which BRDP or app action triggered it. A deterministic stand-in for a
+// real LLM's extraction: scans the user message for the literal
+// substring "pokemon" (case-insensitive) and, if present, reports it as
+// an element candidate -- exercises the SAME code path a real model
+// would (JSON out, no vocabulary given, no existence judgment) without
+// depending on real language understanding. GET /extraction-calls
+// exposes a count separate from the main /calls-equivalent (there isn't
+// one on this mock) so a verification script can assert "N genuinely
+// separate extraction calls happened" -- e.g. confirming the "mismo
+// texto dos veces -> una sola llamada" caching case for real.
+let extractionCallCount = 0;
+function isVocabExtractionSystemPrompt(systemPrompt) {
+  return /You extract candidate XML element and attribute names/.test(systemPrompt || "");
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -88,8 +109,14 @@ const server = http.createServer((req, res) => {
     lastRequest = null;
     slowNextArmed = false;
     errorNextArmed = false;
+    extractionCallCount = 0;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.method === "GET" && req.url === "/extraction-calls") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ count: extractionCallCount }));
     return;
   }
   if (req.method === "POST" && req.url === "/slow-next") {
@@ -118,10 +145,33 @@ const server = http.createServer((req, res) => {
     }
     lastRequest = parsed;
     const messages = parsed.messages || [];
+    const systemPrompt = messages.find((m) => m.role === "system")?.content || "";
     const nonSystem = messages.filter((m) => m.role !== "system");
     const lastUser = [...nonSystem].reverse().find((m) => m.role === "user");
     const userText = lastUser?.content || "";
     const hasPriorTurn = nonSystem.length > 1; // prev user+assistant, plus the new question
+
+    // Schema vocabulary check round: the extraction call, detected by its
+    // own distinctive system prompt -- handled before ERROR_TEST/
+    // errorNextArmed below so /error-next (armed before an Ask/Suggest
+    // click) fails THIS call first, exactly the "la llamada de
+    // extracción falla" edge case a verification script needs to exercise.
+    if (isVocabExtractionSystemPrompt(systemPrompt)) {
+      extractionCallCount += 1;
+      if (/ERROR_TEST/.test(userText) || errorNextArmed) {
+        errorNextArmed = false; // one-shot, same as the main-call path below
+        console.log(`extraction call #${extractionCallCount} -- simulated failure`);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "simulated extraction failure" }));
+        return;
+      }
+      const found = /pokemon/i.test(userText);
+      const body = JSON.stringify({ elements: found ? ["pokemon"] : [], attributes: [] });
+      console.log(`extraction call #${extractionCallCount} -- found=${found}`);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { content: body } }] }));
+      return;
+    }
 
     // Deterministic failure trigger -- exercises askGeneric's catch branch
     // (the real network-failure path) without relying on a flaky real

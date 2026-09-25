@@ -332,7 +332,15 @@ async function main() {
     assert(/\[BRDP-SPSIM-B-01 \| Suggest Proposal Verify B .+ \| similarity \d\.\d\d\]/.test(sysA), "Similar-decisions line carries similarity");
     assert(/\[BRDP-SPPROJ-A-01 \| similarity \d\.\d\d\]/.test(sysA), "This-project line never carries a project name");
     assert(!sysA.includes("THE PREVIOUS PROPOSAL WAS REFUSED"), "no Refused block for a Pending source BRDP");
-    assert(sysA.includes("PROJECT-SPECIFIC VALUES"), "project-specific-values guard present");
+    // docs request (Same BRDP destacado / Proposal como plantilla round):
+    // PROJECT-SPECIFIC VALUES was replaced by the "DO NOT MAKE THE
+    // DECISION" fill-in-template block -- see
+    // verify-vocab-check-and-proposal-template.mjs for the full check of
+    // that block's exact wording; this script just confirms the old
+    // block is gone and the new one is present, so this regression
+    // script stays accurate instead of asserting removed text.
+    assert(!sysA.includes("PROJECT-SPECIFIC VALUES"), "old PROJECT-SPECIFIC VALUES block is gone");
+    assert(sysA.includes("DO NOT MAKE THE DECISION."), "fill-in-template block present");
     assert(sysA.includes(`ID: ${SAME_ID}`), "BRDP block carries the real identifier");
     assert(sysA.trim().endsWith("no quotes, no markdown."), "prompt ends with the return-format instruction");
 

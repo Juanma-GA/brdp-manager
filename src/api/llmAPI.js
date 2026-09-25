@@ -1,4 +1,4 @@
-import { authFetch } from '../services/apiClient';
+import { authFetch } from '../services/apiClient.js';
 
 /**
  * Build request body based on provider

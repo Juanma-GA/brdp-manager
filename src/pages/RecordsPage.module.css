@@ -416,6 +416,24 @@
   border-top: 1px solid #e2e8f0;
 }
 
+/* Docs request (schema vocabulary check round): the unknown-names/not-
+   available/extended-check-unavailable notices below the assistant
+   title -- non-blocking, so a small stacked block of muted text is
+   enough, no border/background (unlike the Same-BRDP red box, which is
+   a deliberately stronger callout for a different, decision-relevant
+   signal). */
+.vocabNotice {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vocabNotice p {
+  margin: 0;
+  font-size: 12px;
+}
+
 .assistantTitle {
   font-size: 13.5px;
   margin: 0 0 8px;
@@ -709,6 +727,41 @@
 
 .referencesGroupTitle:first-child {
   margin-top: 0;
+}
+
+/* Suggest Proposal round (docs request): "Same BRDP in other projects" is
+   the single most decision-relevant group -- an exact identifier match,
+   not a mere similarity guess -- but visually it was reading as just
+   another bullet list. Same red already used for Refused (.badge_Refused,
+   #dc2626) and its light background/border (already used elsewhere for
+   danger-adjacent boxes, #fef2f2/#fecaca) -- reused here rather than a
+   new color, so "red" reads consistently as "pay attention" across the
+   app. Wraps the heading+list in a bordered box for real visual weight,
+   not just a color swap on the text. */
+.referencesGroupHighlighted {
+  padding: 6px 8px;
+  margin: 8px 0;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fef2f2;
+}
+
+/* Compound selectors (base class + danger class together), not the
+   danger class alone -- same specificity fix already established for
+   this exact class of bug (see CLAUDE.md's "Fix CSS specificity bug"
+   round): a single-class .xDanger rule has the SAME specificity as the
+   single-class base rule it's meant to override, so whichever one comes
+   LATER in this file wins, regardless of which one "looks like" the
+   override. That already bit the button rule here once (.referenceIdentifierButton's own color rule sits after this block, so its blue
+   silently won on real render, confirmed via getComputedStyle before
+   this fix) -- .base.danger's specificity (0,2,0) beats a lone .base
+   (0,1,0) unconditionally, so it no longer depends on file order at all. */
+.referencesGroupTitle.referencesGroupTitleDanger {
+  color: #dc2626;
+}
+
+.referenceIdentifierButton.referenceIdentifierButtonDanger {
+  color: #dc2626;
 }
 
 .referencesList {

@@ -16,6 +16,14 @@ import {
   useInvalidatePendingEmbeddings,
   usePendingEmbeddings,
 } from '../hooks/useEmbeddingJob';
+import {
+  checkAgainstVocabulary,
+  extractContextCandidates,
+  extractVocabCandidatesViaLLM,
+  hashVocabInputText,
+  loadSchemaVocabulary,
+  mergeCandidates,
+} from '../utils/vocabularyCheck.js';
 import styles from './RecordsPage.module.css';
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
@@ -81,12 +89,22 @@ function ruleTextForAsk(state, ruleXml) {
   return `${ruleXml.slice(0, ASK_RULE_MAX_CHARS)}\n[Rule truncated at ${ASK_RULE_MAX_CHARS} characters]`;
 }
 
+// Docs request (schema vocabulary check round), 3.5: shared by all three
+// prompts that get this block (Ask, Suggest Definition, Suggest Proposal
+// -- never Suggest Rule, unchanged). `unknownNames` is
+// checkAgainstVocabulary()'s own output -- already deduped and formatted
+// (`<x>`/`@x`/bare) -- appended verbatim, never reformatted a second way.
+function buildUnknownNamesBlock(standard, unknownNames) {
+  if (!unknownNames || unknownNames.length === 0) return '';
+  return `\n\nThe following names do NOT exist in the ${standard} schema: ${unknownNames.join(', ')}. Point this out explicitly; do not treat them as valid elements or attributes.`;
+}
+
 // Builds the "Ask a Question" system prompt: strictly scoped to the
 // selected BRDP (docs request), with its full live context -- including
 // Rule/Rule Status, which askGeneric previously never sent at all -- plus
 // an optional second BRDP (from Records or the official catalog) when the
 // user has picked one to compare against.
-function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard) {
+function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, unknownNames) {
   const ruleState = ruleStateOf(ruleApproval);
   let prompt = `You are an S1000D and DITA business-rules expert assistant embedded in
 BRDP Manager. You answer questions strictly about the single BRDP shown
@@ -143,6 +161,8 @@ Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
     prompt += `\n\nThe user may ask you to compare the current BRDP with the one above; in that case both are in scope.`;
   }
 
+  prompt += buildUnknownNamesBlock(standard, unknownNames);
+
   return prompt;
 }
 
@@ -156,7 +176,7 @@ Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
 // already formatted by the backend ("Records: <project name>" / "Catalog"
 // -- similar.py's _get_definition_similar), reused verbatim here and in
 // the UI rather than reformatted a second, possibly-diverging way.
-function buildSuggestDefinitionPrompt(brdp, standard, similar, styleReferences) {
+function buildSuggestDefinitionPrompt(brdp, standard, similar, styleReferences, unknownNames) {
   const referenceBlock = (c) => `Title: ${c.title}\nDefinition: ${c.text}`;
 
   let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
@@ -201,6 +221,9 @@ knowledge of ${standard} alone.
 
   prompt += `Do not cite specification chapter numbers you are not sure of.
 
+Keep element and attribute names exactly as written in the BRDP's
+Title — never rename them.
+
 LANGUAGE: Write the Definition in the same language as the BRDP's
 Title ("${brdp.title}"). This takes priority over everything else — the
 reference BRDPs may be in a different language; do not follow theirs.
@@ -214,6 +237,8 @@ ID: ${brdp.identifier}
 Title: ${brdp.title}
 Current Definition: ${brdp.definition || 'empty'}
 Proposal: ${brdp.proposal || 'empty'}`;
+
+  prompt += buildUnknownNamesBlock(standard, unknownNames);
 
   return prompt;
 }
@@ -229,7 +254,7 @@ Proposal: ${brdp.proposal || 'empty'}`;
 // backend 400s Suggest Proposal on an empty Definition before this is
 // ever called), so unlike buildSuggestDefinitionPrompt's own fields,
 // `brdp.definition` needs no `|| 'empty'` fallback.
-function buildSuggestProposalPrompt(brdp, standard, sameBrdp, similar, thisProject) {
+function buildSuggestProposalPrompt(brdp, standard, sameBrdp, similar, thisProject, unknownNames) {
   let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
 Decision Points), assisting in BRDP Manager.
 
@@ -295,10 +320,18 @@ Your Proposal must address the reason for refusal.
 `;
   }
 
-  prompt += `PROJECT-SPECIFIC VALUES: never invent or copy from other projects
-concrete values specific to this project (company names, CAGE codes,
-codes, dates, contact data, numeric limits not stated in this BRDP).
-Write a visible placeholder instead, e.g. [to be defined: CAGE codes].
+  prompt += `DO NOT MAKE THE DECISION. Write the Proposal as a fill-in template: the
+complete normative sentence, with every choice left to the user as a
+bracketed placeholder that states the kind of answer and, where useful,
+example options. Examples:
+- The [LIST: Descriptive, Procedural, IPD, ...] schemas shall be used ...
+- The element <x> [YES/NO] be used.
+- Nesting shall be limited to [VALUE: e.g. 4] levels.
+- Permitted characters: [CHARACTERS: ...].
+Example options may come from the reference BRDPs, but never present
+another project's choice as this project's decision.
+Keep element and attribute names exactly as written in the BRDP's Title
+and Definition — never rename them.
 
 BRDP:
 ID: ${brdp.identifier}
@@ -313,6 +346,8 @@ If the Title language is unclear, use the language of the Definition.
 
 Return ONLY the Proposal text — no preamble, no references list,
 no quotes, no markdown.`;
+
+  prompt += buildUnknownNamesBlock(standard, unknownNames);
 
   return prompt;
 }
@@ -330,12 +365,16 @@ no quotes, no markdown.`;
 // is more generous, per the docs request's explicit "despliega su
 // Definition y su Proposal"). Suggest Definition's own two groups leave
 // this unset and keep showing Definition alone, unchanged.
-function ReferenceRow({ candidate, showScore, showProposal, expanded, onToggle }) {
+function ReferenceRow({ candidate, showScore, showProposal, danger, expanded, onToggle }) {
   const { t } = useTranslation();
   return (
     <li>
       <div className={styles.referenceRow}>
-        <button type="button" className={styles.referenceIdentifierButton} onClick={onToggle}>
+        <button
+          type="button"
+          className={`${styles.referenceIdentifierButton}${danger ? ` ${styles.referenceIdentifierButtonDanger}` : ''}`}
+          onClick={onToggle}
+        >
           {candidate.identifier}
         </button>
         <span className={styles.referenceTitle} title={candidate.title}>
@@ -593,6 +632,17 @@ export default function RecordsPage() {
   const [compareBrdp, setCompareBrdp] = useState(null);
   const [compareBusy, setCompareBusy] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Docs request (schema vocabulary check round): the last-run check's
+  // result -- { brdpId, available, unknownNames, unavailable } -- or
+  // null before anything has run yet. Guarded by `brdpId` at render time
+  // (never explicitly cleared on BRDP change) so a stale result from a
+  // PREVIOUS BRDP simply never displays once `selected` moves on. Cached
+  // in a ref, not state, keyed by `${brdpId}:${hash of title+definition+
+  // proposal}` -- "mismo texto dos veces -> una sola llamada de
+  // extracción" (docs request) -- never localStorage (HR1), lost on
+  // reload same as every other in-memory Suggest/Ask state on this page.
+  const [vocabResult, setVocabResult] = useState(null);
+  const vocabCacheRef = useRef(new Map());
   // Suggest: one pending/loaded suggestion PER BRDP, kept until Accept or
   // Discard (docs request -- the suggestion belongs to the BRDP it was
   // requested for and survives switching rows; the previous round's
@@ -1099,6 +1149,48 @@ export default function RecordsPage() {
     refreshStats();
   };
 
+  // Docs request (schema vocabulary check round), 3.3-3.4: runs the two
+  // independent extraction paths (deterministic context scan + a SEPARATE
+  // prior LLM call, temperature 0, that never sees the real vocabulary),
+  // unions them, and checks the union against the project standard's
+  // real generated vocabulary -- entirely deterministic, the LLM never
+  // decides existence. Cached per `brdpId + hash(title+definition+
+  // proposal)` so asking/suggesting twice on unchanged text never pays
+  // for a second extraction call. Called from askGeneric/requestSuggestion
+  // BEFORE building their system prompt, so the unknown-names block (if
+  // any) can be included in that same call -- this IS the "llamada
+  // previa y separada" the docs request describes.
+  const ensureVocabularyChecked = async (brdp) => {
+    const hash = hashVocabInputText(brdp.title, brdp.definition, brdp.proposal);
+    const cacheKey = `${brdp.id}:${hash}`;
+    const cached = vocabCacheRef.current.get(cacheKey);
+    if (cached) {
+      setVocabResult(cached);
+      return cached;
+    }
+    const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
+    const [vocabulary, llmCandidates] = await Promise.all([
+      loadSchemaVocabulary(project.standard).catch(() => null),
+      extractVocabCandidatesViaLLM({
+        title: brdp.title,
+        definition: brdp.definition,
+        proposal: brdp.proposal,
+        aiProvider,
+      }),
+    ]);
+    const merged = mergeCandidates(contextCandidates, llmCandidates.unavailable ? null : llmCandidates);
+    const checked = checkAgainstVocabulary(merged, vocabulary);
+    const result = {
+      brdpId: brdp.id,
+      available: checked.available,
+      unknownNames: checked.unknownNames,
+      unavailable: llmCandidates.unavailable,
+    };
+    vocabCacheRef.current.set(cacheKey, result);
+    setVocabResult(result);
+    return result;
+  };
+
   // The Ask panel only ever renders inside the `selected` branch of the
   // detail panel (see the JSX below), so `selected` is always set here --
   // no `selected ?` guard needed the way the old context-string ever had.
@@ -1116,7 +1208,8 @@ export default function RecordsPage() {
     setAnswer('');
     setAskError(null);
     try {
-      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard);
+      const vocab = await ensureVocabularyChecked(selected);
+      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard, vocab.unknownNames);
       // One turn of chaining (docs request): the previous Q/A, if any,
       // goes in first as real conversation history so a follow-up like
       // "and why?" resolves correctly, then the new question.
@@ -1250,7 +1343,14 @@ export default function RecordsPage() {
       if (kind === 'definition') {
         const referenceSimilar = similar.candidates;
         const referenceStyle = similar.style_references || [];
-        const systemPrompt = buildSuggestDefinitionPrompt(selected, project.standard, referenceSimilar, referenceStyle);
+        const vocab = await ensureVocabularyChecked(selected);
+        const systemPrompt = buildSuggestDefinitionPrompt(
+          selected,
+          project.standard,
+          referenceSimilar,
+          referenceStyle,
+          vocab.unknownNames
+        );
         const res = await sendMessage(
           [{ role: 'user', content: 'Write the Definition for this BRDP.' }],
           null,
@@ -1282,12 +1382,14 @@ export default function RecordsPage() {
         const referenceSameBrdp = similar.same_brdp || [];
         const referenceSimilar = similar.candidates;
         const referenceThisProject = similar.this_project || [];
+        const vocab = await ensureVocabularyChecked(selected);
         const systemPrompt = buildSuggestProposalPrompt(
           selected,
           project.standard,
           referenceSameBrdp,
           referenceSimilar,
-          referenceThisProject
+          referenceThisProject,
+          vocab.unknownNames
         );
         const res = await sendMessage(
           [{ role: 'user', content: 'Write the Proposal for this BRDP.' }],
@@ -1629,6 +1731,7 @@ export default function RecordsPage() {
                 value={newBrdpProposal}
                 onChange={(e) => setNewBrdpProposal(e.target.value)}
               />
+              <p className={styles.hint}>{t('records.vocabHint')}</p>
 
               <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
               <select
@@ -1727,6 +1830,7 @@ export default function RecordsPage() {
                 onChange={(e) => setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: e.target.value } : b)))}
                 onBlur={(e) => canEdit && handleUpdate(selected.id, { proposal: e.target.value })}
               />
+              <p className={styles.hint}>{t('records.vocabHint')}</p>
 
               <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
               <select
@@ -1851,6 +1955,35 @@ export default function RecordsPage() {
               <div className={styles.assistant}>
                 <h3 className={styles.assistantTitle}>{t('records.assistant.title')}</h3>
                 {!aiProvider && <p className={styles.muted}>{t('records.assistant.noProvider')}</p>}
+
+                {/* Docs request (schema vocabulary check round): runs once
+                    Ask/a Suggest is first used on this BRDP (never on its
+                    own) -- non-blocking, HR7-safe (never a false "not
+                    found": a standard without a generated vocabulary shows
+                    the "not available" notice instead of guessing). Guarded
+                    by brdpId so a result from a PREVIOUS BRDP never shows
+                    here after switching rows. */}
+                {vocabResult && vocabResult.brdpId === selected.id && (
+                  <div className={styles.vocabNotice}>
+                    {!vocabResult.available && (
+                      <p className={styles.muted}>
+                        {t('records.assistant.vocabCheckUnavailable', { standard: project.standard })}
+                      </p>
+                    )}
+                    {vocabResult.available && vocabResult.unknownNames.length > 0 && (
+                      <p className={styles.muted}>
+                        ⚠{' '}
+                        {t('records.assistant.vocabUnknownNames', {
+                          standard: project.standard,
+                          names: vocabResult.unknownNames.join(', '),
+                        })}
+                      </p>
+                    )}
+                    {vocabResult.unavailable && (
+                      <p className={styles.muted}>{t('records.assistant.vocabExtendedCheckUnavailable')}</p>
+                    )}
+                  </div>
+                )}
 
                 <label className={styles.fieldLabel}>{t('records.assistant.askLabel')}</label>
 
@@ -2213,8 +2346,15 @@ export default function RecordsPage() {
                         ) : (
                           <>
                             {selectedSuggestion.sameBrdp.length > 0 && (
-                              <div>
-                                <h4 className={styles.referencesGroupTitle}>
+                              // docs request (Suggest Proposal round, "Same
+                              // BRDP destacado"): this group is the most
+                              // decision-relevant of the three (an exact
+                              // identifier match, not a similarity guess),
+                              // but read as just another bullet list --
+                              // given more visual weight here (red, same
+                              // #dc2626 as Refused, in a bordered box).
+                              <div className={styles.referencesGroupHighlighted}>
+                                <h4 className={`${styles.referencesGroupTitle} ${styles.referencesGroupTitleDanger}`}>
                                   {t('records.assistant.proposalSameBrdpGroup')}
                                 </h4>
                                 <ul className={styles.referencesList}>
@@ -2224,6 +2364,7 @@ export default function RecordsPage() {
                                       candidate={c}
                                       showScore={false}
                                       showProposal
+                                      danger
                                       expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
                                       onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
                                     />
