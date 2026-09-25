@@ -441,8 +441,11 @@ export default function RecordsPage() {
   // always be the same single turn.
   const [lastAsked, setLastAsked] = useState(null);
   // True only while THIS specific request is in flight -- kept separate
-  // from the shared `busy` flag (also used by the Suggest buttons below)
-  // so a Suggest call never makes the Ask exchange look like it's loading.
+  // from `busy` (the Ask panel's own send-button/Enter-key guard) so the
+  // "Thinking…" indicator and the disabled button track slightly
+  // different things. Suggest no longer shares `busy` at all (docs
+  // request, per-BRDP suggestion round below) -- it has its own per-entry
+  // `loading` flag in suggestionsByBrdpId.
   const [askPending, setAskPending] = useState(false);
   // The single previous Ask turn ({ question, answer }), or null -- one
   // turn of chaining only (docs request), not unlimited history, so cost
@@ -463,33 +466,77 @@ export default function RecordsPage() {
   const [compareCatalogEntries, setCompareCatalogEntries] = useState([]);
   const [compareBrdp, setCompareBrdp] = useState(null);
   const [compareBusy, setCompareBusy] = useState(false);
-  // null, or { kind, text, sourceBrdpIds, format? } for a real suggestion,
-  // or { kind, insufficientPrecedent: true, count } when /similar (§3
-  // point 3) reports fewer than its minimum candidates -- shown as an
-  // explicit notice instead of ever calling the LLM with weak/no few-shot.
-  const [suggestion, setSuggestion] = useState(null);
   const [busy, setBusy] = useState(false);
-  // Bug fix (docs request): a Suggest request in flight when the selected
-  // BRDP changes must never land on the wrong BRDP -- neither showing its
-  // result nor letting a stale `finally` clear `busy` for a NEWER request
-  // that's since started. Bumped on every BRDP-change reset (below) and by
-  // each new requestSuggestion() call; a request only commits its result
-  // (or resets `busy`) if this still matches the token it captured when it
-  // started -- a soft cancel, since the real fetch/sendMessage calls can't
-  // be aborted mid-flight here.
-  const suggestRequestGenerationRef = useRef(0);
+  // Suggest: one pending/loaded suggestion PER BRDP, kept until Accept or
+  // Discard (docs request -- the suggestion belongs to the BRDP it was
+  // requested for and survives switching rows; the previous round's
+  // "clear on BRDP change" behavior is explicitly reversed here). Keyed by
+  // brdpId, at most one entry per BRDP -- while an entry exists (loading
+  // or resolved) for the SELECTED BRDP, all three Suggest buttons are
+  // disabled (see the button row below); regenerating the same kind
+  // requires Discard first. In memory only, never localStorage (HR1) --
+  // lost on reload/logout, and explicitly emptied on project change
+  // (below). Each entry is one of:
+  //   loading:    { brdpId, kind, loading: true, expandedReferenceIds }
+  //   text:       { brdpId, kind, text, sourceBrdpIds, format?, similar?,
+  //                 styleReferences?, excludedPendingOtherProjects,
+  //                 expandedReferenceIds }
+  //   notice:     { brdpId, kind, insufficientPrecedent: true, count,
+  //                 excludedPendingOtherProjects, expandedReferenceIds }
+  //   error:      { brdpId, kind, error, expandedReferenceIds }
+  // notice/error entries have no Accept (nothing to write) but DO get a
+  // Discard button -- without one, a BRDP that hit "insufficient
+  // precedent" or an LLM error would stay blocked from ever suggesting
+  // again, which is exactly the "stuck forever" failure this design must
+  // avoid (docs request's explicit edge case for the error entry, applied
+  // here to the notice entry for the same reason).
+  const [suggestionsByBrdpId, setSuggestionsByBrdpId] = useState(new Map());
+  // Per-brdpId request generation counter -- bumped ONLY when a NEW
+  // request starts for that brdpId (never by Accept/Discard). A late
+  // response only commits if BOTH still hold at the time it arrives: (a)
+  // the map still has an entry for that brdpId -- false if it was removed
+  // by Accept/Discard/BRDP-delete/project-change, in which case it must
+  // never resurrect a removed entry; (b) this ref's counter for that
+  // brdpId still equals the token captured when the request started --
+  // false if a NEWER request for the SAME brdpId has since begun (e.g.
+  // Discard unblocked it and the user asked again before the old response
+  // landed). Both checks are needed: (a) alone would let an old response
+  // overwrite a newer request's still-loading entry; (b) alone would
+  // resurrect an entry that was legitimately removed with no new request
+  // following it. A soft cancel, since authFetchJson/sendMessage don't
+  // expose real mid-flight cancellation here.
+  const suggestGenerationRef = useRef(new Map());
+  const selectedSuggestion = selectedId ? suggestionsByBrdpId.get(selectedId) || null : null;
+
+  const setSuggestionEntry = (brdpId, entry) =>
+    setSuggestionsByBrdpId((prev) => {
+      const next = new Map(prev);
+      next.set(brdpId, entry);
+      return next;
+    });
+
+  const removeSuggestionEntry = (brdpId) =>
+    setSuggestionsByBrdpId((prev) => {
+      if (!prev.has(brdpId)) return prev;
+      const next = new Map(prev);
+      next.delete(brdpId);
+      return next;
+    });
+
   // Suggest Definition's reference rows (docs request, readable references
   // round): which candidate ids currently have their Definition expanded
-  // below the row -- several can be open at once. Starts empty and is
-  // cleared both when a new suggestion is requested (see requestSuggestion)
-  // and when the selected BRDP changes (effect below), per the docs
-  // request's explicit "se reinician" requirement.
-  const [expandedReferenceIds, setExpandedReferenceIds] = useState(new Set());
-  const toggleReferenceExpanded = (id) =>
-    setExpandedReferenceIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  // below the row -- several can be open at once. Now lives INSIDE each
+  // BRDP's suggestion entry (not a page-wide Set) so it travels with that
+  // entry when switching rows and back, same as the rest of the entry.
+  const toggleReferenceExpanded = (brdpId, id) =>
+    setSuggestionsByBrdpId((prev) => {
+      const entry = prev.get(brdpId);
+      if (!entry) return prev;
+      const nextExpanded = new Set(entry.expandedReferenceIds);
+      if (nextExpanded.has(id)) nextExpanded.delete(id);
+      else nextExpanded.add(id);
+      const next = new Map(prev);
+      next.set(brdpId, { ...entry, expandedReferenceIds: nextExpanded });
       return next;
     });
   // Suggest Definition catalog guard (docs request, Suggest Definition
@@ -561,6 +608,14 @@ export default function RecordsPage() {
     authFetchJson(`/api/brdp-catalog?standard=${encodeURIComponent(project.standard)}`)
       .then((entries) => setCatalogIdentifierSet(new Set(entries.map((e) => e.identifier))))
       .catch(() => setCatalogIdentifierSet(new Set()));
+    // Per-BRDP suggestions are explicitly scoped to this project (docs
+    // request: "al cambiar de proyecto, vaciar el mapa") -- an in-flight
+    // request from the PREVIOUS project would otherwise land with a
+    // brdpId that no longer means anything here. Clearing the generation
+    // ref too means any such stale response fails its isCurrent() check
+    // even before the (now-cleared) map's own existence check would.
+    setSuggestionsByBrdpId(new Map());
+    suggestGenerationRef.current = new Map();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -695,14 +750,15 @@ export default function RecordsPage() {
   // visible, and the next question would have chained onto it as if it
   // were still about the newly selected BRDP.
   //
-  // Same bug existed for Suggest Definition/Proposal/Rule (docs request,
-  // this round): the suggested text/references/notices stuck around after
-  // switching rows, and Accept would have written it to the NEW BRDP.
-  // Bumping the generation token here invalidates any Suggest request
-  // still in flight for the row just left -- see requestSuggestion, whose
-  // own `finally` only resets `busy` if its captured token still matches,
-  // so a stale in-flight request can never clear `busy` out from under a
-  // newer request already running for the row just selected.
+  // Suggest Definition/Proposal/Rule is deliberately NOT reset here any
+  // more (docs request, "la sugerencia se queda en su BRDP hasta
+  // aceptarla o descartarla"): a previous round reset it on every
+  // selection change, which avoided writing to the wrong BRDP but also
+  // threw away real LLM work the moment the user glanced at another row.
+  // Suggest state now lives in suggestionsByBrdpId, keyed by brdpId, and
+  // is left completely untouched by switching the selection -- reselecting
+  // a BRDP with a pending or resolved entry simply shows it again, with
+  // the Suggest buttons still blocked, exactly as it was left.
   useEffect(() => {
     setQuestion('');
     setAnswer('');
@@ -712,10 +768,6 @@ export default function RecordsPage() {
     setCompareOpen(false);
     setCompareQuery('');
     setCompareBrdp(null);
-    setSuggestion(null);
-    setBusy(false);
-    setExpandedReferenceIds(new Set());
-    suggestRequestGenerationRef.current += 1;
   }, [selected?.id]);
 
   useEffect(() => {
@@ -910,6 +962,13 @@ export default function RecordsPage() {
     if (!window.confirm(t('records.deleteConfirm', { identifier }))) return;
     await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, { method: 'DELETE' });
     if (selectedId === brdpId) setSelectedId(null);
+    // Docs request edge case: deleting a BRDP with a pending/loaded
+    // suggestion removes it from the map immediately -- if a request was
+    // still in flight for it, requestSuggestion's own existence check
+    // (the map no longer has this brdpId) discards the response when it
+    // eventually lands, instead of resurrecting an entry for a BRDP that
+    // no longer exists.
+    removeSuggestionEntry(brdpId);
     refresh();
     refreshStats();
   };
@@ -1027,27 +1086,32 @@ export default function RecordsPage() {
   // translated like everything else on this page.
   const requestSuggestion = async (kind) => {
     if (!selected || !aiProvider) return;
-    // Bug fix (docs request): a request in flight when the user switches to
-    // a different BRDP must never land on the new one -- neither showing
-    // its (now stale) result, nor letting a stale `finally` clear `busy`
-    // out from under a newer request already running for the row just
-    // selected. Bumping the token here (in addition to the bump on BRDP
-    // change, above) also invalidates any earlier in-flight request for
-    // THIS SAME BRDP -- a fresh Suggest click always wins.
-    const requestToken = (suggestRequestGenerationRef.current += 1);
-    const requestedBrdpId = selected.id;
-    const isStale = () => suggestRequestGenerationRef.current !== requestToken;
-    setBusy(true);
-    setSuggestion(null);
-    // docs request (readable references round): a fresh suggestion always
-    // starts with every reference row collapsed, never carrying over which
-    // ones happened to be open for a previous request.
-    setExpandedReferenceIds(new Set());
+    const brdpId = selected.id;
+    // Defense in depth (docs request): the button is already disabled
+    // whenever this BRDP has any entry, loading or resolved -- "para
+    // regenerar, primero Discard". Each BRDP's block is independent.
+    if (suggestionsByBrdpId.has(brdpId)) return;
+
+    // Bumped ONLY here, never by Accept/Discard -- see the declaration of
+    // suggestGenerationRef above for why both this token check AND the
+    // map-existence check in commit() below are needed.
+    const token = (suggestGenerationRef.current.get(brdpId) || 0) + 1;
+    suggestGenerationRef.current.set(brdpId, token);
+    const isCurrent = () => suggestGenerationRef.current.get(brdpId) === token;
+    const commit = (entry) => {
+      if (!isCurrent()) return; // a newer request for this same BRDP has since started
+      setSuggestionsByBrdpId((prev) => {
+        if (!prev.has(brdpId)) return prev; // entry removed since (deleted / project changed) -- never resurrect
+        const next = new Map(prev);
+        next.set(brdpId, entry);
+        return next;
+      });
+    };
+
+    setSuggestionEntry(brdpId, { brdpId, kind, loading: true, expandedReferenceIds: new Set() });
+
     try {
-      const similar = await authFetchJson(
-        `/api/projects/${projectId}/brdps/${requestedBrdpId}/similar?kind=${kind}`
-      );
-      if (isStale()) return;
+      const similar = await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/similar?kind=${kind}`);
       // HR7 -- never silently degrade: a Validated BRDP in another project
       // of this same standard that hasn't been through ITS OWN project's
       // embedding job yet is invisible to this search; surfaced regardless
@@ -1070,26 +1134,29 @@ export default function RecordsPage() {
           systemPrompt,
           { temperature: 0.3 }
         );
-        if (isStale()) return;
-        setSuggestion({
+        commit({
+          brdpId,
           kind,
-          brdpId: requestedBrdpId,
+          loading: false,
           text: res.content,
           sourceBrdpIds: referenceSimilar.map((c) => c.id),
           similar: referenceSimilar,
           styleReferences: referenceStyle,
           excludedPendingOtherProjects,
+          expandedReferenceIds: new Set(),
         });
         return;
       }
 
       if (!similar.sufficient_precedent) {
-        setSuggestion({
+        commit({
+          brdpId,
           kind,
-          brdpId: requestedBrdpId,
+          loading: false,
           insufficientPrecedent: true,
           count: similar.candidates.length,
           excludedPendingOtherProjects,
+          expandedReferenceIds: new Set(),
         });
         return;
       }
@@ -1115,20 +1182,21 @@ export default function RecordsPage() {
         aiProvider.provider,
         systemPrompt
       );
-      if (isStale()) return;
-      setSuggestion({
+      commit({
+        brdpId,
         kind,
-        brdpId: requestedBrdpId,
+        loading: false,
         text: res.content,
         sourceBrdpIds: similar.candidates.map((c) => c.id),
         format: similar.format,
         excludedPendingOtherProjects,
+        expandedReferenceIds: new Set(),
       });
     } catch (err) {
-      if (isStale()) return;
-      setSuggestion({ kind, brdpId: requestedBrdpId, text: `Error: ${err.message}`, sourceBrdpIds: [] });
-    } finally {
-      if (!isStale()) setBusy(false);
+      // Docs request's explicit edge case: an error entry still gets a
+      // Discard (rendered below) so the BRDP's Suggest buttons don't stay
+      // blocked forever -- the user can discard and retry.
+      commit({ brdpId, kind, loading: false, error: err.message, expandedReferenceIds: new Set() });
     }
   };
 
@@ -1140,46 +1208,49 @@ export default function RecordsPage() {
   // either way, so the UI reflects whatever IS actually running.
   const handleComputeEmbeddings = () => computeEmbeddings.mutate();
 
-  const logSuggestionFeedback = (outcome) =>
+  const logSuggestionFeedback = (entry, outcome) =>
     authFetchJson('/api/suggestion-feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        brdp_id: selected.id,
-        kind: suggestion.kind,
-        suggested_text: suggestion.text,
-        source_brdp_ids: suggestion.sourceBrdpIds,
+        brdp_id: entry.brdpId,
+        kind: entry.kind,
+        suggested_text: entry.text,
+        source_brdp_ids: entry.sourceBrdpIds || [],
         outcome,
       }),
     });
 
   const acceptSuggestion = async () => {
-    if (!selected || !suggestion?.text) return;
-    // Defense in depth (docs request): even though switching BRDPs already
-    // clears `suggestion` and discards a stale in-flight request's result,
-    // Accept double-checks the suggestion it's about to write actually
-    // belongs to the currently selected BRDP before touching anything.
-    if (suggestion.brdpId !== selected.id) {
-      setSuggestion(null);
-      return;
-    }
-    if (suggestion.kind === 'rule') {
-      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${suggestion.format}`, {
+    if (!selected) return;
+    const entry = suggestionsByBrdpId.get(selected.id);
+    if (!entry?.text) return;
+    // Defense in depth (docs request): the entry is looked up BY the
+    // selected BRDP's own id above, but double-check the field matches
+    // too before writing anything, same principle as the previous round's
+    // guard (kept even though the lookup itself already makes a mismatch
+    // essentially unreachable).
+    if (entry.brdpId !== selected.id) return;
+    if (entry.kind === 'rule') {
+      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${entry.format}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rule_xml: suggestion.text, source: 'llm', status: 'pending_review' }),
+        body: JSON.stringify({ rule_xml: entry.text, source: 'llm', status: 'pending_review' }),
       });
       setApprovalsRefreshToken((n) => n + 1);
     } else {
-      await handleUpdate(selected.id, { [suggestion.kind]: suggestion.text });
+      await handleUpdate(selected.id, { [entry.kind]: entry.text });
     }
-    await logSuggestionFeedback('accepted');
-    setSuggestion(null);
+    await logSuggestionFeedback(entry, 'accepted');
+    removeSuggestionEntry(selected.id);
   };
 
   const discardSuggestion = async () => {
-    if (suggestion?.text) await logSuggestionFeedback('discarded');
-    setSuggestion(null);
+    if (!selected) return;
+    const entry = suggestionsByBrdpId.get(selected.id);
+    if (!entry) return;
+    if (entry.text) await logSuggestionFeedback(entry, 'discarded');
+    removeSuggestionEntry(selected.id);
   };
 
   return (
@@ -1291,7 +1362,19 @@ export default function RecordsPage() {
                       className={selectedId === b.id ? styles.selectedRow : ''}
                       onClick={() => setSelectedId(b.id)}
                     >
-                      <td className={styles.mono}>{b.identifier}</td>
+                      <td className={styles.mono}>
+                        {b.identifier}
+                        {suggestionsByBrdpId.has(b.id) && (
+                          <span
+                            className={styles.pendingSuggestionIcon}
+                            title={t('records.assistant.pendingSuggestionIndicator', {
+                              kind: t(`records.assistant.kindLabels.${suggestionsByBrdpId.get(b.id).kind}`),
+                            })}
+                          >
+                            ✨
+                          </span>
+                        )}
+                      </td>
                       <td className={styles.titleCell} title={b.title || undefined}>
                         {b.title || <span className={styles.muted}>—</span>}
                       </td>
@@ -1804,14 +1887,25 @@ export default function RecordsPage() {
                     // identifier prefix. Only Suggest Definition is gated
                     // by this; Suggest Proposal/Rule are unaffected.
                     const catalogDisabled = kind === 'definition' && catalogIdentifierSet.has(selected.identifier);
+                    // docs request (per-BRDP suggestion round): ANY pending
+                    // or resolved entry for this BRDP blocks ALL THREE
+                    // buttons, not just the matching kind -- Discard (or
+                    // Accept) first to regenerate, even the same kind.
+                    const pendingBlocked = !!selectedSuggestion;
                     return (
                       <button
                         key={kind}
                         onClick={() => requestSuggestion(kind)}
-                        disabled={busy || !aiProvider || suggestDisabledByEmbeddings || catalogDisabled}
-                        title={catalogDisabled ? t('records.assistant.suggestDefinitionCatalogDisabled') : undefined}
+                        disabled={pendingBlocked || !aiProvider || suggestDisabledByEmbeddings || catalogDisabled}
+                        title={
+                          pendingBlocked
+                            ? t('records.assistant.pendingSuggestionBlocksNew')
+                            : catalogDisabled
+                              ? t('records.assistant.suggestDefinitionCatalogDisabled')
+                              : undefined
+                        }
                       >
-                        {busy && suggestion?.kind === kind
+                        {selectedSuggestion?.loading && selectedSuggestion.kind === kind
                           ? '…'
                           : t(`records.assistant.suggest${kind.charAt(0).toUpperCase()}${kind.slice(1)}`)}
                       </button>
@@ -1819,29 +1913,43 @@ export default function RecordsPage() {
                   })}
                 </div>
 
-                {suggestion?.excludedPendingOtherProjects > 0 && (
+                {selectedSuggestion?.excludedPendingOtherProjects > 0 && (
                   <div className={styles.suggestionBox}>
                     <span className={styles.muted}>
                       ⚠{' '}
                       {t('records.assistant.excludedPendingOtherProjects', {
-                        count: suggestion.excludedPendingOtherProjects,
+                        count: selectedSuggestion.excludedPendingOtherProjects,
                       })}
                     </span>
                   </div>
                 )}
 
-                {suggestion?.insufficientPrecedent && (
+                {selectedSuggestion?.insufficientPrecedent && (
                   <div className={styles.suggestionBox}>
                     <span className={styles.muted}>
-                      ⚠ {t('records.assistant.insufficientPrecedent', { count: suggestion.count })}
+                      ⚠ {t('records.assistant.insufficientPrecedent', { count: selectedSuggestion.count })}
                     </span>
+                    <div className={styles.suggestionActions}>
+                      <button onClick={discardSuggestion}>{t('records.assistant.discard')}</button>
+                    </div>
                   </div>
                 )}
 
-                {suggestion?.text && (
+                {selectedSuggestion?.error && (
                   <div className={styles.suggestionBox}>
-                    <div className={suggestion.kind === 'rule' ? styles.suggestionCode : styles.suggestionText}>
-                      {suggestion.text}
+                    <span className={styles.muted}>
+                      ⚠ {t('records.assistant.errorPrefix')}: {selectedSuggestion.error}
+                    </span>
+                    <div className={styles.suggestionActions}>
+                      <button onClick={discardSuggestion}>{t('records.assistant.discard')}</button>
+                    </div>
+                  </div>
+                )}
+
+                {selectedSuggestion?.text && (
+                  <div className={styles.suggestionBox}>
+                    <div className={selectedSuggestion.kind === 'rule' ? styles.suggestionCode : styles.suggestionText}>
+                      {selectedSuggestion.text}
                     </div>
                     <div className={styles.suggestionActions}>
                       <button
@@ -1860,43 +1968,43 @@ export default function RecordsPage() {
                         `styleReferences` arrays buildSuggestDefinitionPrompt
                         used -- NEVER text the LLM produced, and the
                         accepted text above never includes it. */}
-                    {suggestion.kind === 'definition' && (
+                    {selectedSuggestion.kind === 'definition' && (
                       <div className={styles.suggestionReferences}>
-                        {suggestion.similar.length === 0 && suggestion.styleReferences.length === 0 ? (
+                        {selectedSuggestion.similar.length === 0 && selectedSuggestion.styleReferences.length === 0 ? (
                           <p className={styles.hint}>{t('records.assistant.definitionNoReferences')}</p>
                         ) : (
                           <>
-                            {suggestion.similar.length > 0 && (
+                            {selectedSuggestion.similar.length > 0 && (
                               <div>
                                 <h4 className={styles.referencesGroupTitle}>
                                   {t('records.assistant.definitionSimilarGroup')}
                                 </h4>
                                 <ul className={styles.referencesList}>
-                                  {suggestion.similar.map((c) => (
+                                  {selectedSuggestion.similar.map((c) => (
                                     <ReferenceRow
                                       key={`similar-${c.id}`}
                                       candidate={c}
                                       showScore
-                                      expanded={expandedReferenceIds.has(c.id)}
-                                      onToggle={() => toggleReferenceExpanded(c.id)}
+                                      expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
+                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
                                     />
                                   ))}
                                 </ul>
                               </div>
                             )}
-                            {suggestion.styleReferences.length > 0 && (
+                            {selectedSuggestion.styleReferences.length > 0 && (
                               <div>
                                 <h4 className={styles.referencesGroupTitle}>
                                   {t('records.assistant.definitionStyleReferencesGroup')}
                                 </h4>
                                 <ul className={styles.referencesList}>
-                                  {suggestion.styleReferences.map((c) => (
+                                  {selectedSuggestion.styleReferences.map((c) => (
                                     <ReferenceRow
                                       key={`style-${c.id}`}
                                       candidate={c}
                                       showScore={false}
-                                      expanded={expandedReferenceIds.has(c.id)}
-                                      onToggle={() => toggleReferenceExpanded(c.id)}
+                                      expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
+                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
                                     />
                                   ))}
                                 </ul>

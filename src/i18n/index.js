@@ -279,6 +279,13 @@ const resources = {
           accept: 'Accept',
           acceptDisabledTitle: 'Your role on this project cannot accept suggestions',
           discard: 'Discard',
+          pendingSuggestionBlocksNew: 'Accept or discard the pending suggestion first',
+          pendingSuggestionIndicator: 'Pending suggestion: {{kind}}',
+          kindLabels: {
+            definition: 'Definition',
+            proposal: 'Proposal',
+            rule: 'Rule',
+          },
           insufficientPrecedent_one:
             'Insufficient precedent: only {{count}} Validated BRDP of the same standard meets the similarity threshold (minimum 3 required). Suggestions built without enough precedent are not offered automatically — review manually instead.',
           insufficientPrecedent_other:
@@ -729,6 +736,13 @@ const resources = {
           accept: 'Aceptar',
           acceptDisabledTitle: 'Tu rol en este proyecto no puede aceptar sugerencias',
           discard: 'Descartar',
+          pendingSuggestionBlocksNew: 'Acepta o descarta la sugerencia pendiente primero',
+          pendingSuggestionIndicator: 'Sugerencia pendiente: {{kind}}',
+          kindLabels: {
+            definition: 'Definición',
+            proposal: 'Propuesta',
+            rule: 'Regla',
+          },
           insufficientPrecedent_one:
             'Precedente insuficiente: solo {{count}} BRDP validado del mismo estándar supera el umbral de similitud (mínimo 3 requeridos). Las sugerencias sin precedente suficiente no se ofrecen automáticamente — revísalo manualmente.',
           insufficientPrecedent_other:

@@ -193,6 +193,16 @@
   white-space: nowrap;
 }
 
+/* Per-BRDP pending-suggestion indicator (docs request): shown next to the
+   identifier in the table for any row that has a Suggest entry (pending
+   or resolved, from suggestionsByBrdpId) whether or not that row is the
+   one currently selected -- the full state (kind) is in its title=
+   tooltip. */
+.pendingSuggestionIcon {
+  margin-left: 4px;
+  cursor: help;
+}
+
 /* Long titles truncate with an ellipsis instead of stretching the row or
    squeezing neighboring columns -- the full text is still available via
    the native title="" tooltip set on this <td> in the JSX. */

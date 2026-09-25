@@ -162,6 +162,12 @@ async function main() {
     assert((await page.locator(`text=${close2Definition}`).count()) > 0, "the OTHER row stays open (independent state)");
 
     // ---- 3. Requesting a new suggestion resets everything to collapsed ----
+    // Suggest is now blocked while a suggestion is pending for this BRDP
+    // (docs request, "la sugerencia se queda en su BRDP hasta aceptarla o
+    // descartarla" round) -- Discard the current one first, same as any
+    // real user regenerating a suggestion would have to.
+    await page.getByRole("button", { name: "Discard" }).click();
+    await page.waitForTimeout(200);
     await resetMock();
     await page.getByRole("button", { name: "Suggest Definition" }).click();
     await page.waitForSelector("text=Similar", { timeout: 15000 });

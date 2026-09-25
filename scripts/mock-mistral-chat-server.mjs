@@ -67,6 +67,16 @@ function isSuggestRule(text) {
 // is simpler and more reliable than a content marker here.
 const SLOW_RESPONSE_DELAY_MS = 2500;
 let slowNextArmed = false;
+// "Suggest: la sugerencia se queda en su BRDP" round (docs request):
+// content-independent error trigger, armed via POST /error-next
+// (one-shot, like /slow-next). ERROR_TEST above only fires if the
+// literal marker ends up inside a user message, but Suggest Definition's
+// user message is always the same fixed string regardless of BRDP -- no
+// content to embed a marker into -- and Suggest Proposal/Rule's own
+// message only forms at all once /similar reports sufficient precedent,
+// which the encargo's error-entry edge case doesn't need to set up. This
+// flag forces the NEXT call to fail regardless of its content.
+let errorNextArmed = false;
 
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/last-request") {
@@ -77,6 +87,7 @@ const server = http.createServer((req, res) => {
   if (req.method === "POST" && req.url === "/reset") {
     lastRequest = null;
     slowNextArmed = false;
+    errorNextArmed = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -85,6 +96,12 @@ const server = http.createServer((req, res) => {
     slowNextArmed = true;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, delayMs: SLOW_RESPONSE_DELAY_MS }));
+    return;
+  }
+  if (req.method === "POST" && req.url === "/error-next") {
+    errorNextArmed = true;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
 
@@ -113,6 +130,13 @@ const server = http.createServer((req, res) => {
       console.log("chat call -- simulated 500 (ERROR_TEST)");
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "simulated failure for ERROR_TEST" }));
+      return;
+    }
+    if (errorNextArmed) {
+      errorNextArmed = false; // one-shot
+      console.log("chat call -- simulated 500 (armed via /error-next)");
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "simulated failure (armed via /error-next)" }));
       return;
     }
 
