@@ -1,0 +1,285 @@
+/* Same fix as RecordsPage.module.css/ProjectConfigPage.module.css: AppLayout's
+   .mainContent (App.css) is a fixed-height flex column with overflow: hidden
+   by design, so a page taller than the viewport is silently clipped unless
+   it establishes its own scroll region. flex: 1 + min-height: 0 let .page
+   shrink to the space .mainContent actually has (the default min-height:
+   auto would instead let it grow past the viewport and defeat any inner
+   overflow entirely) -- .outputCard below is the flex-grow item that
+   actually scrolls in the normal case (a long result at a typical laptop
+   viewport never needs .page itself to scroll to reach the form/button).
+   overflow-y: auto here is a fallback only, not the primary mechanism --
+   it never engages while .card + .outputCard's flex-distributed height
+   fit .page (the common case), but it's what keeps the resize edge case
+   safe: if the viewport ever gets shorter than .card's own natural height
+   (.card never shrinks -- see its own comment), the page scrolls instead
+   of silently clipping content with no way to reach it.
+*/
+.page {
+  padding: 24px;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 4px;
+  color: #0f172a;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0 0 18px;
+}
+
+.card {
+  max-width: 560px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 18px;
+  /* Stays its natural, compact size -- .outputCard below is the flex-grow
+     item that takes whatever height this leaves in .page (same pattern as
+     RecordsPage.module.css's .createForm next to .tableScroll). */
+  flex-shrink: 0;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+}
+
+.fixedFormat {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid #dde3ec;
+  background: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 8px;
+}
+
+.outputKindGroup {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+.outputKindOption {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid #dde3ec;
+  background: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+  text-align: center;
+}
+
+.outputKindOptionActive {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.warning {
+  font-size: 12.5px;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 0 0 12px;
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: #374151;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.summary {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #1d4ed8;
+  margin: 0 0 12px;
+}
+
+.generateBtn {
+  width: 100%;
+  padding: 10px;
+  background: #2563eb;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hint {
+  font-size: 12px;
+  color: #64748b;
+  margin: 8px 0 0;
+  text-align: center;
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 7px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -1px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.generateBtn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+/* The flex-grow item of .page -- takes whatever vertical space .card
+   above doesn't use, exactly like RecordsPage.module.css's .tableWrap.
+   display: flex + flex-direction: column turns outputMeta/xsdSection/
+   xmlOutput/outputActions below into ITS OWN flex items, so xmlOutput
+   (the only one with flex: 1) is what actually grows/scrolls -- the
+   badges above it and the Copy/Download buttons below stay pinned at
+   their natural size. overflow: hidden keeps the rounded corners clean
+   the same way .tableWrap's does.
+*/
+.outputCard {
+  max-width: 900px;
+  margin-top: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 18px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.outputMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.badgeOk {
+  background: #d1fae5;
+  color: #065f46;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.badgeError {
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.badgePending {
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.countInfo {
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.xsdSection {
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.errorList {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #991b1b;
+}
+
+.errorList li {
+  margin-bottom: 4px;
+}
+
+/* Was max-height: 420px (an arbitrary fixed number, unrelated to the real
+   viewport) -- flex: 1 + min-height: 0 make it fill whatever height
+   .outputCard actually has left instead, so a short viewport never needs
+   a page-level scroll to reach Regenerate/the form above, and a tall one
+   isn't wasted on a fixed 420px box when more of a long result could be
+   shown. overflow: auto (unchanged) is what scrolls when the real result
+   still doesn't fit even at that height.
+*/
+.xmlOutput {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 12px;
+  font-family: 'Menlo', 'Consolas', monospace;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  white-space: pre;
+  color: #111827;
+  margin-bottom: 10px;
+}
+
+.outputActions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.errorBox {
+  background: #fee2e2;
+  border-radius: 6px;
+  padding: 10px;
+  color: #991b1b;
+  font-size: 13px;
+}

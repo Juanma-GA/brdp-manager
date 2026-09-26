@@ -1,69 +1,39 @@
-import { FileText, Code2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { useAuthContext } from '../context/AuthContext';
+import LanguageSwitcher from './LanguageSwitcher';
 import styles from './Header.module.css';
 
 /**
- * Header component with application title and action buttons
- * @param {Object} props - Component props
- * @param {Function} props.onChatClick - Callback when chat button is clicked
- * @param {boolean} props.chatOpen - Whether chat panel is currently open
- * @param {Function} props.onOpenGenerateModal - Callback to open generate modal
- * @param {Function} props.showToast - Callback to show toast notifications
- * @returns {JSX.Element} Header element with title and action buttons
+ * v2 header: app name + signed-in user + logout. The per-feature action
+ * buttons (Generate, AI Extract, BRDP Assistant, BREXdoc) that used to
+ * live here moved into the project-scoped pages that actually need them
+ * (RecordsPage, GeneratePage) now that navigation is real routes instead
+ * of a single global page (docs/v2 §5).
  */
-export default function Header({ onChatClick, chatOpen, onOpenGenerateModal, onOpenBREXdocModal, onOpenAIExtractModal, showToast }) {
-  const handleGenerateBREXdoc = () => {
-    if (onOpenBREXdocModal) onOpenBREXdocModal();
-  };
+export default function Header() {
+  const { t } = useTranslation();
+  const { user, logout } = useAuthContext();
 
   return (
     <header className={styles.header}>
       <div className={styles.container}>
         <h1 className={styles.title}>
           <span>
-            <strong>BRDP Manager</strong>
+            <strong>{t('appName')}</strong>
           </span>
         </h1>
         <div className={styles.buttons}>
-          {/* AI Extract Button */}
-          <button
-            onClick={() => onOpenAIExtractModal()}
-            className={styles.secondaryBtn}
-            title="Extract BRDPs from a document"
-          >
-            AI Extract
-          </button>
-
-          {/* Generate BREXdoc Button */}
-          <button
-            onClick={handleGenerateBREXdoc}
-            className={styles.secondaryBtn}
-            title="Generate BREXdoc"
-            aria-label="Generate BREXdoc"
-          >
-            <FileText size={16} />
-            Generate BREXdoc
-          </button>
-
-          {/* Generate BREX / Schematron Button */}
-          <button
-            onClick={onOpenGenerateModal}
-            className={styles.generateBtn}
-            title="Generate BREX / Schematron"
-            aria-label="Generate BREX / Schematron"
-          >
-            <Code2 size={16} />
-            Generate BREX / Schematron
-          </button>
-
-          {/* BRDP Assistant Button */}
-          <button
-            onClick={onChatClick}
-            className={`${styles.chatButton} ${chatOpen ? styles.chatActive : ''}`}
-            title={chatOpen ? "Close BRDP Assistant" : "Open BRDP Assistant"}
-            aria-label="Open BRDP Assistant"
-          >
-            ✨ BRDP Assistant
-          </button>
+          <LanguageSwitcher />
+          {user && (
+            <>
+              <span className={styles.userInfo}>
+                {user.display_name} · {user.global_role}
+              </span>
+              <button className={styles.secondaryBtn} onClick={logout}>
+                {t('logout')}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </header>

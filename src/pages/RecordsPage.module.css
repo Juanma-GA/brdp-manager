@@ -1,0 +1,939 @@
+/* .mainContent (App.css) is a bounded-height flex column with
+   overflow:hidden -- .page must be a flex:1 item of it (not auto-height)
+   so its own height is definite too, which is what lets .layout's
+   children below size and scroll independently instead of silently
+   overflowing past the app shell with no scrollbar. */
+.page {
+  padding: 24px;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Same title-left/summary-right flex row as ProjectsPage.module.css's own
+   .header/.headerActions -- reused verbatim so the two pages' header
+   layouts read the same way. flex-wrap on both (docs request: the
+   summary now reads as full labels -- "Validated: 36, Pending: 0,
+   Refused: 0" -- not the old compact "V 36 · P 0 · R 0", and Spanish's
+   own labels run longer still) so a narrower window drops the
+   Proposal/Rule summaries onto their own line(s) under the title instead
+   of overflowing the header row -- the exact way the filter-alignment
+   bug happened last round, from assuming fixed English-length text. */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-bottom: 18px;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 4px;
+  color: #0f172a;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+}
+
+.layout {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+.tableWrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.createForm {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  flex-shrink: 0;
+}
+
+/* The scrollable middle of tableWrap -- createForm above and tableFooter
+   below stay pinned, only the rows scroll. */
+.tableScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.createForm input {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+/* The filter <select>s live in their own <thead> row (filterRow below),
+   in the SAME <th> cells (via colSpan) as their matching column's own
+   SortableHeader -- alignment comes from the table's own colgroup, not
+   from matching two independent flex containers' widths by coincidence
+   (the old layout: filters in .createForm, columns in the table itself
+   -- broke as soon as either side's content width changed, e.g. longer
+   Spanish option text). Distinct from .select below (width:100%, meant
+   for the stacked detail-panel fields), width:100% here fills its <th>
+   instead, which is what keeps it inside its column's real width.
+   min-width:0 overrides the <select> default intrinsic min-width, which
+   would otherwise force the cell (and the whole column, table-layout:
+   fixed notwithstanding) wider than colValidation/colRuleStatus's 130px
+   whenever the longest <option> text is wide. */
+.filterRow th {
+  padding: 4px 8px 8px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+}
+
+.filterHeaderCell {
+  vertical-align: middle;
+}
+
+.filterSelect {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 11.5px;
+  color: #0f172a;
+}
+
+/* table-layout: fixed so column widths come from the colgroup below, not
+   from cell content -- otherwise a long Title (or a long value in any
+   other column) reflows every column's width, including ID's, which is
+   exactly the bug this fixes (docs request: ID must never move). */
+.table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  text-align: left;
+  padding: 0;
+  background: #f8fafc;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.plainHeader {
+  padding: 8px 12px;
+}
+
+.table td {
+  padding: 9px 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.table tr {
+  cursor: pointer;
+}
+
+.selectedRow {
+  background: #eaf2fa;
+}
+
+/* Wide enough for "BRDP-S1-00001" (14 chars, the longest identifier the
+   system produces) on one line regardless of what the other columns
+   contain -- fixed width AND min-width so table-layout: fixed can't
+   shrink it either. */
+.colId {
+  width: 150px;
+  min-width: 150px;
+}
+
+.colValidation {
+  width: 130px;
+}
+
+.colRuleStatus {
+  width: 130px;
+}
+
+.colActions {
+  width: 44px;
+}
+
+.mono {
+  font-family: monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Per-BRDP pending-suggestion indicator (docs request): shown next to the
+   identifier in the table for any row that has a Suggest entry (pending
+   or resolved, from suggestionsByBrdpId) whether or not that row is the
+   one currently selected -- the full state (kind) is in its title=
+   tooltip. */
+.pendingSuggestionIcon {
+  margin-left: 4px;
+  cursor: help;
+}
+
+/* Long titles truncate with an ellipsis instead of stretching the row or
+   squeezing neighboring columns -- the full text is still available via
+   the native title="" tooltip set on this <td> in the JSX. */
+.titleCell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.badge_Validated {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.badge_Refused {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.badge_Pending {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+}
+
+.dotFilled {
+  background: #94a3b8;
+  border-color: #94a3b8;
+}
+
+.dotCurrent {
+  background: #2563eb;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px #dbeafe;
+}
+
+.ruleStatusRow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+/* Detail-panel-only Rule Status stepper -- richer than the table's compact
+   .dots (which stays untouched): all 3 stage labels visible, connected by
+   a track line, current stage highlighted in the ATEXIS primary color. */
+.stepper {
+  display: flex;
+  padding: 4px 6px 0;
+}
+
+.stepperStep {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stepperLine {
+  position: absolute;
+  top: 7px;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: #e2e8f0;
+  z-index: 0;
+}
+
+.stepperLineFilled {
+  background: #2e74b5;
+}
+
+.stepperDot {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+}
+
+.stepperDotFilled {
+  background: #2e74b5;
+  border-color: #2e74b5;
+}
+
+.stepperDotCurrent {
+  box-shadow: 0 0 0 4px rgba(46, 116, 181, 0.2);
+}
+
+.stepperLabel {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.stepperLabelReached {
+  color: #475569;
+}
+
+.stepperLabelCurrent {
+  color: #2e74b5;
+  font-weight: 700;
+}
+
+.ruleErrorText {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.ruleEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ruleTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 260px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-family: monospace;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+/* .layout is now a bounded-height flex row (align-items: stretch), so
+   this panel gets a definite height too -- overflow-y: auto lets its own
+   (potentially long: assistant + history) content scroll in place
+   instead of being silently clipped by an ancestor's overflow: hidden. */
+.detailPanel {
+  width: 460px;
+  flex-shrink: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fff;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12.5px;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  margin: 10px 0 4px;
+  text-transform: uppercase;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 50px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+.select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.assistant {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* Docs request (schema vocabulary check round): the unknown-names/not-
+   available/extended-check-unavailable notices below the assistant
+   title. Real-Mistral feedback round: the "not found" line itself is a
+   genuine warning (unlike "not available"/"extended check unavailable",
+   which are informational, not a defect to flag), so it gets the SAME
+   red callout treatment already used for Same BRDP / .ruleErrorText
+   (border #fecaca, background #fef2f2, text #b91c1c) -- not a new
+   palette, just the third real place this exact combination is used. */
+.vocabNotice {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vocabNotice p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.vocabWarning {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.assistantTitle {
+  font-size: 13.5px;
+  margin: 0 0 8px;
+}
+
+.historySection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.historyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.historyItem {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.historyField {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.historyChange {
+  font-size: 12.5px;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.historyOld {
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
+.historyArrow {
+  margin: 0 6px;
+  color: #94a3b8;
+}
+
+.historyNew {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.historyMeta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.historyRevertButton {
+  margin-top: 6px;
+  font-size: 11.5px;
+  padding: 3px 8px;
+}
+
+.hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* Naming-convention tip round: a discreet, non-modal box shown next to a
+   field (docs request: "no modal, no roba el foco") -- reuses the same
+   light-blue "informational chip" palette already established by
+   .compareChip (#eaf2fa/#c7ddf0/#245c90), not a new color. */
+.namingTip {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #eaf2fa;
+  border: 1px solid #c7ddf0;
+  color: #245c90;
+  font-size: 12px;
+}
+
+.namingTip p {
+  margin: 0;
+}
+
+.namingTipActions {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.namingTipActions .linkButton {
+  margin-top: 0;
+}
+
+/* "Did you mean `<x>`?" chips (docs request point 8) -- one .linkButton
+   per candidate, never gated by the naming tip's own dismissed state. */
+.renameSuggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.renameSuggestions .linkButton {
+  margin-top: 4px;
+}
+
+.catalogPicker {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.catalogList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.catalogItem {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.catalogItemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.catalogItemTitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.answerBox,
+.suggestionBox {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 12.5px;
+}
+
+/* .suggestionBox is always raw plain text (a Suggest Definition/Proposal/
+   Rule result), so it keeps preserving the LLM's own line breaks.
+   .answerBox now renders real markdown (react-markdown, docs request) --
+   its paragraphs/lists already carry their own line breaks, so pre-wrap
+   would double them up. */
+.suggestionBox {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* docs request (Suggest Definition line/wrap round): the suggested-text
+   node inside .suggestionBox used to reuse .mono (monospace + nowrap,
+   meant for short identifiers elsewhere on this page) for ALL THREE
+   kinds -- its `white-space: nowrap` overrode .suggestionBox's own
+   pre-wrap above, so a long Definition/Proposal line ran off the right
+   edge of the panel instead of wrapping. .suggestionText (Definition/
+   Proposal, prose) wraps like ordinary text, breaking mid-word if it has
+   to (a long unbroken token, e.g. a URL, must never force the panel to
+   scroll horizontally). .suggestionCode (Rule, XML) keeps a monospace,
+   unwrapped rendering -- breaking mid-tag would make it unreadable -- but
+   scoped to its OWN horizontal scrollbar via overflow-x, bounded by
+   max-width:100% of its container, so it can never widen the panel. */
+.suggestionText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.suggestionCode {
+  display: block;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.progressBar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 6px;
+  /* Same blue already used across the app for a primary/progress accent
+     (StatusCountsSummary.module.css's Verified tone, ProjectsPage's
+     primary button) -- no new color introduced. */
+  accent-color: #2563eb;
+}
+
+/* Compact defaults for react-markdown's output inside .answerBox -- the
+   browser's default <p>/<ul>/<pre> margins are sized for a full document,
+   not this narrow side panel. */
+.answerBox p {
+  margin: 0 0 6px;
+}
+.answerBox p:last-child {
+  margin-bottom: 0;
+}
+.answerBox ul,
+.answerBox ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+.answerBox li {
+  margin: 2px 0;
+}
+.answerBox code {
+  background: #eef2f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 11.5px;
+}
+.answerBox pre {
+  background: #eef2f7;
+  border-radius: 6px;
+  padding: 8px;
+  overflow-x: auto;
+}
+.answerBox pre code {
+  background: none;
+  padding: 0;
+}
+
+/* The mini-thread's last exchange (docs request): the user's own question
+   in a discrete/muted style ("Tú: ..."), the answer/error/loading state
+   directly below it. */
+.exchange {
+  margin-top: 8px;
+}
+
+.exchangeQuestion {
+  margin: 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.exchangeYou {
+  font-weight: 600;
+}
+
+/* Small text-link style, no border/background -- used by "+ Compare with
+   another BRDP" and "Clear" (docs request: both "enlace pequeño"), same
+   ATEXIS blue as the rest of the app's primary actions. */
+.linkButton {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.compareChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eaf2fa;
+  border: 1px solid #c7ddf0;
+  font-size: 12px;
+  color: #245c90;
+}
+
+.compareChipRemove {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: #245c90;
+  cursor: pointer;
+}
+
+.compareSourceTag {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #94a3b8;
+}
+
+.suggestionActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Suggest Definition's reference list (docs request, Suggest Definition
+   corpus round): app-generated from /similar's own data, shown under the
+   Accept/Discard row -- deliberately plainer than .suggestionBox itself
+   (no background/border of its own) since it's read-only context, not the
+   editable suggestion text. */
+.suggestionReferences {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.referencesGroupTitle {
+  margin: 8px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #94a3b8;
+}
+
+.referencesGroupTitle:first-child {
+  margin-top: 0;
+}
+
+/* Suggest Proposal round (docs request): "Same BRDP in other projects" is
+   the single most decision-relevant group -- an exact identifier match,
+   not a mere similarity guess -- but visually it was reading as just
+   another bullet list. Same red already used for Refused (.badge_Refused,
+   #dc2626) and its light background/border (already used elsewhere for
+   danger-adjacent boxes, #fef2f2/#fecaca) -- reused here rather than a
+   new color, so "red" reads consistently as "pay attention" across the
+   app. Wraps the heading+list in a bordered box for real visual weight,
+   not just a color swap on the text. */
+.referencesGroupHighlighted {
+  padding: 6px 8px;
+  margin: 8px 0;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fef2f2;
+}
+
+/* Compound selectors (base class + danger class together), not the
+   danger class alone -- same specificity fix already established for
+   this exact class of bug (see CLAUDE.md's "Fix CSS specificity bug"
+   round): a single-class .xDanger rule has the SAME specificity as the
+   single-class base rule it's meant to override, so whichever one comes
+   LATER in this file wins, regardless of which one "looks like" the
+   override. That already bit the button rule here once (.referenceIdentifierButton's own color rule sits after this block, so its blue
+   silently won on real render, confirmed via getComputedStyle before
+   this fix) -- .base.danger's specificity (0,2,0) beats a lone .base
+   (0,1,0) unconditionally, so it no longer depends on file order at all. */
+.referencesGroupTitle.referencesGroupTitleDanger {
+  color: #dc2626;
+}
+
+.referenceIdentifierButton.referenceIdentifierButtonDanger {
+  color: #dc2626;
+}
+
+.referencesList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: #475569;
+}
+
+/* Suggest Definition's reference row (docs request, readable references
+   round): identifier + title + origin[ + score] on one line, the title
+   truncated to fit -- min-width:0 is required on the flex item for
+   text-overflow:ellipsis to actually kick in inside a flex row (without it
+   the item refuses to shrink below its content's intrinsic width). */
+.referenceRow {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+}
+
+.referenceIdentifierButton {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: monospace;
+  font-size: 12px;
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.referenceTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.referenceMeta {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: #94a3b8;
+}
+
+/* The expanded Definition -- same wrap/no-page-overflow behavior already
+   fixed for the main suggestion box (.suggestionText), reused here since
+   this is likewise real prose that must never force horizontal scroll. */
+.referenceDefinition {
+  margin: 3px 0 4px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Docs request ("Servicio de fichas de esquema y su uso en Ask"): one
+   variant block inside an expanded SchemaFactCard -- several stack when an
+   element resolves differently across schema files (docs request point 1,
+   "la ficha muestra variantes"), each needing its own vertical separation. */
+.schemaFactVariant {
+  margin-bottom: 6px;
+}
+.schemaFactVariant:last-child {
+  margin-bottom: 0;
+}
+
+.hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 14px 0;
+}
+
+/* Same footer/pagination pattern as v1's BRDPTable.module.css. */
+.tableFooter {
+  flex-shrink: 0;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.tableFooterInfo {
+  flex: 1;
+}
+
+.pagination {
+  display: flex;
+  gap: 8px;
+}
+
+.paginationBtn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.paginationBtn:hover:not(:disabled) {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.paginationBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

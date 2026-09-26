@@ -1,0 +1,62 @@
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Only used by the 'full' variant now (RecordsPage's header) -- a comma
+   between "Validated: 36" and "Pending: 0", not the old "·" bullet
+   between bare "V 36"/"P 0", since numbersOnly no longer shares a single
+   <span> across all three values (each is its own <td> -- see NumberCells
+   below). */
+.sep {
+  color: #cbd5e1;
+  font-weight: 400;
+}
+
+/* numbersOnly variant (ProjectsPage's table): each value is a real <td>,
+   so cross-row alignment comes from the browser's own table column
+   layout, not from a min-width trick inside a shared cell (the previous
+   round's fix, now obsolete for this variant since there's no longer a
+   shared cell to misalign within). Centered + tabular-nums just keeps
+   the digits themselves crisp within their own narrow column. */
+.numCell {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* Proposal Status -- exact same hex values as RecordsPage.module.css's
+   .badge_Validated/.badge_Pending/.badge_Refused, never a new palette. */
+.validated {
+  color: #16a34a;
+}
+
+.pending {
+  color: #d97706;
+}
+
+.refused {
+  color: #dc2626;
+}
+
+/* Rule Status -- same blue as RecordsPage.module.css's .dotCurrent /
+   ProjectsPage.module.css's .button (the app's one "current/primary"
+   accent) for Verified, and two tones from the same slate family already
+   used throughout for Draft/To Do. */
+.verified {
+  color: #2563eb;
+}
+
+.draft {
+  color: #64748b;
+}
+
+.todo {
+  color: #94a3b8;
+}

@@ -2,19 +2,27 @@ import { generateBREX301 } from "./generateBREX301.js";
 import { brexToSchematron } from "./brexToSchematron.js";
 import { checkWellFormed } from "./generateBREX.js";
 
-// Genera Schematron (S1000D 3.0.1) en dos pasos deterministas:
-// 1) genera el BREX 3.0.1 reutilizando generateBREX301 (LLM + finalización determinista)
-// 2) convierte ese BREX a ISO Schematron con brexToSchematron (sin LLM, sin error de XPath)
+// Genera Schematron (S1000D) en dos pasos deterministas:
+// 1) genera un BREX real reutilizando el generador base del standard real
+//    del proyecto -- generateBREX (4.2), generateBREX41, o generateBREX301,
+//    seleccionado por el llamador vía options.baseGenerator (LLM +
+//    finalización determinista, sin cambios en ninguno de los tres).
+//    Por defecto generateBREX301, por compatibilidad con el uso histórico
+//    de esta función cuando el llamador no especifica otro.
+// 2) convierte ese BREX a ISO Schematron con brexToSchematron (sin LLM, sin
+//    error de XPath) -- el conversor es agnóstico de versión BREX desde
+//    siempre (lee indistintamente objrule/structureObjectRule,
+//    objpath/objectPath, objval/objectValue, objappl/allowedObjectFlag).
 //
-// Frozen rule approvals for THIS format are keyed 'SCH-S1000D' (the
-// user-facing primaryFormat value), not 'BREX-3.0.1' -- but the frozen
-// content is still a plain <objrule> fragment, injected into the BREX 3.0.1
-// assembly in generateBREX301 and left to brexToSchematron() (a pure
-// function) to convert into the final <sch:pattern> exactly like any other
-// rule. This avoids needing to separately freeze the converted Schematron.
+// No existe un formato de aprobación "SCH-S1000D" independiente: un único
+// conjunto de reglas aprobadas por proyecto, bajo el formato BREX del
+// standard real (BREX-3.0.1/BREX-4.1/BREX-4.2), alimenta tanto la salida
+// BREX como su conversión a Schematron (docs request, confirmado con el
+// usuario) -- options.approvalsFormat/options.approvals se reenvían tal
+// cual al generador base, sin forzar aquí ningún valor propio.
 export async function generateBREXSch(brdps, projectConfig, options = {}) {
-  const brex301Options = { approvalsFormat: 'SCH-S1000D', ...options };
-  const brexResult = await generateBREX301(brdps, projectConfig, brex301Options);
+  const { baseGenerator = generateBREX301, ...baseOptions } = options;
+  const brexResult = await baseGenerator(brdps, projectConfig, baseOptions);
   if (!brexResult || !brexResult.xml) {
     throw new Error("No se pudo generar el BREX base para el Schematron.");
   }
