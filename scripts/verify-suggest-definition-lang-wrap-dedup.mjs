@@ -104,14 +104,21 @@ async function main() {
 
     const returnOnlyIdx = systemPrompt.indexOf("Return ONLY the Definition text");
     const languageIdx = systemPrompt.indexOf("LANGUAGE:");
-    const doNotCiteIdx = systemPrompt.indexOf("Do not cite specification chapter numbers");
+    // Pre-refactor-round staleness bug found while re-running the full
+    // verify suite (unrelated to the prompt/hooks refactor): this script
+    // predates the "nunca citar capítulos" round that replaced the old
+    // "Do not cite specification chapter numbers..." line with the current,
+    // more explicit "Never state or suggest specification chapter..."
+    // wording -- updated to match what buildSuggestDefinitionPrompt
+    // actually emits now.
+    const doNotCiteIdx = systemPrompt.indexOf("Never state or suggest specification chapter");
     const oldLineIdx = systemPrompt.indexOf("Write in the same language as the BRDP's Title and Proposal.");
 
     assert(returnOnlyIdx !== -1, "'Return ONLY...' is present");
     assert(languageIdx !== -1, "'LANGUAGE:' block is present");
-    assert(doNotCiteIdx !== -1, "'Do not cite...' line is present");
+    assert(doNotCiteIdx !== -1, "'Never state or suggest specification chapter...' line is present");
     assert(oldLineIdx === -1, "the OLD generic language line ('Write in the same language...') is gone");
-    assert(doNotCiteIdx < languageIdx, "LANGUAGE block comes AFTER 'Do not cite...'");
+    assert(doNotCiteIdx < languageIdx, "LANGUAGE block comes AFTER the chapter-citation instruction");
     assert(languageIdx < returnOnlyIdx, "LANGUAGE block comes BEFORE 'Return ONLY...' -- immediately preceding it");
 
     // Exact expected block, byte for byte -- confirms nothing else (no

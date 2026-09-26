@@ -132,7 +132,15 @@ async function main() {
     await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
 
     const askBox = page.locator("textarea[placeholder]").filter({ hasText: "" });
-    const questionBox = page.getByPlaceholder("Ask about this BRDP…");
+    // Pre-refactor-round staleness bug found while re-running the full verify
+    // suite (unrelated to the prompt/hooks refactor): this script predates
+    // the "mini-thread UI" round that made the textarea's placeholder change
+    // to askFollowupPlaceholder after a successful answer, so a locator
+    // pinned to the ORIGINAL placeholder text stopped matching the moment a
+    // follow-up question was attempted (the "And why?" fill below). Fixed
+    // with the same robust label+following-textarea pattern already used by
+    // verify-ask-question-thread-and-markdown.mjs for the same reason.
+    const questionBox = page.locator("label", { hasText: "Ask a question" }).locator("xpath=following::textarea[1]");
     const askButton = page.getByRole("button", { name: /^Ask$/ });
     const answerBox = page.locator("div").filter({ hasText: /^MOCK-/ }).last();
 

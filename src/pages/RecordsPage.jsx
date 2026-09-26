@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { authFetchJson } from '../services/apiClient';
-import { sendMessage } from '../api/llmAPI';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import { RULE_STATES, ruleStateOf } from '../utils/ruleState';
@@ -16,17 +15,15 @@ import {
   useInvalidatePendingEmbeddings,
   usePendingEmbeddings,
 } from '../hooks/useEmbeddingJob';
-import {
-  applyRenameSuggestion,
-  checkAgainstVocabulary,
-  extractContextCandidates,
-  formatWrongTypeMessage,
-  hashVocabInputText,
-  loadSchemaVocabulary,
-  resolvePhraseCandidates,
-  selectSchemaFactNames,
-  summarizeSchemaFactEntry,
-} from '../utils/vocabularyCheck.js';
+import { useVocabularyCheck } from '../hooks/useVocabularyCheck';
+import { useAskAssistant } from '../hooks/useAskAssistant';
+import { useSuggestions } from '../hooks/useSuggestions';
+import ReferenceRow from '../components/assistant/ReferenceRow';
+import SchemaFactCard from '../components/assistant/SchemaFactCard';
+import NamingTip from '../components/assistant/NamingTip';
+import RenameSuggestions from '../components/assistant/RenameSuggestions';
+import RuleStatusStepper from '../components/RuleStatusStepper';
+import RuleStatusCell from '../components/RuleStatusCell';
 import styles from './RecordsPage.module.css';
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
@@ -75,768 +72,6 @@ function formatHistoryValue(t, fieldName, value) {
   return value || '—';
 }
 
-// Same local map as ProjectConfigPage.jsx/GenerateBREXdocPage.jsx (not
-// centralized -- established convention in this codebase, see CLAUDE.md).
-const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified' };
-
-// A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
-// examples with inline function expressions run well past this) -- rather
-// than risk silently blowing max_tokens/context on a huge prompt (HR7:
-// never degrade silently), cut it and say so explicitly IN the prompt
-// itself, never just drop it.
-const ASK_RULE_MAX_CHARS = 6000;
-
-function ruleTextForAsk(state, ruleXml) {
-  if (state === 'todo' || !ruleXml) return 'Not yet defined';
-  if (ruleXml.length <= ASK_RULE_MAX_CHARS) return ruleXml;
-  return `${ruleXml.slice(0, ASK_RULE_MAX_CHARS)}\n[Rule truncated at ${ASK_RULE_MAX_CHARS} characters]`;
-}
-
-// Docs request (schema vocabulary check round), 3.5. Shared by all three
-// prompts that get this block (Ask, Suggest Definition, Suggest Proposal
-// -- never Suggest Rule, unchanged). `vocabCheck` is
-// checkAgainstVocabulary()'s own output (notFound/wrongType) -- already
-// deduped and formatted, appended verbatim, never reformatted a second
-// way. "Solo determinista" round: the LLM-guess path (and the hedged
-// "possibly not in" paragraph it fed) is gone entirely -- every name here
-// has real evidence in the text (`<x>`/`@x` markup, or an explicit
-// "element .../attribute ..." introduction), so there is only one
-// confidence level left.
-function buildUnknownNamesBlock(standard, vocabCheck) {
-  if (!vocabCheck) return '';
-  const { notFound, wrongType } = vocabCheck;
-  let block = '';
-  if (notFound && notFound.length > 0) {
-    block += `\n\nThe following names do NOT exist in the ${standard} schema: ${notFound.join(', ')}. Point this out explicitly; do not treat them as valid elements or attributes.`;
-  }
-  if (wrongType && wrongType.length > 0) {
-    const lines = wrongType.map((w) => formatWrongTypeMessage(standard, w));
-    block += `\n\nThe following names were used as the wrong kind in the text: ${lines.join(' ')}`;
-  }
-  return block;
-}
-
-// "Aviso ligado al texto" round, point 3: Suggest Definition/Proposal get
-// a DIFFERENT unknown-names block from Ask's buildUnknownNamesBlock above
-// -- real-Mistral feedback showed the model, given the Ask-style "point
-// this out explicitly" instruction, wrote user-facing commentary INTO the
-// Proposal text itself ("The element <pokemon> does not exist... and will
-// not be used.") and, worse, decided the outcome -- exactly what "DO NOT
-// MAKE THE DECISION" (buildSuggestProposalPrompt's own template block)
-// already forbids for everything else. Ask is a conversation where
-// pointing out an unknown name is the point; a Suggest's OUTPUT becomes
-// the BRDP's own Title/Definition/Proposal field verbatim, where a stray
-// comment or a snuck-in decision would corrupt the record. Regardless of
-// whether a name is notFound/wrongType, the instruction is identical: say
-// nothing about it, decide nothing, just write the text as instructed.
-function buildSuggestUnknownNamesBlock(standard, vocabCheck) {
-  if (!vocabCheck) return '';
-  const names = [
-    ...new Set([
-      ...(vocabCheck.notFound || []),
-      ...(vocabCheck.wrongType || []).map((w) => (w.usedAs === 'element' ? `<${w.name}>` : `@${w.name}`)),
-    ]),
-  ];
-  if (names.length === 0) return '';
-  return `\n\nThe BRDP mentions names that may not exist in the ${standard} schema: ${names.join(', ')}. The user has already been warned in the interface. Do NOT mention their validity in your output, do not add comments or notes, and do not take any decision about them -- write the text exactly as instructed above.`;
-}
-
-// Docs request ("Servicio de fichas de esquema y su uso en Ask"): formats
-// the real structural facts fetched from GET /api/schema-cards into the
-// literal block shape the encargo specifies. `schemaFacts` is an array of
-// {name, entry} in the SAME priority order selectSchemaFactNames returned
-// (question's own names first, then Title/Definition/Proposal) -- `entry`
-// is the endpoint's own per-name shape ({variants, parents, ...}), used
-// here EXACTLY as returned, never reformatted a second, possibly-
-// diverging way from what the "Schema facts used" UI line renders.
-function formatSchemaFactAttribute(attr) {
-  let text = attr.required ? `@${attr.name} (required)` : `@${attr.name}`;
-  if (attr.enum && attr.enum.length > 0) {
-    const values = attr.enum.join('|') + (attr.enum_truncated ? `, +${attr.enum_omitted} more` : '');
-    text += ` [${values}]`;
-  }
-  return text;
-}
-
-function formatSchemaFactNameList(names, truncated, omitted) {
-  if (!names || names.length === 0) return 'none';
-  return names.join(', ') + (truncated ? `, +${omitted} more` : '');
-}
-
-function formatSchemaFactAttributeList(attrs) {
-  if (!attrs || attrs.length === 0) return 'none';
-  return attrs.map(formatSchemaFactAttribute).join(', ');
-}
-
-// Ask-with-schema-cards follow-up round, point 4: for an element with a
-// single schema variant (the common case), render exactly as before. For
-// one with several, render what summarizeSchemaFactEntry found common to
-// ALL of them first (attributes, children, and the always-single `parents`
-// list), then a "Differences by schema" section listing, per variant,
-// ONLY what that variant adds beyond the common set -- never repeating
-// the full attribute/children list once per variant. Truncation markers
-// stay attached to whichever per-variant list they actually describe
-// (never claimed for the computed common set, which is exact given the
-// data available).
-function buildSchemaFactsBlock(standard, schemaFacts) {
-  if (!schemaFacts || schemaFacts.length === 0) return '';
-  let block = `\n\nSCHEMA FACTS — extracted from the official ${standard} schema. These are
-authoritative: for questions about which attributes, values, child
-elements or parent elements are allowed, rely on these facts over your
-own knowledge. If the facts do not cover what is asked, say so plainly
-instead of guessing.`;
-  for (const { name, entry } of schemaFacts) {
-    const summary = summarizeSchemaFactEntry(entry);
-    const parentsText = formatSchemaFactNameList(entry.parents, entry.parents_truncated, entry.parents_omitted);
-
-    if (!summary.common) {
-      const v = entry.variants[0];
-      block += `\n<${name}> (schemas: ${v.schemas.join(', ')})`;
-      if (!v.resolved) {
-        block += `\n  content model not fully resolved for this schema — do not assume the lists below are complete.`;
-      }
-      const attrsText =
-        v.attributes.length > 0
-          ? formatSchemaFactAttributeList(v.attributes) + (v.attributes_truncated ? `, +${v.attributes_omitted} more` : '')
-          : 'none';
-      block += `\n  attributes: ${attrsText}`;
-      block += `\n  children: ${formatSchemaFactNameList(v.children, v.children_truncated, v.children_omitted)}`;
-      block += `\n  allowed inside: ${parentsText}`;
-      continue;
-    }
-
-    block += `\n<${name}> — common to all ${entry.variants.length} schema variants:`;
-    if (summary.anyUnresolved) {
-      block += `\n  note: not every variant's content model was fully resolved — the common set below may be incomplete.`;
-    }
-    block += `\n  attributes: ${formatSchemaFactAttributeList(summary.common.attributes)}`;
-    block += `\n  children: ${formatSchemaFactNameList(summary.common.children, false, 0)}`;
-    block += `\n  allowed inside: ${parentsText}`;
-    block += `\n  Differences by schema:`;
-    for (const pv of summary.perVariant) {
-      block += `\n  [${pv.schemas.join(', ')}]`;
-      if (!pv.resolved) {
-        block += `\n    content model not fully resolved for this schema — do not assume this list is complete.`;
-      }
-      const attrsText =
-        pv.diffAttributes.length > 0
-          ? formatSchemaFactAttributeList(pv.diffAttributes) + (pv.attributes_truncated ? `, +${pv.attributes_omitted} more` : '')
-          : pv.attributes_truncated
-            ? `none beyond the common set (list truncated, +${pv.attributes_omitted} more not shown)`
-            : 'none beyond the common set';
-      block += `\n    attributes: ${attrsText}`;
-      const childrenText =
-        pv.diffChildren.length > 0
-          ? formatSchemaFactNameList(pv.diffChildren, pv.children_truncated, pv.children_omitted)
-          : pv.children_truncated
-            ? `none beyond the common set (list truncated, +${pv.children_omitted} more not shown)`
-            : 'none beyond the common set';
-      block += `\n    children: ${childrenText}`;
-    }
-  }
-  return block;
-}
-
-// Builds the "Ask a Question" system prompt: strictly scoped to the
-// selected BRDP (docs request), with its full live context -- including
-// Rule/Rule Status, which askGeneric previously never sent at all -- plus
-// an optional second BRDP (from Records or the official catalog) when the
-// user has picked one to compare against.
-function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, vocabCheck, schemaFacts) {
-  const ruleState = ruleStateOf(ruleApproval);
-  // Ask-with-schema-cards follow-up round, points 2-3: a real report
-  // against this app showed two symptoms of the SAME root cause -- the
-  // old scope rule only ever mentioned "this specific BRDP", so a genuine
-  // schema question ("Where can <para> go?") could get refused the first
-  // time it was asked (the model reading "not about this specific BRDP"
-  // literally) and, even when answered correctly, sometimes still tacked
-  // on a leftover "if this isn't about this BRDP, rephrase" disclaimer
-  // after a schema answer it had ALREADY given. SCOPE is now explicitly
-  // widened to cover the schema facts this same prompt provides, and the
-  // model is told point-blank never to hedge an answer it just gave.
-  let prompt = `You are an S1000D and DITA business-rules expert assistant embedded in
-BRDP Manager.
-
-SCOPE: answer questions about the BRDP shown below AND questions about
-the ${standard} schema elements and attributes covered by SCHEMA FACTS.
-Only if the question has nothing to do with this BRDP, with ${standard}
-or with its schema, say so briefly and ask the user to rephrase.
-Never add scope reminders or disclaimers to an answer you have given.`;
-
-  if (compareBrdp) {
-    prompt += `\nThe BRDP being compared against (shown below) is also in scope.`;
-  }
-
-  prompt += `
-
-Answer exactly what is asked: "where can X go / be used" -> its allowed
-parents; "what can X contain" -> its children; "which attributes" ->
-its attributes. Do not list other facts unless asked.
-When the facts contain several schema variants, summarize: state what
-is common to all of them and mention only the notable differences.
-Keep the 3-paragraph limit even when the facts are long.
-
-Answer in at most 3 short paragraphs — be direct, no padding, no
-restating the question back to the user.
-
-Never state or suggest specification chapter, section or paragraph
-numbers, not even as possibilities ("it might be in chapter X"),
-unless the exact number appears in the BRDP content above. If the user
-asks where something is defined, say that you cannot give the exact
-location, and name the concept or element to look up in the ${standard}
-specification instead.
-
-Answer in the same language as the question.
-
-This project uses the standard: ${standard}.
-Answer strictly in terms of this standard and version — use its element
-names, rule vocabulary and conventions, and do not mix in other versions
-of S1000D or DITA unless the user explicitly asks for a comparison.`;
-
-  prompt += buildSchemaFactsBlock(standard, schemaFacts);
-
-  prompt += `
-
-Current BRDP context:
-ID: ${brdp.identifier}
-Title: ${brdp.title}
-Definition: ${brdp.definition}
-Proposal: ${brdp.proposal}
-Proposal Status: ${brdp.validation}`;
-
-  if (brdp.validation === 'Refused' && brdp.comments) {
-    prompt += `\nRefusal reason: ${brdp.comments}`;
-  }
-
-  prompt += `
-Rule Status: ${RULE_STATUS_LABELS[ruleState]}
-Rule: ${ruleTextForAsk(ruleState, ruleApproval?.rule_xml)}`;
-
-  if (compareBrdp) {
-    prompt += `\n\nBRDP being compared against (source: ${
-      compareBrdp.source === 'records' ? 'Records' : 'Catalog'
-    }):
-ID: ${compareBrdp.identifier}
-Title: ${compareBrdp.title}
-Definition: ${compareBrdp.definition}`;
-    if (compareBrdp.source === 'records') {
-      prompt += `
-Proposal: ${compareBrdp.proposal}
-Proposal Status: ${compareBrdp.validation}
-Rule Status: ${RULE_STATUS_LABELS[compareBrdp.ruleState]}
-Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
-    }
-    prompt += `\n\nThe user may ask you to compare the current BRDP with the one above; in that case both are in scope.`;
-  }
-
-  prompt += buildUnknownNamesBlock(standard, vocabCheck);
-
-  return prompt;
-}
-
-// Suggest Definition's own system prompt (docs request, Suggest Definition
-// corpus round) -- a dedicated function, not inline in requestSuggestion,
-// same precedent as buildAskSystemPrompt above. Built ENTIRELY from
-// /similar's structured `candidates`/`style_references` arrays (never from
-// the LLM) -- the reference list the UI renders under the suggestion comes
-// from those exact same arrays, so what the user sees always matches what
-// the LLM actually saw. `similar`/`styleReferences` entries carry `source`
-// already formatted by the backend ("Records: <project name>" / "Catalog"
-// -- similar.py's _get_definition_similar), reused verbatim here and in
-// the UI rather than reformatted a second, possibly-diverging way.
-function buildSuggestDefinitionPrompt(brdp, standard, similar, styleReferences, vocabCheck) {
-  const referenceBlock = (c) => `Title: ${c.title}\nDefinition: ${c.text}`;
-
-  let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
-Decision Points), assisting in BRDP Manager.
-
-Your task: write the Definition for the BRDP below. A Definition states
-the decision point — WHAT must be decided and its scope — in neutral,
-concise terms. It does not state the chosen answer (that is the
-Proposal) and does not describe XML implementation details (that is
-the Rule).
-
-Use this project's standard only: ${standard}. Use its terminology and
-element names; do not mix in other versions of S1000D or DITA.
-
-`;
-
-  if (similar.length > 0) {
-    prompt += `SIMILAR BRDPs — validated decision points closest in meaning to this
-one. Follow their style, length and level of detail:
-${similar
-  .map((c) => `[${c.identifier} | ${c.source} | similarity ${c.score.toFixed(2)}]\n${referenceBlock(c)}`)
-  .join('\n\n')}
-
-`;
-  }
-
-  if (styleReferences.length > 0) {
-    prompt += `STYLE REFERENCES — validated decision points that are DIFFERENT in
-content. Use them only to see how Definitions are written in this
-standard; do not copy or reuse their content:
-${styleReferences.map((c) => `[${c.identifier} | ${c.source}]\n${referenceBlock(c)}`).join('\n\n')}
-
-`;
-  }
-
-  if (similar.length === 0 && styleReferences.length === 0) {
-    prompt += `No reference BRDPs are available; write the Definition from your
-knowledge of ${standard} alone.
-
-`;
-  }
-
-  prompt += `Never state or suggest specification chapter, section or paragraph
-numbers, not even as possibilities ("it might be in chapter X"), unless
-the exact number appears in the BRDP content above. If you would
-otherwise need to point to a location in the ${standard} specification,
-name the concept or element to look up instead.
-
-LANGUAGE: Write the Definition in the same language as the BRDP's
-Title ("${brdp.title}"). This takes priority over everything else — the
-reference BRDPs may be in a different language; do not follow theirs.
-If the Title language is unclear, use the language of the Proposal.
-
-Return ONLY the Definition text — no preamble, no references list,
-no quotes, no markdown.
-
-BRDP to define:
-ID: ${brdp.identifier}
-Title: ${brdp.title}
-Current Definition: ${brdp.definition || 'empty'}
-Proposal: ${brdp.proposal || 'empty'}`;
-
-  prompt += buildSuggestUnknownNamesBlock(standard, vocabCheck);
-
-  return prompt;
-}
-
-// Suggest Proposal's own system prompt (docs request, Suggest Proposal
-// round) -- same architecture as buildSuggestDefinitionPrompt above, built
-// ENTIRELY from /similar's structured same_brdp/candidates/this_project
-// arrays (never from the LLM), so what the UI's reference list shows is
-// exactly what the LLM saw. `source` already carries the bare project
-// name (similar.py's _get_proposal_similar) for same_brdp/candidates, and
-// is empty for this_project (that group is never labeled -- "this
-// project" is already implied). Definition is never empty here (the
-// backend 400s Suggest Proposal on an empty Definition before this is
-// ever called), so unlike buildSuggestDefinitionPrompt's own fields,
-// `brdp.definition` needs no `|| 'empty'` fallback.
-function buildSuggestProposalPrompt(brdp, standard, sameBrdp, similar, thisProject, vocabCheck) {
-  let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
-Decision Points), assisting in BRDP Manager.
-
-Your task: write the Proposal for the BRDP below. A Proposal states the
-decision THIS project takes for the decision point described in the
-Definition — the concrete answer, in concise normative terms (e.g.
-"... shall not be used", "... shall be limited to ..."). Do not restate
-the Definition and do not describe XML implementation details (that is
-the Rule).
-
-Use this project's standard only: ${standard}. Use its terminology and
-element names; do not mix in other versions of S1000D or DITA.
-
-`;
-
-  if (sameBrdp.length > 0) {
-    prompt += `SAME BRDP IN OTHER PROJECTS — how other projects decided this exact
-decision point. Use them to understand the usual options; do not copy
-their project-specific values:
-${sameBrdp.map((c) => `[${c.identifier} | ${c.source}] Proposal: ${c.text}`).join('\n\n')}
-
-`;
-  }
-
-  if (similar.length > 0) {
-    prompt += `SIMILAR DECISIONS IN OTHER PROJECTS — related decision points and how
-they were decided:
-${similar
-  .map(
-    (c) =>
-      `[${c.identifier} | ${c.source} | similarity ${c.score.toFixed(2)}]\nDefinition: ${c.definition} / Proposal: ${c.text}`
-  )
-  .join('\n\n')}
-
-`;
-  }
-
-  if (thisProject.length > 0) {
-    prompt += `THIS PROJECT'S RELATED DECISIONS — already validated in this project.
-Your Proposal must be consistent with them and must not contradict them:
-${thisProject
-  .map(
-    (c) => `[${c.identifier} | similarity ${c.score.toFixed(2)}]\nDefinition: ${c.definition} / Proposal: ${c.text}`
-  )
-  .join('\n\n')}
-
-`;
-  }
-
-  if (sameBrdp.length === 0 && similar.length === 0 && thisProject.length === 0) {
-    prompt += `No reference BRDPs are available; write the Proposal from your
-knowledge of ${standard} alone.
-
-`;
-  }
-
-  if (brdp.validation === 'Refused') {
-    prompt += `THE PREVIOUS PROPOSAL WAS REFUSED.
-Refused proposal: ${brdp.proposal || 'empty'}
-Reason for refusal: ${brdp.comments || 'not given'}
-Your Proposal must address the reason for refusal.
-
-`;
-  }
-
-  prompt += `DO NOT MAKE THE DECISION. Write the Proposal as a fill-in template: the
-complete normative sentence, with every choice left to the user as a
-bracketed placeholder that states the kind of answer and, where useful,
-example options. Examples:
-- The [LIST: Descriptive, Procedural, IPD, ...] schemas shall be used ...
-- The element <x> [YES/NO] be used.
-- Nesting shall be limited to [VALUE: e.g. 4] levels.
-- Permitted characters: [CHARACTERS: ...].
-Example options may come from the reference BRDPs, but never present
-another project's choice as this project's decision.
-
-Never state or suggest specification chapter, section or paragraph
-numbers, not even as possibilities ("it might be in chapter X"), unless
-the exact number appears in the BRDP content above. If you would
-otherwise need to point to a location in the ${standard} specification,
-name the concept or element to look up instead.
-
-BRDP:
-ID: ${brdp.identifier}
-Title: ${brdp.title}
-Definition: ${brdp.definition}
-Current Proposal: ${brdp.proposal || 'empty'}
-
-LANGUAGE: Write the Proposal in the same language as the BRDP's Title
-("${brdp.title}"). This takes priority over everything else — the
-reference BRDPs may be in a different language; do not follow theirs.
-If the Title language is unclear, use the language of the Definition.
-
-Return ONLY the Proposal text — no preamble, no references list,
-no quotes, no markdown.`;
-
-  prompt += buildSuggestUnknownNamesBlock(standard, vocabCheck);
-
-  return prompt;
-}
-
-// One row of Suggest Definition's reference list (docs request, readable
-// references round): identifier (clickable, toggles the Definition open
-// below), Title truncated to one line with the full text in `title=`, the
-// origin, and -- only for the "Similar" group, never "Style references" --
-// the similarity score. Never navigates anywhere; expand/collapse is pure
-// local UI state owned by the parent (several rows can be open at once).
-// `showProposal` (docs request, Suggest Proposal round): when set, the
-// expanded panel shows BOTH Definition and Proposal, labeled -- used by
-// all three of Suggest Proposal's reference groups, even "Same BRDP in
-// other projects" (whose PROMPT block only ever cites Proposal -- the UI
-// is more generous, per the docs request's explicit "despliega su
-// Definition y su Proposal"). Suggest Definition's own two groups leave
-// this unset and keep showing Definition alone, unchanged.
-function ReferenceRow({ candidate, showScore, showProposal, danger, expanded, onToggle }) {
-  const { t } = useTranslation();
-  return (
-    <li>
-      <div className={styles.referenceRow}>
-        <button
-          type="button"
-          className={`${styles.referenceIdentifierButton}${danger ? ` ${styles.referenceIdentifierButtonDanger}` : ''}`}
-          onClick={onToggle}
-        >
-          {candidate.identifier}
-        </button>
-        <span className={styles.referenceTitle} title={candidate.title}>
-          — {candidate.title}
-        </span>
-        <span className={styles.referenceMeta}>
-          {/* Suggest Proposal's "This project" group (docs request) never
-              carries a `source` -- the project is already implied, never
-              named -- so the leading " — " is skipped rather than shown
-              with nothing after it. */}
-          {candidate.source ? ` — ${candidate.source}` : ''}
-          {showScore ? ` — ${candidate.score.toFixed(2)}` : ''}
-        </span>
-      </div>
-      {expanded && (
-        <div className={styles.referenceDefinition}>
-          {showProposal ? (
-            <>
-              <div>
-                <strong>{t('records.assistant.referenceDefinitionLabel')}:</strong> {candidate.definition}
-              </div>
-              <div>
-                <strong>{t('records.assistant.referenceProposalLabel')}:</strong> {candidate.text}
-              </div>
-            </>
-          ) : (
-            candidate.definition
-          )}
-        </div>
-      )}
-    </li>
-  );
-}
-
-// Docs request ("Servicio de fichas de esquema y su uso en Ask"): renders
-// one expanded schema-fact card -- exactly the same data
-// buildSchemaFactsBlock formatted into the prompt (the entry object is
-// used as-is, never reformatted a second, possibly-diverging way).
-function formatSchemaFactAttributeUi(attr, t) {
-  let text = attr.required ? `@${attr.name} (${t('records.assistant.schemaFactRequired')})` : `@${attr.name}`;
-  if (attr.enum && attr.enum.length > 0) {
-    const values = attr.enum.join(' | ') + (attr.enum_truncated ? `, +${attr.enum_omitted}` : '');
-    text += ` [${values}]`;
-  }
-  return text;
-}
-
-function formatSchemaFactNameListUi(names, truncated, omitted, t) {
-  if (!names || names.length === 0) return t('records.assistant.schemaFactNone');
-  return names.join(', ') + (truncated ? `, +${omitted}` : '');
-}
-
-function formatSchemaFactAttributeListUi(attrs, t) {
-  if (!attrs || attrs.length === 0) return t('records.assistant.schemaFactNone');
-  return attrs.map((a) => formatSchemaFactAttributeUi(a, t)).join(', ');
-}
-
-// Ask-with-schema-cards follow-up round, point 4: same common/per-variant-
-// diff split as buildSchemaFactsBlock, rendered as the UI's expandable
-// card -- both consume summarizeSchemaFactEntry so the prompt the LLM
-// sees and the card the user can expand never drift apart.
-function SchemaFactCard({ name, entry }) {
-  const { t } = useTranslation();
-  const summary = summarizeSchemaFactEntry(entry);
-  const parentsText = formatSchemaFactNameListUi(entry.parents, entry.parents_truncated, entry.parents_omitted, t);
-
-  if (!summary.common) {
-    const v = entry.variants[0];
-    return (
-      <div className={styles.referenceDefinition}>
-        <div>
-          <strong>&lt;{name}&gt;</strong> ({t('records.assistant.schemaFactSchemas')}: {v.schemas.join(', ')})
-        </div>
-        {!v.resolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
-        <div>
-          {t('records.assistant.schemaFactAttributes')}:{' '}
-          {v.attributes.length > 0
-            ? formatSchemaFactAttributeListUi(v.attributes, t) + (v.attributes_truncated ? `, +${v.attributes_omitted}` : '')
-            : t('records.assistant.schemaFactNone')}
-        </div>
-        <div>
-          {t('records.assistant.schemaFactChildren')}:{' '}
-          {formatSchemaFactNameListUi(v.children, v.children_truncated, v.children_omitted, t)}
-        </div>
-        <div>
-          {t('records.assistant.schemaFactAllowedInside')}: {parentsText}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={styles.referenceDefinition}>
-      <div>
-        <strong>&lt;{name}&gt;</strong> — {t('records.assistant.schemaFactCommonToAll', { count: entry.variants.length })}
-      </div>
-      {summary.anyUnresolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
-      <div>
-        {t('records.assistant.schemaFactAttributes')}: {formatSchemaFactAttributeListUi(summary.common.attributes, t)}
-      </div>
-      <div>
-        {t('records.assistant.schemaFactChildren')}: {formatSchemaFactNameListUi(summary.common.children, false, 0, t)}
-      </div>
-      <div>
-        {t('records.assistant.schemaFactAllowedInside')}: {parentsText}
-      </div>
-      <div className={styles.schemaFactDifferencesHeading}>{t('records.assistant.schemaFactDifferences')}</div>
-      {summary.perVariant.map((pv, idx) => (
-        <div key={idx} className={styles.schemaFactVariant}>
-          <div>({t('records.assistant.schemaFactSchemas')}: {pv.schemas.join(', ')})</div>
-          {!pv.resolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
-          <div>
-            {t('records.assistant.schemaFactAttributes')}:{' '}
-            {pv.diffAttributes.length > 0
-              ? formatSchemaFactAttributeListUi(pv.diffAttributes, t) + (pv.attributes_truncated ? `, +${pv.attributes_omitted}` : '')
-              : t('records.assistant.schemaFactNoneBeyondCommon')}
-          </div>
-          <div>
-            {t('records.assistant.schemaFactChildren')}:{' '}
-            {pv.diffChildren.length > 0
-              ? formatSchemaFactNameListUi(pv.diffChildren, pv.children_truncated, pv.children_omitted, t)
-              : t('records.assistant.schemaFactNoneBeyondCommon')}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Follow-up round ("consejo de nombres sin falsos positivos"): pure
-// wrapper around extractContextCandidates(text).phraseCandidates +
-// resolvePhraseCandidates(..., vocabulary), so every field that wants the
-// "Did you mean `<x>`?" correction calls the same one function rather
-// than each re-deriving it -- never gated by the session tip's dismissed
-// state (a concrete correction, not the general hint). `vocabulary` is
-// the already-loaded {elements,attributes} Sets for this project's
-// standard (see the `vocabulary` state above) -- a phrase-triggered word
-// only ever becomes a suggestion when it genuinely resolves against it;
-// an unresolvable one (a real adjective/verb the trigger word happened to
-// sit next to, e.g. "atributos seleccionados") is silently dropped, never
-// shown as a suggestion NOR as a red warning.
-function renameSuggestionsFor(text, vocabulary) {
-  if (!vocabulary) return [];
-  const { phraseCandidates } = extractContextCandidates(text || '');
-  return resolvePhraseCandidates(phraseCandidates, vocabulary);
-}
-
-// Docs request (naming-convention tip round), follow-up ("sin Don't show
-// again"): a discreet, non-modal box shown next to a field the FIRST time
-// the user focuses/types into Title, Definition, Proposal (BRDP panel or
-// Add BRDP) or the Ask question -- once per session (state owned by the
-// caller, see namingTipAnchor above). "Got it" is the only dismissal --
-// it hides the tip until the next session (a fresh page load), never
-// persisted anywhere (HR1) -- the tip is a genuinely useful reminder in
-// an app used only sporadically, so the user decided it should always
-// come back rather than be permanently silenceable.
-function NamingTip({ standard, onGotIt }) {
-  const { t } = useTranslation();
-  return (
-    <div className={styles.namingTip}>
-      <p>{t('records.namingTip.text', { standard })}</p>
-      <div className={styles.namingTipActions}>
-        <button type="button" className={styles.linkButton} onClick={onGotIt}>
-          {t('records.namingTip.gotIt')}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// One "Did you mean `<x>`?" chip per resolved phrase candidate -- applying
-// it rewrites `text` (wrapping the first bare occurrence) via the passed
-// setter, which for the BRDP detail panel is a combined local-state-plus-
-// save (see the title/definition/proposal fields below).
-function RenameSuggestions({ text, vocabulary, onApply }) {
-  const { t } = useTranslation();
-  const suggestions = renameSuggestionsFor(text, vocabulary);
-  if (suggestions.length === 0) return null;
-  return (
-    <div className={styles.renameSuggestions}>
-      {suggestions.map((s) => (
-        <button
-          key={`${s.type}:${s.name}`}
-          type="button"
-          className={styles.linkButton}
-          onClick={() => onApply(applyRenameSuggestion(text, s))}
-        >
-          {t('records.didYouMean', { suggestion: s.type === 'element' ? `<${s.name}>` : `@${s.name}` })}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// Each dot always carries its own state name as title/aria-label (not
-// color alone) per the accessibility requirement -- the current step is
-// additionally marked via aria-current and a filled style.
-function RuleStatusDots({ state }) {
-  const { t } = useTranslation();
-  const currentIndex = RULE_STATES.indexOf(state);
-  return (
-    <span className={styles.dots}>
-      {RULE_STATES.map((s, i) => (
-        <span
-          key={s}
-          role="img"
-          className={`${styles.dot} ${i <= currentIndex ? styles.dotFilled : ''} ${
-            i === currentIndex ? styles.dotCurrent : ''
-          }`}
-          title={t(`records.rule.states.${s}`)}
-          aria-label={t(`records.rule.states.${s}`)}
-          aria-current={i === currentIndex ? 'step' : undefined}
-        />
-      ))}
-    </span>
-  );
-}
-
-// Richer variant for the detail panel only (the table keeps the compact
-// dots-only RuleStatusDots above): all 3 stage labels are always visible,
-// connected by a track line, reached stages filled, the current one
-// highlighted with the ATEXIS primary color + a halo. The dot itself
-// keeps its own title/aria-label/aria-current -- the visible label text
-// is an addition for sighted users, not a replacement for it.
-function RuleStatusStepper({ state }) {
-  const { t } = useTranslation();
-  const currentIndex = RULE_STATES.indexOf(state);
-  return (
-    <div className={styles.stepper}>
-      {RULE_STATES.map((s, i) => {
-        const reached = i <= currentIndex;
-        const isCurrent = i === currentIndex;
-        return (
-          <div key={s} className={styles.stepperStep}>
-            {i > 0 && (
-              <span className={`${styles.stepperLine} ${reached ? styles.stepperLineFilled : ''}`} />
-            )}
-            <span
-              role="img"
-              className={`${styles.stepperDot} ${reached ? styles.stepperDotFilled : ''} ${
-                isCurrent ? styles.stepperDotCurrent : ''
-              }`}
-              title={t(`records.rule.states.${s}`)}
-              aria-label={t(`records.rule.states.${s}`)}
-              aria-current={isCurrent ? 'step' : undefined}
-            />
-            <span
-              className={`${styles.stepperLabel} ${reached ? styles.stepperLabelReached : ''} ${
-                isCurrent ? styles.stepperLabelCurrent : ''
-              }`}
-            >
-              {t(`records.rule.states.${s}`)}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// Read-only summary for the table column -- the Edit/Verify/Revoke actions
-// and the manual rule editor live in the detail panel below, tied to
-// whichever row is selected (see the Rule Status section further down).
-function RuleStatusCell({ projectId, brdpId, format, refreshToken }) {
-  const { t } = useTranslation();
-  const [approval, setApproval] = useState(undefined); // undefined = loading, null = none
-
-  useEffect(() => {
-    if (!format) return;
-    let cancelled = false;
-    authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/approvals/${format}`).then((data) => {
-      if (!cancelled) setApproval(data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, brdpId, format, refreshToken]);
-
-  if (!format) {
-    return (
-      <span className={styles.muted} title={t('records.rule.unsupportedStandard')}>
-        —
-      </span>
-    );
-  }
-  if (approval === undefined) return <span className={styles.muted}>…</span>;
-  return <RuleStatusDots state={ruleStateOf(approval)} />;
-}
-
 export default function RecordsPage() {
   const { t } = useTranslation();
   const { projectId } = useParams();
@@ -871,29 +106,6 @@ export default function RecordsPage() {
   };
 
   const dismissNamingTipForSession = () => setNamingTipAnchor(null);
-
-  // Follow-up round ("sin falsos positivos"): the real schema vocabulary
-  // for this project's standard, loaded once and kept in state so the
-  // "Did you mean" suggestion (resolvePhraseCandidates, vocabularyCheck.js)
-  // can be computed SYNCHRONOUSLY on every render of every field -- unlike
-  // the big red notice (recomputeVocabResult below), which only needs to
-  // run on selection/save and can afford to be async. `loadSchemaVocabulary`
-  // caches by file internally, so this is cheap even across many BRDPs of
-  // the same project.
-  const [vocabulary, setVocabulary] = useState(null);
-  useEffect(() => {
-    let cancelled = false;
-    loadSchemaVocabulary(project.standard)
-      .then((v) => {
-        if (!cancelled) setVocabulary(v);
-      })
-      .catch(() => {
-        if (!cancelled) setVocabulary(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [project.standard]);
 
   // On-demand embeddings (docs request): Suggest Definition/Proposal/Rule
   // needs real pgvector precedent, so it stays gated behind whatever is
@@ -973,149 +185,6 @@ export default function RecordsPage() {
   const [createError, setCreateError] = useState(null);
 
   const [aiProvider, setAiProvider] = useState(null);
-  // `question` is only ever the live DRAFT in the textarea -- it auto-
-  // clears on a successful answer (docs request: feel like a mini
-  // conversation, not a submitted form) and is intentionally left alone on
-  // error, so the user never loses what they typed. The exchange actually
-  // shown/asked lives in the fields below, decoupled from the draft.
-  const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('');
-  const [askError, setAskError] = useState(null);
-  // The question belonging to the CURRENTLY DISPLAYED exchange (pending,
-  // answered, or errored) -- null when there's nothing to show yet. Only
-  // one exchange is ever shown, matching the one-turn chaining already in
-  // place: what's on screen and what's sent to the LLM as history must
-  // always be the same single turn.
-  const [lastAsked, setLastAsked] = useState(null);
-  // True only while THIS specific request is in flight -- kept separate
-  // from `busy` (the Ask panel's own send-button/Enter-key guard) so the
-  // "Thinking…" indicator and the disabled button track slightly
-  // different things. Suggest no longer shares `busy` at all (docs
-  // request, per-BRDP suggestion round below) -- it has its own per-entry
-  // `loading` flag in suggestionsByBrdpId.
-  const [askPending, setAskPending] = useState(false);
-  // The single previous Ask turn ({ question, answer }), or null -- one
-  // turn of chaining only (docs request), not unlimited history, so cost
-  // and context stay bounded. Set only on a SUCCESSFUL answer (an errored
-  // question never becomes something the LLM "remembers"). Cleared by
-  // Clear or by switching BRDP.
-  const [prevTurn, setPrevTurn] = useState(null);
-  // Docs request ("Servicio de fichas de esquema y su uso en Ask"): the
-  // real schema facts fetched for the CURRENTLY DISPLAYED exchange (in
-  // priority order, question's own names first) -- the exact same array
-  // both buildSchemaFactsBlock used to build the prompt AND the "Schema
-  // facts used" line below render, so what the user sees and what the LLM
-  // saw are always the same data (same precedent already established for
-  // Suggest Definition/Proposal's reference lists). Empty when the
-  // question/BRDP mentioned no real schema names, or the standard has no
-  // generated cards -- no line, no prompt block either way.
-  const [lastAskedSchemaFacts, setLastAskedSchemaFacts] = useState([]);
-  const [expandedSchemaFactNames, setExpandedSchemaFactNames] = useState(new Set());
-  // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
-  // the chosen entry ({ source: 'records'|'catalog', identifier, title,
-  // definition, and for 'records' also proposal/validation/ruleState/
-  // ruleXml }) or null. compareCatalogEntries is fetched lazily, once,
-  // the first time the search opens (same lazy-load pattern as Add BRDP's
-  // catalog picker) -- it's global reference data keyed only by the
-  // project's standard, so it stays valid across switching BRDPs and
-  // doesn't need to be refetched per selection.
-  const [compareOpen, setCompareOpen] = useState(false);
-  const [compareQuery, setCompareQuery] = useState('');
-  const [compareCatalogEntries, setCompareCatalogEntries] = useState([]);
-  const [compareBrdp, setCompareBrdp] = useState(null);
-  const [compareBusy, setCompareBusy] = useState(false);
-  const [busy, setBusy] = useState(false);
-  // Docs request (schema vocabulary check round), extended by the "aviso
-  // ligado al texto" round and by the "solo determinista" follow-up: the
-  // CURRENT check's result -- { brdpId, hash, available, notFound,
-  // wrongType } -- or null before anything has run yet. Guarded by
-  // `brdpId` at render time (never explicitly cleared on BRDP change) so a
-  // stale result from a PREVIOUS BRDP simply never displays once
-  // `selected` moves on. `hash` is the text (title+definition+proposal)
-  // this result reflects. Entirely deterministic now (no LLM call, no
-  // cache to invalidate) -- recomputeVocabResult is cheap enough to run on
-  // every selection change and every save, so the notice always reflects
-  // the BRDP's CURRENT text.
-  const [vocabResult, setVocabResult] = useState(null);
-  // Suggest: one pending/loaded suggestion PER BRDP, kept until Accept or
-  // Discard (docs request -- the suggestion belongs to the BRDP it was
-  // requested for and survives switching rows; the previous round's
-  // "clear on BRDP change" behavior is explicitly reversed here). Keyed by
-  // brdpId, at most one entry per BRDP -- while an entry exists (loading
-  // or resolved) for the SELECTED BRDP, all three Suggest buttons are
-  // disabled (see the button row below); regenerating the same kind
-  // requires Discard first. In memory only, never localStorage (HR1) --
-  // lost on reload/logout, and explicitly emptied on project change
-  // (below). Each entry is one of:
-  //   loading:    { brdpId, kind, loading: true, expandedReferenceIds }
-  //   text:       { brdpId, kind, text, sourceBrdpIds, format?, similar?,
-  //                 styleReferences?, excludedPendingOtherProjects,
-  //                 expandedReferenceIds }
-  //   notice:     { brdpId, kind, insufficientPrecedent: true, count,
-  //                 excludedPendingOtherProjects, expandedReferenceIds }
-  //   error:      { brdpId, kind, error, expandedReferenceIds }
-  // notice/error entries have no Accept (nothing to write) but DO get a
-  // Discard button -- without one, a BRDP that hit "insufficient
-  // precedent" or an LLM error would stay blocked from ever suggesting
-  // again, which is exactly the "stuck forever" failure this design must
-  // avoid (docs request's explicit edge case for the error entry, applied
-  // here to the notice entry for the same reason).
-  const [suggestionsByBrdpId, setSuggestionsByBrdpId] = useState(new Map());
-  // Per-brdpId request generation counter -- bumped ONLY when a NEW
-  // request starts for that brdpId (never by Accept/Discard). A late
-  // response only commits if BOTH still hold at the time it arrives: (a)
-  // the map still has an entry for that brdpId -- false if it was removed
-  // by Accept/Discard/BRDP-delete/project-change, in which case it must
-  // never resurrect a removed entry; (b) this ref's counter for that
-  // brdpId still equals the token captured when the request started --
-  // false if a NEWER request for the SAME brdpId has since begun (e.g.
-  // Discard unblocked it and the user asked again before the old response
-  // landed). Both checks are needed: (a) alone would let an old response
-  // overwrite a newer request's still-loading entry; (b) alone would
-  // resurrect an entry that was legitimately removed with no new request
-  // following it. A soft cancel, since authFetchJson/sendMessage don't
-  // expose real mid-flight cancellation here.
-  const suggestGenerationRef = useRef(new Map());
-  const selectedSuggestion = selectedId ? suggestionsByBrdpId.get(selectedId) || null : null;
-
-  const setSuggestionEntry = (brdpId, entry) =>
-    setSuggestionsByBrdpId((prev) => {
-      const next = new Map(prev);
-      next.set(brdpId, entry);
-      return next;
-    });
-
-  const removeSuggestionEntry = (brdpId) =>
-    setSuggestionsByBrdpId((prev) => {
-      if (!prev.has(brdpId)) return prev;
-      const next = new Map(prev);
-      next.delete(brdpId);
-      return next;
-    });
-
-  // Suggest Definition's reference rows (docs request, readable references
-  // round): which candidate ids currently have their Definition expanded
-  // below the row -- several can be open at once. Now lives INSIDE each
-  // BRDP's suggestion entry (not a page-wide Set) so it travels with that
-  // entry when switching rows and back, same as the rest of the entry.
-  const toggleReferenceExpanded = (brdpId, id) =>
-    setSuggestionsByBrdpId((prev) => {
-      const entry = prev.get(brdpId);
-      if (!entry) return prev;
-      const nextExpanded = new Set(entry.expandedReferenceIds);
-      if (nextExpanded.has(id)) nextExpanded.delete(id);
-      else nextExpanded.add(id);
-      const next = new Map(prev);
-      next.set(brdpId, { ...entry, expandedReferenceIds: nextExpanded });
-      return next;
-    });
-  // Suggest Definition catalog guard (docs request, Suggest Definition
-  // corpus round): identifiers of this standard's official catalog,
-  // fetched once per project (eagerly, unlike catalogEntries/
-  // compareCatalogEntries above which only load lazily when their own
-  // panel opens) -- needed as soon as a row is selected, to decide
-  // whether to disable the button at all, not just when a picker is open.
-  const [catalogIdentifierSet, setCatalogIdentifierSet] = useState(new Set());
 
   // Rule Status stepper state for the SELECTED BRDP -- the manual editor
   // and Edit/Verify/Revoke actions live here in the detail panel (v1's
@@ -1175,17 +244,6 @@ export default function RecordsPage() {
     setProposalStatusFilter('');
     setRuleStatusFilter('');
     authFetchJson('/api/config/ai-provider').then(setAiProvider).catch(() => setAiProvider(null));
-    authFetchJson(`/api/brdp-catalog?standard=${encodeURIComponent(project.standard)}`)
-      .then((entries) => setCatalogIdentifierSet(new Set(entries.map((e) => e.identifier))))
-      .catch(() => setCatalogIdentifierSet(new Set()));
-    // Per-BRDP suggestions are explicitly scoped to this project (docs
-    // request: "al cambiar de proyecto, vaciar el mapa") -- an in-flight
-    // request from the PREVIOUS project would otherwise land with a
-    // brdpId that no longer means anything here. Clearing the generation
-    // ref too means any such stale response fails its isCurrent() check
-    // even before the (now-cleared) map's own existence check would.
-    setSuggestionsByBrdpId(new Map());
-    suggestGenerationRef.current = new Map();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -1314,40 +372,63 @@ export default function RecordsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, ruleFormat, approvalsRefreshToken]);
 
-  // Bug fix (docs request): switching the selected BRDP must reset the Ask
-  // panel entirely -- previously `answer`/`question` just sat there, so a
-  // stale answer (built from and about the PREVIOUS BRDP's context) stayed
-  // visible, and the next question would have chained onto it as if it
-  // were still about the newly selected BRDP.
-  //
-  // Suggest Definition/Proposal/Rule is deliberately NOT reset here any
-  // more (docs request, "la sugerencia se queda en su BRDP hasta
-  // aceptarla o descartarla"): a previous round reset it on every
-  // selection change, which avoided writing to the wrong BRDP but also
-  // threw away real LLM work the moment the user glanced at another row.
-  // Suggest state now lives in suggestionsByBrdpId, keyed by brdpId, and
-  // is left completely untouched by switching the selection -- reselecting
-  // a BRDP with a pending or resolved entry simply shows it again, with
-  // the Suggest buttons still blocked, exactly as it was left.
-  useEffect(() => {
-    setQuestion('');
-    setAnswer('');
-    setAskError(null);
-    setLastAsked(null);
-    setPrevTurn(null);
-    setLastAskedSchemaFacts([]);
-    setExpandedSchemaFactNames(new Set());
-    setCompareOpen(false);
-    setCompareQuery('');
-    setCompareBrdp(null);
-    // "Aviso ligado al texto" round, point 1: the deterministic vocabulary
-    // check reflects whichever BRDP just became selected as soon as it's
-    // selected -- never requiring an Ask/Suggest click first (a BRDP whose
-    // Title already has, say, <cocacola> shows the notice, and its Suggest
-    // buttons are already blocked, the moment it's opened).
-    recomputeVocabResult(selected);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id]);
+  // Prompt-refactor round: the vocabulary check (its own "recompute on
+  // BRDP selection" effect included), the Ask panel (its own "reset on
+  // BRDP selection" effect included) and Suggest are each a dedicated hook
+  // now -- see src/hooks/{useVocabularyCheck,useAskAssistant,
+  // useSuggestions}.js. Same behavior as before the refactor, split by
+  // concern instead of one giant effect.
+  const { vocabulary, vocabResult, recomputeVocabResult } = useVocabularyCheck(project.standard, selected);
+
+  const handleUpdate = async (brdpId, patch) => {
+    await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    setHistoryRefreshToken((n) => n + 1);
+    refresh();
+    refreshStats();
+    // "Aviso ligado al texto" round, point 1: a save touching Title/
+    // Definition/Proposal invalidates whatever vocabulary notice is
+    // showing -- recompute the deterministic part immediately (no LLM
+    // call) against the text JUST saved, so the notice/Suggest-blocking
+    // update without needing another Ask/Suggest click. Covers BOTH "al
+    // guardar" (any direct field edit, which flows through this same
+    // function) and "al aceptar una sugerencia" (acceptSuggestion's
+    // Definition/Proposal branch is itself a call to handleUpdate).
+    // Merges onto the row's own pre-update fields (closure -- may be one
+    // render behind the `refresh()` just kicked off above) since `patch`
+    // alone may only carry ONE of the three fields; that's fine, only
+    // title/definition/proposal/id matter here, and `patch` always holds
+    // the authoritative new value for whichever of those three it touches.
+    if (brdpId === selectedId && ('title' in patch || 'definition' in patch || 'proposal' in patch)) {
+      const priorBrdp = brdps.find((b) => b.id === brdpId) || {};
+      recomputeVocabResult({ ...priorBrdp, ...patch, id: brdpId });
+    }
+  };
+
+  const ask = useAskAssistant({
+    projectId,
+    standard: project.standard,
+    ruleFormat,
+    selected,
+    ruleApproval,
+    aiProvider,
+    vocabulary,
+    recomputeVocabResult,
+  });
+  const suggestions = useSuggestions({
+    projectId,
+    standard: project.standard,
+    selected,
+    aiProvider,
+    handleUpdate,
+    recomputeVocabResult,
+    bumpApprovalsRefreshToken: () => setApprovalsRefreshToken((n) => n + 1),
+    t,
+  });
+  const selectedSuggestion = suggestions.selectedSuggestion;
 
   useEffect(() => {
     if (!selected) {
@@ -1502,34 +583,6 @@ export default function RecordsPage() {
     }
   };
 
-  const handleUpdate = async (brdpId, patch) => {
-    await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
-    setHistoryRefreshToken((n) => n + 1);
-    refresh();
-    refreshStats();
-    // "Aviso ligado al texto" round, point 1: a save touching Title/
-    // Definition/Proposal invalidates whatever vocabulary notice is
-    // showing -- recompute the deterministic part immediately (no LLM
-    // call) against the text JUST saved, so the notice/Suggest-blocking
-    // update without needing another Ask/Suggest click. Covers BOTH "al
-    // guardar" (any direct field edit, which flows through this same
-    // function) and "al aceptar una sugerencia" (acceptSuggestion's
-    // Definition/Proposal branch is itself a call to handleUpdate).
-    // Merges onto the row's own pre-update fields (closure -- may be one
-    // render behind the `refresh()` just kicked off above) since `patch`
-    // alone may only carry ONE of the three fields; that's fine, only
-    // title/definition/proposal/id matter here, and `patch` always holds
-    // the authoritative new value for whichever of those three it touches.
-    if (brdpId === selectedId && ('title' in patch || 'definition' in patch || 'proposal' in patch)) {
-      const priorBrdp = brdps.find((b) => b.id === brdpId) || {};
-      recomputeVocabResult({ ...priorBrdp, ...patch, id: brdpId });
-    }
-  };
-
   // Fields to consider for a History "Revert to this" action -- scoped to
   // the simple text fields with real per-field history (docs request):
   // rule_status has its own Revoke mechanism already and must not be mixed
@@ -1564,345 +617,11 @@ export default function RecordsPage() {
     // (the map no longer has this brdpId) discards the response when it
     // eventually lands, instead of resurrecting an entry for a BRDP that
     // no longer exists.
-    removeSuggestionEntry(brdpId);
+    suggestions.removeSuggestionEntry(brdpId);
     refresh();
     refreshStats();
   };
 
-  // "Aviso ligado al texto" round, point 1, simplified by the "solo
-  // determinista" follow-up: the vocabulary check (context extraction +
-  // comparison against the real schema, no LLM call anywhere) -- fast
-  // enough to run on every selection change and every save, so the notice
-  // always reflects the BRDP's CURRENT text. Also called from
-  // askGeneric/requestSuggestion BEFORE building their system prompt, so
-  // the unknown-names block (if any) can be included in that same call --
-  // there is now only ONE vocabulary-check function, used everywhere.
-  const recomputeVocabResult = async (brdp) => {
-    if (!brdp) {
-      setVocabResult(null);
-      return null;
-    }
-    const hash = hashVocabInputText(brdp.title, brdp.definition, brdp.proposal);
-    const vocabulary = await loadSchemaVocabulary(project.standard).catch(() => null);
-    const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
-    const checked = checkAgainstVocabulary(contextCandidates, vocabulary);
-    const result = {
-      brdpId: brdp.id,
-      hash,
-      available: checked.available,
-      notFound: checked.notFound,
-      wrongType: checked.wrongType,
-    };
-    setVocabResult(result);
-    return result;
-  };
-
-  // Docs request ("Servicio de fichas de esquema y su uso en Ask"): real
-  // structural facts for Ask, from GET /api/schema-cards. Names are
-  // selected in priority order (question first, then Title/Definition/
-  // Proposal -- selectSchemaFactNames), capped at 6, using the SAME
-  // `vocabulary` state already loaded for the vocab-warning banner (no
-  // extra fetch for that part). A fetch failure here (network hiccup, a
-  // transient 5xx) is swallowed to an empty result rather than surfaced as
-  // an Ask error -- this is a real enhancement on top of Ask, never a
-  // requirement for it to work; degrading to "no schema facts this time"
-  // is the right failure mode, not blocking the question itself.
-  const fetchAskSchemaFacts = async (question, brdp) => {
-    const names = selectSchemaFactNames([question, brdp.title, brdp.definition, brdp.proposal], vocabulary, 6).map(
-      (c) => c.name
-    );
-    if (names.length === 0) return [];
-    try {
-      const res = await authFetchJson(
-        `/api/schema-cards?standard=${encodeURIComponent(project.standard)}&names=${encodeURIComponent(names.join(','))}`
-      );
-      if (!res.available) return [];
-      return names.filter((name) => res.cards[name]).map((name) => ({ name, entry: res.cards[name] }));
-    } catch {
-      return [];
-    }
-  };
-
-  // The Ask panel only ever renders inside the `selected` branch of the
-  // detail panel (see the JSX below), so `selected` is always set here --
-  // no `selected ?` guard needed the way the old context-string ever had.
-  const askGeneric = async () => {
-    if (!question.trim() || !aiProvider || !selected) return;
-    const askedQuestion = question;
-    setBusy(true);
-    setAskPending(true);
-    // Shown immediately (docs request: "mostrar la pregunta enviada ya en
-    // la zona de intercambio con un indicador de carga") -- and this is
-    // also the point where the exchange on screen switches to the NEW
-    // question, replacing whatever was shown before, matching exactly what
-    // gets sent as history below (only ever one turn, never both).
-    setLastAsked(askedQuestion);
-    setAnswer('');
-    setAskError(null);
-    setLastAskedSchemaFacts([]);
-    setExpandedSchemaFactNames(new Set());
-    try {
-      const vocab = await recomputeVocabResult(selected);
-      const schemaFacts = await fetchAskSchemaFacts(askedQuestion, selected);
-      setLastAskedSchemaFacts(schemaFacts);
-      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard, vocab, schemaFacts);
-      // One turn of chaining (docs request): the previous Q/A, if any,
-      // goes in first as real conversation history so a follow-up like
-      // "and why?" resolves correctly, then the new question.
-      const messages = [];
-      if (prevTurn) {
-        messages.push({ role: 'user', content: prevTurn.question });
-        messages.push({ role: 'assistant', content: prevTurn.answer });
-      }
-      messages.push({ role: 'user', content: askedQuestion });
-
-      const res = await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt);
-      setAnswer(res.content);
-      setPrevTurn({ question: askedQuestion, answer: res.content });
-      // Auto-clear on success only (docs request) -- an errored question
-      // stays in the textarea below so the user never loses what they typed.
-      setQuestion('');
-    } catch (err) {
-      setAskError(err.message);
-    } finally {
-      setBusy(false);
-      setAskPending(false);
-    }
-  };
-
-  const clearAsk = () => {
-    setAnswer('');
-    setAskError(null);
-    setLastAsked(null);
-    setPrevTurn(null);
-    setLastAskedSchemaFacts([]);
-    setExpandedSchemaFactNames(new Set());
-  };
-
-  const openCompareSearch = () => {
-    setCompareOpen(true);
-    if (compareCatalogEntries.length === 0) {
-      // Global reference data, not project-scoped (same source/pattern as
-      // openCreatePanel's catalog fetch above) -- fetched once, lazily, the
-      // first time the search actually opens.
-      authFetchJson(`/api/brdp-catalog?standard=${encodeURIComponent(project.standard)}`)
-        .then(setCompareCatalogEntries)
-        .catch(() => setCompareCatalogEntries([]));
-    }
-  };
-
-  const closeCompareSearch = () => {
-    setCompareOpen(false);
-    setCompareQuery('');
-  };
-
-  // Rule Status/Rule for a Records candidate live in rule_approvals, not on
-  // the BRDP row itself (same architecture as the stepper above) -- the
-  // bulk-fetched ruleApprovalsById only carries `status` (enough to sort
-  // by), not `rule_xml`, so a dedicated fetch is needed here, same endpoint
-  // and shape the main ruleApproval effect above already uses.
-  const chooseCompareBrdp = async (candidate) => {
-    if (candidate.source === 'catalog') {
-      const { entry } = candidate;
-      setCompareBrdp({ source: 'catalog', identifier: entry.identifier, title: entry.title, definition: entry.definition });
-      closeCompareSearch();
-      return;
-    }
-    const { entry } = candidate;
-    setCompareBusy(true);
-    try {
-      const approval = ruleFormat
-        ? await authFetchJson(`/api/projects/${projectId}/brdps/${entry.id}/approvals/${ruleFormat}`)
-        : null;
-      setCompareBrdp({
-        source: 'records',
-        identifier: entry.identifier,
-        title: entry.title,
-        definition: entry.definition,
-        proposal: entry.proposal,
-        validation: entry.validation,
-        ruleState: ruleStateOf(approval),
-        ruleXml: approval?.rule_xml ?? null,
-      });
-    } finally {
-      setCompareBusy(false);
-    }
-    closeCompareSearch();
-  };
-
-  const clearCompareBrdp = () => setCompareBrdp(null);
-
-  // docs/v2 §3: real few-shot precedent from the project's own validated
-  // BRDPs, via GET .../similar (pure data, no LLM call in the backend --
-  // §4's "FastAPI never builds prompts" rule). §3 point 3 (HR7): when
-  // /similar itself reports insufficient precedent, show that verbatim
-  // and stop -- never fall back to a no-few-shot LLM call, which is
-  // exactly the Phase-4 behavior this replaces. The notice text itself is
-  // built here from structured data (candidate count), not relayed
-  // verbatim from the backend's English `message` field, so it can be
-  // translated like everything else on this page.
-  const requestSuggestion = async (kind) => {
-    if (!selected || !aiProvider) return;
-    const brdpId = selected.id;
-    // Defense in depth (docs request): the button is already disabled
-    // whenever this BRDP has any entry, loading or resolved -- "para
-    // regenerar, primero Discard". Each BRDP's block is independent.
-    if (suggestionsByBrdpId.has(brdpId)) return;
-
-    // Bumped ONLY here, never by Accept/Discard -- see the declaration of
-    // suggestGenerationRef above for why both this token check AND the
-    // map-existence check in commit() below are needed.
-    const token = (suggestGenerationRef.current.get(brdpId) || 0) + 1;
-    suggestGenerationRef.current.set(brdpId, token);
-    const isCurrent = () => suggestGenerationRef.current.get(brdpId) === token;
-    const commit = (entry) => {
-      if (!isCurrent()) return; // a newer request for this same BRDP has since started
-      setSuggestionsByBrdpId((prev) => {
-        if (!prev.has(brdpId)) return prev; // entry removed since (deleted / project changed) -- never resurrect
-        const next = new Map(prev);
-        next.set(brdpId, entry);
-        return next;
-      });
-    };
-
-    setSuggestionEntry(brdpId, { brdpId, kind, loading: true, expandedReferenceIds: new Set() });
-
-    try {
-      const similar = await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/similar?kind=${kind}`);
-      // HR7 -- never silently degrade: a Validated BRDP in another project
-      // of this same standard that hasn't been through ITS OWN project's
-      // embedding job yet is invisible to this search; surfaced regardless
-      // of whether precedent ended up sufficient or not.
-      const excludedPendingOtherProjects = similar.excluded_pending_other_projects || 0;
-
-      // kind='definition' (docs request, Suggest Definition corpus round):
-      // its own dedicated prompt + corpus shape (Similar/Style references,
-      // no MIN_CANDIDATES gate) -- diverges completely from rule below.
-      if (kind === 'definition') {
-        const referenceSimilar = similar.candidates;
-        const referenceStyle = similar.style_references || [];
-        const vocab = await recomputeVocabResult(selected);
-        const systemPrompt = buildSuggestDefinitionPrompt(
-          selected,
-          project.standard,
-          referenceSimilar,
-          referenceStyle,
-          vocab
-        );
-        const res = await sendMessage(
-          [{ role: 'user', content: 'Write the Definition for this BRDP.' }],
-          null,
-          aiProvider.model,
-          aiProvider.provider,
-          systemPrompt,
-          { temperature: 0.3 }
-        );
-        commit({
-          brdpId,
-          kind,
-          loading: false,
-          text: res.content,
-          sourceBrdpIds: referenceSimilar.map((c) => c.id),
-          similar: referenceSimilar,
-          styleReferences: referenceStyle,
-          excludedPendingOtherProjects,
-          expandedReferenceIds: new Set(),
-        });
-        return;
-      }
-
-      // kind='proposal' (docs request, Suggest Proposal round): its own
-      // three-group corpus (Same BRDP in other projects / Similar
-      // decisions / This project), no MIN_CANDIDATES gate, own prompt --
-      // same architecture as kind='definition' above, diverges completely
-      // from kind='rule' below, which is untouched by this round.
-      if (kind === 'proposal') {
-        const referenceSameBrdp = similar.same_brdp || [];
-        const referenceSimilar = similar.candidates;
-        const referenceThisProject = similar.this_project || [];
-        const vocab = await recomputeVocabResult(selected);
-        const systemPrompt = buildSuggestProposalPrompt(
-          selected,
-          project.standard,
-          referenceSameBrdp,
-          referenceSimilar,
-          referenceThisProject,
-          vocab
-        );
-        const res = await sendMessage(
-          [{ role: 'user', content: 'Write the Proposal for this BRDP.' }],
-          null,
-          aiProvider.model,
-          aiProvider.provider,
-          systemPrompt,
-          { temperature: 0.3 }
-        );
-        commit({
-          brdpId,
-          kind,
-          loading: false,
-          text: res.content,
-          sourceBrdpIds: [...referenceSameBrdp, ...referenceSimilar, ...referenceThisProject].map((c) => c.id),
-          sameBrdp: referenceSameBrdp,
-          similar: referenceSimilar,
-          thisProject: referenceThisProject,
-          excludedPendingOtherProjects,
-          expandedReferenceIds: new Set(),
-        });
-        return;
-      }
-
-      if (!similar.sufficient_precedent) {
-        commit({
-          brdpId,
-          kind,
-          loading: false,
-          insufficientPrecedent: true,
-          count: similar.candidates.length,
-          excludedPendingOtherProjects,
-          expandedReferenceIds: new Set(),
-        });
-        return;
-      }
-
-      const label = t(`records.assistant.suggest${kind.charAt(0).toUpperCase()}${kind.slice(1)}`);
-      const examples = similar.candidates
-        .map((c, i) => `Example ${i + 1} (BRDP ${c.identifier}, similarity ${c.score.toFixed(2)}):\n${c.text}`)
-        .join('\n\n');
-      const systemPrompt =
-        `You are an S1000D/DITA BRDP expert assistant. Use the following real, validated precedent ` +
-        `examples from this project's own dataset as few-shot guidance. Return only the new ${label} ` +
-        `text, nothing else.\n\n${examples}`;
-
-      const res = await sendMessage(
-        [
-          {
-            role: 'user',
-            content: `Suggest a ${label} for BRDP "${selected.identifier}" (current definition: "${selected.definition}", current proposal: "${selected.proposal}").`,
-          },
-        ],
-        null,
-        aiProvider.model,
-        aiProvider.provider,
-        systemPrompt
-      );
-      commit({
-        brdpId,
-        kind,
-        loading: false,
-        text: res.content,
-        sourceBrdpIds: similar.candidates.map((c) => c.id),
-        format: similar.format,
-        excludedPendingOtherProjects,
-        expandedReferenceIds: new Set(),
-      });
-    } catch (err) {
-      // Docs request's explicit edge case: an error entry still gets a
-      // Discard (rendered below) so the BRDP's Suggest buttons don't stay
-      // blocked forever -- the user can discard and retry.
-      commit({ brdpId, kind, loading: false, error: err.message, expandedReferenceIds: new Set() });
-    }
-  };
 
   // Editor-only (backend enforces this too -- see embedding_jobs.py's
   // require_project_role('editor')): launches the background job. 409 (a
@@ -1911,51 +630,6 @@ export default function RecordsPage() {
   // .error; the mutation always invalidates the job query on settle
   // either way, so the UI reflects whatever IS actually running.
   const handleComputeEmbeddings = () => computeEmbeddings.mutate();
-
-  const logSuggestionFeedback = (entry, outcome) =>
-    authFetchJson('/api/suggestion-feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        brdp_id: entry.brdpId,
-        kind: entry.kind,
-        suggested_text: entry.text,
-        source_brdp_ids: entry.sourceBrdpIds || [],
-        outcome,
-      }),
-    });
-
-  const acceptSuggestion = async () => {
-    if (!selected) return;
-    const entry = suggestionsByBrdpId.get(selected.id);
-    if (!entry?.text) return;
-    // Defense in depth (docs request): the entry is looked up BY the
-    // selected BRDP's own id above, but double-check the field matches
-    // too before writing anything, same principle as the previous round's
-    // guard (kept even though the lookup itself already makes a mismatch
-    // essentially unreachable).
-    if (entry.brdpId !== selected.id) return;
-    if (entry.kind === 'rule') {
-      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${entry.format}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rule_xml: entry.text, source: 'llm', status: 'pending_review' }),
-      });
-      setApprovalsRefreshToken((n) => n + 1);
-    } else {
-      await handleUpdate(selected.id, { [entry.kind]: entry.text });
-    }
-    await logSuggestionFeedback(entry, 'accepted');
-    removeSuggestionEntry(selected.id);
-  };
-
-  const discardSuggestion = async () => {
-    if (!selected) return;
-    const entry = suggestionsByBrdpId.get(selected.id);
-    if (!entry) return;
-    if (entry.text) await logSuggestionFeedback(entry, 'discarded');
-    removeSuggestionEntry(selected.id);
-  };
 
   return (
     <div className={styles.page}>
@@ -2068,11 +742,11 @@ export default function RecordsPage() {
                     >
                       <td className={styles.mono}>
                         {b.identifier}
-                        {suggestionsByBrdpId.has(b.id) && (
+                        {suggestions.suggestionsByBrdpId.has(b.id) && (
                           <span
                             className={styles.pendingSuggestionIcon}
                             title={t('records.assistant.pendingSuggestionIndicator', {
-                              kind: t(`records.assistant.kindLabels.${suggestionsByBrdpId.get(b.id).kind}`),
+                              kind: t(`records.assistant.kindLabels.${suggestions.suggestionsByBrdpId.get(b.id).kind}`),
                             })}
                           >
                             ✨
@@ -2529,48 +1203,48 @@ export default function RecordsPage() {
 
                 <label className={styles.fieldLabel}>{t('records.assistant.askLabel')}</label>
 
-                {/* The last exchange -- question + answer/error/loading --
+                {/* The last exchange -- ask.question + ask.answer/error/loading --
                     always ABOVE the textarea (docs request: feel like a
                     mini conversation, not a submitted form). Only ever ONE
                     exchange shown, matching the one-turn chaining already
                     sent to the LLM: what's on screen and what it remembers
                     are always the same turn. */}
-                {lastAsked && (
+                {ask.lastAsked && (
                   <div className={styles.exchange}>
                     <p className={styles.exchangeQuestion}>
-                      <span className={styles.exchangeYou}>{t('records.assistant.you')}:</span> {lastAsked}
+                      <span className={styles.exchangeYou}>{t('records.assistant.you')}:</span> {ask.lastAsked}
                     </p>
-                    {askPending ? (
+                    {ask.askPending ? (
                       <div className={styles.answerBox}>
                         <span className={styles.muted}>{t('records.assistant.thinking')}</span>
                       </div>
-                    ) : askError ? (
+                    ) : ask.askError ? (
                       <div className={styles.answerBox} role="alert">
-                        {t('records.assistant.errorPrefix')}: {askError}
+                        {t('records.assistant.errorPrefix')}: {ask.askError}
                       </div>
                     ) : (
                       <div className={styles.answerBox}>
-                        <ReactMarkdown>{answer}</ReactMarkdown>
+                        <ReactMarkdown>{ask.answer}</ReactMarkdown>
                       </div>
                     )}
                     {/* Docs request ("Servicio de fichas de esquema y su uso
-                        en Ask"): discrete, clickable line under the answer
+                        en Ask"): discrete, clickable line under the ask.answer
                         -- absent entirely when no real schema names were
                         mentioned or the standard has no generated cards
                         (no line, matching the prompt having no SCHEMA FACTS
                         block either). Uses the EXACT same array that built
                         the prompt, never a second, possibly-diverging one. */}
-                    {!askPending && !askError && lastAskedSchemaFacts.length > 0 && (
+                    {!ask.askPending && !ask.askError && ask.lastAskedSchemaFacts.length > 0 && (
                       <div className={styles.answerBox}>
                         <span className={styles.muted}>{t('records.assistant.schemaFactsUsed')}</span>{' '}
-                        {lastAskedSchemaFacts.map(({ name }, idx) => (
+                        {ask.lastAskedSchemaFacts.map(({ name }, idx) => (
                           <span key={name}>
                             {idx > 0 && ', '}
                             <button
                               type="button"
                               className={styles.linkButton}
                               onClick={() =>
-                                setExpandedSchemaFactNames((prev) => {
+                                ask.setExpandedSchemaFactNames((prev) => {
                                   const next = new Set(prev);
                                   if (next.has(name)) next.delete(name);
                                   else next.add(name);
@@ -2582,15 +1256,15 @@ export default function RecordsPage() {
                             </button>
                           </span>
                         ))}
-                        {lastAskedSchemaFacts
-                          .filter(({ name }) => expandedSchemaFactNames.has(name))
+                        {ask.lastAskedSchemaFacts
+                          .filter(({ name }) => ask.expandedSchemaFactNames.has(name))
                           .map(({ name, entry }) => (
                             <SchemaFactCard key={name} name={name} entry={entry} />
                           ))}
                       </div>
                     )}
-                    {!askPending && (
-                      <button type="button" className={styles.linkButton} onClick={clearAsk}>
+                    {!ask.askPending && (
+                      <button type="button" className={styles.linkButton} onClick={ask.clearAsk}>
                         {t('records.assistant.clear')}
                       </button>
                     )}
@@ -2600,20 +1274,20 @@ export default function RecordsPage() {
                 <textarea
                   className={styles.textarea}
                   rows={2}
-                  value={question}
+                  value={ask.question}
                   onFocus={() => triggerNamingTip('ask')}
                   onChange={(e) => {
                     triggerNamingTip('ask');
-                    setQuestion(e.target.value);
+                    ask.setQuestion(e.target.value);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && !busy) {
+                    if (e.key === 'Enter' && !e.shiftKey && !ask.busy) {
                       e.preventDefault();
-                      askGeneric();
+                      ask.askGeneric();
                     }
                   }}
                   placeholder={t(
-                    prevTurn ? 'records.assistant.askFollowupPlaceholder' : 'records.assistant.askPlaceholder'
+                    ask.prevTurn ? 'records.assistant.askFollowupPlaceholder' : 'records.assistant.askPlaceholder'
                   )}
                 />
                 {namingTipAnchor === 'ask' && (
@@ -2623,13 +1297,13 @@ export default function RecordsPage() {
                   />
                 )}
 
-                {compareBrdp ? (
+                {ask.compareBrdp ? (
                   <div className={styles.compareChip}>
-                    <span>{t('records.assistant.comparingWith', { identifier: compareBrdp.identifier })}</span>
+                    <span>{t('records.assistant.comparingWith', { identifier: ask.compareBrdp.identifier })}</span>
                     <button
                       type="button"
                       className={styles.compareChipRemove}
-                      onClick={clearCompareBrdp}
+                      onClick={ask.clearCompareBrdp}
                       aria-label={t('records.assistant.compareRemove')}
                     >
                       ✕
@@ -2639,23 +1313,23 @@ export default function RecordsPage() {
                   <button
                     type="button"
                     className={styles.linkButton}
-                    onClick={compareOpen ? closeCompareSearch : openCompareSearch}
+                    onClick={ask.compareOpen ? ask.closeCompareSearch : ask.openCompareSearch}
                   >
                     {t('records.assistant.compareLink')}
                   </button>
                 )}
 
-                {compareOpen &&
-                  !compareBrdp &&
+                {ask.compareOpen &&
+                  !ask.compareBrdp &&
                   (() => {
-                    const q = compareQuery.trim().toLowerCase();
+                    const q = ask.compareQuery.trim().toLowerCase();
                     const recordsMatches = brdps
                       .filter((b) => b.id !== selected.id)
                       .filter(
                         (b) => !q || b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q)
                       )
                       .map((entry) => ({ source: 'records', entry }));
-                    const catalogMatches = compareCatalogEntries
+                    const catalogMatches = ask.compareCatalogEntries
                       .filter((c) => !q || c.identifier.toLowerCase().includes(q) || c.title.toLowerCase().includes(q))
                       .map((entry) => ({ source: 'catalog', entry }));
                     const allMatches = [...recordsMatches, ...catalogMatches];
@@ -2663,8 +1337,8 @@ export default function RecordsPage() {
                       <div className={styles.catalogPicker}>
                         <input
                           className={styles.input}
-                          value={compareQuery}
-                          onChange={(e) => setCompareQuery(e.target.value)}
+                          value={ask.compareQuery}
+                          onChange={(e) => ask.setCompareQuery(e.target.value)}
                           placeholder={t('records.assistant.compareSearchPlaceholder')}
                           autoFocus
                         />
@@ -2683,7 +1357,7 @@ export default function RecordsPage() {
                                       : 'records.assistant.compareSourceCatalog'
                                   )}
                                 </span>
-                                <button type="button" disabled={compareBusy} onClick={() => chooseCompareBrdp(candidate)}>
+                                <button type="button" disabled={ask.compareBusy} onClick={() => ask.chooseCompareBrdp(candidate)}>
                                   {t('records.newBrdp.catalogChoose')}
                                 </button>
                               </div>
@@ -2701,8 +1375,8 @@ export default function RecordsPage() {
                   })()}
 
                 <div>
-                  <button onClick={askGeneric} disabled={busy || !question.trim() || !aiProvider}>
-                    {busy ? '…' : t('records.assistant.ask')}
+                  <button onClick={ask.askGeneric} disabled={ask.busy || !ask.question.trim() || !aiProvider}>
+                    {ask.busy ? '…' : t('records.assistant.ask')}
                   </button>
                 </div>
 
@@ -2768,10 +1442,10 @@ export default function RecordsPage() {
                     // docs request (Suggest Definition corpus round), point
                     // 1: an official catalog BRDP already has a standard-
                     // issued Definition -- checked against the real
-                    // catalog table (catalogIdentifierSet), never by
+                    // catalog table (suggestions.catalogIdentifierSet), never by
                     // identifier prefix. Only Suggest Definition is gated
                     // by this; Suggest Proposal/Rule are unaffected.
-                    const catalogDisabled = kind === 'definition' && catalogIdentifierSet.has(selected.identifier);
+                    const catalogDisabled = kind === 'definition' && suggestions.catalogIdentifierSet.has(selected.identifier);
                     // docs request (Suggest Proposal corpus round): Proposal
                     // is built ON TOP OF the Definition (the prompt cites it
                     // as fixed context) -- an empty Definition means there is
@@ -2789,7 +1463,7 @@ export default function RecordsPage() {
                     return (
                       <button
                         key={kind}
-                        onClick={() => requestSuggestion(kind)}
+                        onClick={() => suggestions.requestSuggestion(kind)}
                         disabled={
                           pendingBlocked ||
                           !aiProvider ||
@@ -2832,7 +1506,7 @@ export default function RecordsPage() {
                       ⚠ {t('records.assistant.insufficientPrecedent', { count: selectedSuggestion.count })}
                     </span>
                     <div className={styles.suggestionActions}>
-                      <button onClick={discardSuggestion}>{t('records.assistant.discard')}</button>
+                      <button onClick={suggestions.discardSuggestion}>{t('records.assistant.discard')}</button>
                     </div>
                   </div>
                 )}
@@ -2843,7 +1517,7 @@ export default function RecordsPage() {
                       ⚠ {t('records.assistant.errorPrefix')}: {selectedSuggestion.error}
                     </span>
                     <div className={styles.suggestionActions}>
-                      <button onClick={discardSuggestion}>{t('records.assistant.discard')}</button>
+                      <button onClick={suggestions.discardSuggestion}>{t('records.assistant.discard')}</button>
                     </div>
                   </div>
                 )}
@@ -2855,13 +1529,13 @@ export default function RecordsPage() {
                     </div>
                     <div className={styles.suggestionActions}>
                       <button
-                        onClick={acceptSuggestion}
+                        onClick={suggestions.acceptSuggestion}
                         disabled={!canEdit}
                         title={!canEdit ? t('records.assistant.acceptDisabledTitle') : undefined}
                       >
                         {t('records.assistant.accept')}
                       </button>
-                      <button onClick={discardSuggestion}>{t('records.assistant.discard')}</button>
+                      <button onClick={suggestions.discardSuggestion}>{t('records.assistant.discard')}</button>
                     </div>
 
                     {/* docs request (Suggest Definition corpus round): the
@@ -2888,7 +1562,7 @@ export default function RecordsPage() {
                                       candidate={c}
                                       showScore
                                       expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
-                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
+                                      onToggle={() => suggestions.toggleReferenceExpanded(selected.id, c.id)}
                                     />
                                   ))}
                                 </ul>
@@ -2906,7 +1580,7 @@ export default function RecordsPage() {
                                       candidate={c}
                                       showScore={false}
                                       expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
-                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
+                                      onToggle={() => suggestions.toggleReferenceExpanded(selected.id, c.id)}
                                     />
                                   ))}
                                 </ul>
@@ -2954,7 +1628,7 @@ export default function RecordsPage() {
                                       showProposal
                                       danger
                                       expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
-                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
+                                      onToggle={() => suggestions.toggleReferenceExpanded(selected.id, c.id)}
                                     />
                                   ))}
                                 </ul>
@@ -2973,7 +1647,7 @@ export default function RecordsPage() {
                                       showScore
                                       showProposal
                                       expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
-                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
+                                      onToggle={() => suggestions.toggleReferenceExpanded(selected.id, c.id)}
                                     />
                                   ))}
                                 </ul>
@@ -2992,7 +1666,7 @@ export default function RecordsPage() {
                                       showScore
                                       showProposal
                                       expanded={selectedSuggestion.expandedReferenceIds.has(c.id)}
-                                      onToggle={() => toggleReferenceExpanded(selected.id, c.id)}
+                                      onToggle={() => suggestions.toggleReferenceExpanded(selected.id, c.id)}
                                     />
                                   ))}
                                 </ul>

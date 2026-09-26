@@ -82,8 +82,13 @@ async function main() {
     // Header summary comes from a separate GET .../stats fetch, independent
     // of the table's own load -- wait for the real figure to actually land
     // instead of a fixed short timeout (avoids a flaky race in this test).
+    // Pre-refactor-round staleness bug found while re-running the full
+    // verify suite (unrelated to the prompt/hooks refactor): this script
+    // predates the "etiquetas completas" round that replaced the compact
+    // "V 1400" summary format with full labels ("Validated: 1400") --
+    // updated to match the real current format.
     await page.waitForFunction(
-      () => /V\s*1400/.test(document.body.innerText),
+      () => /Validated:\s*1400/.test(document.body.innerText),
       { timeout: 10000 }
     );
     const headerText = await page.locator("h1", { hasText: /Records|Registros/i }).locator("xpath=../..").innerText();
