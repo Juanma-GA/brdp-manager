@@ -40,3 +40,8 @@ sources/
 AUDIT_STANDARD.md
 STANDARD_POC.md
 public/fav_original/
+
+# scripts/run-prompt-eval.mjs output -- a run artifact (real LLM responses
+# and per-run pass/fail tables), never something to commit. cases.json
+# itself (the fixed test cases) IS committed.
+scripts/prompt-eval/report/

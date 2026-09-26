@@ -1,0 +1,278 @@
+{
+  "_comment": "Fixed prompt-quality eval cases for scripts/run-prompt-eval.mjs. Each case creates a real BRDP (plus any seedReferences) in a temporary, per-standard project, runs the real Ask/Suggest Definition/Suggest Proposal flow against the REAL configured LLM provider, and checks the response with the automatic checks listed. Checks the harness can't verify automatically are type 'manual' -- always reported as MANUAL REVIEW, never pass/fail. See docs/how CLAUDE.md documents running this against the real provider (grep 'run-prompt-eval' in CLAUDE.md).",
+  "cases": [
+    {
+      "id": "ask-off-topic-weather",
+      "description": "Off-topic question must not be answered as if it were a real question -- the assistant should decline/redirect, never actually answer with weather info.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-01",
+        "title": "Fastener torque verification requirement",
+        "definition": "Decide whether torque verification must be recorded for structural fasteners.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What's the weather like in Madrid today?",
+      "checks": [
+        {
+          "type": "not_contains_any",
+          "patterns": ["\\d+\\s*°", "\\bforecast\\b", "\\bsunny\\b", "\\brainy\\b", "\\btemperature is\\b", "\\bdegrees\\b"],
+          "flags": "i",
+          "note": "must not actually answer with real weather information"
+        },
+        {
+          "type": "manual",
+          "note": "Confirm the response politely explains it can only help with this BRDP / S1000D business rules, not real-world weather -- not just silence on the topic."
+        }
+      ]
+    },
+    {
+      "id": "ask-no-chapter-numbers",
+      "description": "Asking where something is defined in the spec must never produce a chapter/section number unless it's literally in the BRDP content.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-02",
+        "title": "Structural repair data module applicability",
+        "definition": "Decide which structural repair data modules require an applicability cross-reference.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What chapter of the S1000D specification defines this rule?",
+      "checks": [
+        {
+          "type": "not_contains_any",
+          "patterns": ["chapter\\s+\\d", "section\\s+\\d+(\\.\\d+)*", "cap[ií]tulo\\s+\\d", "§\\s*\\d"],
+          "flags": "i",
+          "note": "must never state or suggest a chapter/section/paragraph number, not even as a possibility"
+        }
+      ]
+    },
+    {
+      "id": "ask-table-attributes",
+      "description": "A real schema-facts question about <table> must use the real @frame attribute and not tack on a scope-reminder disclaimer at the end.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-03",
+        "title": "Table usage in illustrated parts data",
+        "definition": "Decide the styling rules for tables used within illustrated parts data.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What attributes does the <table> element admit?",
+      "checks": [
+        { "type": "contains", "pattern": "@frame", "flags": "i", "note": "must mention the real @frame attribute from the schema facts" },
+        {
+          "type": "not_ends_with_any",
+          "patterns": ["\\bonly (answer|discuss|address)\\b", "\\bas a reminder\\b", "\\bI (can only|am only able to)\\b", "\\bplease note\\b.{0,60}\\bthis BRDP\\b", "\\bscope of this\\b"],
+          "flags": "i",
+          "tailChars": 300,
+          "note": "must not end the answer with a scope reminder/disclaimer"
+        }
+      ]
+    },
+    {
+      "id": "ask-para-placement",
+      "description": "A real schema-facts question about <para> must be answered directly, never refused, and kept within the 3-paragraph limit.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-04",
+        "title": "Paragraph nesting in procedural steps",
+        "definition": "Decide how deeply paragraphs may nest within procedural steps.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "Where can the <para> element go?",
+      "checks": [
+        {
+          "type": "not_contains_any",
+          "patterns": ["\\bI cannot answer\\b", "\\boutside the scope\\b", "\\bnot related to this BRDP\\b", "\\bI (can|am able to) (only|not) help\\b"],
+          "flags": "i",
+          "note": "must never refuse a real schema-facts question"
+        },
+        { "type": "max_paragraphs", "max": 3 }
+      ]
+    },
+    {
+      "id": "ask-english-question",
+      "description": "A question asked in English must be answered in English, even though the rest of the app UI/prompts default assumptions could pull toward another language.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-05",
+        "title": "Corrosion inspection interval for exterior skin panels",
+        "definition": "Decide the maximum interval, in flight hours, between corrosion inspections of exterior skin panels.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What is the purpose of this decision point?",
+      "checks": [
+        { "type": "language", "expect": "en" }
+      ]
+    },
+    {
+      "id": "ask-unknown-name-pokemon",
+      "description": "A BRDP mentioning a name that does not exist in the real schema must have Ask say so explicitly.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-06",
+        "title": "Usage of the <pokemon> element in structural data modules",
+        "definition": "Decide whether the <pokemon> element may be used inside structural data modules.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "Is <pokemon> a valid element here?",
+      "checks": [
+        { "type": "contains_any", "patterns": ["does(n't| not) exist", "is not a (valid )?(element|attribute)", "no existe"], "flags": "i" }
+      ]
+    },
+    {
+      "id": "ask-no-rule-yet",
+      "description": "A BRDP whose Rule Status is To Do (no rule_approvals row at all) must have Ask say there is no rule yet, never hallucinate one.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-07",
+        "title": "Fuel line clamp spacing",
+        "definition": "Decide the maximum spacing allowed between fuel line clamps.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What does the rule do?",
+      "checks": [
+        {
+          "type": "contains_any",
+          "patterns": ["no rule", "not yet (been )?defined", "has(n't| not) been (defined|written)", "no existe.{0,20}regla", "sin definir"],
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "suggest-definition-spanish-title-english-refs",
+      "description": "A Spanish-titled BRDP with only English precedent in the corpus must still get a Spanish Definition, with no reference list or markdown and no chapter numbers.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-definition",
+      "brdp": {
+        "identifier": "BRDP-EVAL-SD-01",
+        "title": "Procedimiento de calibración del par de apriete en sujetadores estructurales",
+        "definition": "",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "seedReferences": [
+        {
+          "identifier": "BRDP-EVAL-SD-REF-01",
+          "title": "Torque calibration procedure for structural fasteners",
+          "definition": "Defines the calibration interval and tolerance required for torque wrenches used on structural fasteners.",
+          "proposal": "Torque wrenches shall be calibrated every 90 days to within ±2% of nominal.",
+          "validation": "Validated"
+        },
+        {
+          "identifier": "BRDP-EVAL-SD-REF-02",
+          "title": "Calibration record retention for torque tools",
+          "definition": "Defines how long torque wrench calibration records must be retained.",
+          "proposal": "Calibration records shall be retained for 5 years.",
+          "validation": "Validated"
+        }
+      ],
+      "checks": [
+        { "type": "language", "expect": "es" },
+        { "type": "no_markdown" },
+        {
+          "type": "not_contains_any",
+          "patterns": ["references?:", "similar brdps", "style references?", "BRDP-[A-Za-z0-9-]+"],
+          "flags": "i",
+          "note": "must not include a reference list or cite a BRDP id"
+        },
+        {
+          "type": "not_contains_any",
+          "patterns": ["chapter\\s+\\d", "section\\s+\\d+(\\.\\d+)*", "cap[ií]tulo\\s+\\d"],
+          "flags": "i",
+          "note": "no chapter numbers"
+        }
+      ]
+    },
+    {
+      "id": "suggest-proposal-cage-code",
+      "description": "A CAGE-code decision must come back as a fill-in template with a placeholder, never an invented real-looking code.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-proposal",
+      "brdp": {
+        "identifier": "BRDP-EVAL-SP-01",
+        "title": "CAGE code prefix convention for supplier part numbers",
+        "definition": "Decide which CAGE code prefix convention shall be used when referencing supplier part numbers in illustrated parts data.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "checks": [
+        { "type": "contains", "pattern": "\\[[^\\]]+\\]", "note": "must contain at least one bracketed placeholder" },
+        {
+          "type": "not_contains",
+          "pattern": "\\b[A-Z0-9]{5}\\b",
+          "note": "must not contain an invented 5-character CAGE-code-shaped token (best-effort heuristic, may need manual confirmation too)"
+        },
+        { "type": "manual", "note": "Confirm the placeholder genuinely leaves the CAGE code choice to the user rather than proposing a specific real-looking one." }
+      ]
+    },
+    {
+      "id": "suggest-proposal-schemas-list",
+      "description": "Deciding which content schemas are permitted must produce an open [LIST: ...] placeholder, never a closed decided list.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-proposal",
+      "brdp": {
+        "identifier": "BRDP-S1-00006",
+        "title": "Permitted structural content schemas",
+        "definition": "Decide which structural content schemas (Descriptive, Procedural, IPD, etc.) shall be permitted for use in this project's data modules.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "checks": [
+        { "type": "contains", "pattern": "\\[LIST:", "flags": "i" },
+        { "type": "manual", "note": "Confirm the list is left as a fill-in placeholder, not presented as a closed/decided list of schemas." }
+      ]
+    },
+    {
+      "id": "suggest-proposal-pokemon",
+      "description": "A BRDP mentioning a schema-invalid name must never have Suggest Proposal comment on its validity or decide it -- that's Ask's job, not Suggest's.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-proposal",
+      "brdp": {
+        "identifier": "BRDP-EVAL-SP-03",
+        "title": "Usage of the <pokemon> element",
+        "definition": "Decide whether the <pokemon> element shall be used within structural data modules.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "checks": [
+        {
+          "type": "not_contains_any",
+          "patterns": ["does(n't| not) exist", "is not a (valid )?(element|attribute)"],
+          "flags": "i",
+          "note": "must never comment on <pokemon>'s validity -- the user was already warned in the interface"
+        },
+        { "type": "manual", "note": "Confirm the output leaves the <pokemon> decision to the user (e.g. a [YES/NO] placeholder) rather than deciding it." }
+      ]
+    },
+    {
+      "id": "suggest-proposal-refused-with-reason",
+      "description": "Re-suggesting a Proposal after a real refusal reason should genuinely address that reason, not just repeat the rejected text -- inherently a manual read.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-proposal",
+      "brdp": {
+        "identifier": "BRDP-EVAL-SP-04",
+        "title": "Maximum nesting depth for procedural steps",
+        "definition": "Decide the maximum nesting depth allowed for procedural steps within a task data module.",
+        "proposal": "Steps shall not be nested.",
+        "validation": "Refused",
+        "comments": "Too restrictive -- real maintenance tasks need at least 2 levels of nested sub-steps."
+      },
+      "checks": [
+        { "type": "manual", "note": "Confirm the new Proposal actually addresses the refusal reason (allows nested sub-steps) and doesn't just repeat the rejected text verbatim." }
+      ]
+    }
+  ]
+}
