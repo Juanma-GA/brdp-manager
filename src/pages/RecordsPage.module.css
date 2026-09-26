@@ -889,6 +889,14 @@
   margin-bottom: 0;
 }
 
+/* Ask-with-schema-cards follow-up round, point 4: separates the "common
+   to all variants" facts from the per-variant "Differences by schema"
+   list beneath them. */
+.schemaFactDifferencesHeading {
+  margin: 6px 0 2px;
+  font-weight: 600;
+}
+
 .hr {
   border: none;
   border-top: 1px solid #e2e8f0;

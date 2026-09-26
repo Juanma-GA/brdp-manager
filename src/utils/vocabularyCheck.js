@@ -152,14 +152,54 @@ export function resolvePhraseCandidates(phraseCandidates, vocabulary) {
 // unchanged) if the name can no longer be found bare -- the caller re-runs
 // extractContextCandidates after applying anyway, so a suggestion that's
 // gone stale simply stops appearing rather than throwing.
+//
+// Ask-with-schema-cards follow-up round: a real report against this app --
+// title "Element <table" (an unclosed "<" immediately before the name) --
+// showed the button doing NOTHING. Root cause: the previous single regex
+// `(?<![<@\w])name(?!\w)` treats ANY "<" right before the name as "already
+// marked up" and refuses to match there at all -- for "Element <table"
+// "table" only occurs once, immediately after that dangling "<", so the
+// whole regex found zero matches anywhere and returned the input
+// unchanged. The mirrored case ("table>", a dangling trailing ">" with no
+// opening "<") used to match as a bare word and get wrapped AGAIN,
+// producing a doubled bracket ("<table>>"). Both are now handled as their
+// own cases, tried in order from most to least specific, so incomplete
+// markup is completed (never doubled) and a genuinely bare word is wrapped
+// normally:
+//   1. `<name>` (already fully, correctly marked up) -- nothing to fix.
+//   2. `<name` with no closing `>` right after -- add ONLY the missing
+//      closing bracket, keep the existing opening one.
+//   3. `name>` with no opening `<` right before -- add ONLY the missing
+//      opening bracket, keep the existing closing one.
+//   4. a genuinely bare occurrence -- wrap with both brackets.
+// Attributes have no closing delimiter (`@name` is complete the moment the
+// `@` is there), so they only ever need the bare-word case; a name already
+// following `@` was already excluded upstream (extractContextCandidates
+// never offers it as a phrase candidate to begin with).
 export function applyRenameSuggestion(text, suggestion) {
   const source = text || '';
   const escaped = suggestion.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`(?<![<@\\w])${escaped}(?!\\w)`, 'u');
-  const m = re.exec(source);
+  const bareRe = new RegExp(`(?<![<@\\w])${escaped}(?!\\w)`, 'u');
+
+  if (suggestion.type === 'attribute') {
+    const m = bareRe.exec(source);
+    if (!m) return source;
+    return source.slice(0, m.index) + `@${suggestion.name}` + source.slice(m.index + suggestion.name.length);
+  }
+
+  if (new RegExp(`<${escaped}>`, 'u').test(source)) return source; // already correct
+
+  const danglingOpenRe = new RegExp(`<${escaped}(?!\\w)`, 'u'); // "<table", no ">" right after
+  let m = danglingOpenRe.exec(source);
+  if (m) return source.slice(0, m.index) + `<${suggestion.name}>` + source.slice(m.index + m[0].length);
+
+  const danglingCloseRe = new RegExp(`(?<![<\\w])${escaped}>`, 'u'); // "table>", no "<" right before
+  m = danglingCloseRe.exec(source);
+  if (m) return source.slice(0, m.index) + `<${suggestion.name}>` + source.slice(m.index + m[0].length);
+
+  m = bareRe.exec(source);
   if (!m) return source;
-  const replacement = suggestion.type === 'element' ? `<${suggestion.name}>` : `@${suggestion.name}`;
-  return source.slice(0, m.index) + replacement + source.slice(m.index + suggestion.name.length);
+  return source.slice(0, m.index) + `<${suggestion.name}>` + source.slice(m.index + suggestion.name.length);
 }
 
 const ELEMENT_ATTR_TAG_RE = /<\/?([A-Za-z][\w-]*)[^>]*>/g;
@@ -407,6 +447,71 @@ export function selectSchemaFactNames(orderedTexts, vocabulary, max = 6) {
     }
   }
   return selected;
+}
+
+// Ask-with-schema-cards follow-up round, point 4 ("fichas más compactas con
+// variantes"): a real report against this app -- `<para>` in S1000D 4.2
+// has 8 variants, and the previous rendering repeated every attribute and
+// child for EACH of the 8, producing a wall of near-identical text that
+// buried the one or two things that actually differ between variants.
+// `entry` is the exact shape GET /api/schema-cards returns for one name
+// ({variants: [{schemas, attributes, children, resolved, ...}], parents,
+// ...}) -- this function never re-fetches or reformats that data, only
+// re-partitions it into "common to every variant" vs "per-variant diff",
+// so buildSchemaFactsBlock (the prompt) and SchemaFactCard (the UI) can
+// share one single, testable computation instead of two independently-
+// drifting formatters.
+//
+// `parents` is already NOT per-variant in this data (one list for the
+// whole element, see backend/app/services/schema_cards.py) -- so it is
+// already "common" by construction and is returned as-is, never diffed.
+//
+// Attributes: an attribute counts as common only if EVERY variant has one
+// with the exact same name AND required-ness AND enum (including its own
+// truncation flags) -- a same-named attribute that differs in any of
+// those between variants is genuinely a difference, so it is left OUT of
+// the common set and shown per-variant instead, never silently merged.
+// Children: common iff the name appears in every variant's children list
+// (plain set membership, no attached properties to compare).
+//
+// A single-variant entry (the overwhelmingly common case) returns
+// `common: null` -- there is nothing to summarize across variants, so
+// callers should render it the old, simple way (this function only ever
+// changes the OUTPUT SHAPE for entries that genuinely have more than one
+// variant, per the encargo's own "si un elemento tiene varias variantes").
+function attributeSignature(attr) {
+  return [attr.name, attr.required, JSON.stringify(attr.enum || null), !!attr.enum_truncated, attr.enum_omitted || 0].join('\u0000');
+}
+
+export function summarizeSchemaFactEntry(entry) {
+  const variants = entry.variants || [];
+  if (variants.length <= 1) return { common: null, variants, anyUnresolved: variants.some((v) => !v.resolved) };
+
+  const attrSigSets = variants.map((v) => new Set((v.attributes || []).map(attributeSignature)));
+  const commonAttrSigs = [...attrSigSets[0]].filter((sig) => attrSigSets.every((s) => s.has(sig)));
+  const commonAttrSigSet = new Set(commonAttrSigs);
+  const commonAttributes = (variants[0].attributes || []).filter((a) => commonAttrSigSet.has(attributeSignature(a)));
+
+  const childSets = variants.map((v) => new Set(v.children || []));
+  const commonChildren = [...childSets[0]].filter((name) => childSets.every((s) => s.has(name)));
+  const commonChildSet = new Set(commonChildren);
+
+  const perVariant = variants.map((v) => ({
+    schemas: v.schemas,
+    resolved: v.resolved,
+    diffAttributes: (v.attributes || []).filter((a) => !commonAttrSigSet.has(attributeSignature(a))),
+    attributes_truncated: v.attributes_truncated,
+    attributes_omitted: v.attributes_omitted,
+    diffChildren: (v.children || []).filter((name) => !commonChildSet.has(name)),
+    children_truncated: v.children_truncated,
+    children_omitted: v.children_omitted,
+  }));
+
+  return {
+    common: { attributes: commonAttributes, children: commonChildren },
+    perVariant,
+    anyUnresolved: variants.some((v) => !v.resolved),
+  };
 }
 
 // A cheap, stable, non-cryptographic hash of the three text fields --

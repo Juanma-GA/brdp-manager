@@ -25,6 +25,7 @@ import {
   loadSchemaVocabulary,
   resolvePhraseCandidates,
   selectSchemaFactNames,
+  summarizeSchemaFactEntry,
 } from '../utils/vocabularyCheck.js';
 import styles from './RecordsPage.module.css';
 
@@ -162,6 +163,21 @@ function formatSchemaFactNameList(names, truncated, omitted) {
   return names.join(', ') + (truncated ? `, +${omitted} more` : '');
 }
 
+function formatSchemaFactAttributeList(attrs) {
+  if (!attrs || attrs.length === 0) return 'none';
+  return attrs.map(formatSchemaFactAttribute).join(', ');
+}
+
+// Ask-with-schema-cards follow-up round, point 4: for an element with a
+// single schema variant (the common case), render exactly as before. For
+// one with several, render what summarizeSchemaFactEntry found common to
+// ALL of them first (attributes, children, and the always-single `parents`
+// list), then a "Differences by schema" section listing, per variant,
+// ONLY what that variant adds beyond the common set -- never repeating
+// the full attribute/children list once per variant. Truncation markers
+// stay attached to whichever per-variant list they actually describe
+// (never claimed for the computed common set, which is exact given the
+// data available).
 function buildSchemaFactsBlock(standard, schemaFacts) {
   if (!schemaFacts || schemaFacts.length === 0) return '';
   let block = `\n\nSCHEMA FACTS — extracted from the official ${standard} schema. These are
@@ -170,22 +186,53 @@ elements or parent elements are allowed, rely on these facts over your
 own knowledge. If the facts do not cover what is asked, say so plainly
 instead of guessing.`;
   for (const { name, entry } of schemaFacts) {
-    entry.variants.forEach((variant, idx) => {
-      block += `\n<${name}> (schemas: ${variant.schemas.join(', ')})`;
-      if (!variant.resolved) {
+    const summary = summarizeSchemaFactEntry(entry);
+    const parentsText = formatSchemaFactNameList(entry.parents, entry.parents_truncated, entry.parents_omitted);
+
+    if (!summary.common) {
+      const v = entry.variants[0];
+      block += `\n<${name}> (schemas: ${v.schemas.join(', ')})`;
+      if (!v.resolved) {
         block += `\n  content model not fully resolved for this schema — do not assume the lists below are complete.`;
       }
       const attrsText =
-        variant.attributes.length > 0
-          ? variant.attributes.map(formatSchemaFactAttribute).join(', ') +
-            (variant.attributes_truncated ? `, +${variant.attributes_omitted} more` : '')
+        v.attributes.length > 0
+          ? formatSchemaFactAttributeList(v.attributes) + (v.attributes_truncated ? `, +${v.attributes_omitted} more` : '')
           : 'none';
       block += `\n  attributes: ${attrsText}`;
-      block += `\n  children: ${formatSchemaFactNameList(variant.children, variant.children_truncated, variant.children_omitted)}`;
-      if (idx === entry.variants.length - 1) {
-        block += `\n  allowed inside: ${formatSchemaFactNameList(entry.parents, entry.parents_truncated, entry.parents_omitted)}`;
+      block += `\n  children: ${formatSchemaFactNameList(v.children, v.children_truncated, v.children_omitted)}`;
+      block += `\n  allowed inside: ${parentsText}`;
+      continue;
+    }
+
+    block += `\n<${name}> — common to all ${entry.variants.length} schema variants:`;
+    if (summary.anyUnresolved) {
+      block += `\n  note: not every variant's content model was fully resolved — the common set below may be incomplete.`;
+    }
+    block += `\n  attributes: ${formatSchemaFactAttributeList(summary.common.attributes)}`;
+    block += `\n  children: ${formatSchemaFactNameList(summary.common.children, false, 0)}`;
+    block += `\n  allowed inside: ${parentsText}`;
+    block += `\n  Differences by schema:`;
+    for (const pv of summary.perVariant) {
+      block += `\n  [${pv.schemas.join(', ')}]`;
+      if (!pv.resolved) {
+        block += `\n    content model not fully resolved for this schema — do not assume this list is complete.`;
       }
-    });
+      const attrsText =
+        pv.diffAttributes.length > 0
+          ? formatSchemaFactAttributeList(pv.diffAttributes) + (pv.attributes_truncated ? `, +${pv.attributes_omitted} more` : '')
+          : pv.attributes_truncated
+            ? `none beyond the common set (list truncated, +${pv.attributes_omitted} more not shown)`
+            : 'none beyond the common set';
+      block += `\n    attributes: ${attrsText}`;
+      const childrenText =
+        pv.diffChildren.length > 0
+          ? formatSchemaFactNameList(pv.diffChildren, pv.children_truncated, pv.children_omitted)
+          : pv.children_truncated
+            ? `none beyond the common set (list truncated, +${pv.children_omitted} more not shown)`
+            : 'none beyond the common set';
+      block += `\n    children: ${childrenText}`;
+    }
   }
   return block;
 }
@@ -197,13 +244,37 @@ instead of guessing.`;
 // user has picked one to compare against.
 function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, vocabCheck, schemaFacts) {
   const ruleState = ruleStateOf(ruleApproval);
+  // Ask-with-schema-cards follow-up round, points 2-3: a real report
+  // against this app showed two symptoms of the SAME root cause -- the
+  // old scope rule only ever mentioned "this specific BRDP", so a genuine
+  // schema question ("Where can <para> go?") could get refused the first
+  // time it was asked (the model reading "not about this specific BRDP"
+  // literally) and, even when answered correctly, sometimes still tacked
+  // on a leftover "if this isn't about this BRDP, rephrase" disclaimer
+  // after a schema answer it had ALREADY given. SCOPE is now explicitly
+  // widened to cover the schema facts this same prompt provides, and the
+  // model is told point-blank never to hedge an answer it just gave.
   let prompt = `You are an S1000D and DITA business-rules expert assistant embedded in
-BRDP Manager. You answer questions strictly about the single BRDP shown
-below${compareBrdp ? ' (and the BRDP being compared against, if one is shown below)' : ''} — not general questions, not questions about other BRDPs.
+BRDP Manager.
 
-If the question is not about this specific BRDP, say so plainly and ask
-the user to select the right BRDP (or rephrase) before asking again —
-do not attempt to answer a question unrelated to the BRDP below.
+SCOPE: answer questions about the BRDP shown below AND questions about
+the ${standard} schema elements and attributes covered by SCHEMA FACTS.
+Only if the question has nothing to do with this BRDP, with ${standard}
+or with its schema, say so briefly and ask the user to rephrase.
+Never add scope reminders or disclaimers to an answer you have given.`;
+
+  if (compareBrdp) {
+    prompt += `\nThe BRDP being compared against (shown below) is also in scope.`;
+  }
+
+  prompt += `
+
+Answer exactly what is asked: "where can X go / be used" -> its allowed
+parents; "what can X contain" -> its children; "which attributes" ->
+its attributes. Do not list other facts unless asked.
+When the facts contain several schema variants, summarize: state what
+is common to all of them and mention only the notable differences.
+Keep the 3-paragraph limit even when the facts are long.
 
 Answer in at most 3 short paragraphs — be direct, no padding, no
 restating the question back to the user.
@@ -529,33 +600,77 @@ function formatSchemaFactNameListUi(names, truncated, omitted, t) {
   return names.join(', ') + (truncated ? `, +${omitted}` : '');
 }
 
+function formatSchemaFactAttributeListUi(attrs, t) {
+  if (!attrs || attrs.length === 0) return t('records.assistant.schemaFactNone');
+  return attrs.map((a) => formatSchemaFactAttributeUi(a, t)).join(', ');
+}
+
+// Ask-with-schema-cards follow-up round, point 4: same common/per-variant-
+// diff split as buildSchemaFactsBlock, rendered as the UI's expandable
+// card -- both consume summarizeSchemaFactEntry so the prompt the LLM
+// sees and the card the user can expand never drift apart.
 function SchemaFactCard({ name, entry }) {
   const { t } = useTranslation();
+  const summary = summarizeSchemaFactEntry(entry);
+  const parentsText = formatSchemaFactNameListUi(entry.parents, entry.parents_truncated, entry.parents_omitted, t);
+
+  if (!summary.common) {
+    const v = entry.variants[0];
+    return (
+      <div className={styles.referenceDefinition}>
+        <div>
+          <strong>&lt;{name}&gt;</strong> ({t('records.assistant.schemaFactSchemas')}: {v.schemas.join(', ')})
+        </div>
+        {!v.resolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
+        <div>
+          {t('records.assistant.schemaFactAttributes')}:{' '}
+          {v.attributes.length > 0
+            ? formatSchemaFactAttributeListUi(v.attributes, t) + (v.attributes_truncated ? `, +${v.attributes_omitted}` : '')
+            : t('records.assistant.schemaFactNone')}
+        </div>
+        <div>
+          {t('records.assistant.schemaFactChildren')}:{' '}
+          {formatSchemaFactNameListUi(v.children, v.children_truncated, v.children_omitted, t)}
+        </div>
+        <div>
+          {t('records.assistant.schemaFactAllowedInside')}: {parentsText}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.referenceDefinition}>
-      {entry.variants.map((variant, idx) => (
+      <div>
+        <strong>&lt;{name}&gt;</strong> — {t('records.assistant.schemaFactCommonToAll', { count: entry.variants.length })}
+      </div>
+      {summary.anyUnresolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
+      <div>
+        {t('records.assistant.schemaFactAttributes')}: {formatSchemaFactAttributeListUi(summary.common.attributes, t)}
+      </div>
+      <div>
+        {t('records.assistant.schemaFactChildren')}: {formatSchemaFactNameListUi(summary.common.children, false, 0, t)}
+      </div>
+      <div>
+        {t('records.assistant.schemaFactAllowedInside')}: {parentsText}
+      </div>
+      <div className={styles.schemaFactDifferencesHeading}>{t('records.assistant.schemaFactDifferences')}</div>
+      {summary.perVariant.map((pv, idx) => (
         <div key={idx} className={styles.schemaFactVariant}>
-          <div>
-            <strong>&lt;{name}&gt;</strong> ({t('records.assistant.schemaFactSchemas')}: {variant.schemas.join(', ')})
-          </div>
-          {!variant.resolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
+          <div>({t('records.assistant.schemaFactSchemas')}: {pv.schemas.join(', ')})</div>
+          {!pv.resolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
           <div>
             {t('records.assistant.schemaFactAttributes')}:{' '}
-            {variant.attributes.length > 0
-              ? variant.attributes.map((a) => formatSchemaFactAttributeUi(a, t)).join(', ') +
-                (variant.attributes_truncated ? `, +${variant.attributes_omitted}` : '')
-              : t('records.assistant.schemaFactNone')}
+            {pv.diffAttributes.length > 0
+              ? formatSchemaFactAttributeListUi(pv.diffAttributes, t) + (pv.attributes_truncated ? `, +${pv.attributes_omitted}` : '')
+              : t('records.assistant.schemaFactNoneBeyondCommon')}
           </div>
           <div>
             {t('records.assistant.schemaFactChildren')}:{' '}
-            {formatSchemaFactNameListUi(variant.children, variant.children_truncated, variant.children_omitted, t)}
+            {pv.diffChildren.length > 0
+              ? formatSchemaFactNameListUi(pv.diffChildren, pv.children_truncated, pv.children_omitted, t)
+              : t('records.assistant.schemaFactNoneBeyondCommon')}
           </div>
-          {idx === entry.variants.length - 1 && (
-            <div>
-              {t('records.assistant.schemaFactAllowedInside')}:{' '}
-              {formatSchemaFactNameListUi(entry.parents, entry.parents_truncated, entry.parents_omitted, t)}
-            </div>
-          )}
         </div>
       ))}
     </div>

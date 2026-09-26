@@ -186,7 +186,13 @@ async function main() {
     await ask("What is this for the project?");
     req = await lastMockRequest();
     sys = req.messages.find((m) => m.role === "system").content;
-    assert(!sys.includes("SCHEMA FACTS"), 'bare "para"/"for" with no markup or trigger -> no SCHEMA FACTS block at all');
+    // Ask-with-schema-cards follow-up round: the new SCOPE paragraph
+    // itself mentions the term "SCHEMA FACTS" even when no facts block is
+    // added (it names the concept generically) -- so a bare substring
+    // check is no longer specific enough. Check for the actual header
+    // line buildSchemaFactsBlock emits, which only appears when it
+    // actually has something to report.
+    assert(!sys.includes("SCHEMA FACTS — extracted from"), 'bare "para"/"for" with no markup or trigger -> no SCHEMA FACTS block at all');
     assert((await page.locator("text=Schema facts used:").count()) === 0, "no \"Schema facts used\" line either");
 
     // ==== 4. <pokemon> (doesn't exist) -> no schema fact for it (it
@@ -198,13 +204,40 @@ async function main() {
     assert(!sys.includes("<pokemon> (schemas:"), "<pokemon> (not in vocabulary) never gets a schema-fact card");
 
     // ==== 5. Element with genuinely different definitions across S1000D
-    // schema files (docs request point: "la ficha muestra variantes"). ====
+    // schema files (docs request point: "la ficha muestra variantes").
+    // Ask-with-schema-cards follow-up round, point 4: the previous
+    // one-block-per-variant repetition is now a single "common to all N
+    // schema variants" section plus a compact per-variant diff -- verified
+    // here that the new shape actually appears (not the old repeated
+    // "<para> (schemas: ...)" block once per variant, which the OLD
+    // assertion checked for and would now wrongly fail to find at all). ====
     await openRecords(`Schema Facts Verify S ${suffix}`, "BRDP-SF-PARA");
     await ask("What children does <para> allow?");
     req = await lastMockRequest();
     sys = req.messages.find((m) => m.role === "system").content;
-    const paraVariantCount = (sys.match(/<para> \(schemas:/g) || []).length;
-    assert(paraVariantCount > 1, `<para> genuinely resolves differently across S1000D 4.2 schema files -- prompt shows ${paraVariantCount} variants, not 1`);
+    assert(sys.includes("<para> — common to all 8 schema variants:"), "the real, 8-variant <para> card is summarized as one common-to-all-8 block, not repeated once per variant");
+    assert(sys.includes("Differences by schema:"), "the compact block includes a per-schema differences section");
+    assert(!/\n<para> \(schemas:/.test(sys), "the OLD per-variant repeated block format no longer appears for a multi-variant element");
+    // "acronym" is one of the real 17 children common to every <para>
+    // variant (hand-verified this round); it must appear exactly once, in
+    // the common section, never repeated per variant.
+    const acronymOccurrences = (sys.match(/\bacronym\b/g) || []).length;
+    assert(acronymOccurrences === 1, `a genuinely common child ("acronym") is listed exactly once, not once per variant (found ${acronymOccurrences} times)`);
+    // "footnote" is a real per-variant DIFFERENCE for <para> (present in
+    // some schema files' content models, absent from others) -- it must
+    // show up under "Differences by schema", not in the common list.
+    assert(/Differences by schema:[\s\S]*footnote/.test(sys), '"footnote" (a genuine per-variant difference) appears in the differences section');
+
+    await page.waitForSelector("text=Schema facts used:", { timeout: 3000 });
+    const paraChip = page.getByRole("button", { name: "<para>", exact: true });
+    assert((await paraChip.count()) > 0, 'UI shows a clickable "<para>" chip under the answer');
+    await paraChip.click();
+    await page.waitForSelector("text=/common to all 8 schema variants/", { timeout: 3000 });
+    assert(true, 'the expanded UI card also shows the compact "common to all 8 schema variants" summary');
+    await page.waitForSelector("text=/Differences by schema/", { timeout: 3000 });
+    assert(true, "the expanded UI card also shows the per-schema differences section");
+    await page.screenshot({ path: "/tmp/schema-facts-para-compact.png", fullPage: true });
+    console.log("Screenshot: /tmp/schema-facts-para-compact.png");
 
     // ==== 6. DITA: <note>'s @type closed enum (a second, different
     // standard's worked example, per the docs request's own instruction
@@ -225,7 +258,7 @@ async function main() {
     await ask("What attributes does <table> allow here?");
     req = await lastMockRequest();
     sys = req.messages.find((m) => m.role === "system").content;
-    assert(!sys.includes("SCHEMA FACTS"), "S1000D 5.0 (no generated cards) -> no SCHEMA FACTS block, Ask still answers normally");
+    assert(!sys.includes("SCHEMA FACTS — extracted from"), "S1000D 5.0 (no generated cards) -> no SCHEMA FACTS block, Ask still answers normally");
     assert((await page.locator("text=Schema facts used:").count()) === 0, "no UI line either");
 
     console.log("\nALL CHECKS PASSED\n");

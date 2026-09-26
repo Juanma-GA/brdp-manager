@@ -13,6 +13,9 @@
 // a mock or a duplicated copy.
 //
 //     node scripts/test-vocabulary-check.mjs
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
   extractContextCandidates,
   resolvePhraseCandidates,
@@ -22,7 +25,10 @@ import {
   hashVocabInputText,
   extractSchemaFactCandidates,
   selectSchemaFactNames,
+  summarizeSchemaFactEntry,
 } from "../src/utils/vocabularyCheck.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let failures = 0;
 function assert(cond, msg) {
@@ -250,6 +256,58 @@ assert(!extractContextCandidates("Confirm this is fine.").camelCase.includes("th
   assert(fixed === "el atributo @señal", `applyRenameSuggestion handles accented names too (got: ${fixed})`);
 }
 
+// ---- applyRenameSuggestion: incomplete markup (Ask-with-schema-cards
+// follow-up round, point 1 -- real report: "Element <table" (an unclosed
+// "<" right before the name) made the button do NOTHING, because the old
+// regex's negative lookbehind treated any "<" before the name as "already
+// marked up" and refused to match there at all -- since the name occurred
+// nowhere else in the string, the whole regex found zero matches and
+// returned the input completely unchanged. The mirrored case ("table>", a
+// dangling ">" with no opening "<") used to match as an ordinary bare word
+// and get wrapped AGAIN, producing a doubled bracket ("<table>>"). ----
+
+{
+  const fixed = applyRenameSuggestion("Element <table", { name: "table", type: "element" });
+  assert(fixed === "Element <table>", `dangling leading "<" is completed, never left as a no-op (got: ${fixed})`);
+}
+{
+  const fixed = applyRenameSuggestion("Element table>", { name: "table", type: "element" });
+  assert(fixed === "Element <table>", `dangling trailing ">" is completed, never doubled into "<table>>" (got: ${fixed})`);
+}
+{
+  const fixed = applyRenameSuggestion("Element <table>", { name: "table", type: "element" });
+  assert(fixed === "Element <table>", `an already-complete <table> is left untouched (got: ${fixed})`);
+}
+{
+  // A stray extra ">" right after an already-complete tag is not this
+  // fix's concern (extractContextCandidates would never offer a
+  // suggestion for an already-marked-up name to begin with) -- confirms
+  // the fix does not make this pre-existing, out-of-scope edge case worse.
+  const fixed = applyRenameSuggestion("Element <table>>", { name: "table", type: "element" });
+  assert(fixed === "Element <table>>", `an extra stray ">" after a complete tag is left alone (got: ${fixed})`);
+}
+{
+  // Two occurrences, one broken (dangling "<") and one bare -- the broken
+  // one is fixed in place rather than leaving it broken and wrapping the
+  // unrelated bare occurrence instead (the old bug's actual behavior).
+  const fixed = applyRenameSuggestion("Element <table and table", { name: "table", type: "element" });
+  assert(
+    fixed === "Element <table> and table",
+    `the dangling occurrence is completed first, the unrelated bare one is left alone (got: ${fixed})`
+  );
+}
+{
+  // The fix must never produce an empty string or otherwise drop the
+  // name -- the real report's own "Element \"\"" symptom, guarded against
+  // structurally: every branch either returns the input completely
+  // unchanged or a string that still contains the original name.
+  for (const text of ["Element <table", "Element table>", "Element <table>", "the element table"]) {
+    const fixed = applyRenameSuggestion(text, { name: "table", type: "element" });
+    assert(fixed.includes("table"), `applyRenameSuggestion never drops the original name (text=${JSON.stringify(text)}, got: ${JSON.stringify(fixed)})`);
+    assert(fixed !== "", `applyRenameSuggestion never produces an empty string (text=${JSON.stringify(text)})`);
+  }
+}
+
 // ---- checkAgainstVocabulary: phrase-triggered candidates NEVER feed notFound/wrongType ----
 
 const emptyCtx = { elements: [], attributes: [], camelCase: [], phraseCandidates: [] };
@@ -415,6 +473,116 @@ const emptyCtx = { elements: [], attributes: [], camelCase: [], phraseCandidates
 {
   const r = selectSchemaFactNames(["<table>"], null, 6);
   assert(r.length === 0, "selectSchemaFactNames(..., null) -> always empty");
+}
+
+// ---- summarizeSchemaFactEntry: compact common/variant-diff format
+// (Ask-with-schema-cards follow-up round, point 4) -- against the REAL
+// S1000D 4.2 <para> card the encargo itself names ("la ficha de <para>
+// tiene 8 variantes"), loaded straight from
+// backend/schema_cards/schema-cards-4-2.json (the generator's own raw
+// output, no running backend needed) rather than a hand-built fixture, so
+// this proves the real, exact reduction: 8 schema-file variants collapse
+// to one shared attribute/children list plus a short per-schema diff. The
+// raw generator file's `cards.para` array is the same per-variant shape
+// GET /api/schema-cards' `variants` uses, minus the compaction
+// (attributes_truncated/etc.) flags the backend route adds on top --
+// added here as false/0 (this card is well under the compaction limits:
+// 11 attributes, at most 28 children, both < the 30/40 caps), matching
+// exactly what the real endpoint served (verified live against the
+// running backend during this round). ----
+{
+  const raw = JSON.parse(readFileSync(join(__dirname, "..", "backend", "schema_cards", "schema-cards-4-2.json"), "utf-8"));
+  const rawVariants = raw.cards.para;
+  assert(rawVariants.length === 8, `real S1000D 4.2 <para> card has 8 variants, matching the encargo's own count (got: ${rawVariants.length})`);
+
+  const entry = {
+    variants: rawVariants.map((v) => ({
+      schemas: v.schemas,
+      resolved: v.resolved,
+      attributes: v.attributes.map((a) => ({ ...a, enum_truncated: false, enum_omitted: 0 })),
+      attributes_truncated: false,
+      attributes_omitted: 0,
+      children: v.children,
+      children_truncated: false,
+      children_omitted: 0,
+    })),
+    parents: raw.parents.para || [],
+    parents_truncated: false,
+    parents_omitted: 0,
+  };
+
+  const summary = summarizeSchemaFactEntry(entry);
+  assert(summary.common !== null, "an 8-variant entry produces a non-null common section");
+  assert(!summary.anyUnresolved, "the real <para> card has no unresolved variant");
+
+  const commonAttrNames = summary.common.attributes.map((a) => a.name).sort();
+  const allAttrNamesEverywhere = new Set(rawVariants.flatMap((v) => v.attributes.map((a) => a.name)));
+  assert(
+    commonAttrNames.length === allAttrNamesEverywhere.size,
+    `all 11 real <para> attributes are identical (name+required+enum) across all 8 schemas, so all 11 land in the common set, none left as a per-variant diff (got ${commonAttrNames.length} of ${allAttrNamesEverywhere.size})`
+  );
+  for (const pv of summary.perVariant) {
+    assert(pv.diffAttributes.length === 0, `no schema variant has an attribute difference for real <para> (schemas=${pv.schemas.join(",")})`);
+  }
+
+  // Every child in the common set must genuinely appear in EVERY real
+  // variant's own children list -- not just the first one.
+  for (const childName of summary.common.children) {
+    for (const v of rawVariants) {
+      assert(v.children.includes(childName), `common child "${childName}" is missing from a real variant (schemas=${v.schemas.join(",")}) -- common set is not truly common`);
+    }
+  }
+  // And nothing left in a per-variant diff list may ALSO be in the common
+  // set (the whole point of the split -- never repeat a fact twice).
+  for (const pv of summary.perVariant) {
+    for (const childName of pv.diffChildren) {
+      assert(
+        !summary.common.children.includes(childName),
+        `per-variant diff child "${childName}" (schemas=${pv.schemas.join(",")}) is never also repeated in the common set`
+      );
+    }
+  }
+  // The real, hand-confirmed reduction for this exact card (verified live
+  // against the running backend during this round): 17 children common to
+  // all 8 variants, with "footnote" a genuine per-variant difference --
+  // present in the "crew" variant's own children, but absent from the
+  // "comrep,frontmatter,ipd,schedul,update" group's, so it correctly
+  // cannot land in the common set either.
+  assert(summary.common.children.length === 17, `real <para> has exactly 17 children common to all 8 variants (got: ${summary.common.children.length})`);
+  const crewGroup = summary.perVariant.find((pv) => pv.schemas.includes("crew"));
+  assert(!!crewGroup && crewGroup.diffChildren.includes("footnote"), `"footnote" is a real per-variant difference for the "crew" variant (got: ${JSON.stringify(crewGroup?.diffChildren)})`);
+  const comrepGroup = summary.perVariant.find((pv) => pv.schemas.includes("comrep"));
+  assert(!!comrepGroup && !comrepGroup.diffChildren.includes("footnote"), `"footnote" is absent from the comrep/frontmatter/ipd/schedul/update group's own children too, so it is not a difference there (got: ${JSON.stringify(comrepGroup?.diffChildren)})`);
+  assert(!summary.common.children.includes("footnote"), `"footnote" is NOT common to all 8 variants (it is genuinely absent from some) (got common list: ${JSON.stringify(summary.common.children)})`);
+
+  // parents are already NOT per-variant in the real data -- summarize
+  // must never attempt to diff them; the caller renders entry.parents
+  // once, unconditionally (confirmed by re-reading buildSchemaFactsBlock/
+  // SchemaFactCard, which never touch summary for parents at all).
+  assert(Array.isArray(entry.parents) && entry.parents.length > 0, "real <para> has a real, non-empty parents list (used as-is, never diffed per variant)");
+}
+{
+  // Single-variant entry (the overwhelmingly common case) -> common: null,
+  // so callers fall back to the old simple per-variant rendering.
+  const entry = {
+    variants: [
+      {
+        schemas: ["s1"],
+        resolved: true,
+        attributes: [{ name: "id", required: true, enum: null, enum_truncated: false, enum_omitted: 0 }],
+        attributes_truncated: false,
+        attributes_omitted: 0,
+        children: ["child1"],
+        children_truncated: false,
+        children_omitted: 0,
+      },
+    ],
+    parents: ["parent1"],
+    parents_truncated: false,
+    parents_omitted: 0,
+  };
+  const summary = summarizeSchemaFactEntry(entry);
+  assert(summary.common === null, "a single-variant entry never produces a common/diff split (common: null)");
 }
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED\n" : `\n${failures} CHECK(S) FAILED\n`);
