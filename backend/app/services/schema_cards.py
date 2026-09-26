@@ -12,6 +12,7 @@ STANDARD_TO_VOCABULARY_FILE (both DITA Xpath flavors share one file; S1000D
 false empty result).
 """
 import json
+import re
 from pathlib import Path
 
 STANDARD_TO_SCHEMA_CARDS_FILE = {
@@ -53,6 +54,59 @@ def _load_all_cards() -> dict[str, dict]:
 
 _CARDS_BY_FILE = _load_all_cards()
 
+# "Pulido de fichas" round, point 1: real data (schema-cards-4-2.json,
+# <para>'s @caveat/@securityClassification) has enums like cv01..cv99 or
+# 01..99 -- 99 near-identical tokens that used to get cut at MAX_ENUM_VALUES
+# (20) with a "+79 more" note, hiding the fact the list is actually a clean,
+# gap-free numeric sequence. A value must be `<prefix><digits>` with the
+# SAME prefix and the SAME zero-padded digit width across every value in
+# the enum (mixed widths/prefixes, or anything non-numeric like
+# changeType's add/delete/modify, bail out to `None` -- caller falls back
+# to the normal list + truncation).
+_ENUM_TOKEN_RE = re.compile(r"^([A-Za-z_]*)(\d+)$")
+
+
+def _collapse_enum_to_ranges(values: list[str]) -> list[str] | None:
+    """Collapses a consecutive-numeric enum into range tokens (`cv01–cv99`,
+    or several with gaps: `cv01–cv20, cv51–cv99`) -- always representing
+    the COMPLETE list losslessly (a lone value stays a single token, never
+    gains a dash). Returns None if the values don't form one clean
+    sequence (mixed prefix/width, non-numeric values, anything the regex
+    doesn't match) -- the caller then falls back to the pre-existing
+    truncate-at-MAX_ENUM_VALUES behavior, unchanged."""
+    if not values:
+        return None
+    parsed = []
+    prefixes: set[str] = set()
+    widths: set[int] = set()
+    for v in values:
+        m = _ENUM_TOKEN_RE.match(v)
+        if not m:
+            return None
+        prefix, digits = m.groups()
+        parsed.append(int(digits))
+        prefixes.add(prefix)
+        widths.add(len(digits))
+    if len(prefixes) != 1 or len(widths) != 1:
+        return None
+    prefix = next(iter(prefixes))
+    width = next(iter(widths))
+
+    def fmt(n: int) -> str:
+        return f"{prefix}{str(n).zfill(width)}"
+
+    numbers = sorted(set(parsed))
+    tokens: list[str] = []
+    start = prev = numbers[0]
+    for n in numbers[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        tokens.append(fmt(start) if start == prev else f"{fmt(start)}–{fmt(prev)}")
+        start = prev = n
+    tokens.append(fmt(start) if start == prev else f"{fmt(start)}–{fmt(prev)}")
+    return tokens
+
 
 def _compact_variant(variant: dict) -> dict:
     attributes = variant.get("attributes", [])
@@ -62,10 +116,19 @@ def _compact_variant(variant: dict) -> dict:
         enum = attr.get("enum")
         enum_truncated = False
         enum_omitted = 0
-        if enum and len(enum) > MAX_ENUM_VALUES:
-            enum_truncated = True
-            enum_omitted = len(enum) - MAX_ENUM_VALUES
-            enum = enum[:MAX_ENUM_VALUES]
+        if enum:
+            # Range collapsing runs on the FULL, untruncated enum from the
+            # generated cards file -- BEFORE the MAX_ENUM_VALUES cutoff
+            # below -- so the range genuinely represents the complete list,
+            # never a truncated slice of it (docs request, point 1: "aplicar
+            # esto antes del límite de truncado").
+            collapsed = _collapse_enum_to_ranges(enum)
+            if collapsed is not None:
+                enum = collapsed
+            elif len(enum) > MAX_ENUM_VALUES:
+                enum_truncated = True
+                enum_omitted = len(enum) - MAX_ENUM_VALUES
+                enum = enum[:MAX_ENUM_VALUES]
         compact_attributes.append(
             {
                 "name": attr["name"],

@@ -76,22 +76,49 @@ export default function SchemaFactCard({ name, entry }) {
         {t('records.assistant.schemaFactAllowedInside')}: {parentsText}
       </div>
       <div className={styles.schemaFactDifferencesHeading}>{t('records.assistant.schemaFactDifferences')}</div>
+      {/* "Pulido de fichas" round, points 2-3: a variant with nothing to
+          add beyond the common set no longer renders an "attributes:
+          none beyond the common set" / "children: none beyond the common
+          set" row at all -- pure noise for the common case where a
+          variant differs in at most one of the two. A variant whose raw
+          list was itself truncated still gets a row (a real difference
+          could be hiding past the cutoff, so silence would overclaim
+          completeness -- HR7), reworded away from "none beyond the
+          common set" since that phrase implied certainty the truncation
+          doesn't have. Labels renamed to "additional attributes"/
+          "additional children" (clearer than the bare "attributes"/
+          "children" this diff section used to share with the common-set
+          block above, which reads like a full list, not a diff). No
+          "additional parents" here -- parents has no per-variant diff at
+          all (summarizeSchemaFactEntry never splits it), same as the
+          prompt's buildSchemaFactsBlock. */}
       {summary.perVariant.map((pv, idx) => (
         <div key={idx} className={styles.schemaFactVariant}>
           <div>({t('records.assistant.schemaFactSchemas')}: {pv.schemas.join(', ')})</div>
           {!pv.resolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
-          <div>
-            {t('records.assistant.schemaFactAttributes')}:{' '}
-            {pv.diffAttributes.length > 0
-              ? formatSchemaFactAttributeListUi(pv.diffAttributes, t) + (pv.attributes_truncated ? `, +${pv.attributes_omitted}` : '')
-              : t('records.assistant.schemaFactNoneBeyondCommon')}
-          </div>
-          <div>
-            {t('records.assistant.schemaFactChildren')}:{' '}
-            {pv.diffChildren.length > 0
-              ? formatSchemaFactNameListUi(pv.diffChildren, pv.children_truncated, pv.children_omitted, t)
-              : t('records.assistant.schemaFactNoneBeyondCommon')}
-          </div>
+          {pv.diffAttributes.length > 0 ? (
+            <div>
+              {t('records.assistant.schemaFactAdditionalAttributes')}:{' '}
+              {formatSchemaFactAttributeListUi(pv.diffAttributes, t)}
+              {pv.attributes_truncated ? `, +${pv.attributes_omitted}` : ''}
+            </div>
+          ) : pv.attributes_truncated ? (
+            <div>
+              {t('records.assistant.schemaFactAdditionalAttributes')}:{' '}
+              {t('records.assistant.schemaFactDiffTruncated', { omitted: pv.attributes_omitted })}
+            </div>
+          ) : null}
+          {pv.diffChildren.length > 0 ? (
+            <div>
+              {t('records.assistant.schemaFactAdditionalChildren')}:{' '}
+              {formatSchemaFactNameListUi(pv.diffChildren, pv.children_truncated, pv.children_omitted, t)}
+            </div>
+          ) : pv.children_truncated ? (
+            <div>
+              {t('records.assistant.schemaFactAdditionalChildren')}:{' '}
+              {t('records.assistant.schemaFactDiffTruncated', { omitted: pv.children_omitted })}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>

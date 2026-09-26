@@ -145,25 +145,39 @@ instead of guessing.`;
     block += `\n  children: ${formatSchemaFactNameList(summary.common.children, false, 0)}`;
     block += `\n  allowed inside: ${parentsText}`;
     block += `\n  Differences by schema:`;
+    // "Pulido de fichas" round, points 2-3: a variant with nothing to add
+    // beyond the common set used to still print an "attributes: none
+    // beyond the common set" / "children: none beyond the common set"
+    // line -- pure noise for the overwhelmingly common case (most
+    // variants of most elements differ in at most one of the two). Now
+    // that line is OMITTED ENTIRELY when there is genuinely nothing to
+    // add; a variant whose raw list was itself truncated (so a real
+    // difference could be hiding past the cutoff) still gets a line, but
+    // reworded away from "none beyond the common set" -- that phrase
+    // claimed certainty ("nothing more") the truncation doesn't actually
+    // have (HR7: never silently claim completeness that isn't there). The
+    // two labels that DO print are "additional attributes"/"additional
+    // children" (clearer than the old bare "attributes"/"children", which
+    // read as if it were the variant's FULL list rather than a diff).
+    // `parents` has no per-variant diff to label "additional parents" for
+    // -- it's a single, always-common list (see summarizeSchemaFactEntry's
+    // own docstring) -- so that third label never has a call site here.
     for (const pv of summary.perVariant) {
-      block += `\n  [${pv.schemas.join(', ')}]`;
+      let variantBlock = `\n  [${pv.schemas.join(', ')}]`;
       if (!pv.resolved) {
-        block += `\n    content model not fully resolved for this schema — do not assume this list is complete.`;
+        variantBlock += `\n    content model not fully resolved for this schema — do not assume this list is complete.`;
       }
-      const attrsText =
-        pv.diffAttributes.length > 0
-          ? formatSchemaFactAttributeList(pv.diffAttributes) + (pv.attributes_truncated ? `, +${pv.attributes_omitted} more` : '')
-          : pv.attributes_truncated
-            ? `none beyond the common set (list truncated, +${pv.attributes_omitted} more not shown)`
-            : 'none beyond the common set';
-      block += `\n    attributes: ${attrsText}`;
-      const childrenText =
-        pv.diffChildren.length > 0
-          ? formatSchemaFactNameList(pv.diffChildren, pv.children_truncated, pv.children_omitted)
-          : pv.children_truncated
-            ? `none beyond the common set (list truncated, +${pv.children_omitted} more not shown)`
-            : 'none beyond the common set';
-      block += `\n    children: ${childrenText}`;
+      if (pv.diffAttributes.length > 0) {
+        variantBlock += `\n    additional attributes: ${formatSchemaFactAttributeList(pv.diffAttributes)}${pv.attributes_truncated ? `, +${pv.attributes_omitted} more` : ''}`;
+      } else if (pv.attributes_truncated) {
+        variantBlock += `\n    additional attributes: not confirmed — this variant's attribute list was cut off before comparison (+${pv.attributes_omitted} more not shown)`;
+      }
+      if (pv.diffChildren.length > 0) {
+        variantBlock += `\n    additional children: ${formatSchemaFactNameList(pv.diffChildren, pv.children_truncated, pv.children_omitted)}`;
+      } else if (pv.children_truncated) {
+        variantBlock += `\n    additional children: not confirmed — this variant's children list was cut off before comparison (+${pv.children_omitted} more not shown)`;
+      }
+      block += variantBlock;
     }
   }
   return block;

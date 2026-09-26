@@ -11,7 +11,12 @@ import pytest
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.models import User
-from app.services.schema_cards import MAX_ATTRIBUTES, MAX_CHILDREN, MAX_ENUM_VALUES
+from app.services.schema_cards import (
+    MAX_ATTRIBUTES,
+    MAX_CHILDREN,
+    MAX_ENUM_VALUES,
+    _collapse_enum_to_ranges,
+)
 
 
 async def _make_user() -> User:
@@ -222,3 +227,73 @@ async def test_duplicate_requested_names_are_deduped(client):
     )
     assert res.status_code == 200
     assert list(res.json()["cards"].keys()) == ["table"]
+
+
+# "Pulido de fichas" round, point 1: unit tests for the pure range-collapsing
+# helper -- the literal cases the encargo names (cv01..cv99, 01..99, gaps,
+# non-numeric) plus the edge cases that determine whether it bails out at all.
+class TestCollapseEnumToRanges:
+    def test_full_consecutive_run_with_alpha_prefix(self):
+        values = [f"cv{n:02d}" for n in range(1, 100)]
+        assert _collapse_enum_to_ranges(values) == ["cv01–cv99"]
+
+    def test_full_consecutive_run_with_no_prefix(self):
+        values = [f"{n:02d}" for n in range(1, 100)]
+        assert _collapse_enum_to_ranges(values) == ["01–99"]
+
+    def test_gap_produces_two_ranges(self):
+        values = [f"cv{n:02d}" for n in range(1, 21)] + [f"cv{n:02d}" for n in range(51, 100)]
+        assert _collapse_enum_to_ranges(values) == ["cv01–cv20", "cv51–cv99"]
+
+    def test_non_numeric_values_never_collapse(self):
+        assert _collapse_enum_to_ranges(["add", "delete", "modify"]) is None
+
+    def test_mixed_digit_width_never_collapses(self):
+        assert _collapse_enum_to_ranges(["cv1", "cv02"]) is None
+
+    def test_mixed_prefix_never_collapses(self):
+        assert _collapse_enum_to_ranges(["cv01", "sc02"]) is None
+
+    def test_single_value_stays_a_single_token_no_dash(self):
+        assert _collapse_enum_to_ranges(["cv01"]) == ["cv01"]
+
+    def test_two_consecutive_values_collapse_to_one_range(self):
+        assert _collapse_enum_to_ranges(["cv01", "cv02"]) == ["cv01–cv02"]
+
+    def test_two_non_consecutive_values_stay_two_tokens(self):
+        assert _collapse_enum_to_ranges(["cv01", "cv05"]) == ["cv01", "cv05"]
+
+    def test_unordered_input_is_sorted_before_grouping(self):
+        assert _collapse_enum_to_ranges(["cv03", "cv01", "cv02"]) == ["cv01–cv03"]
+
+    def test_duplicate_values_are_deduped_not_rejected(self):
+        assert _collapse_enum_to_ranges(["cv01", "cv01", "cv02"]) == ["cv01–cv02"]
+
+    def test_empty_list_returns_none(self):
+        assert _collapse_enum_to_ranges([]) is None
+
+
+@pytest.mark.asyncio
+async def test_para_caveat_and_security_classification_render_as_ranges(client):
+    """Real data (docs request's own edge case): <para> in S1000D 4.2 has
+    @caveat (cv01..cv99) and @securityClassification (01..99), both a
+    clean 99-value consecutive sequence -- collapsed to a single range
+    token each, never truncated (a range represents the complete list by
+    construction, so truncation would be actively wrong here). @changeType
+    (add/delete/modify) is NOT a numeric sequence, so it must render
+    completely unchanged -- confirms the collapsing is selective, not a
+    blanket reformat of every enum."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 4.2", "names": "para"}, headers=_headers(user)
+    )
+    assert res.status_code == 200
+    variant = res.json()["cards"]["para"]["variants"][0]
+    attrs = {a["name"]: a for a in variant["attributes"]}
+
+    assert attrs["caveat"]["enum"] == ["cv01–cv99"]
+    assert attrs["caveat"]["enum_truncated"] is False
+    assert attrs["securityClassification"]["enum"] == ["01–99"]
+    assert attrs["securityClassification"]["enum_truncated"] is False
+    assert attrs["changeType"]["enum"] == ["add", "delete", "modify"]
+    assert attrs["changeType"]["enum_truncated"] is False
