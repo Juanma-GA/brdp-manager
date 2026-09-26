@@ -16,50 +16,6 @@ import SortableHeader from '../components/SortableHeader';
 import TemporaryPasswordModal from '../components/TemporaryPasswordModal';
 import styles from './SettingsPage.module.css';
 
-// Naming-convention tip round, point 7: the reverse of the naming-tip
-// banner's (RecordsPage.jsx) "Don't show again" -- both PATCH the same
-// server-side field (users.hide_naming_tip), so an account with it
-// already False (never hidden, or already reactivated) sees a plain
-// status line instead of a redundant button that would PATCH a no-op.
-function NamingTipSection({ user, onUserUpdated }) {
-  const { t } = useTranslation();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-
-  const reactivate = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      const updated = await authFetchJson('/api/auth/me', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hide_naming_tip: false }),
-      });
-      onUserUpdated(updated);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className={styles.formGroup}>
-      <label className={styles.label}>{t('settings.profile.namingTips.title')}</label>
-      {user.hide_naming_tip ? (
-        <>
-          <Button type="button" onClick={reactivate} disabled={saving}>
-            {saving ? t('settings.profile.saving') : t('settings.profile.namingTips.reactivate')}
-          </Button>
-          {error && <p className={styles.statusInvalid}>{error}</p>}
-        </>
-      ) : (
-        <p className={styles.fieldDescription}>{t('settings.profile.namingTips.currentlyShown')}</p>
-      )}
-    </div>
-  );
-}
-
 function ProfileSection({ user, onUserUpdated }) {
   const { t } = useTranslation();
   const [displayName, setDisplayName] = useState(user.display_name);
@@ -145,7 +101,6 @@ function ProfileSection({ user, onUserUpdated }) {
             {saving ? t('settings.profile.saving') : t('settings.profile.save')}
           </Button>
         </form>
-        <NamingTipSection user={user} onUserUpdated={onUserUpdated} />
         <ChangePasswordForm withDivider />
       </div>
     </details>

@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { authFetchJson } from '../services/apiClient';
-import { useAuthContext } from '../context/AuthContext';
 import { sendMessage } from '../api/llmAPI';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
@@ -24,6 +23,7 @@ import {
   formatWrongTypeMessage,
   hashVocabInputText,
   loadSchemaVocabulary,
+  resolvePhraseCandidates,
 } from '../utils/vocabularyCheck.js';
 import styles from './RecordsPage.module.css';
 
@@ -462,26 +462,34 @@ function ReferenceRow({ candidate, showScore, showProposal, danger, expanded, on
   );
 }
 
-// Naming-convention tip round: pure wrapper around
-// extractContextCandidates(text).renamable, so every field that wants the
-// "Did you mean `<x>`?" correction (docs request point 8) calls the same
-// one function rather than each re-deriving it -- never gated by the
-// session tip's dismissed state (a concrete correction, not the general
-// hint), so it's computed straight from the field's own text on every
-// render (cheap, pure regex work, same as elsewhere on this page).
-function renameSuggestionsFor(text) {
-  return extractContextCandidates(text || '').renamable;
+// Follow-up round ("consejo de nombres sin falsos positivos"): pure
+// wrapper around extractContextCandidates(text).phraseCandidates +
+// resolvePhraseCandidates(..., vocabulary), so every field that wants the
+// "Did you mean `<x>`?" correction calls the same one function rather
+// than each re-deriving it -- never gated by the session tip's dismissed
+// state (a concrete correction, not the general hint). `vocabulary` is
+// the already-loaded {elements,attributes} Sets for this project's
+// standard (see the `vocabulary` state above) -- a phrase-triggered word
+// only ever becomes a suggestion when it genuinely resolves against it;
+// an unresolvable one (a real adjective/verb the trigger word happened to
+// sit next to, e.g. "atributos seleccionados") is silently dropped, never
+// shown as a suggestion NOR as a red warning.
+function renameSuggestionsFor(text, vocabulary) {
+  if (!vocabulary) return [];
+  const { phraseCandidates } = extractContextCandidates(text || '');
+  return resolvePhraseCandidates(phraseCandidates, vocabulary);
 }
 
-// Docs request (naming-convention tip round), 5-7: a discreet, non-modal
-// box shown next to a field the FIRST time the user focuses/types into
-// Title, Definition, Proposal (BRDP panel or Add BRDP) or the Ask
-// question -- once per session (state owned by the caller, see
-// namingTipAnchor below), unless permanently dismissed. "Got it" hides it
-// until the next session; "Don't show again" persists server-side (per
-// account, HR1 -- never localStorage) via PATCH /api/auth/me and never
-// shows again on any device until reversed from Settings > Profile.
-function NamingTip({ standard, onGotIt, onDontShowAgain }) {
+// Docs request (naming-convention tip round), follow-up ("sin Don't show
+// again"): a discreet, non-modal box shown next to a field the FIRST time
+// the user focuses/types into Title, Definition, Proposal (BRDP panel or
+// Add BRDP) or the Ask question -- once per session (state owned by the
+// caller, see namingTipAnchor above). "Got it" is the only dismissal --
+// it hides the tip until the next session (a fresh page load), never
+// persisted anywhere (HR1) -- the tip is a genuinely useful reminder in
+// an app used only sporadically, so the user decided it should always
+// come back rather than be permanently silenceable.
+function NamingTip({ standard, onGotIt }) {
   const { t } = useTranslation();
   return (
     <div className={styles.namingTip}>
@@ -490,23 +498,18 @@ function NamingTip({ standard, onGotIt, onDontShowAgain }) {
         <button type="button" className={styles.linkButton} onClick={onGotIt}>
           {t('records.namingTip.gotIt')}
         </button>
-        <button type="button" className={styles.linkButton} onClick={onDontShowAgain}>
-          {t('records.namingTip.dontShowAgain')}
-        </button>
       </div>
     </div>
   );
 }
 
-// One "Did you mean `<x>`?" chip per renamable candidate -- applying it
-// rewrites `text` (wrapping the first bare occurrence) via the passed
+// One "Did you mean `<x>`?" chip per resolved phrase candidate -- applying
+// it rewrites `text` (wrapping the first bare occurrence) via the passed
 // setter, which for the BRDP detail panel is a combined local-state-plus-
-// save (see the title/definition/proposal fields below) so the big
-// vocabulary notice updates immediately, matching the docs request's own
-// edge case ("el aviso de vocabulario se actualiza").
-function RenameSuggestions({ text, onApply }) {
+// save (see the title/definition/proposal fields below).
+function RenameSuggestions({ text, vocabulary, onApply }) {
   const { t } = useTranslation();
-  const suggestions = renameSuggestionsFor(text);
+  const suggestions = renameSuggestionsFor(text, vocabulary);
   if (suggestions.length === 0) return null;
   return (
     <div className={styles.renameSuggestions}>
@@ -628,48 +631,54 @@ export default function RecordsPage() {
   const canEdit = project.effective_role === 'editor';
   const ruleFormat = STANDARD_TO_RULE_FORMAT[project.standard];
 
-  // Naming-convention tip round: `user.hide_naming_tip` is the permanent,
-  // server-side "Don't show again" (HR1 -- never localStorage), read from
-  // the same AuthContext SettingsPage already uses for Display name/
-  // Language. `namingTipAnchor` is which field (if any) is CURRENTLY
-  // showing the tip -- 'title' | 'definition' | 'proposal' | 'ask' | null,
-  // at most one at a time. `namingTipSessionSeenRef` is the "once per
-  // session" latch (docs request: "una sola vez por sesión" is ONE tip
-  // total, not one per field -- confirmed by the edge case "primera
-  // escritura -> aparece; segunda -> no", which doesn't say "segunda en
-  // OTRO campo"): set the instant the tip is triggered anywhere, so no
-  // other field can trigger a second one later in the same session, with
-  // or without the user ever dismissing the first.
-  const { user, updateUser } = useAuthContext();
+  // Naming-convention tip round, follow-up ("sin Don't show again"): the
+  // user decided the tip is a genuinely useful reminder in an app used
+  // only sporadically, so it always comes back next session -- the
+  // permanent, server-side dismissal is gone entirely (users.hide_
+  // naming_tip dropped, migration 0016). `namingTipAnchor` is which field
+  // (if any) is CURRENTLY showing the tip -- 'title' | 'definition' |
+  // 'proposal' | 'ask' | null, at most one at a time. `namingTipSessionSeenRef`
+  // is the "once per session" latch (docs request: "una sola vez por
+  // sesión" is ONE tip total, not one per field -- confirmed by the edge
+  // case "primera escritura -> aparece; segunda -> no", which doesn't say
+  // "segunda en OTRO campo"): set the instant the tip is triggered
+  // anywhere, so no other field can trigger a second one later in the
+  // same session. "Got it" is the only dismissal left -- it hides the tip
+  // until the next session (a fresh page load resets the ref), never
+  // persisted anywhere (HR1).
   const [namingTipAnchor, setNamingTipAnchor] = useState(null);
   const namingTipSessionSeenRef = useRef(false);
 
   const triggerNamingTip = (field) => {
-    if (namingTipSessionSeenRef.current || user?.hide_naming_tip) return;
+    if (namingTipSessionSeenRef.current) return;
     namingTipSessionSeenRef.current = true;
     setNamingTipAnchor(field);
   };
 
   const dismissNamingTipForSession = () => setNamingTipAnchor(null);
 
-  const dismissNamingTipForever = async () => {
-    setNamingTipAnchor(null);
-    try {
-      const updated = await authFetchJson('/api/auth/me', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hide_naming_tip: true }),
+  // Follow-up round ("sin falsos positivos"): the real schema vocabulary
+  // for this project's standard, loaded once and kept in state so the
+  // "Did you mean" suggestion (resolvePhraseCandidates, vocabularyCheck.js)
+  // can be computed SYNCHRONOUSLY on every render of every field -- unlike
+  // the big red notice (recomputeVocabResult below), which only needs to
+  // run on selection/save and can afford to be async. `loadSchemaVocabulary`
+  // caches by file internally, so this is cheap even across many BRDPs of
+  // the same project.
+  const [vocabulary, setVocabulary] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadSchemaVocabulary(project.standard)
+      .then((v) => {
+        if (!cancelled) setVocabulary(v);
+      })
+      .catch(() => {
+        if (!cancelled) setVocabulary(null);
       });
-      updateUser(updated);
-    } catch {
-      // Best-effort: the tip is already hidden for the rest of this
-      // session either way (namingTipSessionSeenRef is already latched,
-      // setNamingTipAnchor(null) already ran above) -- only the
-      // cross-session/cross-device persistence would be missing, and the
-      // user can always dismiss it again next session if this PATCH
-      // failed silently.
-    }
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [project.standard]);
 
   // On-demand embeddings (docs request): Suggest Definition/Proposal/Rule
   // needs real pgvector precedent, so it stays gated behind whatever is
@@ -1894,10 +1903,9 @@ export default function RecordsPage() {
                 <NamingTip
                   standard={project.standard}
                   onGotIt={dismissNamingTipForSession}
-                  onDontShowAgain={dismissNamingTipForever}
                 />
               )}
-              <RenameSuggestions text={newBrdpTitle} onApply={setNewBrdpTitle} />
+              <RenameSuggestions text={newBrdpTitle} vocabulary={vocabulary} onApply={setNewBrdpTitle} />
 
               <label className={styles.fieldLabel}>{t('records.fieldDefinition')}</label>
               <textarea
@@ -1913,10 +1921,9 @@ export default function RecordsPage() {
                 <NamingTip
                   standard={project.standard}
                   onGotIt={dismissNamingTipForSession}
-                  onDontShowAgain={dismissNamingTipForever}
                 />
               )}
-              <RenameSuggestions text={newBrdpDefinition} onApply={setNewBrdpDefinition} />
+              <RenameSuggestions text={newBrdpDefinition} vocabulary={vocabulary} onApply={setNewBrdpDefinition} />
 
               <label className={styles.fieldLabel}>{t('records.fieldProposal')}</label>
               <textarea
@@ -1932,10 +1939,9 @@ export default function RecordsPage() {
                 <NamingTip
                   standard={project.standard}
                   onGotIt={dismissNamingTipForSession}
-                  onDontShowAgain={dismissNamingTipForever}
                 />
               )}
-              <RenameSuggestions text={newBrdpProposal} onApply={setNewBrdpProposal} />
+              <RenameSuggestions text={newBrdpProposal} vocabulary={vocabulary} onApply={setNewBrdpProposal} />
               <p className={styles.hint}>{t('records.vocabHint')}</p>
 
               <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
@@ -2027,12 +2033,12 @@ export default function RecordsPage() {
                 <NamingTip
                   standard={project.standard}
                   onGotIt={dismissNamingTipForSession}
-                  onDontShowAgain={dismissNamingTipForever}
                 />
               )}
               {canEdit && (
                 <RenameSuggestions
                   text={selected.title}
+                  vocabulary={vocabulary}
                   onApply={(newText) => {
                     setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, title: newText } : b)));
                     handleUpdate(selected.id, { title: newText });
@@ -2055,12 +2061,12 @@ export default function RecordsPage() {
                 <NamingTip
                   standard={project.standard}
                   onGotIt={dismissNamingTipForSession}
-                  onDontShowAgain={dismissNamingTipForever}
                 />
               )}
               {canEdit && (
                 <RenameSuggestions
                   text={selected.definition}
+                  vocabulary={vocabulary}
                   onApply={(newText) => {
                     setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, definition: newText } : b)));
                     handleUpdate(selected.id, { definition: newText });
@@ -2083,12 +2089,12 @@ export default function RecordsPage() {
                 <NamingTip
                   standard={project.standard}
                   onGotIt={dismissNamingTipForSession}
-                  onDontShowAgain={dismissNamingTipForever}
                 />
               )}
               {canEdit && (
                 <RenameSuggestions
                   text={selected.proposal}
+                  vocabulary={vocabulary}
                   onApply={(newText) => {
                     setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: newText } : b)));
                     handleUpdate(selected.id, { proposal: newText });
@@ -2318,7 +2324,6 @@ export default function RecordsPage() {
                   <NamingTip
                     standard={project.standard}
                     onGotIt={dismissNamingTipForSession}
-                    onDontShowAgain={dismissNamingTipForever}
                   />
                 )}
 

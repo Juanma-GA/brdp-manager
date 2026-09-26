@@ -1,25 +1,25 @@
-// Verification for "aviso de convención de nombres" (docs request, points
-// 5-8): the naming-tip banner shown once per session near Title/
-// Definition/Proposal (BRDP panel + Add BRDP form) and the Ask question,
-// its "Got it"/"Don't show again" buttons, server-side persistence of
-// "Don't show again" (users.hide_naming_tip), Settings > Profile's
-// reactivation action, and the contextual "Did you mean `<x>`?"
-// correction suggestion. Confirms, through the real running app + real
-// Postgres:
-//   1. First focus/type in ANY of Title/Definition/Proposal/Ask shows the
-//      tip; a second field touched in the SAME session does not show it
-//      again (it's one tip total per session, not one per field).
-//   2. "Got it" hides it; reloading the page (a new session) shows it
-//      again on the next field touch.
-//   3. "Don't show again" persists server-side -- stays hidden across a
-//      reload AND across a fresh login (this app's stand-in for "another
-//      browser", same convention as test_auth.py's own
-//      preferred_language test).
-//   4. Settings > Profile's "Show naming tips again" reverses it -- a
-//      fresh login after that shows the tip again on the next field touch.
-//   5. "Did you mean `<pokemon>`?" appears for unmarked "el elemento
-//      pokemon" phrasing; clicking it rewrites the field to "el elemento
-//      <pokemon>" and the big vocabulary notice updates immediately.
+// Verification for "consejo de nombres sin Don't show again y sugerencias
+// contextuales sin falsos positivos" (docs request), covering the parts
+// of the naming-tip round that survive this reversal PLUS the new
+// vocabulary-gated "Did you mean" behavior. Confirms, through the real
+// running app + real Postgres (no LLM calls involved in any of this --
+// no mock needed):
+//   1. The tip still appears once per session (first focus/type in ANY of
+//      Title/Definition/Proposal/Ask), never a second time in the same
+//      session even on a different field, and comes back after a real
+//      reload (a new session).
+//   2. "Don't show again" no longer exists anywhere -- confirmed by its
+//      absence from the DOM (there is exactly one button in the tip now).
+//   3. "Did you mean" only ever appears for a phrase-triggered bare word
+//      that genuinely resolves against the real vocabulary: a same-type
+//      match (applicRefId, a real attribute) suggests with that type; a
+//      wrong-type match (table, triggered as an attribute but really an
+//      element) suggests with the CORRECTED type; applying either
+//      rewrites the field and persists to Postgres.
+//   4. The exact real-report false positive is fixed: "Atributos
+//      seleccionados para la etiqueta <stranger>." shows the red banner
+//      ONLY for <stranger> (never for "seleccionados"), and offers no
+//      "Did you mean" suggestion for "seleccionados" either.
 import { chromium } from "playwright-core";
 
 const BASE_URL = "http://localhost:5173";
@@ -85,32 +85,26 @@ async function main() {
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const suffix = Math.random().toString(36).slice(2, 8);
 
-  // Reset hide_naming_tip to a known state (false) before this run --
-  // some earlier round/script may have left it set.
-  await fetch(`${API}/api/auth/me`, {
-    method: "PATCH",
-    headers: auth,
-    body: JSON.stringify({ hide_naming_tip: false }),
-  });
-
   const proj = await makeProject(auth, `Naming Tip Verify ${suffix}`, "S1000D 4.2");
+  await makeBrdp(auth, proj.id, { identifier: "BRDP-TIP-FIRST", title: "First field", definition: "", proposal: "", validation: "Pending" });
+  await makeBrdp(auth, proj.id, { identifier: "BRDP-TIP-SECOND", title: "Second field, same session", definition: "", proposal: "", validation: "Pending" });
   await makeBrdp(auth, proj.id, {
-    identifier: "BRDP-TIP-A",
-    title: "First field",
-    definition: "",
+    identifier: "BRDP-TIP-APPLICREFID",
+    title: "Same-type suggestion check",
+    definition: "el atributo applicRefId debe indicarse siempre",
     proposal: "",
     validation: "Pending",
   });
   await makeBrdp(auth, proj.id, {
-    identifier: "BRDP-TIP-B",
-    title: "Second field, same session",
-    definition: "",
+    identifier: "BRDP-TIP-TABLE",
+    title: "Wrong-type correction check",
+    definition: "el atributo table debe existir",
     proposal: "",
     validation: "Pending",
   });
   await makeBrdp(auth, proj.id, {
-    identifier: "BRDP-TIP-RENAME",
-    title: "Did you mean check",
+    identifier: "BRDP-TIP-NOFALSEPOS",
+    title: "Atributos seleccionados para la etiqueta <stranger>.",
     definition: "",
     proposal: "",
     validation: "Pending",
@@ -118,52 +112,39 @@ async function main() {
 
   const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
   try {
-    // ==== 1+2. First touch shows the tip; second field in the same
-    // session doesn't; "Got it" hides it; reload (new session) shows it
-    // again on the next touch. ====
+    // ==== 1+2. Session mechanics + "Don't show again" gone ====
     {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
       await login(page);
-      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-A");
+      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-FIRST");
 
       assert((await page.locator(`text=${TIP_TEXT_MARKER}`).count()) === 0, "tip not shown before any field is touched");
       const titleInput = page.locator('label:text-is("Title") + input');
       await titleInput.click();
       await page.waitForSelector(`text=${TIP_TEXT_MARKER}`, { timeout: 3000 });
       assert(true, "tip appears on the FIRST focus of Title");
-      await page.screenshot({ path: "/tmp/naming-tip-shown.png", fullPage: true });
-      console.log("Screenshot (tip shown on first focus): /tmp/naming-tip-shown.png");
 
-      // A second, DIFFERENT field (Definition) in the SAME session must
-      // NOT show a second tip -- "una sola vez por sesión" is one tip
-      // total, not one per field.
+      assert((await page.getByRole("button", { name: "Don't show again" }).count()) === 0, '"Don\'t show again" button no longer exists anywhere in the DOM');
+      assert((await page.getByRole("button", { name: "Got it" }).count()) === 1, 'exactly one "Got it" button remains');
+      await page.screenshot({ path: "/tmp/naming-tip-shown-single-button.png", fullPage: true });
+      console.log("Screenshot (tip shown, single Got it button): /tmp/naming-tip-shown-single-button.png");
+
       const gotIt = page.getByRole("button", { name: "Got it" });
       await gotIt.click();
       await page.waitForSelector(`text=${TIP_TEXT_MARKER}`, { state: "detached", timeout: 3000 });
-      const definitionTextarea = page.locator('label:text-is("Definition") + textarea');
-      await definitionTextarea.click();
-      await page.waitForTimeout(300);
-      assert(
-        (await page.locator(`text=${TIP_TEXT_MARKER}`).count()) === 0,
-        "tip does NOT reappear on a second, different field in the same session, even after Got it"
-      );
 
       // A different row WITHIN THE SAME records page (no full navigation,
-      // still the same session -- page.goto() would itself be a hard
-      // reload and reset the session ref, which is not what this step
-      // means to test) -- tip still must not reappear.
-      await page.locator("tr", { hasText: "BRDP-TIP-B" }).click();
+      // still the same session) -- tip still must not reappear.
+      await page.locator("tr", { hasText: "BRDP-TIP-SECOND" }).click();
       await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
       await page.locator('label:text-is("Title") + input').click();
       await page.waitForTimeout(300);
       assert((await page.locator(`text=${TIP_TEXT_MARKER}`).count()) === 0, "tip still does not reappear on a different BRDP's Title, same session (no reload)");
 
-      // Reload -- a NEW session (namingTipSessionSeenRef lives only in
-      // React state/refs, reset on every full page load) -- the tip must
-      // appear again on the next touch.
+      // Reload -- a NEW session -- the tip must appear again on the next touch.
       await page.reload();
       await page.waitForSelector("tbody tr", { timeout: 20000 });
-      await page.locator("tr", { hasText: "BRDP-TIP-B" }).click();
+      await page.locator("tr", { hasText: "BRDP-TIP-SECOND" }).click();
       await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
       await page.locator('label:text-is("Title") + input').click();
       await page.waitForSelector(`text=${TIP_TEXT_MARKER}`, { timeout: 3000 });
@@ -171,132 +152,82 @@ async function main() {
       await page.close();
     }
 
-    // ==== 3. "Don't show again" persists server-side -- survives reload
-    // AND a fresh login. ====
+    // ==== 3a. Same-type suggestion: applicRefId (real attribute) ====
     {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
       await login(page);
-      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-A");
-      await page.locator('label:text-is("Title") + input').click();
-      await page.waitForSelector(`text=${TIP_TEXT_MARKER}`, { timeout: 3000 });
-      await page.getByRole("button", { name: "Don't show again" }).click();
-      await page.waitForSelector(`text=${TIP_TEXT_MARKER}`, { state: "detached", timeout: 3000 });
+      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-APPLICREFID");
 
-      const meAfterDontShow = await fetch(`${API}/api/auth/me`, { headers: auth }).then((r) => r.json());
-      assert(meAfterDontShow.hide_naming_tip === true, "PATCH hide_naming_tip:true really persisted to Postgres");
-
-      // Same browser, reload -- must stay hidden.
-      await page.reload();
-      await page.waitForSelector("table", { timeout: 10000 });
-      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-B");
-      await page.locator('label:text-is("Title") + input').click();
-      await page.waitForTimeout(300);
-      assert((await page.locator(`text=${TIP_TEXT_MARKER}`).count()) === 0, "tip stays hidden across a reload after Don't show again");
-      await page.close();
-
-      // A FRESH login (this app's stand-in for "a different browser",
-      // same convention as test_auth.py's preferred_language test) --
-      // must ALSO stay hidden, confirming it's a per-account server
-      // setting, not per-browser state.
-      const page2 = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
-      await login(page2);
-      await openRecords(page2, `Naming Tip Verify ${suffix}`, "BRDP-TIP-A");
-      await page2.locator('label:text-is("Title") + input').click();
-      await page2.waitForTimeout(300);
-      assert((await page2.locator(`text=${TIP_TEXT_MARKER}`).count()) === 0, "tip stays hidden on a genuinely fresh login too -- server-side, per account");
-      await page2.close();
-    }
-
-    // ==== 4. Settings > Profile reactivates it. ====
-    {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
-      await login(page);
-      await page.goto(`${BASE_URL}/settings`);
-      await page.waitForSelector("text=Profile", { timeout: 10000 });
-      await page.getByText("Profile", { exact: true }).click();
-      await page.waitForSelector("text=Show naming tips again", { timeout: 5000 });
-      await page.getByRole("button", { name: "Show naming tips again" }).click();
-      await page.waitForSelector("text=Naming tips are shown.", { timeout: 5000 });
-
-      const meAfterReactivate = await fetch(`${API}/api/auth/me`, { headers: auth }).then((r) => r.json());
-      assert(meAfterReactivate.hide_naming_tip === false, "Settings > Profile's action really PATCHed hide_naming_tip back to false");
-      await page.screenshot({ path: "/tmp/naming-tip-settings-reactivate.png", fullPage: true });
-      console.log("Screenshot (Settings > Profile reactivation): /tmp/naming-tip-settings-reactivate.png");
-      await page.close();
-
-      // A fresh login after reactivating -- the tip is back.
-      const page2 = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
-      await login(page2);
-      await openRecords(page2, `Naming Tip Verify ${suffix}`, "BRDP-TIP-A");
-      await page2.locator('label:text-is("Title") + input').click();
-      await page2.waitForSelector(`text=${TIP_TEXT_MARKER}`, { timeout: 3000 });
-      assert(true, "reactivating from Settings brings the tip back on a fresh login");
-      await page2.close();
-    }
-
-    // ==== 5. Contextual "Did you mean `<pokemon>`?" correction. ====
-    {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
-      await login(page);
-      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-RENAME");
-
-      const definitionTextarea = page.locator('label:text-is("Definition") + textarea');
-      await definitionTextarea.fill("el elemento pokemon debe evitarse");
-      await page.waitForSelector("text=/Did you mean/", { timeout: 3000 });
-      const suggestionButton = page.getByRole("button", { name: "Did you mean <pokemon>?", exact: true });
-      assert((await suggestionButton.count()) > 0, 'exact "Did you mean <pokemon>?" suggestion chip appears under Definition, live as you type -- no save needed');
-      // The big vocabulary notice itself is only recomputed on selection
-      // and on save (never on every keystroke) -- blur to save this
-      // typed text first, then it should already show "pokemon" as not
-      // found (bare, from the phrase-trigger candidate), even before the
-      // "Did you mean" fix is applied.
-      await definitionTextarea.blur();
-      await page.waitForSelector("text=/This BRDP mentions names not found in the S1000D 4.2 schema/", { timeout: 5000 });
+      const suggestionButton = page.getByRole("button", { name: "Did you mean @applicRefId?", exact: true });
+      await suggestionButton.waitFor({ timeout: 3000 });
+      assert(true, 'exact "Did you mean @applicRefId?" suggestion appears for the real attribute, live, no save needed');
 
       await suggestionButton.click();
       await page.waitForTimeout(400);
+      const definitionTextarea = page.locator('label:text-is("Definition") + textarea');
       const newValue = await definitionTextarea.inputValue();
-      assert(newValue === "el elemento <pokemon> debe evitarse", `clicking the suggestion rewrites the field to wrap pokemon in <> (got: "${newValue}")`);
-      assert(
-        (await page.getByRole("button", { name: "Did you mean <pokemon>?", exact: true }).count()) === 0,
-        "the suggestion chip itself disappears once applied (pokemon is no longer bare)"
-      );
-      // The vocabulary notice must still show <pokemon> as not found
-      // (still absent from S1000D 4.2 -- only its SPELLING changed from
-      // bare to marked-up, the schema verdict is the same either way) --
-      // confirms the recompute happened immediately, without any
-      // Ask/Suggest click, straight off the blur-triggered save.
-      await page.waitForSelector("text=/This BRDP mentions names not found in the S1000D 4.2 schema/", { timeout: 3000 });
-      const afterFixText = await page
+      assert(newValue === "el atributo @applicRefId debe indicarse siempre", `clicking the suggestion wraps applicRefId in @... (got: "${newValue}")`);
+      assert((await page.getByRole("button", { name: "Did you mean @applicRefId?", exact: true }).count()) === 0, "the suggestion chip disappears once applied");
+
+      await page.reload();
+      await page.waitForSelector("tbody tr", { timeout: 20000 });
+      await page.locator("tr", { hasText: "BRDP-TIP-APPLICREFID" }).click();
+      await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
+      const persisted = await page.locator('label:text-is("Definition") + textarea').inputValue();
+      assert(persisted === "el atributo @applicRefId debe indicarse siempre", "the correction survives a reload -- persisted to Postgres");
+      await page.screenshot({ path: "/tmp/naming-tip-same-type-suggestion.png", fullPage: true });
+      console.log("Screenshot (same-type suggestion applied): /tmp/naming-tip-same-type-suggestion.png");
+      await page.close();
+    }
+
+    // ==== 3b. Wrong-type correction: "table" triggered as attribute, really an element ====
+    {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+      await login(page);
+      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-TABLE");
+
+      const suggestionButton = page.getByRole("button", { name: "Did you mean <table>?", exact: true });
+      await suggestionButton.waitFor({ timeout: 3000 });
+      assert(true, '"el atributo table" -> suggestion offers the CORRECTED type, "Did you mean <table>?", never "@table"');
+      assert((await page.getByRole("button", { name: "Did you mean @table?", exact: true }).count()) === 0, "the wrong (attribute) spelling is never offered");
+
+      await suggestionButton.click();
+      await page.waitForTimeout(400);
+      const newValue = await page.locator('label:text-is("Definition") + textarea').inputValue();
+      assert(newValue === "el atributo <table> debe existir", `clicking the suggestion wraps table in <...> despite the attribute trigger (got: "${newValue}")`);
+      await page.screenshot({ path: "/tmp/naming-tip-wrong-type-correction.png", fullPage: true });
+      console.log("Screenshot (wrong-type correction applied): /tmp/naming-tip-wrong-type-correction.png");
+      await page.close();
+    }
+
+    // ==== 4. The exact real-report false positive is fixed ====
+    {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+      await login(page);
+      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-NOFALSEPOS");
+
+      await page.waitForSelector("text=/This BRDP mentions names not found in the S1000D 4.2 schema/", { timeout: 5000 });
+      const bannerText = await page
         .locator("text=/This BRDP mentions names not found in the S1000D 4.2 schema/")
         .first()
         .textContent();
-      assert(afterFixText.includes("<pokemon>"), `vocabulary notice updates immediately and still names <pokemon> (got: ${afterFixText})`);
-      await page.screenshot({ path: "/tmp/naming-tip-did-you-mean.png", fullPage: true });
-      console.log("Screenshot (Did you mean applied): /tmp/naming-tip-did-you-mean.png");
+      assert(bannerText.includes("<stranger>"), `banner names <stranger> (got: ${bannerText})`);
+      assert(!bannerText.toLowerCase().includes("seleccionad"), `banner never mentions "seleccionados" (got: ${bannerText})`);
 
-      // Confirms the correction was really SAVED (not just local state) --
-      // reload and re-check.
-      await page.reload();
-      await page.waitForSelector("table", { timeout: 10000 });
-      await openRecords(page, `Naming Tip Verify ${suffix}`, "BRDP-TIP-RENAME");
-      const persistedValue = await page.locator('label:text-is("Definition") + textarea').inputValue();
-      assert(persistedValue === "el elemento <pokemon> debe evitarse", "the correction survives a reload -- persisted to Postgres");
+      assert(
+        (await page.getByRole("button", { name: /Did you mean/ }).count()) === 0,
+        'no "Did you mean" suggestion of any kind for this BRDP ("seleccionados" does not resolve against the real vocabulary)'
+      );
+      await page.screenshot({ path: "/tmp/naming-tip-real-report-fixed.png", fullPage: true });
+      console.log("Screenshot (real report false positive fixed): /tmp/naming-tip-real-report-fixed.png");
       await page.close();
     }
 
     console.log("\nALL CHECKS PASSED\n");
   } finally {
     await browser.close();
-    // Leave hide_naming_tip reactivated (false) -- this script's own
-    // account-level side effect, reset for the next run/round.
-    await fetch(`${API}/api/auth/me`, {
-      method: "PATCH",
-      headers: auth,
-      body: JSON.stringify({ hide_naming_tip: false }),
-    }).catch(() => {});
     await fetch(`${API}/api/projects/${proj.id}`, { method: "DELETE", headers: auth }).catch(() => {});
-    console.log("Cleaned up the seeded project and reset hide_naming_tip.");
+    console.log("Cleaned up the seeded project.");
   }
 }
 

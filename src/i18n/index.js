@@ -242,7 +242,6 @@ const resources = {
         namingTip: {
           text: "Tip: write element names as <element> and attributes as @attribute (e.g. <table>, @applicRefId). This lets the app check them against the {{standard}} schema.",
           gotIt: 'Got it',
-          dontShowAgain: "Don't show again",
         },
         didYouMean: 'Did you mean {{suggestion}}?',
         validationOptions: {
@@ -412,11 +411,6 @@ const resources = {
           globalRole: 'Global role',
           save: 'Save',
           saving: 'Saving…',
-          namingTips: {
-            title: 'Naming tips',
-            currentlyShown: 'Naming tips are shown.',
-            reactivate: 'Show naming tips again',
-          },
           changePassword: {
             title: 'Change password',
             sessionsWarning: 'Changing your password will sign you out of your other sessions.',
@@ -722,7 +716,6 @@ const resources = {
         namingTip: {
           text: 'Consejo: escribe los elementos como <elemento> y los atributos como @atributo (p. ej. <table>, @applicRefId). Así la app puede comprobarlos contra el esquema {{standard}}.',
           gotIt: 'Entendido',
-          dontShowAgain: 'No volver a mostrar',
         },
         didYouMean: '¿Quisiste decir {{suggestion}}?',
         validationOptions: {
@@ -892,11 +885,6 @@ const resources = {
           globalRole: 'Rol global',
           save: 'Guardar',
           saving: 'Guardando…',
-          namingTips: {
-            title: 'Consejos de nomenclatura',
-            currentlyShown: 'Los consejos de nomenclatura están activos.',
-            reactivate: 'Volver a mostrar los consejos de nomenclatura',
-          },
           changePassword: {
             title: 'Cambiar contraseña',
             sessionsWarning: 'Cambiar tu contraseña cerrará tu sesión en tus otros dispositivos.',

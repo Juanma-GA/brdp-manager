@@ -6,35 +6,43 @@
 // see checkAgainstVocabulary below).
 //
 // Real-Mistral follow-up round ("solo determinista, sin bloqueo, sin
-// referencias inventadas"): a SEPARATE prior LLM-extraction path used to
-// exist here (a temperature-0 call that guessed which words the text was
-// "talking about" as element/attribute names, before this function ever
-// judged existence). It is REMOVED entirely in this round -- confirmed
-// real with Mistral, it flagged ordinary technical-English vocabulary and
-// attribute VALUES from a real, correct catalog entry (BRDP-S1-00053:
-// "Data module change/revised ratio" -> `<change>`, `<data>`, `<marks>`,
-// `<module>`, `@changed`, `@revised`, none of which the text actually
-// names as an element/attribute) -- since almost the entire catalog is
-// written in ordinary technical English, that false-positive rate made
-// the "Possibly not in..." warning fire on most BRDPs regardless of the
-// stopword filter that used to sit in front of it. There is no
-// replacement heuristic for "guess what a word might mean" -- only the
-// deterministic path below, which requires actual evidence in the text
-// (`<x>`/`@x` markup, or a name explicitly introduced via "element .../
-// attribute ...") before ever calling a name a candidate at all.
+// referencias inventadas"): the LLM-guess extraction path was removed
+// entirely -- only the deterministic path below remains, which requires
+// actual evidence in the text (`<x>`/`@x` markup, or a name explicitly
+// introduced via "element .../attribute ...") before ever calling a name
+// a candidate at all.
 //
-// Same follow-up round, second real report (a real BRDP titled "lA
-// ETIQUETA <table> no lleva atributo de tipo cl, pl y de tipo ip si es de
-// valor 23"): the deterministic path itself had two real false positives
-// -- "lA" (an all-but-one-letter capitalized word, never intended as a
-// name) came from an over-loose camelCase pattern, and "tipo" (the
-// Spanish word for "type", not a name) came from the phrase-trigger
-// heuristic capturing the word immediately after "atributo de" without
-// skipping it. Neither is guessed at with an LLM; both are fixed
-// deterministically below (tighter camelCase pattern, a wider set of
-// words skipped after the trigger, and list capture so "atributo de tipo
-// cl, pl y de tipo ip" -- interleaved "de tipo" and all -- correctly
-// yields cl/pl/ip, not "tipo" or nothing at all).
+// Follow-up round ("consejo de nombres sin falsos positivos"): a real
+// report against this app -- "Atributos seleccionados para la etiqueta
+// <stranger>" -> "Did you mean `@seleccionados`?"; "Decidir qué atributos
+// usar en el elemento <stranger> y cómo usarlos." -> "Did you mean
+// `@usar`?" and "Did you mean `<c>`?" -- exposed two real bugs, both fixed
+// below, never with an LLM:
+//   (a) a phrase-triggered bare word ("seleccionados", "usar") was
+//       reported as a vocabulary WARNING (notFound) purely because it sat
+//       right after "atributo(s)"/"elemento(s)", even though in Spanish
+//       (and English) that word is very often an adjective or verb, not a
+//       name -- e.g. "atributos SELECCIONADOS", "atributos a USAR". Fixed
+//       by no longer letting a phrase-triggered candidate contribute to
+//       notFound/wrongType AT ALL -- it is used ONLY to offer a "Did you
+//       mean" suggestion, and only when the word actually resolves
+//       against the real vocabulary (see resolvePhraseCandidates below).
+//       A word that isn't in the vocabulary either way is silently
+//       ignored -- no warning, no suggestion (accepted limitation: "el
+//       elemento pokemon" -- a genuinely invented name -- gets nothing).
+//   (b) the tokenizer only matched ASCII letters ([A-Za-z]), so an
+//       accented word like "cómo" split into fragments ("c" + "mo") at
+//       the accented character -- and because the list-continuation
+//       feature (a previous round) treats "y"/"and"/etc. as continuing a
+//       trigger's candidate list, the single-letter fragment "c" (from
+//       "...elemento <stranger> y cómo...") got chained onto the
+//       "elemento" trigger's list as if it were a second candidate,
+//       producing the nonsensical "Did you mean `<c>`?". Fixed with a
+//       Unicode-aware tokenizer (`\p{L}` letters, digits, and the XML
+//       name characters -, _, .) so accented/composed words are always
+//       captured whole -- never fragmented -- combined with (a) above
+//       (even a whole, correctly-tokenized "cómo" would still resolve to
+//       nothing and be ignored, since it isn't in any real schema).
 export const STANDARD_TO_VOCABULARY_FILE = {
   'DITA 1.3 Xpath2.0': 'schema-vocabulary-dita.json',
   'DITA 1.3 Xpath3.0': 'schema-vocabulary-dita.json',
@@ -61,27 +69,25 @@ export async function loadSchemaVocabulary(standard) {
   return parsed;
 }
 
-// Deterministic context extraction -- the ONLY extraction path now.
+// Deterministic context extraction -- the ONLY extraction path.
 // - `elements`: whatever appears between `<...>` (opening or closing tag
 //   form), e.g. `<pokemon>`/`</pokemon>` -> "pokemon".
 // - `attributes`: whatever appears after `@`, e.g. `@conref` -> "conref".
-// - `ambiguous`: candidates whose category (element vs attribute) the
-//   surrounding text doesn't pin down with confidence, so (per
-//   checkAgainstVocabulary) they get checked against the UNION of both
-//   lists rather than guessing which one -- phrase-triggered words (see
-//   extractPhraseCandidates) and lower-camelCase words.
-// - `renamable`: the SAME phrase-triggered candidates as `ambiguous`, but
-//   WITH the type the trigger word itself implied ("elemento"/"element" ->
-//   'element', "atributo"/"attribute" -> 'attribute') and excluding any
-//   name that's already properly marked up elsewhere in the same text
-//   (already present in `elements`/`attributes`) -- used only for the
-//   "Did you mean `<x>`?" contextual correction, never for existence
-//   checking (that stays on `ambiguous`, unioned, exactly as before).
+// - `camelCase`: lower-camelCase words (e.g. "proceduralStep") -- checked
+//   against the UNION of elements+attributes by checkAgainstVocabulary,
+//   exactly like explicit markup, with its own "Not found" warning.
+// - `phraseCandidates`: words introduced via "elemento(s)/element(s)/
+//   atributo(s)/attribute(s)/etiqueta(s)/tag(s)" (see extractPhraseCandidates)
+//   -- NEVER checked for notFound/wrongType (follow-up round: too often an
+//   adjective or verb, not a name). Only used by resolvePhraseCandidates
+//   to build a "Did you mean" suggestion, and only for names that
+//   genuinely exist in the real vocabulary. Excludes any name already
+//   properly marked up elsewhere in the same text (already present in
+//   `elements`/`attributes`).
 export function extractContextCandidates(text) {
   const source = text || '';
   const elements = new Set();
   const attributes = new Set();
-  const ambiguous = new Set();
 
   let match;
   ELEMENT_ATTR_TAG_RE.lastIndex = 0;
@@ -90,21 +96,53 @@ export function extractContextCandidates(text) {
   ATTR_MARKER_RE.lastIndex = 0;
   while ((match = ATTR_MARKER_RE.exec(source))) attributes.add(match[1]);
 
-  const phraseCandidates = extractPhraseCandidates(source);
-  for (const c of phraseCandidates) ambiguous.add(c.name);
-  for (const w of extractCamelCaseCandidates(source)) ambiguous.add(w);
+  const camelCase = extractCamelCaseCandidates(source);
 
-  const renamable = [];
-  const seenRenamable = new Set();
-  for (const c of phraseCandidates) {
+  const rawPhraseCandidates = extractPhraseCandidates(source);
+  const phraseCandidates = [];
+  const seenPhrase = new Set();
+  for (const c of rawPhraseCandidates) {
     if (elements.has(c.name) || attributes.has(c.name)) continue; // already marked up somewhere in this text
     const key = `${c.type}:${c.name}`;
-    if (seenRenamable.has(key)) continue;
-    seenRenamable.add(key);
-    renamable.push({ name: c.name, type: c.type });
+    if (seenPhrase.has(key)) continue;
+    seenPhrase.add(key);
+    phraseCandidates.push({ name: c.name, type: c.type });
   }
 
-  return { elements: [...elements], attributes: [...attributes], ambiguous: [...ambiguous], renamable };
+  return { elements: [...elements], attributes: [...attributes], camelCase, phraseCandidates };
+}
+
+// Follow-up round ("sin falsos positivos"): the ONLY place a phrase-
+// triggered candidate can turn into anything user-visible -- a "Did you
+// mean" suggestion, NEVER a warning. A candidate resolves only if it
+// genuinely exists in the vocabulary, as EITHER kind:
+//   - exists as the kind the trigger implied ("atributo table" where
+//     `table` is a real attribute) -> suggested as that kind;
+//   - exists only as the OTHER kind ("atributo table" where `table` is
+//     really an element) -> suggested with the CORRECTED kind
+//     (`<table>`, never `@table`);
+//   - exists as neither -> dropped entirely, no suggestion, no warning
+//     (accepted limitation: a genuinely invented name like "pokemon"
+//     never gets a suggestion).
+// `vocabulary` may be null (standard with no generated vocabulary) -- in
+// that case nothing can be resolved, so this returns [] rather than
+// guessing.
+export function resolvePhraseCandidates(phraseCandidates, vocabulary) {
+  if (!vocabulary) return [];
+  const seen = new Set();
+  const resolved = [];
+  for (const c of phraseCandidates) {
+    if (seen.has(c.name)) continue;
+    const vocabSet = c.type === 'element' ? vocabulary.elements : vocabulary.attributes;
+    const otherSet = c.type === 'element' ? vocabulary.attributes : vocabulary.elements;
+    let type;
+    if (vocabSet.has(c.name)) type = c.type;
+    else if (otherSet.has(c.name)) type = c.type === 'element' ? 'attribute' : 'element';
+    else continue; // doesn't exist as either kind -- ignored entirely
+    seen.add(c.name);
+    resolved.push({ name: c.name, type });
+  }
+  return resolved;
 }
 
 // Rewrites `text` to wrap the first bare (not already `<...>`/`@...`-marked)
@@ -117,7 +155,7 @@ export function extractContextCandidates(text) {
 export function applyRenameSuggestion(text, suggestion) {
   const source = text || '';
   const escaped = suggestion.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`(?<![<@\\w])${escaped}(?!\\w)`);
+  const re = new RegExp(`(?<![<@\\w])${escaped}(?!\\w)`, 'u');
   const m = re.exec(source);
   if (!m) return source;
   const replacement = suggestion.type === 'element' ? `<${suggestion.name}>` : `@${suggestion.name}`;
@@ -126,15 +164,37 @@ export function applyRenameSuggestion(text, suggestion) {
 
 const ELEMENT_ATTR_TAG_RE = /<\/?([A-Za-z][\w-]*)[^>]*>/g;
 const ATTR_MARKER_RE = /@([A-Za-z][\w-]*)/g;
-const WORD_RE = /[A-Za-z][\w-]*|,/g;
+// Unicode-aware word tokenizer (follow-up round, point 3): letters in any
+// script (`\p{L}`), digits, and the XML name characters -, _, . -- so an
+// accented/composed word like "cómo"/"señal"/"utilizará" is always
+// captured as ONE token, never fragmented at the accented character (the
+// old ASCII-only [A-Za-z][\w-]* pattern broke "cómo" into "c" + "mo",
+// which the list-continuation feature below could then chain onto a
+// trigger's candidate list as a spurious single-letter "name").
+const WORD_RE = /[\p{L}][\p{L}\p{N}_.-]*|,/gu;
+const CAMEL_CASE_TOKEN_RE = /[\p{L}][\p{L}\p{N}_.-]*/gu;
 // Follow-up round, point 2: requires at least two lowercase letters before
 // the first uppercase one, AND a minimum total length of 5 -- "lA" (1
 // lowercase, then uppercase) no longer matches; "dmCode"/"dmRef"/
-// "proceduralStep"/"applicRefId" still do.
+// "proceduralStep"/"applicRefId" still do. The camelCase pattern itself
+// stays ASCII (a-z/A-Z) -- real camelCase identifiers in this app's
+// schemas are always ASCII; the Unicode-aware tokenizer above only
+// matters for not FRAGMENTING a word before this pattern is tested
+// against it.
 const CAMEL_CASE_RE = /^[a-z]{2,}[A-Z][A-Za-z0-9]*$/;
 const CAMEL_CASE_MIN_LENGTH = 5;
 
-const TRIGGER_WORDS = new Set(['elemento', 'elementos', 'element', 'elements', 'atributo', 'atributos', 'attribute', 'attributes']);
+// Follow-up round, point 4: "etiqueta(s)"/"tag(s)" are real synonyms for
+// "elemento(s)"/"element(s)" that a real user actually typed ("la
+// etiqueta <stranger>") -- added as element-type triggers, same
+// mechanism as the existing ones (the type-detection below only special-
+// cases the attribute-type spellings, so these fall through to 'element'
+// automatically, same as "elemento"/"element" already did).
+const TRIGGER_WORDS = new Set([
+  'elemento', 'elementos', 'element', 'elements',
+  'etiqueta', 'etiquetas', 'tag', 'tags',
+  'atributo', 'atributos', 'attribute', 'attributes',
+]);
 // Words skipped between a trigger word and the real candidate -- the
 // original connectors (articles/prepositions) PLUS, per the follow-up
 // round, the descriptive words a real report showed leaking through as
@@ -167,8 +227,8 @@ function skipSkipWords(tokens, idx) {
   return i;
 }
 
-// Phrase-trigger extraction with list capture (follow-up round, point 2):
-// the word following "elemento(s)/element(s)/atributo(s)/attribute(s)",
+// Phrase-trigger extraction with list capture: the word following
+// "elemento(s)/element(s)/atributo(s)/attribute(s)/etiqueta(s)/tag(s)",
 // skipping SKIP_WORDS between the trigger and the real candidate -- if a
 // SECOND trigger word is hit while skipping, the scan re-anchors on that
 // later trigger instead (e.g. "atributos del elemento pokemon" captures
@@ -177,16 +237,17 @@ function skipSkipWords(tokens, idx) {
 // ip"), skipping SKIP_WORDS again between each list separator and its
 // word, and stops at the first word that isn't a clean list continuation.
 // Each returned candidate carries `type` ('element' | 'attribute') from
-// the trigger word that started its list.
+// the trigger word that started its list. These candidates are ONLY ever
+// resolved into a suggestion (never a warning) -- see
+// resolvePhraseCandidates above.
 function extractPhraseCandidates(text) {
   const tokens = tokenize(text);
   const candidates = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (t.type !== 'word' || !TRIGGER_WORDS.has(t.value.toLowerCase())) continue;
-    const type = t.value.toLowerCase().startsWith('atributo') || t.value.toLowerCase().startsWith('attribute')
-      ? 'attribute'
-      : 'element';
+    const lower = t.value.toLowerCase();
+    const type = lower.startsWith('atributo') || lower.startsWith('attribute') ? 'attribute' : 'element';
 
     let j = skipSkipWords(tokens, i + 1);
     if (j >= tokens.length || tokens[j].type !== 'word') continue;
@@ -218,7 +279,7 @@ function extractPhraseCandidates(text) {
 }
 
 function extractCamelCaseCandidates(text) {
-  const tokens = (text.match(/[A-Za-z][\w-]*/g) || []);
+  const tokens = text.match(CAMEL_CASE_TOKEN_RE) || [];
   return tokens.filter((t) => t.length >= CAMEL_CASE_MIN_LENGTH && CAMEL_CASE_RE.test(t));
 }
 
@@ -228,12 +289,15 @@ function extractCamelCaseCandidates(text) {
 //
 // Returns { available, notFound, wrongType }:
 // - `notFound`: display strings (`<x>`/`@x`/bare) for names found via
-//   context extraction or explicit `<x>`/`@x` markup -- the only source of
-//   candidates now, so every finding here has real evidence in the text.
+//   explicit `<x>`/`@x` markup or camelCase -- the only two sources that
+//   feed this (follow-up round: phrase-triggered bare words NEVER
+//   contribute here any more, see extractContextCandidates/
+//   resolvePhraseCandidates above).
 // - `wrongType`: `{ name, usedAs, actualAs }` for a name used as one kind
 //   (element/attribute) that doesn't exist as that kind but DOES exist as
 //   the other -- reported instead of (never in addition to) notFound for
-//   that name.
+//   that name. Only applies to explicit markup (camelCase's kind is
+//   genuinely unknown, so it is never wrong-kind-checked).
 export function checkAgainstVocabulary(contextCandidates, vocabulary) {
   if (!vocabulary) return { available: false, notFound: [], wrongType: [] };
 
@@ -254,14 +318,14 @@ export function checkAgainstVocabulary(contextCandidates, vocabulary) {
     if (!notFound.has(name)) notFound.set(name, display);
   };
 
-  const considerAmbiguous = (name) => {
+  const considerCamelCase = (name) => {
     if (vocabulary.elements.has(name) || vocabulary.attributes.has(name)) return;
     if (!notFound.has(name)) notFound.set(name, name);
   };
 
   for (const name of contextCandidates.elements) considerTyped(name, 'element');
   for (const name of contextCandidates.attributes) considerTyped(name, 'attribute');
-  for (const name of contextCandidates.ambiguous) considerAmbiguous(name);
+  for (const name of contextCandidates.camelCase) considerCamelCase(name);
 
   // A wrong-kind finding is its own, more specific message -- never also
   // listed as merely "not found" for the same name.

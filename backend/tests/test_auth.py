@@ -211,64 +211,6 @@ async def test_preferred_language_follows_the_account_across_a_fresh_login(clien
     assert me.json()["preferred_language"] == "es"
 
 
-async def test_me_response_includes_hide_naming_tip_false_for_a_fresh_user(client, test_user):
-    """Naming-tip round: a fresh account (or one that predates this
-    column) must read back False, not None/missing -- there is no
-    meaningful "unset" state for this one, unlike preferred_language.
-    """
-    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
-    access_token = login.json()["access_token"]
-    response = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {access_token}"})
-    assert response.status_code == 200
-    assert response.json()["hide_naming_tip"] is False
-
-
-async def test_me_update_changes_hide_naming_tip_without_touching_display_name(client, test_user):
-    login = await client.post("/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD})
-    access_token = login.json()["access_token"]
-    headers = {"Authorization": f"Bearer {access_token}"}
-
-    # Partial update -- the naming-tip banner's "Don't show again" sends
-    # ONLY hide_naming_tip, never display_name alongside it.
-    response = await client.patch("/api/auth/me", json={"hide_naming_tip": True}, headers=headers)
-    assert response.status_code == 200
-    body = response.json()
-    assert body["hide_naming_tip"] is True
-    assert body["display_name"] == test_user.display_name  # untouched
-
-    async with async_session_factory() as session:
-        db_user = await session.get(User, test_user.id)
-        assert db_user.hide_naming_tip is True
-        assert db_user.display_name == test_user.display_name
-
-
-async def test_hide_naming_tip_follows_the_account_across_a_fresh_login(client, test_user):
-    """Same edge case as preferred_language's own test -- a fresh login
-    (this app's stand-in for "a different browser") must reflect the
-    account's saved preference, not a per-session default. Also confirms
-    Settings > Profile's "Show naming tips again" (PATCH {false}) reverses
-    it, same endpoint, same field.
-    """
-    first_login = await client.post(
-        "/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD}
-    )
-    await client.patch(
-        "/api/auth/me",
-        json={"hide_naming_tip": True},
-        headers={"Authorization": f"Bearer {first_login.json()['access_token']}"},
-    )
-
-    second_login = await client.post(
-        "/api/auth/login", json={"email": test_user.email, "password": TEST_PASSWORD}
-    )
-    headers = {"Authorization": f"Bearer {second_login.json()['access_token']}"}
-    me = await client.get("/api/auth/me", headers=headers)
-    assert me.json()["hide_naming_tip"] is True
-
-    reactivated = await client.patch("/api/auth/me", json={"hide_naming_tip": False}, headers=headers)
-    assert reactivated.json()["hide_naming_tip"] is False
-
-
 async def test_me_update_ignores_global_role_change(client):
     """A non-admin sending global_role in the PATCH /api/auth/me body must
     NOT become admin -- MeUpdate has no global_role field at all, so this

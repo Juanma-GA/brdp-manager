@@ -31,10 +31,6 @@ class UserOut(BaseModel):
     # that predate this column, or that just haven't touched the
     # language switcher).
     preferred_language: str | None = None
-    # Docs request (naming-convention tip round): "Don't show again" on the
-    # naming-tip banner, persisted server-side per account. Plain boolean,
-    # never None -- every account either has it hidden or doesn't.
-    hide_naming_tip: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -53,9 +49,6 @@ class MeUpdate(BaseModel):
     # display_name -- same partial-update convention as BRDPUpdate.
     display_name: str | None = None
     preferred_language: str | None = None
-    # Settings > Profile's "Show naming tips again" sends {hide_naming_tip:
-    # false}; the naming-tip banner's own "Don't show again" sends {true}.
-    hide_naming_tip: bool | None = None
 
     @field_validator("preferred_language")
     @classmethod

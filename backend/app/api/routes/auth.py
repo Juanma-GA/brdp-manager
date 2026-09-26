@@ -137,12 +137,9 @@ async def update_me(
     Partial update (exclude_unset), same convention as BRDPUpdate: lets
     LanguageSwitcher PATCH just preferred_language without also having to
     resend the current display_name, and vice versa for ProfileSection.
-    Same for hide_naming_tip -- both the naming-tip banner's "Don't show
-    again" and Settings > Profile's "Show naming tips again" PATCH only
-    that one field.
     """
     updates = body.model_dump(exclude_unset=True)
-    for field in ("display_name", "preferred_language", "hide_naming_tip"):
+    for field in ("display_name", "preferred_language"):
         if field in updates:
             setattr(current_user, field, updates[field])
     await db.commit()

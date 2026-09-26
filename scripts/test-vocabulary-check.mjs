@@ -1,11 +1,12 @@
-// Docs request ("comprobación de vocabulario solo determinista, sin
-// bloqueo, sin referencias inventadas") -- closeout requires tests of
-// vocabularyCheck.js covering ONLY the deterministic path now (the LLM
-// extraction path is removed entirely this round -- confirmed by grep
-// that extractVocabCandidatesViaLLM/buildVocabExtractionPrompt/
-// parseVocabExtractionResponse/filterLLMStopwords/isStopword/STOPWORDS no
-// longer exist anywhere in the module, see the import list below), plus
-// the camelCase/descriptive-word/list-capture heuristics this round adds.
+// Docs request ("consejo de nombres sin Don't show again y sugerencias
+// contextuales sin falsos positivos") -- closeout requires tests of
+// vocabularyCheck.js covering: Unicode-aware tokenization (accented words
+// never fragment), the new etiqueta(s)/tag(s) trigger synonyms, and the
+// vocabulary-gated resolvePhraseCandidates (a phrase-triggered bare word
+// is ONLY ever a suggestion, never a "Not found" warning, and only when it
+// genuinely resolves against the real vocabulary). Builds on the previous
+// round's "solo determinista" tests (camelCase/skip-words/list-capture
+// mechanics), most of which are unchanged and kept as regression coverage.
 // This repo has no JS test runner (documented in CLAUDE.md) -- same
 // convention already used by test-schematron-dita.mjs: import the REAL
 // production module directly under plain Node and assert against it, not
@@ -14,6 +15,7 @@
 //     node scripts/test-vocabulary-check.mjs
 import {
   extractContextCandidates,
+  resolvePhraseCandidates,
   applyRenameSuggestion,
   checkAgainstVocabulary,
   formatWrongTypeMessage,
@@ -30,7 +32,12 @@ function assert(cond, msg) {
   }
 }
 
-// ---- explicit markup extraction ----
+const vocab4_2 = {
+  elements: new Set(["topic", "task", "machineryTask", "step", "table"]),
+  attributes: new Set(["id", "conref", "label", "applicRefId"]),
+};
+
+// ---- explicit markup extraction (unchanged) ----
 
 assert(
   extractContextCandidates("The element <pokemon> will not be used.").elements.includes("pokemon"),
@@ -42,7 +49,7 @@ assert(
 );
 assert(
   extractContextCandidates("Do not use <del> here.").elements.includes("del"),
-  "<del> written explicitly is still extracted by the context path (never filtered -- there is no filter any more)"
+  "<del> written explicitly is still extracted by the context path"
 );
 assert(
   extractContextCandidates("Use @conref to reference content.").attributes.includes("conref"),
@@ -50,77 +57,85 @@ assert(
 );
 assert(extractContextCandidates("Use @label for this.").attributes.includes("label"), "@label extracted as attribute");
 
-// ---- phrase-trigger extraction: connectors ----
+// ---- phrase-trigger extraction: connectors, descriptive words, lists (unchanged mechanics) ----
 
 {
   const c = extractContextCandidates("atributos del elemento pokemon");
-  assert(c.ambiguous.includes("pokemon"), 'edge case "atributos del elemento pokemon" -> pokemon flagged (re-anchors on the later trigger)');
   assert(
-    !c.ambiguous.includes("elemento") && !c.ambiguous.includes("atributos") && !c.ambiguous.includes("del"),
+    c.phraseCandidates.some((p) => p.name === "pokemon"),
+    'edge case "atributos del elemento pokemon" -> pokemon captured (re-anchors on the later trigger)'
+  );
+  assert(
+    !c.phraseCandidates.some((p) => ["elemento", "atributos", "del"].includes(p.name)),
     "trigger/connector words themselves never become candidates"
   );
 }
 assert(
-  extractContextCandidates("the attribute of the element pokemon").ambiguous.includes("pokemon"),
+  extractContextCandidates("the attribute of the element pokemon").phraseCandidates.some((p) => p.name === "pokemon"),
   '"the attribute of the element pokemon" -> pokemon (connectors "of"/"the" skipped)'
 );
-
-// ---- follow-up round point 2: descriptive-word skip ----
-
 {
-  // The encargo's own reported false positive: "atributo de tipo cl" must
-  // yield "cl", never "tipo".
   const c = extractContextCandidates("no lleva atributo de tipo cl");
-  assert(c.ambiguous.includes("cl"), '"atributo de tipo cl" -> cl captured');
-  assert(!c.ambiguous.includes("tipo"), '"atributo de tipo cl" -> "tipo" never captured (descriptive word, skipped)');
+  assert(c.phraseCandidates.some((p) => p.name === "cl"), '"atributo de tipo cl" -> cl captured');
+  assert(!c.phraseCandidates.some((p) => p.name === "tipo"), '"atributo de tipo cl" -> "tipo" never captured (descriptive word, skipped)');
 }
 {
   const c = extractContextCandidates("el atributo llamado applicRefId");
-  assert(c.ambiguous.includes("applicRefId"), '"el atributo llamado applicRefId" -> applicRefId captured (skips "llamado")');
+  assert(
+    c.phraseCandidates.some((p) => p.name === "applicRefId" && p.type === "attribute"),
+    '"el atributo llamado applicRefId" -> applicRefId captured as attribute (skips "llamado")'
+  );
 }
-{
-  const c = extractContextCandidates("the element named pokemon");
-  assert(c.ambiguous.includes("pokemon"), '"the element named pokemon" -> pokemon (skips "named")');
-}
-{
-  const c = extractContextCandidates("el elemento de nombre pokemon");
-  assert(c.ambiguous.includes("pokemon"), '"el elemento de nombre pokemon" -> pokemon (skips "de nombre")');
-}
-
-// ---- follow-up round point 2: list capture ----
-
 {
   const c = extractContextCandidates("atributos de tipo cl, pl ni ip");
+  const names = c.phraseCandidates.map((p) => p.name);
+  assert(names.includes("cl") && names.includes("pl") && names.includes("ip"), '"atributos de tipo cl, pl ni ip" -> cl, pl AND ip all captured');
+  assert(!names.includes("tipo"), 'list-capture case still never captures "tipo"');
+}
+
+// ---- follow-up round point 4: etiqueta(s)/tag(s) as element-type triggers ----
+
+for (const trigger of ["etiqueta", "etiquetas", "tag", "tags"]) {
+  const c = extractContextCandidates(`the ${trigger} pokemon should not be used`);
   assert(
-    c.ambiguous.includes("cl") && c.ambiguous.includes("pl") && c.ambiguous.includes("ip"),
-    '"atributos de tipo cl, pl ni ip" -> cl, pl AND ip all captured (comma + "ni" list continuation)'
+    c.phraseCandidates.some((p) => p.name === "pokemon" && p.type === "element"),
+    `"${trigger}" triggers a phrase candidate typed as element (got: ${JSON.stringify(c.phraseCandidates)})`
   );
-  assert(!c.ambiguous.includes("tipo"), 'list-capture case still never captures "tipo"');
+}
+
+// ---- follow-up round point 3: Unicode-aware tokenization (accented words never fragment) ----
+
+{
+  // The real bug: "elemento <stranger> y cómo usarlos" used to fragment
+  // "cómo" into "c"/"mo" at the accented character, and the "y" (list
+  // continuation) chained the "c" fragment onto the "elemento" trigger's
+  // candidate list as a spurious single-letter "name" -- producing the
+  // nonsensical real report "Did you mean `<c>`?".
+  const c = extractContextCandidates("en el elemento <stranger> y cómo usarlos.");
+  const names = c.phraseCandidates.map((p) => p.name);
+  assert(!names.includes("c") && !names.includes("mo"), 'accented word "cómo" never fragments into "c"/"mo" candidates');
+  // "stranger" is excluded too, but for the UNRELATED reason that it is
+  // already marked up via <stranger> elsewhere in the same text.
+  assert(!names.includes("stranger"), '"stranger" excluded from phraseCandidates (already marked up via <stranger>)');
+  // Whatever DOES get captured after "y" (if anything) must be the whole
+  // word "cómo", never a fragment -- checked directly, not just by absence.
+  for (const n of names) assert(/^[\p{L}]+$/u.test(n), `every captured phrase candidate is a real whole word, never a fragment (got: "${n}")`);
 }
 {
-  const c = extractContextCandidates("attributes of type cl, pl and ip");
-  assert(
-    c.ambiguous.includes("cl") && c.ambiguous.includes("pl") && c.ambiguous.includes("ip"),
-    "English list capture: comma + \"and\" continuation"
-  );
+  // Accented words elsewhere in the text (not near any trigger) must also
+  // come through the tokenizer whole -- confirmed via a case where the
+  // accented word IS the trigger's own candidate.
+  const c = extractContextCandidates("el atributo señal debe usarse");
+  assert(c.phraseCandidates.some((p) => p.name === "señal"), '"el atributo señal" -> the accented word "señal" captured whole, not fragmented');
 }
 {
-  // The exact real report, verbatim: "lA ETIQUETA <table> no lleva
-  // atributo de tipo cl, pl y de tipo ip si es de valor 23" -- interleaved
-  // "de tipo" between the conjunction and the third list item must still
-  // be skipped, and the sentence must stop cleanly at "si" (never
-  // capturing it or anything after it).
-  const c = extractContextCandidates(
-    "lA ETIQUETA <table> no lleva atributo de tipo cl, pl y de tipo ip si es de valor 23"
-  );
-  assert(
-    c.ambiguous.includes("cl") && c.ambiguous.includes("pl") && c.ambiguous.includes("ip"),
-    "real report: cl, pl and ip all captured despite the interleaved \"de tipo\" before the 3rd item"
-  );
-  assert(!c.ambiguous.includes("tipo"), "real report: \"tipo\" (appearing twice) never captured");
-  assert(!c.ambiguous.includes("lA") && !c.ambiguous.includes("la"), "real report: \"lA\" never captured (not a phrase candidate, and camelCase rejects it too -- see below)");
-  assert(!c.ambiguous.includes("si") && !c.ambiguous.includes("es") && !c.ambiguous.includes("valor"), "real report: the list stops cleanly at \"si\" -- nothing after it leaks in");
-  assert(c.elements.includes("table"), "real report: <table> still extracted via explicit markup, independent of the list-capture logic");
+  const c = extractContextCandidates("la utilizará en el proceso");
+  // "utilizará" must tokenize as one word -- confirmed indirectly via
+  // camelCase extraction never seeing any ASCII fragment of it either
+  // (no fragment can accidentally look like camelCase, but the more
+  // direct check is that resolvePhraseCandidates/extractContextCandidates
+  // never see a lone "utilizar"/"á" pair reported anywhere).
+  assert(c.phraseCandidates.length === 0, '"la utilizará en el proceso" has no trigger word, so zero phrase candidates regardless (sanity check, not a fragmentation-specific assertion)');
 }
 
 // ---- unchanged edge cases ----
@@ -128,67 +143,93 @@ assert(
 {
   const c = extractContextCandidates("decidir si se usa la lista");
   assert(
-    c.elements.length === 0 && c.attributes.length === 0 && c.ambiguous.length === 0,
-    'edge case "decidir si se usa la lista" -> zero candidates'
+    c.elements.length === 0 && c.attributes.length === 0 && c.camelCase.length === 0 && c.phraseCandidates.length === 0,
+    'edge case "decidir si se usa la lista" -> zero candidates of any kind'
   );
 }
 {
-  // BRDP-S1-00053, a real catalog entry (S1000D 4.2, Verified Rule):
-  // ordinary technical English, no <>/@markup, no "element"/"attribute"
-  // phrasing -- must produce zero candidates of any kind now that the
-  // LLM-guess path (which used to flag "change"/"data"/"marks"/"module"/
-  // "changed"/"revised" here) is gone entirely.
   const c = extractContextCandidates("Data module change/revised ratio");
   assert(
-    c.elements.length === 0 && c.attributes.length === 0 && c.ambiguous.length === 0,
-    "BRDP-S1-00053's real title (\"Data module change/revised ratio\") -> zero candidates"
+    c.elements.length === 0 && c.attributes.length === 0 && c.camelCase.length === 0 && c.phraseCandidates.length === 0,
+    "BRDP-S1-00053's real title (\"Data module change/revised ratio\") -> zero candidates of any kind"
   );
 }
 
-// ---- follow-up round point 2: tighter camelCase (min 2 lowercase, then uppercase, min length 5) ----
+// ---- camelCase (min 2 lowercase, then uppercase, min length 5) -- unchanged ----
 
-assert(
-  extractContextCandidates("Confirm proceduralStep numbering is correct.").ambiguous.includes("proceduralStep"),
-  "camelCase proceduralStep (long) still captured"
-);
-assert(extractContextCandidates("See dmCode for details.").ambiguous.includes("dmCode"), "camelCase dmCode (6 chars) captured");
-assert(extractContextCandidates("See dmRef for details.").ambiguous.includes("dmRef"), "camelCase dmRef (exactly 5 chars, the minimum) captured");
-assert(extractContextCandidates("Use applicRefId here.").ambiguous.includes("applicRefId"), "camelCase applicRefId captured");
-assert(
-  !extractContextCandidates("lA ETIQUETA no lleva nada.").ambiguous.includes("lA"),
-  '"lA" (1 lowercase before the uppercase) never captured as camelCase'
-);
-assert(
-  !extractContextCandidates("abCd is too short.").ambiguous.includes("abCd"),
-  '"abCd" (4 chars, below the length-5 minimum) never captured despite matching 2-lowercase-then-uppercase'
-);
-assert(
-  !extractContextCandidates("Confirm this is fine.").ambiguous.includes("this"),
-  "a plain lowercase word (no inner uppercase) is never treated as camelCase"
-);
+assert(extractContextCandidates("Confirm proceduralStep numbering is correct.").camelCase.includes("proceduralStep"), "camelCase proceduralStep (long) still captured");
+assert(extractContextCandidates("See dmCode for details.").camelCase.includes("dmCode"), "camelCase dmCode (6 chars) captured");
+assert(extractContextCandidates("See dmRef for details.").camelCase.includes("dmRef"), "camelCase dmRef (exactly 5 chars, the minimum) captured");
+assert(!extractContextCandidates("lA ETIQUETA no lleva nada.").camelCase.includes("lA"), '"lA" (1 lowercase before the uppercase) never captured as camelCase');
+assert(!extractContextCandidates("abCd is too short.").camelCase.includes("abCd"), '"abCd" (4 chars, below the length-5 minimum) never captured');
+assert(!extractContextCandidates("Confirm this is fine.").camelCase.includes("this"), "a plain lowercase word is never treated as camelCase");
 
-// ---- renamable candidates + applyRenameSuggestion ("Did you mean?") ----
+// ---- resolvePhraseCandidates: the ONLY path from a phrase-triggered bare
+// word to anything user-visible, and only ever a suggestion, never a
+// warning ----
 
 {
+  // Same-type match: applicRefId is a real attribute, triggered as an attribute.
+  const c = extractContextCandidates("el atributo applicRefId");
+  const resolved = resolvePhraseCandidates(c.phraseCandidates, vocab4_2);
+  assert(
+    resolved.length === 1 && resolved[0].name === "applicRefId" && resolved[0].type === "attribute",
+    '"el atributo applicRefId" -> resolved suggestion {name:"applicRefId", type:"attribute"}'
+  );
+}
+{
+  // Other-type correction: "table" triggered as an element via "etiqueta" -> stays element (matches).
+  const c = extractContextCandidates("la etiqueta table");
+  const resolved = resolvePhraseCandidates(c.phraseCandidates, vocab4_2);
+  assert(
+    resolved.length === 1 && resolved[0].name === "table" && resolved[0].type === "element",
+    '"la etiqueta table" -> resolved as element (got: ' + JSON.stringify(resolved) + ")"
+  );
+}
+{
+  // Other-type correction: "table" triggered as an ATTRIBUTE but only exists as an element -> corrected type.
+  const c = extractContextCandidates("el atributo table");
+  const resolved = resolvePhraseCandidates(c.phraseCandidates, vocab4_2);
+  assert(
+    resolved.length === 1 && resolved[0].name === "table" && resolved[0].type === "element",
+    '"el atributo table" -> corrected to type "element" (got: ' + JSON.stringify(resolved) + ")"
+  );
+}
+{
+  // Genuinely invented name -> dropped entirely (accepted limitation).
   const c = extractContextCandidates("el elemento pokemon");
-  assert(
-    c.renamable.length === 1 && c.renamable[0].name === "pokemon" && c.renamable[0].type === "element",
-    '"el elemento pokemon" -> one renamable candidate {name:"pokemon", type:"element"}'
-  );
+  const resolved = resolvePhraseCandidates(c.phraseCandidates, vocab4_2);
+  assert(resolved.length === 0, '"el elemento pokemon" -> no suggestion (pokemon does not exist in either vocabulary set)');
 }
 {
-  const c = extractContextCandidates("el atributo llamado applicRefId");
-  assert(
-    c.renamable.some((r) => r.name === "applicRefId" && r.type === "attribute"),
-    '"el atributo llamado applicRefId" -> renamable as type "attribute"'
-  );
+  // The two real reported false positives -- neither "seleccionados" nor
+  // "usar" exist in the vocabulary, so both are dropped entirely.
+  const c1 = extractContextCandidates("Atributos seleccionados para la etiqueta <stranger>.");
+  assert(resolvePhraseCandidates(c1.phraseCandidates, vocab4_2).length === 0, '"Atributos seleccionados..." -> zero suggestions ("seleccionados" is not real vocabulary)');
+  const c2 = extractContextCandidates("Decidir qué atributos usar en el elemento <stranger> y cómo usarlos.");
+  assert(resolvePhraseCandidates(c2.phraseCandidates, vocab4_2).length === 0, '"...atributos usar...cómo usarlos." -> zero suggestions ("usar"/"cómo" are not real vocabulary)');
 }
 {
-  // Already marked up elsewhere in the same text -- never offered for
-  // renaming a second time.
-  const c = extractContextCandidates("el elemento <pokemon> ya está bien escrito");
-  assert(c.renamable.length === 0, "a name already wrapped in <...> elsewhere in the text is never renamable");
+  // "atributos de tipo cl, pl y ip" -- none of cl/pl/ip exist in this
+  // vocabulary, so the whole list resolves to zero suggestions.
+  const c = extractContextCandidates("atributos de tipo cl, pl y ip");
+  assert(resolvePhraseCandidates(c.phraseCandidates, vocab4_2).length === 0, '"atributos de tipo cl, pl y ip" -> zero suggestions when none exist in vocab');
 }
+{
+  // No vocabulary available for this standard -- never guesses.
+  const c = extractContextCandidates("el atributo applicRefId");
+  assert(resolvePhraseCandidates(c.phraseCandidates, null).length === 0, "resolvePhraseCandidates(..., null) -> always empty, never guesses");
+}
+{
+  // Dedup: the same name appearing twice (e.g. two separate trigger
+  // occurrences in the same text) only ever produces one suggestion.
+  const c = extractContextCandidates("el atributo applicRefId y también el atributo applicRefId");
+  const resolved = resolvePhraseCandidates(c.phraseCandidates, vocab4_2);
+  assert(resolved.length === 1, "resolvePhraseCandidates dedupes by name, even across separate trigger occurrences");
+}
+
+// ---- applyRenameSuggestion (unchanged) ----
+
 {
   const fixed = applyRenameSuggestion("el elemento pokemon", { name: "pokemon", type: "element" });
   assert(fixed === "el elemento <pokemon>", `applyRenameSuggestion wraps the bare word in <...> (got: ${fixed})`);
@@ -198,89 +239,94 @@ assert(
   assert(fixed === "el atributo @pokemon", `applyRenameSuggestion wraps the bare word in @... for an attribute (got: ${fixed})`);
 }
 {
-  // A suggestion that no longer applies (text changed since it was
-  // computed) is a no-op, never a throw.
   const fixed = applyRenameSuggestion("nothing here", { name: "pokemon", type: "element" });
   assert(fixed === "nothing here", "applyRenameSuggestion is a no-op when the name can no longer be found bare");
 }
+{
+  // Accented name, sanity check for the 'u' flag added to the lookaround regex.
+  const fixed = applyRenameSuggestion("el atributo señal", { name: "señal", type: "attribute" });
+  assert(fixed === "el atributo @señal", `applyRenameSuggestion handles accented names too (got: ${fixed})`);
+}
 
-// ---- checkAgainstVocabulary: solo determinista now, no possiblyNotFound ----
+// ---- checkAgainstVocabulary: phrase-triggered candidates NEVER feed notFound/wrongType ----
 
-const vocab4_2 = { elements: new Set(["topic", "task", "machineryTask", "step", "table"]), attributes: new Set(["id", "conref", "label"]) };
-const emptyCtx = { elements: [], attributes: [], ambiguous: [] };
+const emptyCtx = { elements: [], attributes: [], camelCase: [], phraseCandidates: [] };
 
 {
-  const r = checkAgainstVocabulary({ elements: ["pokemon"], attributes: [], ambiguous: [] }, vocab4_2);
+  const r = checkAgainstVocabulary({ elements: ["pokemon"], attributes: [], camelCase: [] }, vocab4_2);
   assert(r.available === true, "vocabulary marked available when one is supplied");
-  assert(r.notFound.includes("<pokemon>"), "context-path <pokemon> -> notFound");
-  assert(!("possiblyNotFound" in r), "the result shape no longer has a possiblyNotFound key at all");
+  assert(r.notFound.includes("<pokemon>"), "explicit context-path <pokemon> -> notFound (unchanged)");
 }
 {
-  const r = checkAgainstVocabulary({ elements: ["topic"], attributes: [], ambiguous: [] }, vocab4_2);
+  const r = checkAgainstVocabulary({ elements: ["topic"], attributes: [], camelCase: [] }, vocab4_2);
   assert(r.notFound.length === 0 && r.wrongType.length === 0, "edge case: <topic> known -> zero warnings of any kind");
 }
 {
-  const r = checkAgainstVocabulary({ elements: ["anything"], attributes: [], ambiguous: [] }, null);
+  const r = checkAgainstVocabulary({ elements: ["anything"], attributes: [], camelCase: [] }, null);
   assert(r.available === false && r.notFound.length === 0 && r.wrongType.length === 0, "no vocabulary -> not available, zero false positives");
 }
 {
-  const r = checkAgainstVocabulary({ elements: [], attributes: [], ambiguous: ["id", "task"] }, vocab4_2);
-  assert(r.notFound.length === 0, "ambiguous candidates matched against the union of elements+attributes");
+  const r = checkAgainstVocabulary({ elements: [], attributes: [], camelCase: ["id", "task"] }, vocab4_2);
+  assert(r.notFound.length === 0, "camelCase candidates matched against the union of elements+attributes (unchanged)");
 }
 {
   const r = checkAgainstVocabulary(emptyCtx, vocab4_2);
   assert(r.available === true && r.notFound.length === 0 && r.wrongType.length === 0, "empty candidates -> available, zero warnings");
 }
-
-// Wrong-kind check, both directions, real S1000D 4.2 shape (label is an
-// attribute only) -- the encargo's own <label> edge case.
 {
-  const r = checkAgainstVocabulary({ elements: ["label"], attributes: [], ambiguous: [] }, vocab4_2);
+  // The core fix of this round: checkAgainstVocabulary's input shape has
+  // no `phraseCandidates` field at all any more -- confirmed structurally,
+  // not just by absence of a warning, that there is nothing left in the
+  // API for a phrase-derived name to reach notFound through.
+  const c = extractContextCandidates("Atributos seleccionados para la etiqueta <stranger>.");
+  const r = checkAgainstVocabulary(c, vocab4_2);
+  assert(r.notFound.length === 1 && r.notFound[0] === "<stranger>", `real report 1: notFound contains ONLY <stranger> (got: ${JSON.stringify(r.notFound)})`);
+  assert(!r.notFound.some((n) => n.includes("seleccionad")), '"seleccionados" never reaches notFound, regardless of the vocabulary supplied');
+}
+{
+  const c = extractContextCandidates("Decidir qué atributos usar en el elemento <stranger> y cómo usarlos.");
+  const r = checkAgainstVocabulary(c, vocab4_2);
+  assert(r.notFound.length === 1 && r.notFound[0] === "<stranger>", `real report 2: notFound contains ONLY <stranger> (got: ${JSON.stringify(r.notFound)})`);
+  assert(!r.notFound.some((n) => n === "usar" || n === "cómo" || n === "c"), '"usar"/"cómo"/"c" never reach notFound');
+}
+{
+  // "atributos de tipo cl, pl y ip" -- none of cl/pl/ip exist in this
+  // vocabulary; under this round's rules they are simply ignored, never
+  // flagged red (a deliberate change from the previous round, where a
+  // phrase-derived bare word DID feed notFound).
+  const c = extractContextCandidates("atributos de tipo cl, pl y ip");
+  const r = checkAgainstVocabulary(c, vocab4_2);
+  assert(r.notFound.length === 0, `"atributos de tipo cl, pl y ip" -> zero notFound warnings now, even though none of cl/pl/ip exist (got: ${JSON.stringify(r.notFound)})`);
+}
+
+// Wrong-kind check (explicit markup only) -- unchanged.
+{
+  const r = checkAgainstVocabulary({ elements: ["label"], attributes: [], camelCase: [] }, vocab4_2);
   assert(r.wrongType.length === 1 && r.wrongType[0].name === "label", "context <label> (used as element) -> wrongType, not merely notFound");
   assert(r.wrongType[0].usedAs === "element" && r.wrongType[0].actualAs === "attribute", "wrongType records usedAs=element, actualAs=attribute for <label>");
   assert(r.notFound.length === 0, "a wrongType name is never ALSO listed as notFound");
 }
 {
-  const r = checkAgainstVocabulary({ elements: [], attributes: ["label"], ambiguous: [] }, vocab4_2);
+  const r = checkAgainstVocabulary({ elements: [], attributes: ["label"], camelCase: [] }, vocab4_2);
   assert(r.notFound.length === 0 && r.wrongType.length === 0, "edge case: @label (correct kind) -> zero warnings");
 }
 {
   const vocabReverse = { elements: new Set(["title"]), attributes: new Set([]) };
-  const r = checkAgainstVocabulary({ elements: [], attributes: ["title"], ambiguous: [] }, vocabReverse);
+  const r = checkAgainstVocabulary({ elements: [], attributes: ["title"], camelCase: [] }, vocabReverse);
   assert(r.wrongType.length === 1 && r.wrongType[0].usedAs === "attribute" && r.wrongType[0].actualAs === "element", "reverse direction: @title (used as attribute) -> wrongType, actualAs=element");
 }
-{
-  // The real report's <table> and cl/pl/ip attributes, run end to end
-  // through the full extraction + comparison pipeline.
-  const c = extractContextCandidates(
-    "lA ETIQUETA <table> no lleva atributo de tipo cl, pl y de tipo ip si es de valor 23"
-  );
-  const r = checkAgainstVocabulary(c, vocab4_2);
-  assert(!r.notFound.includes("table") && !r.notFound.includes("<table>"), "real report: <table> is real S1000D 4.2 vocabulary -> not in notFound");
-  assert(
-    ["cl", "pl", "ip"].every((n) => r.notFound.includes(n)),
-    "real report: cl, pl and ip all reported as not-found attributes (none exist in this vocab)"
-  );
-  assert(!r.notFound.includes("tipo") && !r.notFound.includes("lA"), "real report: \"tipo\"/\"lA\" never appear in the final warnings either");
-}
 
-// formatWrongTypeMessage -- exact sentence shape (unchanged by this round)
+// formatWrongTypeMessage -- exact sentence shape (unchanged)
 {
   const msg = formatWrongTypeMessage("S1000D 4.2", { name: "label", usedAs: "element", actualAs: "attribute" });
-  assert(
-    msg === "<label> is not an element in S1000D 4.2 — it exists as attribute @label.",
-    `formatWrongTypeMessage exact wording (got: ${msg})`
-  );
+  assert(msg === "<label> is not an element in S1000D 4.2 — it exists as attribute @label.", `formatWrongTypeMessage exact wording (got: ${msg})`);
 }
 {
   const msg = formatWrongTypeMessage("DITA 1.3", { name: "title", usedAs: "attribute", actualAs: "element" });
-  assert(
-    msg === "@title is not an attribute in DITA 1.3 — it exists as element <title>.",
-    `formatWrongTypeMessage exact wording, reverse direction (got: ${msg})`
-  );
+  assert(msg === "@title is not an attribute in DITA 1.3 — it exists as element <title>.", `formatWrongTypeMessage exact wording, reverse direction (got: ${msg})`);
 }
 
-// ---- hashVocabInputText (cache key) -- unchanged by this round ----
+// ---- hashVocabInputText (cache key) -- unchanged ----
 {
   const h1 = hashVocabInputText("T", "D", "P");
   const h2 = hashVocabInputText("T", "D", "P");

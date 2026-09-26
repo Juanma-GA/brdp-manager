@@ -31,11 +31,4 @@ class User(Base):
     # column intentionally has no DB-level default that would erase that
     # distinction). "en" | "es", the only two languages this app ships.
     preferred_language: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Docs request (naming-convention tip round): "Don't show again" on the
-    # naming-tip banner (RecordsPage.jsx) persists here, per account, same
-    # pattern as preferred_language above -- never localStorage (HR1), so
-    # it follows the account across devices/browsers. Unlike
-    # preferred_language there is no meaningful "unset" state to preserve,
-    # so this is a plain NOT NULL boolean defaulting to False.
-    hide_naming_tip: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

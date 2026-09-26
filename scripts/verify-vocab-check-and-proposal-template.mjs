@@ -347,25 +347,37 @@ async function main() {
     );
 
     // applicRefId, captured via phrase-trigger ("el atributo llamado
-    // applicRefId"), resolves to a real S1000D 4.2 attribute -> zero warning.
+    // applicRefId"), resolves to a real S1000D 4.2 attribute -> zero
+    // warning, AND (follow-up round, "sugerencias contextuales sin falsos
+    // positivos") a real "Did you mean @applicRefId?" suggestion, since it
+    // genuinely exists in the vocabulary.
     await openRecords(`Vocab Verify S ${suffix}`, "BRDP-VOCAB-APPLICREFID");
     assert(
       (await page.locator("text=/This BRDP mentions names not found in the S1000D 4.2 schema/").count()) === 0,
       '"el atributo llamado applicRefId" -> applicRefId recognized as a real attribute, zero warnings'
     );
-
-    // The real report, verbatim, against the real S1000D 4.2 vocabulary.
-    await openRecords(`Vocab Verify S ${suffix}`, "BRDP-VOCAB-REAL-REPORT");
-    await page.waitForSelector("text=/This BRDP mentions names not found in the S1000D 4.2 schema/", { timeout: 5000 });
-    const realReportLocator = page.locator("text=/This BRDP mentions names not found in the S1000D 4.2 schema/").first();
-    const realReportText = await realReportLocator.textContent();
     assert(
-      realReportText.includes("cl") && realReportText.includes("pl") && realReportText.includes("ip"),
-      `real report: cl, pl and ip all flagged (got: ${realReportText})`
+      (await page.getByRole("button", { name: "Did you mean @applicRefId?", exact: true }).count()) > 0,
+      '"el atributo llamado applicRefId" also offers a real "Did you mean @applicRefId?" suggestion'
+    );
+
+    // Follow-up round ("sin falsos positivos"): the real report is no
+    // longer flagged at all -- cl/pl/ip are phrase-triggered bare words
+    // that don't exist in this vocabulary, so under the new rules they are
+    // silently ignored (no warning, no suggestion), never flagged red the
+    // way a previous round used to. <table> (explicit markup, real
+    // element) still gets neither a warning nor a suggestion (it's simply
+    // valid), and "tipo"/"lA" were never captured at all, before or after
+    // this round.
+    await openRecords(`Vocab Verify S ${suffix}`, "BRDP-VOCAB-REAL-REPORT");
+    await page.waitForTimeout(500); // give any (incorrect) banner a chance to render before asserting its absence
+    assert(
+      (await page.locator("text=/This BRDP mentions names (not found|possibly not) in the S1000D 4.2 schema/").count()) === 0,
+      "real report: zero vocabulary warnings now -- cl/pl/ip are ignored (not in vocab), never flagged red"
     );
     assert(
-      !realReportText.includes("tipo") && !/\blA\b/.test(realReportText) && !realReportText.includes("table"),
-      `real report: "tipo"/"lA"/"table" never appear in the banner (got: ${realReportText})`
+      (await page.getByRole("button", { name: /Did you mean/ }).count()) === 0,
+      "real report: zero \"Did you mean\" suggestions either -- none of cl/pl/ip exist in the real S1000D 4.2 vocabulary"
     );
 
     // ==== wrong-kind check against the REAL S1000D 4.2 vocabulary --
