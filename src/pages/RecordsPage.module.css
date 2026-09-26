@@ -878,6 +878,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Docs request ("Servicio de fichas de esquema y su uso en Ask"): one
+   variant block inside an expanded SchemaFactCard -- several stack when an
+   element resolves differently across schema files (docs request point 1,
+   "la ficha muestra variantes"), each needing its own vertical separation. */
+.schemaFactVariant {
+  margin-bottom: 6px;
+}
+.schemaFactVariant:last-child {
+  margin-bottom: 0;
+}
+
 .hr {
   border: none;
   border-top: 1px solid #e2e8f0;

@@ -24,6 +24,7 @@ import {
   hashVocabInputText,
   loadSchemaVocabulary,
   resolvePhraseCandidates,
+  selectSchemaFactNames,
 } from '../utils/vocabularyCheck.js';
 import styles from './RecordsPage.module.css';
 
@@ -139,12 +140,62 @@ function buildSuggestUnknownNamesBlock(standard, vocabCheck) {
   return `\n\nThe BRDP mentions names that may not exist in the ${standard} schema: ${names.join(', ')}. The user has already been warned in the interface. Do NOT mention their validity in your output, do not add comments or notes, and do not take any decision about them -- write the text exactly as instructed above.`;
 }
 
+// Docs request ("Servicio de fichas de esquema y su uso en Ask"): formats
+// the real structural facts fetched from GET /api/schema-cards into the
+// literal block shape the encargo specifies. `schemaFacts` is an array of
+// {name, entry} in the SAME priority order selectSchemaFactNames returned
+// (question's own names first, then Title/Definition/Proposal) -- `entry`
+// is the endpoint's own per-name shape ({variants, parents, ...}), used
+// here EXACTLY as returned, never reformatted a second, possibly-
+// diverging way from what the "Schema facts used" UI line renders.
+function formatSchemaFactAttribute(attr) {
+  let text = attr.required ? `@${attr.name} (required)` : `@${attr.name}`;
+  if (attr.enum && attr.enum.length > 0) {
+    const values = attr.enum.join('|') + (attr.enum_truncated ? `, +${attr.enum_omitted} more` : '');
+    text += ` [${values}]`;
+  }
+  return text;
+}
+
+function formatSchemaFactNameList(names, truncated, omitted) {
+  if (!names || names.length === 0) return 'none';
+  return names.join(', ') + (truncated ? `, +${omitted} more` : '');
+}
+
+function buildSchemaFactsBlock(standard, schemaFacts) {
+  if (!schemaFacts || schemaFacts.length === 0) return '';
+  let block = `\n\nSCHEMA FACTS — extracted from the official ${standard} schema. These are
+authoritative: for questions about which attributes, values, child
+elements or parent elements are allowed, rely on these facts over your
+own knowledge. If the facts do not cover what is asked, say so plainly
+instead of guessing.`;
+  for (const { name, entry } of schemaFacts) {
+    entry.variants.forEach((variant, idx) => {
+      block += `\n<${name}> (schemas: ${variant.schemas.join(', ')})`;
+      if (!variant.resolved) {
+        block += `\n  content model not fully resolved for this schema — do not assume the lists below are complete.`;
+      }
+      const attrsText =
+        variant.attributes.length > 0
+          ? variant.attributes.map(formatSchemaFactAttribute).join(', ') +
+            (variant.attributes_truncated ? `, +${variant.attributes_omitted} more` : '')
+          : 'none';
+      block += `\n  attributes: ${attrsText}`;
+      block += `\n  children: ${formatSchemaFactNameList(variant.children, variant.children_truncated, variant.children_omitted)}`;
+      if (idx === entry.variants.length - 1) {
+        block += `\n  allowed inside: ${formatSchemaFactNameList(entry.parents, entry.parents_truncated, entry.parents_omitted)}`;
+      }
+    });
+  }
+  return block;
+}
+
 // Builds the "Ask a Question" system prompt: strictly scoped to the
 // selected BRDP (docs request), with its full live context -- including
 // Rule/Rule Status, which askGeneric previously never sent at all -- plus
 // an optional second BRDP (from Records or the official catalog) when the
 // user has picked one to compare against.
-function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, vocabCheck) {
+function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, vocabCheck, schemaFacts) {
   const ruleState = ruleStateOf(ruleApproval);
   let prompt = `You are an S1000D and DITA business-rules expert assistant embedded in
 BRDP Manager. You answer questions strictly about the single BRDP shown
@@ -169,7 +220,11 @@ Answer in the same language as the question.
 This project uses the standard: ${standard}.
 Answer strictly in terms of this standard and version — use its element
 names, rule vocabulary and conventions, and do not mix in other versions
-of S1000D or DITA unless the user explicitly asks for a comparison.
+of S1000D or DITA unless the user explicitly asks for a comparison.`;
+
+  prompt += buildSchemaFactsBlock(standard, schemaFacts);
+
+  prompt += `
 
 Current BRDP context:
 ID: ${brdp.identifier}
@@ -266,9 +321,6 @@ numbers, not even as possibilities ("it might be in chapter X"), unless
 the exact number appears in the BRDP content above. If you would
 otherwise need to point to a location in the ${standard} specification,
 name the concept or element to look up instead.
-
-Keep element and attribute names exactly as written in the BRDP's
-Title — never rename them.
 
 LANGUAGE: Write the Definition in the same language as the BRDP's
 Title ("${brdp.title}"). This takes priority over everything else — the
@@ -383,9 +435,6 @@ the exact number appears in the BRDP content above. If you would
 otherwise need to point to a location in the ${standard} specification,
 name the concept or element to look up instead.
 
-Keep element and attribute names exactly as written in the BRDP's Title
-and Definition — never rename them.
-
 BRDP:
 ID: ${brdp.identifier}
 Title: ${brdp.title}
@@ -459,6 +508,57 @@ function ReferenceRow({ candidate, showScore, showProposal, danger, expanded, on
         </div>
       )}
     </li>
+  );
+}
+
+// Docs request ("Servicio de fichas de esquema y su uso en Ask"): renders
+// one expanded schema-fact card -- exactly the same data
+// buildSchemaFactsBlock formatted into the prompt (the entry object is
+// used as-is, never reformatted a second, possibly-diverging way).
+function formatSchemaFactAttributeUi(attr, t) {
+  let text = attr.required ? `@${attr.name} (${t('records.assistant.schemaFactRequired')})` : `@${attr.name}`;
+  if (attr.enum && attr.enum.length > 0) {
+    const values = attr.enum.join(' | ') + (attr.enum_truncated ? `, +${attr.enum_omitted}` : '');
+    text += ` [${values}]`;
+  }
+  return text;
+}
+
+function formatSchemaFactNameListUi(names, truncated, omitted, t) {
+  if (!names || names.length === 0) return t('records.assistant.schemaFactNone');
+  return names.join(', ') + (truncated ? `, +${omitted}` : '');
+}
+
+function SchemaFactCard({ name, entry }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.referenceDefinition}>
+      {entry.variants.map((variant, idx) => (
+        <div key={idx} className={styles.schemaFactVariant}>
+          <div>
+            <strong>&lt;{name}&gt;</strong> ({t('records.assistant.schemaFactSchemas')}: {variant.schemas.join(', ')})
+          </div>
+          {!variant.resolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
+          <div>
+            {t('records.assistant.schemaFactAttributes')}:{' '}
+            {variant.attributes.length > 0
+              ? variant.attributes.map((a) => formatSchemaFactAttributeUi(a, t)).join(', ') +
+                (variant.attributes_truncated ? `, +${variant.attributes_omitted}` : '')
+              : t('records.assistant.schemaFactNone')}
+          </div>
+          <div>
+            {t('records.assistant.schemaFactChildren')}:{' '}
+            {formatSchemaFactNameListUi(variant.children, variant.children_truncated, variant.children_omitted, t)}
+          </div>
+          {idx === entry.variants.length - 1 && (
+            <div>
+              {t('records.assistant.schemaFactAllowedInside')}:{' '}
+              {formatSchemaFactNameListUi(entry.parents, entry.parents_truncated, entry.parents_omitted, t)}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -785,6 +885,17 @@ export default function RecordsPage() {
   // question never becomes something the LLM "remembers"). Cleared by
   // Clear or by switching BRDP.
   const [prevTurn, setPrevTurn] = useState(null);
+  // Docs request ("Servicio de fichas de esquema y su uso en Ask"): the
+  // real schema facts fetched for the CURRENTLY DISPLAYED exchange (in
+  // priority order, question's own names first) -- the exact same array
+  // both buildSchemaFactsBlock used to build the prompt AND the "Schema
+  // facts used" line below render, so what the user sees and what the LLM
+  // saw are always the same data (same precedent already established for
+  // Suggest Definition/Proposal's reference lists). Empty when the
+  // question/BRDP mentioned no real schema names, or the standard has no
+  // generated cards -- no line, no prompt block either way.
+  const [lastAskedSchemaFacts, setLastAskedSchemaFacts] = useState([]);
+  const [expandedSchemaFactNames, setExpandedSchemaFactNames] = useState(new Set());
   // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
   // the chosen entry ({ source: 'records'|'catalog', identifier, title,
   // definition, and for 'records' also proposal/validation/ruleState/
@@ -1109,6 +1220,8 @@ export default function RecordsPage() {
     setAskError(null);
     setLastAsked(null);
     setPrevTurn(null);
+    setLastAskedSchemaFacts([]);
+    setExpandedSchemaFactNames(new Set());
     setCompareOpen(false);
     setCompareQuery('');
     setCompareBrdp(null);
@@ -1369,6 +1482,32 @@ export default function RecordsPage() {
     return result;
   };
 
+  // Docs request ("Servicio de fichas de esquema y su uso en Ask"): real
+  // structural facts for Ask, from GET /api/schema-cards. Names are
+  // selected in priority order (question first, then Title/Definition/
+  // Proposal -- selectSchemaFactNames), capped at 6, using the SAME
+  // `vocabulary` state already loaded for the vocab-warning banner (no
+  // extra fetch for that part). A fetch failure here (network hiccup, a
+  // transient 5xx) is swallowed to an empty result rather than surfaced as
+  // an Ask error -- this is a real enhancement on top of Ask, never a
+  // requirement for it to work; degrading to "no schema facts this time"
+  // is the right failure mode, not blocking the question itself.
+  const fetchAskSchemaFacts = async (question, brdp) => {
+    const names = selectSchemaFactNames([question, brdp.title, brdp.definition, brdp.proposal], vocabulary, 6).map(
+      (c) => c.name
+    );
+    if (names.length === 0) return [];
+    try {
+      const res = await authFetchJson(
+        `/api/schema-cards?standard=${encodeURIComponent(project.standard)}&names=${encodeURIComponent(names.join(','))}`
+      );
+      if (!res.available) return [];
+      return names.filter((name) => res.cards[name]).map((name) => ({ name, entry: res.cards[name] }));
+    } catch {
+      return [];
+    }
+  };
+
   // The Ask panel only ever renders inside the `selected` branch of the
   // detail panel (see the JSX below), so `selected` is always set here --
   // no `selected ?` guard needed the way the old context-string ever had.
@@ -1385,9 +1524,13 @@ export default function RecordsPage() {
     setLastAsked(askedQuestion);
     setAnswer('');
     setAskError(null);
+    setLastAskedSchemaFacts([]);
+    setExpandedSchemaFactNames(new Set());
     try {
       const vocab = await recomputeVocabResult(selected);
-      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard, vocab);
+      const schemaFacts = await fetchAskSchemaFacts(askedQuestion, selected);
+      setLastAskedSchemaFacts(schemaFacts);
+      const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, project.standard, vocab, schemaFacts);
       // One turn of chaining (docs request): the previous Q/A, if any,
       // goes in first as real conversation history so a follow-up like
       // "and why?" resolves correctly, then the new question.
@@ -1417,6 +1560,8 @@ export default function RecordsPage() {
     setAskError(null);
     setLastAsked(null);
     setPrevTurn(null);
+    setLastAskedSchemaFacts([]);
+    setExpandedSchemaFactNames(new Set());
   };
 
   const openCompareSearch = () => {
@@ -2291,6 +2436,42 @@ export default function RecordsPage() {
                     ) : (
                       <div className={styles.answerBox}>
                         <ReactMarkdown>{answer}</ReactMarkdown>
+                      </div>
+                    )}
+                    {/* Docs request ("Servicio de fichas de esquema y su uso
+                        en Ask"): discrete, clickable line under the answer
+                        -- absent entirely when no real schema names were
+                        mentioned or the standard has no generated cards
+                        (no line, matching the prompt having no SCHEMA FACTS
+                        block either). Uses the EXACT same array that built
+                        the prompt, never a second, possibly-diverging one. */}
+                    {!askPending && !askError && lastAskedSchemaFacts.length > 0 && (
+                      <div className={styles.answerBox}>
+                        <span className={styles.muted}>{t('records.assistant.schemaFactsUsed')}</span>{' '}
+                        {lastAskedSchemaFacts.map(({ name }, idx) => (
+                          <span key={name}>
+                            {idx > 0 && ', '}
+                            <button
+                              type="button"
+                              className={styles.linkButton}
+                              onClick={() =>
+                                setExpandedSchemaFactNames((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(name)) next.delete(name);
+                                  else next.add(name);
+                                  return next;
+                                })
+                              }
+                            >
+                              &lt;{name}&gt;
+                            </button>
+                          </span>
+                        ))}
+                        {lastAskedSchemaFacts
+                          .filter(({ name }) => expandedSchemaFactNames.has(name))
+                          .map(({ name, entry }) => (
+                            <SchemaFactCard key={name} name={name} entry={entry} />
+                          ))}
                       </div>
                     )}
                     {!askPending && (

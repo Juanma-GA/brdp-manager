@@ -20,6 +20,8 @@ import {
   checkAgainstVocabulary,
   formatWrongTypeMessage,
   hashVocabInputText,
+  extractSchemaFactCandidates,
+  selectSchemaFactNames,
 } from "../src/utils/vocabularyCheck.js";
 
 let failures = 0;
@@ -333,6 +335,86 @@ const emptyCtx = { elements: [], attributes: [], camelCase: [], phraseCandidates
   const h3 = hashVocabInputText("T", "D", "P2");
   assert(h1 === h2, "same (title, definition, proposal) -> same hash");
   assert(h1 !== h3, "different text -> different hash");
+}
+
+// ---- extractSchemaFactCandidates / selectSchemaFactNames (docs request,
+// "Servicio de fichas de esquema y su uso en Ask") ----
+{
+  const r = extractSchemaFactCandidates("What attributes does <table> allow?", vocab4_2);
+  assert(r.length === 1 && r[0].name === "table" && r[0].type === "element", `explicit <table> markup -> schema-fact candidate (got: ${JSON.stringify(r)})`);
+}
+{
+  // Encargo's own example: "¿Qué atributos admite el elemento table?" ->
+  // phrase-triggered, resolves against the vocabulary -> a real candidate.
+  const r = extractSchemaFactCandidates("What attributes does the element table allow?", vocab4_2);
+  assert(r.length === 1 && r[0].name === "table" && r[0].type === "element", `phrase-triggered "element table" resolves to a real element -> candidate (got: ${JSON.stringify(r)})`);
+}
+{
+  // Encargo's own counter-example: "¿Qué es esto para el proyecto?" -- "para"
+  // is a real S1000D element (as it happens), but it's just an ordinary
+  // Spanish preposition here, never marked up nor phrase-triggered -> no
+  // candidate at all, even though "para" DOES exist in the vocabulary.
+  const vocabWithPara = { elements: new Set(["para", "table"]), attributes: new Set([]) };
+  const r = extractSchemaFactCandidates("¿Qué es esto para el proyecto?", vocabWithPara);
+  assert(r.length === 0, `bare untriggered "para" (a real element name) never becomes a schema-fact candidate (got: ${JSON.stringify(r)})`);
+}
+{
+  // "note" -- same shape: a real element name used as an ordinary English
+  // word ("note that...") must never trigger a card lookup on its own.
+  const vocabWithNote = { elements: new Set(["note"]), attributes: new Set([]) };
+  const r = extractSchemaFactCandidates("Please note that this decision is provisional.", vocabWithNote);
+  assert(r.length === 0, `bare untriggered "note" never becomes a schema-fact candidate (got: ${JSON.stringify(r)})`);
+}
+{
+  // <pokemon> -- doesn't exist in the vocabulary -> no schema-fact
+  // candidate (it already has its own red "not found" warning elsewhere;
+  // there is nothing real to fetch a card for).
+  const r = extractSchemaFactCandidates("Is <pokemon> allowed here?", vocab4_2);
+  assert(r.length === 0, `<pokemon> (not in vocabulary) never becomes a schema-fact candidate (got: ${JSON.stringify(r)})`);
+}
+{
+  // "elementos de tipo cl, pl y ip" -- only vocabulary hits become
+  // candidates, in the encargo's own worked list example (schema-fact
+  // candidates are element-only -- see extractSchemaFactCandidates' own
+  // docstring -- so this uses elements, not attributes, unlike the
+  // equivalent checkAgainstVocabulary test above).
+  const vocabList = { elements: new Set(["cl", "ip"]), attributes: new Set([]) };
+  const r = extractSchemaFactCandidates("elementos de tipo cl, pl y ip", vocabList);
+  const names = r.map((c) => c.name).sort();
+  assert(JSON.stringify(names) === JSON.stringify(["cl", "ip"]), `only the list items that exist in the vocabulary become candidates, never "tipo"/"pl" (got: ${JSON.stringify(names)})`);
+}
+{
+  // "el atributo table" -> exists only as an ELEMENT -> corrected type,
+  // same as resolvePhraseCandidates' own wrong-type correction.
+  const r = extractSchemaFactCandidates("el atributo table debe existir", vocab4_2);
+  assert(r.length === 1 && r[0].name === "table" && r[0].type === "element", `wrong-type-corrected phrase candidate still becomes a real schema-fact candidate with the CORRECTED type (got: ${JSON.stringify(r)})`);
+}
+{
+  const r = extractSchemaFactCandidates("<table> and @conref", null);
+  assert(r.length === 0, "extractSchemaFactCandidates(..., null) -> always empty, standard has no vocabulary");
+}
+{
+  // Priority order + max cap + cross-text dedup, the encargo's own wording:
+  // "priorizando los de la pregunta y luego los del Title".
+  const vocabMulti = { elements: new Set(["a", "b", "c", "d", "e", "f", "g"]), attributes: new Set([]) };
+  const question = "Is <a> related to <b>?";
+  const title = "About <b> and <c> and <d>";
+  const definition = "See <e> and <f> and <g>";
+  const selected = selectSchemaFactNames([question, title, definition], vocabMulti, 6);
+  const names = selected.map((c) => c.name);
+  assert(names.length === 6, `caps at max (6), got ${names.length}: ${JSON.stringify(names)}`);
+  assert(names[0] === "a" && names[1] === "b", `question's own candidates come first (got: ${JSON.stringify(names)})`);
+  assert(names.indexOf("b") < names.indexOf("c"), "question's <b> is not duplicated when Title mentions it again -- kept at its higher (question) priority position");
+  assert(JSON.stringify(names.slice(2, 4)) === JSON.stringify(["c", "d"]), `Title's own candidates fill in next, before Definition's (got: ${JSON.stringify(names)})`);
+  assert(JSON.stringify(names.slice(4)) === JSON.stringify(["e", "f"]), `Definition's candidates fill the remaining slots up to the cap, "g" left out (got: ${JSON.stringify(names)})`);
+}
+{
+  const r = selectSchemaFactNames(["no xml names here at all"], vocab4_2, 6);
+  assert(r.length === 0, "selectSchemaFactNames on plain prose with no names -> empty, never guesses");
+}
+{
+  const r = selectSchemaFactNames(["<table>"], null, 6);
+  assert(r.length === 0, "selectSchemaFactNames(..., null) -> always empty");
 }
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED\n" : `\n${failures} CHECK(S) FAILED\n`);

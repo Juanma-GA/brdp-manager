@@ -348,6 +348,67 @@ export function formatWrongTypeMessage(standard, entry) {
   return `${usedDisplay} is not an ${entry.usedAs} in ${standard} — it exists as ${actualDisplay}.`;
 }
 
+// Docs request ("Servicio de fichas de esquema y su uso en Ask"): which
+// names to request a schema CARD for, from a given text -- reusing the
+// EXACT same deterministic extraction the vocabulary-warning banner
+// already uses (explicit `<x>`/`@x` markup, camelCase, and phrase-triggered
+// words), restricted to names that actually EXIST in the vocabulary (an
+// inexistent name already has its own red warning; it never gets a schema
+// card, there is nothing real to fetch). This is also, by construction,
+// how the encargo's own "no cards for bare words that coincidentally match
+// a schema name" requirement is satisfied: extractContextCandidates never
+// treats an untriggered, unmarked bare word (e.g. "para", "note" used as
+// ordinary Spanish/English words) as a candidate AT ALL -- there is no
+// "scan every word against the vocabulary" step to begin with, so nothing
+// extra is needed here.
+//
+// ELEMENT names only: the generator ("una ficha por elemento", docs
+// request point 1) never produces a card for a bare attribute -- an
+// attribute's own facts (required/enum) only exist as part of whichever
+// element card declares it. A `@frame` mentioned on its own therefore
+// never gets its own fetch; its information already surfaces inside the
+// `<table>` card wherever `<table>` itself is a selected name.
+export function extractSchemaFactCandidates(text, vocabulary) {
+  if (!vocabulary) return [];
+  const { elements, camelCase, phraseCandidates } = extractContextCandidates(text);
+  const results = [];
+  const seen = new Set();
+  const add = (name) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    results.push({ name, type: 'element' });
+  };
+  for (const name of elements) if (vocabulary.elements.has(name)) add(name);
+  for (const name of camelCase) if (vocabulary.elements.has(name)) add(name);
+  for (const r of resolvePhraseCandidates(phraseCandidates, vocabulary)) {
+    if (r.type === 'element') add(r.name);
+  }
+  return results;
+}
+
+// Selects up to `max` names across several texts, in PRIORITY ORDER (the
+// encargo's own wording: "priorizando los de la pregunta y luego los del
+// Title" -- Definition/Proposal are extracted too, per the encargo's
+// "aplicada... a Title/Definition/Proposal", but at lower priority still,
+// after Title, since only those two are named explicitly as the priority
+// pair). Dedupes across texts (a name mentioned in both the question and
+// the Title only ever asks for one card, keeping its higher priority).
+export function selectSchemaFactNames(orderedTexts, vocabulary, max = 6) {
+  if (!vocabulary) return [];
+  const seen = new Set();
+  const selected = [];
+  for (const text of orderedTexts) {
+    if (selected.length >= max) break;
+    for (const candidate of extractSchemaFactCandidates(text, vocabulary)) {
+      if (selected.length >= max) break;
+      if (seen.has(candidate.name)) continue;
+      seen.add(candidate.name);
+      selected.push(candidate);
+    }
+  }
+  return selected;
+}
+
 // A cheap, stable, non-cryptographic hash of the three text fields --
 // only used as an in-memory key to avoid recomputing when nothing changed,
 // never for anything security-sensitive.

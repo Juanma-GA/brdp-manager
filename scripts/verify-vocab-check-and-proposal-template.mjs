@@ -7,7 +7,9 @@
 // running app + real Postgres (chat transport mocked, same convention as
 // every other round in this branch):
 //   1. buildSuggestProposalPrompt's fill-in-template block (unchanged by
-//      this round) and the "never rename" lines on both Suggest prompts.
+//      this round), and that the "never rename" line is gone from both
+//      Suggest prompts (removed this round -- it was added on a copy
+//      mistake, not a real observed LLM behavior).
 //   2. The "Same BRDP in other projects" group renders in red (unchanged
 //      by this round).
 //   3. Schema vocabulary check, NOW SOLO DETERMINISTA: an explicit
@@ -267,8 +269,8 @@ async function main() {
     const reqDef = await lastMockRequest();
     const sysDef = reqDef.messages.find((m) => m.role === "system").content;
     assert(
-      sysDef.includes("Keep element and attribute names exactly as written in the BRDP's\nTitle — never rename them."),
-      "Suggest Definition prompt carries the exact never-rename line"
+      !sysDef.includes("never rename them"),
+      "Suggest Definition prompt no longer carries the 'never rename' line (removed: added on a copy-mistake, never a real LLM behavior)"
     );
     assert(!sysDef.includes("The BRDP mentions names that may not exist"), "no unknown-names block on a clean BRDP");
     // New chapter-citation instruction, replacing the old "not sure of" wording.
@@ -295,8 +297,8 @@ async function main() {
     assert(sysProp.includes("Permitted characters: [CHARACTERS: ...]."), "example line 4 present verbatim");
     assert(!sysProp.includes("PROJECT-SPECIFIC VALUES"), "old PROJECT-SPECIFIC VALUES block is gone");
     assert(
-      sysProp.includes("Keep element and attribute names exactly as written in the BRDP's Title\nand Definition — never rename them."),
-      "Suggest Proposal prompt also carries its own never-rename line"
+      !sysProp.includes("never rename them"),
+      "Suggest Proposal prompt no longer carries the 'never rename' line either"
     );
     assert(!sysProp.includes("The BRDP mentions names that may not exist"), "no unknown-names block on a clean BRDP");
     assert(
