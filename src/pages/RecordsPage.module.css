@@ -644,6 +644,32 @@
   max-width: 100%;
 }
 
+/* Suggest Rule (docs request): the precedent rule inside an expanded
+   reference row, and the Paste rule field -- XML, so monospace and never
+   wrapped mid-tag; scrolls inside itself instead of widening the panel. */
+.referenceRuleXml {
+  margin: 4px 0 0;
+  font-family: monospace;
+  font-size: 11.5px;
+  white-space: pre;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.pasteRuleInput {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
+  resize: vertical;
+}
+
 .progressBar {
   display: block;
   width: 100%;

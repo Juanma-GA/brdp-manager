@@ -131,3 +131,80 @@ export const suggestProposalCases = [
   { name: 'refused-with-comments-wrongtype', args: [brdpRefused, 'S1000D 4.2', [], [], [], vocabWrongType] },
   { name: 'no-references-notfound', args: [{ ...brdpBase, proposal: '' }, 'DITA 1.3 Xpath2.0', [], [], [], vocabNotFound] },
 ];
+
+// Suggest Rule round (docs request): one case per rule format (BREX-4.2,
+// BREX-4.1, BREX-3.0.1, SCH-DITA under both XPath dialects), covering the
+// three precedent blocks, schema facts, and the no-reference case.
+const brdpRule = {
+  ...brdpBase,
+  proposal: 'Every <table> shall have @frame set to "all".',
+};
+const ruleSameBrdp = [
+  {
+    id: 'r1',
+    identifier: 'BRDP-S1-00042',
+    source: 'Project Gamma',
+    proposal: 'Tables shall be framed on all sides.',
+    text: '<structureObjectRule id="BRDP-S1-00042"><objectPath allowedObjectFlag="2">//table/@frame</objectPath><objectUse>Frame</objectUse><objectValue valueForm="single" valueAllowed="all">All sides</objectValue></structureObjectRule>',
+  },
+];
+const ruleSimilar = [
+  {
+    id: 'r2',
+    identifier: 'BRDP-S1-00050',
+    source: 'Project Delta',
+    score: 0.71,
+    proposal: 'Tables shall not use @pgwide.',
+    text: '<structureObjectRule id="BRDP-S1-00050"><objectPath allowedObjectFlag="0">//table/@pgwide</objectPath><objectUse>No pgwide</objectUse></structureObjectRule>',
+  },
+];
+const ruleFormatExamples = [
+  {
+    id: 'r3',
+    identifier: 'BRDP-S1-00133',
+    source: 'Template',
+    proposal: 'The parameter element shall not be used.',
+    text: '<structureObjectRule id="BRDP-S1-00133"><objectPath allowedObjectFlag="0">//parameter</objectPath><objectUse>Not used</objectUse></structureObjectRule>',
+  },
+];
+const ruleFormatExamples301 = [
+  {
+    id: 'r4',
+    identifier: 'BRDP-EXT-02634',
+    source: 'Template',
+    proposal: 'Column specifications inside table headers shall not be used.',
+    text: '<objrule id="BRDP-EXT-02634"><objpath objappl="0">/dmodule/content//thead/colspec</objpath><objuse>No colspec in thead</objuse></objrule>',
+  },
+];
+const ruleFormatExamplesDita = [
+  {
+    id: 'r5',
+    identifier: 'BRDP-D1-00010',
+    source: 'Template',
+    proposal: 'Notes shall declare a type.',
+    text: '<sch:pattern id="p-BRDP-D1-00010"><sch:rule context="note"><sch:assert id="BRDP-D1-00010" test="@type">A note must declare @type.</sch:assert></sch:rule></sch:pattern>',
+  },
+];
+
+export const suggestRuleCases = [
+  {
+    name: 'brex-4-2-all-groups-with-facts',
+    args: [brdpRule, 'S1000D 4.2', 'BREX-4.2', { sameBrdp: ruleSameBrdp, similar: ruleSimilar, formatExamples: ruleFormatExamples }, [{ name: 'table', entry: tableEntry }]],
+  },
+  {
+    name: 'brex-4-1-format-examples-only',
+    args: [brdpRule, 'S1000D 4.1', 'BREX-4.1', { sameBrdp: [], similar: [], formatExamples: ruleFormatExamples }, []],
+  },
+  {
+    name: 'brex-3-0-1-format-examples-only',
+    args: [brdpRule, 'S1000D 3.0.1', 'BREX-3.0.1', { sameBrdp: [], similar: [], formatExamples: ruleFormatExamples301 }, []],
+  },
+  {
+    name: 'sch-dita-xpath2-no-references',
+    args: [{ ...brdpRule, proposal: 'Every <note> shall declare @type.' }, 'DITA 1.3 Xpath2.0', 'SCH-DITA', { sameBrdp: [], similar: [], formatExamples: [] }, []],
+  },
+  {
+    name: 'sch-dita-xpath3-format-examples',
+    args: [{ ...brdpRule, proposal: 'Every <note> shall declare @type.' }, 'DITA 1.3 Xpath3.0', 'SCH-DITA', { sameBrdp: [], similar: [], formatExamples: ruleFormatExamplesDita }, []],
+  },
+];

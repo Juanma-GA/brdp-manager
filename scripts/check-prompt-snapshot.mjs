@@ -108,6 +108,12 @@
 //      case with a non-empty `comments`); an empty `comments` still
 //      renders as the literal "not given" with no new paragraph at all
 //      (unchanged from before this round).
+//
+// Suggest Rule round: a fourth group, `suggestRule`, added (5 NEW cases --
+// BREX-4.2 with all three precedent blocks + schema facts, BREX-4.1 and
+// BREX-3.0.1 with format examples only, SCH-DITA under XPath 2.0 with no
+// references and under XPath 3.0 with a format example, so the queryBinding
+// line of both dialects is pinned). The 11 existing cases are unchanged.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -115,16 +121,18 @@ import path from 'node:path';
 import { buildAskSystemPrompt } from '../src/prompts/askPrompt.js';
 import { buildSuggestDefinitionPrompt } from '../src/prompts/suggestDefinitionPrompt.js';
 import { buildSuggestProposalPrompt } from '../src/prompts/suggestProposalPrompt.js';
-import { askCases, suggestDefinitionCases, suggestProposalCases } from './prompt-snapshot/cases.mjs';
+import { buildSuggestRulePrompt } from '../src/prompts/suggestRulePrompt.js';
+import { askCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXPECTED_PATH = path.join(__dirname, 'prompt-snapshot', 'expected-prompts.json');
 
 function buildActual() {
-  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {} };
+  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {} };
   for (const c of askCases) actual.ask[c.name] = buildAskSystemPrompt(...c.args);
   for (const c of suggestDefinitionCases) actual.suggestDefinition[c.name] = buildSuggestDefinitionPrompt(...c.args);
   for (const c of suggestProposalCases) actual.suggestProposal[c.name] = buildSuggestProposalPrompt(...c.args);
+  for (const c of suggestRuleCases) actual.suggestRule[c.name] = buildSuggestRulePrompt(...c.args);
   return actual;
 }
 
@@ -143,7 +151,7 @@ const expected = JSON.parse(readFileSync(EXPECTED_PATH, 'utf-8'));
 let mismatches = 0;
 let checked = 0;
 
-for (const group of ['ask', 'suggestDefinition', 'suggestProposal']) {
+for (const group of ['ask', 'suggestDefinition', 'suggestProposal', 'suggestRule']) {
   const expectedNames = Object.keys(expected[group] || {});
   const actualNames = Object.keys(actual[group] || {});
   for (const name of new Set([...expectedNames, ...actualNames])) {

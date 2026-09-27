@@ -14,7 +14,7 @@
 //   1. A real Excel import of Validated rows triggers ZERO Mistral calls.
 //   2. The pending banner + "Compute embeddings" button appear with the
 //      real count, and Suggest is disabled while pending.
-//   3. Running the job shows real progress (processed/total) and an ETA,
+//   3. Running the job shows its progress bar (processed/total) and an ETA,
 //      completes, and the banner/button disappear afterward.
 //   4. A Validated-but-pending BRDP in ANOTHER project of the same
 //      standard is surfaced via the "excluded" notice on Suggest.
@@ -187,21 +187,25 @@ async function main() {
     console.log("OK: progress bar visible");
     await page.screenshot({ path: "/tmp/embeddings-job-running.png" });
 
-    // At least one poll tick should show partial progress (processed > 0,
-    // < total) given the delayed mock -- confirms this is REAL progress,
-    // not a bar that jumps straight from 0 to done.
-    let sawPartialProgress = false;
+    // Since the batch-embeddings round the job commits and advances
+    // progress per BATCH of EMBED_BATCH_SIZE=32, so this script's 5 rows are
+    // one batch: progress goes 0 -> 5 in one step and a genuine partial
+    // value is impossible by design (batch progress is covered by
+    // scripts/verify-batch-embeddings.mjs with 63 rows). What IS observable
+    // here, with the delayed mock, is the running state itself: the bar
+    // shown below its max while "Computing embeddings" is on screen.
+    let sawRunningState = false;
     for (let i = 0; i < 20; i++) {
       const [value, max] = await progressEl.evaluate((el) => [el.value, el.max]).catch(() => [null, null]);
-      if (value !== null && max !== null && value > 0 && value < max) {
-        sawPartialProgress = true;
-        console.log(`Observed partial progress: ${value} / ${max}`);
+      if (value !== null && max !== null && max > 0 && value < max) {
+        sawRunningState = true;
+        console.log(`Observed running progress: ${value} / ${max}`);
         break;
       }
       if ((await page.locator("text=/Computing embeddings/i").count()) === 0) break; // finished already
       await page.waitForTimeout(200);
     }
-    assert(sawPartialProgress, "progress bar showed a genuine partial value (not just 0 or done) while the job ran");
+    assert(sawRunningState, "progress bar showed the job running (below its max) before it completed");
 
     const etaText = await page
       .locator("text=/remaining|Estimating time/i")
@@ -223,7 +227,8 @@ async function main() {
 
     const callsAfterCompute = await embedCallCount();
     console.log("Mock Mistral embed calls after compute:", callsAfterCompute);
-    assert(callsAfterCompute === 5, `exactly 5 real embedding calls happened (one per pending BRDP), got ${callsAfterCompute}`);
+    // Batch embeddings round: the 5 pending rows fit in ONE batch request.
+    assert(callsAfterCompute === 1, `exactly 1 real (batched) embedding request for the 5 pending BRDPs, got ${callsAfterCompute}`);
 
     const pendingAfterComputeResp = await fetch(`${API}/api/projects/${projA.id}/embeddings/pending`, {
       headers: auth,

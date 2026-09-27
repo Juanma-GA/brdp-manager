@@ -56,6 +56,21 @@ async function main() {
       }),
     });
   }
+  // Suggest Rule round: Suggest Rule now needs a Validated source BRDP with a
+  // filled Proposal (and, like every Suggest, no pending embeddings) -- so the
+  // source is created BEFORE the embeddings job, not after it.
+  const source = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
+    method: "POST",
+    headers: auth,
+    body: JSON.stringify({
+      identifier: "BRDP-RULEBOX-SOURCE",
+      title: "Rule box source",
+      definition: "Rule box source definition",
+      proposal: "LONGRULE: the mock answers this Proposal with one long unbroken XML line.",
+      validation: "Validated",
+    }),
+  }).then((r) => r.json());
+
   const computeResp = await fetch(`${API}/api/projects/${proj.id}/embeddings/compute`, {
     method: "POST",
     headers: auth,
@@ -67,18 +82,6 @@ async function main() {
     if (statusResp.status !== "running") break;
     await new Promise((r) => setTimeout(r, 250));
   }
-
-  const source = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
-    method: "POST",
-    headers: auth,
-    body: JSON.stringify({
-      identifier: "BRDP-RULEBOX-SOURCE",
-      title: "Rule box source",
-      definition: "",
-      proposal: "",
-      validation: "Pending",
-    }),
-  }).then((r) => r.json());
 
   const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });

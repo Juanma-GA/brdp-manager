@@ -8,8 +8,22 @@ import { sendMessage } from '../api/llmAPI';
 import { buildSuggestDefinitionPrompt } from '../prompts/suggestDefinitionPrompt.js';
 import { buildSuggestProposalPrompt } from '../prompts/suggestProposalPrompt.js';
 import { SUGGEST_TEMPERATURE } from '../prompts/shared.js';
+import { buildCopyablePrompt, buildSuggestRulePrompt, parseSuggestRuleResponse, SUGGEST_RULE_USER_MESSAGE } from '../prompts/suggestRulePrompt.js';
+import { fetchSchemaFacts } from '../api/schemaFacts.js';
+import { checkWellFormed } from '../api/generateBREX.js';
+import { checkRuleNames } from '../utils/ruleNameCheck.js';
+import { ruleStateOf } from '../utils/ruleState';
 
-export function useSuggestions({ projectId, standard, selected, aiProvider, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, t }) {
+// Suggest Rule validation (docs request, Part 4): deterministic, warns
+// only. Well-formedness is the one thing that disables Accept -- the
+// backend would reject a malformed rule_xml anyway. Unknown / wrong-kind
+// names in the rule's XPath are red warnings with Accept still enabled.
+export function validateRuleXml(xml, vocabulary) {
+  const wellFormed = checkWellFormed(xml || '');
+  return { wellFormed: wellFormed.valid, wellFormedError: wellFormed.error, names: checkRuleNames(xml || '', vocabulary) };
+}
+
+export function useSuggestions({ projectId, standard, selected, aiProvider, vocabulary, ruleApproval, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, t }) {
   // Suggest Definition catalog guard (docs request, Suggest Definition
   // corpus round): identifiers of this standard's official catalog,
   // fetched once per project (eagerly, unlike other catalog pickers which
@@ -30,13 +44,15 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
   //   text:       { brdpId, kind, text, sourceBrdpIds, format?, similar?,
   //                 styleReferences?, excludedPendingOtherProjects,
   //                 expandedReferenceIds }
-  //   notice:     { brdpId, kind, insufficientPrecedent: true, count,
-  //                 excludedPendingOtherProjects, expandedReferenceIds }
   //   error:      { brdpId, kind, error, expandedReferenceIds }
-  // notice/error entries have no Accept (nothing to write) but DO get a
-  // Discard button -- without one, a BRDP that hit "insufficient
-  // precedent" or an LLM error would stay blocked from ever suggesting
-  // again.
+  // kind='rule' entries (docs request, Suggest Rule round) also carry
+  // `copyablePrompt` (for Copy prompt, whenever a prompt was built),
+  // `pastedRule` (the Paste rule field), the reference groups, and --
+  // instead of `text` -- `notCheckable` (the model's reason) when the
+  // decision can't be verified on the XML.
+  // error / NOT_CHECKABLE entries have no Accept for the generated text
+  // but DO get a Discard button -- otherwise the BRDP would stay blocked
+  // from ever suggesting again.
   const [suggestionsByBrdpId, setSuggestionsByBrdpId] = useState(new Map());
   // Per-brdpId request generation counter -- bumped ONLY when a NEW
   // request starts for that brdpId (never by Accept/Discard). A late
@@ -101,11 +117,9 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
       return next;
     });
 
-  // docs/v2 §3: real few-shot precedent from the project's own validated
-  // BRDPs, via GET .../similar (pure data, no LLM call in the backend --
-  // §4's "FastAPI never builds prompts" rule). §3 point 3 (HR7): when
-  // /similar itself reports insufficient precedent, show that verbatim
-  // and stop -- never fall back to a no-few-shot LLM call.
+  // docs/v2 §3: real few-shot precedent via GET .../similar (pure data,
+  // no LLM call in the backend -- §4's "FastAPI never builds prompts"
+  // rule); each kind builds its own prompt from it here.
   const requestSuggestion = async (kind) => {
     if (!selected || !aiProvider) return;
     const brdpId = selected.id;
@@ -136,8 +150,7 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
       const similar = await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/similar?kind=${kind}`);
       // HR7 -- never silently degrade: a Validated BRDP in another project
       // of this same standard that hasn't been through ITS OWN project's
-      // embedding job yet is invisible to this search; surfaced regardless
-      // of whether precedent ended up sufficient or not.
+      // embedding job yet is invisible to this search -- always surfaced.
       const excludedPendingOtherProjects = similar.excluded_pending_other_projects || 0;
 
       // kind='definition' (docs request, Suggest Definition corpus round):
@@ -217,50 +230,60 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
         return;
       }
 
-      if (!similar.sufficient_precedent) {
-        commit({
-          brdpId,
-          kind,
-          loading: false,
-          insufficientPrecedent: true,
-          count: similar.candidates.length,
-          excludedPendingOtherProjects,
-          expandedReferenceIds: new Set(),
-        });
-        return;
-      }
-
-      const label = t(`records.assistant.suggest${kind.charAt(0).toUpperCase()}${kind.slice(1)}`);
-      const examples = similar.candidates
-        .map((c, i) => `Example ${i + 1} (BRDP ${c.identifier}, similarity ${c.score.toFixed(2)}):\n${c.text}`)
-        .join('\n\n');
-      const systemPrompt =
-        `You are an S1000D/DITA BRDP expert assistant. Use the following real, validated precedent ` +
-        `examples from this project's own dataset as few-shot guidance. Return only the new ${label} ` +
-        `text, nothing else.\n\n${examples}`;
-
-      const res = await sendMessage(
-        [
-          {
-            role: 'user',
-            content: `Suggest a ${label} for BRDP "${selected.identifier}" (current definition: "${selected.definition}", current proposal: "${selected.proposal}").`,
-          },
-        ],
-        null,
-        aiProvider.model,
-        aiProvider.provider,
-        systemPrompt
+      // kind='rule' (docs request, Suggest Rule round): four groups from
+      // /similar (same_brdp / candidates / standard_fallback /
+      // template_fallback), schema facts for the names in the Proposal and
+      // Definition, one general rule in the standard's format. The prompt
+      // is kept on the entry so Copy prompt works even if the LLM call
+      // itself then fails.
+      const sameBrdp = similar.same_brdp || [];
+      const ruleSimilar = similar.candidates;
+      const standardFallback = similar.standard_fallback || [];
+      const templateFallback = similar.template_fallback || [];
+      const schemaFacts = await fetchSchemaFacts(standard, vocabulary, [selected.proposal, selected.definition], 6);
+      const systemPrompt = buildSuggestRulePrompt(
+        selected,
+        standard,
+        similar.format,
+        { sameBrdp, similar: ruleSimilar, formatExamples: [...standardFallback, ...templateFallback] },
+        schemaFacts
       );
-      commit({
+      const ruleBase = {
         brdpId,
         kind,
         loading: false,
-        text: res.content,
-        sourceBrdpIds: similar.candidates.map((c) => c.id),
         format: similar.format,
+        sameBrdp,
+        similar: ruleSimilar,
+        standardFallback,
+        templateFallback,
+        // Only real BRDPs -- template rows are not BRDPs.
+        sourceBrdpIds: [...sameBrdp, ...ruleSimilar, ...standardFallback].map((c) => c.id),
         excludedPendingOtherProjects,
+        copyablePrompt: buildCopyablePrompt(systemPrompt),
+        pastedRule: '',
         expandedReferenceIds: new Set(),
-      });
+      };
+      let res;
+      try {
+        res = await sendMessage(
+          [{ role: 'user', content: SUGGEST_RULE_USER_MESSAGE }],
+          null,
+          aiProvider.model,
+          aiProvider.provider,
+          systemPrompt,
+          { temperature: SUGGEST_TEMPERATURE }
+        );
+      } catch (err) {
+        commit({ ...ruleBase, error: err.message });
+        return;
+      }
+      const parsed = parseSuggestRuleResponse(res.content);
+      if (parsed.notCheckable !== undefined) {
+        commit({ ...ruleBase, notCheckable: parsed.notCheckable || '—' });
+      } else {
+        commit({ ...ruleBase, text: parsed.xml });
+      }
     } catch (err) {
       // Docs request's explicit edge case: an error entry still gets a
       // Discard so the BRDP's Suggest buttons don't stay blocked forever.
@@ -281,6 +304,22 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
       }),
     });
 
+  const saveRuleAsDraft = async (entry, ruleXml, source) => {
+    // A Draft already exists -> the user confirms replacing it (docs
+    // request). A Verified rule can't get here: Suggest Rule is disabled
+    // for it and the backend refuses it too.
+    if (ruleStateOf(ruleApproval) === 'draft' && !window.confirm(t('records.assistant.replaceDraftRuleConfirm'))) {
+      return false;
+    }
+    await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${entry.format}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rule_xml: ruleXml, source, status: 'pending_review' }),
+    });
+    bumpApprovalsRefreshToken();
+    return true;
+  };
+
   const acceptSuggestion = async () => {
     if (!selected) return;
     const entry = suggestionsByBrdpId.get(selected.id);
@@ -290,16 +329,36 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
     // too before writing anything.
     if (entry.brdpId !== selected.id) return;
     if (entry.kind === 'rule') {
-      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${entry.format}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rule_xml: entry.text, source: 'llm', status: 'pending_review' }),
-      });
-      bumpApprovalsRefreshToken();
+      if (!validateRuleXml(entry.text, vocabulary).wellFormed) return;
+      if (!(await saveRuleAsDraft(entry, entry.text, 'llm'))) return;
     } else {
       await handleUpdate(selected.id, { [entry.kind]: entry.text });
     }
     await logSuggestionFeedback(entry, 'accepted');
+    removeSuggestionEntry(selected.id);
+  };
+
+  // Paste rule (docs request): a rule obtained from another LLM with Copy
+  // prompt, pasted back. Same validation as a generated rule; saved as
+  // Draft with source "external_llm" so it stays distinguishable from an
+  // in-app generation. Not logged as suggestion feedback -- that table
+  // measures the app's own suggestions.
+  const setPastedRule = (brdpId, value) =>
+    setSuggestionsByBrdpId((prev) => {
+      const entry = prev.get(brdpId);
+      if (!entry) return prev;
+      const next = new Map(prev);
+      next.set(brdpId, { ...entry, pastedRule: value });
+      return next;
+    });
+
+  const acceptPastedRule = async () => {
+    if (!selected) return;
+    const entry = suggestionsByBrdpId.get(selected.id);
+    const pasted = (entry?.pastedRule || '').trim();
+    if (!entry || entry.kind !== 'rule' || !pasted) return;
+    if (!validateRuleXml(pasted, vocabulary).wellFormed) return;
+    if (!(await saveRuleAsDraft(entry, pasted, 'external_llm'))) return;
     removeSuggestionEntry(selected.id);
   };
 
@@ -318,6 +377,8 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
     toggleReferenceExpanded,
     requestSuggestion,
     acceptSuggestion,
+    acceptPastedRule,
+    setPastedRule,
     discardSuggestion,
     removeSuggestionEntry,
   };

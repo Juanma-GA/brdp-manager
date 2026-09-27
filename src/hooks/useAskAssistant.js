@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { ruleStateOf } from '../utils/ruleState';
-import { selectSchemaFactNames } from '../utils/vocabularyCheck.js';
+import { fetchSchemaFacts } from '../api/schemaFacts.js';
 import { buildAskSystemPrompt } from '../prompts/askPrompt.js';
 import { ASK_TEMPERATURE } from '../prompts/shared.js';
 
@@ -82,30 +82,12 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   }, [selected?.id]);
 
   // Docs request ("Servicio de fichas de esquema y su uso en Ask"): real
-  // structural facts for Ask, from GET /api/schema-cards. Names are
-  // selected in priority order (question first, then Title/Definition/
-  // Proposal -- selectSchemaFactNames), capped at 6, using the SAME
-  // `vocabulary` state already loaded for the vocab-warning banner (no
-  // extra fetch for that part). A fetch failure here (network hiccup, a
-  // transient 5xx) is swallowed to an empty result rather than surfaced as
-  // an Ask error -- this is a real enhancement on top of Ask, never a
-  // requirement for it to work; degrading to "no schema facts this time"
-  // is the right failure mode, not blocking the question itself.
-  const fetchAskSchemaFacts = async (q, brdp) => {
-    const names = selectSchemaFactNames([q, brdp.title, brdp.definition, brdp.proposal], vocabulary, 6).map(
-      (c) => c.name
-    );
-    if (names.length === 0) return [];
-    try {
-      const res = await authFetchJson(
-        `/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(names.join(','))}`
-      );
-      if (!res.available) return [];
-      return names.filter((name) => res.cards[name]).map((name) => ({ name, entry: res.cards[name] }));
-    } catch {
-      return [];
-    }
-  };
+  // structural facts for Ask -- question first, then Title/Definition/
+  // Proposal, capped at 6 (see src/api/schemaFacts.js, shared with Suggest
+  // Rule). A fetch failure degrades to "no schema facts this time", never
+  // blocks the question itself.
+  const fetchAskSchemaFacts = (q, brdp) =>
+    fetchSchemaFacts(standard, vocabulary, [q, brdp.title, brdp.definition, brdp.proposal], 6);
 
   // The Ask panel only ever renders inside the `selected` branch of the
   // detail panel, so `selected` is always set here.

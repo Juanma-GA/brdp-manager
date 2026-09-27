@@ -22,6 +22,8 @@ import ReferenceRow from '../components/assistant/ReferenceRow';
 import SchemaFactCard from '../components/assistant/SchemaFactCard';
 import NamingTip from '../components/assistant/NamingTip';
 import RenameSuggestions from '../components/assistant/RenameSuggestions';
+import RuleSuggestionPanel from '../components/assistant/RuleSuggestionPanel';
+import { hasUnfilledMarkers } from '../utils/proposalMarkers';
 import RuleStatusStepper from '../components/RuleStatusStepper';
 import RuleStatusCell from '../components/RuleStatusCell';
 import styles from './RecordsPage.module.css';
@@ -423,12 +425,27 @@ export default function RecordsPage() {
     standard: project.standard,
     selected,
     aiProvider,
+    vocabulary,
+    ruleApproval,
     handleUpdate,
     recomputeVocabResult,
     bumpApprovalsRefreshToken: () => setApprovalsRefreshToken((n) => n + 1),
     t,
   });
   const selectedSuggestion = suggestions.selectedSuggestion;
+
+  // docs request (Suggest Rule round), Part 1: why Suggest Rule is
+  // unavailable for the selected BRDP, or null when it is. Order matters
+  // only for which single reason the tooltip shows.
+  const suggestRuleBlockedReason = () => {
+    if (!ruleFormat) return t('records.assistant.suggestRuleNoFormat', { standard: project.standard });
+    if (!selected.proposal?.trim()) return t('records.assistant.suggestRuleNeedsProposal');
+    if (hasUnfilledMarkers(selected.proposal)) return t('records.assistant.suggestRuleFillPlaceholders');
+    if (selected.validation !== 'Validated') return t('records.assistant.suggestRuleNeedsValidated');
+    if (ruleApproval === undefined) return t('records.assistant.suggestRuleLoadingRule');
+    if (ruleStateOf(ruleApproval) === 'verified') return t('records.assistant.suggestRuleAlreadyVerified');
+    return null;
+  };
 
   useEffect(() => {
     if (!selected) {
@@ -1455,6 +1472,11 @@ export default function RecordsPage() {
                     // PROJECT's own, unlike Definition which the catalog
                     // already provides.
                     const definitionEmptyForProposal = kind === 'proposal' && !selected.definition?.trim();
+                    // docs request (Suggest Rule round), Part 1: a rule
+                    // implements a DECIDED Proposal -- disabled, with the
+                    // reason shown, until it is (the backend repeats every
+                    // check). Catalog BRDPs are allowed.
+                    const ruleBlockedReason = kind === 'rule' ? suggestRuleBlockedReason() : null;
                     // docs request (per-BRDP suggestion round): ANY pending
                     // or resolved entry for this BRDP blocks ALL THREE
                     // buttons, not just the matching kind -- Discard (or
@@ -1469,7 +1491,8 @@ export default function RecordsPage() {
                           !aiProvider ||
                           suggestDisabledByEmbeddings ||
                           catalogDisabled ||
-                          definitionEmptyForProposal
+                          definitionEmptyForProposal ||
+                          !!ruleBlockedReason
                         }
                         title={
                           pendingBlocked
@@ -1478,7 +1501,7 @@ export default function RecordsPage() {
                               ? t('records.assistant.suggestDefinitionCatalogDisabled')
                               : definitionEmptyForProposal
                                 ? t('records.assistant.suggestProposalNeedsDefinition')
-                                : undefined
+                                : ruleBlockedReason || undefined
                         }
                       >
                         {selectedSuggestion?.loading && selectedSuggestion.kind === kind
@@ -1500,18 +1523,21 @@ export default function RecordsPage() {
                   </div>
                 )}
 
-                {selectedSuggestion?.insufficientPrecedent && (
-                  <div className={styles.suggestionBox}>
-                    <span className={styles.muted}>
-                      ⚠ {t('records.assistant.insufficientPrecedent', { count: selectedSuggestion.count })}
-                    </span>
-                    <div className={styles.suggestionActions}>
-                      <button onClick={suggestions.discardSuggestion}>{t('records.assistant.discard')}</button>
-                    </div>
-                  </div>
+                {selectedSuggestion?.kind === 'rule' && !selectedSuggestion.loading && (
+                  <RuleSuggestionPanel
+                    entry={selectedSuggestion}
+                    standard={project.standard}
+                    vocabulary={vocabulary}
+                    canEdit={canEdit}
+                    onAccept={suggestions.acceptSuggestion}
+                    onDiscard={suggestions.discardSuggestion}
+                    onToggleReference={(id) => suggestions.toggleReferenceExpanded(selected.id, id)}
+                    onPastedRuleChange={(value) => suggestions.setPastedRule(selected.id, value)}
+                    onAcceptPasted={suggestions.acceptPastedRule}
+                  />
                 )}
 
-                {selectedSuggestion?.error && (
+                {selectedSuggestion?.error && selectedSuggestion.kind !== 'rule' && (
                   <div className={styles.suggestionBox}>
                     <span className={styles.muted}>
                       ⚠ {t('records.assistant.errorPrefix')}: {selectedSuggestion.error}
@@ -1522,9 +1548,9 @@ export default function RecordsPage() {
                   </div>
                 )}
 
-                {selectedSuggestion?.text && (
+                {selectedSuggestion?.text && selectedSuggestion.kind !== 'rule' && (
                   <div className={styles.suggestionBox}>
-                    <div className={selectedSuggestion.kind === 'rule' ? styles.suggestionCode : styles.suggestionText}>
+                    <div className={styles.suggestionText}>
                       {selectedSuggestion.text}
                     </div>
                     <div className={styles.suggestionActions}>

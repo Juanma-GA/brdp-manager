@@ -47,13 +47,41 @@ function isSuggestDefinition(text) {
   return text === "Write the Definition for this BRDP.";
 }
 
-// Suggest Rule (proposal/rule kind, unchanged path -- requestSuggestion's
-// generic prompt) -- returns a deliberately LONG, unbroken XML line so a
-// verification script can confirm the suggestion box's Rule/XML rendering
-// (.suggestionCode) keeps its own horizontal scrollbar instead of
-// overflowing the panel, same round as the Definition wrap fix above.
+// Suggest Rule round (docs request): Suggest Rule's fixed user message.
+// The reply is chosen deterministically from the BRDP's Proposal, read
+// from the tail of the system prompt ("BRDP:\n...\nProposal: <text>"), so
+// a verification script picks the scenario through the BRDP it seeds:
+//   - "calibration"  -> NOT_CHECKABLE: <reason>
+//   - "MALFORMED"    -> an unclosed element (Accept must be disabled)
+//   - "pokemon"      -> a well-formed rule naming an invented element
+//   - "LONGRULE"     -> one long unbroken XML line (box-scroll check)
+//   - anything else  -> a valid rule in the format the prompt asks for
+//                       (BREX 4.2 / 4.1 / 3.0.1 or DITA Schematron).
 function isSuggestRule(text) {
-  return /Suggest a Suggest Rule for BRDP/.test(text || "");
+  return text === "Write the rule for this BRDP.";
+}
+
+function suggestRuleReply(systemPrompt) {
+  const id = (systemPrompt.match(/\nBRDP:\nID: (.*)/) || [])[1] || "BRDP-MOCK";
+  const proposal = (systemPrompt.match(/\nProposal: (.*)\s*$/) || [])[1] || "";
+  if (/calibration/i.test(proposal)) {
+    return "NOT_CHECKABLE: tool calibration intervals are a workshop process, not something in the XML document";
+  }
+  if (/MALFORMED/.test(proposal)) {
+    return `<structureObjectRule id="${id}"><objectPath allowedObjectFlag="0">//para</objectPath><objectUse>Broken`;
+  }
+  if (/LONGRULE/.test(proposal)) {
+    return '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath><objectUse>MOCK-LONG-RULE</objectUse></structureObjectRule>';
+  }
+  const element = /pokemon/i.test(proposal) ? "pokemon" : "table";
+  if (/FORMAT — ISO Schematron/.test(systemPrompt)) {
+    return `<sch:pattern id="p-${id}"><sch:rule context="${element}"><sch:assert id="${id}" role="error" test="@frame">MOCK-RULE: &lt;${element}&gt; must declare @frame.</sch:assert></sch:rule></sch:pattern>`;
+  }
+  if (/FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
+    return `<objrule id="${id}"><objpath objappl="1">//${element}/@frame</objpath><objuse>MOCK-RULE: every &lt;${element}&gt; has a frame.</objuse></objrule>`;
+  }
+  const ref = /FORMAT — S1000D Issue 4\.2/.test(systemPrompt) ? `<brDecisionRef brDecisionIdentNumber="${id}"/>` : "";
+  return `<structureObjectRule id="${id}"${ref ? ' brSeverityLevel="brsl01"' : ""}>${ref}<objectPath allowedObjectFlag="1">//${element}/@frame</objectPath><objectUse>MOCK-RULE: every &lt;${element}&gt; has a frame.</objectUse><objectValue valueForm="single" valueAllowed="all">All</objectValue></structureObjectRule>`;
 }
 
 // "Suggest: clear state on BRDP change" round (docs request): opt-in
@@ -180,8 +208,7 @@ const server = http.createServer((req, res) => {
         "MOCK-LONG-DEFINITION: This decision point governs the applicability and scope of the allowedObjectFlag attribute across every structureObjectRule and nonContextRule in the data module, including split-rule variants, and must be evaluated consistently for every objectPath regardless of dmCode context or system differences. " +
         "Alsounabrokenverylongsingletokenwithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     } else if (isSuggestRule(userText)) {
-      reply =
-        '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath></structureObjectRule>';
+      reply = suggestRuleReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
     } else {

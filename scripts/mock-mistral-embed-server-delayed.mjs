@@ -31,10 +31,21 @@ const server = http.createServer((req, res) => {
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
     callCount += 1;
-    console.log(`embed call #${callCount} (delayed ${DELAY_MS}ms)`);
+    // Suggest Rule round: one item per input text, each with its real index
+    // -- the batch-embeddings round updated mock-mistral-embed-server.mjs
+    // this way but missed this twin, so any real job with more than one
+    // pending row failed here with "index mismatch".
+    let inputs = [""];
+    try {
+      const parsed = JSON.parse(body);
+      inputs = Array.isArray(parsed.input) ? parsed.input : [parsed.input];
+    } catch {
+      /* keep the single empty input */
+    }
+    console.log(`embed call #${callCount} (${inputs.length} text(s), delayed ${DELAY_MS}ms)`);
     setTimeout(() => {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ data: [{ embedding, index: 0 }] }));
+      res.end(JSON.stringify({ data: inputs.map((_, index) => ({ embedding, index })) }));
     }, DELAY_MS);
   });
 });

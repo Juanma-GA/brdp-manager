@@ -154,13 +154,9 @@ async function main() {
     assert(/36/.test(summaryText), `analyze summary reports all 36 rows ready (got "${summaryText}")`);
 
     await page.click('button:has-text("Apply import")');
-    // 36 Validated rows exceeds the ETA confirm-modal threshold (10) -- the
-    // real UI interrupts with a confirmation modal before actually applying.
-    await page.waitForSelector('button:has-text("Proceed")', { timeout: 10000 });
-    await page.click('button:has-text("Proceed")');
-
-    // Background job, polled by the UI -- 36 real (mocked-transport)
-    // embedding calls take a few seconds.
+    // Background job, polled by the UI. (The on-demand embeddings round
+    // removed both the import-time embedding calls and the "large Apply"
+    // confirmation modal this script used to click through.)
     await page.waitForSelector("text=Import complete", { timeout: 60000 });
     const resultText = await page
       .locator("ul")
@@ -304,10 +300,16 @@ async function main() {
     );
     assert(similarResp.status === 200, `Suggest Rule returns 200 for a DITA project (previously 400 'no rule format') (got ${similarResp.status})`);
     const similarBody = await similarResp.json();
-    console.log("Suggest Rule response:", JSON.stringify({ ...similarBody, candidates: similarBody.candidates?.length }, null, 2));
+    console.log("Suggest Rule groups:", similarBody.same_brdp.length, similarBody.candidates.length, similarBody.standard_fallback.length, similarBody.template_fallback.length);
     assert(similarBody.format === "SCH-DITA", `Suggest Rule reports format SCH-DITA (got ${similarBody.format})`);
-    assert(similarBody.sufficient_precedent === true, "Suggest Rule reports sufficient_precedent: true from the 8 real approved rules");
-    assert(similarBody.candidates.length >= 3, `Suggest Rule returns real candidates (got ${similarBody.candidates.length})`);
+    // Suggest Rule round: no MIN_CANDIDATES any more -- references come in
+    // four groups; the 8 real approved rules of this project must show up
+    // as references (similar or standard_fallback), topping up to >= 3
+    // before the curated template is ever used.
+    const realRuleRefs = similarBody.same_brdp.length + similarBody.candidates.length + similarBody.standard_fallback.length;
+    assert(similarBody.sufficient_precedent === true, "Suggest Rule always answers (sufficient_precedent: true)");
+    assert(realRuleRefs >= 3, `Suggest Rule returns >= 3 real rule references from the 8 approved rules (got ${realRuleRefs})`);
+    assert(similarBody.template_fallback.length === 0, "real approved rules available -> no curated-template fallback");
 
     // ---- 7. Edge case: Verified rule approved but Proposal Status != Validated ----
     const edgeCreate = await fetch(`${API}/api/projects/${projectId}/brdps`, {

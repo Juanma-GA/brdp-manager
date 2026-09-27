@@ -2,7 +2,7 @@
 // aceptarla o descartarla" (docs request). Confirms, through the real
 // running app + real Postgres (chat transport mocked, same convention as
 // every other round in this branch):
-//   1. Suggest on A blocks all 3 Suggest buttons on A; B's stay active.
+//   1. Suggest on A blocks A's Suggest buttons; B's stay active.
 //   2. Suggest on A -> switch to B before it responds (delayed via
 //      /slow-next) -> B shows nothing, A gets a ✨ indicator visible from
 //      B's row; switching back to A shows the (now landed) suggestion
@@ -62,12 +62,23 @@ async function computeAndWait(auth, projectId) {
   throw new Error(`Embedding job ${job_id} never left 'running' status`);
 }
 
+// Suggest Rule round: this script's rows are Pending with an empty
+// Proposal, so Suggest Rule is disabled by its OWN prerequisites (Validated
+// + filled Proposal) regardless of any pending suggestion -- orthogonal to
+// what this script checks. The pending-suggestion block is therefore read
+// off Definition/Proposal only; ruleBlockedByOwnPrerequisite() confirms
+// Rule stays disabled for its own reason, never the pending-suggestion one.
 async function suggestButtonsDisabled(page) {
-  const buttons = page.getByRole("button", { name: /^Suggest (Definition|Proposal|Rule)$/ });
+  const buttons = page.getByRole("button", { name: /^Suggest (Definition|Proposal)$/ });
   const count = await buttons.count();
   const states = [];
   for (let i = 0; i < count; i++) states.push(await buttons.nth(i).isDisabled());
   return states;
+}
+
+async function ruleBlockedByOwnPrerequisite(page) {
+  const rule = page.getByRole("button", { name: "Suggest Rule" });
+  return (await rule.isDisabled()) && (await rule.getAttribute("title")) === "Write or accept a Proposal first";
 }
 
 async function rowHasSparkle(page, identifier) {
@@ -141,14 +152,15 @@ async function main() {
     await page.getByRole("button", { name: "Suggest Definition" }).click();
     await page.getByRole("button", { name: "Accept" }).waitFor({ timeout: 15000 });
     let states = await suggestButtonsDisabled(page);
-    assert(states.every(Boolean), "all 3 Suggest buttons on A are disabled once A has a resolved suggestion");
+    assert(states.every(Boolean), "A's Suggest Definition/Proposal buttons are disabled once A has a resolved suggestion");
     const tooltip = await page.getByRole("button", { name: "Suggest Proposal" }).getAttribute("title");
     assert(tooltip === "Accept or discard the pending suggestion first", `blocked button carries the exact tooltip text (got "${tooltip}")`);
 
     await page.locator("tr", { hasText: "BRDP-PERSIST-B" }).click();
     await page.waitForTimeout(300);
     states = await suggestButtonsDisabled(page);
-    assert(states.every((d) => !d), "switching to B: B's own 3 Suggest buttons are all still active");
+    assert(states.every((d) => !d), "switching to B: B's own Suggest Definition/Proposal buttons are still active");
+    assert(await ruleBlockedByOwnPrerequisite(page), "B's Suggest Rule is disabled only by its own prerequisite (empty Proposal), not by A's suggestion");
     assert((await page.getByRole("button", { name: "Accept" }).count()) === 0, "B shows no Accept button (no suggestion of its own)");
     assert(await rowHasSparkle(page, "BRDP-PERSIST-A"), "row A shows the ✨ indicator while B is selected");
     assert(!(await rowHasSparkle(page, "BRDP-PERSIST-B")), "row B shows no ✨ (nothing pending there)");
@@ -156,12 +168,9 @@ async function main() {
     console.log("Screenshot (✨ on A, B selected, B's buttons active): /tmp/suggest-persist-sparkle-on-other-row.png");
 
     // ---- 2. Suggest on B with a delayed response, switch away, switch back ----
-    // Suggest Definition again (not Proposal/Rule): those two are gated by
-    // MIN_CANDIDATES (3+ Validated precedent BRDPs of this standard), which
-    // this project deliberately has none of, so they'd resolve instantly
-    // to an "insufficient precedent" notice without ever reaching the
-    // (delayed) mock at all -- Definition always calls the LLM regardless
-    // of corpus, so /slow-next actually gets exercised here.
+    // Suggest Definition again: it always calls the LLM regardless of
+    // corpus (Suggest Rule is unavailable on these Pending rows), so
+    // /slow-next actually gets exercised here.
     await resetMock();
     await armSlowNext();
     await page.getByRole("button", { name: "Suggest Definition" }).click();
@@ -191,7 +200,7 @@ async function main() {
     await page.waitForTimeout(300);
     assert((await page.getByRole("button", { name: "Accept" }).count()) === 0, "B's suggestion box is gone after Discard");
     states = await suggestButtonsDisabled(page);
-    assert(states.every((d) => !d), "B's 3 Suggest buttons are active again after Discard");
+    assert(states.every((d) => !d), "B's Suggest Definition/Proposal buttons are active again after Discard");
     assert(!(await rowHasSparkle(page, "BRDP-PERSIST-B")), "row B's ✨ is gone after Discard");
 
     // ---- 4. Accept on A writes to A, clears ✨, unblocks buttons ----
@@ -207,7 +216,7 @@ async function main() {
     // active again" check now, same as Discard's own assertion elsewhere
     // in this script, with nothing vocabulary-specific to work around.
     states = await suggestButtonsDisabled(page);
-    assert(states.every((d) => !d), "A's 3 Suggest buttons are active again after Accept");
+    assert(states.every((d) => !d), "A's Suggest Definition/Proposal buttons are active again after Accept");
     assert(!(await rowHasSparkle(page, "BRDP-PERSIST-A")), "row A's ✨ is gone after Accept");
     // No single-BRDP GET endpoint exists (brdps.py only has list/stats/
     // next-ext-identifier/history) -- list and find by id, same as the
@@ -235,12 +244,10 @@ async function main() {
     console.log("OK: a suggestion request in flight for a deleted BRDP never resurfaces (confirmed by reload -- the row itself is gone)");
 
     // ---- 6. LLM error -> Discard unblocks retry ----
-    // Suggest Definition has no MIN_CANDIDATES gate (always calls the LLM
-    // regardless of corpus), so /error-next (content-independent, unlike
-    // ERROR_TEST which needs the marker IN the outgoing user message --
-    // Suggest Definition's is always the same fixed string) is the
-    // simplest way to force a real LLM failure here without first having
-    // to build up 3+ Validated precedent BRDPs for kind=proposal/rule.
+    // Suggest Definition always calls the LLM, so /error-next
+    // (content-independent, unlike ERROR_TEST which needs the marker IN the
+    // outgoing user message -- Suggest Definition's is always the same
+    // fixed string) is the simplest way to force a real LLM failure here.
     await page.locator("tr", { hasText: "BRDP-PERSIST-B" }).click();
     await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
     // The vocabulary check is entirely deterministic now (no LLM call, no

@@ -14,7 +14,10 @@ import styles from '../../pages/RecordsPage.module.css';
 // is more generous, per the docs request's explicit "despliega su
 // Definition y su Proposal"). Suggest Definition's own two groups leave
 // this unset and keep showing Definition alone, unchanged.
-export default function ReferenceRow({ candidate, showScore, showProposal, danger, expanded, onToggle }) {
+// `showRule` (docs request, Suggest Rule round): the expanded panel shows
+// the Proposal -> rule pair the prompt cited (Proposal, then the rule XML
+// in monospace).
+export default function ReferenceRow({ candidate, showScore, showProposal, showRule, danger, expanded, onToggle }) {
   const { t } = useTranslation();
   return (
     <li>
@@ -40,7 +43,17 @@ export default function ReferenceRow({ candidate, showScore, showProposal, dange
       </div>
       {expanded && (
         <div className={styles.referenceDefinition}>
-          {showProposal ? (
+          {showRule ? (
+            <>
+              <div>
+                <strong>{t('records.assistant.referenceProposalLabel')}:</strong> {candidate.proposal}
+              </div>
+              <div>
+                <strong>{t('records.assistant.referenceRuleLabel')}:</strong>
+                <pre className={styles.referenceRuleXml}>{candidate.text}</pre>
+              </div>
+            </>
+          ) : showProposal ? (
             <>
               <div>
                 <strong>{t('records.assistant.referenceDefinitionLabel')}:</strong> {candidate.definition}
