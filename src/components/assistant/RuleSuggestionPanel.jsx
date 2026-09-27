@@ -109,8 +109,12 @@ export default function RuleSuggestionPanel({
           ⚠ {t('records.assistant.errorPrefix')}: {entry.error}
         </span>
       )}
+      {/* Red, same style as the vocabulary warnings (Suggest Rule
+          adjustments round): the user has to act on it -- there is no
+          rule to accept. */}
       {entry.notCheckable !== undefined && (
-        <p className={styles.muted}>
+        <p className={styles.vocabWarning}>
+          ⚠{' '}
           {t('records.assistant.ruleNotCheckable', { reason: entry.notCheckable })}
         </p>
       )}

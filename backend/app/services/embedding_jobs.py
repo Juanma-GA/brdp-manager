@@ -126,6 +126,33 @@ async def _pending_catalog(standard: str, db: AsyncSession) -> list[BRDPCatalog]
     return [e for e in result.scalars().all() if is_pending_catalog(e)]
 
 
+async def pending_summary(project: Project, db: AsyncSession) -> tuple[int, int, uuid.UUID | None]:
+    """(project_pending, catalog_pending, only_pending_brdp_id) -- the third
+    is the id of the project's single pending BRDP when exactly one is
+    pending (Suggest Rule adjustments round, Part 6: if it's the selected
+    BRDP, Suggest embeds just that one on the fly instead of blocking)."""
+    project_pending = await _pending_brdps(project.id, db)
+    catalog_pending = await _pending_catalog(project.standard, db)
+    only_id = project_pending[0].id if len(project_pending) == 1 else None
+    return len(project_pending), len(catalog_pending), only_id
+
+
+async def embed_single_brdp(
+    brdp: BRDP, db: AsyncSession, transport: httpx.AsyncBaseTransport | None
+) -> bool:
+    """Embeds ONE BRDP right now (Suggest Rule adjustments round, Part 6)
+    -- same text, truncation and hash as run_embedding_job, one request.
+    Returns False (no request made) when it isn't pending."""
+    if brdp.validation != "Validated" or not is_pending_brdp(brdp):
+        return False
+    texts = _texts_for_embedding([brdp], brdp_embedding_text)
+    [vector] = await compute_embeddings_batch(texts, transport)
+    brdp.embedding = vector
+    brdp.embedding_text_hash = compute_text_hash(brdp_embedding_text(brdp))
+    await db.commit()
+    return True
+
+
 async def count_pending(project: Project, db: AsyncSession) -> tuple[int, int]:
     """Returns (project_pending, catalog_pending) -- backs both GET
     /pending (the banner/button's own gate) and create_job's total_items.

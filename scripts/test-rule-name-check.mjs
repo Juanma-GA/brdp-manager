@@ -155,24 +155,37 @@ for (const [xpath, elements, attributes, label] of cases) {
 
 // ---- unfilled Proposal placeholders (mirror of the backend fixtures) ----
 
+// Suggest Rule adjustments round: the docs request's own table first --
+// same fixtures as backend/tests/test_similar.py.
 for (const p of [
+  'Permitted CAGE codes shall be limited to [e C1008, C1234]',
+  '[e C1008, C1234]',
+  '[LIST: a, b]',
+  '[SHALL/SHALL NOT]',
+  '[tbd]',
   'Dates shall be written in [LIST: YYYY-MM-DD, DD-MM-YYYY] format.',
   'Warnings [SHALL/SHALL NOT] include a hazard symbol.',
   'Titles shall not exceed [VALUE: e.g. 60] characters.',
-  'Measurements in [UNIT: e.g. metric] units.',
   'Use the [CONVENTION: company style] naming.',
-  'The element <x> [YES/NO] be used.',
   'Values [LIST : a, b].',
+  'Dates follow [ISO 8601].',
+  'Codes (see [tbd]) apply.',
+  'Line one.\n[VALUE: x] on line two.',
 ]) {
-  assert(hasUnfilledMarkers(p), `placeholder detected: ${p}`);
+  assert(hasUnfilledMarkers(p), `placeholder detected: ${JSON.stringify(p)}`);
 }
 for (const p of [
+  '//para[@id]',
+  'table[1]',
+  '[1..n]',
+  "@x[.='a']",
+  'Proposal with //para[@id] only.',
   'Warnings shall include a hazard symbol.',
   'Use //para[1] only.',
-  'Dates follow [ISO 8601].',
-  'Only the [a] option.',
-  'See [X] for details.',
+  "Use para[@x] and x[.='y'] and (//p)[2].",
   "Items [@type='x'] are allowed.",
+  'Between [1..n] steps.',
+  'Nothing in brackets: [] or [ ].',
   '',
 ]) {
   assert(!hasUnfilledMarkers(p), `not a placeholder: ${JSON.stringify(p)}`);

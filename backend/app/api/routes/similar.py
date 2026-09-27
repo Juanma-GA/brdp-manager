@@ -19,6 +19,7 @@ from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.similar import SimilarCandidateOut, SimilarOut
 from app.services.embeddings import EmbeddingUnavailable, brdp_embedding_text, compute_embedding
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT as _STANDARD_TO_RULE_FORMAT
+from app.services.rule_precedents import extract_format_rules
 from app.services.rule_templates import load_template_rules
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps/{brdp_id}/similar", tags=["similar"])
@@ -35,15 +36,25 @@ MIN_SIMILARITY = 0.5
 RULE_SAME_BRDP_LIMIT = 5
 RULE_SIMILAR_LIMIT = 5
 RULE_MIN_REFERENCES = 3
+# Rows read per query page while skipping precedents with no rule element
+# of the format (see _get_rule_similar's usable_rows).
+_RULE_PAGE_SIZE = 20
 
 # Mirrors src/utils/proposalMarkers.js's UNFILLED_MARKER_RE -- keep both in
-# sync. A Suggest Proposal placeholder the user hasn't filled in yet: "["
-# + an uppercase name (letters, spaces, "/", "_", "-"; at least 2 chars) +
-# optional ":" and free text + "]" -- [LIST: …], [VALUE: …],
-# [SHALL/SHALL NOT], [UNIT: …], [CONVENTION: …]. Digits are deliberately
-# not allowed in the name, so a legitimate bracketed reference like
-# "[ISO 8601]" or an XPath predicate "[1]" never counts as a placeholder.
-UNFILLED_MARKER_RE = re.compile(r"\[[A-Z][A-Z_/ -]*[A-Z]\s*(?::[^\]]*)?\]")
+# sync (same fixtures in tests/test_similar.py and
+# scripts/test-rule-name-check.mjs). A placeholder the user hasn't filled
+# in yet is ANY "[...]" that
+#   - starts a word: preceded by the start of the text, whitespace or
+#     sentence punctuation ( , ; : ! ? ¿ ¡ quotes, dashes) -- never by a
+#     letter, digit, ")", "]", "*", "/", "@", "." etc., so an XPath
+#     predicate glued to a step (para[@x], //a[1], x[.='y'], (//p)[2]) is
+#     never one;
+#   - and whose content doesn't start with "@" or a digit ([@type='x'],
+#     [1..n] are predicates/ranges, not placeholders).
+# This covers Suggest Proposal's own markers ([LIST: …], [SHALL/SHALL
+# NOT], [VALUE: …]) AND the ones people type by hand ([e C1008, C1234],
+# [tbd]) -- the previous uppercase-name-only pattern missed the latter.
+UNFILLED_MARKER_RE = re.compile(r"(?:^|(?<=[\s(,;:!?¿¡\"'«“‘—–]))\[(?![@\d\s\]])[^\[\]]+\]")
 
 # kind='definition' only (docs request): "up to 5 similar" / "3 lowest-
 # similarity style references, only when fewer than 3 similar".
@@ -620,21 +631,34 @@ async def _get_rule_similar(
             )
         )
 
+    # Precedent cleanup (Suggest Rule adjustments round): a stored rule is
+    # only a precedent if it contains a rule element of the format
+    # (rule_precedents.py) -- a <nonContextRule>-only rule is skipped, a
+    # mixed one is reduced to its rule elements. Rows are therefore read a
+    # page at a time until each group is full, so a skipped row never
+    # leaves a group short while usable rows remain.
+    async def usable_rows(stmt):
+        offset = 0
+        while True:
+            page = (await db.execute(stmt.limit(_RULE_PAGE_SIZE).offset(offset))).all()
+            for row in page:
+                rule = extract_format_rules(row.rule_xml, rule_format)
+                if rule is not None:
+                    yield row, rule
+            if len(page) < _RULE_PAGE_SIZE:
+                return
+            offset += _RULE_PAGE_SIZE
+
     used_ids: set[uuid.UUID] = set()
 
     same_brdp: list[SimilarCandidateOut] = []
     if is_catalog_brdp:
-        rows = (
-            await db.execute(
-                verified_rules_stmt()
-                .where(Project.id != project_id, BRDP.identifier == brdp.identifier)
-                .order_by(Project.name, BRDP.id)
-                .limit(RULE_SAME_BRDP_LIMIT)
-            )
-        ).all()
-        for row in rows:
-            same_brdp.append(_rule_candidate(row.BRDP, row.rule_xml, 0.0, row.project_name))
+        same_stmt = verified_rules_stmt().where(Project.id != project_id, BRDP.identifier == brdp.identifier)
+        async for row, rule in usable_rows(same_stmt.order_by(Project.name, BRDP.id)):
+            same_brdp.append(_rule_candidate(row.BRDP, rule, 0.0, row.project_name))
             used_ids.add(row.BRDP.id)
+            if len(same_brdp) >= RULE_SAME_BRDP_LIMIT:
+                break
 
     distance_col = BRDP.embedding.cosine_distance(query_embedding).label("distance")
 
@@ -644,12 +668,14 @@ async def _get_rule_similar(
     if used_ids:
         similar_stmt = similar_stmt.where(BRDP.id.not_in(used_ids))
     similar: list[SimilarCandidateOut] = []
-    for row in (await db.execute(similar_stmt.order_by(distance_col, BRDP.id).limit(RULE_SIMILAR_LIMIT))).all():
+    async for row, rule in usable_rows(similar_stmt.order_by(distance_col, BRDP.id)):
         similarity = 1 - row.distance
         if similarity < MIN_SIMILARITY:
             break  # ordered ascending by distance -- no later row can pass either
-        similar.append(_rule_candidate(row.BRDP, row.rule_xml, similarity, row.project_name))
+        similar.append(_rule_candidate(row.BRDP, rule, similarity, row.project_name))
         used_ids.add(row.BRDP.id)
+        if len(similar) >= RULE_SIMILAR_LIMIT:
+            break
 
     standard_fallback: list[SimilarCandidateOut] = []
     missing = RULE_MIN_REFERENCES - len(same_brdp) - len(similar)
@@ -657,19 +683,19 @@ async def _get_rule_similar(
         fallback_stmt = verified_rules_stmt(distance_col)
         if used_ids:
             fallback_stmt = fallback_stmt.where(BRDP.id.not_in(used_ids))
-        rows = (
-            await db.execute(fallback_stmt.order_by(distance_col.asc().nulls_last(), BRDP.id).limit(missing))
-        ).all()
-        for row in rows:
+        async for row, rule in usable_rows(fallback_stmt.order_by(distance_col.asc().nulls_last(), BRDP.id)):
             score = 0.0 if row.distance is None else 1 - row.distance
-            standard_fallback.append(_rule_candidate(row.BRDP, row.rule_xml, score, row.project_name))
+            standard_fallback.append(_rule_candidate(row.BRDP, rule, score, row.project_name))
+            if len(standard_fallback) >= missing:
+                break
         missing -= len(standard_fallback)
 
     template_fallback: list[SimilarCandidateOut] = []
     if missing > 0:
         already_shown = {c.text.strip() for c in (*same_brdp, *similar, *standard_fallback)}
         for entry in load_template_rules(project.standard):
-            if entry.identifier == brdp.identifier or entry.rule_xml in already_shown:
+            rule = extract_format_rules(entry.rule_xml, rule_format)
+            if entry.identifier == brdp.identifier or rule is None or rule in already_shown:
                 continue
             template_fallback.append(
                 SimilarCandidateOut(
@@ -677,7 +703,7 @@ async def _get_rule_similar(
                     # used as a UI key (never sent back as precedent id).
                     id=uuid.uuid5(uuid.NAMESPACE_URL, f"brdp-template:{project.standard}:{entry.identifier}"),
                     identifier=entry.identifier,
-                    text=entry.rule_xml,
+                    text=rule,
                     score=0.0,
                     title=entry.title,
                     definition=entry.definition,

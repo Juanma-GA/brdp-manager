@@ -30,6 +30,17 @@
 // "step" are genuinely absent (neither element nor attribute).
 import { chromium } from "playwright-core";
 
+// Suggest Rule prerequisites (Suggest Rule round): Rule may be disabled
+// by its OWN reasons (no Validated/filled Proposal on these fixtures) --
+// never by vocabulary, which is what this check is about.
+const RULE_OWN_REASONS = [
+  "Write or accept a Proposal first",
+  "Fill in the Proposal's placeholders",
+  "Validate the Proposal first",
+  "The rule is already Verified",
+  "Suggest Rule is not available for S1000D 5.0",
+];
+
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const MOCK_CHAT = "http://localhost:8902";
@@ -144,9 +155,14 @@ async function main() {
     }
 
     async function assertAllSuggestButtonsEnabled(context) {
-      for (const kind of ["Definition", "Proposal", "Rule"]) {
+      for (const kind of ["Definition", "Proposal"]) {
         assert(!(await suggestButton(`Suggest ${kind}`).isDisabled()), `Suggest ${kind} is ENABLED ${context}`);
       }
+      const rule = suggestButton("Suggest Rule");
+      assert(
+        !(await rule.isDisabled()) || RULE_OWN_REASONS.includes(await rule.getAttribute("title")),
+        `Suggest Rule is not blocked by vocabulary ${context}`
+      );
     }
 
     // ==== 1. BRDP A selected -- notice appears BEFORE any Ask/Suggest,

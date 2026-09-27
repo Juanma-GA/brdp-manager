@@ -114,6 +114,19 @@
 // BREX-3.0.1 with format examples only, SCH-DITA under XPath 2.0 with no
 // references and under XPath 3.0 with a format example, so the queryBinding
 // line of both dialects is pinned). The 11 existing cases are unchanged.
+//
+// Suggest Rule adjustments round: expected-prompts.json regenerated for
+// ONE deliberate reason -- ruleFormatRules.js's BREX blocks. Rule 4 now
+// asks for attributes as @name (and elements as &lt;name&gt;) in
+// objectUse/objuse, and rule 5 (value lists) says objectPath selects the
+// attribute/element with allowedObjectFlag="2" plus one objectValue per
+// value, never a [. != 'a' and . != 'b'] predicate, with a minimal
+// example on an invented attribute (@acmeCode / @acmecode for 3.0.1,
+// where objappl is left out unless the node is also mandatory). Changes
+// the 3 existing BREX suggestRule cases; the SCH-DITA ones and every
+// Ask/Definition/Proposal case are unchanged. One case added,
+// suggestRule/brex-4-2-value-list-proposal (the docs request's
+// "@emphasisType shall only take em01 and em02" edge case).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

@@ -12,28 +12,49 @@
 // generateSuggestedRule.js/useChat.js/ChatPanel.jsx chain.
 import { queryBindingForStandard } from '../api/generateSchematronDITA.js';
 
+// Rule 4/5 of the BREX blocks (Suggest Rule adjustments round): a real
+// Mistral run expressed "only these values" as an objectPath predicate
+// ([.!="a" and .!="b"]) instead of objectValue, and wrote attribute names
+// in objectUse without "@". The example uses an invented, generic
+// attribute (@acmeCode, ac01/ac02) so it can't be copied into a real rule.
+const BREX_4X_OBJECT_USE = `4. <objectUse> = one sentence stating the decision. Inside it, write attribute names as @name and element names as &lt;name&gt; — never a raw tag, never a bare name.`;
+
+const BREX_4X_VALUE_LIST = `5. When the Proposal limits an attribute or element to a list of values: objectPath selects that attribute/element with allowedObjectFlag="2", and there is one <objectValue valueForm="single" valueAllowed="…"> per allowed value, with ONLY the attributes valueAllowed and valueForm. Never express the list as a predicate in objectPath (such as [. != 'a' and . != 'b']). valueForm is "single", "range" or "pattern" — never list, regex, conditional or multiple. Minimal example (invented attribute, not from this BRDP) for "@acmeCode shall only take ac01 or ac02":
+   <objectPath allowedObjectFlag="2">//@acmeCode</objectPath>
+   <objectUse>The attribute @acmeCode only takes the values ac01 and ac02.</objectUse>
+   <objectValue valueForm="single" valueAllowed="ac01">ac01</objectValue>
+   <objectValue valueForm="single" valueAllowed="ac02">ac02</objectValue>`;
+
 const BREX_42 = `FORMAT — S1000D Issue 4.2 BREX: exactly ONE <structureObjectRule> element.
 1. Output exactly one <structureObjectRule id="{ID}" brSeverityLevel="brsl01"> — never a <contextRules> wrapper, a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <brDecisionRef brDecisionIdentNumber="{ID}"/> → <objectPath> → <objectUse> → <objectValue> (zero or more). brDecisionRef carries the ID as an ATTRIBUTE, never as text.
 3. Exactly ONE <objectPath>. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
-4. <objectUse> = one sentence stating the decision. Inside it, write element names as &lt;elementName&gt;, never a raw tag.
-5. <objectValue> only when the Proposal lists the values allowed for the node objectPath selects: one per value, with ONLY the attributes valueAllowed and valueForm; valueForm is "single", "range" or "pattern" — never list, regex, conditional or multiple.
+${BREX_4X_OBJECT_USE}
+${BREX_4X_VALUE_LIST}
 6. Inside objectPath, a literal < or & must be escaped as &lt; / &amp;.`;
 
 const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: exactly ONE <structureObjectRule> element.
 1. Output exactly one <structureObjectRule id="{ID}"> — never a <contextRules> wrapper, a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <objectPath> → <objectUse> → <objectValue> (zero or more). There is NO brDecisionRef element and NO brSeverityLevel attribute in S1000D 4.1.
 3. Exactly ONE <objectPath>. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
-4. <objectUse> = one sentence stating the decision. Inside it, write element names as &lt;elementName&gt;, never a raw tag.
-5. <objectValue> only when the Proposal lists the values allowed for the node objectPath selects: one per value, with ONLY the attributes valueAllowed and valueForm; valueForm is "single", "range" or "pattern" — never list, regex, conditional or multiple.
+${BREX_4X_OBJECT_USE}
+${BREX_4X_VALUE_LIST}
 6. Inside objectPath, a literal < or & must be escaped as &lt; / &amp;.`;
 
+// 3.0.1 gets the same reinforcement, adapted: objappl only has 0/1 (no
+// "optional") and is optional itself in the 3.0.1 BREX schema -- the real
+// value-list rules of the curated 3.0.1 template omit it unless the node
+// is also mandatory.
 const BREX_301 = `FORMAT — S1000D Issue 3.0.1 BREX: exactly ONE <objrule> element.
 1. Output exactly one <objrule id="{ID}"> — never a dmodule wrapper. {ID} is the BRDP's ID. There is NO brDecisionRef in 3.0.1.
 2. Child order: <objpath> → <objuse> → <objval> (one per allowed value, zero or more).
 3. Exactly ONE <objpath>. Its only attribute is objappl: "0" = the selected nodes are prohibited, "1" = mandatory. NO other values (there is no "optional" in 3.0.1).
-4. <objuse> = one sentence stating the decision. Inside it, escape &lt; &gt; &amp;.
-5. <objval> only when the Proposal lists the values allowed for the node objpath selects, with ONLY the attributes val1, val2 and valtype; valtype is "single" or "range" (val2 only for "range") — never pattern, list, regex, conditional or multiple.
+4. <objuse> = one sentence stating the decision. Inside it, write attribute names as @name and element names as &lt;name&gt; — never a raw tag, never a bare name. Escape &lt; &gt; &amp;.
+5. When the Proposal limits an attribute or element to a list of values: objpath selects that attribute/element, and there is one <objval valtype="single" val1="…"> per allowed value, with ONLY the attributes val1, val2 and valtype; valtype is "single" or "range" (val2 only for "range") — never pattern, list, regex, conditional or multiple. Leave objappl out unless the Proposal also makes the node mandatory (then objappl="1"). Never express the list as a predicate in objpath (such as [. != 'a' and . != 'b']). Minimal example (invented attribute, not from this BRDP) for "@acmecode shall only take ac01 or ac02":
+   <objpath>//@acmecode</objpath>
+   <objuse>The attribute @acmecode only takes the values ac01 and ac02.</objuse>
+   <objval valtype="single" val1="ac01"/>
+   <objval valtype="single" val1="ac02"/>
 6. Inside objpath, a literal < or & must be escaped as &lt; / &amp;.`;
 
 function schDita(standard) {

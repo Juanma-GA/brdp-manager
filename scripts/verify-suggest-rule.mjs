@@ -31,6 +31,27 @@ function assert(cond, msg) {
   }
 }
 
+const EMBED_MOCK = "http://localhost:8901";
+
+// Suggest Rule adjustments round: reconstructions of the two real rules the
+// docs request cites (their real XML isn't available in this environment
+// -- same fixtures as backend/tests/test_rule_precedents.py).
+const RULE_EXT_00066 = `<nonContextRule id="BRDP-EXT-00066">
+  <brDecisionRef brDecisionIdentNumber="BRDP-EXT-00066"/>
+  <simplePara>Illustrations shall be delivered as CGM files.</simplePara>
+</nonContextRule>`;
+const RULE_S1_00489_SOR = `<structureObjectRule id="BRDP-S1-00489" brSeverityLevel="brsl01">
+    <brDecisionRef brDecisionIdentNumber="BRDP-S1-00489"/>
+    <objectPath allowedObjectFlag="0">//logo</objectPath>
+    <objectUse>The element &lt;logo&gt; shall not be used.</objectUse>
+  </structureObjectRule>`;
+const RULE_S1_00489 = `<rules>
+  ${RULE_S1_00489_SOR}
+  <nonContextRule id="BRDP-S1-00489-b">
+    <simplePara>Logotypes are not presented.</simplePara>
+  </nonContextRule>
+</rules>`;
+
 const VERIFIED_RULE = (id) =>
   `<structureObjectRule id="${id}" brSeverityLevel="brsl01"><brDecisionRef brDecisionIdentNumber="${id}"/><objectPath allowedObjectFlag="0">//table/@pgwide</objectPath><objectUse>Tables shall not use pgwide.</objectUse></structureObjectRule>`;
 
@@ -94,6 +115,15 @@ async function main() {
   b.malformed = await makeBrdp(p42, { identifier: "BRDP-SR-MALFORMED", title: "Malformed", proposal: "MALFORMED: the mock returns an unclosed element." });
   b.calib = await makeBrdp(p42, { identifier: "BRDP-SR-CALIB", title: "Calibration", proposal: "Torque tool calibration shall be performed every 6 months." });
   b.ok = await makeBrdp(p42, { identifier: "BRDP-SR-OK", title: "Frames", proposal: "Every <table> shall be framed on all sides." });
+  // Suggest Rule adjustments round.
+  b.cage = await makeBrdp(p42, { identifier: "BRDP-SR-CAGE", title: "CAGE", proposal: "Permitted CAGE codes shall be limited to [e C1008, C1234]" });
+  b.xpath = await makeBrdp(p42, { identifier: "BRDP-SR-XPATH", title: "Ids", proposal: "Only //para[@id] shall carry an identifier." });
+  b.emph = await makeBrdp(p42, { identifier: "BRDP-SR-EMPH", title: "Emphasis", proposal: "@emphasisType shall only take em01 and em02." });
+  b.edit = await makeBrdp(p42, { identifier: "BRDP-SR-EDIT", title: "Edited", proposal: "Every <table> shall be framed." });
+  b.nc66 = await makeBrdp(p42, { identifier: "BRDP-EXT-00066", title: "CGM illustrations", proposal: "Illustrations shall be CGM." });
+  b.s489 = await makeBrdp(p42, { identifier: "BRDP-S1-00489", title: "Logo", proposal: "The element <logo> will not be used." });
+  await putRule(p42, b.nc66, "BREX-4.2", RULE_EXT_00066, "approved");
+  await putRule(p42, b.s489, "BREX-4.2", RULE_S1_00489, "approved");
   await putRule(p42, b.verified, "BREX-4.2", VERIFIED_RULE("BRDP-SR-VERIFIED"), "approved");
   await putRule(p42, b.draft, "BREX-4.2", VERIFIED_RULE("BRDP-SR-DRAFT-OLD"), "pending_review");
 
@@ -126,7 +156,13 @@ async function main() {
   const catBody = await similar(p42, b.catalog).then((r) => r.json());
   assert(catBody.same_brdp.length === 1 && catBody.same_brdp[0].source === pOther.name, "catalog BRDP: other project's Verified rule in same_brdp");
   assert(catBody.same_brdp[0].proposal === "Tables shall be framed." && catBody.same_brdp[0].text.includes(CATALOG_ID), "same_brdp carries the Proposal -> rule pair");
+  assert((await similar(p42, b.cage)).status === 400, "hand-written [e C1008, C1234] is an unfilled placeholder (400)");
+  assert((await similar(p42, b.xpath)).status === 200, "//para[@id] in the Proposal is not a placeholder");
   const okBody = await similar(p42, b.ok).then((r) => r.json());
+  const okAll = [...okBody.same_brdp, ...okBody.candidates, ...okBody.standard_fallback, ...okBody.template_fallback];
+  assert(!okAll.some((c) => c.identifier === "BRDP-EXT-00066"), "nonContextRule-only precedent (BRDP-EXT-00066) is never returned");
+  const s489 = okAll.find((c) => c.identifier === "BRDP-S1-00489");
+  assert(s489 && s489.text === RULE_S1_00489_SOR, "BRDP-S1-00489 is reduced to its structureObjectRule (no <rules>, no nonContextRule)");
   const okCount = okBody.same_brdp.length + okBody.candidates.length + okBody.standard_fallback.length + okBody.template_fallback.length;
   assert(okBody.sufficient_precedent === true && okCount >= 3, `no MIN_CANDIDATES: always answered, topped up to >=3 references (got ${okCount})`);
   // With the mock embeddings every real Verified 4.2 rule may already sit in
@@ -190,12 +226,15 @@ async function main() {
       ["BRDP-SR-MARKER", "Fill in the Proposal's placeholders"],
       ["BRDP-SR-PENDING", "Validate the Proposal first"],
       ["BRDP-SR-VERIFIED", "The rule is already Verified"],
+      ["BRDP-SR-CAGE", "Fill in the Proposal's placeholders"],
     ]) {
       await select(id);
       assert(await ruleButton().isDisabled(), `${id}: Suggest Rule disabled`);
       assert((await ruleButton().getAttribute("title")) === reason, `${id}: reason "${reason}"`);
     }
     await page.screenshot({ path: "/tmp/suggest-rule-disabled-verified.png", fullPage: true });
+    await select("BRDP-SR-XPATH");
+    assert(!(await ruleButton().isDisabled()), "Proposal with //para[@id]: Suggest Rule enabled");
 
     // Happy path: generated rule, references, Copy prompt, Accept -> Draft.
     await select("BRDP-SR-OK");
@@ -209,21 +248,41 @@ async function main() {
     assert(last.temperature === 0.3, `temperature is SUGGEST_TEMPERATURE (got ${last.temperature})`);
     assert(system.includes("FORMAT — S1000D Issue 4.2 BREX") && system.includes("Proposal: Every <table> shall be framed on all sides."), "prompt carries the 4.2 format rules and the Proposal");
     assert(system.includes("SCHEMA FACTS — extracted from the official S1000D 4.2 schema") && system.includes("<table>"), "prompt carries schema facts for <table> (named in the Proposal)");
-    assert(system.includes("Format examples — unrelated to this BRDP"), "format examples block present");
+    assert(system.includes("Format examples — unrelated to this BRDP") || system.includes("Similar decisions"), "precedent blocks present");
+    assert(!system.includes("BRDP-EXT-00066"), "prompt never cites the nonContextRule-only precedent");
+    assert(system.includes(RULE_S1_00489_SOR) && !system.includes("BRDP-S1-00489-b") && !system.includes("<rules>"), "prompt cites only BRDP-S1-00489's structureObjectRule");
+    assert((await page.getByRole("button", { name: "BRDP-EXT-00066", exact: true }).count()) === 0, "UI references never list BRDP-EXT-00066");
+    assert((await page.getByRole("button", { name: "BRDP-S1-00489", exact: true }).count()) === 1, "UI references list BRDP-S1-00489");
     assert((await page.locator("text=/uses names not found/").count()) === 0, "valid rule: no name warning");
     assert(!(await page.getByRole("button", { name: "Accept", exact: true }).isDisabled()), "valid rule: Accept enabled");
     await page.getByRole("button", { name: "Copy prompt" }).click();
     await page.waitForSelector("text=Prompt copied");
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     assert(clip === `${system}\n\nWrite the rule for this BRDP.`, "Copy prompt copies the exact system prompt + user message in one block");
-    const firstRef = page.locator("h4", { hasText: "Format examples" }).locator("xpath=following-sibling::ul[1]//button").first();
-    await firstRef.click();
+    await page.getByRole("button", { name: "BRDP-S1-00489", exact: true }).click();
+    assert(
+      (await page.locator("pre", { hasText: "//logo" }).count()) === 1 &&
+        (await page.locator("pre", { hasText: "Logotypes are not presented" }).count()) === 0,
+      "expanded BRDP-S1-00489 reference shows only its structureObjectRule"
+    );
     assert((await page.locator("pre").count()) >= 1, "expanding a reference shows its rule XML");
     await page.screenshot({ path: "/tmp/suggest-rule-generated.png", fullPage: true });
     await page.getByRole("button", { name: "Accept", exact: true }).click();
     await page.waitForTimeout(800);
     const okRule = await getRule(p42, b.ok, "BREX-4.2");
     assert(okRule.status === "pending_review" && okRule.source === "llm" && okRule.rule_xml.includes("MOCK-RULE"), "Accept saves the rule as Draft (pending_review, source llm)");
+    // History updated at once, no reload: status AND (shortened) text.
+    const historyItems = page.locator("li").filter({ hasText: "admin@example.com" });
+    // The shortened text shows the rule's start; "MOCK-RULE" is past the cut.
+    const okRuleStart = '<structureObjectRule id="BRDP-SR-OK"';
+    await page.locator("li", { hasText: okRuleStart }).first().waitFor({ timeout: 5000 });
+    assert((await historyItems.filter({ hasText: /rule status/i }).filter({ hasText: /draft/i }).count()) >= 1, "History shows Rule Status To Do -> Draft right after Accept");
+    const ruleHistory = historyItems.filter({ hasText: /^\s*rule(?! status)/i }).filter({ hasText: okRuleStart });
+    assert((await ruleHistory.count()) === 1, "History shows the rule text change right after Accept");
+    const shownRule = await ruleHistory.first().locator("span[title]").last().innerText();
+    const fullRule = await ruleHistory.first().locator("span[title]").last().getAttribute("title");
+    assert(fullRule === okRule.rule_xml && shownRule.length <= 161 && shownRule.endsWith("…"), `rule text shortened in the list, full text on hover (${shownRule.length} chars shown)`);
+    await page.screenshot({ path: "/tmp/suggest-rule-history.png", fullPage: true });
 
     // Draft BRDP: allowed, confirmation before replacing.
     await select("BRDP-SR-DRAFT");
@@ -236,6 +295,19 @@ async function main() {
     assert(dialogs.some((m) => m.includes("already has a Draft rule")), "replacing a Draft asks for confirmation");
     const draftRule = await getRule(p42, b.draft, "BREX-4.2");
     assert(draftRule.rule_xml.includes("MOCK-RULE") && draftRule.status === "pending_review", "confirmed: Draft replaced");
+
+    // Value-list Proposal -> objectValue instruction with the generic example.
+    await select("BRDP-SR-EMPH");
+    await suggestRule();
+    const emphSystem = (await fetch(`${MOCK}/last-request`).then((r) => r.json())).messages[0].content;
+    assert(
+      emphSystem.includes('objectPath selects that attribute/element with allowedObjectFlag="2"') &&
+        emphSystem.includes('<objectPath allowedObjectFlag="2">//@acmeCode</objectPath>') &&
+        emphSystem.includes("Never express the list as a predicate in objectPath"),
+      "value-list Proposal: prompt carries the objectValue instruction with the generic @acmeCode example"
+    );
+    assert(emphSystem.includes("write attribute names as @name"), "prompt asks for @name in objectUse");
+    await discard();
 
     // Catalog BRDP: allowed, Same BRDP group in red.
     await select(CATALOG_ID);
@@ -270,6 +342,8 @@ async function main() {
     await page.waitForSelector("text=/Not checkable on the XML: tool calibration/");
     assert((await page.getByRole("button", { name: "Accept", exact: true }).count()) === 0, "NOT_CHECKABLE: no Accept");
     assert((await page.getByRole("button", { name: "Copy prompt" }).count()) === 1, "NOT_CHECKABLE: Copy prompt still available");
+    const ncColor = await page.locator("p", { hasText: "Not checkable on the XML" }).evaluate((el) => getComputedStyle(el).color);
+    assert(ncColor === "rgb(185, 28, 28)", `NOT_CHECKABLE shown in red like the vocabulary warnings (got ${ncColor})`);
     await page.screenshot({ path: "/tmp/suggest-rule-not-checkable.png", fullPage: true });
     const paste = page.getByPlaceholder(/Paste/);
     await paste.fill('<structureObjectRule id="BRDP-SR-CALIB"><brDecisionRef brDecisionIdentNumber="BRDP-SR-CALIB"/><objectPath allowedObjectFlag="0">//pokemon</objectPath><objectUse>External</objectUse></structureObjectRule>');
@@ -284,6 +358,31 @@ async function main() {
     const pasted = await getRule(p42, b.calib, "BREX-4.2");
     assert(pasted.source === "external_llm" && pasted.status === "pending_review" && pasted.rule_xml.includes("External"), "pasted rule saved as Draft with source external_llm");
     assert((await page.getByRole("button", { name: "Discard" }).count()) === 0, "accepting the pasted rule clears the entry");
+
+    // Edit the Proposal (the BRDP becomes the ONLY pending embedding) and
+    // Suggest Rule right away, without Compute embeddings.
+    await select("BRDP-SR-EDIT");
+    const proposalBox = page.locator('label:text-is("Proposal") + textarea');
+    await proposalBox.fill("Every <table> shall be framed on all four sides.");
+    await proposalBox.blur();
+    await page.waitForTimeout(800);
+    const pendingNow = await api(`/api/projects/${p42.id}/embeddings/pending`).then((r) => r.json());
+    assert(
+      pendingNow.project_pending === 1 && pendingNow.catalog_pending === 0 && pendingNow.only_pending_brdp_id === b.edit.id,
+      `editing the Proposal makes this BRDP the only pending one (${JSON.stringify(pendingNow)})`
+    );
+    assert((await page.locator("text=/pending embedding/").count()) === 1, "the pending banner is shown");
+    assert(!(await ruleButton().isDisabled()), "Suggest Rule stays enabled: the only pending BRDP is the selected one");
+    const callsBefore = (await fetch(`${EMBED_MOCK}/calls`).then((r) => r.json())).count;
+    await suggestRule();
+    await page.waitForSelector("text=/MOCK-RULE/");
+    const callsAfter = (await fetch(`${EMBED_MOCK}/calls`).then((r) => r.json())).count;
+    const pendingAfter = await api(`/api/projects/${p42.id}/embeddings/pending`).then((r) => r.json());
+    assert(pendingAfter.project_pending === 0, "the selected BRDP was embedded before the Suggest ran");
+    assert(callsAfter - callsBefore === 2, `one embedding for the BRDP + one query embedding (${callsAfter - callsBefore} calls)`);
+    await page.waitForFunction(() => !document.body.innerText.includes("pending embedding"), null, { timeout: 5000 });
+    await page.screenshot({ path: "/tmp/suggest-rule-embed-selected-first.png", fullPage: true });
+    await discard();
 
     // DITA 1.3 Xpath3.0: Schematron fragment, template format examples.
     await openProject(pDita);

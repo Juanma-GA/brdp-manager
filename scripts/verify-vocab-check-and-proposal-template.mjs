@@ -36,6 +36,17 @@
 // MISTRAL_ENDPOINT overridden to it, real Vite dev server, real Postgres.
 import { chromium } from "playwright-core";
 
+// Suggest Rule prerequisites (Suggest Rule round): Rule may be disabled
+// by its OWN reasons (no Validated/filled Proposal on these fixtures) --
+// never by vocabulary, which is what this check is about.
+const RULE_OWN_REASONS = [
+  "Write or accept a Proposal first",
+  "Fill in the Proposal's placeholders",
+  "Validate the Proposal first",
+  "The rule is already Verified",
+  "Suggest Rule is not available for S1000D 5.0",
+];
+
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const MOCK_CHAT = "http://localhost:8902";
@@ -207,11 +218,15 @@ async function main() {
       await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
     }
 
+    // "Blocked by vocabulary" per button: Definition/Proposal must be
+    // enabled; Rule may be disabled only by its own prerequisites.
     async function suggestButtonsDisabled() {
-      const buttons = page.getByRole("button", { name: /^Suggest (Definition|Proposal|Rule)$/ });
-      const count = await buttons.count();
       const states = [];
-      for (let i = 0; i < count; i++) states.push(await buttons.nth(i).isDisabled());
+      for (const kind of ["Definition", "Proposal"]) {
+        states.push(await page.getByRole("button", { name: `Suggest ${kind}`, exact: true }).isDisabled());
+      }
+      const rule = page.getByRole("button", { name: "Suggest Rule", exact: true });
+      states.push((await rule.isDisabled()) && !RULE_OWN_REASONS.includes(await rule.getAttribute("title")));
       return states;
     }
 

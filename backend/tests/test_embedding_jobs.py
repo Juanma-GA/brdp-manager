@@ -95,6 +95,10 @@ def _mock_embeddings_transport():
     app.dependency_overrides.pop(get_httpx_transport, None)
 
 
+def _counts(pending_body: dict) -> tuple[int, int]:
+    return pending_body["project_pending"], pending_body["catalog_pending"]
+
+
 async def _make_validated_brdp(project_id: uuid.UUID, identifier: str, **overrides) -> BRDP:
     async with async_session_factory() as session:
         brdp = BRDP(
@@ -163,7 +167,7 @@ async def test_never_embedded_validated_brdp_is_pending(client, editor_and_proje
 
     resp = await client.get(f"/api/projects/{project.id}/embeddings/pending", headers=editor_headers)
     assert resp.status_code == 200
-    assert resp.json() == {"project_pending": 1, "catalog_pending": 0}
+    assert _counts(resp.json()) == (1, 0)
 
 
 async def test_embedded_brdp_with_matching_hash_is_not_pending(client, editor_and_project):
@@ -176,7 +180,7 @@ async def test_embedded_brdp_with_matching_hash_is_not_pending(client, editor_an
 
     resp = await client.get(f"/api/projects/{project.id}/embeddings/pending", headers=editor_headers)
     assert resp.status_code == 200
-    assert resp.json() == {"project_pending": 0, "catalog_pending": 0}
+    assert _counts(resp.json()) == (0, 0)
 
 
 async def test_editing_title_after_embedding_marks_brdp_pending_again(client, editor_and_project):
@@ -214,7 +218,7 @@ async def test_catalog_entry_pending_detection_same_hash_logic(client, editor_an
     try:
         resp = await client.get(f"/api/projects/{project.id}/embeddings/pending", headers=editor_headers)
         assert resp.status_code == 200
-        assert resp.json() == {"project_pending": 0, "catalog_pending": 1}
+        assert _counts(resp.json()) == (0, 1)
     finally:
         await _cleanup_catalog(never_embedded.id)
         await _cleanup_catalog(already_current.id)
@@ -230,7 +234,7 @@ async def test_pending_only_counts_other_projects_catalog_by_standard(client, ed
     try:
         resp = await client.get(f"/api/projects/{project.id}/embeddings/pending", headers=editor_headers)
         assert resp.status_code == 200
-        assert resp.json() == {"project_pending": 0, "catalog_pending": 0}
+        assert _counts(resp.json()) == (0, 0)
     finally:
         await _cleanup_catalog(other_standard_entry.id)
 
@@ -242,7 +246,7 @@ async def test_compute_embeds_pending_brdps_and_catalog_and_clears_pending(clien
     catalog_entry = await _make_catalog_entry(project.standard, f"BRDP-CAT-{uuid.uuid4()}")
     try:
         pending_before = await client.get(f"/api/projects/{project.id}/embeddings/pending", headers=editor_headers)
-        assert pending_before.json() == {"project_pending": 2, "catalog_pending": 1}
+        assert _counts(pending_before.json()) == (2, 1)
 
         body = await _compute_and_wait(client, project.id, editor_headers)
         assert body["status"] == "completed"
@@ -251,7 +255,7 @@ async def test_compute_embeds_pending_brdps_and_catalog_and_clears_pending(clien
         assert body["result"] == {"brdps_embedded": 2, "catalog_embedded": 1}
 
         pending_after = await client.get(f"/api/projects/{project.id}/embeddings/pending", headers=editor_headers)
-        assert pending_after.json() == {"project_pending": 0, "catalog_pending": 0}
+        assert _counts(pending_after.json()) == (0, 0)
 
         async with async_session_factory() as session:
             for brdp_id in (brdp_a.id, brdp_b.id):
@@ -506,3 +510,44 @@ async def test_batch_assigns_the_vector_matching_each_brdps_own_text(client, edi
             db_brdp = await session.get(BRDP, brdp.id)
             expected = vector_for_text(brdp_embedding_text(db_brdp))
             assert list(db_brdp.embedding) == pytest.approx(expected), f"{brdp.identifier} got the wrong vector"
+
+
+# ---- Suggest Rule adjustments round, Part 6: the selected BRDP alone ----
+
+
+async def test_pending_reports_only_pending_brdp_id_when_exactly_one(client, editor_and_project):
+    project, _editor, editor_headers, _viewer_headers = editor_and_project
+    url = f"/api/projects/{project.id}/embeddings/pending"
+    assert (await client.get(url, headers=editor_headers)).json()["only_pending_brdp_id"] is None
+    first = await _make_validated_brdp(project.id, "BRDP-ONLY-1")
+    body = (await client.get(url, headers=editor_headers)).json()
+    assert body["project_pending"] == 1 and body["only_pending_brdp_id"] == str(first.id)
+    await _make_validated_brdp(project.id, "BRDP-ONLY-2")
+    assert (await client.get(url, headers=editor_headers)).json()["only_pending_brdp_id"] is None
+
+
+async def test_embed_single_brdp_clears_its_pending_state(client, editor_and_project):
+    project, _editor, editor_headers, _viewer_headers = editor_and_project
+    brdp = await _make_validated_brdp(project.id, "BRDP-SINGLE")
+    other = await _make_validated_brdp(project.id, "BRDP-OTHER")
+    resp = await client.post(f"/api/projects/{project.id}/embeddings/brdps/{brdp.id}", headers=editor_headers)
+    assert resp.status_code == 200 and resp.json() == {"embedded": True}
+    body = (await client.get(f"/api/projects/{project.id}/embeddings/pending", headers=editor_headers)).json()
+    # Only the other one is still pending -- the single embed never touches it.
+    assert body["project_pending"] == 1 and body["only_pending_brdp_id"] == str(other.id)
+    # Not pending any more -> a no-op, no request.
+    again = await client.post(f"/api/projects/{project.id}/embeddings/brdps/{brdp.id}", headers=editor_headers)
+    assert again.json() == {"embedded": False}
+
+
+async def test_embed_single_brdp_is_editor_only_and_blocked_by_running_job(client, editor_and_project):
+    project, editor, editor_headers, viewer_headers = editor_and_project
+    brdp = await _make_validated_brdp(project.id, "BRDP-SINGLE-GUARDS")
+    url = f"/api/projects/{project.id}/embeddings/brdps/{brdp.id}"
+    assert (await client.post(url, headers=viewer_headers)).status_code == 403
+    missing = f"/api/projects/{project.id}/embeddings/brdps/{uuid.uuid4()}"
+    assert (await client.post(missing, headers=editor_headers)).status_code == 404
+    async with async_session_factory() as session:
+        session.add(EmbeddingJob(project_id=project.id, started_by=editor.id, status="running", total_items=1))
+        await session.commit()
+    assert (await client.post(url, headers=editor_headers)).status_code == 409

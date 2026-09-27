@@ -12,6 +12,15 @@ class EmbeddingPendingOut(BaseModel):
 
     project_pending: int
     catalog_pending: int
+    # Suggest Rule adjustments round, Part 6: the id of the project's only
+    # pending BRDP when exactly one is pending, else null -- lets Suggest
+    # stay enabled when that one is the selected BRDP (it gets embedded on
+    # the fly first, via POST .../embeddings/brdps/{id}).
+    only_pending_brdp_id: uuid.UUID | None = None
+
+
+class SingleBrdpEmbeddingOut(BaseModel):
+    embedded: bool
 
 
 class EmbeddingJobAccepted(BaseModel):

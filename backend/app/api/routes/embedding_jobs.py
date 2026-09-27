@@ -2,13 +2,29 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_httpx_transport, require_project_role
 from app.db.base import get_db
-from app.models import EmbeddingJob, Project, User
-from app.schemas.embedding_job import EmbeddingJobAccepted, EmbeddingJobStatusOut, EmbeddingPendingOut
-from app.services.embedding_jobs import count_pending, create_job, get_most_recent_job, get_running_job, run_embedding_job
+from app.models import BRDP, EmbeddingJob, Project, User
+from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
+from app.schemas.embedding_job import (
+    EmbeddingJobAccepted,
+    EmbeddingJobStatusOut,
+    EmbeddingPendingOut,
+    SingleBrdpEmbeddingOut,
+)
+from app.services.embeddings import EmbeddingUnavailable
+from app.services.embedding_jobs import (
+    count_pending,
+    create_job,
+    embed_single_brdp,
+    get_most_recent_job,
+    get_running_job,
+    pending_summary,
+    run_embedding_job,
+)
 
 router = APIRouter(prefix="/api/projects/{project_id}/embeddings", tags=["embedding-jobs"])
 
@@ -31,8 +47,41 @@ async def get_pending_embeddings(
     the project can see whether one is needed.
     """
     project = await _get_owned_project(project_id, db)
-    project_pending, catalog_pending = await count_pending(project, db)
-    return EmbeddingPendingOut(project_pending=project_pending, catalog_pending=catalog_pending)
+    project_pending, catalog_pending, only_id = await pending_summary(project, db)
+    return EmbeddingPendingOut(
+        project_pending=project_pending, catalog_pending=catalog_pending, only_pending_brdp_id=only_id
+    )
+
+
+@router.post("/brdps/{brdp_id}", response_model=SingleBrdpEmbeddingOut)
+async def embed_one_brdp(
+    project_id: uuid.UUID,
+    brdp_id: uuid.UUID,
+    _editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
+) -> SingleBrdpEmbeddingOut:
+    """Embeds ONE BRDP synchronously (Suggest Rule adjustments round, Part
+    6): when the selected BRDP is the project's only pending one, Suggest
+    embeds it first instead of asking for "Compute embeddings". Editor-
+    only like /compute; 409 while the job runs (it may be embedding this
+    very row); a BRDP that isn't pending is a no-op (embedded: false).
+    """
+    await _get_owned_project(project_id, db)
+    brdp = (
+        await db.execute(select(BRDP).where(BRDP.id == brdp_id, BRDP.project_id == project_id, ACTIVE_BRDP_FILTER))
+    ).scalar_one_or_none()
+    if brdp is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BRDP not found")
+    if await get_running_job(project_id, db) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Embedding computation is already running for this project"
+        )
+    try:
+        embedded = await embed_single_brdp(brdp, db, transport)
+    except EmbeddingUnavailable as err:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not compute the embedding: {err}")
+    return SingleBrdpEmbeddingOut(embedded=embedded)
 
 
 @router.post("/compute", response_model=EmbeddingJobAccepted, status_code=status.HTTP_202_ACCEPTED)

@@ -193,6 +193,7 @@ async def propose_approval(
     status_value = "approved" if body.status == "approved" else "pending_review"
     approval = await db.get(RuleApproval, (brdp_id, format))
     old_state = _rule_state(approval)
+    old_rule_xml = approval.rule_xml if approval is not None else ""
     if approval is None:
         approval = RuleApproval(brdp_id=brdp_id, format=format)
         db.add(approval)
@@ -201,6 +202,10 @@ async def propose_approval(
     approval.status = status_value
     approval.approved_at = datetime.now(timezone.utc) if status_value == "approved" else None
     record_change(db, brdp_id, editor, "rule_status", old_state, _rule_state(approval))
+    # The rule TEXT too (Suggest Rule adjustments round): replacing one
+    # Draft with another leaves the status unchanged, and would otherwise
+    # leave no trace at all. record_change skips an unchanged text.
+    record_change(db, brdp_id, editor, "rule", old_rule_xml, approval.rule_xml)
     await db.commit()
     await db.refresh(approval)
     return approval

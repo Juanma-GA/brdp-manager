@@ -120,7 +120,11 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
   // docs/v2 §3: real few-shot precedent via GET .../similar (pure data,
   // no LLM call in the backend -- §4's "FastAPI never builds prompts"
   // rule); each kind builds its own prompt from it here.
-  const requestSuggestion = async (kind) => {
+  // `prepare` (optional, Suggest Rule adjustments round): awaited first,
+  // inside the loading entry -- RecordsPage passes "embed this BRDP" when
+  // it is the project's only pending embedding. Its failure becomes the
+  // entry's error (with Discard), like any other.
+  const requestSuggestion = async (kind, prepare = null) => {
     if (!selected || !aiProvider) return;
     const brdpId = selected.id;
     // Defense in depth (docs request): the button is already disabled
@@ -147,6 +151,7 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
     setSuggestionEntry(brdpId, { brdpId, kind, loading: true, expandedReferenceIds: new Set() });
 
     try {
+      if (prepare) await prepare();
       const similar = await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/similar?kind=${kind}`);
       // HR7 -- never silently degrade: a Validated BRDP in another project
       // of this same standard that hasn't been through ITS OWN project's

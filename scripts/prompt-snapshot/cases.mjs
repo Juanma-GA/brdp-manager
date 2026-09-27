@@ -192,6 +192,19 @@ export const suggestRuleCases = [
     args: [brdpRule, 'S1000D 4.2', 'BREX-4.2', { sameBrdp: ruleSameBrdp, similar: ruleSimilar, formatExamples: ruleFormatExamples }, [{ name: 'table', entry: tableEntry }]],
   },
   {
+    // Suggest Rule adjustments round: the docs request's value-list edge
+    // case -- the prompt must carry rule 5's objectValue instruction with
+    // its generic (@acmeCode) example, never this BRDP's own values.
+    name: 'brex-4-2-value-list-proposal',
+    args: [
+      { ...brdpRule, title: 'Emphasis types', proposal: '@emphasisType shall only take em01 and em02.' },
+      'S1000D 4.2',
+      'BREX-4.2',
+      { sameBrdp: [], similar: [], formatExamples: ruleFormatExamples },
+      [],
+    ],
+  },
+  {
     name: 'brex-4-1-format-examples-only',
     args: [brdpRule, 'S1000D 4.1', 'BREX-4.1', { sameBrdp: [], similar: [], formatExamples: ruleFormatExamples }, []],
   },

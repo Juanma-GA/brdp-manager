@@ -186,6 +186,36 @@ async def test_rule_status_transitions_are_logged(client, editor_viewer_and_proj
     assert transitions == [("todo", "draft"), ("draft", "verified"), ("verified", "draft")]
 
 
+async def test_rule_text_changes_are_logged(client, editor_viewer_and_project):
+    """Suggest Rule adjustments round, Part 5: the rule TEXT is audited as
+    its own field ("rule"), so replacing one Draft with another -- no
+    status change -- still leaves a trace. Re-saving the identical text,
+    approving and revoking never log a text change."""
+    project, _editor, editor_headers, _viewer_headers = editor_viewer_and_project
+    brdp = (
+        await client.post(
+            f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-HIST-RULE"}, headers=editor_headers
+        )
+    ).json()
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
+    first = "<structureObjectRule id='a'/>"
+    second = "<structureObjectRule id='b'/>"
+
+    await client.put(url, json={"rule_xml": first, "source": "llm"}, headers=editor_headers)
+    await client.put(url, json={"rule_xml": second, "source": "external_llm"}, headers=editor_headers)
+    await client.put(url, json={"rule_xml": second, "source": "manual"}, headers=editor_headers)  # identical
+    await client.post(url + "/approve", headers=editor_headers)
+    await client.post(url + "/revoke", headers=editor_headers)
+
+    history = (
+        await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=editor_headers)
+    ).json()
+    rule_entries = [(h["old_value"], h["new_value"]) for h in reversed(history) if h["field_name"] == "rule"]
+    assert rule_entries == [("", first), (first, second)]
+    rule_status_entries = [h for h in history if h["field_name"] == "rule_status"]
+    assert len(rule_status_entries) == 3  # todo->draft, draft->verified, verified->draft
+
+
 async def test_viewer_can_read_history_but_not_trigger_writes(client, editor_viewer_and_project):
     project, _editor, editor_headers, viewer_headers = editor_viewer_and_project
     brdp = (

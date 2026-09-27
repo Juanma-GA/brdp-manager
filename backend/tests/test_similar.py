@@ -311,35 +311,47 @@ async def _get_rule(client, project, source, editor):
     )
 
 
-@pytest.mark.parametrize(
-    "proposal",
-    [
-        "Dates shall be written in [LIST: YYYY-MM-DD, DD-MM-YYYY] format.",
-        "Warnings [SHALL/SHALL NOT] include a hazard symbol.",
-        "Titles shall not exceed [VALUE: e.g. 60] characters.",
-        "Measurements in [UNIT: e.g. metric] units.",
-        "Use the [CONVENTION: company style] naming.",
-        "The element <x> [YES/NO] be used.",
-        "Values [LIST : a, b].",
-    ],
-)
+# Placeholder fixtures (Suggest Rule adjustments round) -- the docs
+# request's own table first, then the Suggest Proposal markers and more
+# real-world XPath predicates. Mirrored in scripts/test-rule-name-check.mjs.
+UNFILLED_MARKER_POSITIVES = [
+    "Permitted CAGE codes shall be limited to [e C1008, C1234]",
+    "[e C1008, C1234]",
+    "[LIST: a, b]",
+    "[SHALL/SHALL NOT]",
+    "[tbd]",
+    "Dates shall be written in [LIST: YYYY-MM-DD, DD-MM-YYYY] format.",
+    "Warnings [SHALL/SHALL NOT] include a hazard symbol.",
+    "Titles shall not exceed [VALUE: e.g. 60] characters.",
+    "Use the [CONVENTION: company style] naming.",
+    "Values [LIST : a, b].",
+    "Dates follow [ISO 8601].",
+    "Codes (see [tbd]) apply.",
+    "Line one.\n[VALUE: x] on line two.",
+]
+UNFILLED_MARKER_NEGATIVES = [
+    "//para[@id]",
+    "table[1]",
+    "[1..n]",
+    "@x[.='a']",
+    "Proposal with //para[@id] only.",
+    "Warnings shall include a hazard symbol.",
+    "Use //para[1] only.",
+    "Use para[@x] and x[.='y'] and (//p)[2].",
+    "Items [@type='x'] are allowed.",
+    "Between [1..n] steps.",
+    "Nothing in brackets: [] or [ ].",
+]
+
+
+@pytest.mark.parametrize("proposal", UNFILLED_MARKER_POSITIVES)
 def test_unfilled_marker_regex_detects_placeholders(proposal):
     from app.api.routes.similar import UNFILLED_MARKER_RE
 
     assert UNFILLED_MARKER_RE.search(proposal)
 
 
-@pytest.mark.parametrize(
-    "proposal",
-    [
-        "Warnings shall include a hazard symbol.",
-        "Use //para[1] only.",
-        "Dates follow [ISO 8601].",
-        "Only the [a] option.",
-        "See [X] for details.",
-        "Items [@type='x'] are allowed.",
-    ],
-)
+@pytest.mark.parametrize("proposal", UNFILLED_MARKER_NEGATIVES)
 def test_unfilled_marker_regex_ignores_non_placeholders(proposal):
     from app.api.routes.similar import UNFILLED_MARKER_RE
 
@@ -554,6 +566,83 @@ async def test_rule_template_fallback_only_tops_up_what_is_missing(client, monke
         await _cleanup(project, [editor])
 
 
+async def test_rule_precedent_without_a_format_rule_is_dropped_and_group_topped_up(client, monkeypatch):
+    """Suggest Rule adjustments round, Part 2: a Verified precedent whose
+    rule has no rule element of the format (BRDP-EXT-00066: only a
+    <nonContextRule>) never reaches the prompt or the UI, and the groups
+    still reach 3 from the rest. A mixed one (BRDP-S1-00489: <rules>
+    wrapper + <nonContextRule>) is reduced to its <structureObjectRule>."""
+    from tests.test_rule_precedents import BRDP_EXT_00066, BRDP_S1_00489, BRDP_S1_00489_RULE
+
+    project = await _make_project()
+    monkeypatch.setitem(STANDARD_TO_RULE_FORMAT, project.standard, "BREX-4.2")
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    nc_only = await _make_validated_candidate(
+        project.id, _SAME_DIRECTION, "BRDP-EXT-00066", rule_xml=BRDP_EXT_00066, rule_format="BREX-4.2"
+    )
+    mixed = await _make_validated_candidate(
+        project.id, _SAME_DIRECTION, "BRDP-S1-00489", rule_xml=BRDP_S1_00489, rule_format="BREX-4.2"
+    )
+    others = [
+        await _make_validated_candidate(
+            project.id,
+            _ORTHOGONAL_DIRECTION,
+            f"BRDP-FAR-{i}",
+            rule_xml=f'<structureObjectRule id="far{i}"><objectPath allowedObjectFlag="0">//far{i}</objectPath></structureObjectRule>',
+            rule_format="BREX-4.2",
+        )
+        for i in range(2)
+    ]
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        every = body["same_brdp"] + body["candidates"] + body["standard_fallback"] + body["template_fallback"]
+        assert str(nc_only.id) not in {c["id"] for c in every}
+        assert all("nonContextRule" not in c["text"] for c in every)
+        assert [c["id"] for c in body["candidates"]] == [str(mixed.id)]
+        assert body["candidates"][0]["text"] == BRDP_S1_00489_RULE
+        # 1 usable similar -> topped up to 3 from the standard, the
+        # dropped one never counted.
+        assert {c["id"] for c in body["standard_fallback"]} == {str(b.id) for b in others}
+        assert body["template_fallback"] == []
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_rule_unusable_precedents_never_leave_similar_short(client, monkeypatch):
+    """More unusable than one query page (see _RULE_PAGE_SIZE) ahead of
+    the usable ones in similarity order -- the usable ones still fill
+    "Similar decisions" instead of falling back to the template."""
+    from app.api.routes import similar as similar_module
+    from tests.test_rule_precedents import BRDP_EXT_00066
+
+    monkeypatch.setattr(similar_module, "_RULE_PAGE_SIZE", 2)
+    project = await _make_project()
+    monkeypatch.setitem(STANDARD_TO_RULE_FORMAT, project.standard, "BREX-4.2")
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    for i in range(5):
+        await _make_validated_candidate(
+            project.id, _SAME_DIRECTION, f"BRDP-A-NC-{i}", rule_xml=BRDP_EXT_00066, rule_format="BREX-4.2"
+        )
+    good = [
+        await _make_validated_candidate(
+            project.id,
+            [0.9, 0.1] + [0.0] * (EMBEDDING_DIM - 2),
+            f"BRDP-Z-GOOD-{i}",
+            rule_xml=f'<structureObjectRule id="g{i}"><objectPath allowedObjectFlag="0">//g{i}</objectPath></structureObjectRule>',
+            rule_format="BREX-4.2",
+        )
+        for i in range(3)
+    ]
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        assert {c["id"] for c in body["candidates"]} == {str(b.id) for b in good}
+        assert body["standard_fallback"] == [] and body["template_fallback"] == []
+    finally:
+        await _cleanup(project, [editor])
+
+
 async def test_rule_same_brdp_group_for_catalog_identifier_not_repeated_in_similar(client, monkeypatch):
     standard = f"TEST-STANDARD-{uuid.uuid4()}"
     project = await _make_project(standard=standard)
@@ -631,7 +720,11 @@ async def test_kind_rule_maps_project_standard_to_rule_format(client):
     editor = await _make_editor(project.id)
     source = await _make_rule_source_brdp(project.id)
     for i in range(3):
-        await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-RULE-{i}", rule_xml=f"<rule id='{i}'/>")
+        # A real <structureObjectRule> -- a BREX-4.2 precedent without one
+        # is dropped (Suggest Rule adjustments round, Part 2).
+        await _make_validated_candidate(
+            project.id, _SAME_DIRECTION, f"BRDP-RULE-{i}", rule_xml=f"<structureObjectRule id='{i}'/>"
+        )
     try:
         response = await _get_rule(client, project, source, editor)
         assert response.status_code == 200
@@ -640,7 +733,7 @@ async def test_kind_rule_maps_project_standard_to_rule_format(client):
         # Subset, not exact-set equality: a REAL standard can't isolate
         # itself from other real approved BREX-4.2 rules in the environment.
         texts = {c["text"] for c in body["candidates"]}
-        assert {f"<rule id='{i}'/>" for i in range(3)} <= texts
+        assert {f"<structureObjectRule id='{i}'/>" for i in range(3)} <= texts
     finally:
         await _cleanup(project, [editor])
 

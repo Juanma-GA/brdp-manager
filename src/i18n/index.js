@@ -377,6 +377,7 @@ const resources = {
             rule_status: 'Rule Status',
             status: 'Status',
             refusal_reason: 'Reason for refusal',
+            rule: 'Rule',
           },
           statusValues: {
             active: 'Active',
@@ -883,6 +884,7 @@ const resources = {
             rule_status: 'Estado de la regla',
             status: 'Estado',
             refusal_reason: 'Motivo de rechazo',
+            rule: 'Regla',
           },
           statusValues: {
             active: 'Activo',

@@ -68,10 +68,18 @@ const HISTORY_TRANSLATED_FIELDS = {
   status: 'records.history.statusValues',
 };
 
+// Long free-text history values (a whole rule's XML, a long Definition)
+// are shortened in the list, with the full text on hover -- the history
+// panel is a narrow side column. The rule's XML also has its indentation
+// collapsed first so the shortened text shows content, not whitespace.
+const HISTORY_MAX_CHARS = 160;
+
 function formatHistoryValue(t, fieldName, value) {
   const prefix = HISTORY_TRANSLATED_FIELDS[fieldName];
   if (prefix) return t(`${prefix}.${value}`, { defaultValue: value });
-  return value || '—';
+  if (!value) return '—';
+  const text = fieldName === 'rule' ? value.replace(/\s+/g, ' ').trim() : value;
+  return text.length > HISTORY_MAX_CHARS ? `${text.slice(0, HISTORY_MAX_CHARS)}…` : text;
 }
 
 export default function RecordsPage() {
@@ -120,7 +128,6 @@ export default function RecordsPage() {
   const embeddingJobRunning = embeddingJob?.status === 'running';
   const totalPendingEmbeddings = (pendingEmbeddings?.project_pending ?? 0) + (pendingEmbeddings?.catalog_pending ?? 0);
   const hasPendingEmbeddings = totalPendingEmbeddings > 0;
-  const suggestDisabledByEmbeddings = hasPendingEmbeddings || embeddingJobRunning;
   const prevEmbeddingJobStatusRef = useRef(null);
 
   // Fires exactly once per job completion (not on every poll tick while
@@ -267,6 +274,23 @@ export default function RecordsPage() {
   }, [approvalsRefreshToken]);
 
   const selected = brdps.find((b) => b.id === selectedId) || null;
+  // Suggest Rule adjustments round, Part 6: when the ONLY pending embedding
+  // (project and catalog) is the selected BRDP itself -- e.g. its Proposal
+  // was just edited -- Suggest isn't blocked: it embeds that one BRDP
+  // first (editor-only, like "Compute embeddings"), then runs. Any other
+  // pending row keeps the old block, since precedent would be missing.
+  const onlySelectedPendingEmbedding =
+    canEdit &&
+    !!selected &&
+    !embeddingJobRunning &&
+    (pendingEmbeddings?.catalog_pending ?? 0) === 0 &&
+    (pendingEmbeddings?.project_pending ?? 0) === 1 &&
+    pendingEmbeddings?.only_pending_brdp_id === selected.id;
+  const suggestDisabledByEmbeddings = embeddingJobRunning || (hasPendingEmbeddings && !onlySelectedPendingEmbedding);
+  const embedSelectedBrdpFirst = async (brdpId) => {
+    await authFetchJson(`/api/projects/${projectId}/embeddings/brdps/${brdpId}`, { method: 'POST' });
+    invalidatePendingEmbeddings(projectId);
+  };
 
   const handleTableSearchChange = (value) => {
     setTableSearchQuery(value);
@@ -391,6 +415,9 @@ export default function RecordsPage() {
     setHistoryRefreshToken((n) => n + 1);
     refresh();
     refreshStats();
+    // An edit of Title/Definition/Proposal/validation can make this BRDP
+    // pending (or not) -- keep the Suggest gate honest right away.
+    invalidatePendingEmbeddings(projectId);
     // "Aviso ligado al texto" round, point 1: a save touching Title/
     // Definition/Proposal invalidates whatever vocabulary notice is
     // showing -- recompute the deterministic part immediately (no LLM
@@ -429,7 +456,13 @@ export default function RecordsPage() {
     ruleApproval,
     handleUpdate,
     recomputeVocabResult,
-    bumpApprovalsRefreshToken: () => setApprovalsRefreshToken((n) => n + 1),
+    // Accepting a rule (suggested or pasted) changes both the rule and the
+    // BRDP's History -- refresh both at once (Suggest Rule adjustments
+    // round: History used to show the change only after a reload).
+    bumpApprovalsRefreshToken: () => {
+      setApprovalsRefreshToken((n) => n + 1);
+      setHistoryRefreshToken((n) => n + 1);
+    },
     t,
   });
   const selectedSuggestion = suggestions.selectedSuggestion;
@@ -1485,7 +1518,12 @@ export default function RecordsPage() {
                     return (
                       <button
                         key={kind}
-                        onClick={() => suggestions.requestSuggestion(kind)}
+                        onClick={() =>
+                          suggestions.requestSuggestion(
+                            kind,
+                            onlySelectedPendingEmbedding ? () => embedSelectedBrdpFirst(selected.id) : null
+                          )
+                        }
                         disabled={
                           pendingBlocked ||
                           !aiProvider ||
@@ -1718,9 +1756,13 @@ export default function RecordsPage() {
                           {t(`records.history.fields.${h.field_name}`, { defaultValue: h.field_name })}
                         </div>
                         <div className={styles.historyChange}>
-                          <span className={styles.historyOld}>{formatHistoryValue(t, h.field_name, h.old_value)}</span>
+                          <span className={styles.historyOld} title={h.old_value || undefined}>
+                            {formatHistoryValue(t, h.field_name, h.old_value)}
+                          </span>
                           <span className={styles.historyArrow}>→</span>
-                          <span className={styles.historyNew}>{formatHistoryValue(t, h.field_name, h.new_value)}</span>
+                          <span className={styles.historyNew} title={h.new_value || undefined}>
+                            {formatHistoryValue(t, h.field_name, h.new_value)}
+                          </span>
                         </div>
                         <div className={styles.historyMeta}>
                           {h.user_email || t('records.history.unknownUser')} ·{' '}

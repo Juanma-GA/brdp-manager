@@ -580,8 +580,10 @@ async def run_import_job(
                 else:
                     if existing_approval is not None:
                         old_state = _rule_state(existing_approval)
+                        old_rule_xml = existing_approval.rule_xml
                         await work_session.delete(existing_approval)
                         record_change(work_session, brdp.id, editor, "rule_status", old_state, "todo")
+                        record_change(work_session, brdp.id, editor, "rule", old_rule_xml, "")
                     conflicts_cleared += 1
             elif row.rule.strip():
                 # A genuine ok row that asserts a real rule (Draft or
@@ -593,6 +595,7 @@ async def run_import_job(
                 new_status = "approved" if row.rule_status == "Verified" else "pending_review"
                 existing_approval = existing_approvals.get(brdp.id)
                 old_state = _rule_state(existing_approval)
+                old_rule_xml = existing_approval.rule_xml if existing_approval is not None else ""
                 if existing_approval is None:
                     existing_approval = RuleApproval(brdp_id=brdp.id, format=rule_format)
                     work_session.add(existing_approval)
@@ -601,6 +604,8 @@ async def run_import_job(
                 existing_approval.status = new_status
                 existing_approval.approved_at = datetime.now(timezone.utc) if new_status == "approved" else None
                 record_change(work_session, brdp.id, editor, "rule_status", old_state, _rule_state(existing_approval))
+                # Same as propose_approval: the rule text is audited too.
+                record_change(work_session, brdp.id, editor, "rule", old_rule_xml, existing_approval.rule_xml)
             # else: rule empty + To Do + no pre-existing approval (conflict
             # already covers the "had one, file clears it" case above) --
             # genuinely nothing to do for the rule.
