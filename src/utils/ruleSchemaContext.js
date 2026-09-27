@@ -196,9 +196,17 @@ export function detectSchemaMentions(text, documentSchemas) {
 }
 
 // ---------------------------------------------------------------------------
-// When to offer the schema choice (docs request, Part 2). `cards` is GET
-// /api/schema-cards's `cards` for the element names found in the BRDP text;
-// `documentSchemas` its `document_schemas`.
+// When to offer the schema choice. `cards` is GET /api/schema-cards's
+// `cards` for the element names found in the BRDP text; `documentSchemas`
+// its `document_schemas`.
+//
+// The selector opens on its own ONLY when the text mentions a schema. An
+// element that exists in just some schemas is NOT a reason to ask: a
+// general rule is still correct -- in the schemas without that element it
+// simply never fires (<table> is in 13 of 28 4.2 schemas; opening the
+// selector for it asked on almost every rule). `partial` is still computed:
+// whenever the selector IS open (a mention, or "Limit to specific
+// schemas…"), the schemas lacking an element are disabled with the reason.
 export function coverageOf(entry) {
   const schemas = new Set();
   for (const variant of entry?.variants || []) variant.schemas.forEach((s) => schemas.add(s));
@@ -217,7 +225,7 @@ export function decideRuleSchemaContext({ standard, documentSchemas, cards, text
     return { schema, disabled, missing, preChecked: !disabled && mentioned.includes(schema) };
   });
   const partial = variants.some((v) => v.disabled);
-  return { supported: true, showSelector: partial || mentioned.length > 0, variants, mentioned, partial };
+  return { supported: true, showSelector: mentioned.length > 0, variants, mentioned, partial };
 }
 
 // ---------------------------------------------------------------------------

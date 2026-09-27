@@ -99,11 +99,14 @@ async function main() {
     proc: await makeBrdp(p42, { identifier: "BRDP-SC-PROC", title: "Emphasis in procedures", proposal: "In procedural data modules, <emphasis> shall not be used." }),
     two: await makeBrdp(p42, { identifier: "BRDP-SC-TWO", title: "Emphasis again", proposal: "Writers: <emphasis> shall not be used." }),
     part: await makeBrdp(p42, { identifier: "BRDP-SC-PART", title: "Part segments", proposal: "<partSegment> shall not be used." }),
+    table: await makeBrdp(p42, { identifier: "BRDP-SC-TABLE", title: "Tables", proposal: "The <table> element shall not be used." }),
+    procTable: await makeBrdp(p42, { identifier: "BRDP-SC-TBLPROC", title: "Tables in procedures", proposal: "In procedural data modules, <table> shall not be used." }),
   };
   const p41 = await makeProject("Schema ctx 4.1", "S1000D 4.1");
   const b41 = await makeBrdp(p41, { identifier: "BRDP-SC-41", title: "Emphasis in procedures", proposal: "In procedural data modules, <emphasis> shall not be used." });
   const p301 = await makeProject("Schema ctx 3.0.1", "S1000D 3.0.1");
   const b301 = await makeBrdp(p301, { identifier: "BRDP-SC-301", title: "Énfasis en procedimientos", proposal: "En los módulos de datos procedimentales no se usará <emphasis>." });
+  await makeBrdp(p301, { identifier: "BRDP-SC-301GEN", title: "Emphasis", proposal: "<emphasis> shall not be used." });
   const pDita = await makeProject("Schema ctx DITA", "DITA 1.3 Xpath2.0");
   await makeBrdp(pDita, { identifier: "BRDP-SC-DITA", title: "Notes", proposal: "In procedural topics every <note> shall declare @type." });
   for (const p of [p42, p41, p301, pDita]) await embed(p);
@@ -212,21 +215,47 @@ async function main() {
     assert((twoShown.match(/\/\/emphasis/g) || []).length === 2, "... with the same inner rule");
     await acceptAndApprove(p42, b.two, "BREX-4.2");
 
-    // 4. Element only in some schemas -> selector opens, others disabled.
-    await select("BRDP-SC-PART");
+    // 4. An element present in only some schemas is NOT a reason to ask:
+    //    <table> is in 13 of the 28 4.2 schemas -> general rule, no selector.
+    await select("BRDP-SC-TABLE");
     await ruleButton().click();
+    await waitForRule();
+    assert((await selector().count()) === 0, "<table> without a schema mention: no selector");
+    assert(await page.locator("text=Applies to: all schemas").isVisible(), "<table>: general rule ('Applies to: all schemas')");
+    await page.getByRole("button", { name: "Discard" }).click();
+    // ... "Limit to specific schemas…" still opens it, with the schemas that
+    // lack <table> disabled and nothing pre-checked.
+    await limitLink().click();
     await selector().waitFor({ timeout: 10000 });
-    assert(!(await checkbox("ipd").isDisabled()), "<partSegment>: ipd enabled");
-    assert(await checkbox("fault").isDisabled(), "<partSegment>: fault disabled");
-    const faultTitle = await selector().locator('label:has(input[value="fault"])').getAttribute("title");
-    assert(/partSegment/.test(faultTitle || ""), `disabled schema says why (${faultTitle})`);
-    await page.screenshot({ path: "/tmp/schema-ctx-selector-partial.png", fullPage: true });
+    assert((await selector().locator("input:checked").count()) === 0, "<table> manual selector: nothing pre-checked");
+    assert(!(await checkbox("proced").isDisabled()) && (await checkbox("ipd").isDisabled()), "<table> manual selector: proced enabled, ipd disabled");
+    const ipdTitle = await selector().locator('label:has(input[value="ipd"])').getAttribute("title");
+    assert(/<table>/.test(ipdTitle || ""), `disabled schema says why (${ipdTitle})`);
+    await page.screenshot({ path: "/tmp/schema-ctx-table-limit-link.png", fullPage: true });
     await selector().getByRole("button", { name: "Cancel" }).click();
     assert((await selector().count()) === 0 && !(await ruleButton().isDisabled()), "Cancel closes the selector and unblocks Suggest");
 
-    // 5. Per-schema warning (Part 5) on a pasted rule: <table> is not in ipd.
+    // A schema mention + <table> -> selector on its own, proced checked,
+    // schemas without <table> disabled.
+    await select("BRDP-SC-TBLPROC");
     await ruleButton().click();
     await selector().waitFor({ timeout: 10000 });
+    assert(await checkbox("proced").isChecked(), "'In procedural data modules, <table>…': proced pre-checked");
+    assert(await checkbox("ipd").isDisabled(), "... ipd (no <table>) disabled");
+    await page.screenshot({ path: "/tmp/schema-ctx-selector-partial.png", fullPage: true });
+    await selector().getByRole("button", { name: "Cancel" }).click();
+
+    // <partSegment> (ipd only): no selector on its own either.
+    await select("BRDP-SC-PART");
+    await ruleButton().click();
+    await waitForRule();
+    assert((await selector().count()) === 0, "<partSegment> without a schema mention: no selector");
+    await page.getByRole("button", { name: "Discard" }).click();
+
+    // 5. Per-schema warning (Part 5) on a pasted rule: <table> is not in ipd.
+    await limitLink().click();
+    await selector().waitFor({ timeout: 10000 });
+    assert(!(await checkbox("ipd").isDisabled()) && (await checkbox("fault").isDisabled()), "<partSegment> manual selector: ipd enabled, fault disabled");
     await checkbox("ipd").check();
     await selector().getByRole("button", { name: "Generate" }).click();
     await waitForRule();
@@ -292,6 +321,14 @@ async function main() {
     assert(xml.indexOf('context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/proced.xsd"') > generic301End, "3.0.1: block placed after the generic contextrules");
     assert(xmllint(xml, "S1000D 3.0.1") === "valid", `3.0.1: xmllint valid (${xmllint(xml, "S1000D 3.0.1")})`);
     await page.screenshot({ path: "/tmp/schema-ctx-generate-3-0-1.png", fullPage: true });
+
+    // 3.0.1 <emphasis> (absent from comment/ddn/dml/pm), no mention -> no selector.
+    await openProject(p301);
+    await select("BRDP-SC-301GEN");
+    await ruleButton().click();
+    await waitForRule();
+    assert((await selector().count()) === 0, "3.0.1 <emphasis> without a schema mention: no selector");
+    await page.getByRole("button", { name: "Discard" }).click();
 
     // 9. DITA never shows the selector.
     await openProject(pDita);

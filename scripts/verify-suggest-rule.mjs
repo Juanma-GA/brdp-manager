@@ -199,21 +199,12 @@ async function main() {
     await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
     await page.waitForTimeout(400); // rule approval fetch
   }
-  // Suggest Rule part 2: a Proposal naming <table> (only in 13 of the 28
-  // S1000D 4.2 schemas) opens the schema selector first -- these cases all
-  // want a general rule, i.e. Generate with nothing checked.
-  // verify-suggest-rule-schema-context.mjs covers the selector itself.
   async function suggestRule() {
     await fetch(`${MOCK}/reset`, { method: "POST" }).catch(() => {});
     await ruleButton().click();
-    const discardBtn = page.getByRole("button", { name: "Discard" });
-    const selectorBox = page.getByTestId("rule-schema-selector");
-    await discardBtn.or(selectorBox).first().waitFor({ timeout: 15000 });
-    if (await selectorBox.isVisible()) {
-      assert((await selectorBox.locator("input:checked").count()) === 0, "schema selector: nothing pre-checked (no schema mentioned)");
-      await selectorBox.getByRole("button", { name: "Generate" }).click();
-    }
-    await discardBtn.waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "Discard" }).waitFor({ timeout: 15000 });
+    // Selector only opens when the text mentions a schema -- none of these do.
+    assert((await page.getByTestId("rule-schema-selector").count()) === 0, "no schema mentioned: no schema selector");
   }
   const discard = () => page.getByRole("button", { name: "Discard" }).click();
 

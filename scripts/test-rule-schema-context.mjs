@@ -100,13 +100,25 @@ const decide = (cards, text, s = s42, standard = 'S1000D 4.2') =>
 {
   const d = decide(s42.cardsFor('partSegment'), '<partSegment> is mandatory');
   const enabled = d.variants.filter((v) => !v.disabled).map((v) => v.schema);
-  check('4.2 element only in some schemas -> selector', d.showSelector && d.partial);
+  check('4.2 element only in some schemas, no mention -> general rule, no selector', !d.showSelector && d.partial);
   check('... only the schemas that have it are enabled', eq(enabled, ['ipd']), enabled.join(','));
   const fault = d.variants.find((v) => v.schema === 'fault');
   check('... disabled ones say which element is missing', fault.disabled && eq(fault.missing, ['partSegment']));
 }
 {
-  const d = decide(s42.cardsFor('table'), 'In procedural data modules, <table> ...');
+  const d = decide(s42.cardsFor('table'), 'The <table> element shall not be used.');
+  check('4.2 <table> (13 of 28 schemas), no mention -> no selector', !d.showSelector && d.partial);
+  const d301 = decide(s301.cardsFor('emphasis', 'para'), '<emphasis> shall not be used in a <para>.', s301, 'S1000D 3.0.1');
+  check('3.0.1 <emphasis>/<para> (missing in comment/ddn/dml/pm), no mention -> no selector', !d301.showSelector && d301.partial);
+  check(
+    '... but the selector opened by hand still disables those schemas',
+    ['comment', 'ddn', 'dml', 'pm'].every((sc) => d301.variants.find((v) => v.schema === sc).disabled)
+  );
+}
+{
+  const d = decide(s42.cardsFor('table'), 'In procedural data modules, <table> shall not be used.');
+  check('4.2 proced mention + <table> -> selector', d.showSelector && eq(d.variants.filter((v) => v.preChecked).map((v) => v.schema), ['proced']));
+  check('... schemas without <table> disabled', d.variants.find((v) => v.schema === 'ipd').disabled && d.variants.find((v) => v.schema === 'ipd').missing.includes('table'));
   const proced = d.variants.find((v) => v.schema === 'proced');
   check('mentioned + present -> pre-checked', proced.preChecked && !proced.disabled);
   const ipdMention = decide(s42.cardsFor('table'), 'In IPD data modules, <table> ...');
@@ -119,7 +131,7 @@ const decide = (cards, text, s = s42, standard = 'S1000D 4.2') =>
 }
 {
   const d = decide(s41.cardsFor('proceduralStep'), '<proceduralStep>', s41, 'S1000D 4.1');
-  check('4.1 <proceduralStep> -> selector, proced enabled', d.showSelector && !d.variants.find((v) => v.schema === 'proced').disabled);
+  check('4.1 <proceduralStep>, no mention -> no selector; proced enabled if opened', !d.showSelector && !d.variants.find((v) => v.schema === 'proced').disabled);
 }
 
 // --- wrapper -------------------------------------------------------------------------
