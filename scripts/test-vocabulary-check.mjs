@@ -125,6 +125,42 @@ assert(extractContextCandidates("Use @label for this.").attributes.includes("lab
   assert(applyRenameSuggestion("above the table>", { name: "table", type: "element" }) === "above the <table>", "dangling close completes to '<table>' (adds only the missing '<')");
 }
 
+// ---- "Falsos avisos del marcado a medias" round, Part 1: the previous
+// dangling-markup check only ever looked at ONE side of the bracket, so a
+// plain comparison/arrow whose captured "name" happened to sit flush
+// against a letter/digit on the OTHER side was wrongly flagged. Every
+// phrase from the real bug report, plus the encargo's own additional
+// phrases, must now produce ZERO dangling candidates.
+{
+  const falsePositives = [
+    'if count>5 then',
+    'value>limit',
+    'A->B',
+    'x<y',
+    'Steps 1<n<3',
+    'a<b and c>d',
+    'temperatura<máxima',
+    'if count > 5',
+    'x < y',
+    '=>',
+    '<=',
+    'a<>b',
+    'x<-y',
+  ];
+  for (const phrase of falsePositives) {
+    const c = extractContextCandidates(phrase);
+    assert(c.danglingElements.length === 0, `"${phrase}" -> zero dangling candidates (got: ${JSON.stringify(c.danglingElements)})`);
+  }
+}
+{
+  // The 4 known-good cases from the same encargo must keep working
+  // exactly as before.
+  assert(extractContextCandidates('encima de la <table').danglingElements.includes('table'), '"encima de la <table" still offers "table" as a dangling-open candidate');
+  assert(extractContextCandidates('la table> va').danglingElements.includes('table'), '"la table> va" still offers "table" as a dangling-close candidate');
+  assert(extractContextCandidates('encima de la <pokemon').danglingElements.includes('pokemon'), '"encima de la <pokemon" still offers "pokemon" as a dangling-open candidate (unresolvable -> red warning elsewhere)');
+  assert(extractContextCandidates('<para>text</para>').danglingElements.length === 0, '"<para>text</para>" (already-complete tags) -> zero dangling candidates');
+}
+
 // ---- phrase-trigger extraction: connectors, descriptive words, lists (unchanged mechanics) ----
 
 {

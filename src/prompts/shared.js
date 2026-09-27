@@ -174,8 +174,19 @@ instead of guessing.`;
     }
     block += `\n  attributes: ${formatSchemaFactAttributeList(summary.common.attributes)}`;
     block += `\n  children: ${formatSchemaFactNameList(summary.common.children, false, 0)}`;
-    block += `\n  allowed inside: ${parentsText}`;
-    block += `\n  Differences by schema:`;
+    // "Ajustes a los prompts de Proposal y fichas" round, Part 4: a real
+    // Mistral test answered that <para>'s schema variants "differ in
+    // additional allowed parents (e.g. footnote)" -- factually wrong on
+    // two counts at once (footnote is a CHILDREN difference, and parents
+    // never vary per variant in this data model at all -- there is only
+    // ever one parents list per element, see summarizeSchemaFactEntry's
+    // own docstring). The block already implied this structurally (one
+    // "allowed inside" line above, entirely outside the per-variant loop
+    // below), but never said so in words the model could not misread --
+    // now it does, on both ends: where "allowed inside" is stated, and
+    // where "Differences by schema" is introduced.
+    block += `\n  allowed inside: ${parentsText} (this is the same for every schema variant listed above — allowed-inside parents never differ by schema variant)`;
+    block += `\n  Differences by schema (attributes and children ONLY — parents are never part of this comparison, see "allowed inside" above):`;
     // "Pulido de fichas" round, points 2-3: a variant with nothing to add
     // beyond the common set used to still print an "attributes: none
     // beyond the common set" / "children: none beyond the common set"

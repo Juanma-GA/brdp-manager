@@ -54,6 +54,60 @@
 // exercised instead by scripts/test-schema-facts-formatting.mjs's
 // synthetic fixtures and backend/tests/test_schema_cards.py's real
 // `refs` (152 parents) case, not by this byte-for-byte comparison.
+//
+// "Falsos avisos del marcado a medias y ajustes de los prompts de
+// Proposal y fichas" round: expected-prompts.json regenerated again (via
+// --update, no fixture-dump re-run needed this time -- Parts 2-4 are pure
+// prompt-text edits, no backend/schema-cards data changed) for THREE more
+// DELIBERATE reasons, all real prompt-content changes:
+//   1. Part 4 -- buildSchemaFactsBlock (shared.js) now says explicitly,
+//      in TWO places, that "allowed inside" (parents) is the same for
+//      every schema variant and that "Differences by schema" only ever
+//      covers attributes/children. This changes ask/multi-variant-para-
+//      refused-notfound (the only fixed case with a multi-variant
+//      element) -- motivated by a real Mistral answer claiming <para>'s
+//      variants "differ in additional allowed parents (e.g. footnote)",
+//      which is wrong on two counts (footnote is a children diff; parents
+//      never vary by variant at all in this data model).
+//   2. Part 2 -- buildSuggestProposalPrompt's (suggestProposalPrompt.js)
+//      four "DO NOT MAKE THE DECISION" template examples were replaced,
+//      because a real Mistral run copied them almost verbatim into actual
+//      output, including one that was not even grammatically correct
+//      English. This changes BOTH suggestProposal cases that reach that
+//      block (all-three-groups, no-references-notfound). Before/after:
+//        BEFORE:
+//          - The [LIST: Descriptive, Procedural, IPD, ...] schemas shall be used ...
+//          - The element <x> [YES/NO] be used.
+//          - Nesting shall be limited to [VALUE: e.g. 4] levels.
+//          - Permitted characters: [CHARACTERS: ...].
+//        AFTER:
+//          - Dates shall be written in [LIST: YYYY-MM-DD, DD-MM-YYYY, Month DD, YYYY] format.
+//          - Illustrations [SHALL/SHALL NOT] use color to indicate hazard severity.
+//          - Titles shall not exceed [VALUE: e.g. 60] characters.
+//          - Measurements shall be expressed in [UNIT: e.g. metric, imperial] units.
+//      The old YES/NO example ("The element <x> [YES/NO] be used.") is
+//      missing its own modal verb -- Mistral was seen copying it as-is.
+//      The new one ("Illustrations [SHALL/SHALL NOT] use color to
+//      indicate hazard severity.") is a complete, grammatical sentence
+//      where the placeholder IS the modal verb pair, so copying its SHAPE
+//      copies something correct. None of the four new examples mentions
+//      permitted schemas, "<element>" yes/no usage, nesting, or CAGE
+//      codes (the very topics the model was seen copying) -- the
+//      sentence right after the list, permitting the caller's own
+//      free-form markers (confirmed working in the real Mistral test via
+//      a self-invented "[CONVENTION: ...]"), is untouched.
+//   3. Part 3 -- the "THE PREVIOUS PROPOSAL WAS REFUSED" block gained a
+//      new paragraph (only emitted when `comments` is non-empty) telling
+//      the model that a concrete restriction stated in the refusal reason
+//      (a minimum, maximum, mandatory or forbidden value) must be
+//      captured faithfully in the placeholder it writes, never overridden
+//      by an unrelated invented example -- motivated by a real Mistral
+//      run where a refusal reason of "real maintenance tasks need at
+//      least 2 levels" still produced "[VALUE: e.g. 5, 8]". This changes
+//      suggestProposal/refused-with-comments-wrongtype (the only fixed
+//      case with a non-empty `comments`); an empty `comments` still
+//      renders as the literal "not given" with no new paragraph at all
+//      (unchanged from before this round).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

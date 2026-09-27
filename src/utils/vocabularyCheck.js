@@ -134,21 +134,47 @@ export function extractContextCandidates(text) {
   return { elements: [...elements], attributes: [...attributes], camelCase, phraseCandidates, danglingElements };
 }
 
-// Finds names introduced via HALF-typed bracket markup, with no trigger
-// word required: "<name" with nothing (or a non-">"-character) right
-// after the name, or "name>" with nothing (or a non-"<"/word-char) right
-// before it. Deliberately does NOT use a single "greedy name then
-// lookahead" regex -- `<([\p{L}][\w-]*)(?!>)` would backtrack the
-// quantifier down to a shorter match whenever the FULL name IS followed
-// by ">" (i.e. exactly the complete-tag case that must be excluded),
-// silently capturing a truncated name instead of correctly matching
-// nothing. Matching the name greedily first and then checking the single
-// character immediately after/before it in plain JS avoids that
-// backtracking trap entirely.
-// Never a false positive on a plain comparison/arrow ("a < b", "x<5",
-// "->"): the character right after "<" (open case) or right before ">"
-// (close case) must be a LETTER, immediately adjacent to the bracket --
-// "a < b" has a space there, "x<5" has a digit, "->" has no "<" at all.
+// "Falsos avisos del marcado a medias" round: the previous version only
+// ever looked at ONE side of the bracket (the character right after "<",
+// or right before ">") -- it never checked the OTHER side, so a plain
+// comparison/arrow whose captured "name" happened to sit flush against a
+// letter/digit on that other side was wrongly treated as dangling markup.
+// Real false positives reported, all now confirmed fixed: "if count>5
+// then" -> "<count>", "value>limit" -> "<value>", "A->B" -> "<A->", "x<y"
+// -> "<y>", "Steps 1<n<3" -> "<n>", "a<b and c>d" -> "<b>"/"<c>",
+// "temperatura<máxima" -> "<máxima>".
+//
+// Fixed with two independent rules, BOTH required:
+//   1. The captured name may never END in "-" or "_" -- this alone kills
+//      "A->B": the old permissive [\p{L}\p{N}_-]* class let the regex
+//      greedily capture "A-" as the "name" right before the literal ">".
+//      The new name pattern only allows a run of [\p{L}\p{N}_-] when it
+//      ends in an actual letter/digit (or is a single bare letter).
+//   2. BOTH sides of the bracket must be a genuine word boundary --
+//      start/end of text, or anything that is not a letter, not a digit,
+//      and (where markup could otherwise directly abut the candidate)
+//      not "<"/">" either:
+//        - "<name": the character right before "<" must not be a
+//          letter/digit (kills "x<y", "1<n", "a<b" -- in each, the
+//          character immediately before "<" is itself a letter/digit),
+//          and the character right after the name must not be a
+//          letter/digit/"<"/">" (excludes an immediately-following tag
+//          and, together with rule 1, a fully-closed "<table>").
+//        - "name>": the character right before the name must not be a
+//          letter/digit/"<"/">" (the "<"/">" exclusion is what keeps an
+//          already-complete "<table>" from being reported a second time
+//          as a dangling close -- unchanged from before this round), and
+//          the character right after ">" must not be a letter/digit
+//          (kills "count>5", "value>limit", "c>d" -- in each, the
+//          character immediately after ">" is itself a letter/digit).
+// Genuinely good cases are unaffected: "encima de la <table" (space
+// before "<", end-of-text after "table"), "la table> va" (space before
+// "table", space after ">"), "<para>text</para>" (already-complete tags,
+// deduped against `elements` before ever reaching `danglingElements`).
+function isLetterOrDigit(ch) {
+  return ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+}
+
 function extractDanglingElementNames(text) {
   const source = text || '';
   const names = new Set();
@@ -156,14 +182,21 @@ function extractDanglingElementNames(text) {
   OPEN_TOKEN_RE.lastIndex = 0;
   let m;
   while ((m = OPEN_TOKEN_RE.exec(source))) {
+    const before = m.index > 0 ? source[m.index - 1] : undefined;
+    if (isLetterOrDigit(before)) continue; // e.g. "x<y", "1<n", "a<b"
     const endIdx = m.index + m[0].length;
-    if (source[endIdx] !== '>') names.add(m[1]);
+    const after = source[endIdx];
+    if (isLetterOrDigit(after) || after === '<' || after === '>') continue; // e.g. "<table>", "<table<"
+    names.add(m[1]);
   }
 
   CLOSE_TOKEN_RE.lastIndex = 0;
   while ((m = CLOSE_TOKEN_RE.exec(source))) {
     const before = m.index > 0 ? source[m.index - 1] : undefined;
-    if (before !== undefined && (before === '<' || NAME_CHAR_RE.test(before))) continue;
+    if (isLetterOrDigit(before) || before === '<' || before === '>') continue; // e.g. "<table>" (complete)
+    const endIdx = m.index + m[0].length;
+    const after = source[endIdx];
+    if (isLetterOrDigit(after)) continue; // e.g. "count>5", "value>limit", "c>d"
     names.add(m[1]);
   }
 
@@ -285,13 +318,19 @@ export function applyRenameSuggestion(text, suggestion) {
 
 const ELEMENT_ATTR_TAG_RE = /<\/?([A-Za-z][\w-]*)[^>]*>/g;
 const ATTR_MARKER_RE = /@([A-Za-z][\w-]*)/g;
-// "Did you mean con marcado a medias" round, Part 1: used only by
-// extractDanglingElementNames above. `<` must be immediately (no space)
-// followed by a letter -- this is what excludes "a < b"/"x<5" as
+// "Did you mean con marcado a medias" round, Part 1 (used only by
+// extractDanglingElementNames above): `<`/`>` must be immediately (no
+// space) adjacent to the name -- this is what excludes "a < b"/"x < y" as
 // candidates, not any check against the vocabulary.
-const OPEN_TOKEN_RE = /<([\p{L}][\p{L}\p{N}_-]*)/gu;
-const CLOSE_TOKEN_RE = /([\p{L}][\p{L}\p{N}_-]*)>/gu;
-const NAME_CHAR_RE = /[\p{L}\p{N}_-]/u;
+// "Falsos avisos del marcado a medias" round: the name's own character
+// class no longer allows it to end in "-"/"_" -- a trailing run of either
+// is only ever a real name if followed by a further letter/digit before
+// the closing delimiter (single bare letters, e.g. "<n", still match on
+// their own). This alone is what keeps "A->B" (old behavior: captured
+// "A-" as the name right before the literal ">") from matching at all;
+// the boundary checks in extractDanglingElementNames handle the rest.
+const OPEN_TOKEN_RE = /<([\p{L}](?:[\p{L}\p{N}_-]*[\p{L}\p{N}])?)/gu;
+const CLOSE_TOKEN_RE = /([\p{L}](?:[\p{L}\p{N}_-]*[\p{L}\p{N}])?)>/gu;
 // Unicode-aware word tokenizer (follow-up round, point 3): letters in any
 // script (`\p{L}`), digits, and the XML name characters -, _, . -- so an
 // accented/composed word like "cómo"/"señal"/"utilizará" is always

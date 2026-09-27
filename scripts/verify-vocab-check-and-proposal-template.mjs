@@ -291,10 +291,22 @@ async function main() {
     const reqProp = await lastMockRequest();
     const sysProp = reqProp.messages.find((m) => m.role === "system").content;
     assert(sysProp.includes("DO NOT MAKE THE DECISION."), "Suggest Proposal prompt opens the template block with the exact instruction");
-    assert(sysProp.includes("The [LIST: Descriptive, Procedural, IPD, ...] schemas shall be used"), "example line 1 present verbatim");
-    assert(sysProp.includes("The element <x> [YES/NO] be used."), "example line 2 present verbatim");
-    assert(sysProp.includes("Nesting shall be limited to [VALUE: e.g. 4] levels."), "example line 3 present verbatim");
-    assert(sysProp.includes("Permitted characters: [CHARACTERS: ...]."), "example line 4 present verbatim");
+    // "Falsos avisos... y ajustes de los prompts de Proposal y fichas"
+    // round, Part 2: the old 4 examples (schemas LIST, "<x>" YES/NO,
+    // nesting VALUE, CHARACTERS) were replaced -- a real Mistral run
+    // copied them almost verbatim, including the ungrammatical YES/NO
+    // one, into its actual Proposal output. New examples cover the same
+    // 4 placeholder kinds on unrelated topics (date format, illustration
+    // color, title length, units of measure).
+    assert(sysProp.includes("Dates shall be written in [LIST: YYYY-MM-DD, DD-MM-YYYY, Month DD, YYYY] format."), "example line 1 (LIST) present verbatim");
+    assert(sysProp.includes("Illustrations [SHALL/SHALL NOT] use color to indicate hazard severity."), "example line 2 (corrected YES/NO-style) present verbatim");
+    assert(sysProp.includes("Titles shall not exceed [VALUE: e.g. 60] characters."), "example line 3 (VALUE) present verbatim");
+    assert(sysProp.includes("Measurements shall be expressed in [UNIT: e.g. metric, imperial] units."), "example line 4 (free-form marker) present verbatim");
+    assert(!sysProp.includes("The element <x> [YES/NO] be used."), "the old ungrammatical YES/NO example is gone");
+    assert(
+      !/schemas shall be used|CAGE|[Nn]esting shall be limited/.test(sysProp),
+      "no new example mentions permitted schemas, CAGE codes, or nesting"
+    );
     assert(!sysProp.includes("PROJECT-SPECIFIC VALUES"), "old PROJECT-SPECIFIC VALUES block is gone");
     assert(
       !sysProp.includes("never rename them"),

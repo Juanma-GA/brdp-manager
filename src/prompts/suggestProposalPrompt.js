@@ -75,18 +75,48 @@ knowledge of ${standard} alone.
 Refused proposal: ${brdp.proposal || 'empty'}
 Reason for refusal: ${brdp.comments || 'not given'}
 Your Proposal must address the reason for refusal.
-
+`;
+    // "Ajustes a los prompts de Proposal y fichas" round, Part 3: a real
+    // Mistral test with the refusal reason "real maintenance tasks need at
+    // least 2 levels" (of nested sub-steps) still came back with
+    // [VALUE: e.g. 5, 8] -- a plausible-looking example that completely
+    // ignores the concrete "at least 2" constraint already stated in the
+    // reason. Only added when there IS a reason to read (an empty
+    // `comments` renders as "not given" above and must not invent any
+    // restriction out of nothing -- behavior unchanged in that case).
+    if (brdp.comments && brdp.comments.trim()) {
+      prompt += `If the reason for refusal states a concrete restriction (a stated
+minimum, maximum, a mandatory value, or a forbidden value), the
+placeholder you write must capture THAT SPECIFIC restriction — e.g. a
+reason of "at least 2" must produce [VALUE: at least 2], never an
+unrelated example value (such as [VALUE: e.g. 5, 8]) that ignores it.
+`;
+    }
+    prompt += `
 `;
   }
 
+  // "Ajustes a los prompts de Proposal y fichas" round, Part 2: a real
+  // Mistral test copied these examples almost verbatim into its actual
+  // output, including "The element <x> [YES/NO] be used." -- which isn't
+  // even grammatically correct English (a bare [YES/NO] dropped into a
+  // sentence with no modal verb). Replaced with topics that have nothing
+  // to do with permitted schemas, "<element>" yes/no usage, nesting, or
+  // CAGE codes (those are the very topics the model was seen copying) --
+  // date format, illustration color, title length, and units of measure
+  // -- while still covering all four placeholder kinds. The YES/NO
+  // example now reads as a real, grammatically complete sentence
+  // (the placeholder IS the modal verb pair, "[SHALL/SHALL NOT]", not a
+  // bare "[YES/NO]" bolted onto a sentence missing its own verb) so a
+  // model copying its *shape* copies something correct.
   prompt += `DO NOT MAKE THE DECISION. Write the Proposal as a fill-in template: the
 complete normative sentence, with every choice left to the user as a
 bracketed placeholder that states the kind of answer and, where useful,
 example options. Examples:
-- The [LIST: Descriptive, Procedural, IPD, ...] schemas shall be used ...
-- The element <x> [YES/NO] be used.
-- Nesting shall be limited to [VALUE: e.g. 4] levels.
-- Permitted characters: [CHARACTERS: ...].
+- Dates shall be written in [LIST: YYYY-MM-DD, DD-MM-YYYY, Month DD, YYYY] format.
+- Illustrations [SHALL/SHALL NOT] use color to indicate hazard severity.
+- Titles shall not exceed [VALUE: e.g. 60] characters.
+- Measurements shall be expressed in [UNIT: e.g. metric, imperial] units.
 Example options may come from the reference BRDPs, but never present
 another project's choice as this project's decision.
 

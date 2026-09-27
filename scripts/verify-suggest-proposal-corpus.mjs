@@ -387,6 +387,14 @@ async function main() {
       "refusal reason cited verbatim"
     );
     assert(sysRefused.includes("Your Proposal must address the reason for refusal."), "explicit instruction to address the reason");
+    // "Falsos avisos... y ajustes de los prompts de Proposal y fichas"
+    // round, Part 3: a non-empty refusal reason now also gets the
+    // restriction-capture instruction, against real BRDP/API data (not
+    // just the fixed prompt-snapshot cases).
+    assert(
+      sysRefused.includes("placeholder you write must capture THAT SPECIFIC restriction"),
+      "real refused-with-reason BRDP gets the concrete-restriction instruction too"
+    );
     await page.getByRole("button", { name: "Discard" }).click();
     await page.waitForTimeout(200);
 

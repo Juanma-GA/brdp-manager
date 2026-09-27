@@ -216,7 +216,16 @@ async function main() {
     req = await lastMockRequest();
     sys = req.messages.find((m) => m.role === "system").content;
     assert(sys.includes("<para> — common to all 8 schema variants:"), "the real, 8-variant <para> card is summarized as one common-to-all-8 block, not repeated once per variant");
-    assert(sys.includes("Differences by schema:"), "the compact block includes a per-schema differences section");
+    // "Falsos avisos... y ajustes de los prompts de Proposal y fichas"
+    // round, Part 4: "Differences by schema" no longer ends right after
+    // the colon -- it now says explicitly, in the same line, that it only
+    // ever covers attributes/children, never parents (a real Mistral run
+    // had claimed <para>'s variants "differ in additional allowed
+    // parents").
+    assert(
+      sys.includes("Differences by schema (attributes and children ONLY — parents are never part of this comparison, see \"allowed inside\" above):"),
+      "the compact block's 'Differences by schema' header now says explicitly it never covers parents"
+    );
     assert(!/\n<para> \(schemas:/.test(sys), "the OLD per-variant repeated block format no longer appears for a multi-variant element");
     // "acronym" is one of the real 17 children common to every <para>
     // variant (hand-verified this round); it must appear exactly once, in
@@ -226,7 +235,7 @@ async function main() {
     // "footnote" is a real per-variant DIFFERENCE for <para> (present in
     // some schema files' content models, absent from others) -- it must
     // show up under "Differences by schema", not in the common list.
-    assert(/Differences by schema:[\s\S]*footnote/.test(sys), '"footnote" (a genuine per-variant difference) appears in the differences section');
+    assert(/Differences by schema \(attributes[\s\S]*footnote/.test(sys), '"footnote" (a genuine per-variant difference) appears in the differences section');
 
     // "Did you mean con marcado a medias y listas de padres cortadas"
     // round, Part 2: <para> in S1000D 4.2 has 43 real parents (confirmed
@@ -235,12 +244,22 @@ async function main() {
     // bare ", +3 more" that a real Mistral run was seen copying verbatim
     // into its answer. Must now come back as the full 43, with NO
     // "(partial list: ...)" marker at all (43 <= 60).
-    const allowedInsideLine = sys.match(/allowed inside: ([^\n]*)/);
+    // The regex stops at the first "(" so it captures only the comma-
+    // separated name list, never the Part 4 clarifying parenthetical
+    // ("(this is the same for every schema variant...)") that now follows
+    // it on the same line.
+    const allowedInsideLine = sys.match(/allowed inside: ([^\n(]*)/);
     assert(!!allowedInsideLine, '"allowed inside:" line present in the real prompt');
-    const parentNames = allowedInsideLine[1].split(", ").filter(Boolean);
+    const parentNames = allowedInsideLine[1].trim().split(", ").filter(Boolean);
     assert(parentNames.length === 43, `<para>'s real "allowed inside" list has exactly 43 parents, none dropped (got ${parentNames.length})`);
     assert(!allowedInsideLine[1].includes("partial list"), '<para>\'s 43 real parents fit under MAX_PARENTS=60 -- no "(partial list: ...)" marker at all');
     assert(!/\+\s*\d+\s*more/.test(sys), 'the real prompt never contains a bare "+N more" fragment anywhere');
+    // Part 4's own new wording, present verbatim right after the parents
+    // list, on the same "allowed inside" line.
+    assert(
+      sys.includes("(this is the same for every schema variant listed above — allowed-inside parents never differ by schema variant)"),
+      '"allowed inside" line explicitly states parents are the same across every variant'
+    );
 
     await page.waitForSelector("text=Schema facts used:", { timeout: 3000 });
     const paraChip = page.getByRole("button", { name: "<para>", exact: true });
