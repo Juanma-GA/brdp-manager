@@ -31,7 +31,7 @@ export function extractXML(rawResponse) {
 // backend/app/api/routes/approvals.py exactly, keep both in sync.
 const QNAME_RE = /\b([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)/g;
 
-function wrapRuleXmlFragment(xmlString) {
+export function wrapRuleXmlFragment(xmlString) {
   // Also declares (with a dummy, well-formedness-only URI) any namespace
   // prefix the fragment actually USES but never declares itself --
   // confirmed empirically necessary for real native Schematron content

@@ -1,5 +1,5 @@
 {
-  "_comment": "Fixed prompt-quality eval cases for scripts/run-prompt-eval.mjs. Each case creates a real BRDP (plus any seedReferences) in a temporary, per-standard project, runs the real Ask/Suggest Definition/Suggest Proposal flow against the REAL configured LLM provider, and checks the response with the automatic checks listed. Checks the harness can't verify automatically are type 'manual' -- always reported as MANUAL REVIEW, never pass/fail. See docs/how CLAUDE.md documents running this against the real provider (grep 'run-prompt-eval' in CLAUDE.md).",
+  "_comment": "Fixed prompt-quality eval cases for scripts/run-prompt-eval.mjs. Each case creates a real BRDP (plus any seedReferences) in a temporary, per-standard project, runs the real Ask/Suggest Definition/Suggest Proposal/Suggest Rule flow against the REAL configured LLM provider, and checks the response with the automatic checks listed. Checks the harness can't verify automatically are type 'manual' -- always reported as MANUAL REVIEW, never pass/fail. See docs/how CLAUDE.md documents running this against the real provider (grep 'run-prompt-eval' in CLAUDE.md).",
   "cases": [
     {
       "id": "ask-off-topic-weather",
@@ -342,6 +342,293 @@
           "flags": "i",
           "tailChars": 300,
           "note": "must not end the answer with a scope reminder/disclaimer"
+        }
+      ]
+    },
+    {
+      "id": "rule-4-2-prohibit-element",
+      "description": "Suggest Rule, S1000D 4.2: prohibiting an element -> one structureObjectRule with allowedObjectFlag=\"0\" on that element, real names only, no context block.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-rule",
+      "seedReferences": [
+        {
+          "identifier": "BRDP-EVAL-RULE-SEED-01",
+          "title": "Acronyms",
+          "definition": "Decide whether acronyms are marked up.",
+          "validation": "Validated",
+          "proposal": "The element <acronym> shall not be used.",
+          "rule": "<structureObjectRule id=\"BRDP-EVAL-RULE-SEED-01\" brSeverityLevel=\"brsl01\">\n  <brDecisionRef brDecisionIdentNumber=\"BRDP-EVAL-RULE-SEED-01\"/>\n  <objectPath allowedObjectFlag=\"0\">//acronym</objectPath>\n  <objectUse>The element &lt;acronym&gt; is not used.</objectUse>\n</structureObjectRule>"
+        }
+      ],
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-01",
+        "title": "Random lists",
+        "definition": "Decide whether random (unordered) lists may be used.",
+        "proposal": "The element <randomList> shall not be used.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false,
+          "note": "a checkable decision must get a rule, never NOT_CHECKABLE"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "<structureObjectRule\\b",
+          "note": "one structureObjectRule"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "allowedObjectFlag=\"0\"",
+          "note": "prohibition flag"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "randomList",
+          "note": "targets <randomList>"
+        },
+        {
+          "type": "not_contains",
+          "target": "xml",
+          "pattern": "<contextRules|<nonContextRule",
+          "note": "no context block, no nonContextRule"
+        }
+      ]
+    },
+    {
+      "id": "rule-4-2-attribute-value-list",
+      "description": "Suggest Rule, S1000D 4.2: an attribute limited to a list of values -> allowedObjectFlag=\"2\" and one objectValue per value, never a predicate.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-rule",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-02",
+        "title": "Emphasis types",
+        "definition": "Decide which emphasis types are allowed.",
+        "proposal": "@emphasisType shall only take the values em01 and em02.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false,
+          "note": "a checkable decision must get a rule, never NOT_CHECKABLE"
+        },
+        {
+          "type": "uses_object_value"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "allowedObjectFlag=\"2\""
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "valueAllowed=\"em01\""
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "valueAllowed=\"em02\""
+        }
+      ]
+    },
+    {
+      "id": "rule-3-0-1-objrule",
+      "description": "Suggest Rule, S1000D 3.0.1: the 3.0.1 format -- objrule/objpath/objuse with objappl, never 4.x elements.",
+      "standard": "S1000D 3.0.1",
+      "type": "suggest-rule",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-03",
+        "title": "Random lists",
+        "definition": "Decide whether random lists may be used.",
+        "proposal": "The element <randlist> shall not be used.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false,
+          "note": "a checkable decision must get a rule, never NOT_CHECKABLE"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "<objrule\\b"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "objappl=\"0\""
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "randlist"
+        },
+        {
+          "type": "not_contains",
+          "target": "xml",
+          "pattern": "structureObjectRule|allowedObjectFlag|brDecisionRef|objectPath",
+          "note": "no S1000D 4.x elements"
+        }
+      ]
+    },
+    {
+      "id": "rule-dita-xpath2-schematron",
+      "description": "Suggest Rule, DITA 1.3 Xpath2.0: one sch:pattern with an assert/report, XPath 2.0 only.",
+      "standard": "DITA 1.3 Xpath2.0",
+      "type": "suggest-rule",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-04",
+        "title": "Note types",
+        "definition": "Decide whether notes must state their type.",
+        "proposal": "Every <note> shall declare the @type attribute.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false,
+          "note": "a checkable decision must get a rule, never NOT_CHECKABLE"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "<sch:pattern\\b"
+        },
+        {
+          "type": "contains_any",
+          "target": "xml",
+          "patterns": [
+            "<sch:assert\\b",
+            "<sch:report\\b"
+          ]
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "@type"
+        },
+        {
+          "type": "not_contains_any",
+          "target": "xml",
+          "patterns": [
+            "=>",
+            "function\\s*\\(",
+            "\\s!\\s"
+          ],
+          "note": "no XPath 3.0-only syntax under queryBinding xslt2"
+        }
+      ]
+    },
+    {
+      "id": "rule-not-checkable",
+      "description": "Suggest Rule: a decision about a workshop process cannot be verified on the XML -> NOT_CHECKABLE with a reason.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-rule",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-05",
+        "title": "Tool calibration",
+        "definition": "Decide how often torque tools are calibrated.",
+        "proposal": "Torque tool calibration shall be performed every 6 months.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "not_checkable"
+        },
+        {
+          "type": "manual",
+          "note": "The reason after NOT_CHECKABLE: is short and says the decision is outside the XML document."
+        }
+      ]
+    },
+    {
+      "id": "rule-4-2-limited-to-proced",
+      "description": "Suggest Rule, S1000D 4.2, schema fixed to proced (as if chosen in the selector): the LLM writes only the inner rule; the app wraps it in the proced contextRules.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-rule",
+      "schemas": [
+        "proced"
+      ],
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-06",
+        "title": "Emphasis in procedures",
+        "definition": "Decide whether emphasis is allowed in procedures.",
+        "proposal": "In procedural data modules, <emphasis> shall not be used.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false,
+          "note": "a checkable decision must get a rule, never NOT_CHECKABLE"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "<structureObjectRule\\b"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "allowedObjectFlag=\"0\""
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "emphasis"
+        },
+        {
+          "type": "not_contains",
+          "target": "xml",
+          "pattern": "<contextRules",
+          "note": "the LLM never writes the context block"
+        },
+        {
+          "type": "contains",
+          "target": "final",
+          "pattern": "<contextRules rulesContext=\"http://www\\.s1000d\\.org/S1000D_4-2/xml_schema_flat/proced\\.xsd\">",
+          "note": "the saved rule is wrapped in the proced block"
+        },
+        {
+          "type": "manual",
+          "note": "<objectUse> reads naturally for procedural data modules (it may name the schema)."
         }
       ]
     }

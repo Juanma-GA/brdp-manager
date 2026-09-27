@@ -46,7 +46,18 @@ import { execFileSync } from "node:child_process";
 import { buildAskSystemPrompt } from "../src/prompts/askPrompt.js";
 import { buildSuggestDefinitionPrompt } from "../src/prompts/suggestDefinitionPrompt.js";
 import { buildSuggestProposalPrompt } from "../src/prompts/suggestProposalPrompt.js";
+import {
+  NOT_CHECKABLE_PREFIX,
+  SUGGEST_RULE_USER_MESSAGE,
+  buildSuggestRulePrompt,
+  parseSuggestRuleResponse,
+} from "../src/prompts/suggestRulePrompt.js";
 import { ASK_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
+import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
+import { checkRuleNames } from "../src/utils/ruleNameCheck.js";
+import { wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
+import { validateXML } from "xmllint-wasm";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
@@ -134,8 +145,60 @@ const MARKDOWN_PATTERNS = [
   /^\s*\d+\.\s+/m, // 1. numbered list
 ];
 
-function runCheck(check, answer) {
+// Suggest Rule checks (Suggest Rule part 2, Part 6). `ctx` carries what a
+// rule check needs beyond the raw answer: the parsed XML (fence and XML
+// declaration stripped, exactly as the app parses it), the final rule the
+// app would save (wrapped in the case's schema context blocks) and the
+// standard's vocabulary. Well-formedness uses xmllint-wasm (already a
+// dependency; no DOMParser in Node) on the same tolerant <root> wrapper the
+// app's own checkWellFormed uses, so a Schematron fragment's undeclared
+// sch: prefix never counts as an error.
+async function xmlWellFormed(xml) {
+  if (!xml || !xml.trim()) return { ok: false, error: "empty answer" };
+  const result = await validateXML({ xml: { fileName: "rule.xml", contents: wrapRuleXmlFragment(xml) }, normalization: "format" });
+  return result.valid ? { ok: true } : { ok: false, error: result.errors.map((e) => e.message).join(" / ").slice(0, 300) };
+}
+
+// A value list in BREX 4.x is one <objectValue> per value -- never a
+// comparison predicate inside <objectPath> (Suggest Rule adjustments round).
+function usesObjectValue(xml) {
+  const hasObjectValue = /<objectValue\b/.test(xml);
+  const paths = [...xml.matchAll(/<objectPath\b[^>]*>([\s\S]*?)<\/objectPath>/g)].map((m) => m[1]);
+  const predicate = paths.find((p) => /\[[^\]]*(?:!=|=\s*['"]|=\s*&quot;|=\s*&apos;)[^\]]*\]/.test(p));
+  if (!hasObjectValue) return { ok: false, detail: "no <objectValue>" };
+  if (predicate) return { ok: false, detail: `value comparison predicate in objectPath: ${predicate.slice(0, 120)}` };
+  return { ok: true, detail: `${(xml.match(/<objectValue\b/g) || []).length} objectValue element(s), no predicate` };
+}
+
+async function runCheck(check, answer, ctx = {}) {
   const flags = check.flags || "";
+  const target = check.target === "final" ? ctx.finalRule ?? "" : check.target === "xml" ? ctx.xml ?? "" : answer;
+  switch (check.type) {
+    case "xml_well_formed": {
+      const r = await xmlWellFormed(ctx.xml);
+      return { status: r.ok ? "pass" : "fail", detail: r.ok ? "well-formed" : r.error };
+    }
+    case "names_in_vocabulary": {
+      const names = checkRuleNames(ctx.xml || "", ctx.vocabulary);
+      if (!names.available) return { status: "manual", detail: `no schema vocabulary for ${ctx.standard}` };
+      const bad = [...names.notFound, ...names.wrongType.map((w) => `${w.usedAs === "element" ? "<" + w.name + ">" : "@" + w.name} (wrong kind)`)];
+      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `not in the schema: ${bad.join(", ")}` : "every name exists" };
+    }
+    case "not_checkable": {
+      const is = answer.trim().replace(/^```\w*\s*/, "").startsWith(NOT_CHECKABLE_PREFIX);
+      const expect = check.expect !== false;
+      return { status: is === expect ? "pass" : "fail", detail: expect ? `answer starts with ${NOT_CHECKABLE_PREFIX}` : `answer is a rule, not ${NOT_CHECKABLE_PREFIX}` };
+    }
+    case "uses_object_value": {
+      const r = usesObjectValue(ctx.xml || "");
+      return { status: r.ok ? "pass" : "fail", detail: r.detail };
+    }
+    default:
+      return runTextCheck(check, target, flags);
+  }
+}
+
+function runTextCheck(check, answer, flags) {
   switch (check.type) {
     case "contains": {
       const re = new RegExp(check.pattern, flags);
@@ -362,7 +425,44 @@ async function runSuggestProposalCase(project, aiProvider, createdBrdp, testCase
   return { systemPrompt, userMessage, answer };
 }
 
+// Suggest Rule (Part 6): same flow as the app -- /similar?kind=rule groups,
+// schema facts for the names in the Proposal and Definition, the case's
+// fixed schema context (`schemas`, empty = a general rule), the real prompt
+// builder, the fixed user message. The final rule is wrapped exactly as the
+// app would save it, for checks with "target": "final".
+async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
+  const similar = await apiFetch(`/api/projects/${project.id}/brdps/${createdBrdp.id}/similar?kind=rule`);
+  const vocabulary = loadSchemaVocabulary(testCase.standard);
+  const names = selectSchemaFactNames([createdBrdp.proposal, createdBrdp.definition], vocabulary, 6).map((c) => c.name);
+  const schemaFacts = await fetchSchemaFacts(testCase.standard, names);
+  const schemas = testCase.schemas || [];
+  const systemPrompt = buildSuggestRulePrompt(
+    createdBrdp,
+    testCase.standard,
+    similar.format,
+    {
+      sameBrdp: similar.same_brdp || [],
+      similar: similar.candidates || [],
+      formatExamples: [...(similar.standard_fallback || []), ...(similar.template_fallback || [])],
+    },
+    schemaFacts,
+    { schemas }
+  );
+  const answer = await sendToLlm(aiProvider, systemPrompt, SUGGEST_RULE_USER_MESSAGE, SUGGEST_TEMPERATURE);
+  const parsed = parseSuggestRuleResponse(answer);
+  const xml = parsed.xml ?? "";
+  const finalRule = xml ? wrapRuleInSchemaContexts(xml, similar.format, testCase.standard, schemas) : "";
+  return {
+    systemPrompt,
+    userMessage: SUGGEST_RULE_USER_MESSAGE,
+    answer,
+    finalRule,
+    checkContext: { xml, finalRule, vocabulary, standard: testCase.standard },
+  };
+}
+
 async function runCaseOnce(project, aiProvider, createdBrdp, testCase) {
+  if (testCase.type === "suggest-rule") return runSuggestRuleCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "ask") return runAskCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-definition") return runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-proposal") return runSuggestProposalCase(project, aiProvider, createdBrdp, testCase);
@@ -403,7 +503,17 @@ async function main() {
     for (const testCase of selectedCases) {
       const project = projectByStandard.get(testCase.standard);
       for (const ref of testCase.seedReferences || []) {
-        await createBrdp(project.id, ref);
+        const createdRef = await createBrdp(project.id, ref);
+        // Part 6: a seed reference can carry a rule (Verified by default)
+        // so Suggest Rule has a real precedent to cite.
+        if (ref.rule) {
+          const format = STANDARD_TO_RULE_FORMAT[testCase.standard];
+          if (!format) throw new Error(`seedReferences rule on ${testCase.id}: ${testCase.standard} has no rule format`);
+          await apiFetch(`/api/projects/${project.id}/brdps/${createdRef.id}/approvals/${format}`, {
+            method: "PUT",
+            body: JSON.stringify({ rule_xml: ref.rule, source: "manual", status: ref.ruleStatus || "approved" }),
+          });
+        }
       }
       const created = await createBrdp(project.id, testCase.brdp);
       brdpByCase.set(testCase.id, created);
@@ -422,9 +532,10 @@ async function main() {
       for (let run = 1; run <= args.runs; run++) {
         process.stdout.write(`  ${testCase.id} (run ${run}/${args.runs})... `);
         try {
-          const { systemPrompt, userMessage, answer } = await runCaseOnce(project, aiProvider, createdBrdp, testCase);
-          const checkResults = testCase.checks.map((check) => ({ check, result: runCheck(check, answer) }));
-          caseResult.runs.push({ run, systemPrompt, userMessage, answer, checkResults });
+          const { systemPrompt, userMessage, answer, finalRule, checkContext } = await runCaseOnce(project, aiProvider, createdBrdp, testCase);
+          const checkResults = [];
+          for (const check of testCase.checks) checkResults.push({ check, result: await runCheck(check, answer, checkContext) });
+          caseResult.runs.push({ run, systemPrompt, userMessage, answer, ...(finalRule !== undefined ? { finalRule } : {}), checkResults });
           const failed = checkResults.filter((c) => c.result.status === "fail").length;
           console.log(failed === 0 ? "ok" : `${failed} check(s) failed`);
         } catch (err) {
@@ -461,7 +572,7 @@ function buildReportHeader(meta, runs) {
     model: meta.aiProvider.model,
     commit: meta.gitInfo.commit,
     uncommittedChanges: meta.gitInfo.dirty,
-    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE },
+    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE },
     runs,
     generatedAt: meta.generatedAt,
   };
@@ -478,7 +589,7 @@ function writeReport(results, runs, meta) {
   lines.push(`- Provider: ${header.provider} / ${header.model}`);
   lines.push(`- Commit: ${header.commit}${header.uncommittedChanges ? " (+ uncommitted changes)" : ""}`);
   lines.push(
-    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}`
+    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}`
   );
   lines.push(`- Runs per case: ${header.runs}`);
   lines.push(`- Generated: ${header.generatedAt}`);
@@ -538,6 +649,9 @@ function writeReport(results, runs, meta) {
                   systemPrompt: r.systemPrompt,
                   userMessage: r.userMessage,
                   answer: r.answer,
+                  // Suggest Rule only: the rule as the app would save it
+                  // (wrapped in the case's schema context blocks).
+                  ...(r.finalRule !== undefined ? { finalRule: r.finalRule } : {}),
                   checks: r.checkResults.map((cr) => ({ type: cr.check.type, ...cr.result })),
                 }
           ),
