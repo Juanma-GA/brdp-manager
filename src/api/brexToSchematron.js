@@ -88,7 +88,7 @@ export function _isSafePattern(ctx) {
   return true;
 }
 
-function _splitTopLevel(path) {
+export function _splitTopLevel(path) {
   const t = _normSpace(path);
   let depth = 0, inStr = false, q = '', lastSep = -1;
   for (let i = 0; i < t.length; i++) { const ch = t[i];
