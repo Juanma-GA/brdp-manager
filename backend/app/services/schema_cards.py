@@ -117,18 +117,25 @@ def _compact_variant(variant: dict) -> dict:
         enum_truncated = False
         enum_omitted = 0
         if enum:
-            # Range collapsing runs on the FULL, untruncated enum from the
-            # generated cards file -- BEFORE the MAX_ENUM_VALUES cutoff
-            # below -- so the range genuinely represents the complete list,
-            # never a truncated slice of it (docs request, point 1: "aplicar
-            # esto antes del límite de truncado").
-            collapsed = _collapse_enum_to_ranges(enum)
-            if collapsed is not None:
-                enum = collapsed
-            elif len(enum) > MAX_ENUM_VALUES:
-                enum_truncated = True
-                enum_omitted = len(enum) - MAX_ENUM_VALUES
-                enum = enum[:MAX_ENUM_VALUES]
+            # "Ajustes al juego de pruebas de prompts" round, Part 4: only
+            # collapse into a range when the enum actually NEEDS it -- a
+            # short, already-readable enum (cat: 1-2, allowedObjectFlag:
+            # 0-2, asp: 1-3) reads better as a plain list than as a range
+            # token, and was never the problem this mechanism was built for
+            # (that was cv01..cv99/01..99, 99 near-identical values getting
+            # cut to "20 + 79 more"). Collapsing still runs on the FULL,
+            # untruncated enum -- BEFORE the MAX_ENUM_VALUES slice below --
+            # so a long range genuinely represents the complete list, never
+            # a truncated slice of it (unchanged from the previous round);
+            # it's just gated on actually being long enough to need it.
+            if len(enum) > MAX_ENUM_VALUES:
+                collapsed = _collapse_enum_to_ranges(enum)
+                if collapsed is not None:
+                    enum = collapsed
+                else:
+                    enum_truncated = True
+                    enum_omitted = len(enum) - MAX_ENUM_VALUES
+                    enum = enum[:MAX_ENUM_VALUES]
         compact_attributes.append(
             {
                 "name": attr["name"],

@@ -41,10 +41,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 import { buildAskSystemPrompt } from "../src/prompts/askPrompt.js";
 import { buildSuggestDefinitionPrompt } from "../src/prompts/suggestDefinitionPrompt.js";
 import { buildSuggestProposalPrompt } from "../src/prompts/suggestProposalPrompt.js";
+import { ASK_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
@@ -60,6 +62,23 @@ const REPORT_DIR = path.join(__dirname, "prompt-eval", "report");
 const API = process.env.PROMPT_EVAL_API_URL || "http://localhost:8000";
 const EMAIL = process.env.PROMPT_EVAL_EMAIL;
 const PASSWORD = process.env.PROMPT_EVAL_PASSWORD;
+
+// "Ajustes al juego de pruebas de prompts" round: the first pass against
+// the real provider becomes the baseline every later run gets compared
+// against, so the report must say exactly what produced it -- which
+// commit (and whether the working tree had uncommitted changes on top of
+// it, since those wouldn't be reproducible from git history alone), never
+// just "trust me, nothing changed since last time".
+function getGitInfo() {
+  try {
+    const hash = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+    const porcelain = execFileSync("git", ["status", "--porcelain"], { cwd: REPO_ROOT, encoding: "utf8" });
+    const dirty = porcelain.trim().length > 0;
+    return { commit: hash, dirty };
+  } catch {
+    return { commit: "unknown", dirty: false };
+  }
+}
 
 function parseArgs(argv) {
   const args = { runs: 1 };
@@ -244,14 +263,14 @@ async function getAiProvider() {
   return apiFetch("/api/config/ai-provider");
 }
 
-async function sendToLlm(aiProvider, systemPrompt, userMessage) {
+async function sendToLlm(aiProvider, systemPrompt, userMessage, temperature) {
   const payload =
     aiProvider.provider === "Anthropic"
-      ? { model: aiProvider.model, max_tokens: 4000, temperature: 1, system: systemPrompt, messages: [{ role: "user", content: userMessage }] }
+      ? { model: aiProvider.model, max_tokens: 4000, temperature, system: systemPrompt, messages: [{ role: "user", content: userMessage }] }
       : {
           model: aiProvider.model,
           max_tokens: 4000,
-          temperature: 1,
+          temperature,
           messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
         };
   const res = await apiFetch("/api/llm-proxy", { method: "POST", body: JSON.stringify({ payload }) });
@@ -308,7 +327,7 @@ async function runAskCase(project, aiProvider, createdBrdp, testCase) {
     vocabCheck,
     schemaFacts
   );
-  const answer = await sendToLlm(aiProvider, systemPrompt, testCase.question);
+  const answer = await sendToLlm(aiProvider, systemPrompt, testCase.question, ASK_TEMPERATURE);
   return { systemPrompt, userMessage: testCase.question, answer };
 }
 
@@ -323,7 +342,7 @@ async function runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCa
     vocabCheck
   );
   const userMessage = "Write the Definition for this BRDP.";
-  const answer = await sendToLlm(aiProvider, systemPrompt, userMessage);
+  const answer = await sendToLlm(aiProvider, systemPrompt, userMessage, SUGGEST_TEMPERATURE);
   return { systemPrompt, userMessage, answer };
 }
 
@@ -339,7 +358,7 @@ async function runSuggestProposalCase(project, aiProvider, createdBrdp, testCase
     vocabCheck
   );
   const userMessage = "Write the Proposal for this BRDP.";
-  const answer = await sendToLlm(aiProvider, systemPrompt, userMessage);
+  const answer = await sendToLlm(aiProvider, systemPrompt, userMessage, SUGGEST_TEMPERATURE);
   return { systemPrompt, userMessage, answer };
 }
 
@@ -362,7 +381,9 @@ async function main() {
   console.log(`Prompt eval: ${selectedCases.length} case(s), ${args.runs} run(s) each, against ${API}`);
   await login();
   const aiProvider = await getAiProvider();
+  const gitInfo = getGitInfo();
   console.log(`Provider: ${aiProvider.provider} / ${aiProvider.model}`);
+  console.log(`Commit: ${gitInfo.commit}${gitInfo.dirty ? " (+ uncommitted changes)" : ""}`);
 
   const standards = [...new Set(selectedCases.map((c) => c.standard))];
   const projectByStandard = new Map();
@@ -425,16 +446,42 @@ async function main() {
     }
   }
 
-  writeReport(results, args.runs);
+  writeReport(results, args.runs, { aiProvider, gitInfo, generatedAt: new Date().toISOString() });
 }
 
-function writeReport(results, runs) {
+// Header shared by report.md and responses.json (Part 2 of this round):
+// this eval's FIRST real run against Mistral becomes the baseline every
+// later run is compared against, so both files must say exactly what
+// produced them -- provider/model, the commit (+ dirty flag), the real
+// temperature used per case type (imported from src/prompts/shared.js,
+// never a copied number -- see Part 1), the run count, and when it ran.
+function buildReportHeader(meta, runs) {
+  return {
+    provider: meta.aiProvider.provider,
+    model: meta.aiProvider.model,
+    commit: meta.gitInfo.commit,
+    uncommittedChanges: meta.gitInfo.dirty,
+    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE },
+    runs,
+    generatedAt: meta.generatedAt,
+  };
+}
+
+function writeReport(results, runs, meta) {
   fs.mkdirSync(REPORT_DIR, { recursive: true });
+
+  const header = buildReportHeader(meta, runs);
 
   const lines = [];
   lines.push(`# Prompt eval report`);
   lines.push("");
-  lines.push(`Generated ${new Date().toISOString()}, ${runs} run(s) per case.`);
+  lines.push(`- Provider: ${header.provider} / ${header.model}`);
+  lines.push(`- Commit: ${header.commit}${header.uncommittedChanges ? " (+ uncommitted changes)" : ""}`);
+  lines.push(
+    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}`
+  );
+  lines.push(`- Runs per case: ${header.runs}`);
+  lines.push(`- Generated: ${header.generatedAt}`);
   lines.push("");
   lines.push("| Case | Check | Result | Detail |");
   lines.push("|---|---|---|---|");
@@ -478,21 +525,24 @@ function writeReport(results, runs) {
   fs.writeFileSync(
     responsesPath,
     JSON.stringify(
-      results.map((c) => ({
-        id: c.id,
-        description: c.description,
-        runs: c.runs.map((r) =>
-          r.error
-            ? { run: r.run, error: r.error }
-            : {
-                run: r.run,
-                systemPrompt: r.systemPrompt,
-                userMessage: r.userMessage,
-                answer: r.answer,
-                checks: r.checkResults.map((cr) => ({ type: cr.check.type, ...cr.result })),
-              }
-        ),
-      })),
+      {
+        header,
+        cases: results.map((c) => ({
+          id: c.id,
+          description: c.description,
+          runs: c.runs.map((r) =>
+            r.error
+              ? { run: r.run, error: r.error }
+              : {
+                  run: r.run,
+                  systemPrompt: r.systemPrompt,
+                  userMessage: r.userMessage,
+                  answer: r.answer,
+                  checks: r.checkResults.map((cr) => ({ type: cr.check.type, ...cr.result })),
+                }
+          ),
+        })),
+      },
       null,
       2
     )

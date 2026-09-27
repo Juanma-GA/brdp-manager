@@ -7,6 +7,7 @@ import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { buildSuggestDefinitionPrompt } from '../prompts/suggestDefinitionPrompt.js';
 import { buildSuggestProposalPrompt } from '../prompts/suggestProposalPrompt.js';
+import { SUGGEST_TEMPERATURE } from '../prompts/shared.js';
 
 export function useSuggestions({ projectId, standard, selected, aiProvider, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, t }) {
   // Suggest Definition catalog guard (docs request, Suggest Definition
@@ -159,7 +160,7 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
           aiProvider.model,
           aiProvider.provider,
           systemPrompt,
-          { temperature: 0.3 }
+          { temperature: SUGGEST_TEMPERATURE }
         );
         commit({
           brdpId,
@@ -199,7 +200,7 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, hand
           aiProvider.model,
           aiProvider.provider,
           systemPrompt,
-          { temperature: 0.3 }
+          { temperature: SUGGEST_TEMPERATURE }
         );
         commit({
           brdpId,

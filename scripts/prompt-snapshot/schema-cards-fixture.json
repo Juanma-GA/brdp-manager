@@ -1,0 +1,1272 @@
+{
+  "S1000D 4.2": {
+    "para": {
+      "parents": [
+        "brAction",
+        "brCategoryDescription",
+        "brDecisionExplanation",
+        "brDecisionPointExplanation",
+        "brDecisionPointValue",
+        "brDecisionText",
+        "brDecisionValue",
+        "brDoc",
+        "brLevelledPara",
+        "challenge",
+        "checkListPara",
+        "checkListStep",
+        "commonInfo",
+        "commonInfoDescrPara",
+        "crewDrill",
+        "crewDrillStep",
+        "crewProcedureName",
+        "crewRefCard",
+        "description",
+        "endMatter",
+        "entry",
+        "equipmentNotAvailable",
+        "footnote",
+        "icnSupportingFilesDescr",
+        "levelledPara",
+        "listItem",
+        "listItemDefinition",
+        "proceduralStep",
+        "response",
+        "sbAccomplishmentInstructions",
+        "sbAdditionalInfo",
+        "sbIndustrySupport",
+        "sbMaterialInfo",
+        "sbMaterialSetList",
+        "sbPlanningInfo",
+        "sbRemovedSparesList",
+        "sbRevisionInfo",
+        "sbSparesList",
+        "sbSummary",
+        "sbSuppliesList"
+      ],
+      "parents_omitted": 3,
+      "parents_truncated": true,
+      "variants": [
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "accessPointRef",
+            "acronym",
+            "acronymTerm",
+            "caption",
+            "captionGroup",
+            "changeInline",
+            "circuitBreakerRef",
+            "controlIndicatorRef",
+            "definitionList",
+            "dmRef",
+            "emphasis",
+            "externalPubRef",
+            "footnote",
+            "footnoteRef",
+            "functionalItemRef",
+            "identNumber",
+            "indexFlag",
+            "inlineSignificantData",
+            "internalRef",
+            "pmRef",
+            "quantity",
+            "randomList",
+            "sequentialList",
+            "subScript",
+            "superScript",
+            "symbol",
+            "verbatimText",
+            "zoneRef"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "appliccrossreftable",
+            "brdoc",
+            "comment",
+            "container",
+            "ddn",
+            "descript",
+            "dml",
+            "icnmetadata",
+            "learning",
+            "pm",
+            "sb",
+            "scocontent",
+            "scormcontentpackage"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "acronym",
+            "acronymTerm",
+            "changeInline",
+            "circuitBreakerRef",
+            "definitionList",
+            "dmRef",
+            "emphasis",
+            "externalPubRef",
+            "footnote",
+            "footnoteRef",
+            "functionalItemRef",
+            "indexFlag",
+            "inlineSignificantData",
+            "internalRef",
+            "pmRef",
+            "quantity",
+            "randomList",
+            "sequentialList",
+            "subScript",
+            "superScript",
+            "symbol",
+            "verbatimText"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "brex",
+            "condcrossreftable",
+            "prdcrossreftable",
+            "wrngdata",
+            "wrngflds"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "acronym",
+            "acronymTerm",
+            "changeInline",
+            "circuitBreakerRef",
+            "controlIndicatorRef",
+            "definitionList",
+            "dmRef",
+            "emphasis",
+            "externalPubRef",
+            "functionalItemRef",
+            "inlineSignificantData",
+            "internalRef",
+            "pmRef",
+            "quantity",
+            "randomList",
+            "sequentialList",
+            "subScript",
+            "superScript",
+            "symbol",
+            "verbatimText"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "comrep",
+            "frontmatter",
+            "ipd",
+            "schedul",
+            "update"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "acronym",
+            "acronymTerm",
+            "captionGroup",
+            "changeInline",
+            "circuitBreakerRef",
+            "controlIndicatorRef",
+            "definitionList",
+            "dmRef",
+            "emphasis",
+            "externalPubRef",
+            "footnote",
+            "footnoteRef",
+            "functionalItemRef",
+            "indexFlag",
+            "inlineSignificantData",
+            "internalRef",
+            "quantity",
+            "randomList",
+            "sequentialList",
+            "subScript",
+            "superScript",
+            "symbol"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "checklist"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "acronym",
+            "acronymTerm",
+            "caption",
+            "captionGroup",
+            "changeInline",
+            "circuitBreakerRef",
+            "controlIndicatorRef",
+            "definitionList",
+            "dmRef",
+            "emphasis",
+            "externalPubRef",
+            "footnote",
+            "footnoteRef",
+            "functionalItemRef",
+            "indexFlag",
+            "inlineSignificantData",
+            "internalRef",
+            "quantity",
+            "randomList",
+            "sequentialList",
+            "subScript",
+            "superScript",
+            "symbol"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "crew"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "acronym",
+            "acronymTerm",
+            "captionGroup",
+            "changeInline",
+            "circuitBreakerRef",
+            "controlIndicatorRef",
+            "definitionList",
+            "dmRef",
+            "emphasis",
+            "externalPubRef",
+            "functionalItemRef",
+            "indexFlag",
+            "inlineSignificantData",
+            "internalRef",
+            "pmRef",
+            "quantity",
+            "randomList",
+            "sequentialList",
+            "subScript",
+            "superScript",
+            "symbol",
+            "verbatimText"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "fault"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "acronym",
+            "acronymTerm",
+            "changeInline",
+            "circuitBreakerRef",
+            "controlIndicatorRef",
+            "definitionList",
+            "dmRef",
+            "emphasis",
+            "externalPubRef",
+            "footnote",
+            "footnoteRef",
+            "functionalItemRef",
+            "inlineSignificantData",
+            "internalRef",
+            "pmRef",
+            "quantity",
+            "randomList",
+            "sequentialList",
+            "subScript",
+            "superScript",
+            "symbol",
+            "verbatimText"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "proced"
+          ]
+        },
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "acronym",
+            "acronymTerm",
+            "changeInline",
+            "circuitBreakerRef",
+            "controlIndicatorRef",
+            "definitionList",
+            "dmRef",
+            "emphasis",
+            "externalPubRef",
+            "footnote",
+            "footnoteRef",
+            "functionalItemRef",
+            "globalPropertyRef",
+            "inlineSignificantData",
+            "internalRef",
+            "pmRef",
+            "quantity",
+            "randomList",
+            "sequentialList",
+            "subScript",
+            "superScript",
+            "symbol",
+            "variableRef",
+            "verbatimText"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "process"
+          ]
+        }
+      ]
+    },
+    "table": {
+      "parents": [
+        "brAction",
+        "brDecisionExplanation",
+        "brDecisionPointExplanation",
+        "brDoc",
+        "brLevelledPara",
+        "challenge",
+        "commonInfoDescrPara",
+        "crewDrill",
+        "crewDrillStep",
+        "crewProcedureName",
+        "crewRefCard",
+        "descrCrew",
+        "description",
+        "dmNode",
+        "endMatter",
+        "extraResources",
+        "foldout",
+        "isolationMainProcedure",
+        "isolationProcedureEnd",
+        "isolationStep",
+        "levelledPara",
+        "mainProcedure",
+        "proceduralStep",
+        "response",
+        "sbTopicContent",
+        "subCrewDrill"
+      ],
+      "parents_omitted": 0,
+      "parents_truncated": false,
+      "variants": [
+        {
+          "attributes": [
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "applicRefId",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityDocument",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "authorityName",
+              "required": false
+            },
+            {
+              "enum": [
+                "cv01\u2013cv99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "caveat",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeMark",
+              "required": false
+            },
+            {
+              "enum": [
+                "add",
+                "delete",
+                "modify"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "changeType",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "colsep",
+              "required": false
+            },
+            {
+              "enum": [
+                "cc01\u2013cc99"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "commercialClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "derivativeClassificationRefId",
+              "required": false
+            },
+            {
+              "enum": [
+                "top",
+                "bottom",
+                "topbot",
+                "all",
+                "sides",
+                "none"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "frame",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "id",
+              "required": false
+            },
+            {
+              "enum": [
+                "port",
+                "land"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "orient",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "pgwide",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "reasonForUpdateRefIds",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "rowsep",
+              "required": false
+            },
+            {
+              "enum": [
+                "01\u201399"
+              ],
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "securityClassification",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "tabstyle",
+              "required": false
+            },
+            {
+              "enum": null,
+              "enum_omitted": 0,
+              "enum_truncated": false,
+              "name": "tocentry",
+              "required": false
+            }
+          ],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "graphic",
+            "tgroup",
+            "title"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "brdoc",
+            "brex",
+            "checklist",
+            "comrep",
+            "crew",
+            "descript",
+            "fault",
+            "learning",
+            "proced",
+            "process",
+            "sb",
+            "schedul",
+            "scocontent"
+          ]
+        }
+      ]
+    }
+  }
+}

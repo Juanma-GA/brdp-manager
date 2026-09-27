@@ -273,6 +273,71 @@
       "checks": [
         { "type": "manual", "note": "Confirm the new Proposal actually addresses the refusal reason (allows nested sub-steps) and doesn't just repeat the rejected text verbatim." }
       ]
+    },
+    {
+      "id": "ask-spanish-question-english-brdp",
+      "description": "'Ajustes al juego de pruebas' round: a question asked in Spanish must be answered in Spanish even though the BRDP itself is written in English -- Ask's own language priority (question's language, or the BRDP's Title as fallback) must favor the question that was actually typed.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-08",
+        "title": "Hydraulic reservoir fluid level check interval",
+        "definition": "Decide the maximum interval, in flight hours, between hydraulic reservoir fluid level checks.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿Para qué sirve este punto de decisión?",
+      "checks": [
+        { "type": "language", "expect": "es" }
+      ]
+    },
+    {
+      "id": "ask-para-attributes-3-0-1",
+      "description": "'Ajustes al juego de pruebas' round: a schema-facts question on an S1000D 3.0.1 project must fetch the 3.0.1 schema card, not 4.2's -- confirmed against backend/schema_cards/schema-cards-3-0-1.json, <para>'s real attributes there are authdoc/authname/caveat/change/class/commcls/id/level/mark/refapplic/rfc (no securityClassification/authorityDocument, which are 4.x-only names).",
+      "standard": "S1000D 3.0.1",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-09",
+        "title": "Paragraph classification in fault isolation procedures",
+        "definition": "Decide how paragraphs shall be classified within fault isolation procedures.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What attributes does the <para> element admit?",
+      "checks": [
+        { "type": "contains", "pattern": "@caveat", "flags": "i", "note": "must mention the real 3.0.1 @caveat attribute" },
+        { "type": "contains_any", "patterns": ["@class\\b", "@authdoc\\b"], "flags": "i", "note": "must mention at least one of the other real 3.0.1 attributes (class or authdoc)" },
+        {
+          "type": "not_contains_any",
+          "patterns": ["securityClassification", "authorityDocument"],
+          "flags": "i",
+          "note": "must never mention 4.x-only attribute names -- their presence would mean the wrong standard's schema card was fetched"
+        }
+      ]
+    },
+    {
+      "id": "ask-step-children-dita",
+      "description": "'Ajustes al juego de pruebas' round: a schema-facts question on a DITA 1.3 Xpath2.0 project must fetch DITA's schema card -- confirmed against backend/schema_cards/schema-cards-dita.json, <step>'s real children include cmd.",
+      "standard": "DITA 1.3 Xpath2.0",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-10",
+        "title": "Command element usage within procedural steps",
+        "definition": "Decide how command instructions shall be authored within procedural steps.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What children can the <step> element contain?",
+      "checks": [
+        { "type": "contains", "pattern": "\\bcmd\\b", "flags": "i", "note": "must mention the real cmd child element" },
+        {
+          "type": "not_ends_with_any",
+          "patterns": ["\\bonly (answer|discuss|address)\\b", "\\bas a reminder\\b", "\\bI (can only|am only able to)\\b", "\\bplease note\\b.{0,60}\\bthis BRDP\\b", "\\bscope of this\\b"],
+          "flags": "i",
+          "tailChars": 300,
+          "note": "must not end the answer with a scope reminder/disclaimer"
+        }
+      ]
     }
   ]
 }

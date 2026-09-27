@@ -8,6 +8,7 @@ import { sendMessage } from '../api/llmAPI';
 import { ruleStateOf } from '../utils/ruleState';
 import { selectSchemaFactNames } from '../utils/vocabularyCheck.js';
 import { buildAskSystemPrompt } from '../prompts/askPrompt.js';
+import { ASK_TEMPERATURE } from '../prompts/shared.js';
 
 export function useAskAssistant({ projectId, standard, ruleFormat, selected, ruleApproval, aiProvider, vocabulary, recomputeVocabResult }) {
   // `question` is only ever the live DRAFT in the textarea -- it auto-
@@ -138,7 +139,9 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
       }
       messages.push({ role: 'user', content: askedQuestion });
 
-      const res = await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt);
+      const res = await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
+        temperature: ASK_TEMPERATURE,
+      });
       setAnswer(res.content);
       setPrevTurn({ question: askedQuestion, answer: res.content });
       // Auto-clear on success only (docs request) -- an errored question

@@ -297,3 +297,44 @@ async def test_para_caveat_and_security_classification_render_as_ranges(client):
     assert attrs["securityClassification"]["enum_truncated"] is False
     assert attrs["changeType"]["enum"] == ["add", "delete", "modify"]
     assert attrs["changeType"]["enum_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_short_consecutive_enum_stays_a_plain_list_not_a_range(client):
+    """"Ajustes al juego de pruebas de prompts" round, Part 4: a short
+    consecutive-numeric enum reads better as a plain list than as a range
+    token -- the collapsing mechanism above exists for cv01..cv99-shaped
+    enums (99 near-identical values), not for objectPath's real
+    allowedObjectFlag (0/1/2, confirmed against schema-cards-4-2.json),
+    which is exactly the kind of short enum the previous round's blanket
+    collapse wrongly turned into "0–2". len(enum) <= MAX_ENUM_VALUES must
+    leave it exactly as the generator produced it, uncollapsed."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 4.2", "names": "objectPath"}, headers=_headers(user)
+    )
+    assert res.status_code == 200
+    variant = res.json()["cards"]["objectPath"]["variants"][0]
+    attrs = {a["name"]: a for a in variant["attributes"]}
+    assert attrs["allowedObjectFlag"]["enum"] == ["0", "1", "2"]
+    assert attrs["allowedObjectFlag"]["enum_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_long_consecutive_enum_still_collapses_to_a_range(client):
+    """"Ajustes al juego de pruebas de prompts" round, Part 4, other half of
+    the same gate: an enum long enough to actually need it (more than
+    MAX_ENUM_VALUES=20 values) must still collapse -- the gating in Part 4
+    only turns the mechanism OFF for short enums, it must never turn it off
+    altogether. Reuses <para>'s real @caveat (S1000D 3.0.1 this time, not
+    4.2 -- confirmed against schema-cards-3-0-1.json: 99 values, cv01..cv99,
+    same shape as 4.2's) as real data genuinely over the threshold."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 3.0.1", "names": "para"}, headers=_headers(user)
+    )
+    assert res.status_code == 200
+    variant = res.json()["cards"]["para"]["variants"][0]
+    attrs = {a["name"]: a for a in variant["attributes"]}
+    assert attrs["caveat"]["enum"] == ["cv01–cv99"]
+    assert attrs["caveat"]["enum_truncated"] is False

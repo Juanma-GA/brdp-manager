@@ -11,6 +11,18 @@ import { formatWrongTypeMessage, summarizeSchemaFactEntry } from '../utils/vocab
 // centralized -- established convention in this codebase, see CLAUDE.md).
 export const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified' };
 
+// "Ajustes al juego de pruebas de prompts" round: the single source of
+// truth for the temperature each assistant flow calls the provider with --
+// useAskAssistant.js/useSuggestions.js pass these explicitly instead of
+// leaving Ask on sendMessage()'s implicit default or hardcoding Suggest's
+// 0.3 inline, and scripts/run-prompt-eval.mjs imports the SAME constants
+// so it measures the app's real behavior, never a copied number that could
+// drift from it. Ask stays conversational (default sampling); Suggest
+// writes directly into a BRDP field, where a drifting/inventive text is
+// worse than a slightly-repetitive one.
+export const ASK_TEMPERATURE = 1;
+export const SUGGEST_TEMPERATURE = 0.3;
+
 // A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
 // examples with inline function expressions run well past this) -- rather
 // than risk silently blowing max_tokens/context on a huge prompt (HR7:
