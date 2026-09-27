@@ -267,7 +267,9 @@ function buildValueMatcher(valueEl, spec, evaluate) {
   return (node) => evaluate(`boolean(${check.expr})`, node, null, 'boolean');
 }
 
-function runPart(part, spec, doc, evaluate) {
+// The checks that need no fragment: a path to run, no other file, a valid
+// flag. Shared by runPart and analyzeRule. Throws NotExecutable.
+function partBasics(part, spec) {
   const pathEl = childElements(part.element, spec.path)[0];
   const expression = pathEl ? String(pathEl.textContent || '').trim() : '';
   if (!expression) throw new NotExecutable(REASON.emptyPath(spec.path));
@@ -276,7 +278,11 @@ function runPart(part, spec, doc, evaluate) {
   const rawFlag = pathEl.getAttribute(spec.flagAttr);
   const flag = rawFlag === null || rawFlag === '' ? spec.defaultFlag : rawFlag.trim();
   if (flag !== null && !spec.flags.includes(flag)) throw new NotExecutable(REASON.badFlag(spec.flagAttr, flag, spec.flags));
+  return { expression, flag };
+}
 
+function runPart(part, spec, doc, evaluate) {
+  const { expression, flag } = partBasics(part, spec);
   const matchers = childElements(part.element, spec.value).map((v) => buildValueMatcher(v, spec, evaluate));
   const hasValues = matchers.length > 0;
   const root = doc.documentElement;
@@ -438,5 +444,62 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
     notExecutableReason: reason,
     notExecutableParts: notRun,
     outOfScopeSchemas: [...new Set(outOfScope)],
+  };
+}
+
+// T2b: what can be known about a rule without any fragment -- before the
+// examples are even written, so the panel can show from the start why a
+// rule cannot be tested. Every per-part check that does not depend on the
+// fragment: format, well-formed rule, a rule element, nonContextRule, an
+// empty path, another file (document()…), the flag, the value checks, and
+// the path itself, evaluated once on an empty document of its own root
+// (an XPath error, or an expression that returns a boolean/number instead
+// of nodes). Not reported: mandatory-node rules (the examples are whole
+// documents now) and schema scoping (the examples carry their schema).
+//
+//   analyzeRule(ruleXml, format, options) →
+//     { status: 'executable' | 'partial' | 'not_executable',
+//       reason: string | null,             // as notExecutableReason
+//       parts: [{ ruleId, reason }],       // the parts that cannot run
+//       total }                            // number of parts
+export function analyzeRule(ruleXml, format, options = {}) {
+  const none = (reason) => ({ status: 'not_executable', reason, parts: [], total: 0 });
+  const spec = FORMATS[format];
+  if (!spec) return none(REASON.format(format));
+  const parseXml = options.parseXml || parseXmlDocument;
+  let ruleDoc;
+  try {
+    ruleDoc = parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+  } catch (err) {
+    return none(REASON.ruleXml(err.message));
+  }
+  const parts = collectParts(ruleDoc.documentElement, spec);
+  if (!parts.length) return none(REASON.noRule(spec.rule));
+
+  const notRun = [];
+  for (const part of parts) {
+    try {
+      if (part.kind === 'nonContext') throw new NotExecutable(REASON.nonContext);
+      const { expression } = partBasics(part, spec);
+      const root = absoluteRootNames(expression)[0] || 'dmodule';
+      const doc = parseXml(`<${root}/>`);
+      const evaluate = makeEvaluator(doc);
+      for (const v of childElements(part.element, spec.value)) buildValueMatcher(v, spec, evaluate);
+      evaluate(expression, doc, null, 'nodes');
+    } catch (err) {
+      if (!(err instanceof NotExecutable)) throw err;
+      notRun.push({ ruleId: part.ruleId, reason: err.message });
+    }
+  }
+  const reason = notRun.length === 0
+    ? null
+    : parts.length === 1
+      ? notRun[0].reason
+      : notRun.map((p) => `${p.ruleId}: ${p.reason}`).join(' ');
+  return {
+    status: notRun.length === 0 ? 'executable' : notRun.length === parts.length ? 'not_executable' : 'partial',
+    reason,
+    parts: notRun,
+    total: parts.length,
   };
 }

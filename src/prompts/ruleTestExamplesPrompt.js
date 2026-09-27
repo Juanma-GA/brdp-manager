@@ -1,74 +1,59 @@
-// Test rule (T2 of 4): the system prompt that asks the LLM for short
-// aeronautical example fragments -- one that complies with the rule and one
-// that breaks it (plus one of another schema for a context-scoped rule).
+// Test rule (T2 of 4, T2b): the system prompt that asks the LLM for short
+// aeronautical examples -- one that complies with the rule and one that
+// breaks it (plus one of another schema for a context-scoped rule).
 // Pure function, same architecture as the other prompts: the application,
-// not the LLM, then runs the rule on each example (utils/ruleTestEngine.js)
+// not the LLM, builds each example on a real skeleton of its schema
+// (utils/ruleTestSkeleton.js; T2b: the LLM only writes the content of the
+// insertion point), checks it, runs the rule on it (utils/ruleTestEngine.js)
 // and gives the verdict.
 import { buildSchemaFactsBlock } from './shared.js';
-import { extractRuleXPaths } from '../utils/ruleNameCheck.js';
 
 export const RULE_TEST_USER_MESSAGE = 'Write the test examples for this rule.';
 
-// Mandatory-node rules can only be judged on a whole document (engine), so
-// the examples must be whole documents too.
-function hasMandatoryFlag(ruleXml) {
-  return /\b(allowedObjectFlag|objappl)\s*=\s*["']1["']/.test(ruleXml || '');
-}
+// Elements that only reference or group other content: an LLM put text in
+// a <dmRef> in the first real run, and the structural check cannot see text,
+// so the rule is stated in the prompt.
+const NO_TEXT_ELEMENTS = '<dmRef>, <dmRefIdent>, <dmCode>, <internalRef>, <pmRef>, <externalPubRef>';
 
-// The root names of the rule's absolute paths ("/dmodule/content/…" →
-// "dmodule"), for the "start the fragment at that element" instruction.
-function absoluteRoots(ruleXml) {
-  const roots = new Set();
-  for (const expression of extractRuleXPaths(ruleXml || '')) {
-    for (const m of expression.matchAll(/(?:^|[\s([|,=])\/(?!\/)\s*([A-Za-z_][\w.-]*)/g)) roots.add(m[1]);
-  }
-  return [...roots];
-}
-
-function schemaInstructions(contextSchemas, otherSchema) {
+function schemaInstructions(contextSchemas, placements) {
+  const rulePlacement = placements.find((p) => p.role === 'rule');
+  const other = placements.find((p) => p.role === 'other');
   if (!contextSchemas || contextSchemas.length === 0) {
-    return `The rule is general (it applies to every schema): set "schema" to null in
-every example.`;
+    return `The rule is general: every example uses the "${rulePlacement.schema}" schema
+("schema": "${rulePlacement.schema}").`;
   }
   const list = contextSchemas.join(', ');
-  const first = contextSchemas[0];
   let text = `The rule applies ONLY to documents of the ${list} schema${contextSchemas.length > 1 ? 's' : ''}. Every
-example that tests the rule is a fragment of that schema: set "schema" to
-"${first}"${contextSchemas.length > 1 ? ` (or another of: ${list})` : ''}.`;
-  if (otherSchema) {
+example that tests the rule uses "schema": "${rulePlacement.schema}".`;
+  if (other) {
     text += `
-Add a third example from the ${otherSchema} schema ("schema": "${otherSchema}",
-"expected": "accept") that contains what the rule checks, to show that the
-rule does not apply there.`;
+Add a third example of the ${other.schema} schema ("schema": "${other.schema}",
+"expected": "accept") whose content has what the rule checks, to show that
+the rule does not apply there.`;
   }
   return text;
 }
 
-// `input`: { brdp, standard, format, ruleXml, contextSchemas, otherSchema,
-// schemaFacts } -- contextSchemas are the schemas of the rule's context
-// blocks ([] for a general rule), otherSchema the schema the third example
-// uses (null when there is none), schemaFacts the cards of the rule's
-// element names (as for Ask / Suggest Rule).
-export function buildRuleTestExamplesPrompt({ brdp, standard, format, ruleXml, contextSchemas = [], otherSchema = null, schemaFacts = [] }) {
-  const roots = absoluteRoots(ruleXml);
-  const ancestorLine =
-    roots.length > 0
-      ? `The rule's path is absolute: each example starts with the element the path
-  starts with (<${roots.join('>, <')}>) and keeps every element on the way down.`
-      : 'Include every ancestor element the rule\'s path needs to reach the checked node.';
-  const mandatoryLine = hasMandatoryFlag(ruleXml)
-    ? `
-- The rule makes a node mandatory: each example is a complete document
-  starting at its root element (for example <dmodule>).`
-    : '';
+function placementLine(p) {
+  const allowed = p.allowedChildren.length > 0 ? p.allowedChildren.join(', ') : 'text only';
+  return `- schema "${p.schema}": your content goes directly inside <${p.insertion}>, at
+  ${p.path.join('/')}.
+  Allowed directly inside <${p.insertion}> in this schema: ${allowed}.`;
+}
 
+// `input`: { brdp, standard, format, ruleXml, contextSchemas, placements,
+// schemaFacts } -- contextSchemas are the schemas of the rule's context
+// blocks ([] for a general rule); placements (T2b) say where each offered
+// schema takes the LLM's content: [{ schema, role: 'rule' | 'other', path,
+// insertion, allowedChildren }]; schemaFacts the cards of the rule's element
+// names (as for Ask / Suggest Rule).
+export function buildRuleTestExamplesPrompt({ brdp, standard, format, ruleXml, contextSchemas = [], placements = [], schemaFacts = [] }) {
   const hasFacts = schemaFacts && schemaFacts.length > 0;
   const namesLine = hasFacts
     ? `use only element and attribute names that appear in
-  the rule or in the SCHEMA FACTS below, with correct parents and children.`
+  the rule, in the lists above or in the SCHEMA FACTS below`
     : `use only real ${standard} element and attribute names —
-  the rule's own names and the elements that really contain them — with
-  correct parents and children. Never invent a name.`;
+  the rule's own names and the lists above; never invent a name`;
 
   let prompt = `You write test examples for one ${standard} business rule, in BRDP Manager's
 "Test rule". The application runs the rule itself on each example and
@@ -78,36 +63,68 @@ rule: you only write the examples.
 The rule (${format}):
 ${ruleXml}
 
-The decision it implements (BRDP ${brdp.identifier}):
+The decision the rule is meant to implement (BRDP ${brdp.identifier}):
 Title: ${brdp.title}
 Definition: ${brdp.definition}
 Proposal: ${brdp.proposal}
 
 WHAT TO WRITE:
 - "explanation": one or two sentences, in the same language as the Proposal,
-  saying what the rule checks, for a technical publications author.
-- "examples": at least two examples: one that complies with the decision
+  saying what the RULE checks, read from its XML (its path, its flag, its
+  values) — not what the Proposal says. For a technical publications author.
+- "proposalMismatch": null when the rule implements the Proposal's decision.
+  When it does not seem to, one short sentence in the same language as the
+  Proposal saying why — for example: "This rule does not seem to implement
+  the Proposal (the Proposal is about CAGE codes; the rule checks
+  <emphasis>)." It is only an indication, so keep it short.
+- "examples": at least two examples: one that complies with the rule
   ("expected": "accept") and one that breaks it ("expected": "reject").
-${schemaInstructions(contextSchemas, otherSchema)}
+${schemaInstructions(contextSchemas, placements)}
+
+HOW EACH EXAMPLE IS BUILT: the application builds a real ${standard} document
+of the example's schema and puts your "content" at one fixed point. Write
+ONLY that content — never the element it goes into, never the elements
+around it, never the document root.
+${placements.map(placementLine).join('\n')}
 
 EACH EXAMPLE:
-- A short fragment of an aircraft maintenance manual: maintenance steps,
-  warnings and cautions, removal of components, torque values and the like.
-  In English, at most 10 lines.
-- Real ${standard} markup: ${namesLine}
-- ${ancestorLine}${mandatoryLine}
-- The reject example breaks the decision in one clear way; the accept example
+- A short piece of an aircraft maintenance manual: maintenance steps,
+  removal of components, torque values and the like. In English, at most 10
+  lines of content.
+- Real ${standard} markup: ${namesLine}. Every
+  element only inside a parent that allows it, every attribute only on an
+  element that has it.
+- Never put text directly inside an element that only references or groups
+  other content (${NO_TEXT_ELEMENTS}): give it its child
+  elements and attributes instead.
+- The reject example breaks the rule in one clear way; the accept example
   is otherwise similar, so the difference is easy to see.
 - No customer data, no real manufacturer names, part numbers or CAGE codes.
 - "label": a few words saying what the example shows.`;
 
   prompt += buildSchemaFactsBlock(standard, schemaFacts);
 
+  const firstSchema = placements[0]?.schema || 'descript';
   prompt += `
 
 OUTPUT: strict JSON only — no markdown, no comments, nothing before or after:
-{"explanation": "…", "examples": [{"label": "…", "expected": "accept", "schema": null, "xml": "…"}]}`;
+{"explanation": "…", "proposalMismatch": null, "examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", "content": "…"}]}`;
   return prompt;
+}
+
+// T2b, the one automatic correction round: the exact problems of each
+// failing example, sent as the next user message after the LLM's first
+// answer. `failures`: [{ index (0-based), label, problems: [English] }].
+export function buildRuleTestCorrectionMessage(failures) {
+  const blocks = failures.map(
+    (f) => `Example ${f.index + 1} ("${f.label}"):\n${f.problems.map((p) => `- ${p}`).join('\n')}`
+  );
+  return `Some examples are not valid. Fix exactly these problems and
+return the complete JSON again: the same explanation, the same examples in
+the same order with the same "expected" and "schema" — change only the
+"content" of the examples listed.
+
+${blocks.join('\n\n')}`;
 }
 
 // Everything "Copy test prompt" puts on the clipboard.
@@ -115,7 +132,7 @@ export function buildCopyableTestPrompt(systemPrompt) {
   return `${systemPrompt}\n\n${RULE_TEST_USER_MESSAGE}`;
 }
 
-// { ok: true, explanation, examples } | { ok: false, error } -- tolerant of a
+// { ok: true, explanation, proposalMismatch, examples } | { ok: false, error } -- tolerant of a
 // markdown fence and of text around the JSON object, strict about its shape.
 export function parseRuleTestResponse(raw) {
   let text = (raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
@@ -132,6 +149,8 @@ export function parseRuleTestResponse(raw) {
     return { ok: false, error: `The answer is not valid JSON (${err.message}).` };
   }
   if (typeof data.explanation !== 'string') return { ok: false, error: 'The answer has no "explanation" text.' };
+  const proposalMismatch =
+    typeof data.proposalMismatch === 'string' && data.proposalMismatch.trim() ? data.proposalMismatch.trim() : null;
   if (!Array.isArray(data.examples) || data.examples.length === 0) {
     return { ok: false, error: 'The answer has no "examples" list.' };
   }
@@ -142,7 +161,10 @@ export function parseRuleTestResponse(raw) {
     if (ex.expected !== 'accept' && ex.expected !== 'reject') {
       return { ok: false, error: `${where} has "expected" = ${JSON.stringify(ex.expected)} (must be "accept" or "reject").` };
     }
-    if (typeof ex.xml !== 'string' || !ex.xml.trim()) return { ok: false, error: `${where} has no "xml".` };
+    // T2b: the content of the insertion point ("xml" accepted from an
+    // answer that still uses the old field name).
+    const content = typeof ex.content === 'string' ? ex.content : ex.xml;
+    if (typeof content !== 'string' || !content.trim()) return { ok: false, error: `${where} has no "content".` };
     if (ex.schema !== undefined && ex.schema !== null && typeof ex.schema !== 'string') {
       return { ok: false, error: `${where} has a "schema" that is not text or null.` };
     }
@@ -150,8 +172,8 @@ export function parseRuleTestResponse(raw) {
       label: typeof ex.label === 'string' && ex.label.trim() ? ex.label.trim() : where,
       expected: ex.expected,
       schema: ex.schema && ex.schema !== 'null' ? ex.schema : null,
-      xml: ex.xml.trim(),
+      content: content.trim(),
     });
   }
-  return { ok: true, explanation: data.explanation.trim(), examples };
+  return { ok: true, explanation: data.explanation.trim(), proposalMismatch, examples };
 }

@@ -1111,10 +1111,32 @@
   max-width: 100%;
 }
 
+/* T2b: the application's skeleton is dimmed; the content written for the
+   test is highlighted. Declared before .ruleTestMark so a selected node's
+   yellow wins (same specificity, later rule). */
+.ruleTestSkeleton {
+  color: #94a3b8;
+}
+
+.ruleTestContent {
+  color: #0f172a;
+  background: #e0f2fe;
+}
+
 .ruleTestMark {
   background: #fef08a;
   color: inherit;
   border-radius: 2px;
+}
+
+.ruleTestProblems {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+
+.ruleTestExampleActions {
+  display: flex;
+  gap: 12px;
 }
 
 .ruleTestEditor {

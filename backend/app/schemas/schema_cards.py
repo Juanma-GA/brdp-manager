@@ -48,3 +48,29 @@ class SchemaCardsOut(BaseModel):
     # variants a rule can be limited to), so the client can tell whether an
     # element exists in ALL of them. [] when not available.
     document_schemas: list[str] = []
+
+
+class SchemaStructureElementOut(BaseModel):
+    children: list[str]
+    attributes: list[str]
+
+
+class RuleTestSkeletonOut(BaseModel):
+    root: str
+    # Element names from the root down to the insertion point, inclusive.
+    path: list[str]
+    insertion: str
+    # "para" (a chain down to <para>) or the fallback used when the schema
+    # has none: "body", "content" or "root" (see rule_test_skeletons.py).
+    derivation: str
+
+
+class SchemaStructureOut(BaseModel):
+    """Test rule (T2b): one schema's derived skeleton and its complete
+    element graph (children and attribute names, no truncation)."""
+
+    standard: str
+    schema_name: str
+    available: bool
+    skeleton: RuleTestSkeletonOut | None = None
+    elements: dict[str, SchemaStructureElementOut] = {}

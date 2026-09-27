@@ -24,10 +24,19 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { placeExample, ruleTargets } from '../../src/utils/ruleTestSkeleton.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const realCards = JSON.parse(readFileSync(path.join(__dirname, 'schema-cards-fixture.json'), 'utf-8'));
+// Test rule (T2b): the real schema structures/skeletons the backend serves
+// (backend/scripts/dump_rule_test_structures.py), so the examples prompt's
+// placements come from the same code as in the app.
+const realStructures = JSON.parse(readFileSync(path.join(__dirname, '..', 'rule-test-fixtures', 'structures.json'), 'utf-8'));
+function placementsFor(standard, ruleXml, roles) {
+  const targets = ruleTargets(ruleXml);
+  return roles.map(([schema, role]) => ({ schema, role, ...placeExample(realStructures[`${standard}|${schema}`], targets) }));
+}
 const paraEntry = realCards['S1000D 4.2'].para;
 const tableEntry = realCards['S1000D 4.2'].table;
 
@@ -279,10 +288,25 @@ const brdpRuleTest = {
 };
 const ruleEmphasisFlag0 =
   '<structureObjectRule>\n  <objectPath allowedObjectFlag="0">//emphasis</objectPath>\n  <objectUse>BRDP-TEST-001. The element &lt;emphasis&gt; must not be used.</objectUse>\n</structureObjectRule>';
+const ruleEmphasisType =
+  '<structureObjectRule>\n  <objectPath allowedObjectFlag="2">//@emphasisType</objectPath>\n  <objectUse>Only em01 and em02.</objectUse>\n  <objectValue valueForm="single" valueAllowed="em01"/>\n  <objectValue valueForm="single" valueAllowed="em02"/>\n</structureObjectRule>';
+const ruleProcedContext = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">\n<structureObjectRuleGroup>\n${ruleEmphasisFlag0}\n</structureObjectRuleGroup>\n</contextRules>`;
+const rule301Mandatory = '<objrule id="R-1">\n  <objpath objappl="1">/dmodule/content//tgroup/tbody</objpath>\n  <objuse>Every tgroup needs a tbody.</objuse>\n</objrule>';
+const ruleStepTitle =
+  '<structureObjectRule>\n  <objectPath allowedObjectFlag="0">//proceduralStep[not(title)]</objectPath>\n  <objectUse>Every procedural step needs a title.</objectUse>\n</structureObjectRule>';
 export const ruleTestExamplesCases = [
   {
     name: 'brex-4-2-general-flag0-with-facts',
-    args: [{ brdp: brdpRuleTest, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleEmphasisFlag0, schemaFacts: [{ name: 'table', entry: tableEntry }] }],
+    args: [
+      {
+        brdp: brdpRuleTest,
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleEmphasisFlag0,
+        placements: placementsFor('S1000D 4.2', ruleEmphasisFlag0, [['descript', 'rule']]),
+        schemaFacts: [{ name: 'table', entry: tableEntry }],
+      },
+    ],
   },
   {
     name: 'brex-4-2-value-list',
@@ -291,8 +315,8 @@ export const ruleTestExamplesCases = [
         brdp: { ...brdpRuleTest, title: 'Emphasis types', proposal: '@emphasisType shall only take em01 and em02.' },
         standard: 'S1000D 4.2',
         format: 'BREX-4.2',
-        ruleXml:
-          '<structureObjectRule>\n  <objectPath allowedObjectFlag="2">//@emphasisType</objectPath>\n  <objectUse>Only em01 and em02.</objectUse>\n  <objectValue valueForm="single" valueAllowed="em01"/>\n  <objectValue valueForm="single" valueAllowed="em02"/>\n</structureObjectRule>',
+        ruleXml: ruleEmphasisType,
+        placements: placementsFor('S1000D 4.2', ruleEmphasisType, [['descript', 'rule']]),
       },
     ],
   },
@@ -303,9 +327,9 @@ export const ruleTestExamplesCases = [
         brdp: { ...brdpRuleTest, proposal: 'In procedural data modules, <emphasis> shall not be used.' },
         standard: 'S1000D 4.2',
         format: 'BREX-4.2',
-        ruleXml: `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">\n<structureObjectRuleGroup>\n${ruleEmphasisFlag0}\n</structureObjectRuleGroup>\n</contextRules>`,
+        ruleXml: ruleProcedContext,
         contextSchemas: ['proced'],
-        otherSchema: 'descript',
+        placements: placementsFor('S1000D 4.2', ruleProcedContext, [['proced', 'rule'], ['descript', 'other']]),
       },
     ],
   },
@@ -316,7 +340,22 @@ export const ruleTestExamplesCases = [
         brdp: { ...brdpRuleTest, title: 'Table body', proposal: 'Every tgroup shall have a tbody.' },
         standard: 'S1000D 3.0.1',
         format: 'BREX-3.0.1',
-        ruleXml: '<objrule id="R-1">\n  <objpath objappl="1">/dmodule/content//tgroup/tbody</objpath>\n  <objuse>Every tgroup needs a tbody.</objuse>\n</objrule>',
+        ruleXml: rule301Mandatory,
+        placements: placementsFor('S1000D 3.0.1', rule301Mandatory, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // T2b: the rule checks <proceduralStep>, so the content goes inside
+    // <mainProcedure> (the example that complies can leave the step out).
+    name: 'brex-4-2-proced-insertion-mainprocedure',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Step titles', proposal: 'Procedural steps shall have a title.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleStepTitle,
+        placements: placementsFor('S1000D 4.2', ruleStepTitle, [['proced', 'rule']]),
       },
     ],
   },

@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_current_user
 from app.models import User
-from app.schemas.schema_cards import SchemaCardsOut
+from app.schemas.schema_cards import SchemaCardsOut, SchemaStructureOut
+from app.services.rule_test_skeletons import get_schema_structure
 from app.services.schema_cards import get_document_schemas, get_schema_cards
 
 router = APIRouter(prefix="/api/schema-cards", tags=["schema-cards"])
@@ -30,4 +31,25 @@ async def read_schema_cards(
         cards=cards,
         unknown=unknown,
         document_schemas=get_document_schemas(standard),
+    )
+
+
+@router.get("/structure", response_model=SchemaStructureOut)
+async def read_schema_structure(
+    standard: str = Query(...),
+    schema: str = Query(..., description="Schema name, e.g. proced, descript."),
+    _current_user: User = Depends(get_current_user),
+) -> SchemaStructureOut:
+    """Test rule (T2b): the skeleton the application builds the examples on
+    (root → insertion point, derived from the cards) and the schema's
+    complete element graph, used to check each example's structure (every
+    child allowed inside its parent, every attribute declared on its
+    element). Reference data, same posture as GET /api/schema-cards."""
+    data = get_schema_structure(standard, schema)
+    return SchemaStructureOut(
+        standard=standard,
+        schema_name=schema,
+        available=data["available"],
+        skeleton=data["skeleton"],
+        elements=data["elements"],
     )

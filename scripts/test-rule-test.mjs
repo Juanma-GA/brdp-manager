@@ -1,16 +1,38 @@
-// Tests for Test rule (T2 of 4) -- plain Node, the real modules:
-// src/prompts/ruleTestExamplesPrompt.js (prompt + response parsing) and
-// src/utils/ruleTest.js (example validation, runs, global verdict,
-// highlighted display). Run: node scripts/test-rule-test.mjs
+// Tests for Test rule (T2, T2b) -- plain Node, the real modules:
+// src/prompts/ruleTestExamplesPrompt.js (prompt, response parsing,
+// correction request), src/utils/ruleTestSkeleton.js (targets, schema
+// choice, placement, assembly, structural check), src/utils/ruleTest.js
+// (materialize, validation, runs, verdict, display) and analyzeRule of
+// src/utils/ruleTestEngine.js. The schema structures are the real ones the
+// backend serves (scripts/rule-test-fixtures/structures.json, dumped by
+// backend/scripts/dump_rule_test_structures.py).
+// Run: node scripts/test-rule-test.mjs
 import fs from 'node:fs';
 import { DOMParser } from '@xmldom/xmldom';
 import {
   buildRuleTestExamplesPrompt,
   buildCopyableTestPrompt,
+  buildRuleTestCorrectionMessage,
   parseRuleTestResponse,
   RULE_TEST_USER_MESSAGE,
 } from '../src/prompts/ruleTestExamplesPrompt.js';
-import { pickOtherSchema, runExample, ruleTestVerdict, validateExample, xmlDisplayLines } from '../src/utils/ruleTest.js';
+import {
+  displayText,
+  exampleProblems,
+  materializeExample,
+  runExample,
+  ruleTestVerdict,
+  validateExample,
+  xmlDisplayLines,
+} from '../src/utils/ruleTest.js';
+import {
+  assembleExample,
+  checkExampleStructure,
+  chooseTestSchemas,
+  placeExample,
+  ruleTargets,
+} from '../src/utils/ruleTestSkeleton.js';
+import { analyzeRule } from '../src/utils/ruleTestEngine.js';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
 
@@ -30,13 +52,29 @@ function parseXml(text) {
   if (messages.length) throw new Error(messages[0].replace(/^\[xmldom \w+\]\s*/, '').split('\n')[0]);
   return doc;
 }
-const vocabJson = JSON.parse(fs.readFileSync(new URL('../public/schema-vocabulary-4-2.json', import.meta.url)));
-const vocabulary = { elements: new Set(vocabJson.elements), attributes: new Set(vocabJson.attributes) };
-const opts = { vocabulary, parseXml };
+const vocabOf = (file) => {
+  const json = JSON.parse(fs.readFileSync(new URL(`../public/${file}`, import.meta.url)));
+  return { elements: new Set(json.elements), attributes: new Set(json.attributes) };
+};
+const vocabulary = vocabOf('schema-vocabulary-4-2.json');
+const vocabulary301 = vocabOf('schema-vocabulary-3-0-1.json');
+const STRUCTURES = JSON.parse(fs.readFileSync(new URL('./rule-test-fixtures/structures.json', import.meta.url)));
+const structureOf = (standard, schema) => STRUCTURES[`${standard}|${schema}`];
 
-function testRun(ruleXml, examples, format = 'BREX-4.2') {
-  const runs = examples.map((ex) => runExample(ruleXml, format, ex, opts));
-  return { runs, verdict: ruleTestVerdict(examples, runs) };
+// A setup as useRuleTest builds it, from the real structures.
+function setupFor(standard, ruleXml, schemas, schemaLocation = 'flat') {
+  const targets = ruleTargets(ruleXml);
+  const placements = {};
+  for (const schema of schemas) {
+    const structure = structureOf(standard, schema);
+    placements[schema] = { structure, placement: placeExample(structure, targets) };
+  }
+  return { standard, schemaLocation, placements };
+}
+function testRun(ruleXml, examples, setup, { format = 'BREX-4.2', vocab = vocabulary } = {}) {
+  const materialized = examples.map((ex) => materializeExample(ex, setup));
+  const runs = materialized.map((ex) => runExample(ruleXml, format, ex, { vocabulary: vocab, parseXml }));
+  return { materialized, runs, verdict: ruleTestVerdict(materialized, runs, analyzeRule(ruleXml, format, { parseXml })) };
 }
 
 const brdp = {
@@ -45,169 +83,249 @@ const brdp = {
   definition: 'Decide whether <emphasis> may be used.',
   proposal: 'El elemento <emphasis> no se utiliza.',
 };
+const EMPH = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>Do not use emphasis.</objectUse></structureObjectRule>';
+const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObjectFlag="2">//emphasis/@emphasisType</objectPath><objectUse>Only em01 and em02 are allowed.</objectUse><objectValue valueForm="single" valueAllowed="em01"/><objectValue valueForm="single" valueAllowed="em02"/></structureObjectRule>';
+
+// ─── Skeletons (the real fixture) ───────────────────────────────────────────
+{
+  for (const [key, s] of Object.entries(STRUCTURES)) {
+    const path = s.skeleton.path;
+    const ok = path.every((name, i) => i === 0 || s.elements[path[i - 1]].children.includes(name));
+    check(`skeleton ${key}: every link is a real parent/child pair`, ok, path.join('/'));
+  }
+  check('skeleton 4.2 proced', structureOf('S1000D 4.2', 'proced').skeleton.path.join('/') === 'dmodule/content/procedure/mainProcedure/proceduralStep/para');
+  check('skeleton 4.2 descript', structureOf('S1000D 4.2', 'descript').skeleton.path.join('/') === 'dmodule/content/description/levelledPara/para');
+  check('skeleton 3.0.1 proced (not 4.x names)', structureOf('S1000D 3.0.1', 'proced').skeleton.path.join('/') === 'dmodule/content/proced/mainfunc/step1/para');
+  check('skeleton 3.0.1 descript', structureOf('S1000D 3.0.1', 'descript').skeleton.path.join('/') === 'dmodule/content/descript/para0/para');
+  check('skeleton 4.2 ipd: no <para> chain, insertion at the body', structureOf('S1000D 4.2', 'ipd').skeleton.insertion === 'illustratedPartsCatalog');
+}
+
+// ─── What the rule checks ───────────────────────────────────────────────────
+{
+  const t = (path) => ruleTargets(`<structureObjectRule><objectPath>${path}</objectPath></structureObjectRule>`);
+  check('targets: //emphasis', JSON.stringify(t('//emphasis').checked) === '["emphasis"]');
+  check('targets: attribute → owner element', JSON.stringify(t('//emphasis/@emphasisType').checked) === '["emphasis"]');
+  check('targets: predicate ignored', JSON.stringify(t('//proceduralStep[not(title)]').checked) === '["proceduralStep"]');
+  check('targets: attribute with no owner → nothing', t('//@assyCode').checked.length === 0);
+  const abs = t('/dmodule/content//thead');
+  check('targets: absolute prefix', JSON.stringify(abs.absolutePrefixes) === '[["dmodule","content"]]' && abs.checked[0] === 'thead', JSON.stringify(abs));
+  check('targets: union in parentheses', JSON.stringify(t('(/dmodule/content/procedure | /dmodule/content/description)/levelledPara').checked) === '["levelledPara"]');
+  check('targets: escaped < in a predicate', JSON.stringify(t('//para[count(x) &lt; 3]').checked) === '["para"]');
+}
+
+// ─── Schema choice and placement ────────────────────────────────────────────
+{
+  // cards: which of the fixture's 4.2 schemas have each name (the same
+  // information GET /api/schema-cards gives through variants[].schemas).
+  const schemas42 = ['descript', 'proced', 'ipd'];
+  const cardsFor = (names) =>
+    Object.fromEntries(names.map((n) => [n, { variants: [{ schemas: schemas42.filter((s) => structureOf('S1000D 4.2', s).elements[n]) }] }]));
+  const choose = (rule, contextSchemas = []) => {
+    const targets = ruleTargets(rule);
+    return chooseTestSchemas({ contextSchemas, documentSchemas: schemas42, cards: cardsFor([...targets.checked, 'dmodule']), targets });
+  };
+  check('schema choice: //emphasis → descript', choose(EMPH).testSchema === 'descript');
+  check('schema choice: //proceduralStep → proced', choose('<structureObjectRule><objectPath>//proceduralStep</objectPath></structureObjectRule>').testSchema === 'proced');
+  const scoped = choose(EMPH, ['proced']);
+  check('schema choice: limited to proced → proced + descript', scoped.testSchema === 'proced' && scoped.otherSchema === 'descript', JSON.stringify(scoped));
+
+  const place = (schema, rule) => placeExample(structureOf('S1000D 4.2', schema), ruleTargets(rule)).path.join('/');
+  check('placement: //emphasis in proced → inside <para>', place('proced', EMPH) === 'dmodule/content/procedure/mainProcedure/proceduralStep/para');
+  check('placement: //proceduralStep → inside <mainProcedure> (the accept example can leave it out)', place('proced', '<structureObjectRule><objectPath>//proceduralStep</objectPath></structureObjectRule>') === 'dmodule/content/procedure/mainProcedure');
+  check('placement: //thead → inside <levelledPara> (a table cannot sit in <para>)', place('descript', '<structureObjectRule><objectPath>/dmodule/content//thead</objectPath></structureObjectRule>') === 'dmodule/content/description/levelledPara');
+  check('placement: /dmodule/identAndStatusSection/… → inside <dmodule>', place('descript', '<structureObjectRule><objectPath>/dmodule/identAndStatusSection/dmAddress/dmIdent/dmCode/@modelIdentCode</objectPath></structureObjectRule>') === 'dmodule');
+  const p = placeExample(structureOf('S1000D 4.2', 'proced'), ruleTargets(EMPH));
+  check('placement: allowed children of <para> listed', p.allowedChildren.includes('emphasis') && !p.allowedChildren.includes('warning'));
+}
+
+// ─── Assembly ───────────────────────────────────────────────────────────────
+{
+  const structure = structureOf('S1000D 3.0.1', 'descript');
+  const placement = placeExample(structure, ruleTargets(EMPH));
+  const master = assembleExample({ standard: 'S1000D 3.0.1', schema: 'descript', schemaLocation: 'master', placement, content: 'Torque the <emphasis>bolt</emphasis>.' });
+  check('assembly: xsi:noNamespaceSchemaLocation in the project form (master)', master.xml.includes('xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd"'), master.xml);
+  const flat = assembleExample({ standard: 'S1000D 4.2', schema: 'proced', schemaLocation: 'flat', placement: placeExample(structureOf('S1000D 4.2', 'proced'), ruleTargets(EMPH)), content: 'Remove the panel.' });
+  check('assembly: flat URL', flat.xml.includes('S1000D_4-2/xml_schema_flat/proced.xsd'));
+  check('assembly: well-formed and rooted at <dmodule>', parseXml(flat.xml).documentElement.nodeName === 'dmodule');
+  check('assembly: the insertion point holds exactly the content (no added whitespace for string(.) checks)', parseXml(flat.xml).getElementsByTagName('para')[0].textContent === 'Remove the panel.');
+  check('assembly: skeleton node paths', flat.skeletonNodePaths.at(-1) === '/dmodule[1]/content[1]/procedure[1]/mainProcedure[1]/proceduralStep[1]/para[1]', JSON.stringify(flat.skeletonNodePaths));
+  check('assembly: xlink declared only when used', !flat.xml.includes('xmlns:xlink') && assembleExample({ standard: 'S1000D 4.2', schema: 'proced', placement: placeExample(structureOf('S1000D 4.2', 'proced'), ruleTargets(EMPH)), content: '<dmRef xlink:href="x"/>' }).xml.includes('xmlns:xlink'));
+}
+
+// ─── Structural check (the cases of the first real run) ─────────────────────
+{
+  const proced = structureOf('S1000D 4.2', 'proced');
+  const problems = (xml) => checkExampleStructure(parseXml(xml), proced);
+  const warn = problems('<dmodule><content><procedure><mainProcedure><proceduralStep><warning><content>Hot</content></warning></proceduralStep></mainProcedure></procedure></content></dmodule>');
+  check('structure: <content> is not allowed inside <warning>', warn.some((p) => p.kind === 'notAllowed' && p.element === 'content' && p.parent === 'warning'), JSON.stringify(warn));
+  const note = problems('<dmodule><content><procedure><mainProcedure><proceduralStep><note emphasisType="em01"><notePara>x</notePara></note></proceduralStep></mainProcedure></procedure></content></dmodule>');
+  check('structure: @emphasisType does not exist on <note>', note.some((p) => p.kind === 'unknownAttribute' && p.attribute === 'emphasisType' && p.element === 'note'), JSON.stringify(note));
+  const step = problems('<dmodule><content><procedure><step><para>x</para></step></procedure></content></dmodule>');
+  check('structure: <step> does not exist in proced', step.some((p) => p.kind === 'unknownElement' && p.element === 'step'), JSON.stringify(step));
+  const good = problems('<dmodule><content><procedure><mainProcedure><proceduralStep><para>Apply <emphasis emphasisType="em01">sealant</emphasis>.</para></proceduralStep></mainProcedure></procedure></content></dmodule>');
+  check('structure: a correct procedural step → no problem', good.length === 0, JSON.stringify(good));
+  const xlink = problems('<dmodule xmlns:xlink="http://www.w3.org/1999/xlink"><content><procedure><mainProcedure><proceduralStep><para><dmRef xlink:href="x"><dmRefIdent/></dmRef></para></proceduralStep></mainProcedure></procedure></content></dmodule>');
+  check('structure: xlink:href checked by local name (declared on dmRef)', xlink.length === 0, JSON.stringify(xlink));
+
+  // The same through materialize + validate, and in English for the correction.
+  const setup = setupFor('S1000D 4.2', EMPH, ['proced']);
+  const ex = materializeExample({ label: 'bad', expected: 'accept', schema: 'proced', content: '<warning><content>Hot</content></warning>' }, setup);
+  const v = validateExample(ex.xml, vocabulary, parseXml, ex.structure);
+  check('validate: structural problems make the example not runnable', !v.runnable && v.structure.length >= 2, JSON.stringify(v.structure));
+  const english = exampleProblems(v, { standard: 'S1000D 4.2', schema: 'proced' });
+  check('problems in English: warning inside para', english.includes('<warning> is not allowed inside <para>'), JSON.stringify(english));
+  check('problems in English: content inside warning', english.includes('<content> is not allowed inside <warning>'), JSON.stringify(english));
+  const unknown = validateExample(materializeExample({ label: 'x', expected: 'accept', schema: 'proced', content: '<step>x</step>' }, setup).xml, vocabulary, parseXml, setup.placements.proced.structure);
+  check('validate: an unknown name is reported once (vocabulary), not again as "does not exist in proced"', unknown.names.notFound.includes('<step>') && !unknown.structure.some((p) => p.element === 'step'), JSON.stringify(unknown));
+  const offered = materializeExample({ label: 'x', expected: 'accept', schema: 'fault', content: 'x' }, setup);
+  const run = runExample(EMPH, 'BREX-4.2', offered, { vocabulary, parseXml });
+  check('an example of a schema that was not offered is not run', run.result === null && run.validation.unknownSchema === 'fault');
+}
+
+// ─── analyzeRule ────────────────────────────────────────────────────────────
+{
+  const a = (xml, format = 'BREX-4.2') => analyzeRule(xml, format, { parseXml });
+  check('analyze: //emphasis executable', a(EMPH).status === 'executable');
+  const doc = a("<structureObjectRule><objectPath allowedObjectFlag=\"0\">document('other.xml')//emphasis</objectPath></structureObjectRule>");
+  check('analyze: document() → not executable, with the reason', doc.status === 'not_executable' && /reads another file/.test(doc.reason), JSON.stringify(doc));
+  check('analyze: only nonContextRule → not executable', a('<nonContextRule id="x"><simplePara>Text</simplePara></nonContextRule>').status === 'not_executable');
+  const partial = a(`<nonContextRule id="n1"><simplePara>Text</simplePara></nonContextRule>${EMPH}`);
+  check('analyze: nonContextRule next to a rule → partial, says which part', partial.status === 'partial' && /n1: This rule has no XPath/.test(partial.reason), JSON.stringify(partial));
+  const bool = a('<structureObjectRule><objectPath allowedObjectFlag="2">//updateCode[@x] and (//zoneSpec or //zone)</objectPath></structureObjectRule>');
+  check('analyze: a boolean objectPath is not a path', bool.status === 'not_executable' && /does not select nodes/.test(bool.reason), JSON.stringify(bool));
+  check('analyze: unknown format', a(EMPH, 'SCH-DITA').status === 'not_executable');
+  check('analyze: XPath syntax error', /XPath error/.test(a('<structureObjectRule><objectPath>//&lt;emphasis&gt;</objectPath></structureObjectRule>').reason || ''));
+  check('analyze: mandatory-node rule is executable (examples are whole documents)', a('<objrule><objpath objappl="1">//dmodule/content</objpath></objrule>', 'BREX-3.0.1').status === 'executable');
+  check('analyze: absolute path to another root is still executable (the schema choice follows the root)', a('<structureObjectRule><objectPath allowedObjectFlag="0">/pm/content//dmRef</objectPath></structureObjectRule>').status === 'executable');
+}
 
 // ─── Prompt ─────────────────────────────────────────────────────────────────
 {
-  const rule = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>';
-  const p = buildRuleTestExamplesPrompt({ brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: rule });
-  check('prompt: contains the rule verbatim', p.includes(rule));
-  check('prompt: contains Title/Definition/Proposal', p.includes(`Title: ${brdp.title}`) && p.includes(`Proposal: ${brdp.proposal}`));
-  check('prompt: explanation in the language of the Proposal', p.includes('in the same language as the Proposal'));
-  check('prompt: examples in English, max 10 lines', p.includes('In English, at most 10 lines.'));
-  check('prompt: aeronautical content', p.includes('aircraft maintenance manual'));
-  check('prompt: no customer data', p.includes('No customer data, no real manufacturer names'));
-  check('prompt: general rule → schema null', p.includes('set "schema" to null'));
-  check('prompt: no third example for a general rule', !p.includes('third example'));
-  check('prompt: strict JSON output', p.includes('OUTPUT: strict JSON only') && p.includes('"expected": "accept"'));
-  check('prompt: no mandatory line without flag 1', !p.includes('makes a node mandatory'));
-  check('prompt: relative path → ancestors line', p.includes("Include every ancestor element the rule's path needs"));
+  const setup = setupFor('S1000D 4.2', EMPH, ['descript']);
+  const placements = [{ schema: 'descript', role: 'rule', ...setup.placements.descript.placement }];
+  const p = buildRuleTestExamplesPrompt({ brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: EMPH, placements });
+  check('prompt: contains the rule verbatim', p.includes(EMPH));
+  check('prompt: explanation from the rule XML, not the Proposal', p.includes('saying what the RULE checks, read from its XML') && p.includes('not what the Proposal says'));
+  check('prompt: proposalMismatch field, marked as an indication', p.includes('"proposalMismatch": null when the rule implements') && p.includes('It is only an indication'));
+  check('prompt: the application builds the document; only the content', p.includes('Write\nONLY that content'));
+  check('prompt: insertion point with the skeleton path', p.includes('your content goes directly inside <para>, at\n  dmodule/content/description/levelledPara/para.'), p);
+  check('prompt: allowed children of the insertion point', /Allowed directly inside <para> in this schema: .*emphasis/.test(p));
+  check('prompt: no text in references/containers', p.includes('Never put text directly inside an element that only references or groups') && p.includes('<dmRef>'));
+  check('prompt: general rule → the chosen schema', p.includes('every example uses the "descript" schema'));
+  check('prompt: output uses content', p.includes('"content": "…"') && !p.includes('"xml": "…"'));
   check('prompt: user message', buildCopyableTestPrompt(p) === `${p}\n\n${RULE_TEST_USER_MESSAGE}`);
   check('temperature constant', RULE_TEST_TEMPERATURE === 0.5);
 
-  const abs = '<objrule><objpath objappl="1">/dmodule/content//thead/colspec</objpath></objrule>';
-  const pa = buildRuleTestExamplesPrompt({ brdp, standard: 'S1000D 3.0.1', format: 'BREX-3.0.1', ruleXml: abs });
-  check('prompt: absolute path → start at <dmodule>', pa.includes('each example starts with the element the path\n  starts with (<dmodule>)'), pa);
-  check('prompt: flag 1 → whole document', pa.includes('makes a node mandatory'));
-
-  const proced = wrapRuleInSchemaContexts(rule, 'BREX-4.2', 'S1000D 4.2', ['proced']);
-  const pc = buildRuleTestExamplesPrompt({ brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: proced, contextSchemas: ['proced'], otherSchema: 'descript' });
-  check('prompt: context rule → schema "proced"', pc.includes('set "schema" to\n"proced"'), pc);
-  check('prompt: context rule → third example of descript, expected accept', pc.includes('Add a third example from the descript schema ("schema": "descript",\n"expected": "accept")'), pc);
+  const proced = wrapRuleInSchemaContexts(ETYPE, 'BREX-4.2', 'S1000D 4.2', ['proced']);
+  const s2 = setupFor('S1000D 4.2', proced, ['proced', 'descript']);
+  const pc = buildRuleTestExamplesPrompt({
+    brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: proced, contextSchemas: ['proced'],
+    placements: [{ schema: 'proced', role: 'rule', ...s2.placements.proced.placement }, { schema: 'descript', role: 'other', ...s2.placements.descript.placement }],
+  });
+  check('prompt: context rule → proced placement', pc.includes('schema "proced": your content goes directly inside <para>, at\n  dmodule/content/procedure/mainProcedure/proceduralStep/para.'), pc);
+  check('prompt: context rule → third example of descript, expected accept', pc.includes('Add a third example of the descript schema ("schema": "descript",\n"expected": "accept")'), pc);
 
   const facts = [{ name: 'emphasis', entry: { variants: [{ schemas: ['descript'], attributes: [{ name: 'emphasisType', required: false, enum: ['em01', 'em02'] }], children: [], resolved: true }], parents: ['para'] } }];
-  const pf = buildRuleTestExamplesPrompt({ brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: rule, schemaFacts: facts });
+  const pf = buildRuleTestExamplesPrompt({ brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: EMPH, placements, schemaFacts: facts });
   check('prompt: schema facts block', pf.includes('SCHEMA FACTS') && pf.includes('<emphasis>'));
-  check('prompt: with facts, names come from the rule or the facts', pf.includes('the rule or in the SCHEMA FACTS below'));
-  check('prompt: without facts, never invent a name', p.includes('Never invent a name.') && !p.includes('SCHEMA FACTS'));
+  check('prompt: without facts, never invent a name', p.includes('never invent a name') && !p.includes('SCHEMA FACTS'));
+
+  const msg = buildRuleTestCorrectionMessage([{ index: 1, label: 'Hot surface', problems: ['<content> is not allowed inside <warning>', '@emphasisType does not exist on <warning>'] }]);
+  check('correction message: lists each problem of each example', msg.includes('Example 2 ("Hot surface"):\n- <content> is not allowed inside <warning>\n- @emphasisType does not exist on <warning>'), msg);
+  check('correction message: same order, change only the content', msg.includes('the same examples in') && msg.includes('change only the\n"content"'), msg);
 }
 
 // ─── Response parsing ───────────────────────────────────────────────────────
 {
-  const good = '{"explanation":"Prohíbe <emphasis>.","examples":[{"label":"ok","expected":"accept","schema":null,"xml":"<para>a</para>"},{"label":"bad","expected":"reject","schema":null,"xml":"<para><emphasis>a</emphasis></para>"}]}';
+  const good = '{"explanation":"Prohíbe <emphasis>.","proposalMismatch":null,"examples":[{"label":"ok","expected":"accept","schema":"descript","content":"a"},{"label":"bad","expected":"reject","schema":"descript","content":"<emphasis>a</emphasis>"}]}';
   const r = parseRuleTestResponse(good);
-  check('parse: valid JSON', r.ok && r.examples.length === 2 && r.explanation === 'Prohíbe <emphasis>.', JSON.stringify(r));
+  check('parse: valid JSON with content', r.ok && r.examples.length === 2 && r.examples[1].content === '<emphasis>a</emphasis>' && r.proposalMismatch === null, JSON.stringify(r));
+  check('parse: proposalMismatch text kept', parseRuleTestResponse(good.replace('"proposalMismatch":null', '"proposalMismatch":"No implementa la Proposal."')).proposalMismatch === 'No implementa la Proposal.');
   check('parse: fenced JSON', parseRuleTestResponse('```json\n' + good + '\n```').ok);
-  check('parse: text around JSON', parseRuleTestResponse('Here you go:\n' + good + '\nDone').ok);
   const broken = parseRuleTestResponse('{"explanation": "x", "examples": [ {"label": "a", ');
   check('parse: broken JSON → error', !broken.ok && /not valid JSON/.test(broken.error), JSON.stringify(broken));
-  check('parse: no JSON at all', !parseRuleTestResponse('Sorry, I cannot.').ok);
-  check('parse: bad expected', /must be "accept" or "reject"/.test(parseRuleTestResponse('{"explanation":"x","examples":[{"expected":"maybe","xml":"<a/>"}]}').error || ''));
-  check('parse: missing xml', /has no "xml"/.test(parseRuleTestResponse('{"explanation":"x","examples":[{"expected":"accept"}]}').error || ''));
-  check('parse: string "null" schema → null', parseRuleTestResponse('{"explanation":"x","examples":[{"expected":"accept","schema":"null","xml":"<a/>"}]}').examples[0].schema === null);
-}
-
-// ─── Validation ─────────────────────────────────────────────────────────────
-{
-  check('validate: malformed', !validateExample('<para><emphasis>a</para>', vocabulary, parseXml).wellFormed);
-  const unk = validateExample('<para><pokemon/></para>', vocabulary, parseXml);
-  check('validate: unknown name → not runnable', unk.wellFormed && !unk.runnable && unk.names.notFound.includes('<pokemon>'), JSON.stringify(unk));
-  const wrong = validateExample('<para><label/></para>', vocabulary, parseXml);
-  check('validate: wrong type (label is an attribute in 4.2)', !wrong.runnable && wrong.names.wrongType[0]?.name === 'label', JSON.stringify(wrong));
-  check('validate: real names → runnable', validateExample('<para>Torque the <emphasis emphasisType="em01">bolt</emphasis>.</para>', vocabulary, parseXml).runnable);
-  check('validate: xsi attributes are not vocabulary', validateExample('<dmodule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="x"><content/></dmodule>', vocabulary, parseXml).runnable);
-  check('validate: no vocabulary → only well-formedness', validateExample('<pokemon/>', null, parseXml).runnable);
+  check('parse: missing content', /has no "content"/.test(parseRuleTestResponse('{"explanation":"x","examples":[{"expected":"accept"}]}').error || ''));
+  check('parse: old "xml" field still read as content', parseRuleTestResponse('{"explanation":"x","examples":[{"expected":"accept","xml":"<a/>"}]}').examples[0].content === '<a/>');
 }
 
 // ─── Edge cases of the encargo ──────────────────────────────────────────────
 {
-  // //emphasis with flag 0
-  const rule = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>Do not use emphasis.</objectUse></structureObjectRule>';
+  // @emphasisType em01/em02 limited to proced
+  const rule = wrapRuleInSchemaContexts(ETYPE, 'BREX-4.2', 'S1000D 4.2', ['proced']);
+  const setup = setupFor('S1000D 4.2', rule, ['proced', 'descript']);
   const examples = [
-    { label: 'Plain step', expected: 'accept', schema: null, xml: '<proceduralStep><para>Remove the access panel.</para></proceduralStep>' },
-    { label: 'Emphasised warning text', expected: 'reject', schema: null, xml: '<proceduralStep><para>Do <emphasis>not</emphasis> touch the fan.</para></proceduralStep>' },
+    { label: 'em01 in a step', expected: 'accept', schema: 'proced', content: 'Apply <emphasis emphasisType="em01">sealant</emphasis> to the joint.' },
+    { label: 'em03 in a step', expected: 'reject', schema: 'proced', content: 'Apply <emphasis emphasisType="em03">sealant</emphasis> to the joint.' },
+    { label: 'em03 in a description', expected: 'accept', schema: 'descript', content: 'The <emphasis emphasisType="em03">seal</emphasis> is grey.' },
   ];
-  const { runs, verdict } = testRun(rule, examples);
-  check('//emphasis: accept example accepted', runs[0].result.status === 'accepted' && runs[0].matches === true);
-  check('//emphasis: reject example rejected, <emphasis> selected', runs[1].result.status === 'rejected' && runs[1].result.selectedNodePaths[0] === '/proceduralStep[1]/para[1]/emphasis[1]', JSON.stringify(runs[1].result));
-  check('//emphasis: verdict correct', verdict.kind === 'correct', JSON.stringify(verdict));
-  const lines = xmlDisplayLines(examples[1].xml, runs[1].result.selectedNodePaths, parseXml);
-  const highlighted = lines.flatMap((l) => l.segments.filter((s) => s.highlight).map((s) => s.text));
-  check('//emphasis: display highlights <emphasis> start and end tag', JSON.stringify(highlighted) === JSON.stringify(['<emphasis', '>', '</emphasis>']), JSON.stringify(lines));
-  check('//emphasis: display is indented, the mixed-content <para> on one line', lines.length === 3 && lines.map((l) => l.depth).join() === '0,1,0', JSON.stringify(lines.map((l) => l.depth)));
-  check('//emphasis: the <para> line reads as the text', lines[1].segments.map((s) => s.text).join('') === '<para>Do <emphasis>not</emphasis> touch the fan.</para>', JSON.stringify(lines[1]));
-  const nested = xmlDisplayLines('<dmodule><content><procedure><proceduralStep><para>Torque to 25 N·m.</para></proceduralStep></procedure></content></dmodule>', [], parseXml);
-  check('display: nested elements one per line, indented', nested.map((l) => l.depth).join() === '0,1,2,3,4,3,2,1,0', JSON.stringify(nested.map((l) => l.depth)));
-}
-{
-  // @emphasisType em01/em02
-  const rule = '<structureObjectRule><objectPath allowedObjectFlag="2">//@emphasisType</objectPath><objectUse>Only em01 and em02 are allowed.</objectUse><objectValue valueForm="single" valueAllowed="em01"/><objectValue valueForm="single" valueAllowed="em02"/></structureObjectRule>';
-  const examples = [
-    { label: 'em01', expected: 'accept', schema: null, xml: '<para>Apply <emphasis emphasisType="em01">sealant</emphasis>.</para>' },
-    { label: 'em05', expected: 'reject', schema: null, xml: '<para>Apply <emphasis emphasisType="em05">sealant</emphasis>.</para>' },
-  ];
-  const { runs, verdict } = testRun(rule, examples);
-  check('@emphasisType: em05 rejected with the rule message', runs[1].result.status === 'rejected' && runs[1].result.violations[0].message === 'Only em01 and em02 are allowed.');
-  check('@emphasisType: em01 accepted', runs[0].result.status === 'accepted');
-  check('@emphasisType: verdict correct', verdict.kind === 'correct');
-  const hl = xmlDisplayLines(examples[1].xml, runs[1].result.selectedNodePaths, parseXml).flatMap((l) => l.segments).filter((s) => s.highlight).map((s) => s.text);
-  check('@emphasisType: only the attribute is highlighted', JSON.stringify(hl) === JSON.stringify(['emphasisType="em05"']), JSON.stringify(hl));
-  // Edit em05 → em02 and run again
-  const edited = { ...examples[1], xml: examples[1].xml.replace('em05', 'em02') };
-  const again = runExample(rule, 'BREX-4.2', edited, opts);
-  check('@emphasisType: edited to em02 → accepted', again.result.status === 'accepted' && again.matches === false);
-  const v2 = ruleTestVerdict([examples[0], edited], [runs[0], again]);
-  check('@emphasisType: after the edit the verdict says the rule was permissive', v2.kind === 'incorrect' && v2.permissive && !v2.strict, JSON.stringify(v2));
-}
-{
-  // <emphasis> forbidden only in proced
-  const rule = wrapRuleInSchemaContexts('<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>No emphasis in procedures.</objectUse></structureObjectRule>', 'BREX-4.2', 'S1000D 4.2', ['proced']);
-  const examples = [
-    { label: 'proced without', expected: 'accept', schema: 'proced', xml: '<proceduralStep><para>Remove the panel.</para></proceduralStep>' },
-    { label: 'proced with', expected: 'reject', schema: 'proced', xml: '<proceduralStep><para>Remove the <emphasis>panel</emphasis>.</para></proceduralStep>' },
-    { label: 'descript with', expected: 'accept', schema: 'descript', xml: '<levelledPara><para>The <emphasis>panel</emphasis> is blue.</para></levelledPara>' },
-  ];
-  const { runs, verdict } = testRun(rule, examples);
-  check('proced-only: descript example with <emphasis> accepted (rule does not apply)', runs[2].result.status === 'accepted' && runs[2].matches === true && runs[2].result.outOfScopeSchemas[0] === 'proced', JSON.stringify(runs[2].result));
-  check('proced-only: proced example rejected', runs[1].result.status === 'rejected');
+  const { materialized, runs, verdict } = testRun(rule, examples, setup);
+  check('proced-only: examples built on proceduralStep/para/emphasis', materialized[0].xml.includes('<proceduralStep>') && materialized[0].xml.includes('<para>'));
+  check('proced-only: em03 rejected with the rule message', runs[1].result?.status === 'rejected' && runs[1].result.violations[0].message === 'Only em01 and em02 are allowed.', JSON.stringify(runs[1]));
+  check('proced-only: descript example accepted ("does not apply")', runs[2].result?.status === 'accepted' && runs[2].result.outOfScopeSchemas[0] === 'proced', JSON.stringify(runs[2].result));
   check('proced-only: verdict correct', verdict.kind === 'correct', JSON.stringify(verdict));
-  check('pickOtherSchema: descript for proced', pickOtherSchema(['proced'], ['descript', 'proced', 'ipd']) === 'descript');
-  check('pickOtherSchema: proced when descript is taken', pickOtherSchema(['descript'], ['descript', 'proced']) === 'proced');
-  check('pickOtherSchema: any other document schema', pickOtherSchema(['descript', 'proced', 'ipd', 'fault'], ['descript', 'proced', 'ipd', 'fault', 'crew']) === 'crew');
-  check('pickOtherSchema: general rule → null', pickOtherSchema([], ['descript']) === null);
+  // Display: skeleton dimmed, content highlighted, the attribute selected.
+  const lines = xmlDisplayLines(materialized[1].xml, runs[1].result.selectedNodePaths, parseXml, materialized[1].skeletonNodePaths);
+  const segs = lines.flatMap((l) => l.segments);
+  check('display: skeleton tags marked', segs.some((s) => s.skeleton && s.text === '<proceduralStep') && segs.every((s) => !s.text.startsWith('<emphasis') || !s.skeleton));
+  check('display: only the attribute highlighted', JSON.stringify(segs.filter((s) => s.highlight).map((s) => s.text)) === JSON.stringify(['emphasisType="em03"']));
+  const text = displayText(lines);
+  check('display: copied text keeps its indentation', text.split('\n')[5].startsWith('          <para>') && text.split('\n')[0].startsWith('<dmodule'), text);
 }
 {
-  // document() → not executable, examples still there
+  // //emphasis flag 0, general, 4.2: works as before, now on a real skeleton
+  const setup = setupFor('S1000D 4.2', EMPH, ['descript']);
+  const { materialized, runs, verdict } = testRun(EMPH, [
+    { label: 'plain', expected: 'accept', schema: null, content: 'Remove the access panel.' },
+    { label: 'emphasised', expected: 'reject', schema: null, content: 'Do <emphasis>not</emphasis> touch the fan.' },
+  ], setup);
+  check('//emphasis: schema filled in with the only offered one', materialized[0].schema === 'descript');
+  check('//emphasis: <emphasis> selected inside the real skeleton', runs[1].result.selectedNodePaths[0] === '/dmodule[1]/content[1]/description[1]/levelledPara[1]/para[1]/emphasis[1]', JSON.stringify(runs[1].result));
+  check('//emphasis: verdict correct', verdict.kind === 'correct', JSON.stringify(verdict));
+}
+{
+  // 3.0.1: its own skeletons, not 4.x ones
+  const rule = '<objrule><objpath objappl="0">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>';
+  const setup = setupFor('S1000D 3.0.1', rule, ['descript']);
+  const { materialized, verdict } = testRun(rule, [
+    { label: 'plain', expected: 'accept', schema: null, content: 'The pump is on the left.' },
+    { label: 'emphasised', expected: 'reject', schema: null, content: 'The <emphasis>pump</emphasis> is on the left.' },
+  ], setup, { format: 'BREX-3.0.1', vocab: vocabulary301 });
+  check('3.0.1: skeleton para0/para, no levelledPara', materialized[0].xml.includes('<para0>') && !materialized[0].xml.includes('levelledPara'));
+  check('3.0.1: verdict correct', verdict.kind === 'correct', JSON.stringify(verdict));
+}
+{
+  // document(): the reason comes from analyzeRule, whatever the examples
   const rule = "<structureObjectRule><objectPath allowedObjectFlag=\"0\">document('other.xml')//emphasis</objectPath></structureObjectRule>";
-  const examples = [
-    { label: 'a', expected: 'accept', schema: null, xml: '<para>a</para>' },
-    { label: 'b', expected: 'reject', schema: null, xml: '<para><emphasis>b</emphasis></para>' },
-  ];
-  const { runs, verdict } = testRun(rule, examples);
-  check('document(): verdict not executable with the engine reason', verdict.kind === 'not_executable' && /reads another file/.test(verdict.reason), JSON.stringify(verdict));
-  check('document(): examples were still validated and kept', runs.every((r) => r.validation.wellFormed));
+  const setup = setupFor('S1000D 4.2', rule, ['descript']);
+  const { runs, verdict } = testRun(rule, [
+    { label: 'a', expected: 'accept', schema: null, content: 'a' },
+    { label: 'b', expected: 'reject', schema: null, content: '<emphasis>b</emphasis>' },
+  ], setup);
+  check('document(): verdict not executable with the reason', verdict.kind === 'not_executable' && /reads another file/.test(verdict.reason), JSON.stringify(verdict));
+  check('document(): examples still validated and kept', runs.every((r) => r.validation.wellFormed));
+  const noneRunnable = ruleTestVerdict([{ expected: 'accept' }], [{ validation: { runnable: false }, result: null, matches: null }], analyzeRule(rule, 'BREX-4.2', { parseXml }));
+  check('document(): the reason shows even when no example could run', noneRunnable.kind === 'not_executable', JSON.stringify(noneRunnable));
 }
 {
-  // Inconclusive: nothing selected anywhere
-  const rule = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath></structureObjectRule>';
-  const examples = [
-    { label: 'a', expected: 'accept', schema: null, xml: '<para>a</para>' },
-    { label: 'b', expected: 'reject', schema: null, xml: '<para>b</para>' },
-  ];
-  const { verdict } = testRun(rule, examples);
-  check('inconclusive: no example selected anything', verdict.kind === 'inconclusive' && verdict.why === 'nothing_selected', JSON.stringify(verdict));
-}
-{
-  // Incorrect, strict direction
-  const rule = '<structureObjectRule><objectPath allowedObjectFlag="0">//para</objectPath></structureObjectRule>';
-  const examples = [
-    { label: 'a', expected: 'accept', schema: null, xml: '<levelledPara><para>a</para></levelledPara>' },
-    { label: 'b', expected: 'reject', schema: null, xml: '<levelledPara><para>b</para></levelledPara>' },
-  ];
-  const { verdict } = testRun(rule, examples);
-  check('incorrect: rule rejected an example meant to comply', verdict.kind === 'incorrect' && verdict.strict && !verdict.permissive, JSON.stringify(verdict));
-}
-{
-  // Invalid examples are never run, never dropped
-  const rule = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath></structureObjectRule>';
-  const examples = [
-    { label: 'a', expected: 'accept', schema: null, xml: '<para>a<pokemon/></para>' },
-    { label: 'b', expected: 'reject', schema: null, xml: '<para><emphasis>b</para>' },
-  ];
-  const { runs, verdict } = testRun(rule, examples);
-  check('invalid examples: not run', runs.every((r) => r.result === null && r.matches === null));
-  check('invalid examples: verdict no_runnable', verdict.kind === 'no_runnable', JSON.stringify(verdict));
-  const one = testRun(rule, [examples[0], { ...examples[1], xml: '<para><emphasis>b</emphasis></para>' }]);
-  check('one invalid example: the runnable one alone is inconclusive (no accept ran)', one.verdict.kind === 'inconclusive' && one.verdict.why === 'missing_expectation', JSON.stringify(one.verdict));
+  // Inconclusive / incorrect / no runnable, on real skeletons
+  const setup = setupFor('S1000D 4.2', EMPH, ['descript']);
+  const inc = testRun(EMPH, [
+    { label: 'a', expected: 'accept', schema: null, content: 'a' },
+    { label: 'b', expected: 'reject', schema: null, content: 'b' },
+  ], setup);
+  check('inconclusive: nothing selected', inc.verdict.kind === 'inconclusive' && inc.verdict.why === 'nothing_selected', JSON.stringify(inc.verdict));
+  const paraRule = '<structureObjectRule><objectPath allowedObjectFlag="0">//para</objectPath></structureObjectRule>';
+  const strict = testRun(paraRule, [
+    { label: 'a', expected: 'accept', schema: null, content: '<para>a</para>' },
+    { label: 'b', expected: 'reject', schema: null, content: '<para>b</para>' },
+  ], setupFor('S1000D 4.2', paraRule, ['descript']));
+  check('placement for //para: inside <levelledPara>', strict.materialized[0].insertion === 'levelledPara');
+  check('incorrect: the rule rejected an example meant to comply (strict)', strict.verdict.kind === 'incorrect' && strict.verdict.strict, JSON.stringify(strict.verdict));
+  const bad = testRun(EMPH, [
+    { label: 'a', expected: 'accept', schema: null, content: 'a<pokemon/>' },
+    { label: 'b', expected: 'reject', schema: null, content: '<emphasis>b' },
+  ], setup);
+  check('invalid examples: not run, verdict no_runnable', bad.runs.every((r) => r.result === null) && bad.verdict.kind === 'no_runnable', JSON.stringify(bad.verdict));
   check('display: malformed XML → null', xmlDisplayLines('<para><emphasis>b</para>', [], parseXml) === null);
 }
 

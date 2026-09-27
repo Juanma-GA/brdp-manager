@@ -220,6 +220,7 @@ export default function RuleSuggestionPanel({
           ruleXml={entry.text}
           format={entry.format}
           standard={standard}
+          schemaLocation={entry.schemaLocation}
           brdp={brdp}
           aiProvider={aiProvider}
           vocabulary={vocabulary}

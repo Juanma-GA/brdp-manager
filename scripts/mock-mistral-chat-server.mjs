@@ -100,40 +100,58 @@ function suggestRuleReply(systemPrompt) {
   return `<structureObjectRule id="${id}"${ref ? ' brSeverityLevel="brsl01"' : ""}>${ref}<objectPath allowedObjectFlag="1">//${element}/@frame</objectPath><objectUse>MOCK-RULE: every &lt;${element}&gt; has a frame.</objectUse><objectValue valueForm="single" valueAllowed="all">All</objectValue></structureObjectRule>`;
 }
 
-// Test rule (T2): the examples prompt ("Write the test examples for this
-// rule.") gets fixed examples, chosen from the rule quoted in the prompt:
-//   - Proposal with "BROKENJSON"  -> a truncated JSON answer
-//   - //@emphasisType             -> em01 (accept) / em05 (reject)
-//   - a proced context block      -> proced without / with <emphasis>, and a
-//                                    descript example with <emphasis> (accept)
-//   - anything else (//emphasis)  -> a step without / with <emphasis>
+// Test rule: the examples prompt ("Write the test examples for this rule.",
+// or the correction round that follows it) gets fixed examples.
 function isRuleTest(text) {
-  return text === "Write the test examples for this rule.";
+  return text === "Write the test examples for this rule." || text.startsWith("Some examples are not valid.");
 }
 
-function ruleTestReply(systemPrompt) {
-  const rule = (systemPrompt.match(/\nThe rule \([^)]*\):\n([\s\S]*?)\n\nThe decision it implements/) || [])[1] || "";
+// Test rule (T2b): the LLM writes only the content of an insertion point.
+// The examples follow the rule quoted in the prompt and the schemas it
+// offers ('- schema "proced": your content goes directly inside <para>');
+// Proposal markers pick a scenario:
+//   BROKENJSON   truncated answer
+//   BROKENSTRUCT the reject example is <warning><content> inside <para>
+//                (the first real run); the correction round fixes it
+//   STUBBORN     same, but the correction keeps it broken
+//   MISMATCH     "proposalMismatch" filled in
+function ruleTestReply(systemPrompt, messages) {
+  const rule = (systemPrompt.match(/\nThe rule \([^)]*\):\n([\s\S]*?)\n\nThe decision the rule is meant to implement/) || [])[1] || "";
   const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
+  const schemas = [...systemPrompt.matchAll(/- schema "([\w-]+)": your content goes directly inside/g)].map((m) => m[1]);
+  const [ruleSchema, otherSchema] = schemas;
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content || "";
+  const correcting = lastUser.startsWith("Some examples are not valid.");
   if (/BROKENJSON/.test(proposal)) {
-    return '{"explanation": "Truncated answer", "examples": [ {"label": "cut", "expected": "accept", "xml": "<para>';
+    return '{"explanation": "Truncated answer", "examples": [ {"label": "cut", "expected": "accept", "content": "<para>';
   }
-  const answer = (explanation, examples) => JSON.stringify({ explanation, examples });
-  if (/\/\/@emphasisType/.test(rule)) {
-    return answer("La regla solo admite los tipos de énfasis em01 y em02.", [
-      { label: "Caution text with em01", expected: "accept", schema: null, xml: '<para>Apply <emphasis emphasisType="em01">sealant</emphasis> to the fastener threads.</para>' },
-      { label: "Caution text with em05", expected: "reject", schema: null, xml: '<para>Apply <emphasis emphasisType="em05">sealant</emphasis> to the fastener threads.</para>' },
-    ]);
+  const mismatch = /MISMATCH/.test(proposal)
+    ? "This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."
+    : null;
+  const answer = (explanation, examples) => JSON.stringify({ explanation, proposalMismatch: mismatch, examples });
+  if (/@emphasisType/.test(rule)) {
+    const broken = /BROKENSTRUCT|STUBBORN/.test(proposal) && (!correcting || /STUBBORN/.test(proposal));
+    const examples = [
+      { label: "Sealant step with em01", expected: "accept", schema: ruleSchema, content: 'Apply <emphasis emphasisType="em01">sealant</emphasis> to the fastener threads.' },
+      broken
+        ? { label: "Hot surface warning with em03", expected: "reject", schema: ruleSchema, content: '<warning emphasisType="em03"><content>Hot surface.</content></warning>' }
+        : { label: "Sealant step with em03", expected: "reject", schema: ruleSchema, content: 'Apply <emphasis emphasisType="em03">sealant</emphasis> to the fastener threads.' },
+    ];
+    if (otherSchema) {
+      examples.push({ label: "Description with em03", expected: "accept", schema: otherSchema, content: 'The <emphasis emphasisType="em03">sealant</emphasis> is applied to the threads.' });
+    }
+    return answer("La regla solo admite los valores em01 y em02 en el atributo @emphasisType de <emphasis>.", examples);
   }
-  if (/proced\.xsd/.test(rule)) {
+  if (otherSchema) {
     return answer("La regla prohíbe <emphasis> solo en los módulos de datos procedimentales.", [
-      { label: "Procedural step without emphasis", expected: "accept", schema: "proced", xml: "<proceduralStep>\n  <para>Remove the four bolts from the access panel.</para>\n</proceduralStep>" },
-      { label: "Procedural step with emphasis", expected: "reject", schema: "proced", xml: "<proceduralStep>\n  <para>Remove the <emphasis>four</emphasis> bolts from the access panel.</para>\n</proceduralStep>" },
-      { label: "Descriptive text with emphasis", expected: "accept", schema: "descript", xml: "<levelledPara>\n  <para>The access panel is held by <emphasis>four</emphasis> bolts.</para>\n</levelledPara>" },
+      { label: "Step without emphasis", expected: "accept", schema: ruleSchema, content: "Remove the four bolts from the access panel." },
+      { label: "Step with emphasis", expected: "reject", schema: ruleSchema, content: "Remove the <emphasis>four</emphasis> bolts from the access panel." },
+      { label: "Description with emphasis", expected: "accept", schema: otherSchema, content: "The access panel is held by <emphasis>four</emphasis> bolts." },
     ]);
   }
   return answer("La regla prohíbe el elemento <emphasis> en cualquier módulo de datos.", [
-    { label: "Torque step without emphasis", expected: "accept", schema: null, xml: "<proceduralStep>\n  <para>Torque the bolts to 25 N.m.</para>\n</proceduralStep>" },
-    { label: "Torque step with emphasis", expected: "reject", schema: null, xml: "<proceduralStep>\n  <para>Torque the bolts to <emphasis>25 N.m</emphasis>.</para>\n</proceduralStep>" },
+    { label: "Torque step without emphasis", expected: "accept", schema: ruleSchema, content: "Torque the bolts to 25 N.m." },
+    { label: "Torque step with emphasis", expected: "reject", schema: ruleSchema, content: "Torque the bolts to <emphasis>25 N.m</emphasis>." },
   ]);
 }
 
@@ -263,7 +281,7 @@ const server = http.createServer((req, res) => {
     } else if (isSuggestRule(userText)) {
       reply = suggestRuleReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (isRuleTest(userText)) {
-      reply = ruleTestReply(messages.find((m) => m.role === "system")?.content || "");
+      reply = ruleTestReply(messages.find((m) => m.role === "system")?.content || "", messages);
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
     } else {

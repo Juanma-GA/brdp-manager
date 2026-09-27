@@ -1214,6 +1214,7 @@ export default function RecordsPage() {
                       ruleXml={ruleApproval.rule_xml}
                       format={ruleFormat}
                       standard={project.standard}
+                      schemaLocation={schemaLocationOf(project.project_config)}
                       brdp={selected}
                       aiProvider={aiProvider}
                       vocabulary={vocabulary}

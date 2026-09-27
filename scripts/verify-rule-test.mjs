@@ -1,10 +1,15 @@
-// Live verification for "Test de reglas (T2 de 4)": the Test rule button on
-// a Suggest Rule suggestion and on a saved Draft rule, the panel (verdict,
-// explanation, examples with results, highlighted nodes, the rule's
-// message, "Run again" on an edited example, Regenerate, Copy test prompt),
-// against the real app (Vite + FastAPI + Postgres). Only the Mistral
-// TRANSPORT is mocked: mock-mistral-chat-server.mjs answers the examples
-// prompt with fixed examples chosen from the rule it quotes.
+// Live verification for "Test de reglas" (T2, T2b): the Test rule button on
+// a Suggest Rule suggestion and on a saved Draft rule, the panel (what cannot
+// be tested shown from the start, verdict, explanation, "does not implement
+// the Proposal" warning, examples built on the application's skeleton with
+// the skeleton dimmed and the content highlighted, highlighted nodes, the
+// rule's message, structural problems, the one automatic correction round,
+// "Run again" on an edited example, Copy XML with its indentation,
+// Regenerate, Copy test prompt), against the real app (Vite + FastAPI +
+// Postgres). Only the Mistral TRANSPORT is mocked:
+// mock-mistral-chat-server.mjs answers the examples prompt with fixed
+// content chosen from the rule it quotes (and BROKENSTRUCT/STUBBORN/MISMATCH
+// markers in the Proposal).
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
@@ -30,13 +35,17 @@ function assert(cond, msg) {
   }
 }
 
-const RULE_TYPE = `<structureObjectRule id="BRDP-RT-TYPE" brSeverityLevel="brsl01">
-  <brDecisionRef brDecisionIdentNumber="BRDP-RT-TYPE"/>
-  <objectPath allowedObjectFlag="2">//@emphasisType</objectPath>
-  <objectUse>Only emphasis types em01 and em02 are allowed.</objectUse>
-  <objectValue valueForm="single" valueAllowed="em01"/>
-  <objectValue valueForm="single" valueAllowed="em02"/>
-</structureObjectRule>`;
+const RULE_TYPE = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">
+  <structureObjectRuleGroup>
+    <structureObjectRule id="BRDP-RT-TYPE" brSeverityLevel="brsl01">
+      <brDecisionRef brDecisionIdentNumber="BRDP-RT-TYPE"/>
+      <objectPath allowedObjectFlag="2">//emphasis/@emphasisType</objectPath>
+      <objectUse>Only emphasis types em01 and em02 are allowed.</objectUse>
+      <objectValue valueForm="single" valueAllowed="em01"/>
+      <objectValue valueForm="single" valueAllowed="em02"/>
+    </structureObjectRule>
+  </structureObjectRuleGroup>
+</contextRules>`;
 const RULE_PROCED = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">
   <structureObjectRuleGroup>
     <structureObjectRule id="BRDP-RT-PROCED">
@@ -49,10 +58,14 @@ const RULE_DOC = `<structureObjectRule id="BRDP-RT-DOC">
   <objectPath allowedObjectFlag="0">document('common.xml')//emphasis</objectPath>
   <objectUse>No emphasis in the common file.</objectUse>
 </structureObjectRule>`;
-const RULE_BROKEN = `<structureObjectRule id="BRDP-RT-BROKEN">
+const RULE_EMPH = `<structureObjectRule id="BRDP-RT-X">
   <objectPath allowedObjectFlag="0">//emphasis</objectPath>
   <objectUse>No emphasis.</objectUse>
 </structureObjectRule>`;
+const RULE_301 = `<objrule id="BRDP-RT-301">
+  <objpath objappl="0">//emphasis</objpath>
+  <objuse>No emphasis.</objuse>
+</objrule>`;
 
 async function main() {
   const token = (
@@ -101,19 +114,27 @@ async function main() {
   // ---- seed ----
   const p42 = await makeProject("Rule test 4.2", "S1000D 4.2");
   const emph = await makeBrdp(p42, { identifier: "BRDP-RT-EMPH", title: "Use of the element <emphasis>", proposal: "The element <emphasis> shall not be used." });
-  const type = await makeBrdp(p42, { identifier: "BRDP-RT-TYPE", title: "Emphasis types", proposal: "@emphasisType shall only take em01 and em02." });
+  const type = await makeBrdp(p42, { identifier: "BRDP-RT-TYPE", title: "Emphasis types", proposal: "In procedural data modules, @emphasisType shall only take em01 and em02." });
   const proced = await makeBrdp(p42, { identifier: "BRDP-RT-PROCED", title: "Emphasis in procedures", proposal: "In procedural data modules, <emphasis> shall not be used." });
   const doc = await makeBrdp(p42, { identifier: "BRDP-RT-DOC", title: "Common file", proposal: "The common file shall not use emphasis." });
   const broken = await makeBrdp(p42, { identifier: "BRDP-RT-BROKEN", title: "Broken answer", proposal: "BROKENJSON: the mock returns a truncated answer." });
+  const fixable = await makeBrdp(p42, { identifier: "BRDP-RT-FIX", title: "Emphasis types (fix)", proposal: "BROKENSTRUCT: in procedural data modules, @emphasisType shall only take em01 and em02." });
+  const stubborn = await makeBrdp(p42, { identifier: "BRDP-RT-STUB", title: "Emphasis types (stubborn)", proposal: "STUBBORN: in procedural data modules, @emphasisType shall only take em01 and em02." });
+  const mismatch = await makeBrdp(p42, { identifier: "BRDP-RT-MISM", title: "CAGE codes", proposal: "MISMATCH: permitted CAGE codes shall be listed in the front matter." });
   await putDraft(p42, type, "BREX-4.2", RULE_TYPE);
   await putDraft(p42, proced, "BREX-4.2", RULE_PROCED);
   await putDraft(p42, doc, "BREX-4.2", RULE_DOC);
-  await putDraft(p42, broken, "BREX-4.2", RULE_BROKEN);
+  await putDraft(p42, broken, "BREX-4.2", RULE_EMPH);
+  await putDraft(p42, fixable, "BREX-4.2", RULE_TYPE.replaceAll("BRDP-RT-TYPE", "BRDP-RT-FIX"));
+  await putDraft(p42, stubborn, "BREX-4.2", RULE_TYPE.replaceAll("BRDP-RT-TYPE", "BRDP-RT-STUB"));
+  await putDraft(p42, mismatch, "BREX-4.2", RULE_EMPH.replace("BRDP-RT-X", "BRDP-RT-MISM"));
+  const p301 = await makeProject("Rule test 3.0.1", "S1000D 3.0.1");
+  const b301 = await makeBrdp(p301, { identifier: "BRDP-RT-301", title: "Use of <emphasis>", proposal: "The element <emphasis> shall not be used." });
+  await putDraft(p301, b301, "BREX-3.0.1", RULE_301);
   const pDita = await makeProject("Rule test DITA", "DITA 1.3 Xpath2.0");
   const dita = await makeBrdp(pDita, { identifier: "BRDP-RT-DITA", title: "Notes", proposal: "Every note shall declare a type." });
   await putDraft(pDita, dita, "SCH-DITA", '<sch:pattern id="p1"><sch:rule context="note"><sch:assert id="a1" test="@type">Type.</sch:assert></sch:rule></sch:pattern>');
-  for (const p of [p42, pDita]) await embed(p);
-  void emph;
+  for (const p of [p42, p301, pDita]) await embed(p);
 
   // ---- UI ----
   const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
@@ -149,7 +170,8 @@ async function main() {
     await page.waitForTimeout(300);
     await openProject(p42);
 
-    // 1. //emphasis flag 0, on a Suggest Rule suggestion (before Accept).
+    // 1. //emphasis flag 0 in 4.2, on a Suggest Rule suggestion (before
+    //    Accept): as before, now inside a real descript skeleton.
     await select("BRDP-RT-EMPH");
     await page.getByRole("button", { name: "Suggest Rule" }).click();
     await page.getByRole("button", { name: "Discard" }).waitFor({ timeout: 15000 });
@@ -161,12 +183,14 @@ async function main() {
     const req1 = await lastRequest();
     const sys1 = req1.messages.find((m) => m.role === "system").content;
     assert(req1.temperature === 0.5, `examples prompt sent with RULE_TEST_TEMPERATURE (got ${req1.temperature})`);
-    assert(sys1.includes("<objectPath allowedObjectFlag=\"0\">//emphasis</objectPath>"), "the prompt quotes the suggested rule (in memory, not saved)");
+    assert(sys1.includes('<objectPath allowedObjectFlag="0">//emphasis</objectPath>'), "the prompt quotes the suggested rule (in memory, not saved)");
+    assert(sys1.includes('your content goes directly inside <para>, at\n  dmodule/content/description/levelledPara/para.'), "general rule: the prompt offers the descript skeleton's <para>");
     assert(sys1.includes("SCHEMA FACTS") && sys1.includes("<emphasis>"), "the prompt carries the schema facts of the rule's element");
     assert((await verdict().textContent()).startsWith("Correct"), `//emphasis: verdict correct (${await verdict().textContent()})`);
     assert((await panel().textContent()).includes("La regla prohíbe el elemento <emphasis>"), "explanation shown");
     assert((await example(0).getByTestId("rule-test-result").textContent()).includes("Result: accepted ✓"), "//emphasis: accept example accepted");
     assert((await example(1).getByTestId("rule-test-result").textContent()).includes("Result: rejected ✓"), "//emphasis: reject example rejected");
+    assert((await example(1).locator("pre").textContent()).includes("<levelledPara>"), "//emphasis: example built on the real descript skeleton");
     const marks1 = await example(1).locator("mark").allTextContents();
     assert(marks1.join("") === "<emphasis></emphasis>", `//emphasis: <emphasis> highlighted in the rejected example (${JSON.stringify(marks1)})`);
     assert((await example(0).locator("mark").count()) === 0, "//emphasis: nothing highlighted in the accepted example");
@@ -177,30 +201,64 @@ async function main() {
     assert(okColor === "rgb(22, 163, 74)", `accepted result in green (${okColor})`);
     const approvalBefore = await api(`/api/projects/${p42.id}/brdps/${emph.id}/approvals/BREX-4.2`);
     assert(approvalBefore.status === 404 || (await approvalBefore.json()) === null, "testing a suggestion saves nothing");
+    assert((await panel().getByTestId("rule-test-analysis").count()) === 0, "an executable rule shows no analysis warning");
     await panel().screenshot({ path: "/tmp/rule-test-emphasis.png" });
     await page.getByRole("button", { name: "Discard" }).first().click();
 
-    // 2. @emphasisType em01/em02, on a saved Draft rule.
+    // 2. @emphasisType em01/em02 limited to proced, on a saved Draft rule.
     await select("BRDP-RT-TYPE");
     await page.getByRole("button", { name: "Test rule" }).click();
     await waitVerdict();
-    assert((await verdict().textContent()).startsWith("Correct"), "@emphasisType: verdict correct");
-    assert((await example(1).getByTestId("rule-test-result").textContent()).includes("rejected"), "@emphasisType: em05 rejected");
-    assert((await example(1).textContent()).includes("Rule's message: Only emphasis types em01 and em02 are allowed."), "@emphasisType: em05 shows the rule's message");
-    assert((await example(0).getByTestId("rule-test-result").textContent()).includes("accepted"), "@emphasisType: em01 accepted");
+    const sys2 = (await lastRequest()).messages.find((m) => m.role === "system").content;
+    assert(sys2.includes('schema "proced": your content goes directly inside <para>, at\n  dmodule/content/procedure/mainProcedure/proceduralStep/para.'), "proced skeleton offered to the LLM");
+    assert(sys2.includes('Add a third example of the descript schema ("schema": "descript",'), "context rule: the prompt asks for a descript example");
+    assert((await verdict().textContent()).startsWith("Correct"), `proced @emphasisType: verdict correct (${await verdict().textContent()})`);
+    const xml1 = await example(1).locator("pre").textContent();
+    assert(xml1.includes("<proceduralStep>") && xml1.includes("<mainProcedure>") && xml1.includes('emphasisType="em03"'), "examples with proceduralStep/para/emphasis");
+    assert(xml1.includes('xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd"'), "the skeleton carries the proced schema location");
+    assert((await example(1).getByTestId("rule-test-result").textContent()).includes("rejected"), "em03 rejected");
+    assert((await example(1).textContent()).includes("Rule's message: Only emphasis types em01 and em02 are allowed."), "em03 shows the rule's message");
+    assert((await example(2).getByTestId("rule-test-result").textContent()).includes("Result: accepted ✓"), "descript example accepted");
+    assert((await example(2).textContent()).includes("The rule does not apply to the descript schema."), "descript example: does not apply");
     const marks2 = await example(1).locator("mark").allTextContents();
-    assert(JSON.stringify(marks2) === JSON.stringify(['emphasisType="em05"']), `@emphasisType: only the attribute highlighted (${JSON.stringify(marks2)})`);
+    assert(JSON.stringify(marks2) === JSON.stringify(['emphasisType="em03"']), `only the attribute highlighted (${JSON.stringify(marks2)})`);
+    // Skeleton dimmed, content highlighted.
+    const skeletonSpan = example(1).locator("pre span", { hasText: "<proceduralStep" }).first();
+    const skColor = await skeletonSpan.evaluate((el) => getComputedStyle(el).color);
+    assert(skColor === "rgb(148, 163, 184)", `skeleton dimmed (${skColor})`);
+    const contentSpan = example(1).locator("pre span", { hasText: "sealant" }).first();
+    const ctBg = await contentSpan.evaluate((el) => getComputedStyle(el).backgroundColor);
+    assert(ctBg === "rgb(224, 242, 254)", `content highlighted (${ctBg})`);
+    // Part 6: whole, indented, inside its block -- on screen and copied.
+    const fits = await example(1).locator("pre").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+    assert(fits, "the multi-line example fits its block (no hidden overflow)");
+    const indented = await example(1).locator("pre > div").nth(5).evaluate((el) => getComputedStyle(el).paddingLeft);
+    assert(indented === `${5 * 2 * 7.2}px` || parseFloat(indented) > 50, `deep lines indented on screen (${indented})`);
+    await example(1).getByRole("button", { name: "Copy XML" }).click();
+    const copiedXml = await page.evaluate(() => navigator.clipboard.readText());
+    assert(copiedXml.split("\n")[5]?.startsWith("          <para>"), `Copy XML keeps the indentation (${JSON.stringify(copiedXml.split("\n").slice(4, 7))})`);
+    const selectedText = await example(1).locator("pre").evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return sel.toString();
+    });
+    assert(/\n {8}<proceduralStep>/.test(selectedText), "a mouse selection copies the indentation too");
     await panel().screenshot({ path: "/tmp/rule-test-emphasis-type.png" });
 
-    // Edit em05 → em02 and Run again: no LLM call, result becomes accepted.
+    // Edit the content em03 → em02 and Run again: no LLM call.
     const before = JSON.stringify(await lastRequest());
     await example(1).getByRole("button", { name: "Edit" }).click();
     const editor = example(1).locator("textarea");
-    await editor.fill((await editor.inputValue()).replace("em05", "em02"));
+    assert(!(await editor.inputValue()).includes("<dmodule"), "Edit opens the content only (the skeleton is the application's)");
+    await editor.fill((await editor.inputValue()).replace("em03", "em02"));
     await example(1).getByRole("button", { name: "Run again" }).click();
     await page.waitForTimeout(300);
-    assert((await example(1).getByTestId("rule-test-result").textContent()).includes("Result: accepted ✗"), "edited to em02 + Run again → accepted (no longer what the example expected)");
-    assert((await verdict().textContent()).startsWith("The rule accepted an example meant to violate it."), "verdict now says the rule accepted an example meant to violate it");
+    assert((await example(1).getByTestId("rule-test-result").textContent()).includes("Result: accepted ✗"), "edited to em02 + Run again → accepted");
+    assert((await verdict().textContent()).startsWith("The rule accepted an example meant to violate it."), "verdict: the rule accepted an example meant to violate it");
+    assert((await example(1).locator("pre").textContent()).includes("<proceduralStep>"), "the edited content is rebuilt on the skeleton");
     assert(JSON.stringify(await lastRequest()) === before, "Run again made no LLM call");
     const saved = await api(`/api/projects/${p42.id}/brdps/${type.id}/approvals/BREX-4.2`).then((r) => r.json());
     assert(saved.rule_xml === RULE_TYPE && saved.status === "pending_review", "Run again saved nothing");
@@ -208,39 +266,60 @@ async function main() {
     // Copy test prompt = the prompt that was sent + the user message.
     await page.getByRole("button", { name: "Copy test prompt" }).click();
     const clip = await page.evaluate(() => navigator.clipboard.readText());
-    const req2 = await lastRequest();
-    const sys2 = req2.messages.find((m) => m.role === "system").content;
     assert(clip === `${sys2}\n\nWrite the test examples for this rule.`, "Copy test prompt copies exactly the prompt sent");
 
-    // Regenerate: a new LLM call, the edit is gone.
-    await fetch(`${MOCK}/reset`, { method: "POST" }).catch(() => {});
     await page.getByRole("button", { name: "Regenerate examples" }).click();
     await waitVerdict();
     assert((await verdict().textContent()).startsWith("Correct"), "Regenerate: fresh examples, verdict correct again");
     await page.getByRole("button", { name: "Close" }).click();
     assert((await panel().count()) === 0, "Close hides the panel");
 
-    // 3. <emphasis> forbidden only in proced: the descript example is accepted.
-    await select("BRDP-RT-PROCED");
+    // 3. <warning><content>: one correction round fixes it.
+    await select("BRDP-RT-FIX");
     await page.getByRole("button", { name: "Test rule" }).click();
     await waitVerdict();
-    const sys3 = (await lastRequest()).messages.find((m) => m.role === "system").content;
-    assert(sys3.includes('Add a third example from the descript schema ("schema": "descript",'), "context rule: the prompt asks for a descript example");
-    assert((await verdict().textContent()).startsWith("Correct"), "proced-only: verdict correct");
-    assert((await example(2).getByTestId("rule-test-result").textContent()).includes("Result: accepted ✓"), "descript example with <emphasis> accepted");
-    assert((await example(2).textContent()).includes("The rule does not apply to the descript schema."), "descript example says the rule does not apply there");
-    assert((await example(1).getByTestId("rule-test-result").textContent()).includes("rejected"), "proced example with <emphasis> rejected");
-    await panel().screenshot({ path: "/tmp/rule-test-proced-context.png" });
+    const req3 = await lastRequest();
+    const nonSystem = req3.messages.filter((m) => m.role !== "system");
+    assert(nonSystem.length === 3 && nonSystem[1].role === "assistant", "correction round: first answer sent back + the problems");
+    const correction = nonSystem[2].content;
+    assert(correction.includes('Example 2 ("Hot surface warning with em03"):') && correction.includes("- <content> is not allowed inside <warning>") && correction.includes("- <warning> is not allowed inside <para>") && correction.includes("- @emphasisType does not exist on <warning>"), `correction lists the exact problems (${correction})`);
+    assert((await page.getByTestId("rule-test-correction").textContent()) === "1 example was corrected automatically.", "correction note shown");
+    assert((await verdict().textContent()).startsWith("Correct"), "after the correction the verdict is correct");
 
-    // 4. document(): reason visible, examples visible, no results.
-    await select("BRDP-RT-DOC");
+    // 4. Still broken after the correction: shown with concrete messages, not run.
+    await select("BRDP-RT-STUB");
     await page.getByRole("button", { name: "Test rule" }).click();
     await waitVerdict();
-    assert((await verdict().textContent()).includes("The rule reads another file (document())"), `document(): the engine's reason is shown (${await verdict().textContent()})`);
+    assert((await page.getByTestId("rule-test-correction").textContent()).includes("fixed 0 of 1"), "correction note: 0 of 1 fixed");
+    const stubText = await example(1).textContent();
+    assert(stubText.includes("Not run:") && stubText.includes("<content> is not allowed inside <warning>") && stubText.includes("@emphasisType does not exist on <warning>"), `structural problems shown on the example (${stubText})`);
+    assert((await example(1).getByTestId("rule-test-result").count()) === 0, "the broken example is not run");
+    assert((await example(1).locator("pre").count()) === 1, "the broken example stays visible");
+    await panel().screenshot({ path: "/tmp/rule-test-structure-problems.png" });
+
+    // 5. document(): the reason at the top from the start, examples still generated.
+    await select("BRDP-RT-DOC");
+    await fetch(`${MOCK}/slow-next`, { method: "POST" });
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await panel().getByText("Writing example fragments…").waitFor({ timeout: 5000 });
+    const early = await panel().getByTestId("rule-test-analysis").textContent();
+    assert(early.includes("This rule can't be tested: The rule reads another file (document())"), `document(): reason shown while the examples are still being written (${early})`);
+    await example(0).waitFor({ timeout: 15000 });
     assert((await example(0).locator("pre").count()) === 1 && (await example(1).locator("pre").count()) === 1, "document(): the examples stay visible");
     assert((await panel().getByTestId("rule-test-result").count()) === 0, "document(): no result lines");
+    assert((await panel().getByTestId("rule-test-verdict").count()) === 0, "document(): the reason is not repeated as a verdict");
+    await panel().screenshot({ path: "/tmp/rule-test-document-reason.png" });
 
-    // 5. Broken JSON: error with Regenerate, nothing run.
+    // 6. A rule that does not implement the Proposal.
+    await select("BRDP-RT-MISM");
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await waitVerdict();
+    const mism = await page.getByTestId("rule-test-mismatch").textContent();
+    assert(mism.includes("Indicative: This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."), `mismatch warning (${mism})`);
+    const sys6 = (await lastRequest()).messages.find((m) => m.role === "system").content;
+    assert(sys6.includes("saying what the RULE checks, read from its XML") && sys6.includes("<dmRef>"), "prompt: explanation from the rule, no text in references");
+
+    // 7. Broken JSON: error with Regenerate, nothing run.
     await select("BRDP-RT-BROKEN");
     await page.getByRole("button", { name: "Test rule" }).click();
     await panel().getByRole("alert").waitFor({ timeout: 15000 });
@@ -248,20 +327,29 @@ async function main() {
     assert((await panel().getByRole("button", { name: "Regenerate examples" }).count()) === 1, "broken JSON: Regenerate offered");
     assert((await page.getByTestId("rule-test-example-0").count()) === 0, "broken JSON: nothing executed or shown");
 
-    // 6. DITA: no Test rule (the engine runs BREX only).
+    // 8. 3.0.1: its own skeleton.
+    await openProject(p301);
+    await select("BRDP-RT-301");
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await waitVerdict();
+    const xml301 = await example(1).locator("pre").textContent();
+    assert(xml301.includes("<para0>") && xml301.includes("<descript>") && !xml301.includes("levelledPara"), "3.0.1: descript/para0/para skeleton");
+    assert((await verdict().textContent()).startsWith("Correct"), `3.0.1: verdict correct (${await verdict().textContent()})`);
+
+    // 9. DITA: no Test rule (the engine runs BREX only).
     await openProject(pDita);
     await select("BRDP-RT-DITA");
     assert((await page.getByRole("button", { name: "Test rule" }).count()) === 0, "DITA Draft rule: no Test rule button");
 
-    // 7. Spanish UI.
+    // 10. Spanish UI.
     await openProject(p42);
-    await select("BRDP-RT-TYPE");
+    await select("BRDP-RT-STUB");
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(300);
     await page.getByRole("button", { name: "Probar regla" }).click();
     await waitVerdict();
-    assert((await verdict().textContent()).startsWith("Correcto"), "Spanish: verdict translated");
-    assert((await example(1).textContent()).includes("Esperado: rechazado"), "Spanish: expected/result translated");
+    const es = await example(1).textContent();
+    assert(es.includes("No ejecutado:") && es.includes("<content> no está permitido dentro de <warning>"), "Spanish: structural problems translated");
     await page.locator("header select, nav select").first().selectOption("en");
   } finally {
     await browser.close();

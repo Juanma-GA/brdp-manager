@@ -15,6 +15,14 @@
 // (see this round's own CLAUDE.md entry). No backend, Postgres, or LLM
 // provider needed -- these are pure functions.
 //
+// Test rule T2b: the 4 ruleTestExamples prompts changed deliberately -- the
+// LLM now writes only the content of an insertion point on an application
+// skeleton (placements from scripts/rule-test-fixtures/structures.json),
+// the explanation is read from the rule's XML, a "proposalMismatch" field
+// and the no-text-in-references line were added; new case
+// brex-4-2-proced-insertion-mainprocedure (insertion point other than
+// <para>). The 19 other prompts are unchanged.
+//
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a
 // few rounds back) means expected-prompts.json is stale by design, not
