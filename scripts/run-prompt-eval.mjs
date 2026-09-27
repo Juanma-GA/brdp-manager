@@ -173,7 +173,17 @@ function usesObjectValue(xml) {
 
 async function runCheck(check, answer, ctx = {}) {
   const flags = check.flags || "";
-  const target = check.target === "final" ? ctx.finalRule ?? "" : check.target === "xml" ? ctx.xml ?? "" : answer;
+  // "xpath": only the rule's XPath expressions (objectPath/objpath, or
+  // Schematron @context/@test), entity-decoded, one per line -- so a check
+  // on the path never matches the objectUse text.
+  const target =
+    check.target === "final"
+      ? ctx.finalRule ?? ""
+      : check.target === "xml"
+        ? ctx.xml ?? ""
+        : check.target === "xpath"
+          ? extractRuleXPaths(ctx.xml || "").join("\n")
+          : answer;
   switch (check.type) {
     case "xml_well_formed": {
       const r = await xmlWellFormed(ctx.xml);

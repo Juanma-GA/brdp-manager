@@ -559,6 +559,12 @@
             "\\s!\\s"
           ],
           "note": "no XPath 3.0-only syntax under queryBinding xslt2"
+        },
+        {
+          "type": "not_contains",
+          "target": "xml",
+          "pattern": "test=\"false\\(\\)\"",
+          "note": "the condition goes in @test (context=\"note\", test=\"@type\"), never in @context with test=\"false()\""
         }
       ]
     },
@@ -646,8 +652,75 @@
           "note": "the saved rule is wrapped in the proced block"
         },
         {
+          "type": "not_contains",
+          "target": "xpath",
+          "pattern": "ancestor|proced",
+          "note": "objectPath never filters by schema -- the app adds the context block"
+        },
+        {
           "type": "manual",
           "note": "<objectUse> reads naturally for procedural data modules (it may name the schema)."
+        }
+      ]
+    },
+    {
+      "id": "rule-3-0-1-limited-to-descript",
+      "description": "Suggest Rule, S1000D 3.0.1, project in Master schema location, schema fixed to descript (as if chosen in the selector): objpath without a schema filter, final rule wrapped in the master descript URL.",
+      "standard": "S1000D 3.0.1",
+      "type": "suggest-rule",
+      "schemas": [
+        "descript"
+      ],
+      "schemaLocation": "master",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-07",
+        "title": "Emphasis in descriptions",
+        "definition": "Decide whether emphasis is allowed in descriptive data modules.",
+        "proposal": "In descriptive data modules, <emphasis> shall not be used.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false,
+          "note": "a checkable decision must get a rule, never NOT_CHECKABLE"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "<objrule\\b"
+        },
+        {
+          "type": "contains",
+          "target": "xpath",
+          "pattern": "emphasis"
+        },
+        {
+          "type": "not_contains",
+          "target": "xpath",
+          "pattern": "ancestor|descript",
+          "note": "objpath never filters by schema -- the app adds the context block (a real run wrote //emphasis[ancestor-or-self::descript])"
+        },
+        {
+          "type": "not_contains",
+          "target": "xml",
+          "pattern": "<contextrules",
+          "note": "the LLM never writes the context block"
+        },
+        {
+          "type": "contains",
+          "target": "final",
+          "pattern": "<contextrules context=\"http://www\\.s1000d\\.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema\\.xsd\">",
+          "note": "the saved rule's context is the master URL of descript"
         }
       ]
     }

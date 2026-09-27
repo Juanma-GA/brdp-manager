@@ -40,17 +40,29 @@ function precedentLines(candidates, withSource) {
     .join('\n\n');
 }
 
-function scopeText(schemaContext) {
+function scopeText(schemaContext, format) {
   const schemas = schemaContext?.schemas || [];
   if (schemas.length === 0) {
     return `The rule applies to every schema (it is a general rule,
 not tied to one document type).`;
   }
   const list = schemas.join(', ');
+  const path = format === 'BREX-3.0.1' ? 'objpath' : 'objectPath';
+  const use = format === 'BREX-3.0.1' ? 'objuse' : 'objectUse';
+  // A real Mistral run (3.0.1, descript chosen) wrote
+  // //emphasis[ancestor-or-self::descript] -- filtering by schema inside the
+  // path although the app already wraps the rule in the schema's block. The
+  // example uses invented names so it can't be copied into a real rule.
   return `The rule applies ONLY to documents written against the
 schema${schemas.length > 1 ? 's' : ''} ${list}. The application places your rule inside one context block per
 schema itself — write only the rule element described below, never a
-context block. <objectUse> may name the schema${schemas.length > 1 ? 's' : ''} it applies to.`;
+context block. <${use}> may name the schema${schemas.length > 1 ? 's' : ''} it applies to.
+Because the application adds the schema context, write <${path}> exactly as
+you would for any document: no predicate or step that filters by schema or
+document type. Example (invented names, not from this BRDP):
+   Correct: //acmeElement
+   Wrong:   //acmeElement[ancestor::acmeSchema]
+   Wrong:   //acmeSchema//acmeElement`;
 }
 
 // `references` is { sameBrdp, similar, formatExamples } -- formatExamples
@@ -66,7 +78,7 @@ Decision Points), assisting in BRDP Manager.
 TASK: implement, as ONE ${schemaContext?.schemas?.length ? '' : 'general '}rule in the ${standard} rule format below,
 the decision already taken in the BRDP's Proposal. Do not change the
 decision, do not widen or narrow it, and do not add checks the Proposal
-does not ask for. ${scopeText(schemaContext)}
+does not ask for. ${scopeText(schemaContext, format)}
 
 ${ruleFormatRules(format, standard)}`;
 

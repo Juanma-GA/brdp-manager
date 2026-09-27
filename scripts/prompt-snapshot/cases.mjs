@@ -245,6 +245,20 @@ export const suggestRuleCases = [
     args: [brdpRule, 'S1000D 3.0.1', 'BREX-3.0.1', { sameBrdp: [], similar: [], formatExamples: ruleFormatExamples301 }, []],
   },
   {
+    // Prompt adjustments after the 0c19b28 photo: 3.0.1 with a chosen
+    // schema -- the "no schema filter in <objpath>" paragraph and the
+    // objuse/objpath element names of that issue.
+    name: 'brex-3-0-1-descript-context',
+    args: [
+      { ...brdpRule, title: 'Emphasis in descriptions', proposal: 'In descriptive data modules, <emphasis> shall not be used.' },
+      'S1000D 3.0.1',
+      'BREX-3.0.1',
+      { sameBrdp: [], similar: [], formatExamples: ruleFormatExamples301 },
+      [],
+      { schemas: ['descript'] },
+    ],
+  },
+  {
     name: 'sch-dita-xpath2-no-references',
     args: [{ ...brdpRule, proposal: 'Every <note> shall declare @type.' }, 'DITA 1.3 Xpath2.0', 'SCH-DITA', { sameBrdp: [], similar: [], formatExamples: [] }, []],
   },

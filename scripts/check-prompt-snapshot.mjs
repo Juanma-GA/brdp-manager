@@ -138,6 +138,26 @@
 // and a wrong example on an invented element (acmeElement). Changes the 5
 // BREX suggestRule cases; SCH-DITA and every Ask/Definition/Proposal case
 // are unchanged.
+//
+// Prompt adjustments after the 0c19b28 photo against real Mistral:
+// expected-prompts.json regenerated for two deliberate reasons, plus one NEW
+// case. (1) suggestRulePrompt.js: with schemas chosen, the TASK now says the
+// application adds the schema context, so <objectPath>/<objpath> never
+// filters by schema (correct //acmeElement, wrong
+// //acmeElement[ancestor::acmeSchema] and //acmeSchema//acmeElement) -- a
+// real 3.0.1 run wrote //emphasis[ancestor-or-self::descript]; the
+// "<objectUse> may name the schema" line also names 3.0.1's own element
+// (<objuse>). Changes suggestRule/brex-4-2-proced-context; the NEW case
+// suggestRule/brex-3-0-1-descript-context covers 3.0.1. With no schema
+// chosen the prompt is unchanged byte for byte (every other BREX case).
+// (2) ruleFormatRules.js, SCH-DITA rule 4: @context selects the elements,
+// @test states the condition, never the condition in @context with
+// test="false()" (correct/wrong example on acmeElement/@acmeAttr, never
+// note/@type); test="false()" stays only for an absolute prohibition. 2 of 3
+// real runs of rule-dita-xpath2-schematron wrote
+// context="note[not(@type)]" + test="false()". Changes the two SCH-DITA
+// cases. ASK_TEMPERATURE 1 -> 0.7 is not part of any prompt text, so no Ask
+// case changes.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

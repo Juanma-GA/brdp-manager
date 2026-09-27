@@ -79,7 +79,10 @@ function schDita(standard) {
 1. Output exactly one <sch:pattern id="p-{ID}"> containing ONE <sch:rule context="...">. {ID} is the BRDP's ID. No <sch:schema> wrapper, no XML comments. ${xpathLine}
 2. If the decision needs more than one independent check, put them all inside that SAME sch:rule as separate sch:assert/sch:report elements. Each sch:assert/sch:report has id="{ID}", or "{ID}-slug" with a short descriptive slug when there is more than one — never the same id twice.
 3. context MUST be a valid match pattern: an element name, a union of element names with "|", and predicates on that node. NEVER start context with a reverse axis (ancestor::, parent::, preceding::, preceding-sibling::) — put ancestor/parent checks inside test instead.
-4. Absolute prohibition of an element with no exceptions -> context targets the forbidden element itself, test="false()".
+4. sch:rule/@context selects the elements to check; sch:assert/@test states the condition they must meet. Never put the condition in @context and pair it with test="false()". Example (invented names, not from this BRDP) for "every <acmeElement> shall carry @acmeAttr":
+   Correct: <sch:rule context="acmeElement"><sch:assert id="{ID}" test="@acmeAttr" role="error">…</sch:assert></sch:rule>
+   Wrong:   <sch:rule context="acmeElement[not(@acmeAttr)]"><sch:assert id="{ID}" test="false()" role="error">…</sch:assert></sch:rule>
+   test="false()" is only for an absolute prohibition of an element with no exceptions: context is the forbidden element itself, with no predicate.
 5. Closed list of permitted values -> test="@attr = ('v1','v2','v3')". Never a regex for a short closed list.
 6. Attribute format constraint -> matches(@attr, '^...$', 'i'), anchored, applied to the attribute that ACTUALLY carries that data.
 7. Nesting-depth limit -> count(ancestor::element-name) compared with a relational operator. Never nested positional predicates.

@@ -17,10 +17,11 @@ export const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Ve
 // leaving Ask on sendMessage()'s implicit default or hardcoding Suggest's
 // 0.3 inline, and scripts/run-prompt-eval.mjs imports the SAME constants
 // so it measures the app's real behavior, never a copied number that could
-// drift from it. Ask stays conversational (default sampling); Suggest
-// writes directly into a BRDP field, where a drifting/inventive text is
-// worse than a slightly-repetitive one.
-export const ASK_TEMPERATURE = 1;
+// drift from it. Ask stays conversational but below the default 1 -- a
+// real Mistral run at 1 slipped a German word into a Spanish answer
+// (ask-para-placement); Suggest writes directly into a BRDP field, where a
+// drifting/inventive text is worse than a slightly-repetitive one.
+export const ASK_TEMPERATURE = 0.7;
 export const SUGGEST_TEMPERATURE = 0.3;
 
 // A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
