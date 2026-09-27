@@ -19,6 +19,9 @@ import { DOMParser } from '@xmldom/xmldom';
 import XLSX from 'xlsx';
 import { runRuleOnFragment } from '../src/utils/ruleTestEngine.js';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
+import { brexToSchematron } from '../src/api/brexToSchematron.js';
+import { wrapRuleXmlFragment } from '../src/utils/ruleXmlFragment.js';
+import fontoxpath from 'fontoxpath';
 
 let passed = 0;
 let failed = 0;
@@ -38,7 +41,35 @@ function parseXml(text) {
   if (messages.length) throw new Error(messages[0].replace(/^\[xmldom \w+\]\s*/, '').split('\n')[0]);
   return doc;
 }
-const run = (rule, format, fragment, schema = null) => runRuleOnFragment(rule, format, fragment, schema, { parseXml });
+// Every engine run of a rule with values is replayed through the Schematron
+// that Generate would produce (section 3): same rule, same fragment.
+const valueRuns = [];
+const run = (rule, format, fragment, schema = null) => {
+  const result = runRuleOnFragment(rule, format, fragment, schema, { parseXml });
+  if (/<(objectValue|objval)\b/.test(rule)) valueRuns.push({ rule, format, fragment, schema, result });
+  return result;
+};
+const toSchematron = (rule) => brexToSchematron(wrapRuleXmlFragment(rule), { DOMParserImpl: DOMParser });
+
+// The verdict of the generated Schematron on a fragment, evaluated with
+// fontoxpath: every sch:rule context (a pattern, matched as a path from the
+// document) and its sch:assert test; any failed assert means rejected.
+const SCH_NS = { xsi: 'http://www.w3.org/2001/XMLSchema-instance', xlink: 'http://www.w3.org/1999/xlink' };
+function schematronVerdict(rule, fragment) {
+  const sch = parseXml(toSchematron(rule));
+  const doc = parseXml(fragment);
+  const options = { language: fontoxpath.evaluateXPath.XPATH_3_1_LANGUAGE, namespaceResolver: (p) => (p ? SCH_NS[p] ?? null : null) };
+  const rules = Array.from(sch.getElementsByTagName('sch:rule'));
+  for (const r of rules) {
+    const context = r.getAttribute('context');
+    const nodes = fontoxpath.evaluateXPathToNodes(context.startsWith('/') ? context : `//${context}`, doc, null, null, options);
+    const test = r.getElementsByTagName('sch:assert')[0].getAttribute('test');
+    for (const node of nodes) {
+      if (!fontoxpath.evaluateXPathToBoolean(test, node, null, null, options)) return 'rejected';
+    }
+  }
+  return 'accepted';
+}
 
 function expect(name, result, status, extra = {}) {
   check(`${name}: status ${status}`, result.status === status, JSON.stringify(result));
@@ -117,15 +148,23 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
   expect('text range, inside', run(text, 'BREX-4.2', '<x caveat="cv05"/>'), 'accepted');
   expect('text range, outside', run(text, 'BREX-4.2', '<x caveat="cv30"/>'), 'rejected');
   expect('range mixing number and text', run(sor('2', '//@a', ov('range', '1~b')), 'BREX-4.2', '<x a="1"/>'), 'not_executable',
-    { reason: "Range '1~b' mixes a number and text; the comparison is not confirmed." });
+    { reason: "Range '1~b' mixes a number and text; Generate compares it as text and flags it, so the test gives no verdict." });
+  const mixedSch = toSchematron(sor('2', '//@a', ov('range', '1~b')).replace('<structureObjectRule>', '<structureObjectRule id="R-MIX">'));
+  check('mixed range: the generated Schematron carries a warning comment', mixedSch.includes("<!-- R-MIX: range '1~b' mixes a number and text; it is compared as text -->"), mixedSch);
+  check('mixed range: the generated Schematron still compares as text', mixedSch.includes("string(.) ge '1' and string(.) le 'b'"), mixedSch);
+  expect('encargo: range 1~10 with 5', run(numeric, 'BREX-4.2', '<x level="5"/>'), 'accepted');
+  expect('encargo: range em01~em05 with em03', run(sor('2', '//@code', ov('range', 'em01~em05')), 'BREX-4.2', '<x code="em03"/>'), 'accepted');
+  expect('range em01~em05 with em07', run(sor('2', '//@code', ov('range', 'em01~em05')), 'BREX-4.2', '<x code="em07"/>'), 'rejected');
+  check('numeric range compiles to number(.)', toSchematron(numeric).includes("number(.) ge number('1') and number(.) le number('10')"), toSchematron(numeric));
   expect('range without ~', run(sor('2', '//@a', ov('range', '1-10')), 'BREX-4.2', '<x a="1"/>'), 'not_executable',
     { reason: "Range '1-10' is not in the form from~to." });
 
   const pattern = sor('2', '//@code', ov('pattern', 'em0[1-2]'));
   expect('pattern, whole value matches', run(pattern, 'BREX-4.2', '<x code="em01"/>'), 'accepted');
   expect('pattern, no match', run(pattern, 'BREX-4.2', '<x code="xx"/>'), 'rejected');
-  expect('pattern matching only part of the value (anchoring unconfirmed)', run(pattern, 'BREX-4.2', '<x code="em01x"/>'), 'not_executable',
-    { reason: "Pattern 'em0[1-2]' matches only part of the value 'em01x'; whether a pattern must match the whole value is not confirmed." });
+  expect('pattern is anchored: matching only part of the value is a violation', run(pattern, 'BREX-4.2', '<x code="em01x"/>'), 'rejected');
+  expect('encargo: pattern em0[1-5] with em05x', run(sor('2', '//@code', ov('pattern', 'em0[1-5]')), 'BREX-4.2', '<x code="em05x"/>'), 'rejected');
+  check('pattern compiles to an anchored matches()', toSchematron(pattern).includes("matches(string(.), '^(em0[1-2])$')"), toSchematron(pattern));
   expect('anchored pattern decides on its own', run(sor('2', '//@code', ov('pattern', '^[A-Z]{2}$')), 'BREX-4.2', '<x code="ABC"/>'), 'rejected');
   expect('unknown valueForm', run(sor('2', '//@a', ov('list', 'a b')), 'BREX-4.2', '<x a="a"/>'), 'not_executable',
     { reason: "Value check 'list' is not supported by the test engine." });
@@ -155,8 +194,9 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
   check('proced rule is wrapped in a contextRules block', proced.includes('rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd"'), proced);
   const frag = '<para><emphasis>x</emphasis></para>';
   expect('context rule, fragment of the right schema', run(proced, 'BREX-4.2', frag, 'proced'), 'rejected');
-  expect('context rule, fragment of another schema', run(proced, 'BREX-4.2', frag, 'descript'), 'not_executable',
-    { reason: 'This rule applies only to the proced schema; this fragment belongs to the descript schema.' });
+  const other = expect('context rule, fragment of another schema: the rule does not apply', run(proced, 'BREX-4.2', frag, 'descript'), 'accepted',
+    { reason: null, selected: [] });
+  check('context rule, other schema: outOfScopeSchemas names it', JSON.stringify(other.outOfScopeSchemas) === '["proced"]', JSON.stringify(other));
   expect('context rule, schema unknown', run(proced, 'BREX-4.2', frag), 'not_executable',
     { reason: 'This rule applies only to the proced schema, and the fragment\'s schema is not known.' });
   expect('context rule, schema inferred from xsi:noNamespaceSchemaLocation',
@@ -167,7 +207,7 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
   check('descript Master rule uses the master URL', descript.includes('context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd"'), descript);
   expect('descript Master rule, descript fragment', run(descript, 'BREX-3.0.1', frag, 'descript'), 'rejected');
   expect('descript Master rule, complying descript fragment', run(descript, 'BREX-3.0.1', '<para>x</para>', 'descript'), 'accepted');
-  expect('descript Master rule, proced fragment', run(descript, 'BREX-3.0.1', frag, 'proced'), 'not_executable', { reason: /only to the descript schema/ });
+  expect('descript Master rule, proced fragment: does not apply', run(descript, 'BREX-3.0.1', frag, 'proced'), 'accepted');
 
   const both = wrapRuleInSchemaContexts(sor('0', '//emphasis').replace('<structureObjectRule>', '<structureObjectRule id="R">'), 'BREX-4.2', 'S1000D 4.2', ['proced', 'ipd']);
   const r = expect('two context blocks: only the matching one runs', run(both, 'BREX-4.2', frag, 'ipd'), 'rejected');
@@ -354,6 +394,22 @@ for (const [format, suffix] of Object.entries(TEMPLATE_FILES)) {
     if (c.partial) notExecutableInTemplates.push(`${format} ${row.ID} (part): ${c.partial}`);
   }
 }
+
+// ─── 3. Engine and generated Schematron agree ───────────────────────────────
+// Rules with objectValue/objval (own cases + templates): the engine verdict
+// must equal the verdict of the Schematron brexToSchematron.js generates.
+let coherent = 0;
+const coherentStatuses = new Set();
+for (const r of valueRuns) {
+  if (r.result.status === 'not_executable') continue;
+  const sch = schematronVerdict(r.rule, r.fragment);
+  check(`coherence (${r.format}): engine ${r.result.status} = Schematron ${sch}\n     rule: ${r.rule.replace(/\s+/g, ' ').slice(0, 160)}\n     fragment: ${r.fragment.slice(0, 160)}`, sch === r.result.status);
+  coherent += 1;
+  coherentStatuses.add(sch);
+}
+check('coherence compared both accepted and rejected verdicts', coherentStatuses.size === 2, [...coherentStatuses].join(','));
+check('coherence covered the template value rules', coherent >= 20, `only ${coherent} runs compared`);
+console.log(`Coherence: ${coherent} engine runs on rules with values replayed through the generated Schematron.`);
 
 console.log('\nTemplate rules not executable (whole or in part):');
 for (const line of notExecutableInTemplates) console.log(`  - ${line}`);

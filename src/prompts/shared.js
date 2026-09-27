@@ -23,6 +23,9 @@ export const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Ve
 // drifting/inventive text is worse than a slightly-repetitive one.
 export const ASK_TEMPERATURE = 0.7;
 export const SUGGEST_TEMPERATURE = 0.3;
+// Test rule (T2): the examples must vary between regenerations to be
+// useful, but stay plain and on-topic.
+export const RULE_TEST_TEMPERATURE = 0.5;
 
 // A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
 // examples with inline function expressions run well past this) -- rather

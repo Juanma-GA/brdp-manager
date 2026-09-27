@@ -267,3 +267,57 @@ export const suggestRuleCases = [
     args: [{ ...brdpRule, proposal: 'Every <note> shall declare @type.' }, 'DITA 1.3 Xpath3.0', 'SCH-DITA', { sameBrdp: [], similar: [], formatExamples: ruleFormatExamplesDita }, []],
   },
 ];
+
+// Test rule (T2): the examples prompt -- a general flag-0 rule with schema
+// facts, a value-list rule, a proced-only rule (third example of another
+// schema), and a 3.0.1 mandatory rule on an absolute path.
+const brdpRuleTest = {
+  identifier: 'BRDP-TEST-001',
+  title: 'Use of the element <emphasis>',
+  definition: 'Decide whether the element <emphasis> may be used in data modules.',
+  proposal: 'El elemento <emphasis> no se utiliza.',
+};
+const ruleEmphasisFlag0 =
+  '<structureObjectRule>\n  <objectPath allowedObjectFlag="0">//emphasis</objectPath>\n  <objectUse>BRDP-TEST-001. The element &lt;emphasis&gt; must not be used.</objectUse>\n</structureObjectRule>';
+export const ruleTestExamplesCases = [
+  {
+    name: 'brex-4-2-general-flag0-with-facts',
+    args: [{ brdp: brdpRuleTest, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleEmphasisFlag0, schemaFacts: [{ name: 'table', entry: tableEntry }] }],
+  },
+  {
+    name: 'brex-4-2-value-list',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Emphasis types', proposal: '@emphasisType shall only take em01 and em02.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml:
+          '<structureObjectRule>\n  <objectPath allowedObjectFlag="2">//@emphasisType</objectPath>\n  <objectUse>Only em01 and em02.</objectUse>\n  <objectValue valueForm="single" valueAllowed="em01"/>\n  <objectValue valueForm="single" valueAllowed="em02"/>\n</structureObjectRule>',
+      },
+    ],
+  },
+  {
+    name: 'brex-4-2-proced-context',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, proposal: 'In procedural data modules, <emphasis> shall not be used.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">\n<structureObjectRuleGroup>\n${ruleEmphasisFlag0}\n</structureObjectRuleGroup>\n</contextRules>`,
+        contextSchemas: ['proced'],
+        otherSchema: 'descript',
+      },
+    ],
+  },
+  {
+    name: 'brex-3-0-1-mandatory-absolute',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Table body', proposal: 'Every tgroup shall have a tbody.' },
+        standard: 'S1000D 3.0.1',
+        format: 'BREX-3.0.1',
+        ruleXml: '<objrule id="R-1">\n  <objpath objappl="1">/dmodule/content//tgroup/tbody</objpath>\n  <objuse>Every tgroup needs a tbody.</objuse>\n</objrule>',
+      },
+    ],
+  },
+];

@@ -9,12 +9,16 @@
 //       violations: [{ ruleId, message, nodePaths }],
 //       selectedNodePaths: [...],        // every node each executed path selected
 //       notExecutableReason: string | null,
-//       notExecutableParts: [{ ruleId, reason }] }
+//       notExecutableParts: [{ ruleId, reason }],
+//       outOfScopeSchemas: [...] }       // context blocks skipped: other schema
 //
 // A rule with several parts (a group, context blocks, a nonContextRule next
 // to a structureObjectRule) runs every part it can: status comes from the
 // parts that ran, and notExecutableReason/notExecutableParts report the parts
-// that could not run. status is 'not_executable' only when no part ran.
+// that could not run. status is 'not_executable' only when no part ran --
+// except when every part sits in a context block of ANOTHER schema: the rule
+// does not apply to that fragment, so it is 'accepted' (T2), with
+// outOfScopeSchemas naming those schemas.
 // Reasons are short English sentences; the UI (T2) translates them.
 //
 // options.parseXml(text) → Document may be injected (it must throw on
@@ -54,27 +58,28 @@
 // | 3.0.1 single with val2         | not executable: REF reads val2 as a "conditional path", which    | XSD301 has no meaning |
 // |                                | the XSD (xs:string) does not confirm                             |        |
 // | range                          | 4.x valueAllowed "from~to" (one "~"); 3.0.1 val1..val2.          | REF    |
-// |                                | Both bounds numbers: numeric comparison, a non-numeric value is  | deviation from REF, |
-// |                                | outside. Both text: string comparison as REF. Mixed: not         | see note |
-// |                                | executable                                                       |        |
-// | pattern (4.x only)             | XPath/XSD regex (fontoxpath matches()). Anchoring is not         | REF (dialect); |
-// |                                | confirmed (REF: unanchored, XSD patterns: anchored): the value   | anchoring unconfirmed |
-// |                                | is tested both ways; if they disagree, that part is not          |        |
-// |                                | executable                                                       |        |
+// |                                | Both bounds numbers: number(.) between them (a non-numeric value | REF (as |
+// |                                | is outside). Both text: string comparison. Mixed: Generate       | changed in |
+// |                                | compares as text and writes a warning comment; the test gives    | T2) |
+// |                                | no verdict (not executable)                                      |        |
+// | pattern (4.x only)             | XPath/XSD regex, anchored like an XSD pattern facet:             | REF (as |
+// |                                | matches(string(.), '^(pattern)$')                                | changed in T2) |
 // | valueTailoring                 | ignored (it says whether projects may tailor the values, not how | REF    |
 // |                                | to check them)                                                   |        |
 // | Context blocks                 | rules in contextRules@rulesContext / contextrules@context apply  | XSD, TPL, |
 // |                                | only when the fragment's schema equals schemaNameFromContext()   | REF (xsi) |
 // |                                | of the URL (flat or master); an empty attribute = general.       |        |
 // |                                | Fragment schema: the fragmentSchema argument, else the root's    |        |
-// |                                | xsi:noNamespaceSchemaLocation (what REF tests)                   |        |
+// |                                | xsi:noNamespaceSchemaLocation (what REF tests). A fragment of    |        |
+// |                                | another schema, with no part left to run: accepted (the rule    | REF (its |
+// |                                | does not apply there)                                            | not(xsi=…) or) |
 // | nonContextRule (4.x element,   | nothing to execute → not executable                             | XSD42/41, GEN |
 // | 3.0.1 comment)                 |                                                                  |        |
 //
-// Note on range: REF compares with `string(.) ge 'from' and string(.) le
-// 'to'`, which misjudges numbers of different widths ("5" is not in "1~10"
-// as strings). The engine compares numbers as numbers; for equal widths both
-// agree. No curated template uses range or pattern.
+// Value checks (single/range/pattern) are not reimplemented here: the engine
+// evaluates the very XPath expression brexToSchematron.js writes into the
+// Schematron (_valueCheckXPath), so a value the test accepts is a value the
+// generated Schematron accepts. No curated template uses range or pattern.
 //
 // Beyond the table, a path is not executable when (reasons below): it reads
 // another file (document()/doc()/collection()/doc-available()/unparsed-text*);
@@ -82,12 +87,14 @@
 // expression; REF turns such rules into no-ops); or it starts at an absolute
 // root (/dmodule/…) that is not the fragment's root element — it could never
 // select anything there, and "accepted" would be a verdict nobody computed.
-// REF also treats a path that does not start with "/" (e.g. "(/a | /b)/c")
-// as a no-op; the engine judges it by what it selects.
+// A path starting with "(" ("(/a | /b)/c") is a location path for both
+// (REF treated it as a no-op until T2).
 import fontoxpath from 'fontoxpath';
-import { _isSafePattern, _splitTopLevel } from '../api/brexToSchematron.js';
+import { _isContextPattern, _splitTopLevel, _valueCheckXPath } from '../api/brexToSchematron.js';
 import { schemaNameFromContext } from './ruleSchemaContext.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
+
+export const RULE_TEST_FORMATS = ['BREX-4.2', 'BREX-4.1', 'BREX-3.0.1'];
 
 const FORMATS = {
   'BREX-4.2': {
@@ -135,16 +142,14 @@ const REASON = {
   notNodes: (kind) => `The rule's path does not select nodes (it returns ${kind}), so there is nothing to judge.`,
   absoluteRoot: (name, root) => `The rule's path starts at /${name}, but this fragment's root element is <${root}>; it can only be judged on a fragment whose root is <${name}>.`,
   schemaUnknown: (schema) => `This rule applies only to the ${schema} schema, and the fragment's schema is not known.`,
-  otherSchema: (schemas, schema) => `This rule applies only to the ${schemas.join(', ')} schema${schemas.length > 1 ? 's' : ''}; this fragment belongs to the ${schema} schema.`,
   missingValue: (element, attr) => `An <${element}> has no ${attr} to compare with.`,
   badRange: (text) => `Range '${text}' is not in the form from~to.`,
-  mixedRange: (from, to) => `Range '${from}~${to}' mixes a number and text; the comparison is not confirmed.`,
-  pattern: (pattern, value) => `Pattern '${pattern}' matches only part of the value '${value}'; whether a pattern must match the whole value is not confirmed.`,
+  mixedRange: (from, to) => `Range '${from}~${to}' mixes a number and text; Generate compares it as text and flags it, so the test gives no verdict.`,
 };
 
 class NotExecutable extends Error {}
 
-function defaultParseXml(text) {
+export function parseXmlDocument(text) {
   if (typeof DOMParser === 'undefined') throw new Error('No XML parser available.');
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   const error = doc.getElementsByTagName('parsererror')[0];
@@ -177,7 +182,7 @@ function localName(node) {
 }
 
 // XPath-like path of a node for highlighting: /dmodule[1]/content[1]/para[2]/@x
-function nodePath(node) {
+export function nodePath(node) {
   if (!node) return '';
   if (node.nodeType === 2) return `${nodePath(node.ownerElement)}/@${node.nodeName}`;
   if (node.nodeType === 9) return '/';
@@ -230,48 +235,36 @@ function textOf(el) {
   return el ? String(el.textContent || '').replace(/\s+/g, ' ').trim() : '';
 }
 
-// One matcher per value element: node value → boolean. Throws NotExecutable.
+// One matcher per value element: node → boolean. The check itself is the
+// XPath expression brexToSchematron.js writes into the Schematron
+// (_valueCheckXPath), evaluated with fontoxpath on the node, so the test and
+// Generate judge a value the same way. Only the attribute shapes are checked
+// here first. Throws NotExecutable.
 function buildValueMatcher(valueEl, spec, evaluate) {
   const is301 = spec.value === 'objval';
   const form = (is301 ? valueEl.getAttribute('valtype') : valueEl.getAttribute('valueForm')) || 'single';
   const attr = (name) => valueEl.getAttribute(name);
   if (form === 'single') {
     if (is301 && attr('val2')) throw new NotExecutable(REASON.valueForm('single with val2'));
-    const expected = is301 ? attr('val1') : attr('valueAllowed');
-    if (expected === null) throw new NotExecutable(REASON.missingValue(spec.value, is301 ? 'val1' : 'valueAllowed'));
-    return (value) => value === expected;
-  }
-  if (form === 'range') {
-    let from;
-    let to;
+    if ((is301 ? attr('val1') : attr('valueAllowed')) === null) {
+      throw new NotExecutable(REASON.missingValue(spec.value, is301 ? 'val1' : 'valueAllowed'));
+    }
+  } else if (form === 'range') {
     if (is301) {
-      from = attr('val1');
-      to = attr('val2');
-      if (from === null || to === null) throw new NotExecutable(REASON.badRange(`${from ?? ''}~${to ?? ''}`));
+      if (attr('val1') === null || attr('val2') === null) throw new NotExecutable(REASON.badRange(`${attr('val1') ?? ''}~${attr('val2') ?? ''}`));
     } else {
       const text = attr('valueAllowed') ?? '';
       const parts = text.split('~');
       if (parts.length !== 2 || !parts[0] || !parts[1]) throw new NotExecutable(REASON.badRange(text));
-      [from, to] = parts;
     }
-    const isNumber = (v) => v.trim() !== '' && Number.isFinite(Number(v));
-    if (isNumber(from) && isNumber(to)) {
-      return (value) => isNumber(value) && Number(value) >= Number(from) && Number(value) <= Number(to);
-    }
-    if (isNumber(from) !== isNumber(to)) throw new NotExecutable(REASON.mixedRange(from, to));
-    return (value) => value >= from && value <= to;
+  } else if (form === 'pattern' && !is301) {
+    if (attr('valueAllowed') === null) throw new NotExecutable(REASON.missingValue(spec.value, 'valueAllowed'));
+  } else {
+    throw new NotExecutable(REASON.valueForm(form));
   }
-  if (form === 'pattern' && !is301) {
-    const pattern = attr('valueAllowed');
-    if (pattern === null) throw new NotExecutable(REASON.missingValue(spec.value, 'valueAllowed'));
-    return (value) => {
-      const partial = evaluate('matches($v, $p)', null, { v: value, p: pattern }, 'boolean');
-      const whole = evaluate('matches($v, $p)', null, { v: value, p: `^(${pattern})$` }, 'boolean');
-      if (partial !== whole) throw new NotExecutable(REASON.pattern(pattern, value));
-      return whole;
-    };
-  }
-  throw new NotExecutable(REASON.valueForm(form));
+  const check = _valueCheckXPath(valueEl);
+  if (check.mixedRange) throw new NotExecutable(REASON.mixedRange(check.from, check.to));
+  return (node) => evaluate(`boolean(${check.expr})`, node, null, 'boolean');
 }
 
 function runPart(part, spec, doc, evaluate) {
@@ -293,18 +286,14 @@ function runPart(part, spec, doc, evaluate) {
   if (flag === '1' && !WHOLE_DOCUMENT_ROOTS.has(localName(root))) throw new NotExecutable(REASON.mandatory);
 
   const selected = evaluate(expression, doc, null, 'nodes');
-  const valueOf = (node) => evaluate('string(.)', node, null, 'string');
-  const matches = (node) => {
-    const value = valueOf(node);
-    return matchers.some((m) => m(value));
-  };
+  const matches = (node) => matchers.some((m) => m(node));
 
   let offending = [];
   if (flag === '0') {
     offending = hasValues ? selected.filter(matches) : selected;
   } else if (flag === '1') {
     const split = _splitTopLevel(expression);
-    if (split && _isSafePattern(split.parent)) {
+    if (split && _isContextPattern(split.parent)) {
       for (const parentNode of evaluate(split.parent, doc, null, 'nodes')) {
         const found = evaluate(split.step, parentNode, null, 'nodes');
         const ok = hasValues ? found.some(matches) : found.length > 0;
@@ -339,7 +328,6 @@ function makeEvaluator(doc) {
   return (expression, contextNode, variables, kind) => {
     try {
       if (kind === 'boolean') return fontoxpath.evaluateXPathToBoolean(expression, contextNode, null, variables, options);
-      if (kind === 'string') return fontoxpath.evaluateXPathToString(expression, contextNode, null, variables, options);
       const items = evaluateXPath(expression, contextNode, null, variables, evaluateXPath.ALL_RESULTS_TYPE, options);
       const nonNode = items.find((item) => item === null || typeof item !== 'object' || typeof item.nodeType !== 'number');
       if (nonNode !== undefined) throw new NotExecutable(REASON.notNodes(typeof nonNode === 'boolean' ? 'a boolean' : typeof nonNode === 'number' ? 'a number' : 'a value'));
@@ -382,13 +370,13 @@ function collectParts(ruleRoot, spec) {
 }
 
 function notExecutable(reason) {
-  return { status: 'not_executable', violations: [], selectedNodePaths: [], notExecutableReason: reason, notExecutableParts: [] };
+  return { status: 'not_executable', violations: [], selectedNodePaths: [], notExecutableReason: reason, notExecutableParts: [], outOfScopeSchemas: [] };
 }
 
 export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema = null, options = {}) {
   const spec = FORMATS[format];
   if (!spec) return notExecutable(REASON.format(format));
-  const parseXml = options.parseXml || defaultParseXml;
+  const parseXml = options.parseXml || parseXmlDocument;
 
   let doc;
   try {
@@ -433,19 +421,22 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
     }
   }
 
-  if (!ran && !notRun.length) {
-    notRun.push({ ruleId: parts[0].ruleId, reason: REASON.otherSchema([...new Set(outOfScope)], schema) });
-  }
+  // Every part is scoped to other schemas: the rule does not apply to this
+  // fragment, which is exactly what a BREX validator says -- accepted, with
+  // outOfScopeSchemas telling why (T2: "an example of another schema shows
+  // the rule does not apply there").
+  const notApplicable = ran === 0 && notRun.length === 0;
   const reason = notRun.length === 0
     ? null
     : parts.length === 1
       ? notRun[0].reason
       : notRun.map((p) => `${p.ruleId}: ${p.reason}`).join(' ');
   return {
-    status: ran === 0 ? 'not_executable' : violations.length ? 'rejected' : 'accepted',
+    status: notApplicable ? 'accepted' : ran === 0 ? 'not_executable' : violations.length ? 'rejected' : 'accepted',
     violations,
     selectedNodePaths: [...new Set(selected)],
     notExecutableReason: reason,
     notExecutableParts: notRun,
+    outOfScopeSchemas: [...new Set(outOfScope)],
   };
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
+import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
 import { finalRuleXml, validateRuleXml } from '../../hooks/useSuggestions';
 import { extractRuleNames } from '../../utils/ruleNameCheck.js';
 import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
@@ -118,6 +119,8 @@ export default function RuleSuggestionPanel({
   standard,
   vocabulary,
   canEdit,
+  brdp,
+  aiProvider,
   onAccept,
   onDiscard,
   onToggleReference,
@@ -127,6 +130,10 @@ export default function RuleSuggestionPanel({
 }) {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(null); // null | 'copied' | 'failed'
+  // Test rule (T2): runs on the rule in memory, already wrapped in its
+  // context blocks -- before Accept.
+  const [testOpen, setTestOpen] = useState(false);
+  const testable = !!entry.text && canTestRule(entry.format);
 
   const generatedValidation = entry.text ? validateRuleXml(entry.text, vocabulary) : null;
   const pasted = (entry.pastedRule || '').trim();
@@ -189,6 +196,7 @@ export default function RuleSuggestionPanel({
       )}
 
       <div className={styles.suggestionActions}>
+        {testable && <TestRuleButton aiProvider={aiProvider} open={testOpen} onToggle={() => setTestOpen((v) => !v)} />}
         {entry.text && (
           <button
             onClick={onAccept}
@@ -206,6 +214,18 @@ export default function RuleSuggestionPanel({
         )}
       </div>
       {copyStatus === 'failed' && <p className={styles.muted}>{t('records.assistant.promptCopyFailed')}</p>}
+      {testable && testOpen && aiProvider && (
+        <RuleTestPanel
+          key={entry.text}
+          ruleXml={entry.text}
+          format={entry.format}
+          standard={standard}
+          brdp={brdp}
+          aiProvider={aiProvider}
+          vocabulary={vocabulary}
+          onClose={() => setTestOpen(false)}
+        />
+      )}
 
       {hasPrompt && (
         <div className={styles.suggestionReferences}>

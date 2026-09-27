@@ -1008,3 +1008,118 @@
   font-weight: 600;
   margin: 0 0 4px;
 }
+
+/* Test rule (T2): the panel under a suggested or Draft rule. Colors reuse
+   the page's palette: green/red/amber of the Proposal Status badges and the
+   red of the vocabulary warnings. white-space is reset because the panel can
+   sit inside .suggestionBox (pre-wrap). */
+.ruleTestPanel {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  white-space: normal;
+  font-size: 12.5px;
+}
+
+.ruleTestHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ruleTestTitle {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.ruleTestVerdict {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.ruleTestToneOk {
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+.ruleTestToneBad {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.ruleTestToneWarn {
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.ruleTestExplanation {
+  margin: 0 0 8px;
+}
+
+.ruleTestExample {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.ruleTestExampleHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.ruleTestOutcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 4px 0;
+}
+
+.ruleTestResult {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.ruleTestNote {
+  margin: 4px 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.ruleTestXml {
+  margin: 4px 0;
+  padding: 6px 8px;
+  background: #f8fafc;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  /* The side panel is narrow: long lines wrap (under their own
+     indentation, set per line) instead of hiding behind a scrollbar. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.ruleTestMark {
+  background: #fef08a;
+  color: inherit;
+  border-radius: 2px;
+}
+
+.ruleTestEditor {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: monospace;
+  font-size: 12px;
+}

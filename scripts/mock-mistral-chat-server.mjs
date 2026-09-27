@@ -100,6 +100,43 @@ function suggestRuleReply(systemPrompt) {
   return `<structureObjectRule id="${id}"${ref ? ' brSeverityLevel="brsl01"' : ""}>${ref}<objectPath allowedObjectFlag="1">//${element}/@frame</objectPath><objectUse>MOCK-RULE: every &lt;${element}&gt; has a frame.</objectUse><objectValue valueForm="single" valueAllowed="all">All</objectValue></structureObjectRule>`;
 }
 
+// Test rule (T2): the examples prompt ("Write the test examples for this
+// rule.") gets fixed examples, chosen from the rule quoted in the prompt:
+//   - Proposal with "BROKENJSON"  -> a truncated JSON answer
+//   - //@emphasisType             -> em01 (accept) / em05 (reject)
+//   - a proced context block      -> proced without / with <emphasis>, and a
+//                                    descript example with <emphasis> (accept)
+//   - anything else (//emphasis)  -> a step without / with <emphasis>
+function isRuleTest(text) {
+  return text === "Write the test examples for this rule.";
+}
+
+function ruleTestReply(systemPrompt) {
+  const rule = (systemPrompt.match(/\nThe rule \([^)]*\):\n([\s\S]*?)\n\nThe decision it implements/) || [])[1] || "";
+  const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
+  if (/BROKENJSON/.test(proposal)) {
+    return '{"explanation": "Truncated answer", "examples": [ {"label": "cut", "expected": "accept", "xml": "<para>';
+  }
+  const answer = (explanation, examples) => JSON.stringify({ explanation, examples });
+  if (/\/\/@emphasisType/.test(rule)) {
+    return answer("La regla solo admite los tipos de énfasis em01 y em02.", [
+      { label: "Caution text with em01", expected: "accept", schema: null, xml: '<para>Apply <emphasis emphasisType="em01">sealant</emphasis> to the fastener threads.</para>' },
+      { label: "Caution text with em05", expected: "reject", schema: null, xml: '<para>Apply <emphasis emphasisType="em05">sealant</emphasis> to the fastener threads.</para>' },
+    ]);
+  }
+  if (/proced\.xsd/.test(rule)) {
+    return answer("La regla prohíbe <emphasis> solo en los módulos de datos procedimentales.", [
+      { label: "Procedural step without emphasis", expected: "accept", schema: "proced", xml: "<proceduralStep>\n  <para>Remove the four bolts from the access panel.</para>\n</proceduralStep>" },
+      { label: "Procedural step with emphasis", expected: "reject", schema: "proced", xml: "<proceduralStep>\n  <para>Remove the <emphasis>four</emphasis> bolts from the access panel.</para>\n</proceduralStep>" },
+      { label: "Descriptive text with emphasis", expected: "accept", schema: "descript", xml: "<levelledPara>\n  <para>The access panel is held by <emphasis>four</emphasis> bolts.</para>\n</levelledPara>" },
+    ]);
+  }
+  return answer("La regla prohíbe el elemento <emphasis> en cualquier módulo de datos.", [
+    { label: "Torque step without emphasis", expected: "accept", schema: null, xml: "<proceduralStep>\n  <para>Torque the bolts to 25 N.m.</para>\n</proceduralStep>" },
+    { label: "Torque step with emphasis", expected: "reject", schema: null, xml: "<proceduralStep>\n  <para>Torque the bolts to <emphasis>25 N.m</emphasis>.</para>\n</proceduralStep>" },
+  ]);
+}
+
 // "Suggest: clear state on BRDP change" round (docs request): opt-in
 // per-call delay, armed via POST /slow-next (disarms itself after being
 // consumed once) so a verification script has a real window to switch to
@@ -225,6 +262,8 @@ const server = http.createServer((req, res) => {
         "Alsounabrokenverylongsingletokenwithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     } else if (isSuggestRule(userText)) {
       reply = suggestRuleReply(messages.find((m) => m.role === "system")?.content || "");
+    } else if (isRuleTest(userText)) {
+      reply = ruleTestReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
     } else {

@@ -27,6 +27,7 @@ import RuleSchemaSelector from '../components/assistant/RuleSchemaSelector';
 import { schemaLocationOf, supportsSchemaContext } from '../utils/ruleSchemaContext.js';
 import { hasUnfilledMarkers } from '../utils/proposalMarkers';
 import RuleStatusStepper from '../components/RuleStatusStepper';
+import RuleTestPanel, { canTestRule, TestRuleButton } from '../components/assistant/RuleTestPanel';
 import RuleStatusCell from '../components/RuleStatusCell';
 import styles from './RecordsPage.module.css';
 
@@ -208,6 +209,8 @@ export default function RecordsPage() {
   // criterion as being able to see the stepper at all: this never writes
   // anything, it only reads what's already there.
   const [rulePreviewOpen, setRulePreviewOpen] = useState(false);
+  // Test rule (T2) on the saved Draft rule -- open for this BRDP only.
+  const [draftTestOpenFor, setDraftTestOpenFor] = useState(null);
   const [ruleDraftText, setRuleDraftText] = useState('');
   const [ruleBusy, setRuleBusy] = useState(false);
   const [ruleValidationError, setRuleValidationError] = useState(null);
@@ -1173,6 +1176,13 @@ export default function RecordsPage() {
                 <div className={styles.ruleStatusRow}>
                   <RuleStatusStepper state={ruleStateOf(ruleApproval)} />
                   <div className={styles.suggestionActions}>
+                    {ruleStateOf(ruleApproval) === 'draft' && canTestRule(ruleFormat) && (
+                      <TestRuleButton
+                        aiProvider={aiProvider}
+                        open={draftTestOpenFor === selected.id}
+                        onToggle={() => setDraftTestOpenFor((id) => (id === selected.id ? null : selected.id))}
+                      />
+                    )}
                     {ruleStateOf(ruleApproval) === 'verified' && (
                       <button onClick={() => setRulePreviewOpen((v) => !v)}>
                         {rulePreviewOpen ? t('records.rule.closePreview') : t('records.rule.preview')}
@@ -1198,6 +1208,18 @@ export default function RecordsPage() {
                       </>
                     )}
                   </div>
+                  {draftTestOpenFor === selected.id && ruleStateOf(ruleApproval) === 'draft' && aiProvider && canTestRule(ruleFormat) && (
+                    <RuleTestPanel
+                      key={`${selected.id}:${ruleApproval.rule_xml}`}
+                      ruleXml={ruleApproval.rule_xml}
+                      format={ruleFormat}
+                      standard={project.standard}
+                      brdp={selected}
+                      aiProvider={aiProvider}
+                      vocabulary={vocabulary}
+                      onClose={() => setDraftTestOpenFor(null)}
+                    />
+                  )}
                   {rulePreviewOpen && ruleStateOf(ruleApproval) === 'verified' && (
                     <textarea
                       className={styles.ruleTextarea}
@@ -1602,6 +1624,8 @@ export default function RecordsPage() {
                     standard={project.standard}
                     vocabulary={vocabulary}
                     canEdit={canEdit}
+                    brdp={selected}
+                    aiProvider={aiProvider}
                     onAccept={suggestions.acceptSuggestion}
                     onDiscard={suggestions.discardSuggestion}
                     onToggleReference={(id) => suggestions.toggleReferenceExpanded(selected.id, id)}

@@ -171,17 +171,21 @@ import { buildSuggestProposalPrompt } from '../src/prompts/suggestProposalPrompt
 // existing prompts are unchanged (a general rule and precedents without
 // context blocks keep the old wording byte for byte).
 import { buildSuggestRulePrompt } from '../src/prompts/suggestRulePrompt.js';
-import { askCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
+// Test rule (T2): a new group, ruleTestExamples (4 cases), for the prompt
+// that asks for the test examples. No existing prompt changes.
+import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesPrompt.js';
+import { askCases, ruleTestExamplesCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXPECTED_PATH = path.join(__dirname, 'prompt-snapshot', 'expected-prompts.json');
 
 function buildActual() {
-  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {} };
+  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {} };
   for (const c of askCases) actual.ask[c.name] = buildAskSystemPrompt(...c.args);
   for (const c of suggestDefinitionCases) actual.suggestDefinition[c.name] = buildSuggestDefinitionPrompt(...c.args);
   for (const c of suggestProposalCases) actual.suggestProposal[c.name] = buildSuggestProposalPrompt(...c.args);
   for (const c of suggestRuleCases) actual.suggestRule[c.name] = buildSuggestRulePrompt(...c.args);
+  for (const c of ruleTestExamplesCases) actual.ruleTestExamples[c.name] = buildRuleTestExamplesPrompt(...c.args);
   return actual;
 }
 
@@ -200,7 +204,7 @@ const expected = JSON.parse(readFileSync(EXPECTED_PATH, 'utf-8'));
 let mismatches = 0;
 let checked = 0;
 
-for (const group of ['ask', 'suggestDefinition', 'suggestProposal', 'suggestRule']) {
+for (const group of Object.keys(actual)) {
   const expectedNames = Object.keys(expected[group] || {});
   const actualNames = Object.keys(actual[group] || {});
   for (const name of new Set([...expectedNames, ...actualNames])) {
