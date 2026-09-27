@@ -5,6 +5,7 @@ import { authFetchJson } from '../services/apiClient';
 import { generateTemplate, importFromExcel, exportToExcel, CURATED_TEMPLATE_BY_STANDARD } from '../utils/excelUtils';
 import { ruleStateOf } from '../utils/ruleState';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
+import { SCHEMA_LOCATIONS, schemaLocationOf, supportsSchemaContext } from '../utils/ruleSchemaContext.js';
 import {
   useActiveImportJob,
   useDismissImportJob,
@@ -733,6 +734,27 @@ export default function ProjectConfigPage() {
               {f.hintKey && <span className={styles.hint}>{t(`config.fields.${f.hintKey}`)}</span>}
             </div>
           ))}
+          {supportsSchemaContext(project.standard) && (
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="cfg-schemaLocation">
+                {t('config.fields.schemaLocation')}
+              </label>
+              <select
+                id="cfg-schemaLocation"
+                className={styles.input}
+                value={schemaLocationOf(values)}
+                onChange={(e) => handleChange('schemaLocation', e.target.value)}
+                disabled={!canEdit}
+              >
+                {SCHEMA_LOCATIONS.map((loc) => (
+                  <option key={loc} value={loc}>
+                    {t(`config.fields.schemaLocationOptions.${loc}`)}
+                  </option>
+                ))}
+              </select>
+              <span className={styles.hint}>{t('config.fields.schemaLocationHint')}</span>
+            </div>
+          )}
         </div>
 
         {canEdit && (

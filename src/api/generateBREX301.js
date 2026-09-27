@@ -1,4 +1,4 @@
-import { checkWellFormed } from "./generateBREX.js";
+import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
 
 let _schemaSummaryCache301 = null;
@@ -521,7 +521,7 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
 
   if (unapprovedBRDPs.length > 0) {
     const comments = unapprovedBRDPs
-      .map((b) => `<!-- ${b.id}: pendiente de aprobación de regla, no incluida en este documento -->`)
+      .map(pendingApprovalComment)
       .join('\n');
     finalXml = finalXml.replace('</brex>', comments + '\n</brex>');
   }

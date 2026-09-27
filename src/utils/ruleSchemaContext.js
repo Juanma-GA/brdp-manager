@@ -9,35 +9,71 @@
 // DITA has one merged schema set (a single variant in the schema cards), so
 // it never gets a schema choice.
 
-// Context URL per standard: `${base}${schema}.xsd`. Origin:
-//   S1000D 4.2   -- real rulesContext values in public/brdp-template-4-2.xlsx
-//                   (BRDP-S1-00006, -00219, -00377).
-//   S1000D 4.1   -- real rulesContext values in public/brdp-template-4-1.xlsx
-//                   (BRDP-EXT-00001, -00007, -00012, -00013, -00019).
-//   S1000D 3.0.1 -- no real <contextrules context="…"> exists in this repo;
-//                   the same flat-schema URL scheme is the one the 3.0.1
-//                   BREX few-shot uses for xsi:noNamespaceSchemaLocation
-//                   (public/brex-schema-summary-3-0-1.json). sources/S3.0.1/
-//                   brex.xsd only types @context as a string.
-export const SCHEMA_CONTEXT_URL_BASE = {
-  'S1000D 4.2': 'http://www.s1000d.org/S1000D_4-2/xml_schema_flat/',
-  'S1000D 4.1': 'http://www.s1000d.org/S1000D_4-1/xml_schema_flat/',
-  'S1000D 3.0.1': 'http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/',
+// Context URL per standard and per project "Schema location" (project
+// configuration, S1000D only, stored as project_config.schemaLocation; absent
+// = "flat", the default). A context block only applies to a data module whose
+// own schema URL is exactly the one written here, so it must match the form
+// the project's DMs use.
+//
+//   flat:   http://www.s1000d.org/S1000D_{issue}/xml_schema_flat/{schema}.xsd
+//   master: http://www.s1000d.org/S1000D_{issue}/xml_schema_master/{folder}/{schema}Schema.xsd
+//
+// Origin of each form:
+//   flat, 4.2   -- real rulesContext values in public/brdp-template-4-2.xlsx
+//                  (BRDP-S1-00006, -00219, -00377).
+//   flat, 4.1   -- real rulesContext values in public/brdp-template-4-1.xlsx
+//                  (BRDP-EXT-00001, -00007, -00012, -00013, -00019).
+//   flat, 3.0.1 -- the same URL scheme the 3.0.1 BREX few-shot uses for
+//                  xsi:noNamespaceSchemaLocation (public/brex-schema-summary-3-0-1.json).
+//   master      -- sources/SchemasS1000D holds only the flat set (no master
+//                  files in this repo); the master names come from a real
+//                  3.0.1 project list of approved schema locations
+//                  (public/brex-schema-summary-sch.json, BRDP-A1-00100) and a
+//                  real 3.0.1 project DM (…/xml_schema_master/dm/descriptSchema.xsd).
+//                  Data module schemas live under dm/; the four non-DM
+//                  schemas have their own folder: comment/commentSchema.xsd,
+//                  ddn/ddnSchema.xsd, dml/dmlSchema.xsd, pm/pmSchema.xsd.
+//                  The same folder layout is assumed for 4.1 and 4.2 (no
+//                  master file of those issues is available to confirm it).
+export const SCHEMA_LOCATIONS = ['flat', 'master'];
+export const DEFAULT_SCHEMA_LOCATION = 'flat';
+
+export const SCHEMA_CONTEXT_ISSUE = {
+  'S1000D 4.2': '4-2',
+  'S1000D 4.1': '4-1',
+  'S1000D 3.0.1': '3-0-1',
 };
 
+// Master folder of the schemas that aren't data modules; every other schema
+// is under dm/.
+export const MASTER_SCHEMA_FOLDER = { comment: 'comment', ddn: 'ddn', dml: 'dml', pm: 'pm' };
+
 export function supportsSchemaContext(standard) {
-  return Object.prototype.hasOwnProperty.call(SCHEMA_CONTEXT_URL_BASE, standard);
+  return Object.prototype.hasOwnProperty.call(SCHEMA_CONTEXT_ISSUE, standard);
 }
 
-export function schemaContextUrl(standard, schema) {
-  return `${SCHEMA_CONTEXT_URL_BASE[standard]}${schema}.xsd`;
+// The project's schema location ("flat" | "master") from its project_config.
+export function schemaLocationOf(projectConfig) {
+  const value = projectConfig?.schemaLocation;
+  return SCHEMA_LOCATIONS.includes(value) ? value : DEFAULT_SCHEMA_LOCATION;
 }
 
-// A context URL/value -> the schema name ("…/fault.xsd" -> "fault"); a value
-// that isn't a .xsd reference is returned as written.
+export function schemaContextUrl(standard, schema, location = DEFAULT_SCHEMA_LOCATION) {
+  const base = `http://www.s1000d.org/S1000D_${SCHEMA_CONTEXT_ISSUE[standard]}`;
+  if (location === 'master') {
+    return `${base}/xml_schema_master/${MASTER_SCHEMA_FOLDER[schema] || 'dm'}/${schema}Schema.xsd`;
+  }
+  return `${base}/xml_schema_flat/${schema}.xsd`;
+}
+
+// A context URL/value -> the schema name, in either form
+// ("…/xml_schema_flat/fault.xsd" and "…/xml_schema_master/dm/faultSchema.xsd"
+// -> "fault"); a value that isn't a .xsd reference is returned as written.
 export function schemaNameFromContext(value) {
   const m = /([A-Za-z0-9_-]+)\.xsd\s*$/.exec(value || '');
-  return m ? m[1] : (value || '').trim();
+  if (!m) return (value || '').trim();
+  const master = /(.+)Schema$/.exec(m[1]);
+  return master ? master[1] : m[1];
 }
 
 // ---------------------------------------------------------------------------
@@ -178,13 +214,13 @@ function mentionRegexes(schema) {
     res.push(new RegExp(String.raw`\b${src}\b`, typeof p === 'string' ? 'i' : ''));
   }
   // Every schema's own file name counts next to a document-type noun, and
-  // always as "<name>.xsd".
+  // always as "<name>.xsd" or its master file name "<name>Schema.xsd".
   const weak = [...(entry.weak || []), schema];
   for (const w of weak) {
     res.push(new RegExp(String.raw`\b${w}\s+${DOC_NOUN_EN}\b`, 'i'));
     res.push(new RegExp(String.raw`\b${DOC_NOUN_ES}\s+(?:de\s+(?:tipo\s+)?)?${w}\b`, 'i'));
   }
-  res.push(new RegExp(String.raw`\b${schema}\.xsd\b`, 'i'));
+  res.push(new RegExp(String.raw`\b${schema}(?:Schema)?\.xsd\b`, 'i'));
   return res;
 }
 
@@ -255,14 +291,14 @@ function withSchemaId(ruleXml, element, schema) {
   );
 }
 
-export function wrapRuleInSchemaContexts(ruleXml, format, standard, schemas) {
+export function wrapRuleInSchemaContexts(ruleXml, format, standard, schemas, location = DEFAULT_SCHEMA_LOCATION) {
   const rule = (ruleXml || '').trim();
   const element = RULE_ELEMENT_BY_FORMAT[format];
   if (!schemas || schemas.length === 0 || !element || !supportsSchemaContext(standard)) return rule;
   return schemas
     .map((schema) => {
       const inner = schemas.length > 1 ? withSchemaId(rule, element, schema) : rule;
-      const url = schemaContextUrl(standard, schema);
+      const url = schemaContextUrl(standard, schema, location);
       return format === 'BREX-3.0.1'
         ? `<contextrules context="${url}">\n  <structrules>\n${indent(inner, 4)}\n  </structrules>\n</contextrules>`
         : `<contextRules rulesContext="${url}">\n  <structureObjectRuleGroup>\n${indent(inner, 4)}\n  </structureObjectRuleGroup>\n</contextRules>`;

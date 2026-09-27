@@ -11,6 +11,12 @@
 // Cancel; per-schema warning on a pasted rule; DITA never shows it; and
 // Generate BREX for 4.2, 4.1 and 3.0.1 with the blocks in place, valid
 // against the XSD (the app's own check AND xmllint against sources/).
+// "Schema location" round: the project setting (Flat default / Master) set
+// through the real Project Configuration page; a 3.0.1 Master project writes
+// …/xml_schema_master/dm/descriptSchema.xsd, a precedent in that form is
+// recognized in the next prompt, and its BREX validates against the XSD;
+// Generate comments for BRDPs without a Verified rule show the identifier in
+// English, never a UUID.
 //
 // Preconditions: uvicorn with MISTRAL_ENDPOINT=http://localhost:8902 and
 // MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks, Vite on 5173.
@@ -104,12 +110,17 @@ async function main() {
   };
   const p41 = await makeProject("Schema ctx 4.1", "S1000D 4.1");
   const b41 = await makeBrdp(p41, { identifier: "BRDP-SC-41", title: "Emphasis in procedures", proposal: "In procedural data modules, <emphasis> shall not be used." });
+  await makeBrdp(p41, { identifier: "BRDP-SC-PEND41", title: "Pending", proposal: "Pending decision." });
   const p301 = await makeProject("Schema ctx 3.0.1", "S1000D 3.0.1");
   const b301 = await makeBrdp(p301, { identifier: "BRDP-SC-301", title: "Énfasis en procedimientos", proposal: "En los módulos de datos procedimentales no se usará <emphasis>." });
   await makeBrdp(p301, { identifier: "BRDP-SC-301GEN", title: "Emphasis", proposal: "<emphasis> shall not be used." });
+  const pMaster = await makeProject("Schema ctx 3.0.1 master", "S1000D 3.0.1");
+  const bMaster = await makeBrdp(pMaster, { identifier: "BRDP-SC-M-DESC", title: "Emphasis in descriptions", proposal: "In descriptive data modules, <emphasis> shall not be used." });
+  await makeBrdp(pMaster, { identifier: "BRDP-SC-M-NEXT", title: "Emphasis in descriptions again", proposal: "In descriptive data modules, <emphasis> shall never be used." });
+  await makeBrdp(pMaster, { identifier: "BRDP-SC-M-PEND", title: "Pending", proposal: "Pending decision." });
   const pDita = await makeProject("Schema ctx DITA", "DITA 1.3 Xpath2.0");
   await makeBrdp(pDita, { identifier: "BRDP-SC-DITA", title: "Notes", proposal: "In procedural topics every <note> shall declare @type." });
-  for (const p of [p42, p41, p301, pDita]) await embed(p);
+  for (const p of [p42, p41, p301, pMaster, pDita]) await embed(p);
 
   const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 1300 } })).newPage();
@@ -123,7 +134,10 @@ async function main() {
     await page.waitForSelector("tbody tr", { timeout: 20000 });
   }
   async function select(identifier) {
-    await page.locator("tbody tr", { hasText: identifier }).first().click();
+    // Exact identifier (never a prefix of another one: BRDP-SC-301 vs
+    // BRDP-SC-301GEN), whatever order the rows come in.
+    const exact = new RegExp(`^\\s*${identifier.replace(/[-]/g, "\\-")}(?![\\w-])`);
+    await page.locator("tbody tr").filter({ has: page.locator("td").filter({ hasText: exact }) }).first().click();
     await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
     await page.waitForTimeout(400);
   }
@@ -143,6 +157,16 @@ async function main() {
     await page.waitForSelector("pre", { timeout: 30000 });
     await page.waitForSelector("text=/Valid against XSD schema|XSD validation issue|XSD validation failed/", { timeout: 60000 });
     return page.locator("pre").innerText();
+  }
+  // Generate comment for a BRDP without a Verified rule: its identifier, in
+  // English -- and no BRDP UUID anywhere in the document.
+  async function checkPendingComments(project, xml, identifiers) {
+    for (const id of identifiers) {
+      assert(xml.includes(`<!-- ${id}: rule pending approval, not included in this document -->`), `${project.standard}: '${id}: rule pending approval…' comment`);
+    }
+    const all = await api(`/api/projects/${project.id}/brdps`).then((r) => r.json());
+    assert(all.length > 0 && all.every((x) => !xml.includes(x.id)), `${project.standard}: no BRDP UUID in the generated BREX`);
+    assert(!xml.includes("pendiente de aprobación"), `${project.standard}: no Spanish pending-approval comment left`);
   }
   function xmllint(xml, standard) {
     const file = path.join(os.tmpdir(), `schema-ctx-${suffix}-${standard.replace(/\W/g, "")}.xml`);
@@ -278,14 +302,17 @@ async function main() {
     // 6. Generate BREX 4.2 with the context blocks in place.
     let xml = await generate(p42);
     assert(await page.locator("text=Valid against XSD schema").isVisible(), "4.2 Generate: the app's own XSD check passes");
-    const genericEnd = xml.indexOf("</contextRules>");
+    // The generic block (no rulesContext) is pruned when there is no general
+    // rule; when present, every context block comes after it.
+    const genericIdx = xml.indexOf("<contextRules>");
     const procIdx = xml.indexOf('rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd"');
-    assert(procIdx > genericEnd && genericEnd > 0, "4.2: context blocks placed after the generic contextRules");
+    assert(procIdx > 0 && (genericIdx === -1 || genericIdx < procIdx), "4.2: context blocks placed after the generic contextRules (if any)");
     assert((xml.match(/xml_schema_flat\/proced\.xsd/g) || []).length === 2 && xml.includes("xml_schema_flat/descript.xsd"), "4.2: all three blocks (proced x2, descript) present");
     const nonCtx = xml.indexOf("<nonContextRules");
     assert(nonCtx === -1 || nonCtx > xml.lastIndexOf("</contextRules>"), "4.2: no nonContextRules before a contextRules sibling");
     assert(xmllint(xml, "S1000D 4.2") === "valid", `4.2: xmllint --schema brex4.2.xsd valid (${xmllint(xml, "S1000D 4.2")})`);
     await page.screenshot({ path: "/tmp/schema-ctx-generate-4-2.png", fullPage: true });
+    await checkPendingComments(p42, xml, ["BRDP-SC-GEN", "BRDP-SC-TABLE", "BRDP-SC-TBLPROC", "BRDP-SC-PART"]);
 
     // 7. 4.1: same flow, Generate, XSD.
     await openProject(p41);
@@ -301,6 +328,7 @@ async function main() {
     assert(await page.locator("text=Valid against XSD schema").isVisible(), "4.1 Generate: the app's own XSD check passes");
     assert(xml.includes("S1000D_4-1/xml_schema_flat/proced.xsd"), "4.1: block present in the BREX");
     assert(xmllint(xml, "S1000D 4.1") === "valid", `4.1: xmllint valid (${xmllint(xml, "S1000D 4.1")})`);
+    await checkPendingComments(p41, xml, ["BRDP-SC-PEND41"]);
 
     // 8. 3.0.1 (Spanish mention): contextrules / structrules / objrule.
     await openProject(p301);
@@ -317,10 +345,12 @@ async function main() {
     );
     xml = await generate(p301);
     assert(await page.locator("text=Valid against XSD schema").isVisible(), "3.0.1 Generate: the app's own XSD check passes");
-    const generic301End = xml.indexOf("</contextrules>");
-    assert(xml.indexOf('context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/proced.xsd"') > generic301End, "3.0.1: block placed after the generic contextrules");
+    const generic301Idx = xml.indexOf("<contextrules>");
+    const proc301Idx = xml.indexOf('context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/proced.xsd"');
+    assert(proc301Idx > 0 && (generic301Idx === -1 || generic301Idx < proc301Idx), "3.0.1: block placed after the generic contextrules (if any)");
     assert(xmllint(xml, "S1000D 3.0.1") === "valid", `3.0.1: xmllint valid (${xmllint(xml, "S1000D 3.0.1")})`);
     await page.screenshot({ path: "/tmp/schema-ctx-generate-3-0-1.png", fullPage: true });
+    await checkPendingComments(p301, xml, ["BRDP-SC-301GEN"]);
 
     // 3.0.1 <emphasis> (absent from comment/ddn/dml/pm), no mention -> no selector.
     await openProject(p301);
@@ -330,7 +360,68 @@ async function main() {
     assert((await selector().count()) === 0, "3.0.1 <emphasis> without a schema mention: no selector");
     await page.getByRole("button", { name: "Discard" }).click();
 
-    // 9. DITA never shows the selector.
+    // 8b. "Schema location" = Master, set on the real Project Configuration page.
+    await page.goto(`${BASE_URL}/projects/${pMaster.id}/config`);
+    const locSelect = page.locator("#cfg-schemaLocation");
+    await locSelect.waitFor({ timeout: 10000 });
+    assert((await locSelect.inputValue()) === "flat", "Schema location: a new S1000D project defaults to Flat");
+    await locSelect.selectOption("master");
+    // Wait on the real PUT (the page's "Saved" flag doesn't survive the
+    // project refresh that follows a save -- ProjectLayout remounts it).
+    const [putRes] = await Promise.all([
+      page.waitForResponse((r) => r.url().endsWith(`/api/projects/${pMaster.id}/config`) && r.request().method() === "PUT", { timeout: 10000 }),
+      page.getByRole("button", { name: "Save Configuration" }).click(),
+    ]);
+    assert(putRes.ok(), "Save Configuration: PUT …/config 200");
+    await locSelect.waitFor({ timeout: 10000 });
+    await page.screenshot({ path: "/tmp/schema-ctx-config-master.png", fullPage: true });
+    const savedCfg = (await api(`/api/projects/${pMaster.id}/config`).then((r) => r.json())).project_config;
+    assert(savedCfg.schemaLocation === "master" && savedCfg.modelIdentCode === "SCHCTX", "Schema location saved in project_config (other fields kept)");
+    await page.reload();
+    await locSelect.waitFor({ timeout: 10000 });
+    assert((await locSelect.inputValue()) === "master", "Schema location survives a reload");
+
+    // 3.0.1 Master, rule limited to descript.
+    await openProject(pMaster);
+    await select("BRDP-SC-M-DESC");
+    await ruleButton().click();
+    await selector().waitFor({ timeout: 10000 });
+    assert(await checkbox("descript").isChecked(), "3.0.1 master: 'descriptive' pre-checks descript");
+    await selector().getByRole("button", { name: "Generate" }).click();
+    await waitForRule();
+    const masterShown = await page.locator('[class*="suggestionCode"]').first().innerText();
+    assert(
+      masterShown.startsWith('<contextrules context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd">'),
+      `3.0.1 master: context="…/xml_schema_master/dm/descriptSchema.xsd" (${masterShown.split("\n")[0]})`
+    );
+    await page.screenshot({ path: "/tmp/schema-ctx-master-rule.png", fullPage: true });
+    const sMaster = await acceptAndApprove(pMaster, bMaster, "BREX-3.0.1");
+    assert(sMaster === masterShown, "3.0.1 master: saved rule_xml is the wrapped rule shown");
+
+    // A precedent in master form -> its schema is recognized in the prompt.
+    await select("BRDP-SC-M-NEXT");
+    await ruleButton().click();
+    await selector().waitFor({ timeout: 10000 });
+    await selector().getByRole("button", { name: "Generate" }).click();
+    await waitForRule();
+    system = await lastSystemPrompt();
+    assert(system.includes("[BRDP-SC-M-DESC") && system.includes("Applies to: only the descript schema"), "master-form precedent: 'Applies to: only the descript schema'");
+    await page.getByRole("button", { name: "Discard" }).click();
+
+    xml = await generate(pMaster);
+    assert(await page.locator("text=Valid against XSD schema").isVisible(), "3.0.1 master Generate: the app's own XSD check passes");
+    const genericMIdx = xml.indexOf("<contextrules>");
+    const descMIdx = xml.indexOf('context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd"');
+    assert(descMIdx > 0 && (genericMIdx === -1 || genericMIdx < descMIdx), "3.0.1 master: block placed after the generic contextrules (if any)");
+    assert(xml.includes("xml_schema_flat/brex.xsd") && !xml.includes("xml_schema_master/dm/brexSchema.xsd"), "3.0.1 master: the BREX's own schema URL is unchanged");
+    assert(xmllint(xml, "S1000D 3.0.1") === "valid", `3.0.1 master: xmllint valid (${xmllint(xml, "S1000D 3.0.1")})`);
+    await checkPendingComments(pMaster, xml, ["BRDP-SC-M-NEXT", "BRDP-SC-M-PEND"]);
+    await page.screenshot({ path: "/tmp/schema-ctx-generate-master.png", fullPage: true });
+
+    // 9. DITA never shows the selector (nor the Schema location setting).
+    await page.goto(`${BASE_URL}/projects/${pDita.id}/config`);
+    await page.waitForSelector("#cfg-projectName", { timeout: 10000 });
+    assert((await page.locator("#cfg-schemaLocation").count()) === 0, "DITA: no Schema location setting");
     await openProject(pDita);
     await select("BRDP-SC-DITA");
     assert((await limitLink().count()) === 0, "DITA: no 'Limit to specific schemas…' link");

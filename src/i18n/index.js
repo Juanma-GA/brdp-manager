@@ -126,6 +126,13 @@ const resources = {
           countryIsoCode: 'Country ISO Code',
           securityClassification: 'Security Classification',
           enterpriseCode: 'Enterprise Code',
+          schemaLocation: 'Schema location',
+          schemaLocationHint:
+            "The form of the data modules' schema URL. Suggest Rule's schema-limited rules only apply to DMs whose schema URL is exactly this one.",
+          schemaLocationOptions: {
+            flat: 'Flat — …/xml_schema_flat/descript.xsd',
+            master: 'Master — …/xml_schema_master/dm/descriptSchema.xsd',
+          },
         },
         save: 'Save Configuration',
         saved: 'Saved',
@@ -675,6 +682,13 @@ const resources = {
           countryIsoCode: 'Código ISO de país',
           securityClassification: 'Clasificación de seguridad',
           enterpriseCode: 'Código de empresa',
+          schemaLocation: 'Ubicación del esquema',
+          schemaLocationHint:
+            'Forma de la URL del esquema de los módulos de datos. Las reglas de Suggest Rule limitadas a un esquema solo se aplican a los DM cuya URL de esquema sea exactamente esta.',
+          schemaLocationOptions: {
+            flat: 'Flat — …/xml_schema_flat/descript.xsd',
+            master: 'Master — …/xml_schema_master/dm/descriptSchema.xsd',
+          },
         },
         save: 'Guardar configuración',
         saved: 'Guardado',

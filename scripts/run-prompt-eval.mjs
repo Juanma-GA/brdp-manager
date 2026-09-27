@@ -56,7 +56,7 @@ import { ASK_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { checkRuleNames } from "../src/utils/ruleNameCheck.js";
-import { wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
+import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
 import { validateXML } from "xmllint-wasm";
 import {
   STANDARD_TO_VOCABULARY_FILE,
@@ -429,7 +429,8 @@ async function runSuggestProposalCase(project, aiProvider, createdBrdp, testCase
 // schema facts for the names in the Proposal and Definition, the case's
 // fixed schema context (`schemas`, empty = a general rule), the real prompt
 // builder, the fixed user message. The final rule is wrapped exactly as the
-// app would save it, for checks with "target": "final".
+// app would save it (in the case's optional `schemaLocation` URL form,
+// "flat" by default), for checks with "target": "final".
 async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
   const similar = await apiFetch(`/api/projects/${project.id}/brdps/${createdBrdp.id}/similar?kind=rule`);
   const vocabulary = loadSchemaVocabulary(testCase.standard);
@@ -451,7 +452,10 @@ async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
   const answer = await sendToLlm(aiProvider, systemPrompt, SUGGEST_RULE_USER_MESSAGE, SUGGEST_TEMPERATURE);
   const parsed = parseSuggestRuleResponse(answer);
   const xml = parsed.xml ?? "";
-  const finalRule = xml ? wrapRuleInSchemaContexts(xml, similar.format, testCase.standard, schemas) : "";
+  // Optional "schemaLocation" on the case ("flat" | "master", default flat) --
+  // the project's Schema location setting, i.e. the context URL form.
+  const location = schemaLocationOf({ schemaLocation: testCase.schemaLocation });
+  const finalRule = xml ? wrapRuleInSchemaContexts(xml, similar.format, testCase.standard, schemas, location) : "";
   return {
     systemPrompt,
     userMessage: SUGGEST_RULE_USER_MESSAGE,

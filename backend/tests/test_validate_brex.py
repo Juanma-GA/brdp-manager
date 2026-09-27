@@ -53,7 +53,7 @@ VALID_BREX_42_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <content>
 <brex>
 
-<!-- BRDP-T-00001: pendiente de aprobación de regla, no incluida en este documento -->
+<!-- BRDP-T-00001: rule pending approval, not included in this document -->
 </brex>
 </content>
 </dmodule>

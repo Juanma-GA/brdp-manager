@@ -1,4 +1,4 @@
-import { extractXML } from "./generateBREX.js";
+import { extractXML, pendingApprovalComment } from "./generateBREX.js";
 import { _isSafePattern } from "./brexToSchematron.js";
 import { getApprovalsForFormat } from "./approvals.js";
 
@@ -227,8 +227,8 @@ function extractCheckIds(text) {
 }
 
 // Only counts a comment as a genuine resolution if it follows our own
-// canonical "no automatable rule" wording (both STRICT RULE 12's template and
-// buildTraceabilityComment() always include "pendiente de revision manual").
+// canonical "no automatable rule" wording (STRICT RULE 12's template always
+// includes "pendiente de revision manual").
 // A real 100-BRDP run found the LLM sometimes dismisses a BRDP with an
 // off-pattern comment instead ("ya existe en few-shot ... no se genera de
 // nuevo (regla duplicada)") when its id happens to match a few-shot example
@@ -257,24 +257,6 @@ function sanitizeForXmlComment(text) {
     .replace(/-{2,}/g, "—")
     .replace(/-+$/, "")
     .trim();
-}
-
-function buildTraceabilityComment(brdp, reason) {
-  const desc = String(brdp.definition || brdp.proposal || "Regla sin contexto").slice(0, 300);
-  const why = reason || "sin gancho estructural claro en el vocabulario confirmado";
-  // Sanitize the WHOLE assembled body in one pass (not just the injected
-  // fragments) -- a literal "--" in the surrounding boilerplate text itself
-  // is just as fatal to XML well-formedness as one in `why`/`desc`, and this
-  // was in fact the real bug: the boilerplate wording used a raw "--".
-  // brdp.identifier is the human-readable id (BRDP-EXT-00010, BRDP-D1-...);
-  // brdp.id is Postgres's internal UUID -- confirmed real (a generated .sch
-  // showed raw UUIDs in its traceability comments) that this used to read
-  // brdp.id here. The single caller (generateSchematronDITA()'s main loop)
-  // passes objects straight from GET /api/projects/{id}/brdps (BRDPOut),
-  // which always has both fields -- .identifier is what a reviewer actually
-  // needs to look up.
-  const inner = `${brdp.identifier}: no se pudo generar una regla Schematron automatable (${why}); pendiente de revision manual. Definition: ${desc}`;
-  return `<!-- ${sanitizeForXmlComment(inner)} -->`;
 }
 
 // Splits raw LLM output into pattern blocks (dropping any whose ids don't map
@@ -393,8 +375,8 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryB
   // can only ever reach status "approved" after passing the SAME
   // well-formedness check server-side (propose_approval/import_jobs.py's
   // _xml_well_formed_error) and client-side (RecordsPage's checkWellFormed
-  // before save), and buildTraceabilityComment() already sanitizes its own
-  // generated text via sanitizeForXmlComment(). Confirmed live with real
+  // before save), and pendingApprovalComment() (generateBREX.js) already
+  // sanitizes the identifier it writes. Confirmed live with real
   // Navantia data that a blanket comment-body pass here actively broke the
   // "verbatim" guarantee: a real approved rule's OWN internal explanatory
   // comment (e.g. "<!-- La columna de exención ... -->") got silently
@@ -1019,9 +1001,9 @@ function dedupeSharedLets(blocks) {
 // takes only the BRDPs with a frozen 'approved' rule_approvals row and
 // injects their rule_xml verbatim (via buildDeterministicBlockFromFewShot,
 // which already special-cases entry.rule_xml as a verbatim passthrough);
-// every other Validated BRDP becomes a traceability comment via
-// buildTraceabilityComment(), the exact same mechanism already used for
-// BRDP-D1-00089 -- untouched here, just called with a different reason.
+// every other Validated BRDP becomes a pending-approval comment via
+// pendingApprovalComment() (generateBREX.js) -- the same comment the BREX
+// generators write: the BRDP identifier, never its UUID, in English.
 // The curated few-shot exact-id-match shortcut (previously also used to
 // bypass the LLM for known examples) is intentionally NOT consulted here
 // anymore: approval is now the only gate for inclusion, so an unapproved
@@ -1062,7 +1044,9 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     if (approvalEntry && approvalEntry.status === "approved") {
       blocks.push(buildDeterministicBlockFromFewShot(approvalEntry));
     } else {
-      blocks.push(buildTraceabilityComment(brdp, "pendiente de aprobación de regla, no incluida en este documento"));
+      // Same comment as the BREX generators (pendingApprovalComment in
+      // generateBREX.js): the BRDP identifier (never its UUID), in English.
+      blocks.push(pendingApprovalComment(brdp));
     }
   }
 

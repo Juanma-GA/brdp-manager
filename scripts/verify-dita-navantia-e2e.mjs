@@ -269,8 +269,11 @@ async function main() {
     // real pattern blocks, was making that naive regex match end-to-end).
     const patternBlocks = xml.match(/<pattern\b(?:(?!<pattern\b)[\s\S])*?<\/pattern>/g) || [];
     for (const todo of todoRows) {
-      const idComment = new RegExp(`<!--[^]*?\\b${todo.identifier}\\b[^]*?-->`);
-      assert(idComment.test(xml), `To Do BRDP ${todo.identifier}'s own traceability comment shows its real identifier`);
+      // Same comment as the BREX generators: identifier, in English.
+      assert(
+        xml.includes(`<!-- ${todo.identifier}: rule pending approval, not included in this document -->`),
+        `To Do BRDP ${todo.identifier}'s own comment: '${todo.identifier}: rule pending approval, not included in this document'`
+      );
       const appearsInsideAPattern = patternBlocks.some((block) => block.includes(todo.identifier));
       assert(!appearsInsideAPattern, `To Do BRDP ${todo.identifier} never appears as a real <pattern> block`);
     }

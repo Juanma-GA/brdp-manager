@@ -8,18 +8,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  SCHEMA_CONTEXT_URL_BASE,
+  DEFAULT_SCHEMA_LOCATION,
+  SCHEMA_CONTEXT_ISSUE,
   checkRuleSchemaCoverage,
   contextSchemasOfRule,
   coverageOf,
   decideRuleSchemaContext,
   detectSchemaMentions,
   hasSchemaContextBlock,
+  schemaContextUrl,
+  schemaLocationOf,
   schemaNameFromContext,
   supportsSchemaContext,
   wrapRuleInSchemaContexts,
 } from '../src/utils/ruleSchemaContext.js';
 import { buildSuggestRulePrompt } from '../src/prompts/suggestRulePrompt.js';
+import { pendingApprovalComment } from '../src/api/generateBREX.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0;
@@ -48,7 +52,7 @@ const s41 = loadCards('schema-cards-4-1.json');
 const s301 = loadCards('schema-cards-3-0-1.json');
 
 // --- URL table ---------------------------------------------------------------
-check('url table covers exactly the three S1000D rule formats', eq(Object.keys(SCHEMA_CONTEXT_URL_BASE).sort(), ['S1000D 3.0.1', 'S1000D 4.1', 'S1000D 4.2']));
+check('url table covers exactly the three S1000D rule formats', eq(Object.keys(SCHEMA_CONTEXT_ISSUE).sort(), ['S1000D 3.0.1', 'S1000D 4.1', 'S1000D 4.2']));
 check('DITA never supports schema context', !supportsSchemaContext('DITA 1.3 Xpath2.0') && !supportsSchemaContext('DITA 1.3 Xpath3.0'));
 check('S1000D 5.0 has no schema context', !supportsSchemaContext('S1000D 5.0'));
 // The 4.2 / 4.1 bases are the real rulesContext values of the curated templates.
@@ -58,11 +62,58 @@ for (const [std, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const rules = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).map((r) => r.Rule || '');
   const urls = rules.flatMap((r) => [...r.matchAll(/rulesContext="([^"]+)"/g)].map((m) => m[1]));
   check(`${std}: template has real rulesContext values`, urls.length > 0);
-  check(`${std}: every template rulesContext uses the table's base`, urls.every((u) => u.startsWith(SCHEMA_CONTEXT_URL_BASE[std])), urls.join(' '));
+  check(`${std}: every template rulesContext is the flat URL the app writes`, urls.every((u) => u === schemaContextUrl(std, schemaNameFromContext(u), 'flat')), urls.join(' '));
 }
 // Every document schema of each standard has a mention entry or at least its
 // file name (always matched as "<name>.xsd").
 check('schemaNameFromContext', schemaNameFromContext('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd') === 'fault');
+
+// --- schema location (flat / master) ---------------------------------------------
+check('default location is flat', DEFAULT_SCHEMA_LOCATION === 'flat');
+check('schemaLocationOf: absent / unknown -> flat', schemaLocationOf(undefined) === 'flat' && schemaLocationOf({}) === 'flat' && schemaLocationOf({ schemaLocation: 'weird' }) === 'flat');
+check('schemaLocationOf: master kept', schemaLocationOf({ schemaLocation: 'master' }) === 'master');
+{
+  const expected = {
+    'S1000D 4.2': ['4-2', s42.docs],
+    'S1000D 4.1': ['4-1', s41.docs],
+    'S1000D 3.0.1': ['3-0-1', s301.docs],
+  };
+  for (const [std, [issue, docs]] of Object.entries(expected)) {
+    check(`${std} flat descript`, schemaContextUrl(std, 'descript', 'flat') === `http://www.s1000d.org/S1000D_${issue}/xml_schema_flat/descript.xsd`);
+    check(`${std} master descript`, schemaContextUrl(std, 'descript', 'master') === `http://www.s1000d.org/S1000D_${issue}/xml_schema_master/dm/descriptSchema.xsd`);
+    check(`${std} default = flat`, schemaContextUrl(std, 'proced') === schemaContextUrl(std, 'proced', 'flat'));
+    // Every document schema of the issue round-trips through both forms.
+    for (const loc of ['flat', 'master']) {
+      const bad = docs.filter((d) => schemaNameFromContext(schemaContextUrl(std, d, loc)) !== d);
+      check(`${std} ${loc}: every document schema round-trips (${docs.length})`, bad.length === 0, bad.join(','));
+    }
+  }
+  // The four non-DM schemas have their own master folder.
+  for (const [schema, folder] of [['comment', 'comment'], ['ddn', 'ddn'], ['dml', 'dml'], ['pm', 'pm']]) {
+    check(`master ${schema} under ${folder}/`, schemaContextUrl('S1000D 3.0.1', schema, 'master') === `http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/${folder}/${schema}Schema.xsd`);
+  }
+  // Real 3.0.1 master list (public/brex-schema-summary-sch.json, BRDP-A1-00100):
+  // every xml_schema_master URL there is exactly what the app writes.
+  const sch = JSON.parse(fs.readFileSync(path.join(root, 'public/brex-schema-summary-sch.json'), 'utf8'));
+  const a1 = sch.few_shot_examples.find((e) => e.id === 'BRDP-A1-00100');
+  const masterUrls = [...a1.assert_test.matchAll(/'(http[^']*xml_schema_master[^']*)'/g)].map((m) => m[1]);
+  check('real 3.0.1 master list present', masterUrls.length >= 15, String(masterUrls.length));
+  const mismatch = masterUrls.filter((u) => u !== schemaContextUrl('S1000D 3.0.1', schemaNameFromContext(u), 'master'));
+  check('every real 3.0.1 master URL matches the app', mismatch.length === 0, mismatch.join(' '));
+}
+check('schemaNameFromContext master', schemaNameFromContext('http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd') === 'descript');
+check('schemaNameFromContext master non-DM', schemaNameFromContext('http://www.s1000d.org/S1000D_4-2/xml_schema_master/comment/commentSchema.xsd') === 'comment');
+{
+  const r301 = '<objrule id="BRDP-Y">\n  <objpath objappl="0">//emphasis</objpath>\n  <objuse>u</objuse>\n</objrule>';
+  const w = wrapRuleInSchemaContexts(r301, 'BREX-3.0.1', 'S1000D 3.0.1', ['descript'], 'master');
+  check('3.0.1 master, limited to descript -> context="…xml_schema_master/dm/descriptSchema.xsd"', w.startsWith('<contextrules context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd">'), w.split('\n')[0]);
+  check('precedent in master form -> schema recognized', eq(contextSchemasOfRule(w), { schemas: ['descript'], general: false }));
+  const w42m = wrapRuleInSchemaContexts('<structureObjectRule id="Z"/>', 'BREX-4.2', 'S1000D 4.2', ['proced'], 'master');
+  check('4.2 master', w42m.startsWith('<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_master/dm/procedSchema.xsd">'));
+  const w42f = wrapRuleInSchemaContexts('<structureObjectRule id="Z"/>', 'BREX-4.2', 'S1000D 4.2', ['proced']);
+  check('4.2 flat unchanged from before', w42f.startsWith('<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">'));
+  check('4.1 master', wrapRuleInSchemaContexts('<structureObjectRule id="Z"/>', 'BREX-4.1', 'S1000D 4.1', ['fault'], 'master').includes('S1000D_4-1/xml_schema_master/dm/faultSchema.xsd'));
+}
 
 // --- word -> schema map ----------------------------------------------------------
 const mention = (text, docs = s42.docs) => detectSchemaMentions(text, docs);
@@ -77,6 +128,7 @@ check('"process data modules" is', eq(mention('Process data modules shall ...'),
 check('"the BREX" alone is not the brex schema', eq(mention('The BREX shall list every rule.'), []));
 check('fault: weak + strong', eq(mention('Fault isolation procedures'), ['fault']) && eq(mention('esquema de fallos'), ['fault']));
 check('file name with .xsd', eq(mention('Use fault.xsd here'), ['fault']));
+check('master file name <name>Schema.xsd', eq(mention('Use descriptSchema.xsd here'), ['descript']));
 check('CIR acronym', eq(mention('In the CIR'), ['comrep']));
 check('crew / tripulación', eq(mention('crew data'), ['crew']) && eq(mention('información de tripulación'), ['crew']));
 check('checklist', eq(mention('In checklists, ...'), ['checklist']));
@@ -198,6 +250,16 @@ check('plain rule -> general, no schemas', eq(contextSchemasOfRule(rule42), { sc
   check('... no CONTEXT BLOCKS note without context precedents', !scoped.includes('CONTEXT BLOCKS:'));
   const two = buildSuggestRulePrompt(brdp, 'S1000D 4.2', 'BREX-4.2', { formatExamples: [] }, [], { schemas: ['proced', 'descript'] });
   check('two schemas listed', two.includes('schemas proced, descript.'));
+}
+
+// --- Generate: comment for a BRDP without a Verified rule (all BREX issues + DITA) ---
+{
+  const uuid = '3b32ddb1-0c8e-4a55-9a1f-0d5c7d9e2f11';
+  const c = pendingApprovalComment({ id: uuid, identifier: 'BRDP-EXT-00031' });
+  check('pending comment: identifier, English', c === '<!-- BRDP-EXT-00031: rule pending approval, not included in this document -->', c);
+  check('pending comment: never the UUID', !c.includes(uuid));
+  const odd = pendingApprovalComment({ id: uuid, identifier: 'BRDP--X-' });
+  check('pending comment: "--" / trailing "-" neutralized (XML-legal)', !/--(?!>)/.test(odd.slice(4, -3)) && !odd.includes('X-:'), odd);
 }
 
 console.log(`${passes} passed, ${failures} failed`);

@@ -24,7 +24,7 @@ import NamingTip from '../components/assistant/NamingTip';
 import RenameSuggestions from '../components/assistant/RenameSuggestions';
 import RuleSuggestionPanel from '../components/assistant/RuleSuggestionPanel';
 import RuleSchemaSelector from '../components/assistant/RuleSchemaSelector';
-import { supportsSchemaContext } from '../utils/ruleSchemaContext.js';
+import { schemaLocationOf, supportsSchemaContext } from '../utils/ruleSchemaContext.js';
 import { hasUnfilledMarkers } from '../utils/proposalMarkers';
 import RuleStatusStepper from '../components/RuleStatusStepper';
 import RuleStatusCell from '../components/RuleStatusCell';
@@ -452,6 +452,7 @@ export default function RecordsPage() {
   const suggestions = useSuggestions({
     projectId,
     standard: project.standard,
+    schemaLocation: schemaLocationOf(project.project_config),
     selected,
     aiProvider,
     vocabulary,

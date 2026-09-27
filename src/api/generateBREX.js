@@ -57,6 +57,20 @@ export function wrapRuleXmlFragment(xmlString) {
   return `<root${nsDecls}>${xmlString}</root>`;
 }
 
+// Comment left in the generated BREX for a BRDP without a Verified rule
+// (shared by the 4.2, 4.1 and 3.0.1 generators). Uses the BRDP's identifier
+// (BRDP-EXT-00031), never its internal UUID (brdp.id), and is in English
+// like the rest of the generated document. An identifier is user data, so
+// "--" (never legal inside an XML comment) and a trailing "-" are neutralized.
+export function pendingApprovalComment(brdp) {
+  const identifier = String(brdp.identifier || '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/-{2,}/g, '—')
+    .replace(/-+$/, '')
+    .trim();
+  return `<!-- ${identifier}: rule pending approval, not included in this document -->`;
+}
+
 export function checkWellFormed(xmlString) {
   try {
     const parser = new DOMParser();
@@ -761,7 +775,7 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
 
   if (unapprovedBRDPs.length > 0) {
     const comments = unapprovedBRDPs
-      .map((b) => `<!-- ${b.id}: pendiente de aprobación de regla, no incluida en este documento -->`)
+      .map(pendingApprovalComment)
       .join('\n');
     finalXml = finalXml.replace('</brex>', comments + '\n</brex>');
   }

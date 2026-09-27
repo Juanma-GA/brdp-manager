@@ -31,7 +31,7 @@ const SCHEMA_CONTEXT_MAX_NAMES = 30;
 export function finalRuleXml(entry, ruleXml) {
   const schemas = entry.schemas || [];
   if (schemas.length === 0 || hasSchemaContextBlock(ruleXml)) return ruleXml;
-  return wrapRuleInSchemaContexts(ruleXml, entry.format, entry.standard, schemas);
+  return wrapRuleInSchemaContexts(ruleXml, entry.format, entry.standard, schemas, entry.schemaLocation);
 }
 import { ruleStateOf } from '../utils/ruleState';
 
@@ -44,7 +44,7 @@ export function validateRuleXml(xml, vocabulary) {
   return { wellFormed: wellFormed.valid, wellFormedError: wellFormed.error, names: checkRuleNames(xml || '', vocabulary) };
 }
 
-export function useSuggestions({ projectId, standard, selected, aiProvider, vocabulary, ruleApproval, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, t }) {
+export function useSuggestions({ projectId, standard, schemaLocation, selected, aiProvider, vocabulary, ruleApproval, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, t }) {
   // Suggest Definition catalog guard (docs request, Suggest Definition
   // corpus round): identifiers of this standard's official catalog,
   // fetched once per project (eagerly, unlike other catalog pickers which
@@ -293,6 +293,9 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
         loading: false,
         format: similar.format,
         standard,
+        // The project's "Schema location" (flat / master) -- the context
+        // block URL form the wrapper writes.
+        schemaLocation,
         schemas,
         coverageByName: options.coverageByName || {},
         sameBrdp,
