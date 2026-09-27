@@ -19,3 +19,16 @@ export async function fetchSchemaFacts(standard, vocabulary, orderedTexts, max =
     return [];
   }
 }
+
+// Suggest Rule part 2 (schema context): the raw GET /api/schema-cards answer
+// for `names` -- { available, cards, unknown, document_schemas }. Unlike
+// fetchSchemaFacts, errors propagate: the schema-choice decision depends on
+// it, and it must never silently fall back to "general rule" (HR7).
+export async function fetchSchemaCards(standard, names) {
+  const unique = [...new Set(names)];
+  // With no names the endpoint still answers document_schemas.
+  const query = unique.length > 0 ? unique.join(',') : '_';
+  return authFetchJson(
+    `/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(query)}`
+  );
+}

@@ -205,6 +205,38 @@ export const suggestRuleCases = [
     ],
   },
   {
+    // Suggest Rule part 2: a Proposal limited to procedural data modules,
+    // the user kept proced checked in the selector, and a format example
+    // with context blocks (the shape of the template's BRDP-S1-00006: a
+    // general rule plus three context-scoped //dmodule prohibitions).
+    name: 'brex-4-2-proced-context',
+    args: [
+      { ...brdpRule, title: 'Emphasis in procedures', proposal: 'In procedural data modules, <emphasis> shall not be used.' },
+      'S1000D 4.2',
+      'BREX-4.2',
+      {
+        sameBrdp: [],
+        similar: [],
+        formatExamples: [
+          {
+            identifier: 'BRDP-S1-00006',
+            source: 'Template',
+            proposal: 'Descriptive, Procedural and IPD schemas shall be used as per Writing Style Guide',
+            text: [
+              '<structureObjectRule>\n  <objectPath allowedObjectFlag="2">//@xsi:noNamespaceSchemaLocation</objectPath>\n  <objectUse>BRDP-S1-00006. Schema location.</objectUse>\n</structureObjectRule>',
+              ...['condcrossreftable', 'fault'].map(
+                (schema) =>
+                  `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/${schema}.xsd">\n  <structureObjectRuleGroup>\n    <structureObjectRule>\n      <objectPath allowedObjectFlag="0">//dmodule</objectPath>\n      <objectUse>BRDP-S1-00006. Not allowed.</objectUse>\n    </structureObjectRule>\n  </structureObjectRuleGroup>\n</contextRules>`
+              ),
+            ].join('\n'),
+          },
+        ],
+      },
+      [],
+      { schemas: ['proced'] },
+    ],
+  },
+  {
     name: 'brex-4-1-format-examples-only',
     args: [brdpRule, 'S1000D 4.1', 'BREX-4.1', { sameBrdp: [], similar: [], formatExamples: ruleFormatExamples }, []],
   },

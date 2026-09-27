@@ -9,9 +9,30 @@ import { buildSuggestDefinitionPrompt } from '../prompts/suggestDefinitionPrompt
 import { buildSuggestProposalPrompt } from '../prompts/suggestProposalPrompt.js';
 import { SUGGEST_TEMPERATURE } from '../prompts/shared.js';
 import { buildCopyablePrompt, buildSuggestRulePrompt, parseSuggestRuleResponse, SUGGEST_RULE_USER_MESSAGE } from '../prompts/suggestRulePrompt.js';
-import { fetchSchemaFacts } from '../api/schemaFacts.js';
+import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
-import { checkRuleNames } from '../utils/ruleNameCheck.js';
+import { checkRuleNames, extractRuleNames } from '../utils/ruleNameCheck.js';
+import { selectSchemaFactNames } from '../utils/vocabularyCheck.js';
+import {
+  coverageOf,
+  decideRuleSchemaContext,
+  hasSchemaContextBlock,
+  supportsSchemaContext,
+  wrapRuleInSchemaContexts,
+} from '../utils/ruleSchemaContext.js';
+
+// Element names the schema-context decision looks at: every element name
+// the BRDP's Title, Definition and Proposal mention (same extraction as the
+// schema facts, just not capped at the prompt's 6).
+const SCHEMA_CONTEXT_MAX_NAMES = 30;
+
+// Pasted rules get the same wrapper as a generated one when schemas were
+// chosen -- unless the pasted text already carries its own context block.
+export function finalRuleXml(entry, ruleXml) {
+  const schemas = entry.schemas || [];
+  if (schemas.length === 0 || hasSchemaContextBlock(ruleXml)) return ruleXml;
+  return wrapRuleInSchemaContexts(ruleXml, entry.format, entry.standard, schemas);
+}
 import { ruleStateOf } from '../utils/ruleState';
 
 // Suggest Rule validation (docs request, Part 4): deterministic, warns
@@ -45,6 +66,9 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
   //                 styleReferences?, excludedPendingOtherProjects,
   //                 expandedReferenceIds }
   //   error:      { brdpId, kind, error, expandedReferenceIds }
+  //   selector:   { brdpId, kind: 'rule', selector, prepare, coverageByName,
+  //                 expandedReferenceIds } -- Suggest Rule part 2: the
+  //                 inline schema choice shown BEFORE generating (S1000D).
   // kind='rule' entries (docs request, Suggest Rule round) also carry
   // `copyablePrompt` (for Copy prompt, whenever a prompt was built),
   // `pastedRule` (the Paste rule field), the reference groups, and --
@@ -84,6 +108,9 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
   }, [projectId]);
 
   const selectedSuggestion = selected ? suggestionsByBrdpId.get(selected.id) || null : null;
+  // Latest map, for checks after an await (the closure's copy is stale).
+  const suggestionsRef = useRef(suggestionsByBrdpId);
+  suggestionsRef.current = suggestionsByBrdpId;
 
   const setSuggestionEntry = (brdpId, entry) =>
     setSuggestionsByBrdpId((prev) => {
@@ -124,13 +151,18 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
   // inside the loading entry -- RecordsPage passes "embed this BRDP" when
   // it is the project's only pending embedding. Its failure becomes the
   // entry's error (with Discard), like any other.
-  const requestSuggestion = async (kind, prepare = null) => {
+  // `options` (Suggest Rule part 2): { schemas, coverageByName,
+  // fromSelector } -- the schemas chosen in the selector (empty = general
+  // rule), the element coverage already fetched for the decision, and
+  // whether the call replaces this BRDP's own selector entry.
+  const requestSuggestion = async (kind, prepare = null, options = {}) => {
     if (!selected || !aiProvider) return;
     const brdpId = selected.id;
     // Defense in depth (docs request): the button is already disabled
     // whenever this BRDP has any entry, loading or resolved -- "para
-    // regenerar, primero Discard". Each BRDP's block is independent.
-    if (suggestionsByBrdpId.has(brdpId)) return;
+    // regenerar, primero Discard". Each BRDP's block is independent. The
+    // one exception is the schema selector's own Generate.
+    if (suggestionsByBrdpId.has(brdpId) && !options.fromSelector) return;
 
     // Bumped ONLY here, never by Accept/Discard -- see suggestGenerationRef
     // above for why both this token check AND the map-existence check in
@@ -246,18 +278,23 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
       const standardFallback = similar.standard_fallback || [];
       const templateFallback = similar.template_fallback || [];
       const schemaFacts = await fetchSchemaFacts(standard, vocabulary, [selected.proposal, selected.definition], 6);
+      const schemas = options.schemas || [];
       const systemPrompt = buildSuggestRulePrompt(
         selected,
         standard,
         similar.format,
         { sameBrdp, similar: ruleSimilar, formatExamples: [...standardFallback, ...templateFallback] },
-        schemaFacts
+        schemaFacts,
+        { schemas }
       );
       const ruleBase = {
         brdpId,
         kind,
         loading: false,
         format: similar.format,
+        standard,
+        schemas,
+        coverageByName: options.coverageByName || {},
         sameBrdp,
         similar: ruleSimilar,
         standardFallback,
@@ -287,13 +324,115 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
       if (parsed.notCheckable !== undefined) {
         commit({ ...ruleBase, notCheckable: parsed.notCheckable || '—' });
       } else {
-        commit({ ...ruleBase, text: parsed.xml });
+        // The LLM writes only the inner rule; the app adds one context
+        // block per chosen schema. With schemas chosen, the coverage of the
+        // rule's own element names is fetched too, for the per-schema
+        // warning (Part 5) -- a failed fetch only loses that warning, the
+        // vocabulary check still runs.
+        const text = finalRuleXml(ruleBase, parsed.xml);
+        const coverageByName = schemas.length
+          ? await fetchMissingCoverage(extractRuleNames(parsed.xml).elements, ruleBase.coverageByName)
+          : ruleBase.coverageByName;
+        commit({ ...ruleBase, coverageByName, text });
       }
     } catch (err) {
       // Docs request's explicit edge case: an error entry still gets a
       // Discard so the BRDP's Suggest buttons don't stay blocked forever.
       commit({ brdpId, kind, loading: false, error: err.message, expandedReferenceIds: new Set() });
     }
+  };
+
+  // name -> Set(schemas) for `names` not in `known` yet, merged into it.
+  const fetchMissingCoverage = async (names, known) => {
+    const missing = names.filter((n) => !known[n]);
+    if (missing.length === 0) return known;
+    try {
+      const res = await fetchSchemaCards(standard, missing);
+      const merged = { ...known };
+      for (const [name, entry] of Object.entries(res.cards || {})) merged[name] = coverageOf(entry);
+      return merged;
+    } catch {
+      return known;
+    }
+  };
+
+  // Suggest Rule entry point (part 2). S1000D: decides deterministically
+  // whether to offer the schema choice (utils/ruleSchemaContext.js) and
+  // either shows the selector or generates a general rule straight away.
+  // `manual` = the "Limit to specific schemas…" link: always shows it.
+  // DITA (no schema context): straight to a general rule.
+  const startRuleSuggestion = async ({ prepare = null, manual = false } = {}) => {
+    if (!selected || !aiProvider) return;
+    const brdpId = selected.id;
+    if (suggestionsByBrdpId.has(brdpId)) return;
+    if (!supportsSchemaContext(standard)) {
+      await requestSuggestion('rule', prepare);
+      return;
+    }
+    setSuggestionEntry(brdpId, { brdpId, kind: 'rule', loading: true, expandedReferenceIds: new Set() });
+    let decision;
+    let coverageByName = {};
+    try {
+      const texts = [selected.title, selected.definition, selected.proposal];
+      const names = selectSchemaFactNames(texts, vocabulary, SCHEMA_CONTEXT_MAX_NAMES).map((c) => c.name);
+      const res = await fetchSchemaCards(standard, names);
+      for (const [name, entry] of Object.entries(res.cards || {})) coverageByName[name] = coverageOf(entry);
+      decision = decideRuleSchemaContext({
+        standard,
+        documentSchemas: res.document_schemas || [],
+        cards: res.cards || {},
+        text: texts.join('\n'),
+      });
+    } catch (err) {
+      // Never silently fall back to a general rule (HR7): the user sees the
+      // error and Discards it.
+      if (!suggestionsRef.current.has(brdpId)) return; // BRDP deleted / project changed meanwhile
+      setSuggestionEntry(brdpId, { brdpId, kind: 'rule', loading: false, error: err.message, expandedReferenceIds: new Set() });
+      return;
+    }
+    if (!suggestionsRef.current.has(brdpId)) return; // BRDP deleted / project changed meanwhile
+    if (!decision.supported || (!decision.showSelector && !manual)) {
+      removeSuggestionEntry(brdpId);
+      await requestSuggestion('rule', prepare, { schemas: [], coverageByName, fromSelector: true });
+      return;
+    }
+    setSuggestionEntry(brdpId, {
+      brdpId,
+      kind: 'rule',
+      loading: false,
+      selector: decision,
+      prepare,
+      coverageByName,
+      expandedReferenceIds: new Set(),
+    });
+  };
+
+  // The selector's Generate: nothing checked = a general rule.
+  const generateRuleWithSchemas = async (schemas) => {
+    if (!selected) return;
+    const entry = suggestionsByBrdpId.get(selected.id);
+    if (!entry?.selector) return;
+    await requestSuggestion('rule', entry.prepare, {
+      schemas,
+      coverageByName: entry.coverageByName,
+      fromSelector: true,
+    });
+  };
+
+  // Paste rule with schemas chosen: coverage for the pasted rule's names,
+  // for the per-schema warning.
+  const ensurePastedCoverage = async (brdpId, ruleXml) => {
+    const entry = suggestionsByBrdpId.get(brdpId);
+    if (!entry || !(entry.schemas || []).length) return;
+    const coverageByName = await fetchMissingCoverage(extractRuleNames(ruleXml).elements, entry.coverageByName || {});
+    if (coverageByName === entry.coverageByName) return;
+    setSuggestionsByBrdpId((prev) => {
+      const current = prev.get(brdpId);
+      if (!current) return prev;
+      const next = new Map(prev);
+      next.set(brdpId, { ...current, coverageByName: { ...current.coverageByName, ...coverageByName } });
+      return next;
+    });
   };
 
   const logSuggestionFeedback = (entry, outcome) =>
@@ -362,8 +501,9 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
     const entry = suggestionsByBrdpId.get(selected.id);
     const pasted = (entry?.pastedRule || '').trim();
     if (!entry || entry.kind !== 'rule' || !pasted) return;
-    if (!validateRuleXml(pasted, vocabulary).wellFormed) return;
-    if (!(await saveRuleAsDraft(entry, pasted, 'external_llm'))) return;
+    const ruleXml = finalRuleXml(entry, pasted);
+    if (!validateRuleXml(ruleXml, vocabulary).wellFormed) return;
+    if (!(await saveRuleAsDraft(entry, ruleXml, 'external_llm'))) return;
     removeSuggestionEntry(selected.id);
   };
 
@@ -381,6 +521,9 @@ export function useSuggestions({ projectId, standard, selected, aiProvider, voca
     selectedSuggestion,
     toggleReferenceExpanded,
     requestSuggestion,
+    startRuleSuggestion,
+    generateRuleWithSchemas,
+    ensurePastedCoverage,
     acceptSuggestion,
     acceptPastedRule,
     setPastedRule,

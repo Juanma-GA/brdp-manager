@@ -44,3 +44,7 @@ class SchemaCardsOut(BaseModel):
     available: bool
     cards: dict[str, SchemaCardEntryOut]
     unknown: list[str]
+    # Suggest Rule part 2: every document-type schema of the standard (the
+    # variants a rule can be limited to), so the client can tell whether an
+    # element exists in ALL of them. [] when not available.
+    document_schemas: list[str] = []

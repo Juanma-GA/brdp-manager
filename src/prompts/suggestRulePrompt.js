@@ -5,10 +5,14 @@
 //
 // A rule IMPLEMENTS a decision already taken: Suggest Rule is only offered
 // once the Proposal is Validated and has no unfilled [PLACEHOLDER] left.
-// Rules are always generated as GENERAL rules (no schema context) in this
-// round.
+// Schema context (Suggest Rule part 2): S1000D rules can be limited to some
+// schemas. The LLM still writes only the inner rule (format rule 1); the app
+// wraps it in one context block per chosen schema
+// (utils/ruleSchemaContext.js). Precedents keep their context blocks and
+// say which schemas they apply to.
 import { buildSchemaFactsBlock } from './shared.js';
 import { ruleFormatRules } from './ruleFormatRules.js';
+import { contextSchemasOfRule } from '../utils/ruleSchemaContext.js';
 
 export const SUGGEST_RULE_USER_MESSAGE = 'Write the rule for this BRDP.';
 
@@ -16,28 +20,53 @@ export const SUGGEST_RULE_USER_MESSAGE = 'Write the rule for this BRDP.';
 // verified on the XML -- parsed by parseSuggestRuleResponse below.
 export const NOT_CHECKABLE_PREFIX = 'NOT_CHECKABLE:';
 
+// "Applies to" line of a precedent that has context blocks; '' for a plain
+// general rule (unchanged precedent layout).
+function appliesToLine(ruleXml) {
+  const { schemas, general } = contextSchemasOfRule(ruleXml);
+  if (schemas.length === 0) return '';
+  const scoped = `only the ${schemas.join(', ')} schema${schemas.length > 1 ? 's' : ''}`;
+  return general
+    ? `\nApplies to: every schema for the rule outside the context blocks; ${scoped} for the rules inside them`
+    : `\nApplies to: ${scoped}`;
+}
+
 function precedentLines(candidates, withSource) {
   return candidates
     .map((c) => {
       const head = withSource && c.source ? `[${c.identifier} | ${c.source}]` : `[${c.identifier}]`;
-      return `${head}\nProposal: ${c.proposal}\nRule:\n${c.text}`;
+      return `${head}${appliesToLine(c.text)}\nProposal: ${c.proposal}\nRule:\n${c.text}`;
     })
     .join('\n\n');
 }
 
+function scopeText(schemaContext) {
+  const schemas = schemaContext?.schemas || [];
+  if (schemas.length === 0) {
+    return `The rule applies to every schema (it is a general rule,
+not tied to one document type).`;
+  }
+  const list = schemas.join(', ');
+  return `The rule applies ONLY to documents written against the
+schema${schemas.length > 1 ? 's' : ''} ${list}. The application places your rule inside one context block per
+schema itself — write only the rule element described below, never a
+context block. <objectUse> may name the schema${schemas.length > 1 ? 's' : ''} it applies to.`;
+}
+
 // `references` is { sameBrdp, similar, formatExamples } -- formatExamples
 // being /similar's standard_fallback followed by template_fallback.
-export function buildSuggestRulePrompt(brdp, standard, format, references, schemaFacts) {
+// `schemaContext` (optional): { schemas: [...] } -- the schemas the user
+// limited the rule to; absent or empty = a general rule.
+export function buildSuggestRulePrompt(brdp, standard, format, references, schemaFacts, schemaContext = null) {
   const { sameBrdp = [], similar = [], formatExamples = [] } = references;
 
   let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
 Decision Points), assisting in BRDP Manager.
 
-TASK: implement, as ONE general rule in the ${standard} rule format below,
+TASK: implement, as ONE ${schemaContext?.schemas?.length ? '' : 'general '}rule in the ${standard} rule format below,
 the decision already taken in the BRDP's Proposal. Do not change the
 decision, do not widen or narrow it, and do not add checks the Proposal
-does not ask for. The rule applies to every schema (it is a general rule,
-not tied to one document type).
+does not ask for. ${scopeText(schemaContext)}
 
 ${ruleFormatRules(format, standard)}`;
 
@@ -58,6 +87,16 @@ ${ruleFormatRules(format, standard)}`;
 NAMES: use only element and attribute names that appear in ${nameSourceText}.
 Never take names from the format examples, and never invent a
 plausible-sounding name.`;
+
+  const allPrecedents = [...sameBrdp, ...similar, ...formatExamples];
+  if (allPrecedents.some((c) => contextSchemasOfRule(c.text).schemas.length > 0)) {
+    prompt += `
+
+CONTEXT BLOCKS: some rules below sit inside a context block
+(<contextRules rulesContext="…"> / <contextrules context="…">). The block only
+limits them to the schema named in its URL — see each rule's "Applies to"
+line. Never output a context block yourself.`;
+  }
 
   if (sameBrdp.length > 0) {
     prompt += `

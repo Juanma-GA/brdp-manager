@@ -134,6 +134,11 @@ import path from 'node:path';
 import { buildAskSystemPrompt } from '../src/prompts/askPrompt.js';
 import { buildSuggestDefinitionPrompt } from '../src/prompts/suggestDefinitionPrompt.js';
 import { buildSuggestProposalPrompt } from '../src/prompts/suggestProposalPrompt.js';
+// Suggest Rule part 2 (schema context): one NEW case,
+// suggestRule/brex-4-2-proced-context -- the chosen-schema TASK wording, a
+// precedent's "Applies to" line and the CONTEXT BLOCKS note. The 17
+// existing prompts are unchanged (a general rule and precedents without
+// context blocks keep the old wording byte for byte).
 import { buildSuggestRulePrompt } from '../src/prompts/suggestRulePrompt.js';
 import { askCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

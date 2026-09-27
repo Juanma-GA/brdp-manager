@@ -408,3 +408,41 @@ def test_real_per_standard_parents_truncation_counts_match_the_documented_table(
     # compaction-layer artifact.
     para_parents = _CARDS_BY_FILE[STANDARD_TO_SCHEMA_CARDS_FILE["S1000D 4.2"]]["parents"]["para"]
     assert len(para_parents) == 43
+
+
+@pytest.mark.asyncio
+async def test_document_schemas_lists_the_rule_context_variants(client):
+    """Suggest Rule part 2: every document-type schema of the standard,
+    without the imported helper schemas (dc/rdf/xlink/xcf), so the client
+    can tell whether an element exists in all of them."""
+    user = await _make_user()
+    expected = {
+        "S1000D 4.2": 28,
+        "S1000D 4.1": 26,
+        "S1000D 3.0.1": 19,
+    }
+    for standard, count in expected.items():
+        res = await client.get(
+            "/api/schema-cards", params={"standard": standard, "names": "emphasis"}, headers=_headers(user)
+        )
+        schemas = res.json()["document_schemas"]
+        assert len(schemas) == count, standard
+        assert {"proced", "descript", "fault", "ipd"} <= set(schemas)
+        assert not {"dc", "rdf", "xlink", "xcf"} & set(schemas)
+        assert schemas == sorted(schemas)
+    assert "checklist" not in (
+        await client.get(
+            "/api/schema-cards", params={"standard": "S1000D 3.0.1", "names": "para"}, headers=_headers(user)
+        )
+    ).json()["document_schemas"]
+    # <emphasis> exists in every 4.2 document schema -> no schema choice needed
+    res = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 4.2", "names": "emphasis"}, headers=_headers(user)
+    )
+    body = res.json()
+    covered = {s for v in body["cards"]["emphasis"]["variants"] for s in v["schemas"]}
+    assert set(body["document_schemas"]) <= covered
+    unavailable = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 5.0", "names": "para"}, headers=_headers(user)
+    )
+    assert unavailable.json()["document_schemas"] == []

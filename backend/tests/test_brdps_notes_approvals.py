@@ -509,3 +509,45 @@ async def test_propose_accepts_native_schematron_rule_xml_for_dita_project(clien
             if db_user is not None:
                 await session.delete(db_user)
             await session.commit()
+
+
+async def test_rule_wrapped_in_several_schema_context_blocks_is_saved(client, editor_and_project):
+    """Suggest Rule part 2: a rule limited to two schemas is stored as two
+    sibling context blocks -- a fragment with several roots, accepted as
+    well-formed and stored verbatim, for BREX 4.x and 3.0.1 alike."""
+    project, headers = editor_and_project
+    brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-CTX-001"}, headers=headers)
+    ).json()
+    base42 = "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/"
+    rule42 = "\n".join(
+        f'<contextRules rulesContext="{base42}{s}.xsd">\n  <structureObjectRuleGroup>\n'
+        f'    <structureObjectRule id="BRDP-CTX-001-{s}" brSeverityLevel="brsl01">\n'
+        f'      <brDecisionRef brDecisionIdentNumber="BRDP-CTX-001"/>\n'
+        f'      <objectPath allowedObjectFlag="0">//emphasis</objectPath>\n'
+        f"      <objectUse>No &lt;emphasis&gt; in {s}.</objectUse>\n"
+        "    </structureObjectRule>\n  </structureObjectRuleGroup>\n</contextRules>"
+        for s in ("proced", "descript")
+    )
+    saved = await client.put(
+        f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2",
+        json={"rule_xml": rule42, "source": "llm", "status": "pending_review"},
+        headers=headers,
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["rule_xml"] == rule42
+
+    rule301 = (
+        '<contextrules context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/proced.xsd">\n'
+        '  <structrules>\n    <objrule id="BRDP-CTX-001-proced"><objpath objappl="0">//emphasis</objpath>'
+        "<objuse>u</objuse></objrule>\n  </structrules>\n</contextrules>\n"
+        '<contextrules context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/fault.xsd">\n'
+        '  <structrules>\n    <objrule id="BRDP-CTX-001-fault"><objpath objappl="0">//emphasis</objpath>'
+        "<objuse>u</objuse></objrule>\n  </structrules>\n</contextrules>"
+    )
+    saved301 = await client.put(
+        f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-3.0.1",
+        json={"rule_xml": rule301, "source": "external_llm", "status": "pending_review"},
+        headers=headers,
+    )
+    assert saved301.status_code == 200, saved301.text

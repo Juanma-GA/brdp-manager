@@ -73,6 +73,17 @@ function suggestRuleReply(systemPrompt) {
   if (/LONGRULE/.test(proposal)) {
     return '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath><objectUse>MOCK-LONG-RULE</objectUse></structureObjectRule>';
   }
+  // Suggest Rule part 2: a Proposal naming one of these elements gets a
+  // prohibition rule on it (schema-context verification: <emphasis> exists
+  // in every 4.2 schema, <partSegment> only in ipd).
+  const prohibited = (proposal.match(/<(emphasis|partSegment)>/) || [])[1];
+  if (prohibited) {
+    if (/FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
+      return `<objrule id="${id}"><objpath objappl="0">//${prohibited}</objpath><objuse>MOCK-RULE: &lt;${prohibited}&gt; is not used.</objuse></objrule>`;
+    }
+    const ref = /FORMAT — S1000D Issue 4\.2/.test(systemPrompt) ? `<brDecisionRef brDecisionIdentNumber="${id}"/>` : "";
+    return `<structureObjectRule id="${id}"${ref ? ' brSeverityLevel="brsl01"' : ""}>${ref}<objectPath allowedObjectFlag="0">//${prohibited}</objectPath><objectUse>MOCK-RULE: &lt;${prohibited}&gt; is not used.</objectUse></structureObjectRule>`;
+  }
   const element = /pokemon/i.test(proposal) ? "pokemon" : "table";
   if (/FORMAT — ISO Schematron/.test(systemPrompt)) {
     return `<sch:pattern id="p-${id}"><sch:rule context="${element}"><sch:assert id="${id}" role="error" test="@frame">MOCK-RULE: &lt;${element}&gt; must declare @frame.</sch:assert></sch:rule></sch:pattern>`;

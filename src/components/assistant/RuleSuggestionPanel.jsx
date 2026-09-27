@@ -1,8 +1,42 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
-import { validateRuleXml } from '../../hooks/useSuggestions';
+import { finalRuleXml, validateRuleXml } from '../../hooks/useSuggestions';
+import { extractRuleNames } from '../../utils/ruleNameCheck.js';
+import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
+
+// Part 5 (Suggest Rule part 2): with schemas chosen, an element of the
+// rule's XPath that doesn't exist in one of them -- red, never blocking.
+function SchemaCoverageWarnings({ ruleXml, entry }) {
+  const { t } = useTranslation();
+  const problems = checkRuleSchemaCoverage(
+    extractRuleNames(ruleXml).elements,
+    entry.schemas || [],
+    entry.coverageByName || {}
+  );
+  return problems.map((p) => (
+    <p key={p.schema} className={styles.vocabWarning}>
+      ⚠{' '}
+      {t('records.assistant.ruleNamesNotInSchema', {
+        names: p.missing.map((n) => `<${n}>`).join(', '),
+        schema: p.schema,
+      })}
+    </p>
+  ));
+}
+
+function AppliesTo({ entry }) {
+  const { t } = useTranslation();
+  if (!supportsSchemaContext(entry.standard) || !entry.schemas) return null;
+  return (
+    <p className={styles.ruleAppliesTo}>
+      {entry.schemas.length === 0
+        ? t('records.assistant.ruleAppliesToAll')
+        : t('records.assistant.ruleAppliesTo', { schemas: entry.schemas.join(', ') })}
+    </p>
+  );
+}
 
 // Red warnings for one rule fragment (docs request, Suggest Rule round,
 // Part 4) -- same style as the BRDP text's vocabulary warning. Only the
@@ -77,13 +111,28 @@ export default function RuleSuggestionPanel({
   onToggleReference,
   onPastedRuleChange,
   onAcceptPasted,
+  onEnsurePastedCoverage,
 }) {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(null); // null | 'copied' | 'failed'
 
   const generatedValidation = entry.text ? validateRuleXml(entry.text, vocabulary) : null;
   const pasted = (entry.pastedRule || '').trim();
-  const pastedValidation = pasted ? validateRuleXml(pasted, vocabulary) : null;
+  // A pasted rule is validated -- and shown -- exactly as it will be saved:
+  // wrapped in the chosen schemas' context blocks.
+  const pastedFinal = pasted ? finalRuleXml(entry, pasted) : '';
+  const pastedValidation = pasted ? validateRuleXml(pastedFinal, vocabulary) : null;
+  const hasSchemas = (entry.schemas || []).length > 0;
+
+  // Coverage of the pasted rule's element names, for the per-schema
+  // warning -- fetched once typing pauses. (The callback is a fresh closure
+  // every render; only the text and the schema choice re-arm the timer.)
+  useEffect(() => {
+    if (!pasted || !hasSchemas || !onEnsurePastedCoverage) return undefined;
+    const timer = setTimeout(() => onEnsurePastedCoverage(pasted), 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pasted, hasSchemas]);
 
   const copyPrompt = async () => {
     try {
@@ -118,10 +167,12 @@ export default function RuleSuggestionPanel({
           {t('records.assistant.ruleNotCheckable', { reason: entry.notCheckable })}
         </p>
       )}
+      {(entry.text || entry.notCheckable !== undefined) && <AppliesTo entry={entry} />}
       {entry.text && (
         <>
           <div className={styles.suggestionCode}>{entry.text}</div>
           <RuleValidationWarnings validation={generatedValidation} standard={standard} />
+          <SchemaCoverageWarnings ruleXml={entry.text} entry={entry} />
         </>
       )}
 
@@ -195,7 +246,14 @@ export default function RuleSuggestionPanel({
             placeholder={t('records.assistant.pasteRulePlaceholder')}
             onChange={(e) => onPastedRuleChange(e.target.value)}
           />
+          {pasted && hasSchemas && pastedFinal !== pasted && (
+            <>
+              <AppliesTo entry={entry} />
+              <div className={styles.suggestionCode}>{pastedFinal}</div>
+            </>
+          )}
           {pastedValidation && <RuleValidationWarnings validation={pastedValidation} standard={standard} />}
+          {pasted && <SchemaCoverageWarnings ruleXml={pastedFinal} entry={entry} />}
           {pasted && (
             <div className={styles.suggestionActions}>
               <button

@@ -80,6 +80,32 @@ def _load_all_cards() -> dict[str, dict]:
 
 _CARDS_BY_FILE = _load_all_cards()
 
+# Suggest Rule part 2 (schema context): the schema variants a rule can be
+# limited to. Every schema file that appears in a card, minus the four
+# imported helper schemas that are never a document type of their own:
+# dc/rdf/xlink (Dublin Core, RDF, XLink namespaces) and xcf (the WebCGM
+# companion-file schema -- its elements are webcgm/grobject/linkuri/
+# bindById/bindByName, confirmed against sources/SchemasS1000D/4.2/xcf.xsd).
+_NON_DOCUMENT_SCHEMAS = frozenset({"dc", "rdf", "xlink", "xcf"})
+
+
+def _document_schemas(data: dict) -> list[str]:
+    found: set[str] = set()
+    for variants in data.get("cards", {}).values():
+        for variant in variants:
+            found.update(variant.get("schemas", []))
+    return sorted(found - _NON_DOCUMENT_SCHEMAS)
+
+
+_DOCUMENT_SCHEMAS_BY_FILE = {filename: _document_schemas(data) for filename, data in _CARDS_BY_FILE.items()}
+
+
+def get_document_schemas(standard: str) -> list[str]:
+    """Sorted document-type schema names of `standard` ([] when it has no
+    cards)."""
+    filename = STANDARD_TO_SCHEMA_CARDS_FILE.get(standard)
+    return list(_DOCUMENT_SCHEMAS_BY_FILE.get(filename, [])) if filename else []
+
 # "Pulido de fichas" round, point 1: real data (schema-cards-4-2.json,
 # <para>'s @caveat/@securityClassification) has enums like cv01..cv99 or
 # 01..99 -- 99 near-identical tokens that used to get cut at MAX_ENUM_VALUES

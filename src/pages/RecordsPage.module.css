@@ -971,3 +971,40 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Suggest Rule part 2: inline schema selector. */
+.schemaSelectorList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 6px 0;
+  padding: 4px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.schemaOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.schemaOptionDisabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.schemaOptionReason {
+  font-style: italic;
+}
+
+.ruleAppliesTo {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}

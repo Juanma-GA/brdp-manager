@@ -23,6 +23,8 @@ import SchemaFactCard from '../components/assistant/SchemaFactCard';
 import NamingTip from '../components/assistant/NamingTip';
 import RenameSuggestions from '../components/assistant/RenameSuggestions';
 import RuleSuggestionPanel from '../components/assistant/RuleSuggestionPanel';
+import RuleSchemaSelector from '../components/assistant/RuleSchemaSelector';
+import { supportsSchemaContext } from '../utils/ruleSchemaContext.js';
 import { hasUnfilledMarkers } from '../utils/proposalMarkers';
 import RuleStatusStepper from '../components/RuleStatusStepper';
 import RuleStatusCell from '../components/RuleStatusCell';
@@ -1515,14 +1517,14 @@ export default function RecordsPage() {
                     // buttons, not just the matching kind -- Discard (or
                     // Accept) first to regenerate, even the same kind.
                     const pendingBlocked = !!selectedSuggestion;
+                    const prepare = onlySelectedPendingEmbedding ? () => embedSelectedBrdpFirst(selected.id) : null;
                     return (
                       <button
                         key={kind}
                         onClick={() =>
-                          suggestions.requestSuggestion(
-                            kind,
-                            onlySelectedPendingEmbedding ? () => embedSelectedBrdpFirst(selected.id) : null
-                          )
+                          kind === 'rule'
+                            ? suggestions.startRuleSuggestion({ prepare })
+                            : suggestions.requestSuggestion(kind, prepare)
                         }
                         disabled={
                           pendingBlocked ||
@@ -1549,6 +1551,38 @@ export default function RecordsPage() {
                     );
                   })}
                 </div>
+                {/* Suggest Rule part 2: S1000D rules can be limited to some
+                    schemas -- this link always opens the selector by hand
+                    (the app also opens it on its own when the BRDP text
+                    calls for it). Same availability as Suggest Rule. */}
+                {supportsSchemaContext(project.standard) &&
+                  !selectedSuggestion &&
+                  aiProvider &&
+                  !suggestDisabledByEmbeddings &&
+                  !suggestRuleBlockedReason() && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      title={t('records.assistant.limitToSchemasTitle')}
+                      onClick={() =>
+                        suggestions.startRuleSuggestion({
+                          prepare: onlySelectedPendingEmbedding ? () => embedSelectedBrdpFirst(selected.id) : null,
+                          manual: true,
+                        })
+                      }
+                    >
+                      {t('records.assistant.limitToSchemas')}
+                    </button>
+                  )}
+
+                {selectedSuggestion?.kind === 'rule' && selectedSuggestion.selector && (
+                  <RuleSchemaSelector
+                    key={selected.id}
+                    selector={selectedSuggestion.selector}
+                    onGenerate={suggestions.generateRuleWithSchemas}
+                    onCancel={() => suggestions.removeSuggestionEntry(selected.id)}
+                  />
+                )}
 
                 {selectedSuggestion?.excludedPendingOtherProjects > 0 && (
                   <div className={styles.suggestionBox}>
@@ -1561,7 +1595,7 @@ export default function RecordsPage() {
                   </div>
                 )}
 
-                {selectedSuggestion?.kind === 'rule' && !selectedSuggestion.loading && (
+                {selectedSuggestion?.kind === 'rule' && !selectedSuggestion.loading && !selectedSuggestion.selector && (
                   <RuleSuggestionPanel
                     entry={selectedSuggestion}
                     standard={project.standard}
@@ -1572,6 +1606,7 @@ export default function RecordsPage() {
                     onToggleReference={(id) => suggestions.toggleReferenceExpanded(selected.id, id)}
                     onPastedRuleChange={(value) => suggestions.setPastedRule(selected.id, value)}
                     onAcceptPasted={suggestions.acceptPastedRule}
+                    onEnsurePastedCoverage={(rule) => suggestions.ensurePastedCoverage(selected.id, rule)}
                   />
                 )}
 

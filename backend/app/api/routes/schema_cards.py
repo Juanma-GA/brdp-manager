@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from app.api.deps import get_current_user
 from app.models import User
 from app.schemas.schema_cards import SchemaCardsOut
-from app.services.schema_cards import get_schema_cards
+from app.services.schema_cards import get_document_schemas, get_schema_cards
 
 router = APIRouter(prefix="/api/schema-cards", tags=["schema-cards"])
 
@@ -24,4 +24,10 @@ async def read_schema_cards(
     """
     name_list = [n.strip() for n in names.split(",") if n.strip()]
     available, cards, unknown = get_schema_cards(standard, name_list)
-    return SchemaCardsOut(standard=standard, available=available, cards=cards, unknown=unknown)
+    return SchemaCardsOut(
+        standard=standard,
+        available=available,
+        cards=cards,
+        unknown=unknown,
+        document_schemas=get_document_schemas(standard),
+    )
