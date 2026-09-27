@@ -22,7 +22,7 @@ class RuleApproval(Base):
     # e.g. "BREX-4.2", "BREX-4.1", "BREX-3.0.1", "SCH-S1000D", "SCH-DITA"
     format: Mapped[str] = mapped_column(String, primary_key=True)
     rule_xml: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    # "llm" | "manual"
+    # "llm" | "manual" | "external_llm" -- see app/schemas/rule_approval.py's RuleSource.
     source: Mapped[str] = mapped_column(String, nullable=False, default="llm")
     # "pending_review" | "approved"
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending_review")

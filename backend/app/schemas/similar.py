@@ -45,8 +45,15 @@ class SimilarCandidateOut(BaseModel):
     # for this kind at all) -- the exact `{project name}` token the
     # "Same BRDP in other projects"/"Similar decisions" prompt blocks need.
     # Empty for the "This project" group (the project is implied, never
-    # named in that block) and for kind='rule'.
+    # named in that block).
+    # kind='rule' (docs request, Suggest Rule round): the bare project
+    # name, or "Template" for a template_fallback row.
     source: str = ""
+    # kind='rule' only (docs request, Suggest Rule round): each precedent
+    # is a "Proposal -> rule" PAIR -- `text` is the rule_xml, this is the
+    # Proposal that rule implements. Empty for the other kinds (their own
+    # Proposal, when relevant, already travels in `text`).
+    proposal: str = ""
 
 
 class SimilarOut(BaseModel):
@@ -68,8 +75,10 @@ class SimilarOut(BaseModel):
     # `same_brdp` below is non-empty, this group only tops it up to a
     # COMBINED total of 5 (5 - len(same_brdp) here) -- when `same_brdp` is
     # empty (no matching catalog identifier), this alone provides all 5.
-    # kind='rule': unchanged, up to CANDIDATE_LIMIT from this project's own
-    # standard-wide search.
+    # kind='rule' (docs request, Suggest Rule round): the "Similar
+    # decisions" group -- up to 5 Validated BRDPs of the standard (any
+    # project) with a Verified rule and similarity >= 0.5, never repeating
+    # same_brdp. `sufficient_precedent` is always True for rule too now.
     candidates: list[SimilarCandidateOut]
     # kind='definition' only: up to 3 "different in content, same style"
     # references (the 3 candidates with the LOWEST similarity in the whole
@@ -84,7 +93,9 @@ class SimilarOut(BaseModel):
     # official catalog (`brdp_catalog`) -- an EXT-style auto-generated
     # identifier can coincidentally match across two unrelated projects,
     # so identifier matching is only semantically meaningful for a real
-    # catalog-issued id. Always empty for definition/rule.
+    # catalog-issued id. kind='rule' (docs request, Suggest Rule round):
+    # same rule, but requires a Verified rule instead of a Proposal. Always
+    # empty for definition.
     same_brdp: list[SimilarCandidateOut] = []
     # kind='proposal' only (docs request, Suggest Proposal round): the
     # "This project" group -- up to 3 Validated BRDPs (non-empty Proposal)
@@ -93,6 +104,13 @@ class SimilarOut(BaseModel):
     # OTHER projects), so never needs cross-group dedup against them.
     # Always empty for definition/rule.
     this_project: list[SimilarCandidateOut] = []
+    # kind='rule' only (docs request, Suggest Rule round): format examples,
+    # never related decisions -- only filled when same_brdp + candidates
+    # hold fewer than 3. standard_fallback: other Verified rules of the
+    # standard, most similar first even below 0.5; template_fallback: if
+    # still short, Verified rows of the standard's curated Excel template.
+    standard_fallback: list[SimilarCandidateOut] = []
+    template_fallback: list[SimilarCandidateOut] = []
     message: str | None = None
     # kind='rule' only: the rule_approvals format these candidates' rule_xml
     # came from, so a frontend that accepts a suggested rule knows which

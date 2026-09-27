@@ -98,3 +98,19 @@ def test_rule_format_keys_are_a_subset_of_the_canonical_standards():
         f"similar.py's _STANDARD_TO_RULE_FORMAT has standard(s) not in the canonical 7: "
         f"{sorted(backend_keys - canonical)}"
     )
+
+
+def test_curated_template_mapping_matches_frontend_and_files_exist():
+    """Suggest Rule's template_fallback (app/services/rule_templates.py)
+    reads the same curated Excel files "Download Excel template" serves --
+    both mappings must agree, and every mapped file must really exist."""
+    from app.services.rule_templates import CURATED_TEMPLATE_BY_STANDARD, PUBLIC_DIR, load_template_rules
+
+    source = (REPO_ROOT / "src" / "utils" / "excelUtils.js").read_text()
+    block = re.search(r"export const CURATED_TEMPLATE_BY_STANDARD = \{(.*?)\};", source, re.DOTALL)
+    assert block, "Could not find CURATED_TEMPLATE_BY_STANDARD in excelUtils.js"
+    frontend = {k: v.lstrip("/") for k, v in re.findall(r"'([^']+)':\s*'([^']+)'", block.group(1))}
+    assert frontend == CURATED_TEMPLATE_BY_STANDARD
+    for standard, filename in CURATED_TEMPLATE_BY_STANDARD.items():
+        assert (PUBLIC_DIR / filename).is_file(), filename
+        assert len(load_template_rules(standard)) >= 3, f"{standard}: fewer than 3 Verified template rules"

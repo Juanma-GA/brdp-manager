@@ -3,6 +3,7 @@ precedent for Suggest Definition/Proposal/Rule; the frontend builds the
 actual LLM prompt from this (§4's "FastAPI never builds prompts" rule) --
 this endpoint never calls the LLM itself, only pgvector + Postgres.
 """
+import re
 import uuid
 
 import httpx
@@ -18,27 +19,31 @@ from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.similar import SimilarCandidateOut, SimilarOut
 from app.services.embeddings import EmbeddingUnavailable, brdp_embedding_text, compute_embedding
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT as _STANDARD_TO_RULE_FORMAT
+from app.services.rule_templates import load_template_rules
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps/{brdp_id}/similar", tags=["similar"])
 
-# docs/v2 §3 point 3 -- HR7, never silently degrade: below this many
-# passing candidates, the response says so explicitly instead of padding
-# with weak matches. Starting value, not empirically tuned yet (§3 point 5
-# -- revisit after real usage, same as the rest of the mechanism). Applies
-# to kind='rule' only now -- docs request already removed this gate for
-# kind='definition' (its corpus round), and this round removes it for
-# kind='proposal' too (its own corpus round), both of which always call
-# the LLM regardless of precedent count now.
-MIN_CANDIDATES = 3
-
 # Minimum cosine similarity (1 - pgvector cosine distance) to count as a
-# real match at all, independent of MIN_CANDIDATES -- without this, a
-# project with only 3 total Validated BRDPs would always report
-# "sufficient precedent" even if none of them are actually similar. Also
-# the threshold for kind='definition''s "Similar" list (docs request).
+# real "similar" match -- used by every kind's similarity-ranked group.
 MIN_SIMILARITY = 0.5
 
-CANDIDATE_LIMIT = 10
+# kind='rule' (docs request, Suggest Rule round): there is no longer a
+# minimum-precedent gate -- the LLM is always called. same_brdp + similar
+# are topped up to RULE_MIN_REFERENCES with standard_fallback, then with
+# template_fallback, so the prompt always shows the format at least this
+# many times when the standard has any rules at all.
+RULE_SAME_BRDP_LIMIT = 5
+RULE_SIMILAR_LIMIT = 5
+RULE_MIN_REFERENCES = 3
+
+# Mirrors src/utils/proposalMarkers.js's UNFILLED_MARKER_RE -- keep both in
+# sync. A Suggest Proposal placeholder the user hasn't filled in yet: "["
+# + an uppercase name (letters, spaces, "/", "_", "-"; at least 2 chars) +
+# optional ":" and free text + "]" -- [LIST: …], [VALUE: …],
+# [SHALL/SHALL NOT], [UNIT: …], [CONVENTION: …]. Digits are deliberately
+# not allowed in the name, so a legitimate bracketed reference like
+# "[ISO 8601]" or an XPath predicate "[1]" never counts as a placeholder.
+UNFILLED_MARKER_RE = re.compile(r"\[[A-Z][A-Z_/ -]*[A-Z]\s*(?::[^\]]*)?\]")
 
 # kind='definition' only (docs request): "up to 5 similar" / "3 lowest-
 # similarity style references, only when fewer than 3 similar".
@@ -76,6 +81,7 @@ async def get_similar(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Rule suggestions are not available for project standard {project.standard!r}",
             )
+        await _check_rule_prerequisites(db, brdp, rule_format)
 
     # docs request (Suggest Definition corpus round), point 1 -- "Prohibido
     # sobre BRDPs de catálogo": an official catalog BRDP already HAS a
@@ -143,98 +149,7 @@ async def get_similar(
 
     # Only kind == "rule" ever reaches here -- "definition"/"proposal" both
     # return early above via their own dedicated corpus functions.
-    distance_col = BRDP.embedding.cosine_distance(query_embedding).label("distance")
-    stmt = (
-        select(BRDP, distance_col)
-        .join(Project, BRDP.project_id == Project.id)
-        .join(
-            RuleApproval,
-            (RuleApproval.brdp_id == BRDP.id) & (RuleApproval.format == rule_format),
-        )
-        .where(
-            Project.standard == project.standard,
-            BRDP.validation == "Validated",
-            BRDP.id != brdp_id,
-            BRDP.embedding.is_not(None),
-            RuleApproval.status == "approved",
-            # A trashed BRDP must never count as precedent for Suggest
-            # Rule (docs request), even though its rule_approvals row is
-            # left alive by a soft-delete -- this is the one thing that
-            # actually hides it from that join.
-            ACTIVE_BRDP_FILTER,
-        )
-        .order_by(distance_col)
-        .limit(CANDIDATE_LIMIT)
-    )
-
-    rows = (await db.execute(stmt)).all()
-
-    rule_text_by_brdp_id: dict[uuid.UUID, str] = {}
-    if rows:
-        candidate_ids = [row.BRDP.id for row in rows]
-        approvals = (
-            await db.execute(
-                select(RuleApproval).where(
-                    RuleApproval.brdp_id.in_(candidate_ids), RuleApproval.format == rule_format
-                )
-            )
-        ).scalars()
-        rule_text_by_brdp_id = {a.brdp_id: a.rule_xml for a in approvals}
-
-    candidates: list[SimilarCandidateOut] = []
-    for row in rows:
-        candidate_brdp, distance = row.BRDP, row.distance
-        similarity = 1 - distance
-        if similarity < MIN_SIMILARITY:
-            continue  # rows are ordered by distance ascending -- no later row can pass either
-        text = rule_text_by_brdp_id.get(candidate_brdp.id, "")
-        candidates.append(
-            SimilarCandidateOut(
-                id=candidate_brdp.id, identifier=candidate_brdp.identifier, text=text, score=similarity
-            )
-        )
-
-    # HR7 -- never silently degrade: a Validated BRDP in ANOTHER project of
-    # this same standard that hasn't been through its own project's
-    # embedding job yet is invisible to the query above (BRDP.embedding.
-    # is_not(None) excludes it), and nothing else here would ever surface
-    # that it was left out. Scoped to other projects only -- this project's
-    # own pending BRDPs already block Suggest entirely via the frontend's
-    # disabled-while-pending rule, so they can never actually reach this
-    # query in practice.
-    excluded_pending_other_projects = (
-        await db.execute(
-            select(func.count())
-            .select_from(BRDP)
-            .join(Project, BRDP.project_id == Project.id)
-            .where(
-                Project.standard == project.standard,
-                Project.id != project_id,
-                BRDP.validation == "Validated",
-                BRDP.embedding.is_(None),
-                ACTIVE_BRDP_FILTER,
-            )
-        )
-    ).scalar_one()
-
-    sufficient = len(candidates) >= MIN_CANDIDATES
-    message = (
-        None
-        if sufficient
-        else (
-            f"Insufficient precedent: only {len(candidates)} Validated BRDP(s) of the same standard "
-            f"meet the similarity threshold (minimum {MIN_CANDIDATES} required). Suggestions built "
-            "without enough precedent are not offered automatically -- review manually instead."
-        )
-    )
-    return SimilarOut(
-        kind=kind,
-        sufficient_precedent=sufficient,
-        candidates=candidates,
-        message=message,
-        format=rule_format,
-        excluded_pending_other_projects=excluded_pending_other_projects,
-    )
+    return await _get_rule_similar(db, project, project_id, brdp_id, brdp, rule_format, query_embedding)
 
 
 _DefinitionPoolEntry = tuple[tuple[str, uuid.UUID], float, SimilarCandidateOut]
@@ -274,7 +189,7 @@ async def _get_definition_similar(
     """kind='definition' corpus (docs request, Suggest Definition round):
     unlike proposal/rule, candidates come from BOTH this standard's other
     Validated BRDPs (across every project, same as proposal/rule already
-    do) AND its official catalog -- and MIN_CANDIDATES no longer applies,
+    do) AND its official catalog -- and there is no minimum-precedent gate,
     since the LLM is always called for this kind regardless of precedent.
 
     The "top N" / "bottom N" queries below are each independently LIMITed
@@ -442,7 +357,7 @@ async def _get_proposal_similar(
 
     No "style reference" fallback for this kind (unlike definition) --
     if all three groups are empty, the response says so and stops there.
-    MIN_CANDIDATES doesn't apply here either -- sufficient_precedent is
+    No minimum-precedent gate here either -- sufficient_precedent is
     always True and message always None, same as kind='definition'.
     """
     is_catalog_brdp = (
@@ -599,5 +514,205 @@ async def _get_proposal_similar(
         this_project=this_project,
         message=None,
         format=None,
+        excluded_pending_other_projects=excluded_pending_other_projects,
+    )
+
+
+async def _check_rule_prerequisites(db: AsyncSession, brdp: BRDP, rule_format: str) -> None:
+    """docs request (Suggest Rule round), Part 1 -- server-side defense for
+    the same conditions the frontend already disables the button for.
+    Flow: Suggest Proposal -> the user fills in its placeholders and
+    validates it -> Suggest Rule. A rule implements a DECIDED Proposal, so
+    every check here is about that decision being actually taken. Catalog
+    BRDPs are allowed (unlike Suggest Definition).
+    """
+    proposal = (brdp.proposal or "").strip()
+    if not proposal:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"BRDP {brdp.identifier!r} has no Proposal yet -- Suggest Rule implements a decided Proposal.",
+        )
+    if UNFILLED_MARKER_RE.search(proposal):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"BRDP {brdp.identifier!r}'s Proposal still has unfilled placeholders -- fill them in first.",
+        )
+    if brdp.validation != "Validated":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"BRDP {brdp.identifier!r}'s Proposal is not Validated yet -- validate it before Suggest Rule.",
+        )
+    existing = await db.get(RuleApproval, (brdp.id, rule_format))
+    if existing is not None and existing.status == "approved":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"BRDP {brdp.identifier!r} already has a Verified rule -- revoke it to Draft first.",
+        )
+
+
+def _rule_candidate(b: BRDP, rule_xml: str, score: float, source: str) -> SimilarCandidateOut:
+    """A kind='rule' precedent is a "Proposal -> rule" PAIR (docs request):
+    `text` is the rule_xml, `proposal` the Proposal it implements."""
+    return SimilarCandidateOut(
+        id=b.id,
+        identifier=b.identifier,
+        text=rule_xml,
+        score=score,
+        title=b.title or "",
+        definition=b.definition,
+        proposal=b.proposal,
+        source=source,
+    )
+
+
+async def _get_rule_similar(
+    db: AsyncSession,
+    project: Project,
+    project_id: uuid.UUID,
+    brdp_id: uuid.UUID,
+    brdp: BRDP,
+    rule_format: str,
+    query_embedding: list[float],
+) -> SimilarOut:
+    """kind='rule' corpus (docs request, Suggest Rule round), four groups in
+    order, never repeating a BRDP across them:
+
+      - same_brdp: this BRDP's exact identifier in OTHER projects of the
+        standard, with a Verified rule. Only when the identifier is a real
+        catalog entry of the standard -- same reasoning as Suggest
+        Proposal's same_brdp: an EXT-style auto-generated identifier can
+        coincide across unrelated projects by pure chance, and this group
+        is highlighted in red as "the same decision", so a coincidence
+        would be actively misleading.
+      - candidates ("similar"): Validated BRDPs of the standard (any
+        project) with a Verified rule and similarity >= MIN_SIMILARITY, up
+        to RULE_SIMILAR_LIMIT.
+      - standard_fallback: only if the two groups above hold fewer than
+        RULE_MIN_REFERENCES -- other Verified rules of the standard, most
+        similar first even below MIN_SIMILARITY (no embedding sorts last),
+        topping up to RULE_MIN_REFERENCES. Shown to the LLM as format
+        examples, never as related decisions.
+      - template_fallback: only if STILL short -- Verified rows of the
+        standard's curated Excel template (rule_templates.py), same role.
+
+    A trashed BRDP is never precedent (ACTIVE_BRDP_FILTER): its
+    rule_approvals row survives a soft-delete, so the join alone wouldn't
+    hide it.
+    """
+    is_catalog_brdp = (
+        await db.execute(
+            select(func.count())
+            .select_from(BRDPCatalog)
+            .where(BRDPCatalog.standard == project.standard, BRDPCatalog.identifier == brdp.identifier)
+        )
+    ).scalar_one() > 0
+
+    def verified_rules_stmt(*columns):
+        return (
+            select(BRDP, RuleApproval.rule_xml, Project.name.label("project_name"), *columns)
+            .join(Project, BRDP.project_id == Project.id)
+            .join(RuleApproval, (RuleApproval.brdp_id == BRDP.id) & (RuleApproval.format == rule_format))
+            .where(
+                Project.standard == project.standard,
+                BRDP.id != brdp_id,
+                RuleApproval.status == "approved",
+                ACTIVE_BRDP_FILTER,
+            )
+        )
+
+    used_ids: set[uuid.UUID] = set()
+
+    same_brdp: list[SimilarCandidateOut] = []
+    if is_catalog_brdp:
+        rows = (
+            await db.execute(
+                verified_rules_stmt()
+                .where(Project.id != project_id, BRDP.identifier == brdp.identifier)
+                .order_by(Project.name, BRDP.id)
+                .limit(RULE_SAME_BRDP_LIMIT)
+            )
+        ).all()
+        for row in rows:
+            same_brdp.append(_rule_candidate(row.BRDP, row.rule_xml, 0.0, row.project_name))
+            used_ids.add(row.BRDP.id)
+
+    distance_col = BRDP.embedding.cosine_distance(query_embedding).label("distance")
+
+    similar_stmt = verified_rules_stmt(distance_col).where(
+        BRDP.validation == "Validated", BRDP.embedding.is_not(None)
+    )
+    if used_ids:
+        similar_stmt = similar_stmt.where(BRDP.id.not_in(used_ids))
+    similar: list[SimilarCandidateOut] = []
+    for row in (await db.execute(similar_stmt.order_by(distance_col, BRDP.id).limit(RULE_SIMILAR_LIMIT))).all():
+        similarity = 1 - row.distance
+        if similarity < MIN_SIMILARITY:
+            break  # ordered ascending by distance -- no later row can pass either
+        similar.append(_rule_candidate(row.BRDP, row.rule_xml, similarity, row.project_name))
+        used_ids.add(row.BRDP.id)
+
+    standard_fallback: list[SimilarCandidateOut] = []
+    missing = RULE_MIN_REFERENCES - len(same_brdp) - len(similar)
+    if missing > 0:
+        fallback_stmt = verified_rules_stmt(distance_col)
+        if used_ids:
+            fallback_stmt = fallback_stmt.where(BRDP.id.not_in(used_ids))
+        rows = (
+            await db.execute(fallback_stmt.order_by(distance_col.asc().nulls_last(), BRDP.id).limit(missing))
+        ).all()
+        for row in rows:
+            score = 0.0 if row.distance is None else 1 - row.distance
+            standard_fallback.append(_rule_candidate(row.BRDP, row.rule_xml, score, row.project_name))
+        missing -= len(standard_fallback)
+
+    template_fallback: list[SimilarCandidateOut] = []
+    if missing > 0:
+        already_shown = {c.text.strip() for c in (*same_brdp, *similar, *standard_fallback)}
+        for entry in load_template_rules(project.standard):
+            if entry.identifier == brdp.identifier or entry.rule_xml in already_shown:
+                continue
+            template_fallback.append(
+                SimilarCandidateOut(
+                    # Not a real BRDP -- a stable synthetic id, only ever
+                    # used as a UI key (never sent back as precedent id).
+                    id=uuid.uuid5(uuid.NAMESPACE_URL, f"brdp-template:{project.standard}:{entry.identifier}"),
+                    identifier=entry.identifier,
+                    text=entry.rule_xml,
+                    score=0.0,
+                    title=entry.title,
+                    definition=entry.definition,
+                    proposal=entry.proposal,
+                    source="Template",
+                )
+            )
+            if len(template_fallback) >= missing:
+                break
+
+    # HR7 -- never silently degrade: a Validated BRDP in another project of
+    # this standard with no embedding yet can't be ranked as "similar".
+    excluded_pending_other_projects = (
+        await db.execute(
+            select(func.count())
+            .select_from(BRDP)
+            .join(Project, BRDP.project_id == Project.id)
+            .where(
+                Project.standard == project.standard,
+                Project.id != project_id,
+                BRDP.validation == "Validated",
+                BRDP.embedding.is_(None),
+                ACTIVE_BRDP_FILTER,
+            )
+        )
+    ).scalar_one()
+
+    return SimilarOut(
+        kind="rule",
+        sufficient_precedent=True,
+        candidates=similar,
+        same_brdp=same_brdp,
+        standard_fallback=standard_fallback,
+        template_fallback=template_fallback,
+        message=None,
+        format=rule_format,
         excluded_pending_other_projects=excluded_pending_other_projects,
     )

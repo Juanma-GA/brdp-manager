@@ -358,6 +358,25 @@ async def test_manual_propose_can_save_directly_as_approved(client, editor_and_p
     assert response.json()["approved_at"] is not None
 
 
+async def test_propose_accepts_external_llm_source_and_rejects_unknown_sources(client, editor_and_project):
+    """Suggest Rule's "Paste rule" (docs request) stores a rule produced by
+    an LLM outside the app as source "external_llm", distinct from the
+    in-app "llm". Any other source value is a client bug -> 422."""
+    project, headers = editor_and_project
+    brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-APPR-SRC"}, headers=headers)
+    ).json()
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
+
+    pasted = await client.put(url, json={"rule_xml": "<pasted/>", "source": "external_llm"}, headers=headers)
+    assert pasted.status_code == 200
+    assert pasted.json()["source"] == "external_llm"
+    assert pasted.json()["status"] == "pending_review"
+
+    bogus = await client.put(url, json={"rule_xml": "<x/>", "source": "chatgpt"}, headers=headers)
+    assert bogus.status_code == 422
+
+
 async def test_propose_rejects_malformed_xml(client, editor_and_project):
     """The manual rule editor is a write path into rule_approvals that
     bypasses the generation engine entirely -- so it also bypasses the

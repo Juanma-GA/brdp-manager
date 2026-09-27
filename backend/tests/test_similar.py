@@ -21,19 +21,15 @@ the old behavior byte-for-byte. Only tests that were never actually
 about that gating (self-exclusion, auth) were left on kind='definition'.
 
 Suggest Proposal corpus round (docs request): kind='proposal' ALSO gets
-its own dedicated corpus now (_get_proposal_similar, tested separately
-further down this file, mirroring the definition corpus's own section) --
-MIN_CANDIDATES/candidate-cap-10/insufficient-precedent no longer apply to
-it either. The remaining tests of those GENERIC semantics (zero/two/
-fifteen-plus candidates, standard filtering) move one more time, to
-kind='rule' -- the only kind left with the old behavior. kind='rule'
-needs a real, mapped project standard (STANDARD_TO_RULE_FORMAT), which
-would normally reintroduce the exact real-standard-data fragility a
-previous round eliminated -- avoided here with `_fake_rule_format()`
-below, which monkeypatches a fresh, per-test SYNTHETIC format string onto
-_make_project()'s already-synthetic standard, so these tests stay just as
-isolated from real approved rules in the environment as every other test
-in this file that doesn't genuinely need a real standard.
+its own dedicated corpus (_get_proposal_similar, tested further down).
+
+Suggest Rule round (docs request): kind='rule' loses the last
+minimum-precedent gate too -- it now has its own four-group corpus
+(_get_rule_similar) plus prerequisites on the source BRDP, tested in the
+kind='rule' section below. kind='rule' needs a mapped project standard
+(STANDARD_TO_RULE_FORMAT); `_fake_rule_format()` monkeypatches a fresh,
+per-test SYNTHETIC format onto _make_project()'s synthetic standard, so
+these tests stay isolated from real approved rules in the environment.
 
 Test isolation from real data (docs request, "tests que dependen de los
 datos existentes" round): candidate search here scans ALL projects (and,
@@ -254,83 +250,6 @@ async def _cleanup(project: Project, extra_users: list[User] | None = None) -> N
             await session.commit()
 
 
-async def test_zero_candidates_reports_insufficient_precedent(client, monkeypatch):
-    project = await _make_project()
-    _fake_rule_format(monkeypatch, project.standard)
-    editor = await _make_editor(project.id)
-    source = await _make_source_brdp(project.id)
-    try:
-        response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["sufficient_precedent"] is False
-        assert body["candidates"] == []
-        assert "insufficient" in body["message"].lower()
-    finally:
-        await _cleanup(project, [editor])
-
-
-async def test_two_passing_candidates_reports_insufficient_precedent(client, monkeypatch):
-    """Below MIN_CANDIDATES (3) even though the two DO pass the
-    similarity threshold -- the "not enough precedent" rule is about
-    COUNT, not just quality.
-    """
-    project = await _make_project()
-    fmt = _fake_rule_format(monkeypatch, project.standard)
-    editor = await _make_editor(project.id)
-    source = await _make_source_brdp(project.id)
-    close_ones = [
-        await _make_validated_candidate(
-            project.id, _SAME_DIRECTION, f"BRDP-CLOSE-{i}", rule_xml=f"<rule id='{i}'/>", rule_format=fmt
-        )
-        for i in range(2)
-    ]
-    # A dissimilar one too, to prove it's correctly excluded rather than
-    # padding the response up to 3.
-    far_one = await _make_validated_candidate(
-        project.id, _ORTHOGONAL_DIRECTION, "BRDP-FAR-1", rule_xml="<rule id='far'/>", rule_format=fmt
-    )
-    try:
-        response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["sufficient_precedent"] is False
-        assert len(body["candidates"]) == 2
-        returned_ids = {c["id"] for c in body["candidates"]}
-        assert returned_ids == {str(b.id) for b in close_ones}
-        assert str(far_one.id) not in returned_ids
-        assert "insufficient" in body["message"].lower()
-    finally:
-        await _cleanup(project, [editor])
-
-
-async def test_fifteen_plus_candidates_reports_sufficient_precedent_capped_at_ten(client, monkeypatch):
-    project = await _make_project()
-    fmt = _fake_rule_format(monkeypatch, project.standard)
-    editor = await _make_editor(project.id)
-    source = await _make_source_brdp(project.id)
-    for i in range(15):
-        await _make_validated_candidate(
-            project.id, _SAME_DIRECTION, f"BRDP-MANY-{i}", rule_xml=f"<rule id='{i}'/>", rule_format=fmt
-        )
-    try:
-        response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["sufficient_precedent"] is True
-        assert body["message"] is None
-        assert len(body["candidates"]) == 10  # CANDIDATE_LIMIT, not all 15
-        assert all(c["score"] == pytest.approx(1.0) for c in body["candidates"])
-    finally:
-        await _cleanup(project, [editor])
-
-
 async def test_source_brdp_never_appears_in_its_own_candidates(client):
     """Even if the source BRDP were somehow Validated with an embedding
     identical to the query, it must never suggest itself as precedent for
@@ -360,29 +279,348 @@ async def test_source_brdp_never_appears_in_its_own_candidates(client):
         await _cleanup(project, [editor])
 
 
-async def test_different_standard_is_excluded_from_candidates(client, monkeypatch):
+# ---- kind='rule' (docs request, Suggest Rule round) ----
+# Four groups (same_brdp / candidates / standard_fallback / template_fallback),
+# no minimum-precedent gate, and prerequisites on the SOURCE BRDP (a decided,
+# Validated Proposal with no Verified rule yet).
+
+
+async def _make_rule_source_brdp(
+    project_id: uuid.UUID,
+    identifier: str = "BRDP-SOURCE-001",
+    proposal: str = "The element <para> shall not be used.",
+    validation: str = "Validated",
+) -> BRDP:
+    async with async_session_factory() as session:
+        brdp = BRDP(
+            project_id=project_id,
+            identifier=identifier,
+            definition="Some definition text",
+            proposal=proposal,
+            validation=validation,
+        )
+        session.add(brdp)
+        await session.commit()
+        await session.refresh(brdp)
+        return brdp
+
+
+async def _get_rule(client, project, source, editor):
+    return await client.get(
+        f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
+    )
+
+
+@pytest.mark.parametrize(
+    "proposal",
+    [
+        "Dates shall be written in [LIST: YYYY-MM-DD, DD-MM-YYYY] format.",
+        "Warnings [SHALL/SHALL NOT] include a hazard symbol.",
+        "Titles shall not exceed [VALUE: e.g. 60] characters.",
+        "Measurements in [UNIT: e.g. metric] units.",
+        "Use the [CONVENTION: company style] naming.",
+        "The element <x> [YES/NO] be used.",
+        "Values [LIST : a, b].",
+    ],
+)
+def test_unfilled_marker_regex_detects_placeholders(proposal):
+    from app.api.routes.similar import UNFILLED_MARKER_RE
+
+    assert UNFILLED_MARKER_RE.search(proposal)
+
+
+@pytest.mark.parametrize(
+    "proposal",
+    [
+        "Warnings shall include a hazard symbol.",
+        "Use //para[1] only.",
+        "Dates follow [ISO 8601].",
+        "Only the [a] option.",
+        "See [X] for details.",
+        "Items [@type='x'] are allowed.",
+    ],
+)
+def test_unfilled_marker_regex_ignores_non_placeholders(proposal):
+    from app.api.routes.similar import UNFILLED_MARKER_RE
+
+    assert not UNFILLED_MARKER_RE.search(proposal)
+
+
+@pytest.mark.parametrize(
+    "proposal,validation,expected_fragment",
+    [
+        ("", "Validated", "no Proposal"),
+        ("   ", "Validated", "no Proposal"),
+        ("Warnings [SHALL/SHALL NOT] include a hazard symbol.", "Validated", "unfilled placeholders"),
+        ("Warnings shall include a hazard symbol.", "Pending", "not Validated"),
+        ("Warnings shall include a hazard symbol.", "Refused", "not Validated"),
+    ],
+)
+async def test_rule_prerequisites_reject_undecided_proposal(client, monkeypatch, proposal, validation, expected_fragment):
+    project = await _make_project()
+    _fake_rule_format(monkeypatch, project.standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id, proposal=proposal, validation=validation)
+    try:
+        response = await _get_rule(client, project, source, editor)
+        assert response.status_code == 400
+        assert expected_fragment in response.json()["detail"]
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_rule_prerequisites_reject_already_verified_rule_but_allow_draft(client, monkeypatch):
+    project = await _make_project()
+    fmt = _fake_rule_format(monkeypatch, project.standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    try:
+        async with async_session_factory() as session:
+            session.add(
+                RuleApproval(brdp_id=source.id, format=fmt, rule_xml="<rule/>", source="llm", status="pending_review")
+            )
+            await session.commit()
+        draft = await _get_rule(client, project, source, editor)
+        assert draft.status_code == 200, "a Draft rule may be replaced -- the frontend asks for confirmation"
+
+        async with async_session_factory() as session:
+            approval = await session.get(RuleApproval, (source.id, fmt))
+            approval.status = "approved"
+            await session.commit()
+        verified = await _get_rule(client, project, source, editor)
+        assert verified.status_code == 400
+        assert "Verified" in verified.json()["detail"]
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_rule_allowed_on_catalog_brdp(client, monkeypatch):
+    project = await _make_project()
+    _fake_rule_format(monkeypatch, project.standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id, identifier="BRDP-S1-00999")
+    catalog = await _make_catalog_entry(project.standard, _SAME_DIRECTION, "BRDP-S1-00999")
+    try:
+        response = await _get_rule(client, project, source, editor)
+        assert response.status_code == 200
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([catalog])
+
+
+async def test_rule_no_precedent_anywhere_returns_empty_groups_never_insufficient(client, monkeypatch):
+    project = await _make_project()
+    fmt = _fake_rule_format(monkeypatch, project.standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    try:
+        response = await _get_rule(client, project, source, editor)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["sufficient_precedent"] is True
+        assert body["message"] is None
+        assert body["format"] == fmt
+        for group in ("same_brdp", "candidates", "standard_fallback", "template_fallback"):
+            assert body[group] == [], group
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_rule_similar_capped_at_five_with_proposal_pairs_and_no_fallback(client, monkeypatch):
+    project = await _make_project()
+    fmt = _fake_rule_format(monkeypatch, project.standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    for i in range(7):
+        await _make_validated_candidate(
+            project.id, _SAME_DIRECTION, f"BRDP-MANY-{i}", rule_xml=f"<rule id='{i}'/>", rule_format=fmt
+        )
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        assert len(body["candidates"]) == 5
+        assert all(c["score"] == pytest.approx(1.0) for c in body["candidates"])
+        # Each precedent is a Proposal -> rule pair.
+        for c in body["candidates"]:
+            assert c["proposal"] == f"Proposal for {c['identifier']}"
+            assert c["text"].startswith("<rule id=")
+        assert body["standard_fallback"] == []
+        assert body["template_fallback"] == []
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_rule_similar_requires_verified_rule_validated_and_threshold(client, monkeypatch):
+    project = await _make_project()
+    fmt = _fake_rule_format(monkeypatch, project.standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    close = [
+        await _make_validated_candidate(
+            project.id, _SAME_DIRECTION, f"BRDP-CLOSE-{i}", rule_xml=f"<rule id='c{i}'/>", rule_format=fmt
+        )
+        for i in range(3)
+    ]
+    # Similar but with no Verified rule -> never precedent at all.
+    await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-NORULE")
+    # Similar, Verified rule, but Draft-only -> never precedent either.
+    async with async_session_factory() as session:
+        b = BRDP(project_id=project.id, identifier="BRDP-DRAFTRULE", definition="d", proposal="p",
+                 validation="Validated", embedding=_SAME_DIRECTION)
+        session.add(b)
+        await session.flush()
+        session.add(RuleApproval(brdp_id=b.id, format=fmt, rule_xml="<draft/>", source="llm", status="pending_review"))
+        await session.commit()
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        assert {c["id"] for c in body["candidates"]} == {str(b.id) for b in close}
+        assert body["standard_fallback"] == []  # already 3
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_rule_one_similar_is_topped_up_from_standard_fallback_not_template(client, monkeypatch):
+    """Docs request edge case: 1 similar + other Verified rules in the
+    standard -> standard_fallback completes to 3, the template is NOT used
+    (proved by mapping a real curated template to this synthetic standard,
+    so it WOULD show up if the fallback order were wrong)."""
+    from app.services import rule_templates
+
+    project = await _make_project()
+    fmt = _fake_rule_format(monkeypatch, project.standard)
+    monkeypatch.setitem(rule_templates.CURATED_TEMPLATE_BY_STANDARD, project.standard, "brdp-template-4-2.xlsx")
+    other_project = await _make_project(standard=project.standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    close = await _make_validated_candidate(
+        project.id, _SAME_DIRECTION, "BRDP-CLOSE-ONLY", rule_xml="<rule id='close'/>", rule_format=fmt
+    )
+    far = [
+        await _make_validated_candidate(
+            other_project.id, _ORTHOGONAL_DIRECTION, f"BRDP-FAR-{i}", rule_xml=f"<rule id='far{i}'/>", rule_format=fmt
+        )
+        for i in range(4)
+    ]
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        assert [c["id"] for c in body["candidates"]] == [str(close.id)]
+        assert len(body["standard_fallback"]) == 2
+        assert {c["id"] for c in body["standard_fallback"]} <= {str(b.id) for b in far}
+        assert all(c["score"] < 0.5 for c in body["standard_fallback"])  # below the "similar" threshold
+        assert all(c["source"] == other_project.name for c in body["standard_fallback"])
+        assert body["template_fallback"] == []
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other_project)
+
+
+async def test_rule_standard_without_verified_rules_uses_template_fallback(client, monkeypatch):
+    from app.services import rule_templates
+
+    project = await _make_project()
+    _fake_rule_format(monkeypatch, project.standard)
+    monkeypatch.setitem(rule_templates.CURATED_TEMPLATE_BY_STANDARD, project.standard, "brdp-template-4-2.xlsx")
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        assert body["candidates"] == [] and body["standard_fallback"] == []
+        template = body["template_fallback"]
+        assert len(template) == 3
+        expected = rule_templates.load_template_rules(project.standard)[:3]
+        assert [c["identifier"] for c in template] == [e.identifier for e in expected]
+        assert [c["text"] for c in template] == [e.rule_xml for e in expected]
+        assert all(c["proposal"] and c["source"] == "Template" for c in template)
+        assert all("<structureObjectRule" in c["text"] for c in template)
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_rule_template_fallback_only_tops_up_what_is_missing(client, monkeypatch):
+    from app.services import rule_templates
+
+    project = await _make_project()
+    fmt = _fake_rule_format(monkeypatch, project.standard)
+    monkeypatch.setitem(rule_templates.CURATED_TEMPLATE_BY_STANDARD, project.standard, "brdp-template-3-0-1.xlsx")
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id)
+    await _make_validated_candidate(project.id, _SAME_DIRECTION, "BRDP-ONE", rule_xml="<rule/>", rule_format=fmt)
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        assert len(body["candidates"]) == 1
+        assert body["standard_fallback"] == []  # the only Verified rule is already "similar"
+        assert len(body["template_fallback"]) == 2
+        assert all("<objrule" in c["text"] for c in body["template_fallback"])
+    finally:
+        await _cleanup(project, [editor])
+
+
+async def test_rule_same_brdp_group_for_catalog_identifier_not_repeated_in_similar(client, monkeypatch):
+    standard = f"TEST-STANDARD-{uuid.uuid4()}"
+    project = await _make_project(standard=standard)
+    other_a = await _make_project(standard=standard)
+    other_b = await _make_project(standard=standard)
+    fmt = _fake_rule_format(monkeypatch, standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id, identifier="BRDP-S1-00555")
+    catalog = await _make_catalog_entry(standard, _SAME_DIRECTION, "BRDP-S1-00555")
+    # Same identifier elsewhere, Verified rule, and ALSO similar -- must
+    # land in same_brdp only.
+    same = [
+        await _make_validated_candidate(p.id, _SAME_DIRECTION, "BRDP-S1-00555", rule_xml=f"<rule p='{i}'/>", rule_format=fmt)
+        for i, p in enumerate((other_a, other_b))
+    ]
+    similar_one = await _make_validated_candidate(
+        other_a.id, _SAME_DIRECTION, "BRDP-OTHER-1", rule_xml="<rule id='o'/>", rule_format=fmt
+    )
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        assert {c["id"] for c in body["same_brdp"]} == {str(b.id) for b in same}
+        assert {c["source"] for c in body["same_brdp"]} == {other_a.name, other_b.name}
+        assert [c["id"] for c in body["candidates"]] == [str(similar_one.id)]
+        assert body["standard_fallback"] == []  # 2 + 1 == 3 already
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other_a)
+        await _cleanup(other_b)
+        await _cleanup_catalog([catalog])
+
+
+async def test_rule_same_brdp_empty_for_non_catalog_identifier(client, monkeypatch):
+    standard = f"TEST-STANDARD-{uuid.uuid4()}"
+    project = await _make_project(standard=standard)
+    other = await _make_project(standard=standard)
+    fmt = _fake_rule_format(monkeypatch, standard)
+    editor = await _make_editor(project.id)
+    source = await _make_rule_source_brdp(project.id, identifier="BRDP-EXT-00001")
+    match = await _make_validated_candidate(
+        other.id, _SAME_DIRECTION, "BRDP-EXT-00001", rule_xml="<rule/>", rule_format=fmt
+    )
+    try:
+        body = (await _get_rule(client, project, source, editor)).json()
+        assert body["same_brdp"] == []
+        # Not dropped: an identifier coincidence is still an ordinary similar decision.
+        assert str(match.id) in {c["id"] for c in body["candidates"]}
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup(other)
+
+
+async def test_rule_different_standard_is_excluded_from_every_group(client, monkeypatch):
     project_a = await _make_project()
     project_b = await _make_project()
     fmt_a = _fake_rule_format(monkeypatch, project_a.standard)
     editor = await _make_editor(project_a.id)
-    source = await _make_source_brdp(project_a.id)
-    # Enough close candidates in project_b to pass MIN_CANDIDATES on their
-    # own, IF the standard filter were broken -- registered under
-    # project_a's OWN rule format on purpose: project_b's real Project.
-    # standard column still differs (its own fresh synthetic value), so
-    # this proves standard filtering catches it regardless of format.
+    source = await _make_rule_source_brdp(project_a.id)
+    # Registered under project_a's OWN rule format on purpose: only the
+    # Project.standard filter can exclude these.
     for i in range(5):
         await _make_validated_candidate(
             project_b.id, _SAME_DIRECTION, f"BRDP-OTHERSTD-{i}", rule_xml=f"<rule id='{i}'/>", rule_format=fmt_a
         )
     try:
-        response = await client.get(
-            f"/api/projects/{project_a.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["candidates"] == []
-        assert body["sufficient_precedent"] is False
+        body = (await _get_rule(client, project_a, source, editor)).json()
+        for group in ("same_brdp", "candidates", "standard_fallback", "template_fallback"):
+            assert body[group] == [], group
     finally:
         await _cleanup(project_a, [editor])
         await _cleanup(project_b)
@@ -391,65 +629,38 @@ async def test_different_standard_is_excluded_from_candidates(client, monkeypatc
 async def test_kind_rule_maps_project_standard_to_rule_format(client):
     project = await _make_project(standard="S1000D 4.2")
     editor = await _make_editor(project.id)
-    source = await _make_source_brdp(project.id)
-    candidates = [
+    source = await _make_rule_source_brdp(project.id)
+    for i in range(3):
         await _make_validated_candidate(project.id, _SAME_DIRECTION, f"BRDP-RULE-{i}", rule_xml=f"<rule id='{i}'/>")
-        for i in range(3)
-    ]
     try:
-        response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
-        )
+        response = await _get_rule(client, project, source, editor)
         assert response.status_code == 200
         body = response.json()
-        assert body["sufficient_precedent"] is True
         assert body["format"] == "BREX-4.2"
-        # Subset, not exact-set equality (docs request): this test needs a
-        # REAL standard to exercise the real STANDARD_TO_RULE_FORMAT
-        # mapping, so it can't isolate itself from other real approved
-        # BREX-4.2 rules that may already exist for this standard in the
-        # environment -- it only has to prove OUR 3 rows are present.
+        # Subset, not exact-set equality: a REAL standard can't isolate
+        # itself from other real approved BREX-4.2 rules in the environment.
         texts = {c["text"] for c in body["candidates"]}
         assert {f"<rule id='{i}'/>" for i in range(3)} <= texts
-        assert len(candidates) == 3  # sanity on the fixture itself
     finally:
         await _cleanup(project, [editor])
 
 
 async def test_kind_rule_maps_dita_standard_to_sch_dita_format(client):
-    """DITA 1.3 has no BREX equivalent, but it DOES have its own native
-    Schematron rule-kind (generateSchematronDITA.js's deterministic
-    assembler, approved rows frozen under format 'SCH-DITA') -- confirms
-    Suggest Rule now returns real precedent for a DITA project instead of
-    the previous hard 400 (see test_kind_rule_unsupported_standard_returns_400
-    below, which used to use DITA 1.3 as ITS example of an unsupported
-    standard before this format was added). Uses "DITA 1.3 Xpath2.0" (the
-    single "DITA 1.3" standard split in two by migration
-    0013_split_dita_xpath_standards.py) -- both flavors map to the same
-    SCH-DITA format either way, so which one this test uses is arbitrary.
-    """
+    """Both DITA flavors map to SCH-DITA; which one this uses is arbitrary."""
     project = await _make_project(standard="DITA 1.3 Xpath2.0")
     editor = await _make_editor(project.id)
-    source = await _make_source_brdp(project.id)
-    candidates = [
+    source = await _make_rule_source_brdp(project.id)
+    for i in range(3):
         await _make_validated_candidate(
             project.id, _SAME_DIRECTION, f"BRDP-DITARULE-{i}", rule_xml=f"<sch:pattern id='{i}'/>", rule_format="SCH-DITA"
         )
-        for i in range(3)
-    ]
     try:
-        response = await client.get(
-            f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=rule", headers=_headers(editor)
-        )
+        response = await _get_rule(client, project, source, editor)
         assert response.status_code == 200
         body = response.json()
-        assert body["sufficient_precedent"] is True
         assert body["format"] == "SCH-DITA"
-        # Subset, not exact-set equality -- same reasoning as the S1000D
-        # 4.2 rule-mapping test above (docs request).
         texts = {c["text"] for c in body["candidates"]}
         assert {f"<sch:pattern id='{i}'/>" for i in range(3)} <= texts
-        assert len(candidates) == 3  # sanity on the fixture itself
     finally:
         await _cleanup(project, [editor])
 

@@ -28,10 +28,9 @@ async def admin_editor_and_project():
     """A fresh synthetic standard per test run, not a real one (docs
     request, "tests que dependen de los datos existentes" round):
     test_deleted_brdp_excluded_from_similar_precedent below hits a real
-    cross-project GET .../similar query scoped by this standard, at the
-    exact MIN_CANDIDATES boundary -- only correct if no other real
-    Validated BRDP for that standard, anywhere, happens to score above
-    MIN_SIMILARITY against the test's fixed query vector.
+    cross-project GET .../similar query scoped by this standard and
+    asserts an exact candidate count -- only correct if no other real
+    Verified rule for that standard, anywhere, exists.
     """
     async with async_session_factory() as session:
         project = Project(name=f"Trash Test Project {uuid.uuid4()}", standard=f"TEST-TRASH-STANDARD-{uuid.uuid4()}")
@@ -106,15 +105,15 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
     test_similar.py), and only GET .../similar's own real query-embedding
     call (for the source BRDP) is mocked, scoped to this one test.
 
-    kind='rule' (not 'definition'/'proposal') -- this test is about
-    ACTIVE_BRDP_FILTER excluding a soft-deleted BRDP from the candidate
-    set, a GENERIC mechanism, not either of those two kinds' own corpus
-    logic. Neither still has a sufficient_precedent/MIN_CANDIDATES concept
-    at all any more (kind='definition': see the Suggest Definition corpus
-    round tests in test_similar.py; kind='proposal': see the Suggest
-    Proposal corpus round tests there too) -- 'rule' is the only kind left
-    where dropping a precedent below MIN_CANDIDATES actually flips
-    sufficient_precedent to False, which is the whole point of this test.
+    kind='rule' -- this test is about ACTIVE_BRDP_FILTER excluding a
+    soft-deleted BRDP from the candidate set, a GENERIC mechanism. A
+    soft-delete leaves the BRDP's rule_approvals row alive, so rule is the
+    kind where the join alone would NOT hide it -- the case worth pinning.
+    Suggest Rule round (docs request): there's no minimum-precedent gate
+    any more, so this checks that the deleted precedent is absent from
+    EVERY group (similar and the standard_fallback that tops it up),
+    rather than a sufficient_precedent flip. The query BRDP itself must
+    meet Suggest Rule's prerequisites (Validated, decided Proposal).
     Needs a rule format mapped to this project's (synthetic) standard --
     monkeypatched fresh per test run, same isolation pattern as
     test_similar.py's own _fake_rule_format().
@@ -128,9 +127,7 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
 
     app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
     try:
-        # 3 Validated BRDPs, all with the same embedding -- exactly
-        # MIN_CANDIDATES (similar.py), so sufficient_precedent starts True.
-        # Each also gets an approved RuleApproval under the mapped format
+        # 3 Validated BRDPs, all with the same embedding. Each also gets an approved RuleApproval under the mapped format
         # -- kind='rule' candidates require one (unlike proposal/
         # definition, which read straight off the BRDP row).
         validated_ids = []
@@ -163,7 +160,7 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
         query_brdp = await _create_brdp(client, project.id, editor_headers, "BRDP-PREC-QUERY")
         await client.put(
             f"/api/projects/{project.id}/brdps/{query_brdp['id']}",
-            json={"definition": "same definition text", "proposal": "same proposal text"},
+            json={"definition": "same definition text", "proposal": "same proposal text", "validation": "Validated"},
             headers=editor_headers,
         )
 
@@ -173,7 +170,6 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
             headers=editor_headers,
         )
         assert before.status_code == 200
-        assert before.json()["sufficient_precedent"] is True
         assert len(before.json()["candidates"]) == 3
 
         # Soft-delete one of the 3 precedents -- must drop out of the
@@ -189,8 +185,10 @@ async def test_deleted_brdp_excluded_from_similar_precedent(client, admin_editor
             headers=editor_headers,
         )
         assert after.status_code == 200
-        assert len(after.json()["candidates"]) == 2
-        assert after.json()["sufficient_precedent"] is False
+        body = after.json()
+        assert len(body["candidates"]) == 2
+        every_group = body["candidates"] + body["same_brdp"] + body["standard_fallback"] + body["template_fallback"]
+        assert validated_ids[0] not in {c["id"] for c in every_group}
     finally:
         app.dependency_overrides.pop(get_httpx_transport, None)
 
