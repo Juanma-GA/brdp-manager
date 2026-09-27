@@ -114,3 +114,16 @@ def test_curated_template_mapping_matches_frontend_and_files_exist():
     for standard, filename in CURATED_TEMPLATE_BY_STANDARD.items():
         assert (PUBLIC_DIR / filename).is_file(), filename
         assert len(load_template_rules(standard)) >= 3, f"{standard}: fewer than 3 Verified template rules"
+
+
+def test_template_rules_decode_excel_escapes():
+    """openpyxl returns Excel's "_x000d_" CR escape verbatim; the real DITA
+    templates contain it inside multi-line Rule cells. It must never reach
+    the Suggest Rule prompt."""
+    from app.services.rule_templates import CURATED_TEMPLATE_BY_STANDARD, load_template_rules
+
+    for standard in CURATED_TEMPLATE_BY_STANDARD:
+        for entry in load_template_rules(standard):
+            for text in (entry.rule_xml, entry.proposal, entry.definition):
+                assert "_x000" not in text, (standard, entry.identifier)
+                assert "\r" not in text, (standard, entry.identifier)
