@@ -39,11 +39,11 @@ function AppliesTo({ entry }) {
 }
 
 // Red warnings for one rule fragment (docs request, Suggest Rule round,
-// Part 4) -- same style as the BRDP text's vocabulary warning. Only the
-// well-formedness error disables Accept; name warnings never do.
+// Part 4) -- same style as the BRDP text's vocabulary warning. Malformed
+// XML and an invalid XPath expression disable Accept; name warnings never do.
 function RuleValidationWarnings({ validation, standard }) {
   const { t } = useTranslation();
-  const { wellFormed, wellFormedError, names } = validation;
+  const { wellFormed, wellFormedError, invalidXPaths, names } = validation;
   return (
     <>
       {!wellFormed && (
@@ -51,6 +51,11 @@ function RuleValidationWarnings({ validation, standard }) {
           ⚠ {t('records.assistant.ruleNotWellFormed', { error: wellFormedError })}
         </p>
       )}
+      {invalidXPaths.map((expression) => (
+        <p key={expression} className={styles.vocabWarning}>
+          ⚠ {t('records.assistant.ruleInvalidXPath', { expression })}
+        </p>
+      ))}
       {names.available && names.notFound.length > 0 && (
         <p className={styles.vocabWarning}>
           ⚠ {t('records.assistant.ruleNamesNotFound', { standard, names: names.notFound.join(', ') })}
@@ -70,6 +75,13 @@ function RuleValidationWarnings({ validation, standard }) {
         ))}
     </>
   );
+}
+
+function acceptDisabledTitle(t, canEdit, validation) {
+  if (!canEdit) return t('records.assistant.acceptDisabledTitle');
+  if (!validation.wellFormed) return t('records.assistant.ruleAcceptDisabledMalformed');
+  if (validation.invalidXPaths.length > 0) return t('records.assistant.ruleAcceptDisabledInvalidXPath');
+  return undefined;
 }
 
 function ReferenceGroup({ title, candidates, entry, onToggleReference, danger, showScore }) {
@@ -180,14 +192,8 @@ export default function RuleSuggestionPanel({
         {entry.text && (
           <button
             onClick={onAccept}
-            disabled={!canEdit || !generatedValidation.wellFormed}
-            title={
-              !canEdit
-                ? t('records.assistant.acceptDisabledTitle')
-                : !generatedValidation.wellFormed
-                  ? t('records.assistant.ruleAcceptDisabledMalformed')
-                  : undefined
-            }
+            disabled={!canEdit || !generatedValidation.acceptable}
+            title={acceptDisabledTitle(t, canEdit, generatedValidation)}
           >
             {t('records.assistant.accept')}
           </button>
@@ -258,14 +264,8 @@ export default function RuleSuggestionPanel({
             <div className={styles.suggestionActions}>
               <button
                 onClick={onAcceptPasted}
-                disabled={!canEdit || !pastedValidation.wellFormed}
-                title={
-                  !canEdit
-                    ? t('records.assistant.acceptDisabledTitle')
-                    : !pastedValidation.wellFormed
-                      ? t('records.assistant.ruleAcceptDisabledMalformed')
-                      : undefined
-                }
+                disabled={!canEdit || !pastedValidation.acceptable}
+                title={acceptDisabledTitle(t, canEdit, pastedValidation)}
               >
                 {t('records.assistant.acceptPastedRule')}
               </button>

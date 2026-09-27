@@ -53,6 +53,8 @@ function isSuggestDefinition(text) {
 // a verification script picks the scenario through the BRDP it seeds:
 //   - "calibration"  -> NOT_CHECKABLE: <reason>
 //   - "MALFORMED"    -> an unclosed element (Accept must be disabled)
+//   - "ESCAPEDPATH"  -> well-formed, but objectPath is //&lt;emphasis&gt;
+//                       (not XPath -- Accept must be disabled)
 //   - "pokemon"      -> a well-formed rule naming an invented element
 //   - "LONGRULE"     -> one long unbroken XML line (box-scroll check)
 //   - anything else  -> a valid rule in the format the prompt asks for
@@ -69,6 +71,9 @@ function suggestRuleReply(systemPrompt) {
   }
   if (/MALFORMED/.test(proposal)) {
     return `<structureObjectRule id="${id}"><objectPath allowedObjectFlag="0">//para</objectPath><objectUse>Broken`;
+  }
+  if (/ESCAPEDPATH/.test(proposal)) {
+    return `<structureObjectRule id="${id}" brSeverityLevel="brsl01"><brDecisionRef brDecisionIdentNumber="${id}"/><objectPath allowedObjectFlag="0">//&lt;emphasis&gt;</objectPath><objectUse>MOCK-RULE: &lt;emphasis&gt; is not used.</objectUse></structureObjectRule>`;
   }
   if (/LONGRULE/.test(proposal)) {
     return '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath><objectUse>MOCK-LONG-RULE</objectUse></structureObjectRule>';

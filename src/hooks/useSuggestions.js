@@ -12,6 +12,7 @@ import { buildCopyablePrompt, buildSuggestRulePrompt, parseSuggestRuleResponse, 
 import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { checkRuleNames, extractRuleNames } from '../utils/ruleNameCheck.js';
+import { invalidRuleXPaths } from '../utils/ruleXPathSyntax.js';
 import { selectSchemaFactNames } from '../utils/vocabularyCheck.js';
 import {
   coverageOf,
@@ -35,13 +36,23 @@ export function finalRuleXml(entry, ruleXml) {
 }
 import { ruleStateOf } from '../utils/ruleState';
 
-// Suggest Rule validation (docs request, Part 4): deterministic, warns
-// only. Well-formedness is the one thing that disables Accept -- the
-// backend would reject a malformed rule_xml anyway. Unknown / wrong-kind
-// names in the rule's XPath are red warnings with Accept still enabled.
+// Suggest Rule validation (docs request, Part 4): deterministic. Two
+// things disable Accept: XML that isn't well-formed (the backend would
+// reject it anyway) and an XPath expression that isn't syntactically valid
+// (schema-location encargo, Part 3 -- e.g. //&lt;emphasis&gt;). Unknown /
+// wrong-kind names in the rule's XPath are red warnings with Accept still
+// enabled. `acceptable` is the single gate every Accept path uses.
 export function validateRuleXml(xml, vocabulary) {
   const wellFormed = checkWellFormed(xml || '');
-  return { wellFormed: wellFormed.valid, wellFormedError: wellFormed.error, names: checkRuleNames(xml || '', vocabulary) };
+  // Only meaningful on well-formed XML (the expressions come out of it).
+  const invalidXPaths = wellFormed.valid ? invalidRuleXPaths(xml || '') : [];
+  return {
+    wellFormed: wellFormed.valid,
+    wellFormedError: wellFormed.error,
+    invalidXPaths,
+    acceptable: wellFormed.valid && invalidXPaths.length === 0,
+    names: checkRuleNames(xml || '', vocabulary),
+  };
 }
 
 export function useSuggestions({ projectId, standard, schemaLocation, selected, aiProvider, vocabulary, ruleApproval, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, t }) {
@@ -476,7 +487,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     // too before writing anything.
     if (entry.brdpId !== selected.id) return;
     if (entry.kind === 'rule') {
-      if (!validateRuleXml(entry.text, vocabulary).wellFormed) return;
+      if (!validateRuleXml(entry.text, vocabulary).acceptable) return;
       if (!(await saveRuleAsDraft(entry, entry.text, 'llm'))) return;
     } else {
       await handleUpdate(selected.id, { [entry.kind]: entry.text });
@@ -505,7 +516,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     const pasted = (entry?.pastedRule || '').trim();
     if (!entry || entry.kind !== 'rule' || !pasted) return;
     const ruleXml = finalRuleXml(entry, pasted);
-    if (!validateRuleXml(ruleXml, vocabulary).wellFormed) return;
+    if (!validateRuleXml(ruleXml, vocabulary).acceptable) return;
     if (!(await saveRuleAsDraft(entry, ruleXml, 'external_llm'))) return;
     removeSuggestionEntry(selected.id);
   };

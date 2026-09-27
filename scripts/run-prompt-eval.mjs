@@ -55,7 +55,8 @@ import {
 import { ASK_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
-import { checkRuleNames } from "../src/utils/ruleNameCheck.js";
+import { checkRuleNames, extractRuleXPaths } from "../src/utils/ruleNameCheck.js";
+import { invalidRuleXPaths } from "../src/utils/ruleXPathSyntax.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
 import { validateXML } from "xmllint-wasm";
 import {
@@ -177,6 +178,14 @@ async function runCheck(check, answer, ctx = {}) {
     case "xml_well_formed": {
       const r = await xmlWellFormed(ctx.xml);
       return { status: r.ok ? "pass" : "fail", detail: r.ok ? "well-formed" : r.error };
+    }
+    case "xpath_valid": {
+      // Same parser and rule as the app's Accept gate (ruleXPathSyntax.js):
+      // every objectPath/objpath / @context / @test, entity-decoded, must parse.
+      const count = extractRuleXPaths(ctx.xml || "").length;
+      const invalid = invalidRuleXPaths(ctx.xml || "");
+      if (invalid.length) return { status: "fail", detail: `invalid XPath: ${invalid.join(" | ").slice(0, 200)}` };
+      return { status: "pass", detail: count ? `${count} XPath expression(s), all valid` : "no XPath expression in the answer" };
     }
     case "names_in_vocabulary": {
       const names = checkRuleNames(ctx.xml || "", ctx.vocabulary);

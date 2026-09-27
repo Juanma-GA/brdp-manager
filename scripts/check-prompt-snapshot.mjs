@@ -127,6 +127,17 @@
 // Ask/Definition/Proposal case are unchanged. One case added,
 // suggestRule/brex-4-2-value-list-proposal (the docs request's
 // "@emphasisType shall only take em01 and em02" edge case).
+//
+// Schema-location encargo, Part 3: expected-prompts.json regenerated for
+// ONE deliberate reason -- rule 6 of the three BREX blocks
+// (ruleFormatRules.js). The old wording ("a literal < or & must be escaped
+// as &lt; / &amp;") produced <objectPath>//&lt;emphasis&gt;</objectPath>
+// in all three passes of a real Mistral run; rule 6 now says names go bare
+// in objectPath/objpath (//emphasis, //@emphasisType -- //@emph in 3.0.1),
+// &lt;/&amp; only for a < or & of the expression itself, with a correct
+// and a wrong example on an invented element (acmeElement). Changes the 5
+// BREX suggestRule cases; SCH-DITA and every Ask/Definition/Proposal case
+// are unchanged.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

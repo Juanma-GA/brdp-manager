@@ -133,7 +133,7 @@
       },
       "question": "Is <pokemon> a valid element here?",
       "checks": [
-        { "type": "contains_any", "patterns": ["does(n't| not) exist", "is not a (valid )?(element|attribute)", "no existe"], "flags": "i" }
+        { "type": "contains_any", "patterns": ["does(n't| \\*{0,2}not\\*{0,2}) exist", "is \\*{0,2}not\\*{0,2} a (valid )?(element|attribute)", "\\*{0,2}no\\*{0,2} existe"], "flags": "i", "note": "** around not/no allowed (the answer is markdown)" }
       ]
     },
     {
@@ -372,6 +372,9 @@
           "type": "xml_well_formed"
         },
         {
+          "type": "xpath_valid"
+        },
+        {
           "type": "names_in_vocabulary"
         },
         {
@@ -422,6 +425,9 @@
           "type": "xml_well_formed"
         },
         {
+          "type": "xpath_valid"
+        },
+        {
           "type": "names_in_vocabulary"
         },
         {
@@ -464,6 +470,9 @@
       "checks": [
         {
           "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
         },
         {
           "type": "names_in_vocabulary"
@@ -511,6 +520,9 @@
       "checks": [
         {
           "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
         },
         {
           "type": "names_in_vocabulary"
@@ -567,6 +579,10 @@
           "type": "not_checkable"
         },
         {
+          "type": "xpath_valid",
+          "note": "vacuous for a NOT_CHECKABLE answer (no XPath); guards against a rule sneaking in"
+        },
+        {
           "type": "manual",
           "note": "The reason after NOT_CHECKABLE: is short and says the decision is outside the XML document."
         }
@@ -590,6 +606,9 @@
       "checks": [
         {
           "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
         },
         {
           "type": "names_in_vocabulary"

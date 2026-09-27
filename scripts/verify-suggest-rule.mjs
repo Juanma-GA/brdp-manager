@@ -113,6 +113,7 @@ async function main() {
   b.catalog = await makeBrdp(p42, { identifier: CATALOG_ID, title: "Catalog clamps", proposal: "Every table shall be framed on all sides." });
   b.pokemon = await makeBrdp(p42, { identifier: "BRDP-SR-POKEMON", title: "Pokemon", proposal: "Every pokemon shall be framed." });
   b.malformed = await makeBrdp(p42, { identifier: "BRDP-SR-MALFORMED", title: "Malformed", proposal: "MALFORMED: the mock returns an unclosed element." });
+  b.escaped = await makeBrdp(p42, { identifier: "BRDP-SR-ESCAPED", title: "Escaped path", proposal: "ESCAPEDPATH: the mock returns //&lt;emphasis&gt; in objectPath." });
   b.calib = await makeBrdp(p42, { identifier: "BRDP-SR-CALIB", title: "Calibration", proposal: "Torque tool calibration shall be performed every 6 months." });
   b.ok = await makeBrdp(p42, { identifier: "BRDP-SR-OK", title: "Frames", proposal: "Every <table> shall be framed on all sides." });
   // Suggest Rule adjustments round.
@@ -195,6 +196,9 @@ async function main() {
     await page.waitForSelector("tbody tr", { timeout: 20000 });
   }
   async function select(identifier) {
+    // Search first: the table shows 15 rows per page, and this project has
+    // more than that.
+    await page.fill('input[placeholder="Search by ID or Title…"]', identifier);
     await page.locator("tbody tr", { hasText: identifier }).first().click();
     await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
     await page.waitForTimeout(400); // rule approval fetch
@@ -336,6 +340,31 @@ async function main() {
     await page.waitForSelector("text=/not well-formed XML/");
     assert(await page.getByRole("button", { name: "Accept", exact: true }).isDisabled(), "malformed rule: Accept disabled");
     await page.screenshot({ path: "/tmp/suggest-rule-malformed.png", fullPage: true });
+    await discard();
+
+    // Schema-location encargo, Part 3: well-formed XML whose objectPath is
+    // //&lt;emphasis&gt; (not XPath) -> red warning + Accept disabled, like
+    // malformed XML. No name warning: "emphasis" is a real 4.2 element.
+    await select("BRDP-SR-ESCAPED");
+    await suggestRule();
+    await page.waitForSelector("text=/Invalid XPath expression: \\/\\/<emphasis>/");
+    const accept = page.getByRole("button", { name: "Accept", exact: true });
+    assert(await accept.isDisabled(), "//&lt;emphasis&gt;: Accept disabled");
+    assert((await accept.getAttribute("title")) === "The rule has an invalid XPath expression — it cannot be saved", "//&lt;emphasis&gt;: Accept says why");
+    const xpColor = await page.locator("p", { hasText: "Invalid XPath expression" }).evaluate((el) => getComputedStyle(el).color);
+    assert(xpColor === "rgb(185, 28, 28)", `invalid XPath warning is red (got ${xpColor})`);
+    assert((await page.locator("text=/uses names not found/").count()) === 0, "//&lt;emphasis&gt;: no name warning (emphasis exists) -- only the syntax check catches it");
+    await page.screenshot({ path: "/tmp/suggest-rule-invalid-xpath.png", fullPage: true });
+    // The encargo's table, through Paste rule (same validation).
+    const pasteBox = page.getByPlaceholder(/Paste/);
+    const acceptPasted = page.getByRole("button", { name: "Accept pasted rule" });
+    const brex = (path) => `<structureObjectRule id="BRDP-SR-ESCAPED" brSeverityLevel="brsl01"><brDecisionRef brDecisionIdentNumber="BRDP-SR-ESCAPED"/><objectPath allowedObjectFlag="0">${path}</objectPath><objectUse>u</objectUse></structureObjectRule>`;
+    for (const [path, valid] of [["//para[count(x) &lt; 3]", true], ["//@emphasisType", true], ["//&lt;emphasis&gt;", false]]) {
+      await pasteBox.fill(brex(path));
+      await page.waitForTimeout(300);
+      const warned = (await page.locator("text=/Invalid XPath expression/").count()) === 2; // generated + pasted
+      assert(warned === !valid && (await acceptPasted.isDisabled()) === !valid, `pasted ${path}: ${valid ? "valid, Accept enabled" : "warning + Accept disabled"}`);
+    }
     await discard();
 
     // NOT_CHECKABLE -> reason, no Accept, Discard + Copy prompt; then Paste rule.

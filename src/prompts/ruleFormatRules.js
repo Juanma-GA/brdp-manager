@@ -25,13 +25,23 @@ const BREX_4X_VALUE_LIST = `5. When the Proposal limits an attribute or element 
    <objectValue valueForm="single" valueAllowed="ac01">ac01</objectValue>
    <objectValue valueForm="single" valueAllowed="ac02">ac02</objectValue>`;
 
+// Rule 6 of the BREX blocks (schema-location encargo, Part 3): the old
+// wording ("a literal < or & must be escaped as &lt; / &amp;"), next to
+// rule 4 (&lt;name&gt; in objectUse) and a Proposal that writes <emphasis>,
+// produced <objectPath>//&lt;emphasis&gt;</objectPath> in all three passes
+// of a real Mistral run -- not XPath. The generic name (acmeElement) keeps
+// the examples from being copied into a real rule.
+const BREX_4X_PATH_NAMES = `6. Inside objectPath, write element and attribute names bare, exactly as in XPath — no angle brackets and no escaping: //emphasis, //@emphasisType. &lt;name&gt; is only for objectUse text, never for objectPath. &lt; and &amp; are used in objectPath only for a literal < or & that belongs to the expression itself (the less-than operator, or an & inside a string), e.g. //para[count(x) &lt; 3]. Example (invented element, not from this BRDP):
+   Correct: <objectPath allowedObjectFlag="0">//acmeElement</objectPath>
+   Wrong:   <objectPath allowedObjectFlag="0">//&lt;acmeElement&gt;</objectPath>`;
+
 const BREX_42 = `FORMAT — S1000D Issue 4.2 BREX: exactly ONE <structureObjectRule> element.
 1. Output exactly one <structureObjectRule id="{ID}" brSeverityLevel="brsl01"> — never a <contextRules> wrapper, a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <brDecisionRef brDecisionIdentNumber="{ID}"/> → <objectPath> → <objectUse> → <objectValue> (zero or more). brDecisionRef carries the ID as an ATTRIBUTE, never as text.
 3. Exactly ONE <objectPath>. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
 ${BREX_4X_OBJECT_USE}
 ${BREX_4X_VALUE_LIST}
-6. Inside objectPath, a literal < or & must be escaped as &lt; / &amp;.`;
+${BREX_4X_PATH_NAMES}`;
 
 const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: exactly ONE <structureObjectRule> element.
 1. Output exactly one <structureObjectRule id="{ID}"> — never a <contextRules> wrapper, a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
@@ -39,7 +49,7 @@ const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: exactly ONE <structureObjectR
 3. Exactly ONE <objectPath>. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
 ${BREX_4X_OBJECT_USE}
 ${BREX_4X_VALUE_LIST}
-6. Inside objectPath, a literal < or & must be escaped as &lt; / &amp;.`;
+${BREX_4X_PATH_NAMES}`;
 
 // 3.0.1 gets the same reinforcement, adapted: objappl only has 0/1 (no
 // "optional") and is optional itself in the 3.0.1 BREX schema -- the real
@@ -55,7 +65,9 @@ const BREX_301 = `FORMAT — S1000D Issue 3.0.1 BREX: exactly ONE <objrule> elem
    <objuse>The attribute @acmecode only takes the values ac01 and ac02.</objuse>
    <objval valtype="single" val1="ac01"/>
    <objval valtype="single" val1="ac02"/>
-6. Inside objpath, a literal < or & must be escaped as &lt; / &amp;.`;
+6. Inside objpath, write element and attribute names bare, exactly as in XPath — no angle brackets and no escaping: //emphasis, //@emph. &lt;name&gt; is only for objuse text, never for objpath. &lt; and &amp; are used in objpath only for a literal < or & that belongs to the expression itself (the less-than operator, or an & inside a string), e.g. //para[count(x) &lt; 3]. Example (invented element, not from this BRDP):
+   Correct: <objpath objappl="0">//acmeElement</objpath>
+   Wrong:   <objpath objappl="0">//&lt;acmeElement&gt;</objpath>`;
 
 function schDita(standard) {
   const queryBinding = queryBindingForStandard(standard);

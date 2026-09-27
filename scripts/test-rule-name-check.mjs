@@ -10,6 +10,10 @@
 //     detection (mirrors backend UNFILLED_MARKER_RE -- same fixtures as
 //     backend/tests/test_similar.py).
 //   - src/prompts/suggestRulePrompt.js: parseSuggestRuleResponse.
+//   - src/utils/ruleXPathSyntax.js: XPath syntax of every expression of a
+//     rule (schema-location encargo, Part 3) -- the encargo's edge cases and
+//     EVERY real rule of the five curated templates (a false "invalid" would
+//     block Accept on a correct rule).
 //
 //     node scripts/test-rule-name-check.mjs
 import { readFileSync } from 'node:fs';
@@ -19,6 +23,8 @@ import * as XLSX from 'xlsx';
 import { extractRuleXPaths, extractXPathNames, extractRuleNames, checkRuleNames } from '../src/utils/ruleNameCheck.js';
 import { hasUnfilledMarkers } from '../src/utils/proposalMarkers.js';
 import { parseSuggestRuleResponse } from '../src/prompts/suggestRulePrompt.js';
+import { invalidRuleXPaths, isXPathSyntaxValid } from '../src/utils/ruleXPathSyntax.js';
+import { ruleFormatRules } from '../src/prompts/ruleFormatRules.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -204,6 +210,52 @@ for (const p of [
 {
   const r = parseSuggestRuleResponse('```\nNOT_CHECKABLE: outside the document\n```');
   assert(r.notCheckable === 'outside the document', 'NOT_CHECKABLE inside a fence still recognized');
+}
+
+// ---- XPath syntax (schema-location encargo, Part 3) ----
+{
+  const brex = (path) => `<structureObjectRule id="X"><objectPath allowedObjectFlag="0">${path}</objectPath><objectUse>u</objectUse></structureObjectRule>`;
+  const sch = (test) => `<sch:pattern id="p-X"><sch:rule context="note"><sch:assert id="X" test="${test}">m</sch:assert></sch:rule></sch:pattern>`;
+  // The encargo's table.
+  assert(same(invalidRuleXPaths(brex('//&lt;emphasis&gt;')), ['//<emphasis>']), '//&lt;emphasis&gt; -> invalid (decoded //<emphasis> reported)');
+  assert(invalidRuleXPaths(brex('//para[count(x) &lt; 3]')).length === 0, '//para[count(x) &lt; 3] -> valid');
+  assert(invalidRuleXPaths(brex('//@emphasisType')).length === 0, '//@emphasisType -> valid');
+  assert(invalidRuleXPaths(sch('@type')).length === 0, 'Schematron test="@type" -> valid');
+  assert(same(invalidRuleXPaths(sch('count(.) &lt;')), ['count(.) <']), 'test="count(.) <" -> invalid');
+  // Why the name check alone never caught it: "emphasis" IS a 4.2 element.
+  const n = checkRuleNames(brex('//&lt;emphasis&gt;'), vocabs['S1000D 4.2']);
+  assert(n.notFound.length === 0 && n.wrongType.length === 0, 'name check on //&lt;emphasis&gt; finds nothing wrong (emphasis is a real 4.2 element) -- the syntax check is what catches it');
+  // 3.0.1 objpath and a Schematron @context.
+  assert(invalidRuleXPaths('<objrule id="X"><objpath objappl="0">//&lt;randlist&gt;</objpath><objuse>u</objuse></objrule>').length === 1, '3.0.1 objpath //&lt;randlist&gt; -> invalid');
+  assert(invalidRuleXPaths('<sch:pattern id="p"><sch:rule context="note["><sch:report id="X" test="true()">m</sch:report></sch:rule></sch:pattern>').length === 1, 'Schematron context="note[" -> invalid');
+  // Things that are normal in rule fragments are never "invalid".
+  for (const expr of [
+    "every $r in tgroup/tbody/row satisfies ($r/entry[1] != '')",
+    "@type = ('caution','warning')",
+    "matches(@id, '^[a-z]+$', 'i')",
+    '$valor(.) ! normalize-space(.)',
+    'function($t as element()) as xs:string { string($t) }',
+    '//@xlink:href',
+    'doc-available(resolve-uri(@href, base-uri(.)))',
+    'count(ancestor::list) lt 3',
+  ]) {
+    assert(isXPathSyntaxValid(expr), `valid XPath 2.0/3.0 / rule-fragment expression: ${expr}`);
+  }
+  assert(!isXPathSyntaxValid('//<emphasis/>'), 'XQuery element constructor is not XPath');
+  // Every real rule of the five curated templates parses.
+  for (const [standard, map] of Object.entries(rules)) {
+    const bad = [...map.entries()].flatMap(([id, rule]) => invalidRuleXPaths(rule).map((x) => `${id}: ${x}`));
+    assert(bad.length === 0, `${standard}: every template rule's XPath is valid (${map.size} rules)${bad.length ? ' -- ' + bad.join(' | ') : ''}`);
+  }
+  // Prompt rule 6: bare names, correct/wrong example with acmeElement.
+  for (const fmt of ['BREX-4.2', 'BREX-4.1', 'BREX-3.0.1']) {
+    const text = ruleFormatRules(fmt, '');
+    assert(
+      /6\. Inside obj(ectPath|path), write element and attribute names bare/.test(text) && text.includes('Correct: <obj') && text.includes('//acmeElement</obj') && text.includes('Wrong:   <obj') && text.includes('//&lt;acmeElement&gt;</obj'),
+      `${fmt}: rule 6 says names go bare, with a correct and a wrong acmeElement example`
+    );
+    assert(!text.includes('a literal < or & must be escaped as &lt; / &amp;.'), `${fmt}: old rule 6 wording gone`);
+  }
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED\n' : `\n${failures} CHECK(S) FAILED\n`);
