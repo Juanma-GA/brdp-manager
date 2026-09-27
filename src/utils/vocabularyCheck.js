@@ -96,6 +96,28 @@ export function extractContextCandidates(text) {
   ATTR_MARKER_RE.lastIndex = 0;
   while ((match = ATTR_MARKER_RE.exec(source))) attributes.add(match[1]);
 
+  // "Did you mean con marcado a medias" round, Part 1: a half-typed tag
+  // ("Title above the <table", "above the table>") is just as explicit an
+  // intent to mark up an element as a complete `<table>` -- the missing
+  // bracket is a typo, not ambiguity about whether the author meant to
+  // mark it up at all. So these names are folded into the SAME `elements`
+  // Set that checkAgainstVocabulary reads -- UNLIKE phraseCandidates below
+  // (which never produce a warning, only a suggestion): a dangling name
+  // that doesn't exist in the schema gets the same red "not found" banner
+  // a complete `<pokemon>` would, per the encargo ("porque la intención de
+  // marcar es explícita"). A name already captured via a complete tag
+  // elsewhere in the same text is never duplicated. `danglingElements`
+  // (returned separately below) is ONLY the subset of names that were
+  // genuinely incomplete -- used later to also offer a "Did you mean
+  // <name>?" completion when the name resolves (resolveDanglingElement
+  // Suggestions), the same way a phrase-triggered word does.
+  const danglingElements = [];
+  for (const name of extractDanglingElementNames(source)) {
+    if (elements.has(name)) continue;
+    elements.add(name);
+    danglingElements.push(name);
+  }
+
   const camelCase = extractCamelCaseCandidates(source);
 
   const rawPhraseCandidates = extractPhraseCandidates(source);
@@ -109,7 +131,43 @@ export function extractContextCandidates(text) {
     phraseCandidates.push({ name: c.name, type: c.type });
   }
 
-  return { elements: [...elements], attributes: [...attributes], camelCase, phraseCandidates };
+  return { elements: [...elements], attributes: [...attributes], camelCase, phraseCandidates, danglingElements };
+}
+
+// Finds names introduced via HALF-typed bracket markup, with no trigger
+// word required: "<name" with nothing (or a non-">"-character) right
+// after the name, or "name>" with nothing (or a non-"<"/word-char) right
+// before it. Deliberately does NOT use a single "greedy name then
+// lookahead" regex -- `<([\p{L}][\w-]*)(?!>)` would backtrack the
+// quantifier down to a shorter match whenever the FULL name IS followed
+// by ">" (i.e. exactly the complete-tag case that must be excluded),
+// silently capturing a truncated name instead of correctly matching
+// nothing. Matching the name greedily first and then checking the single
+// character immediately after/before it in plain JS avoids that
+// backtracking trap entirely.
+// Never a false positive on a plain comparison/arrow ("a < b", "x<5",
+// "->"): the character right after "<" (open case) or right before ">"
+// (close case) must be a LETTER, immediately adjacent to the bracket --
+// "a < b" has a space there, "x<5" has a digit, "->" has no "<" at all.
+function extractDanglingElementNames(text) {
+  const source = text || '';
+  const names = new Set();
+
+  OPEN_TOKEN_RE.lastIndex = 0;
+  let m;
+  while ((m = OPEN_TOKEN_RE.exec(source))) {
+    const endIdx = m.index + m[0].length;
+    if (source[endIdx] !== '>') names.add(m[1]);
+  }
+
+  CLOSE_TOKEN_RE.lastIndex = 0;
+  while ((m = CLOSE_TOKEN_RE.exec(source))) {
+    const before = m.index > 0 ? source[m.index - 1] : undefined;
+    if (before !== undefined && (before === '<' || NAME_CHAR_RE.test(before))) continue;
+    names.add(m[1]);
+  }
+
+  return [...names];
 }
 
 // Follow-up round ("sin falsos positivos"): the ONLY place a phrase-
@@ -141,6 +199,29 @@ export function resolvePhraseCandidates(phraseCandidates, vocabulary) {
     else continue; // doesn't exist as either kind -- ignored entirely
     seen.add(c.name);
     resolved.push({ name: c.name, type });
+  }
+  return resolved;
+}
+
+// "Did you mean con marcado a medias" round, Part 1: half-typed markup
+// (`danglingElements` from extractContextCandidates) only ever suggests
+// COMPLETING the bracket as an element -- unlike resolvePhraseCandidates
+// above, it never flips to `@name`. The author already chose "<"/">" as
+// the delimiter; the fix is to close it, never to change what kind of
+// markup it is. A name that doesn't exist as an element in the vocabulary
+// is never suggested here -- it already gets its own red "not found" (or
+// wrongType, if it exists only as an attribute) warning from
+// checkAgainstVocabulary, since extractContextCandidates folds these
+// names into the same `elements` Set that check reads.
+export function resolveDanglingElementSuggestions(danglingElementNames, vocabulary) {
+  if (!vocabulary) return [];
+  const seen = new Set();
+  const resolved = [];
+  for (const name of danglingElementNames) {
+    if (seen.has(name)) continue;
+    if (!vocabulary.elements.has(name)) continue;
+    seen.add(name);
+    resolved.push({ name, type: 'element' });
   }
   return resolved;
 }
@@ -204,6 +285,13 @@ export function applyRenameSuggestion(text, suggestion) {
 
 const ELEMENT_ATTR_TAG_RE = /<\/?([A-Za-z][\w-]*)[^>]*>/g;
 const ATTR_MARKER_RE = /@([A-Za-z][\w-]*)/g;
+// "Did you mean con marcado a medias" round, Part 1: used only by
+// extractDanglingElementNames above. `<` must be immediately (no space)
+// followed by a letter -- this is what excludes "a < b"/"x<5" as
+// candidates, not any check against the vocabulary.
+const OPEN_TOKEN_RE = /<([\p{L}][\p{L}\p{N}_-]*)/gu;
+const CLOSE_TOKEN_RE = /([\p{L}][\p{L}\p{N}_-]*)>/gu;
+const NAME_CHAR_RE = /[\p{L}\p{N}_-]/u;
 // Unicode-aware word tokenizer (follow-up round, point 3): letters in any
 // script (`\p{L}`), digits, and the XML name characters -, _, . -- so an
 // accented/composed word like "cómo"/"señal"/"utilizará" is always

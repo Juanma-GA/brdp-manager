@@ -7,18 +7,27 @@ import styles from '../../pages/RecordsPage.module.css';
 // buildSchemaFactsBlock (src/prompts/shared.js) formatted into the prompt
 // (the entry object is used as-is, never reformatted a second, possibly-
 // diverging way).
+// "Did you mean con marcado a medias y listas de padres cortadas" round,
+// Part 2: the UI card shows the same "partial list" wording as the prompt
+// (src/prompts/shared.js's truncationMarker) -- one exact, verifiable
+// total wherever shown+omitted genuinely adds up to it, never a bare
+// "+N" fragment.
 function formatSchemaFactAttributeUi(attr, t) {
   let text = attr.required ? `@${attr.name} (${t('records.assistant.schemaFactRequired')})` : `@${attr.name}`;
   if (attr.enum && attr.enum.length > 0) {
-    const values = attr.enum.join(' | ') + (attr.enum_truncated ? `, +${attr.enum_omitted}` : '');
-    text += ` [${values}]`;
+    text += ` [${attr.enum.join(' | ')}]`;
+    if (attr.enum_truncated) {
+      text += ` (${t('records.assistant.schemaFactPartialList', { shown: attr.enum.length, total: attr.enum.length + attr.enum_omitted })})`;
+    }
   }
   return text;
 }
 
 function formatSchemaFactNameListUi(names, truncated, omitted, t) {
   if (!names || names.length === 0) return t('records.assistant.schemaFactNone');
-  return names.join(', ') + (truncated ? `, +${omitted}` : '');
+  const list = names.join(', ');
+  if (!truncated) return list;
+  return `${list} (${t('records.assistant.schemaFactPartialList', { shown: names.length, total: names.length + omitted })})`;
 }
 
 function formatSchemaFactAttributeListUi(attrs, t) {
@@ -46,7 +55,10 @@ export default function SchemaFactCard({ name, entry }) {
         <div>
           {t('records.assistant.schemaFactAttributes')}:{' '}
           {v.attributes.length > 0
-            ? formatSchemaFactAttributeListUi(v.attributes, t) + (v.attributes_truncated ? `, +${v.attributes_omitted}` : '')
+            ? formatSchemaFactAttributeListUi(v.attributes, t) +
+              (v.attributes_truncated
+                ? ` (${t('records.assistant.schemaFactPartialList', { shown: v.attributes.length, total: v.attributes.length + v.attributes_omitted })})`
+                : '')
             : t('records.assistant.schemaFactNone')}
         </div>
         <div>
@@ -100,23 +112,24 @@ export default function SchemaFactCard({ name, entry }) {
             <div>
               {t('records.assistant.schemaFactAdditionalAttributes')}:{' '}
               {formatSchemaFactAttributeListUi(pv.diffAttributes, t)}
-              {pv.attributes_truncated ? `, +${pv.attributes_omitted}` : ''}
+              {pv.attributes_truncated ? ` (${t('records.assistant.schemaFactPartialDiffNote')})` : ''}
             </div>
           ) : pv.attributes_truncated ? (
             <div>
               {t('records.assistant.schemaFactAdditionalAttributes')}:{' '}
-              {t('records.assistant.schemaFactDiffTruncated', { omitted: pv.attributes_omitted })}
+              {t('records.assistant.schemaFactDiffTruncated')}
             </div>
           ) : null}
           {pv.diffChildren.length > 0 ? (
             <div>
               {t('records.assistant.schemaFactAdditionalChildren')}:{' '}
-              {formatSchemaFactNameListUi(pv.diffChildren, pv.children_truncated, pv.children_omitted, t)}
+              {formatSchemaFactNameListUi(pv.diffChildren, false, 0, t)}
+              {pv.children_truncated ? ` (${t('records.assistant.schemaFactPartialDiffNote')})` : ''}
             </div>
           ) : pv.children_truncated ? (
             <div>
               {t('records.assistant.schemaFactAdditionalChildren')}:{' '}
-              {t('records.assistant.schemaFactDiffTruncated', { omitted: pv.children_omitted })}
+              {t('records.assistant.schemaFactDiffTruncated')}
             </div>
           ) : null}
         </div>

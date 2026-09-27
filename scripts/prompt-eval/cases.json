@@ -93,7 +93,13 @@
           "flags": "i",
           "note": "must never refuse a real schema-facts question"
         },
-        { "type": "max_paragraphs", "max": 3 }
+        { "type": "max_paragraphs", "max": 3 },
+        {
+          "type": "not_contains",
+          "pattern": "\\+\\s*\\d+\\s*(more|m[aá]s)",
+          "flags": "i",
+          "note": "'Did you mean con marcado a medias y listas de padres cortadas' round, Part 2: a real run against Mistral answered this exact question with the 40 shown parent names plus a literal '+3 more' copied verbatim from the (now-fixed) prompt truncation marker -- must never appear in the answer at all, whether the model paraphrases a partial list ('among others') or, since <para> in S1000D 4.2 has 43 real parents (comfortably under MAX_PARENTS=60), the list isn't even truncated any more."
+        }
       ]
     },
     {

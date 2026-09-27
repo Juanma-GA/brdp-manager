@@ -25,6 +25,35 @@
 // and commit the new expected-prompts.json alongside the prompt change
 // itself, in the same commit, so the diff shows reviewers exactly what
 // changed in the prompt text.
+//
+// "Did you mean con marcado a medias y listas de padres cortadas" round:
+// expected-prompts.json regenerated (via --update, after re-running
+// backend/scripts/dump_schema_cards_fixture.py so its fixture reflects
+// this round's own backend change too -- see below) for two DELIBERATE
+// reasons, both real prompt-content changes, not accidental drift:
+//   1. buildAskSystemPrompt (askPrompt.js) gained a new, unconditional
+//      instruction paragraph ("If a schema-facts list is marked as a
+//      partial list, say so... group or summarize lists over 15 names")
+//      -- this changes ALL 5 Ask cases in cases.mjs, even the ones with no
+//      schema facts at all, since the paragraph is static text next to
+//      SCOPE, not something gated on schemaFacts being non-empty.
+//   2. schema_cards.py's MAX_PARENTS (new, separate from MAX_CHILDREN,
+//      raised to 60) means <para> in S1000D 4.2 -- used by the
+//      multi-variant-para-refused-notfound case -- now has its full 43
+//      real parents rendered untruncated, with no "(partial list: ...)"
+//      marker at all (43 <= 60); before this round it was silently cut to
+//      40 with the old ", +3 more" wording. The fixture dump had to be
+//      re-run for this to show up here -- schema-cards-fixture.json is a
+//      point-in-time capture of what the backend returns, not live data.
+// None of the OTHER wording changes this round (formatSchemaFactNameList/
+// formatSchemaFactAttribute's new "(partial list: N of M shown)" phrasing,
+// the per-variant-diff PARTIAL_DIFF_NOTE) show up in any of the 11 fixed
+// cases below, because none of them happens to hit a genuinely truncated
+// list under MAX_PARENTS=60/MAX_CHILDREN=40/MAX_ATTRIBUTES=30/
+// MAX_ENUM_VALUES=20 with real S1000D 4.2 data -- that machinery is
+// exercised instead by scripts/test-schema-facts-formatting.mjs's
+// synthetic fixtures and backend/tests/test_schema_cards.py's real
+// `refs` (152 parents) case, not by this byte-for-byte comparison.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

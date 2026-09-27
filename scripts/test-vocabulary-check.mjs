@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import {
   extractContextCandidates,
   resolvePhraseCandidates,
+  resolveDanglingElementSuggestions,
   applyRenameSuggestion,
   checkAgainstVocabulary,
   formatWrongTypeMessage,
@@ -64,6 +65,65 @@ assert(
   "@conref extracted as attribute"
 );
 assert(extractContextCandidates("Use @label for this.").attributes.includes("label"), "@label extracted as attribute");
+
+// ---- "Did you mean con marcado a medias" round, Part 1: half-typed
+// bracket markup ("<table" with no ">", "table>" with no "<") is a
+// candidate WITHOUT any trigger word -- the encargo's own edge-case table.
+
+{
+  const ctx = extractContextCandidates("Title above the <table");
+  assert(ctx.elements.includes("table"), "dangling open '<table' (no closing '>') is captured as an element candidate");
+  assert(ctx.danglingElements.includes("table"), "'table' is reported as genuinely dangling (not already fully marked up)");
+}
+{
+  const ctx = extractContextCandidates("above the table>");
+  assert(ctx.elements.includes("table"), "dangling close 'table>' (no opening '<') is captured as an element candidate");
+  assert(ctx.danglingElements.includes("table"), "'table' is reported as genuinely dangling");
+}
+{
+  // Not found in the vocabulary -> treated exactly like a complete
+  // <pokemon> tag for the RED WARNING (checkAgainstVocabulary), because
+  // the intent to mark up an element is just as explicit as if the
+  // bracket had been closed -- but NOT offered as a "Did you mean"
+  // completion (there's nothing real to complete it to).
+  const ctx = extractContextCandidates("above the <pokemon");
+  const checked = checkAgainstVocabulary(ctx, vocab4_2);
+  assert(checked.notFound.includes("<pokemon>"), "dangling '<pokemon' (not in vocabulary) still produces the red 'not found' warning");
+  assert(resolveDanglingElementSuggestions(ctx.danglingElements, vocab4_2).length === 0, "an unresolvable dangling name is never offered as a completion suggestion");
+}
+{
+  // Found in the vocabulary -> a completion suggestion, and NEVER a red
+  // warning (it's a real element, just half-typed).
+  const ctx = extractContextCandidates("Title above the <table");
+  const checked = checkAgainstVocabulary(ctx, vocab4_2);
+  assert(checked.notFound.length === 0, "a resolvable dangling name never produces a red warning");
+  const suggestions = resolveDanglingElementSuggestions(ctx.danglingElements, vocab4_2);
+  assert(suggestions.length === 1 && suggestions[0].name === "table" && suggestions[0].type === "element", "a resolvable dangling name IS offered as an element completion suggestion");
+}
+{
+  // Never confused with a plain comparison/arrow: the character
+  // immediately adjacent to the bracket must be a letter, with nothing in
+  // between -- "a < b" has a space, "x<5" has a digit, "->" has no "<" at
+  // all right before the ">".
+  assert(extractContextCandidates("if a < b then...").danglingElements.length === 0, "'a < b' (space before the candidate letter) is never a dangling-markup candidate");
+  assert(extractContextCandidates("x<5 is true").danglingElements.length === 0, "'x<5' (digit right after '<', not a letter) is never a dangling-markup candidate");
+  assert(extractContextCandidates("value -> result").danglingElements.length === 0, "'->' (no letter adjacent to any bracket) is never a dangling-markup candidate");
+}
+{
+  // A complete tag is never ALSO reported as dangling (no double-counting,
+  // no spurious second suggestion for the same name).
+  const complete = extractContextCandidates("<table>");
+  assert(complete.elements.includes("table") && complete.danglingElements.length === 0, "a complete <table> tag is captured once as 'elements', never listed in 'danglingElements' too");
+  const closing = extractContextCandidates("closing tag </table>");
+  assert(closing.elements.includes("table") && closing.danglingElements.length === 0, "a complete closing </table> tag is likewise never reported as dangling");
+}
+{
+  // Completing the markup: applyRenameSuggestion (already fixed in an
+  // earlier round for exactly this shape) closes the bracket without
+  // duplicating it either way.
+  assert(applyRenameSuggestion("Title above the <table", { name: "table", type: "element" }) === "Title above the <table>", "dangling open completes to '<table>' (adds only the missing '>')");
+  assert(applyRenameSuggestion("above the table>", { name: "table", type: "element" }) === "above the <table>", "dangling close completes to '<table>' (adds only the missing '<')");
+}
 
 // ---- phrase-trigger extraction: connectors, descriptive words, lists (unchanged mechanics) ----
 

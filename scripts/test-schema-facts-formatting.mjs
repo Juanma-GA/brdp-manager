@@ -82,10 +82,16 @@ function makeVariant(schemas, { attributes = [], children = [], attributes_trunc
     }),
   ]);
   const block = buildSchemaFactsBlock("S1000D 4.2", [{ name: "y", entry }]);
+  // "Did you mean con marcado a medias" round, Part 2: this line no longer
+  // cites a bare "+N more" count -- a per-variant DIFF is a subset of that
+  // variant's raw (pre-diff) list, so its raw omitted count can't honestly
+  // be attributed to the diff (some of what was cut could be common, not a
+  // real difference) -- reworded to say so in prose, with no number a
+  // model could copy as if it were exact.
   assert(block.includes("additional attributes: not confirmed"), "truncated-but-empty attribute diff still shows a line, reworded");
-  assert(block.includes("+5 more not shown"), "the truncated-attributes line cites the real omitted count");
+  assert(block.includes("cut off before comparison, so a real difference could be hiding past the cutoff"), "the truncated-attributes line explains the uncertainty without citing a bare count");
+  assert(!/\+\s*\d+\s*more/.test(block), "no bare '+N more' fragment anywhere in this block");
   assert(block.includes("additional children: not confirmed"), "truncated-but-empty children diff still shows a line, reworded");
-  assert(block.includes("+3 more not shown"), "the truncated-children line cites the real omitted count");
   assert(!block.includes("none beyond the common set"), "still never the old phrase, even in the truncated case");
 }
 
@@ -97,6 +103,63 @@ function makeVariant(schemas, { attributes = [], children = [], attributes_trunc
   assert(block.includes("attributes: @frame [top|bottom]"), "single-variant entry keeps the plain 'attributes:' label (never 'additional')");
   assert(block.includes("children: title"), "single-variant entry keeps the plain 'children:' label");
   assert(!block.includes("additional attributes"), "single-variant entry never uses the per-variant-diff labels at all");
+}
+
+{
+  // "Did you mean con marcado a medias y listas de padres cortadas" round,
+  // Part 2: a genuinely truncated name list (parents, children, or an
+  // enum) must read as "(partial list: N of M shown)" -- never the old
+  // bare ", +N more" a real Mistral run was seen literally copying into
+  // its own answer ("+3 más") as if it were a fact rather than metadata
+  // about the prompt's own capped list.
+  const entry = makeEntry(
+    [makeVariant(["only"], { attributes: [{ name: "kind", required: false, enum: ["a", "b", "c", "d", "e"], enum_truncated: true, enum_omitted: 3 }] })],
+    ["p1", "p2", "p3", "p4", "p5"]
+  );
+  entry.parents_truncated = true;
+  entry.parents_omitted = 3;
+  const block = buildSchemaFactsBlock("S1000D 4.2", [{ name: "w", entry }]);
+  assert(block.includes("[a|b|c|d|e] (partial list: 5 of 8 shown)"), `enum truncation reads "partial list: N of M shown" (got: ${block})`);
+  assert(block.includes("allowed inside: p1, p2, p3, p4, p5 (partial list: 5 of 8 shown)"), `parents truncation reads "partial list: N of M shown" (got: ${block})`);
+  assert(!/\+\s*\d+\s*more/.test(block), "no bare '+N more' fragment for either truncation");
+}
+
+{
+  // Single-variant entry whose OWN attribute list (not an enum, the whole
+  // list) was truncated server-side -- same new wording, same exact math.
+  const entry = makeEntry([
+    makeVariant(["only"], {
+      attributes: [{ name: "a1", required: false, enum: null }, { name: "a2", required: false, enum: null }],
+      attributes_truncated: true,
+      attributes_omitted: 4,
+    }),
+  ]);
+  const block = buildSchemaFactsBlock("S1000D 4.2", [{ name: "v", entry }]);
+  assert(block.includes("attributes: @a1, @a2 (partial list: 2 of 6 shown)"), `single-variant attribute-list truncation reads "partial list: N of M shown" (got: ${block})`);
+  assert(!/\+\s*\d+\s*more/.test(block), "no bare '+N more' fragment for the single-variant attribute-list truncation");
+}
+
+{
+  // Non-empty per-variant DIFF whose raw (pre-diff) list was ALSO
+  // truncated server-side -- unlike the plain name-list/enum cases above,
+  // the diff's own shown+omitted is NOT an honest total (some of what was
+  // cut could belong to the common set, not the diff), so this must never
+  // print a number here -- only the prose PARTIAL_DIFF_NOTE.
+  const entry = makeEntry([
+    makeVariant(["a"], { attributes: [{ name: "shared", required: false, enum: null }] }),
+    makeVariant(["b"], {
+      attributes: [{ name: "shared", required: false, enum: null }, { name: "onlyB", required: false, enum: null }],
+      attributes_truncated: true,
+      attributes_omitted: 9,
+      children: ["c1"],
+      children_truncated: true,
+      children_omitted: 7,
+    }),
+  ]);
+  const block = buildSchemaFactsBlock("S1000D 4.2", [{ name: "u", entry }]);
+  assert(block.includes("additional attributes: @onlyB (this variant"), `non-empty truncated attribute diff carries the prose note, no number (got: ${block})`);
+  assert(block.includes("further differences may exist beyond what is shown"), "the prose note itself is present");
+  assert(!/\+\s*\d+\s*more/.test(block), "no bare '+N more' fragment for the non-empty truncated diff either");
 }
 
 // ---- Real data: <para> in S1000D 4.2, loaded directly from the generated

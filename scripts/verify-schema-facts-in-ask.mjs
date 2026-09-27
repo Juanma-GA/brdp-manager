@@ -228,6 +228,20 @@ async function main() {
     // show up under "Differences by schema", not in the common list.
     assert(/Differences by schema:[\s\S]*footnote/.test(sys), '"footnote" (a genuine per-variant difference) appears in the differences section');
 
+    // "Did you mean con marcado a medias y listas de padres cortadas"
+    // round, Part 2: <para> in S1000D 4.2 has 43 real parents (confirmed
+    // against schema-cards-4-2.json before picking MAX_PARENTS=60) -- the
+    // encargo's own worked example, previously silently cut to 40 with a
+    // bare ", +3 more" that a real Mistral run was seen copying verbatim
+    // into its answer. Must now come back as the full 43, with NO
+    // "(partial list: ...)" marker at all (43 <= 60).
+    const allowedInsideLine = sys.match(/allowed inside: ([^\n]*)/);
+    assert(!!allowedInsideLine, '"allowed inside:" line present in the real prompt');
+    const parentNames = allowedInsideLine[1].split(", ").filter(Boolean);
+    assert(parentNames.length === 43, `<para>'s real "allowed inside" list has exactly 43 parents, none dropped (got ${parentNames.length})`);
+    assert(!allowedInsideLine[1].includes("partial list"), '<para>\'s 43 real parents fit under MAX_PARENTS=60 -- no "(partial list: ...)" marker at all');
+    assert(!/\+\s*\d+\s*more/.test(sys), 'the real prompt never contains a bare "+N more" fragment anywhere');
+
     await page.waitForSelector("text=Schema facts used:", { timeout: 3000 });
     const paraChip = page.getByRole("button", { name: "<para>", exact: true });
     assert((await paraChip.count()) > 0, 'UI shows a clickable "<para>" chip under the answer');
@@ -236,6 +250,8 @@ async function main() {
     assert(true, 'the expanded UI card also shows the compact "common to all 8 schema variants" summary');
     await page.waitForSelector("text=/Differences by schema/", { timeout: 3000 });
     assert(true, "the expanded UI card also shows the per-schema differences section");
+    const allowedInsideUi = await page.locator("text=/allowed inside:/").first().textContent();
+    assert(!allowedInsideUi.includes("partial list"), 'the expanded UI card also shows the full 43 parents with no "(partial list: ...)" marker');
     await page.screenshot({ path: "/tmp/schema-facts-para-compact.png", fullPage: true });
     console.log("Screenshot: /tmp/schema-facts-para-compact.png");
 

@@ -41,10 +41,13 @@
         "sbRevisionInfo",
         "sbSparesList",
         "sbSummary",
-        "sbSuppliesList"
+        "sbSuppliesList",
+        "sbSupportEquipsList",
+        "sbTopicContent",
+        "subCrewDrill"
       ],
-      "parents_omitted": 3,
-      "parents_truncated": true,
+      "parents_omitted": 0,
+      "parents_truncated": false,
       "variants": [
         {
           "attributes": [

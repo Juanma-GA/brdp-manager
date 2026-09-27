@@ -15,6 +15,9 @@ from app.services.schema_cards import (
     MAX_ATTRIBUTES,
     MAX_CHILDREN,
     MAX_ENUM_VALUES,
+    MAX_PARENTS,
+    STANDARD_TO_SCHEMA_CARDS_FILE,
+    _CARDS_BY_FILE,
     _collapse_enum_to_ranges,
 )
 
@@ -196,7 +199,7 @@ async def test_response_never_exceeds_the_documented_compact_limits(client):
     assert res.status_code == 200
     body = res.json()
     for element_name, entry in body["cards"].items():
-        assert len(entry["parents"]) <= MAX_CHILDREN
+        assert len(entry["parents"]) <= MAX_PARENTS
         if entry["parents_truncated"]:
             assert entry["parents_omitted"] > 0
         for variant in entry["variants"]:
@@ -338,3 +341,70 @@ async def test_long_consecutive_enum_still_collapses_to_a_range(client):
     attrs = {a["name"]: a for a in variant["attributes"]}
     assert attrs["caveat"]["enum"] == ["cv01–cv99"]
     assert attrs["caveat"]["enum_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_para_real_43_parents_fit_under_max_parents_untruncated(client):
+    """"Did you mean con marcado a medias y listas de padres cortadas"
+    round, Part 2, the encargo's own worked example: <para> in S1000D 4.2
+    really does have 43 parents (confirmed by counting
+    backend/schema_cards/schema-cards-4-2.json directly before picking 60)
+    -- just over the OLD MAX_CHILDREN=40 cutoff that used to also gate
+    parents, so a real "Where can <para> go?" answer always hit "+3 more"
+    even though 43 is still a short, readable list. Under the new, separate
+    MAX_PARENTS=60 the full 43 must come back untruncated."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 4.2", "names": "para"}, headers=_headers(user)
+    )
+    assert res.status_code == 200
+    entry = res.json()["cards"]["para"]
+    assert len(entry["parents"]) == 43
+    assert entry["parents_truncated"] is False
+    assert entry["parents_omitted"] == 0
+
+
+@pytest.mark.asyncio
+async def test_refs_real_152_parents_still_truncate_at_max_parents(client):
+    """Other half of the same gate: MAX_PARENTS=60 is a real cap, not
+    "never truncate parents again" -- `refs` in S1000D 4.2 has 152 real
+    parents (confirmed by counting the same generated file), the encargo's
+    own second worked example ("refs en 4.2 (152) -> partial list: 60 of
+    152 shown"). It must still come back capped at exactly 60, flagged."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 4.2", "names": "refs"}, headers=_headers(user)
+    )
+    assert res.status_code == 200
+    entry = res.json()["cards"]["refs"]
+    assert len(entry["parents"]) == MAX_PARENTS
+    assert entry["parents_truncated"] is True
+    assert entry["parents_omitted"] == 152 - MAX_PARENTS
+
+
+def test_real_per_standard_parents_truncation_counts_match_the_documented_table():
+    """Locks in the exact counts schema_cards.py's own MAX_PARENTS comment
+    cites as justification for picking 60 over 40 -- computed directly from
+    the real generated cards files (no server, no fixtures), so this fails
+    loudly if the schema data is ever regenerated in a way that silently
+    changes the tradeoff the comment describes."""
+    expected = {
+        "S1000D 3.0.1": (4, 4),
+        "S1000D 4.1": (7, 5),
+        "S1000D 4.2": (8, 5),
+        "DITA 1.3 Xpath2.0": (137, 60),
+    }
+    for standard, (expected_over_40, expected_over_60) in expected.items():
+        filename = STANDARD_TO_SCHEMA_CARDS_FILE[standard]
+        data = _CARDS_BY_FILE[filename]
+        parents = data.get("parents", {})
+        over_40 = sum(1 for names in parents.values() if len(names) > 40)
+        over_60 = sum(1 for names in parents.values() if len(names) > MAX_PARENTS)
+        assert over_40 == expected_over_40, f"{standard}: expected {expected_over_40} elements over 40 parents, got {over_40}"
+        assert over_60 == expected_over_60, f"{standard}: expected {expected_over_60} elements over 60 parents, got {over_60}"
+    # <para>'s own real parent count, the encargo's worked example, cross-
+    # checked against the raw (pre-compaction) data too -- confirms the
+    # HTTP-level test above isn't accidentally passing because of some
+    # compaction-layer artifact.
+    para_parents = _CARDS_BY_FILE[STANDARD_TO_SCHEMA_CARDS_FILE["S1000D 4.2"]]["parents"]["para"]
+    assert len(para_parents) == 43

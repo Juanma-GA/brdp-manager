@@ -85,6 +85,24 @@ export function buildSuggestUnknownNamesBlock(standard, vocabCheck) {
   return `\n\nThe BRDP mentions names that may not exist in the ${standard} schema: ${names.join(', ')}. The user has already been warned in the interface. Do NOT mention their validity in your output, do not add comments or notes, and do not take any decision about them -- write the text exactly as instructed above.`;
 }
 
+// "Did you mean con marcado a medias y listas de padres cortadas" round,
+// Part 2: a truncated list used to end with a bare ", +3 more" -- a real
+// production run against Mistral for "Where can <para> go?" showed the
+// model answering with the 40 shown names AND a literal "+3 more" tacked
+// on, as if that fragment were itself a fact to report rather than
+// metadata about the PROMPT's own (necessarily capped) list. This marker
+// is deliberately worded as a parenthetical the model has to paraphrase --
+// buildAskSystemPrompt tells it explicitly never to invent or state how
+// many more there are -- never a bare number it could lift verbatim into
+// a sentence. Used only where `shownCount + omitted` is an honest, exact
+// total (a name list or an enum, both counted directly against the
+// server's own truncation) -- see PARTIAL_DIFF_NOTE below for the
+// per-variant-diff case, where no such exact total exists.
+function truncationMarker(shownCount, omitted) {
+  const total = shownCount + omitted;
+  return ` (partial list: ${shownCount} of ${total} shown)`;
+}
+
 // Docs request ("Servicio de fichas de esquema y su uso en Ask"): formats
 // the real structural facts fetched from GET /api/schema-cards into the
 // literal block shape the encargo specifies. `schemaFacts` is an array of
@@ -96,15 +114,16 @@ export function buildSuggestUnknownNamesBlock(standard, vocabCheck) {
 export function formatSchemaFactAttribute(attr) {
   let text = attr.required ? `@${attr.name} (required)` : `@${attr.name}`;
   if (attr.enum && attr.enum.length > 0) {
-    const values = attr.enum.join('|') + (attr.enum_truncated ? `, +${attr.enum_omitted} more` : '');
-    text += ` [${values}]`;
+    text += ` [${attr.enum.join('|')}]`;
+    if (attr.enum_truncated) text += truncationMarker(attr.enum.length, attr.enum_omitted);
   }
   return text;
 }
 
 export function formatSchemaFactNameList(names, truncated, omitted) {
   if (!names || names.length === 0) return 'none';
-  return names.join(', ') + (truncated ? `, +${omitted} more` : '');
+  const list = names.join(', ');
+  return truncated ? list + truncationMarker(names.length, omitted) : list;
 }
 
 export function formatSchemaFactAttributeList(attrs) {
@@ -141,7 +160,7 @@ instead of guessing.`;
       }
       const attrsText =
         v.attributes.length > 0
-          ? formatSchemaFactAttributeList(v.attributes) + (v.attributes_truncated ? `, +${v.attributes_omitted} more` : '')
+          ? formatSchemaFactAttributeList(v.attributes) + (v.attributes_truncated ? truncationMarker(v.attributes.length, v.attributes_omitted) : '')
           : 'none';
       block += `\n  attributes: ${attrsText}`;
       block += `\n  children: ${formatSchemaFactNameList(v.children, v.children_truncated, v.children_omitted)}`;
@@ -174,20 +193,30 @@ instead of guessing.`;
     // `parents` has no per-variant diff to label "additional parents" for
     // -- it's a single, always-common list (see summarizeSchemaFactEntry's
     // own docstring) -- so that third label never has a call site here.
+    //
+    // "Did you mean con marcado a medias" round, Part 2: a per-variant diff
+    // is a SUBSET of that variant's raw (pre-diff) list -- so its raw
+    // omitted count cannot honestly be attributed to the diff shown here
+    // (some of what was cut could belong to the common set already
+    // reported above). PARTIAL_DIFF_NOTE says so in prose, deliberately
+    // WITHOUT a number the diff itself has no way to back up -- unlike
+    // truncationMarker() above, which is only used where shown+omitted is
+    // an exact, verifiable total.
+    const PARTIAL_DIFF_NOTE = ' (this variant’s own list was cut before comparison — further differences may exist beyond what is shown)';
     for (const pv of summary.perVariant) {
       let variantBlock = `\n  [${pv.schemas.join(', ')}]`;
       if (!pv.resolved) {
         variantBlock += `\n    content model not fully resolved for this schema — do not assume this list is complete.`;
       }
       if (pv.diffAttributes.length > 0) {
-        variantBlock += `\n    additional attributes: ${formatSchemaFactAttributeList(pv.diffAttributes)}${pv.attributes_truncated ? `, +${pv.attributes_omitted} more` : ''}`;
+        variantBlock += `\n    additional attributes: ${formatSchemaFactAttributeList(pv.diffAttributes)}${pv.attributes_truncated ? PARTIAL_DIFF_NOTE : ''}`;
       } else if (pv.attributes_truncated) {
-        variantBlock += `\n    additional attributes: not confirmed — this variant's attribute list was cut off before comparison (+${pv.attributes_omitted} more not shown)`;
+        variantBlock += `\n    additional attributes: not confirmed — this variant's attribute list was cut off before comparison, so a real difference could be hiding past the cutoff`;
       }
       if (pv.diffChildren.length > 0) {
-        variantBlock += `\n    additional children: ${formatSchemaFactNameList(pv.diffChildren, pv.children_truncated, pv.children_omitted)}`;
+        variantBlock += `\n    additional children: ${formatSchemaFactNameList(pv.diffChildren, false, 0)}${pv.children_truncated ? PARTIAL_DIFF_NOTE : ''}`;
       } else if (pv.children_truncated) {
-        variantBlock += `\n    additional children: not confirmed — this variant's children list was cut off before comparison (+${pv.children_omitted} more not shown)`;
+        variantBlock += `\n    additional children: not confirmed — this variant's children list was cut off before comparison, so a real difference could be hiding past the cutoff`;
       }
       block += variantBlock;
     }

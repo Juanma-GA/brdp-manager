@@ -1,5 +1,10 @@
 import { useTranslation } from 'react-i18next';
-import { applyRenameSuggestion, extractContextCandidates, resolvePhraseCandidates } from '../../utils/vocabularyCheck.js';
+import {
+  applyRenameSuggestion,
+  extractContextCandidates,
+  resolveDanglingElementSuggestions,
+  resolvePhraseCandidates,
+} from '../../utils/vocabularyCheck.js';
 import styles from '../../pages/RecordsPage.module.css';
 
 // Follow-up round ("consejo de nombres sin falsos positivos"): pure
@@ -14,10 +19,27 @@ import styles from '../../pages/RecordsPage.module.css';
 // adjective/verb the trigger word happened to sit next to, e.g.
 // "atributos seleccionados") is silently dropped, never shown as a
 // suggestion NOR as a red warning.
+//
+// "Did you mean con marcado a medias" round, Part 1: also offers a
+// completion chip for half-typed markup ("<table" with no closing ">"),
+// via `danglingElements` (a DIFFERENT source than phraseCandidates -- no
+// trigger word needed, see extractContextCandidates). Merged and deduped
+// by (type, name) so a name that somehow qualifies both ways never shows
+// two identical chips.
 function renameSuggestionsFor(text, vocabulary) {
   if (!vocabulary) return [];
-  const { phraseCandidates } = extractContextCandidates(text || '');
-  return resolvePhraseCandidates(phraseCandidates, vocabulary);
+  const { phraseCandidates, danglingElements } = extractContextCandidates(text || '');
+  const fromDangling = resolveDanglingElementSuggestions(danglingElements, vocabulary);
+  const fromPhrases = resolvePhraseCandidates(phraseCandidates, vocabulary);
+  const seen = new Set();
+  const merged = [];
+  for (const s of [...fromDangling, ...fromPhrases]) {
+    const key = `${s.type}:${s.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(s);
+  }
+  return merged;
 }
 
 // One "Did you mean `<x>`?" chip per resolved phrase candidate -- applying

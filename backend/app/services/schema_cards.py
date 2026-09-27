@@ -34,6 +34,32 @@ MAX_CHILDREN = 40
 MAX_ATTRIBUTES = 30
 MAX_ENUM_VALUES = 20
 
+# "Did you mean con marcado a medias y listas de padres cortadas" round,
+# Part 2: `parents` (the inverse index -- "what elements allow THIS one as
+# a child") was cut at the same MAX_CHILDREN=40 as an element's own direct
+# children, but the two lists have nothing to do with each other and don't
+# need the same limit -- <para> in S1000D 4.2 genuinely has 43 real
+# parents (every element `<para>` may appear inside), just over the old
+# 40 cutoff, so a real "Where can <para> go?" answer always hit the
+# "+3 more" case even though 43 is still a short, readable list on its
+# own. Counted directly against the real generated cards
+# (backend/schema_cards/*.json) before picking 60, for elements whose
+# parents list exceeds 40 vs 60:
+#
+#   S1000D 3.0.1: 4 elements over 40  (refs=127, applic=119, dscr=86, fldname=86)  -- same 4 still over 60
+#   S1000D 4.1:   7 elements over 40  (refs=149, description=118, descr=91, fieldName=87, title=80, dmRef=43, name=43) -- 5 still over 60
+#   S1000D 4.2:   8 elements over 40  (refs=152, description=118, descr=91, title=88, fieldName=87, dmRef=47, name=43, para=43) -- 5 still over 60 (para drops out: 43 <= 60)
+#   DITA 1.3:     137 elements over 40 -- 60 elements still over 60 (DITA's inverse index is far denser -- common inline elements like `data`/`text`/`keyword` are legitimately allowed inside hundreds of container elements; 60 does not make this list exhaustive for DITA, only less aggressively cut than 40 was)
+#
+# 60 clears <para>'s real 43 (the encargo's own worked example) while
+# still bounding the genuinely huge DITA/`refs`-style cases -- raising it
+# further would keep chasing DITA's long tail without ever reaching
+# "never truncated" for it, so MAX_PARENTS stays a real cap, not a promise
+# that every element's parent list is always shown whole; see Part 2's own
+# "(partial list: N of M shown)" wording in buildSchemaFactsBlock for how a
+# genuinely truncated list is now marked, never silently.
+MAX_PARENTS = 60
+
 
 def _load_all_cards() -> dict[str, dict]:
     """Loads every schema-cards-*.json referenced by the standard map into
@@ -188,11 +214,11 @@ def get_schema_cards(standard: str, names: list[str]) -> tuple[bool, dict[str, l
             unknown.append(name)
             continue
         parents = all_parents.get(name, [])
-        parents_truncated = len(parents) > MAX_CHILDREN
+        parents_truncated = len(parents) > MAX_PARENTS
         cards[name] = {
             "variants": [_compact_variant(v) for v in variants],
-            "parents": parents[:MAX_CHILDREN],
+            "parents": parents[:MAX_PARENTS],
             "parents_truncated": parents_truncated,
-            "parents_omitted": max(0, len(parents) - MAX_CHILDREN) if parents_truncated else 0,
+            "parents_omitted": max(0, len(parents) - MAX_PARENTS) if parents_truncated else 0,
         }
     return True, cards, sorted(unknown)
