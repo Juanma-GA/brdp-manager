@@ -1,8 +1,10 @@
+import hashlib
+import json
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 # Where a rule_approvals row's rule_xml came from:
 #   "llm"          -- generated inside this app (Suggest Rule's Accept).
@@ -24,13 +26,88 @@ class RuleApprovalPropose(BaseModel):
     status: str = "pending_review"
 
 
+def rule_xml_hash(rule_xml: str) -> str:
+    """SHA-256 hex digest of a rule_xml, byte for byte (UTF-8) -- the same
+    digest the frontend computes (src/utils/ruleHash.js) for the rule it
+    tested. No normalisation: any change to the saved text makes an earlier
+    test outdated.
+    """
+    return hashlib.sha256(rule_xml.encode("utf-8")).hexdigest()
+
+
+# Test de reglas T3: the recorded result of the last "Test rule" run.
+#   passed         -- the engine agreed with every example (verdict correct)
+#   failed         -- it accepted an example meant to violate the rule, or
+#                     rejected one meant to comply
+#   inconclusive   -- nothing selected, no accept+reject pair ran, or no
+#                     example passed validation
+#   not_executable -- the engine cannot run the rule (document(), a
+#                     nonContextRule, an XPath error...)
+RuleTestResult = Literal["passed", "failed", "inconclusive", "not_executable"]
+
+# A reason's serialized size cap: a code plus a few short params (an XPath
+# error message, a rule id per part). Generous, only there so the column
+# never stores an arbitrary payload.
+_MAX_REASON_JSON = 4000
+
+
+class RuleTestReason(BaseModel):
+    """A reason as a code and its parameters, never a sentence -- the UI
+    translates it (records.ruleTest.reasons.<code>) in the viewer's own
+    language, so History and the Rule Status indicator follow a language
+    switch. Codes are the frontend's (src/utils/ruleTestReasons.js); the
+    backend only checks the shape.
+    """
+
+    code: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=64)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuleTestRegister(BaseModel):
+    result: RuleTestResult
+    reason: RuleTestReason | None = None
+    # SHA-256 hex of the rule_xml that was tested; must match the saved
+    # rule_xml (otherwise the test was of another rule -- 409).
+    rule_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_size(cls, reason: RuleTestReason | None) -> RuleTestReason | None:
+        if reason is not None and len(json.dumps(reason.model_dump())) > _MAX_REASON_JSON:
+            raise ValueError("reason is too large")
+        return reason
+
+    @model_validator(mode="after")
+    def _reason_matches_result(self) -> "RuleTestRegister":
+        # A passed test has nothing to explain; every other result does.
+        if self.result == "passed" and self.reason is not None:
+            raise ValueError("a passed test has no reason")
+        if self.result != "passed" and self.reason is None:
+            raise ValueError(f"a {self.result} test needs a reason")
+        return self
+
+
 class RuleApprovalOut(BaseModel):
     rule_xml: str
     source: str
     status: str
     approved_at: datetime | None
+    last_test_result: str | None = None
+    last_test_reason: dict[str, Any] | None = None
+    last_test_at: datetime | None = None
+    last_test_rule_hash: str | None = None
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def last_test_up_to_date(self) -> bool | None:
+        """None when never tested; False when the rule changed since the
+        test ("Test outdated"); True when the tested rule is the saved one.
+        """
+        if self.last_test_result is None:
+            return None
+        return self.last_test_rule_hash == rule_xml_hash(self.rule_xml)
 
 
 class BulkRuleApprovalOut(BaseModel):

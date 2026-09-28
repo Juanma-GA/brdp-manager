@@ -1,3 +1,4 @@
+import json
 import re
 import uuid
 from datetime import datetime, timezone
@@ -17,6 +18,8 @@ from app.schemas.rule_approval import (
     BulkRuleApprovalWithRuleOut,
     RuleApprovalOut,
     RuleApprovalPropose,
+    RuleTestRegister,
+    rule_xml_hash,
 )
 from app.services.history import record_change
 
@@ -206,6 +209,68 @@ async def propose_approval(
     # Draft with another leaves the status unchanged, and would otherwise
     # leave no trace at all. record_change skips an unchanged text.
     record_change(db, brdp_id, editor, "rule", old_rule_xml, approval.rule_xml)
+    await db.commit()
+    await db.refresh(approval)
+    return approval
+
+
+def _rule_test_history_value(result: str | None, reason: dict | None) -> str:
+    """The History value of a "rule_test" entry: the result and its reason
+    as JSON codes (never a sentence), so the History panel translates it in
+    the viewer's language. "" for "not tested" (a rule's first test).
+    """
+    if result is None:
+        return ""
+    return json.dumps({"result": result, "reason": reason}, sort_keys=True, ensure_ascii=False)
+
+
+@router.post("/test", response_model=RuleApprovalOut)
+async def register_rule_test(
+    project_id: uuid.UUID,
+    brdp_id: uuid.UUID,
+    format: str,
+    body: RuleTestRegister,
+    editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+) -> RuleApproval:
+    """Records the result of a "Test rule" run on the SAVED rule (Test de
+    reglas T3). The frontend sends the SHA-256 of the rule_xml it tested;
+    it must match the saved rule_xml, so a result is never attached to a
+    rule it was not computed for (a stale panel, a suggestion that was
+    replaced before Accept) -- 409 otherwise.
+
+    What is recorded is the verdict of the examples as the LLM wrote them
+    and the application validated them (after the one correction round):
+    editing an example and pressing "Run again" in the panel is a
+    what-if for the user and never changes the recorded result (see
+    useRuleTest.js). Editor only: a viewer can run Test rule (it writes
+    nothing), but only an editor's run is recorded.
+
+    Always adds a "rule_test" History entry, even with the same result as
+    before (history.record_change(always=True)).
+    """
+    await _get_owned_brdp(project_id, brdp_id, db)
+    approval = await db.get(RuleApproval, (brdp_id, format))
+    if approval is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No rule found for this BRDP/format",
+        )
+    if body.rule_hash != rule_xml_hash(approval.rule_xml):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The tested rule is not the saved rule; test the saved rule again",
+        )
+    reason = body.reason.model_dump() if body.reason is not None else None
+    old_value = _rule_test_history_value(approval.last_test_result, approval.last_test_reason)
+    approval.last_test_result = body.result
+    approval.last_test_reason = reason
+    approval.last_test_at = datetime.now(timezone.utc)
+    approval.last_test_by = editor.id
+    approval.last_test_rule_hash = body.rule_hash
+    record_change(
+        db, brdp_id, editor, "rule_test", old_value, _rule_test_history_value(body.result, reason), always=True
+    )
     await db.commit()
     await db.refresh(approval)
     return approval

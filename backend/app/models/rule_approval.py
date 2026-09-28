@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -27,3 +27,19 @@ class RuleApproval(Base):
     # "pending_review" | "approved"
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending_review")
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # The last "Test rule" run on this rule (Test de reglas T3). Nullable
+    # together: all NULL = never tested. last_test_rule_hash is the SHA-256
+    # hex digest of the rule_xml that was tested -- when it no longer
+    # matches the current rule_xml the test is outdated (the rule changed
+    # since), which RuleApprovalOut reports as last_test_up_to_date=False.
+    # "passed" | "failed" | "inconclusive" | "not_executable"
+    last_test_result: Mapped[str | None] = mapped_column(String, nullable=True)
+    # {"code": ..., "params": {...}} -- a code, never a sentence, so the
+    # UI shows it in the viewer's own language (see RuleTestReason).
+    last_test_reason: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    last_test_rule_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)

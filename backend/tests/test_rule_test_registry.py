@@ -1,0 +1,226 @@
+"""Test de reglas T3: recording the last "Test rule" run on a saved rule.
+Real Postgres, no mocking (the test itself runs in the browser; the backend
+only records its result, checked against the saved rule's hash).
+"""
+import hashlib
+import json
+import uuid
+
+import pytest
+
+from app.core.security import create_access_token, hash_password
+from app.db.base import async_session_factory
+from app.models import Project, User, UserProjectRole
+
+RULE = '<structureObjectRule id="BRDP-T3-001"><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>'
+DOC_REASON = {"code": "external_document", "params": {"fn": "document()"}}
+
+
+def _hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@pytest.fixture
+async def editor_viewer_and_project():
+    async with async_session_factory() as session:
+        project = Project(name=f"Rule test registry {uuid.uuid4()}", standard="S1000D 4.2")
+        editor = User(
+            email=f"t3-editor-{uuid.uuid4()}@example.com",
+            password_hash=hash_password("irrelevant-password"),
+            display_name="T3 Editor",
+            global_role="user",
+        )
+        viewer = User(
+            email=f"t3-viewer-{uuid.uuid4()}@example.com",
+            password_hash=hash_password("irrelevant-password"),
+            display_name="T3 Viewer",
+            global_role="user",
+        )
+        session.add_all([project, editor, viewer])
+        await session.flush()
+        session.add(UserProjectRole(user_id=editor.id, project_id=project.id, role="editor"))
+        session.add(UserProjectRole(user_id=viewer.id, project_id=project.id, role="viewer"))
+        await session.commit()
+        await session.refresh(project)
+        await session.refresh(editor)
+        await session.refresh(viewer)
+
+    yield (
+        project,
+        {"Authorization": f"Bearer {create_access_token(editor.id)}"},
+        {"Authorization": f"Bearer {create_access_token(viewer.id)}"},
+    )
+
+    async with async_session_factory() as session:
+        for model, key in ((Project, project.id), (User, editor.id), (User, viewer.id)):
+            row = await session.get(model, key)
+            if row is not None:
+                await session.delete(row)
+        await session.commit()
+
+
+async def _brdp_with_rule(client, project, headers, identifier="BRDP-T3-001", rule=RULE):
+    brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": identifier}, headers=headers)
+    ).json()
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
+    res = await client.put(url, json={"rule_xml": rule, "source": "llm"}, headers=headers)
+    assert res.status_code == 200
+    return brdp, url
+
+
+async def test_never_tested_rule_reports_no_test(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    body = (await client.get(url, headers=headers)).json()
+    assert body["last_test_result"] is None
+    assert body["last_test_reason"] is None
+    assert body["last_test_at"] is None
+    assert body["last_test_up_to_date"] is None
+
+
+async def test_register_passed_test_with_matching_hash(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    res = await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["last_test_result"] == "passed"
+    assert body["last_test_reason"] is None
+    assert body["last_test_at"] is not None
+    assert body["last_test_rule_hash"] == _hash(RULE)
+    assert body["last_test_up_to_date"] is True
+    # The per-BRDP GET returns the same.
+    assert (await client.get(url, headers=headers)).json()["last_test_up_to_date"] is True
+
+
+async def test_register_rejects_hash_of_another_rule(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    other = RULE.replace("//emphasis", "//para")
+    res = await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(other)}, headers=headers)
+    assert res.status_code == 409
+    assert (await client.get(url, headers=headers)).json()["last_test_result"] is None
+
+
+async def test_editing_the_rule_after_testing_makes_the_test_outdated(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)
+    edited = RULE.replace("No emphasis.", "Emphasis is not allowed.")
+    body = (await client.put(url, json={"rule_xml": edited, "source": "manual"}, headers=headers)).json()
+    # The result is kept (it is what was tested), but it no longer applies.
+    assert body["last_test_result"] == "passed"
+    assert body["last_test_up_to_date"] is False
+    # Testing the edited rule brings it up to date again.
+    body = (
+        await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(edited)}, headers=headers)
+    ).json()
+    assert body["last_test_up_to_date"] is True
+
+
+async def test_register_not_executable_keeps_the_reason_code(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    res = await client.post(
+        url + "/test",
+        json={"result": "not_executable", "reason": DOC_REASON, "rule_hash": _hash(RULE)},
+        headers=headers,
+    )
+    assert res.status_code == 200
+    assert res.json()["last_test_result"] == "not_executable"
+    assert res.json()["last_test_reason"] == DOC_REASON
+
+
+async def test_multi_part_reason_is_stored_as_given(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    reason = {
+        "code": "parts",
+        "params": {"parts": [{"ruleId": "n1", "reason": {"code": "non_context_rule", "params": {}}}]},
+    }
+    res = await client.post(
+        url + "/test", json={"result": "not_executable", "reason": reason, "rule_hash": _hash(RULE)}, headers=headers
+    )
+    assert res.status_code == 200
+    assert res.json()["last_test_reason"] == reason
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"result": "passed", "reason": DOC_REASON},  # a passed test has no reason
+        {"result": "failed"},  # a failed test needs one
+        {"result": "not_executable"},
+        {"result": "maybe", "reason": DOC_REASON},  # unknown result
+        {"result": "failed", "reason": {"code": "Not a code!", "params": {}}},  # a code, not a sentence
+        {"result": "passed", "rule_hash": "abc"},  # not a SHA-256 hex digest
+        {"result": "failed", "reason": {"code": "xpath_error", "params": {"message": "x" * 5000}}},  # too large
+    ],
+)
+async def test_register_validates_the_payload(client, editor_viewer_and_project, payload):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    body = {"rule_hash": _hash(RULE), **payload}
+    res = await client.post(url + "/test", json=body, headers=headers)
+    assert res.status_code == 422
+
+
+async def test_register_without_a_saved_rule_404s(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    brdp = (
+        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-T3-NONE"}, headers=headers)
+    ).json()
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
+    res = await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)
+    assert res.status_code == 404
+
+
+async def test_viewer_cannot_register_a_test(client, editor_viewer_and_project):
+    project, headers, viewer_headers = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    res = await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=viewer_headers)
+    assert res.status_code == 403
+    # ...but can read the recorded result.
+    assert (await client.get(url, headers=viewer_headers)).status_code == 200
+
+
+async def test_every_registration_adds_a_rule_test_history_entry(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    await client.post(
+        url + "/test",
+        json={"result": "failed", "reason": {"code": "test_incorrect", "params": {"permissive": True, "strict": False}}, "rule_hash": _hash(RULE)},
+        headers=headers,
+    )
+    await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)
+    # The same result again is still a test: recorded too.
+    await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)
+    history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
+    entries = sorted((h for h in history if h["field_name"] == "rule_test"), key=lambda h: h["changed_at"])
+    assert len(entries) == 3
+    first, second, third = entries
+    assert first["old_value"] == ""
+    assert json.loads(first["new_value"]) == {
+        "result": "failed",
+        "reason": {"code": "test_incorrect", "params": {"permissive": True, "strict": False}},
+    }
+    assert json.loads(second["old_value"])["result"] == "failed"
+    assert json.loads(second["new_value"]) == {"result": "passed", "reason": None}
+    assert third["old_value"] == third["new_value"]
+
+
+async def test_approve_is_not_blocked_by_a_missing_or_failed_test(client, editor_viewer_and_project):
+    """Warn, never block (user decision): the backend's approve path is
+    unchanged -- the warning lives in the UI.
+    """
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    assert (await client.post(url + "/approve", headers=headers)).status_code == 200
+    await client.post(url + "/revoke", headers=headers)
+    await client.post(
+        url + "/test",
+        json={"result": "failed", "reason": {"code": "test_incorrect", "params": {"permissive": True, "strict": False}}, "rule_hash": _hash(RULE)},
+        headers=headers,
+    )
+    assert (await client.post(url + "/approve", headers=headers)).status_code == 200
