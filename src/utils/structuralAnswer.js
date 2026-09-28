@@ -24,7 +24,20 @@
 // every schema, "depends on the schema" by groups, or none -- and long lists
 // are shown complete, grouped by initial letter.
 //
-// Pure apart from the injected I/O (fetchCards, fetchAttribute), so the
+// C2, Part 3: two more kinds. "relation" -- a yes/no question about two
+// elements ("¿<para> puede contener <table>?", "¿se puede usar <emphasis>
+// dentro de <title>?", "can <table> appear inside <para>?"), only when both
+// names exist as elements, with no wh-word and no condition ("si", "if"...);
+// the answer is about the DIRECT relation, schema by schema (GET
+// /api/schema-cards/relation), and says "not directly" with an example chain
+// and the parent's direct children when the child is only reachable through
+// other elements. "attributeOwners" -- "¿qué elementos tienen
+// @emphasisType?", "which elements allow @changeMark?" -- from the attribute
+// owners, grouped by schema, each list cut at 20 names with "+N more" (the
+// same answer now serves "where can @x go?").
+//
+// Pure apart from the injected I/O (fetchCards, fetchAttribute,
+// fetchRelation), so the
 // panel (hooks/useAskAssistant.js) and the eval harness
 // (scripts/run-prompt-eval.mjs) run the same code.
 import { extractContextCandidates, resolvePhraseCandidates } from '../validation/schemaValidation.js';
@@ -148,9 +161,98 @@ function questionNames(question, vocabulary) {
   return [];
 }
 
+// ─── C2: relation and attribute owners ──────────────────────────────────────
+
+// A relation question is a yes/no question: no wh-word, no condition.
+const WH_WORDS = /\b(que|cual|cuales|donde|como|cuanto|cuantos|cuantas|quien|quienes|what|which|where|how|who|whom)\b/;
+const CONDITION = /\b(si|cuando|siempre que|salvo|excepto|a menos que|if|when|whenever|unless|except|provided)\b/;
+const EN_YES_NO_START = /^[\s"'`(]*(can|could|may|does|do|is|are)\b/;
+const RELATION = {
+  es: {
+    contain: /\b(puede|pueden|podria|podrian)\s+(contener|llevar|tener|incluir|admitir)\b|\b(admite|admiten|contiene|contienen|acepta|aceptan|incluye|incluyen)\b/,
+    verbs: /\b(puede|pueden|podria|podrian|va|van|ir|aparecer|aparece|usar|utilizar|poner|meter|permite|permitido|cabe|admite|contiene)\b/,
+    strongInside: /\bdentro (de|del)\b/g,
+    weakInside: /\ben\b/g,
+  },
+  en: {
+    contain: /\b(contain|contains|include|includes|hold|holds|allow|allows|accept|accepts|take|takes|have|has)\b/,
+    verbs: /\b(can|could|may|does|do|is|are)\b/,
+    strongInside: /\b(inside|within|into)\b/g,
+    weakInside: /\bin\b/g,
+  },
+};
+
+const OWNERS_PATTERNS = {
+  es: [
+    /\b(que|cuales) elementos (tienen|llevan|admiten|aceptan|usan|utilizan|permiten|declaran|pueden (tener|llevar|usar))\b/,
+    /\belementos (que tienen|con)\b/,
+  ],
+  en: [
+    /\b(what|which) elements (have|take|allow|accept|use|support|declare|carry|can (have|take|use|carry))\b/,
+    /\belements (with|that have|having)\b/,
+  ],
+};
+
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Index of `name` as a whole word in normalized text, or -1.
+function nameIndex(text, name) {
+  const m = new RegExp(`(^|[^\\p{L}\\p{N}_])${escapeRe(normalize(name))}(?![\\p{L}\\p{N}_])`, 'u').exec(text);
+  return m ? m.index + m[1].length : -1;
+}
+const markerBetween = (re, text, from, to) => [...text.matchAll(re)].some((m) => m.index > from && m.index < to);
+
+// { kind: 'relation', lang, parent, child } or null.
+function detectRelation(question, vocabulary) {
+  const text = normalize(question);
+  if (NOT_STRUCTURAL.some((re) => re.test(text)) || WH_WORDS.test(text) || CONDITION.test(text)) return null;
+  let lang = null;
+  if (/¿/.test(question)) lang = 'es';
+  else if (EN_YES_NO_START.test(text)) lang = 'en';
+  else if (RELATION.es.contain.test(text) || RELATION.es.verbs.test(text)) lang = 'es';
+  if (!lang) return null;
+  const rel = RELATION[lang];
+  const names = questionNames(question, vocabulary);
+  if (names.length !== 2) return null;
+  if (!names.every((n) => n.type !== 'attribute' && vocabulary.elements.has(n.name))) return null;
+  const [first, second] = names
+    .map((n) => ({ name: n.name, at: nameIndex(text, n.name) }))
+    .sort((a, b) => a.at - b.at);
+  if (first.at < 0 || second.at < 0 || first.name === second.name) return null;
+  // "dentro de" / "inside" between the two names: the name after it is the
+  // parent ("¿<table> puede ir dentro de <para>?"). Otherwise a containment
+  // verb makes the first name the parent ("¿<para> puede contener
+  // <table>?"), and last a plain "en" / "in" between them ("¿se puede usar
+  // <emphasis> en <title>?").
+  let parent = null;
+  if (markerBetween(rel.strongInside, text, first.at, second.at)) parent = second;
+  else if (rel.contain.test(text)) parent = first;
+  else if (markerBetween(rel.weakInside, text, first.at, second.at)) parent = second;
+  if (!parent) return null;
+  const child = parent === first ? second : first;
+  return { kind: 'relation', lang, parent: parent.name, child: child.name };
+}
+
+// { kind: 'attributeOwners', lang, name, usedAs: 'attribute' } or null.
+function detectAttributeOwners(question, vocabulary) {
+  const text = normalize(question);
+  if (NOT_STRUCTURAL.some((re) => re.test(text))) return null;
+  const lang = ['es', 'en'].find((l) => OWNERS_PATTERNS[l].some((re) => re.test(text)));
+  if (!lang) return null;
+  const names = questionNames(question, vocabulary);
+  if (names.length !== 1) return null;
+  const [n] = names;
+  const isAttribute = n.type === 'attribute' || (n.type === null && vocabulary.attributes.has(n.name) && !vocabulary.elements.has(n.name));
+  if (!isAttribute) return null;
+  return { kind: 'attributeOwners', lang, name: n.name, usedAs: 'attribute', owner: null };
+}
+
 // { kind, lang, name, usedAs: 'element'|'attribute'|null, owner } or null.
 export function detectStructuralQuestion(question, vocabulary) {
   if (!vocabulary || !String(question || '').trim()) return null;
+  const relation = detectRelation(question, vocabulary);
+  if (relation) return relation;
+  const owners = detectAttributeOwners(question, vocabulary);
+  if (owners) return owners;
   const detected = detectKind(question);
   if (!detected) return null;
   const names = questionNames(question, vocabulary);
@@ -202,7 +304,6 @@ const T = {
     none: 'ninguno',
     parents: (name, n) => `${el(name)} puede ir dentro de ${n === 1 ? 'un elemento' : `${n} elementos`}: `,
     root: (name) => `${el(name)} no va dentro de ningún otro elemento: es un elemento raíz.`,
-    attrOwners: (name, n) => `${at(name)} se usa en ${n === 1 ? 'un elemento' : `${n} elementos`}: `,
     attributes: (name, n) => `${el(name)} admite ${n === 1 ? 'un atributo' : `${n} atributos`}:`,
     noAttributes: (name) => `${el(name)} no admite atributos.`,
     noAttributesAnySchema: (name) => `${el(name)} no admite atributos en ningún esquema.`,
@@ -217,6 +318,24 @@ const T = {
     valuesFreeShort: 'sin lista cerrada de valores',
     inPrefix: (owners) => `en ${owners}: `,
     notOnOwner: (attr, owner) => `${el(owner)} no tiene el atributo ${at(attr)}.`,
+    more: (n) => `+${n} más`,
+    relYesAll: (p, c, n) =>
+      n > 1
+        ? `Sí: ${el(p)} puede contener ${el(c)} como hijo directo en todos los esquemas en los que existe ${el(p)} (${n}).`
+        : `Sí: ${el(p)} puede contener ${el(c)} como hijo directo.`,
+    relMixed: (p, c, yes, total) => `Sí, en ${yes.length} de los ${total} esquemas en los que existe ${el(p)}: ${yes.join(', ')}.`,
+    relMixedNo: (p, c, no) => `No en: ${no.join(', ')}. Ahí ${el(c)} no es un hijo directo de ${el(p)}.`,
+    relMixedNoPath: (path) => ` Solo puede llegar a través de otros elementos, por ejemplo ${path}.`,
+    relIndirect: (p, c, path) =>
+      `No directamente: ${el(c)} no es un hijo directo de ${el(p)} en ningún esquema; solo puede llegar a través de otros elementos, por ejemplo ${path}. Los hijos directos de ${el(p)} son estos:`,
+    relNever: (p, c) => `No, en ningún esquema del proyecto: ${el(p)} no puede contener ${el(c)}, ni directamente ni a través de otros elementos.`,
+    ownersNone: (name) => `${at(name)} no existe en ningún esquema del proyecto.`,
+    ownersSame: (name, n, schemas) =>
+      `${at(name)} se usa en ${n === 1 ? 'un elemento' : `${n} elementos`}${schemas > 1 ? `, igual en los ${schemas} esquemas en los que aparece` : ''}: `,
+    ownersBySchema: (name, n, schemas) => `${at(name)} se usa en ${n} elementos; cuáles depende del esquema (aparece en ${schemas} esquemas).`,
+    ownersCommon: 'En todos esos esquemas: ',
+    ownersAdditional: (schemas) => `Además, en ${schemas}: `,
+    ownersNoCommon: 'Ningún elemento lo tiene en todos los esquemas:',
   },
   en: {
     notExist: (display, std) => `${display} does not exist in the ${std} schema.`,
@@ -232,7 +351,6 @@ const T = {
     none: 'none',
     parents: (name, n) => `${el(name)} can go inside ${n === 1 ? 'one element' : `${n} elements`}: `,
     root: (name) => `${el(name)} does not go inside any other element: it is a root element.`,
-    attrOwners: (name, n) => `${at(name)} is used on ${n === 1 ? 'one element' : `${n} elements`}: `,
     attributes: (name, n) => `${el(name)} takes ${n === 1 ? 'one attribute' : `${n} attributes`}:`,
     noAttributes: (name) => `${el(name)} takes no attributes.`,
     noAttributesAnySchema: (name) => `${el(name)} takes no attributes in any schema.`,
@@ -247,6 +365,24 @@ const T = {
     valuesFreeShort: 'no closed list of values',
     inPrefix: (owners) => `on ${owners}: `,
     notOnOwner: (attr, owner) => `${el(owner)} has no ${at(attr)} attribute.`,
+    more: (n) => `+${n} more`,
+    relYesAll: (p, c, n) =>
+      n > 1
+        ? `Yes: ${el(p)} can contain ${el(c)} as a direct child in every schema where ${el(p)} exists (${n}).`
+        : `Yes: ${el(p)} can contain ${el(c)} as a direct child.`,
+    relMixed: (p, c, yes, total) => `Yes, in ${yes.length} of the ${total} schemas where ${el(p)} exists: ${yes.join(', ')}.`,
+    relMixedNo: (p, c, no) => `Not in: ${no.join(', ')}. There ${el(c)} is not a direct child of ${el(p)}.`,
+    relMixedNoPath: (path) => ` It can only be reached through other elements, for example ${path}.`,
+    relIndirect: (p, c, path) =>
+      `Not directly: ${el(c)} is not a direct child of ${el(p)} in any schema; it can only be reached through other elements, for example ${path}. These are the direct children of ${el(p)}:`,
+    relNever: (p, c) => `No, in no schema of the project: ${el(p)} cannot contain ${el(c)}, neither directly nor through other elements.`,
+    ownersNone: (name) => `${at(name)} does not exist in any schema of the project.`,
+    ownersSame: (name, n, schemas) =>
+      `${at(name)} is used on ${n === 1 ? 'one element' : `${n} elements`}${schemas > 1 ? `, the same in the ${schemas} schemas where it appears` : ''}: `,
+    ownersBySchema: (name, n, schemas) => `${at(name)} is used on ${n} elements; which ones depends on the schema (it appears in ${schemas} schemas).`,
+    ownersCommon: 'In all those schemas: ',
+    ownersAdditional: (schemas) => `Also, in ${schemas}: `,
+    ownersNoCommon: 'No element has it in every schema:',
   },
 };
 
@@ -330,6 +466,84 @@ function valuesAnswer(name, owners, standard, ownerFilter, t) {
   ].join('\n\n');
 }
 
+// ─── C2 answers ─────────────────────────────────────────────────────────────
+
+// Imported helper schemas, never a document type (as the backend's
+// _NON_DOCUMENT_SCHEMAS).
+const NON_DOCUMENT_SCHEMAS = new Set(['dc', 'rdf', 'xlink', 'xcf']);
+const OWNERS_LIST_MAX = 20;
+
+// A list cut at `max` names with "+N more".
+function cutList(names, fmt, t, max = OWNERS_LIST_MAX) {
+  const sorted = [...names].sort((a, b) => a.localeCompare(b));
+  if (sorted.length <= max) return joinNames(sorted, fmt);
+  return `${joinNames(sorted.slice(0, max), fmt)} ${t.more(sorted.length - max)}`;
+}
+
+const chain = (path) => path.map(el).join(' → ');
+const shortestPath = (entries) =>
+  entries
+    .map((e) => e.path)
+    .filter(Boolean)
+    .sort((a, b) => a.length - b.length || a.join('/').localeCompare(b.join('/')))[0] || null;
+
+function relationAnswer(detection, relation, parentCard, t) {
+  const { parent, child } = detection;
+  const entries = relation.schemas || [];
+  const yes = entries.filter((e) => e.direct).map((e) => e.schema_name);
+  const no = entries.filter((e) => !e.direct);
+  // No document schema defines the parent: nothing to answer from.
+  if (!entries.length) return null;
+  if (no.length === 0) return t.relYesAll(parent, child, entries.length);
+  if (yes.length) {
+    const path = shortestPath(no);
+    return [
+      t.relMixed(parent, child, yes, entries.length),
+      t.relMixedNo(parent, child, no.map((e) => e.schema_name)) + (path ? t.relMixedNoPath(chain(path)) : ''),
+    ].join('\n\n');
+  }
+  const path = shortestPath(no);
+  if (!path) return t.relNever(parent, child);
+  const lines = [t.relIndirect(parent, child, chain(path))];
+  if (parentCard) lines.push(childrenAnswer(parent, parentCard, t));
+  return lines.join('\n\n');
+}
+
+function ownersAnswer(name, owners, t) {
+  if (!owners.length) return t.ownersNone(name);
+  const bySchema = new Map();
+  for (const o of owners) {
+    const schemas = o.schemas.filter((s) => !NON_DOCUMENT_SCHEMAS.has(s));
+    for (const schema of schemas.length ? schemas : o.schemas) {
+      if (!bySchema.has(schema)) bySchema.set(schema, new Set());
+      bySchema.get(schema).add(o.element);
+    }
+  }
+  const elements = [...new Set(owners.map((o) => o.element))];
+  // Schemas with the same set of elements are one group.
+  const groups = new Map();
+  for (const [schema, set] of [...bySchema].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const key = [...set].sort().join('|');
+    if (!groups.has(key)) groups.set(key, { elements: [...set], schemas: [] });
+    groups.get(key).schemas.push(schema);
+  }
+  const list = [...groups.values()];
+  if (list.length <= 1) return t.ownersSame(name, elements.length, bySchema.size) + cutList(elements, el, t);
+  const common = elements.filter((e) => [...bySchema.values()].every((set) => set.has(e)));
+  const lines = [t.ownersBySchema(name, elements.length, bySchema.size)];
+  if (common.length) {
+    lines.push(t.ownersCommon + cutList(common, el, t));
+    const extra = list
+      .map((g) => ({ ...g, diff: g.elements.filter((e) => !common.includes(e)) }))
+      .filter((g) => g.diff.length)
+      .map((g) => `- ${t.ownersAdditional(g.schemas.join(', '))}${cutList(g.diff, el, t)}`);
+    if (extra.length) lines.push(extra.join('\n'));
+  } else {
+    lines.push(t.ownersNoCommon, list.map((g) => `- **${g.schemas.join(', ')}**: ${cutList(g.elements, el, t)}`).join('\n'));
+  }
+  return lines.join('\n\n');
+}
+
 // Markdown answer for a detection, or null when the data needed is missing
 // (standard without cards). `data` = { card } for element kinds (the full
 // card entry, or null when the name is not an element) and { owners } for
@@ -337,6 +551,11 @@ function valuesAnswer(name, owners, standard, ownerFilter, t) {
 export function buildStructuralAnswer(detection, data, { standard, vocabulary }) {
   const t = T[detection.lang];
   const { kind, name, usedAs } = detection;
+  if (kind === 'relation') return data.relation ? relationAnswer(detection, data.relation, data.card || null, t) : null;
+  if (kind === 'attributeOwners') {
+    if (!vocabulary.attributes.has(name)) return vocabulary.elements.has(name) ? t.elementNotAttribute(name) : t.ownersNone(name);
+    return ownersAnswer(name, data.owners || [], t);
+  }
   const isElement = vocabulary.elements.has(name);
   const isAttribute = vocabulary.attributes.has(name);
   const wantsAttribute = kind === 'values';
@@ -349,8 +568,7 @@ export function buildStructuralAnswer(detection, data, { standard, vocabulary })
   }
   if (attributeParents) {
     if (!isAttribute) return t.elementNotAttribute(name);
-    const elements = [...new Set((data.owners || []).map((o) => o.element))];
-    return t.attrOwners(name, elements.length) + nameList(elements, el);
+    return ownersAnswer(name, data.owners || [], t);
   }
   if (wantsAttribute || usedAs === 'attribute') {
     if (!isAttribute) return t.elementNotAttribute(name);
@@ -370,18 +588,31 @@ export function buildStructuralAnswer(detection, data, { standard, vocabulary })
 // an attribute.
 function needsOwners(detection, vocabulary) {
   const { kind, name, usedAs } = detection;
-  if (kind === 'values') return true;
+  if (kind === 'values' || kind === 'attributeOwners') return true;
   return kind === 'parents' && (usedAs === 'attribute' || (usedAs === null && !vocabulary.elements.has(name)));
 }
 
 // The whole step, as Ask runs it: null when the question is not structural
 // (it goes to the LLM), else { detection, text }. `fetchCards(standard,
 // names, { full })` → GET /api/schema-cards; `fetchAttribute(standard, name)`
-// → GET /api/schema-cards/attribute. Fetch errors propagate: an answer
+// → GET /api/schema-cards/attribute; `fetchRelation(standard, parent,
+// child)` → GET /api/schema-cards/relation. Fetch errors propagate: an answer
 // presented as "from the schema" must never be a guess (HR7).
-export async function answerStructuralQuestion({ question, standard, vocabulary, fetchCards, fetchAttribute }) {
+export async function answerStructuralQuestion({ question, standard, vocabulary, fetchCards, fetchAttribute, fetchRelation }) {
   const detection = detectStructuralQuestion(question, vocabulary);
   if (!detection) return null;
+  if (detection.kind === 'relation') {
+    const relation = await fetchRelation(standard, detection.parent, detection.child);
+    if (!relation.available) return null;
+    const data = { relation };
+    // "Not directly": the answer lists the parent's direct children.
+    if (!(relation.schemas || []).some((e) => e.direct) && (relation.schemas || []).some((e) => e.path)) {
+      const res = await fetchCards(standard, [detection.parent], { full: true });
+      if (res.available) data.card = res.cards[detection.parent] || null;
+    }
+    const text = buildStructuralAnswer(detection, data, { standard, vocabulary });
+    return text ? { detection, text } : null;
+  }
   const exists = vocabulary.elements.has(detection.name) || vocabulary.attributes.has(detection.name);
   const data = {};
   if (exists) {

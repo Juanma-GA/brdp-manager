@@ -520,3 +520,65 @@ async def test_attribute_owners_unknown_and_unavailable(client):
     assert missing.json()["available"] is False and missing.json()["owners"] == []
     no_auth = await client.get("/api/schema-cards/attribute", params={"standard": "S1000D 4.2", "name": "frame"})
     assert no_auth.status_code == 401
+
+
+# ─── C2, Part 3: direct parent/child relation (Ask's deterministic yes/no
+# answer to "can <para> contain <table>?") ─────────────────────────────────
+
+
+async def _relation(client, user, standard, parent, child):
+    res = await client.get(
+        "/api/schema-cards/relation",
+        params={"standard": standard, "parent": parent, "child": child},
+        headers=_headers(user),
+    )
+    assert res.status_code == 200
+    return res.json()
+
+
+@pytest.mark.asyncio
+async def test_relation_direct_in_every_schema(client):
+    user = await _make_user()
+    body = await _relation(client, user, "S1000D 4.2", "para", "emphasis")
+    assert body["available"] and body["parent_exists"] and body["child_exists"]
+    assert len(body["schemas"]) == 28
+    assert all(s["direct"] and s["path"] is None for s in body["schemas"])
+
+
+@pytest.mark.asyncio
+async def test_relation_mixed_by_schema(client):
+    """<footnote> is a direct child of <para> in 22 schemas, not in comrep,
+    fault, frontmatter, ipd, schedul, update (real 4.2 cards)."""
+    user = await _make_user()
+    body = await _relation(client, user, "S1000D 4.2", "para", "footnote")
+    no = sorted(s["schema_name"] for s in body["schemas"] if not s["direct"])
+    assert no == ["comrep", "fault", "frontmatter", "ipd", "schedul", "update"]
+    assert len([s for s in body["schemas"] if s["direct"]]) == 22
+
+
+@pytest.mark.asyncio
+async def test_relation_only_through_intermediates_gives_the_shortest_path(client):
+    user = await _make_user()
+    body = await _relation(client, user, "S1000D 4.2", "para", "listItem")
+    assert body["schemas"] and all(not s["direct"] for s in body["schemas"])
+    assert {tuple(s["path"]) for s in body["schemas"]} == {("para", "randomList", "listItem")}
+    # Reachable at any depth (no depth limit): <table> → … → <entry> → <para>.
+    table = await _relation(client, user, "S1000D 4.2", "table", "para")
+    assert table["schemas"] and all(not s["direct"] and s["path"] and s["path"][0] == "table" for s in table["schemas"])
+    dita = await _relation(client, user, "DITA 1.3 Xpath2.0", "p", "li")
+    assert dita["schemas"] == [{"schema_name": "DITA 1.3", "direct": False, "path": ["p", "ol", "li"]}]
+
+
+@pytest.mark.asyncio
+async def test_relation_never_and_unknown_names(client):
+    user = await _make_user()
+    never = await _relation(client, user, "S1000D 4.2", "para", "table")
+    assert never["schemas"] and all(not s["direct"] and s["path"] is None for s in never["schemas"])
+    dita = await _relation(client, user, "DITA 1.3 Xpath2.0", "p", "table")
+    assert dita["schemas"] == [{"schema_name": "DITA 1.3", "direct": True, "path": None}]
+    unknown = await _relation(client, user, "S1000D 4.2", "para", "pokemon")
+    assert unknown["parent_exists"] and not unknown["child_exists"] and unknown["schemas"] == []
+    missing = await _relation(client, user, "S1000D 5.0", "para", "table")
+    assert missing["available"] is False
+    no_auth = await client.get("/api/schema-cards/relation", params={"standard": "S1000D 4.2", "parent": "para", "child": "table"})
+    assert no_auth.status_code == 401

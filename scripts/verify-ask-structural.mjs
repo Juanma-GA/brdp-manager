@@ -146,12 +146,50 @@ async function main() {
     r = await ask("¿Por qué se decidió no usar <emphasis>?");
     assert(!r.deterministic && r.req?.messages, "¿Por qué se decidió no usar <emphasis>?: LLM, no label");
 
+    // C2, Part 3 -- relation (yes/no) and attribute owners.
+    // 7b. Mixed relation, schema by schema.
+    await language.selectOption("es");
+    r = await ask("¿<para> puede contener <footnote>?");
+    assert(r.deterministic && noLlmCall(r.req), "¿<para> puede contener <footnote>?: from the schema, no LLM call");
+    assert(r.text.includes("Sí, en 22 de los 28 esquemas en los que existe <para>") && r.text.includes("No en: comrep, fault, frontmatter, ipd, schedul, update."), "mixed: yes in 22 schemas, not in the other 6");
+    await page.locator('[class*="exchange"]').first().screenshot({ path: "/tmp/ask-structural-relation.png" });
+    console.log("Screenshot: /tmp/ask-structural-relation.png");
+    // 7c. Reversed order, English: the parent is the name after "inside".
+    await language.selectOption("en");
+    r = await ask("Can <table> appear inside <para>?");
+    assert(r.deterministic && noLlmCall(r.req), "Can <table> appear inside <para>?: from the schema, no LLM call");
+    assert(r.text.includes("No, in no schema of the project: <para> cannot contain <table>"), "never: <para> cannot contain <table>");
+    // 7d. Only through intermediates: not directly, the chain, the direct children.
+    r = await ask("¿<para> puede contener <listItem>?");
+    assert(r.deterministic && noLlmCall(r.req), "¿<para> puede contener <listItem>?: no LLM call");
+    assert(r.text.includes("No directamente: <listItem> no es un hijo directo de <para>") && r.text.includes("<para> → <randomList> → <listItem>"), "not directly, with the chain para → randomList → listItem");
+    assert(r.text.includes("En todos los esquemas puede contener:"), "lists the direct children of <para>");
+    // 7e. A condition goes to the LLM; so does a name that does not exist.
+    r = await ask("¿<para> puede contener <table> si es un procedimiento?");
+    assert(!r.deterministic && r.req?.messages, "a question with a condition goes to the LLM");
+    r = await ask("¿<para> puede contener <pokemon>?");
+    assert(!r.deterministic && r.req?.messages, "a relation with a name that does not exist goes to the LLM");
+    // 7f. Attribute owners, by schema, cut with "+N more".
+    r = await ask("¿Qué elementos tienen @emphasisType?");
+    assert(r.deterministic && noLlmCall(r.req), "¿Qué elementos tienen @emphasisType?: no LLM call");
+    assert(r.text.includes("@emphasisType se usa en un elemento, igual en los 28 esquemas en los que aparece: <emphasis>"), "@emphasisType: only <emphasis>");
+    r = await ask("Which elements allow @changeMark?");
+    assert(r.deterministic && noLlmCall(r.req), "Which elements allow @changeMark?: no LLM call");
+    assert(r.text.includes("@changeMark is used on 672 elements; which ones depends on the schema") && /\+\d+ more/.test(r.text), "@changeMark: 672 elements by schema, long lists cut with +N more");
+    r = await ask("¿Qué elementos tienen @pokemon?");
+    assert(r.deterministic && r.text.includes("@pokemon no existe en ningún esquema del proyecto."), "nonexistent attribute: no existe en ningún esquema del proyecto");
+
     // 8. DITA <step>: deterministic.
     await open(pDita, "BRDP-AS-DITA");
     r = await ask("¿Qué puede contener <step>?");
     assert(r.deterministic && noLlmCall(r.req), "DITA ¿Qué puede contener <step>?: from the schema, no LLM call");
     assert(r.text.includes("<cmd>") && r.text.includes("<substeps>"), "DITA <step> children: <cmd>, <substeps>");
     assert((await label().textContent()) === "Answer taken from the DITA 1.3 Xpath2.0 schema (no AI)", "label names the DITA standard");
+    // C2: DITA works the same.
+    r = await ask("¿<p> puede contener <table>?");
+    assert(r.deterministic && noLlmCall(r.req) && r.text.includes("Sí: <p> puede contener <table> como hijo directo."), "DITA ¿<p> puede contener <table>?: yes, direct");
+    r = await ask("Which elements have @outputclass?");
+    assert(r.deterministic && noLlmCall(r.req) && r.text.includes("@outputclass is used on 364 elements") && r.text.includes("+344 more"), "DITA @outputclass: 364 elements, cut with +344 more");
 
     console.log("\nALL CHECKS PASSED\n");
   } finally {

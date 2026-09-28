@@ -98,3 +98,23 @@ class SchemaStructureOut(BaseModel):
     available: bool
     skeleton: RuleTestSkeletonOut | None = None
     elements: dict[str, SchemaStructureElementOut] = {}
+
+
+class SchemaRelationSchemaOut(BaseModel):
+    schema_name: str
+    direct: bool
+    # parent … child, the shortest chain when not direct (None if none).
+    path: list[str] | None = None
+
+
+class SchemaRelationOut(BaseModel):
+    """C2: can <parent> contain <child> directly, schema by schema (Ask's
+    deterministic yes/no answer)."""
+
+    standard: str
+    parent: str
+    child: str
+    available: bool
+    parent_exists: bool
+    child_exists: bool
+    schemas: list[SchemaRelationSchemaOut] = []

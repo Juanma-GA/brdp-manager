@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_current_user
 from app.models import User
-from app.schemas.schema_cards import SchemaAttributeOut, SchemaCardsOut, SchemaStructureOut
-from app.services.rule_test_skeletons import get_element_schemas, get_schema_structure
+from app.schemas.schema_cards import SchemaAttributeOut, SchemaCardsOut, SchemaRelationOut, SchemaStructureOut
+from app.services.rule_test_skeletons import get_element_relation, get_element_schemas, get_schema_structure
 from app.services.schema_cards import get_attribute_owners, get_document_schemas, get_schema_cards
 
 router = APIRouter(prefix="/api/schema-cards", tags=["schema-cards"])
@@ -46,6 +46,30 @@ async def read_schema_attribute(
     values -- the data behind Ask's "which values does @x take" answer."""
     available, owners = get_attribute_owners(standard, name)
     return SchemaAttributeOut(standard=standard, name=name, available=available, owners=owners)
+
+
+@router.get("/relation", response_model=SchemaRelationOut)
+async def read_schema_relation(
+    standard: str = Query(...),
+    parent: str = Query(...),
+    child: str = Query(...),
+    _current_user: User = Depends(get_current_user),
+) -> SchemaRelationOut:
+    """C2: whether <parent> can contain <child> as a DIRECT child, per
+    document schema where the parent is defined, with the shortest chain of
+    elements that reaches the child when it is not direct -- the data behind
+    Ask's "can <para> contain <table>?" answer. Reference data, same posture
+    as GET /api/schema-cards."""
+    data = get_element_relation(standard, parent, child)
+    return SchemaRelationOut(
+        standard=standard,
+        parent=parent,
+        child=child,
+        available=data["available"],
+        parent_exists=data["parent_exists"],
+        child_exists=data["child_exists"],
+        schemas=[{"schema_name": s["schema"], "direct": s["direct"], "path": s["path"]} for s in data["schemas"]],
+    )
 
 
 @router.get("/structure", response_model=SchemaStructureOut)

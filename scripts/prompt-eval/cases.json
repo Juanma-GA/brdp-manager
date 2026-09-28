@@ -665,6 +665,101 @@
       ]
     },
     {
+      "id": "ask-structural-relation-es",
+      "description": "C2, Part 3: a yes/no question about two elements is answered from the schema, schema by schema, with no LLM call.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C2-1",
+        "title": "Footnotes in paragraphs",
+        "definition": "Decide whether <footnote> may be used inside <para>.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿<para> puede contener <footnote>?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "direct relation from the schema cards, no LLM call"
+        },
+        {
+          "type": "contains",
+          "pattern": "Sí, en 22 de los 28 esquemas",
+          "note": "a mixed answer: yes in 22 schemas"
+        },
+        {
+          "type": "contains",
+          "pattern": "No en: comrep, fault, frontmatter, ipd, schedul, update",
+          "note": "the schemas where it is not a direct child"
+        },
+        {
+          "type": "language",
+          "expect": "es"
+        }
+      ]
+    },
+    {
+      "id": "ask-structural-relation-en",
+      "description": "C2, Part 3: the relation question with the child first (\"can <table> appear inside <para>?\"): the parent is the name after \"inside\"; in S1000D 4.2 <table> is never inside <para>.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C2-2",
+        "title": "Tables in paragraphs",
+        "definition": "Decide whether a <table> may be placed inside a <para>.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "Can <table> appear inside <para>?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "direct relation from the schema cards, no LLM call"
+        },
+        {
+          "type": "contains",
+          "pattern": "`<para>` cannot contain `<table>`",
+          "note": "the parent detected correctly from the reversed order"
+        },
+        {
+          "type": "language",
+          "expect": "en"
+        }
+      ]
+    },
+    {
+      "id": "ask-structural-attribute-owners",
+      "description": "C2, Part 3: the elements that declare an attribute, from the attribute owners, grouped by schema.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C2-3",
+        "title": "Emphasis types",
+        "definition": "Decide which emphasis types are allowed.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿Qué elementos tienen @emphasisType?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "attribute owners from the schema, no LLM call"
+        },
+        {
+          "type": "contains",
+          "pattern": "`<emphasis>`",
+          "note": "the only element that declares @emphasisType"
+        },
+        {
+          "type": "language",
+          "expect": "es"
+        }
+      ]
+    },
+    {
       "id": "ask-structural-open-question-llm",
       "description": "C1, Part 2: a question about reasons (not structure) still goes to the LLM.",
       "standard": "S1000D 4.2",

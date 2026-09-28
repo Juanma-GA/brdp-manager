@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { ruleStateOf } from '../utils/ruleState';
-import { fetchSchemaAttribute, fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
+import { fetchSchemaAttribute, fetchSchemaCards, fetchSchemaFacts, fetchSchemaRelation } from '../api/schemaFacts.js';
 import { buildAskSystemPrompt } from '../prompts/askPrompt.js';
 import { ASK_TEMPERATURE } from '../prompts/shared.js';
 import { checkAnswerNames, loadSchemaVocabulary } from '../validation/schemaValidation.js';
@@ -139,6 +139,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
           vocabulary: questionVocabulary,
           fetchCards: fetchSchemaCards,
           fetchAttribute: fetchSchemaAttribute,
+          fetchRelation: fetchSchemaRelation,
         });
         if (structural) {
           setAnswer(structural.text);

@@ -41,3 +41,11 @@ export async function fetchSchemaAttribute(standard, name) {
     `/api/schema-cards/attribute?standard=${encodeURIComponent(standard)}&name=${encodeURIComponent(name)}`
   );
 }
+
+// C2: can <parent> contain <child> directly, schema by schema --
+// { available, parent_exists, child_exists, schemas: [{ schema_name, direct, path }] }.
+export async function fetchSchemaRelation(standard, parent, child) {
+  return authFetchJson(
+    `/api/schema-cards/relation?standard=${encodeURIComponent(standard)}&parent=${encodeURIComponent(parent)}&child=${encodeURIComponent(child)}`
+  );
+}

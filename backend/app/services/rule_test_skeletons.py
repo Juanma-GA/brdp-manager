@@ -279,3 +279,66 @@ def get_schema_structure(standard: str, schema: str) -> dict:
     if graph is None or skeleton is None:
         return {"standard": standard, "schema": schema, "available": False, "skeleton": None, "elements": {}}
     return {"standard": standard, "schema": schema, "available": True, "skeleton": skeleton, "elements": graph}
+
+
+# Consolidation C2, Part 3: Ask's yes/no question "can <parent> contain
+# <child>?" answered from the cards. The answer is about the DIRECT relation,
+# schema by schema (the parent card's variants list their schemas and their
+# direct children); when a schema has no direct relation, the shortest chain
+# of elements that does reach the child is given as an example (breadth
+# first over that schema's whole graph -- finite, so "not reachable" is a
+# real answer, never a depth limit), so the answer can say "not directly".
+
+
+def _dita_full_graph(data: dict) -> dict[str, list[str]]:
+    return {name: list(variants[0].get("children", [])) for name, variants in data.get("cards", {}).items() if variants}
+
+
+def _shortest_path(children_of, start: str, target: str) -> list[str] | None:
+    previous = {start: None}
+    frontier = [start]
+    while frontier:
+        nxt = []
+        for node in frontier:
+            for child in children_of(node):
+                if child == target:
+                    path = [child, node]
+                    while previous[path[-1]] is not None:
+                        path.append(previous[path[-1]])
+                    return list(reversed(path))
+                if child not in previous:
+                    previous[child] = node
+                    nxt.append(child)
+        frontier = nxt
+    return None
+
+
+def get_element_relation(standard: str, parent: str, child: str) -> dict:
+    """{"available", "parent_exists", "child_exists", "schemas": [{"schema",
+    "direct", "path"}]} -- one entry per document schema where `parent` is
+    defined (DITA: the single merged "DITA 1.3" schema of its cards).
+    `path` (parent … child, shortest) only when the relation is not direct
+    and the child is reachable through other elements; else None."""
+    data = _cards_for(standard)
+    if data is None:
+        return {"available": False, "parent_exists": False, "child_exists": False, "schemas": []}
+    cards = data.get("cards", {})
+    result = {"available": True, "parent_exists": parent in cards, "child_exists": child in cards, "schemas": []}
+    if parent not in cards or child not in cards:
+        return result
+    dita_graph = _dita_full_graph(data) if is_dita_standard(standard) else None
+    for variant in cards[parent]:
+        direct = child in variant.get("children", [])
+        for schema in variant.get("schemas", []):
+            if schema in _NON_DOCUMENT_SCHEMAS:
+                continue
+            path = None
+            if not direct:
+                if dita_graph is not None:
+                    path = _shortest_path(lambda n: dita_graph.get(n, []), parent, child)
+                else:
+                    graph = schema_graph(standard, schema) or {}
+                    path = _shortest_path(lambda n, g=graph: g.get(n, {}).get("children", []), parent, child)
+            result["schemas"].append({"schema": schema, "direct": direct, "path": path})
+    result["schemas"].sort(key=lambda s: s["schema"])
+    return result

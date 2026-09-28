@@ -522,6 +522,8 @@ async function runAskCase(project, aiProvider, createdBrdp, testCase) {
         apiFetch(`/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(names.join(","))}${full ? "&full=true" : ""}`),
       fetchAttribute: (standard, name) =>
         apiFetch(`/api/schema-cards/attribute?standard=${encodeURIComponent(standard)}&name=${encodeURIComponent(name)}`),
+      fetchRelation: (standard, parent, child) =>
+        apiFetch(`/api/schema-cards/relation?standard=${encodeURIComponent(standard)}&parent=${encodeURIComponent(parent)}&child=${encodeURIComponent(child)}`),
     });
     if (structural) {
       return {
