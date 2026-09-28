@@ -68,7 +68,16 @@ Answer in the same language as the question.
 This project uses the standard: ${standard}.
 Answer strictly in terms of this standard and version — use its element
 names, rule vocabulary and conventions, and do not mix in other versions
-of S1000D or DITA unless the user explicitly asks for a comparison.`;
+of S1000D or DITA unless the user explicitly asks for a comparison.
+
+When your answer names an element or attribute of the ${standard} schema,
+it must be one that appears in SCHEMA FACTS or is quoted from the BRDP
+context below. If the question is about a concept that no SCHEMA FACTS
+cover (for example a code, an identifier or a date that a document
+records), do not name an element or attribute for it from memory: say
+that you cannot confirm the element or attribute name in the ${standard}
+schema, and suggest looking the concept up in the ${standard}
+specification.`;
 
   prompt += buildSchemaFactsBlock(standard, schemaFacts);
 

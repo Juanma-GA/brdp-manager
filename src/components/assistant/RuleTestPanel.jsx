@@ -234,7 +234,7 @@ function CorrectionNote({ correction }) {
 // TestRuleButton; mounted with key={rule} so another rule starts afresh.
 export default function RuleTestPanel({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onClose }) {
   const { t } = useTranslation();
-  const { state, analysis, verdict, copyablePrompt, regenerate, runAgain } = useRuleTest({
+  const { state, analysis, verdict, copyablePrompt, generate, regenerate, runAgain } = useRuleTest({
     ruleXml,
     format,
     standard,
@@ -275,6 +275,13 @@ export default function RuleTestPanel({ ruleXml, format, standard, schemaLocatio
         </p>
       )}
 
+      {state.status === 'idle' && (
+        <div className={styles.suggestionActions}>
+          <button type="button" onClick={generate} data-testid="rule-test-show-examples">
+            {t('records.ruleTest.showIllustrativeExamples')}
+          </button>
+        </div>
+      )}
       {state.status === 'loading' && <p className={styles.muted}>{t('records.ruleTest.generating')}</p>}
       {state.status === 'error' && (
         <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneBad}`} role="alert">
@@ -313,7 +320,7 @@ export default function RuleTestPanel({ ruleXml, format, standard, schemaLocatio
         </>
       )}
 
-      {state.status !== 'loading' && (
+      {state.status !== 'loading' && state.status !== 'idle' && (
         <div className={styles.suggestionActions}>
           <button onClick={regenerate}>{t('records.ruleTest.regenerate')}</button>
           {copyablePrompt && (

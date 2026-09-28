@@ -1303,6 +1303,34 @@ export default function RecordsPage() {
                         <ReactMarkdown>{ask.answer}</ReactMarkdown>
                       </div>
                     )}
+                    {/* "Ask: comprobar los nombres de la respuesta": names the
+                        answer presents as real that the standard's schema
+                        does not have (or has only as the other kind). A
+                        warning only -- the answer above is never changed. */}
+                    {!ask.askPending && !ask.askError && ask.answerNameCheck?.available && (
+                      <>
+                        {ask.answerNameCheck.notFound.length > 0 && (
+                          <p className={styles.vocabWarning} data-testid="ask-answer-unknown-names">
+                            ⚠{' '}
+                            {t('records.assistant.answerUnknownNames', {
+                              standard: project.standard,
+                              names: ask.answerNameCheck.notFound.join(', '),
+                            })}
+                          </p>
+                        )}
+                        {ask.answerNameCheck.wrongType.map((w) => (
+                          <p key={w.name} className={styles.vocabWarning} data-testid="ask-answer-wrong-type">
+                            ⚠{' '}
+                            {t(
+                              w.usedAs === 'element'
+                                ? 'records.assistant.answerWrongTypeAsElement'
+                                : 'records.assistant.answerWrongTypeAsAttribute',
+                              { standard: project.standard, name: w.name }
+                            )}
+                          </p>
+                        ))}
+                      </>
+                    )}
                     {/* Docs request ("Servicio de fichas de esquema y su uso
                         en Ask"): discrete, clickable line under the ask.answer
                         -- absent entirely when no real schema names were

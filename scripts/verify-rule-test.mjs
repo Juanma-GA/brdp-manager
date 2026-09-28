@@ -58,6 +58,13 @@ const RULE_DOC = `<structureObjectRule id="BRDP-RT-DOC">
   <objectPath allowedObjectFlag="0">document('common.xml')//emphasis</objectPath>
   <objectUse>No emphasis in the common file.</objectUse>
 </structureObjectRule>`;
+const RULE_PARTIAL = `<structureObjectRule id="BRDP-RT-PART">
+  <objectPath allowedObjectFlag="0">//emphasis</objectPath>
+  <objectUse>No emphasis.</objectUse>
+</structureObjectRule>
+<nonContextRule id="BRDP-RT-PART-N">
+  <simplePara>Checked manually in the review.</simplePara>
+</nonContextRule>`;
 const RULE_EMPH = `<structureObjectRule id="BRDP-RT-X">
   <objectPath allowedObjectFlag="0">//emphasis</objectPath>
   <objectUse>No emphasis.</objectUse>
@@ -117,6 +124,7 @@ async function main() {
   const type = await makeBrdp(p42, { identifier: "BRDP-RT-TYPE", title: "Emphasis types", proposal: "In procedural data modules, @emphasisType shall only take em01 and em02." });
   const proced = await makeBrdp(p42, { identifier: "BRDP-RT-PROCED", title: "Emphasis in procedures", proposal: "In procedural data modules, <emphasis> shall not be used." });
   const doc = await makeBrdp(p42, { identifier: "BRDP-RT-DOC", title: "Common file", proposal: "The common file shall not use emphasis." });
+  const partial = await makeBrdp(p42, { identifier: "BRDP-RT-PART", title: "Emphasis (partly manual)", proposal: "The element <emphasis> shall not be used." });
   const broken = await makeBrdp(p42, { identifier: "BRDP-RT-BROKEN", title: "Broken answer", proposal: "BROKENJSON: the mock returns a truncated answer." });
   const fixable = await makeBrdp(p42, { identifier: "BRDP-RT-FIX", title: "Emphasis types (fix)", proposal: "BROKENSTRUCT: in procedural data modules, @emphasisType shall only take em01 and em02." });
   const stubborn = await makeBrdp(p42, { identifier: "BRDP-RT-STUB", title: "Emphasis types (stubborn)", proposal: "STUBBORN: in procedural data modules, @emphasisType shall only take em01 and em02." });
@@ -124,6 +132,7 @@ async function main() {
   await putDraft(p42, type, "BREX-4.2", RULE_TYPE);
   await putDraft(p42, proced, "BREX-4.2", RULE_PROCED);
   await putDraft(p42, doc, "BREX-4.2", RULE_DOC);
+  await putDraft(p42, partial, "BREX-4.2", RULE_PARTIAL);
   await putDraft(p42, broken, "BREX-4.2", RULE_EMPH);
   await putDraft(p42, fixable, "BREX-4.2", RULE_TYPE.replaceAll("BRDP-RT-TYPE", "BRDP-RT-FIX"));
   await putDraft(p42, stubborn, "BREX-4.2", RULE_TYPE.replaceAll("BRDP-RT-TYPE", "BRDP-RT-STUB"));
@@ -297,18 +306,44 @@ async function main() {
     assert((await example(1).locator("pre").count()) === 1, "the broken example stays visible");
     await panel().screenshot({ path: "/tmp/rule-test-structure-problems.png" });
 
-    // 5. document(): the reason at the top from the start, examples still generated.
+    // 5. document(): the whole rule is not executable -> the reason at the
+    // top and a "Show illustrative examples" button; no LLM call until it
+    // is clicked ("ejemplos bajo demanda en reglas no ejecutables").
     await select("BRDP-RT-DOC");
-    await fetch(`${MOCK}/slow-next`, { method: "POST" });
+    await fetch(`${MOCK}/reset`, { method: "POST" });
     await page.getByRole("button", { name: "Test rule" }).click();
-    await panel().getByText("Writing example fragments…").waitFor({ timeout: 5000 });
+    await panel().getByTestId("rule-test-analysis").waitFor({ timeout: 5000 });
     const early = await panel().getByTestId("rule-test-analysis").textContent();
-    assert(early.includes("This rule can't be tested: The rule reads another file (document())"), `document(): reason shown while the examples are still being written (${early})`);
+    assert(early.includes("This rule can't be tested: The rule reads another file (document())") && early.includes("Examples could only illustrate it."), `document(): reason shown on top (${early})`);
+    const showExamples = panel().getByTestId("rule-test-show-examples");
+    assert((await showExamples.textContent()) === "Show illustrative examples", "document(): the on-demand button is shown");
+    await page.waitForTimeout(1500);
+    assert((await lastRequest()) === null, "document(): no LLM call before the button is clicked");
+    assert((await example(0).count()) === 0 && (await panel().getByText("Writing example fragments…").count()) === 0, "document(): no examples and nothing being written");
+    assert((await panel().getByRole("button", { name: "Regenerate examples" }).count()) === 0, "document(): no Regenerate before the first generation");
+    await panel().screenshot({ path: "/tmp/rule-test-document-on-demand.png" });
+    await fetch(`${MOCK}/slow-next`, { method: "POST" });
+    await showExamples.click();
+    await panel().getByText("Writing example fragments…").waitFor({ timeout: 5000 });
+    assert((await showExamples.count()) === 0, "document(): the button goes away once clicked");
     await example(0).waitFor({ timeout: 15000 });
-    assert((await example(0).locator("pre").count()) === 1 && (await example(1).locator("pre").count()) === 1, "document(): the examples stay visible");
+    assert((await lastRequest()).messages.some((m) => m.content === "Write the test examples for this rule."), "document(): the click made the LLM call");
+    assert((await example(0).locator("pre").count()) === 1 && (await example(1).locator("pre").count()) === 1, "document(): the illustrative examples are shown");
     assert((await panel().getByTestId("rule-test-result").count()) === 0, "document(): no result lines");
     assert((await panel().getByTestId("rule-test-verdict").count()) === 0, "document(): the reason is not repeated as a verdict");
+    assert((await panel().getByRole("button", { name: "Regenerate examples" }).count()) === 1, "document(): Regenerate available after the first generation");
     await panel().screenshot({ path: "/tmp/rule-test-document-reason.png" });
+
+    // 5b. Only part of the rule is not executable: unchanged behaviour --
+    // the examples are generated straight away and the rest is judged.
+    await select("BRDP-RT-PART");
+    await fetch(`${MOCK}/reset`, { method: "POST" });
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await waitVerdict();
+    assert((await panel().getByTestId("rule-test-analysis").textContent()).startsWith("Part of this rule can't be tested:"), "partial: the partial note is shown");
+    assert((await panel().getByTestId("rule-test-show-examples").count()) === 0, "partial: no on-demand button");
+    assert((await lastRequest())?.messages?.some((m) => m.content === "Write the test examples for this rule."), "partial: examples generated without a click");
+    assert((await verdict().textContent()).startsWith("Correct"), "partial: the executable part is judged");
 
     // 6. A rule that does not implement the Proposal.
     await select("BRDP-RT-MISM");

@@ -346,6 +346,25 @@
       ]
     },
     {
+      "id": "ask-concept-without-facts-3-0-1",
+      "description": "'Ask: comprobar los nombres de la respuesta' round: a question about a concept with no schema facts (NCAGE) on a 3.0.1 BRDP that uses @ncage (no such attribute in 3.0.1). The real failure answered 'ncage es un atributo del elemento <identAndStatusSection>' -- a 4.x element (3.0.1 uses <idstatus>) and a name the prompt had already called nonexistent.",
+      "standard": "S1000D 3.0.1",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-11",
+        "title": "NCAGE code of the responsible partner company",
+        "definition": "Decide whether the @ncage attribute records the CAGE code of the responsible partner company.",
+        "proposal": "The @ncage attribute shall always be filled in.",
+        "validation": "Validated"
+      },
+      "question": "Which element is used for the NCAGE code?",
+      "checks": [
+        { "type": "not_contains", "pattern": "identAndStatusSection", "note": "4.x element, not in 3.0.1 (the real failure)" },
+        { "type": "answer_names_in_vocabulary", "note": "same check as the red warning under the answer in the app" },
+        { "type": "manual", "note": "@ncage (also written ncage/Ncage) must not be presented as a valid attribute or placed inside an element; the expected answer says the name cannot be confirmed in the 3.0.1 schema and suggests looking NCAGE up in the specification" }
+      ]
+    },
+    {
       "id": "rule-4-2-prohibit-element",
       "description": "Suggest Rule, S1000D 4.2: prohibiting an element -> one structureObjectRule with allowedObjectFlag=\"0\" on that element, real names only, no context block.",
       "standard": "S1000D 4.2",

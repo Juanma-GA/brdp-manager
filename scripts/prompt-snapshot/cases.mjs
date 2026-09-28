@@ -127,6 +127,25 @@ export const askCases = [
     name: 'no-vocab-no-facts-no-compare',
     args: [brdpBase, ruleApprovalVerified, null, 'S1000D 3.0.1', vocabNone, []],
   },
+  // "Ask: comprobar los nombres de la respuesta": the real case -- a 3.0.1
+  // BRDP that says @ncage (no such attribute in 3.0.1), no schema facts.
+  {
+    name: 'concept-without-facts-ncage-3-0-1',
+    args: [
+      {
+        ...brdpBase,
+        identifier: 'BRDP-EXT-00090',
+        title: 'NCAGE code of the responsible partner company',
+        definition: 'Decide whether the @ncage attribute records the CAGE code of the responsible partner company.',
+        proposal: 'The @ncage attribute shall always be filled in.',
+      },
+      ruleApprovalNone,
+      null,
+      'S1000D 3.0.1',
+      { available: true, notFound: ['@ncage'], wrongType: [] },
+      [],
+    ],
+  },
 ];
 
 export const suggestDefinitionCases = [

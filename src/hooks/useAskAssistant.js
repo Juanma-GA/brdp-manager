@@ -9,6 +9,8 @@ import { ruleStateOf } from '../utils/ruleState';
 import { fetchSchemaFacts } from '../api/schemaFacts.js';
 import { buildAskSystemPrompt } from '../prompts/askPrompt.js';
 import { ASK_TEMPERATURE } from '../prompts/shared.js';
+import { checkAnswerNames } from '../utils/answerNameCheck.js';
+import { loadSchemaVocabulary } from '../utils/vocabularyCheck.js';
 
 export function useAskAssistant({ projectId, standard, ruleFormat, selected, ruleApproval, aiProvider, vocabulary, recomputeVocabResult }) {
   // `question` is only ever the live DRAFT in the textarea -- it auto-
@@ -48,6 +50,12 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   // generated cards -- no line, no prompt block either way.
   const [lastAskedSchemaFacts, setLastAskedSchemaFacts] = useState([]);
   const [expandedSchemaFactNames, setExpandedSchemaFactNames] = useState(new Set());
+  // "Ask: comprobar los nombres de la respuesta": the names the displayed
+  // answer presents as schema names, checked against the standard's
+  // vocabulary (utils/answerNameCheck.js) -- { available, notFound,
+  // wrongType } or null. Only a warning under the answer; the answer
+  // itself is never changed.
+  const [answerNameCheck, setAnswerNameCheck] = useState(null);
   // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
   // the chosen entry ({ source: 'records'|'catalog', identifier, title,
   // definition, and for 'records' also proposal/validation/ruleState/
@@ -76,6 +84,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setPrevTurn(null);
     setLastAskedSchemaFacts([]);
     setExpandedSchemaFactNames(new Set());
+    setAnswerNameCheck(null);
     setCompareOpen(false);
     setCompareQuery('');
     setCompareBrdp(null);
@@ -106,6 +115,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setAskError(null);
     setLastAskedSchemaFacts([]);
     setExpandedSchemaFactNames(new Set());
+    setAnswerNameCheck(null);
     try {
       const vocab = await recomputeVocabResult(selected);
       const schemaFacts = await fetchAskSchemaFacts(askedQuestion, selected);
@@ -125,6 +135,11 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
         temperature: ASK_TEMPERATURE,
       });
       setAnswer(res.content);
+      // The same vocabulary as the BRDP's own notice; the names the prompt
+      // already called nonexistent count too if the answer presents them
+      // as real.
+      const answerVocabulary = vocabulary || (await loadSchemaVocabulary(standard).catch(() => null));
+      setAnswerNameCheck(checkAnswerNames(res.content, answerVocabulary, vocab?.notFound || []));
       setPrevTurn({ question: askedQuestion, answer: res.content });
       // Auto-clear on success only (docs request) -- an errored question
       // stays in the textarea below so the user never loses what they typed.
@@ -144,6 +159,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setPrevTurn(null);
     setLastAskedSchemaFacts([]);
     setExpandedSchemaFactNames(new Set());
+    setAnswerNameCheck(null);
   };
 
   const openCompareSearch = () => {
@@ -208,6 +224,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     askPending,
     prevTurn,
     lastAskedSchemaFacts,
+    answerNameCheck,
     expandedSchemaFactNames,
     setExpandedSchemaFactNames,
     compareOpen,

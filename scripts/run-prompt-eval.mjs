@@ -57,6 +57,7 @@ import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { checkRuleNames, extractRuleXPaths } from "../src/utils/ruleNameCheck.js";
 import { invalidRuleXPaths } from "../src/utils/ruleXPathSyntax.js";
+import { checkAnswerNames } from "../src/utils/answerNameCheck.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
 import { validateXML } from "xmllint-wasm";
 import {
@@ -202,6 +203,15 @@ async function runCheck(check, answer, ctx = {}) {
       if (!names.available) return { status: "manual", detail: `no schema vocabulary for ${ctx.standard}` };
       const bad = [...names.notFound, ...names.wrongType.map((w) => `${w.usedAs === "element" ? "<" + w.name + ">" : "@" + w.name} (wrong kind)`)];
       return { status: bad.length ? "fail" : "pass", detail: bad.length ? `not in the schema: ${bad.join(", ")}` : "every name exists" };
+    }
+    case "answer_names_in_vocabulary": {
+      // Ask: the same check as the red warning under the answer in the app
+      // (utils/answerNameCheck.js), including the BRDP's own nonexistent
+      // names when the answer presents them as real.
+      const names = checkAnswerNames(answer, ctx.vocabulary, ctx.vocabCheck?.notFound || []);
+      if (!names.available) return { status: "manual", detail: `no schema vocabulary for ${ctx.standard}` };
+      const bad = [...names.notFound, ...names.wrongType.map((w) => `${w.usedAs === "element" ? "<" + w.name + ">" : "@" + w.name} (wrong kind)`)];
+      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `presented as real but not in the schema: ${bad.join(", ")}` : "no nonexistent name presented as real" };
     }
     case "not_checkable": {
       const is = answer.trim().replace(/^```\w*\s*/, "").startsWith(NOT_CHECKABLE_PREFIX);
@@ -410,7 +420,12 @@ async function runAskCase(project, aiProvider, createdBrdp, testCase) {
     schemaFacts
   );
   const answer = await sendToLlm(aiProvider, systemPrompt, testCase.question, ASK_TEMPERATURE);
-  return { systemPrompt, userMessage: testCase.question, answer };
+  return {
+    systemPrompt,
+    userMessage: testCase.question,
+    answer,
+    checkContext: { vocabulary, vocabCheck, standard: testCase.standard },
+  };
 }
 
 async function runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCase) {

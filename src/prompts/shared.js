@@ -55,7 +55,14 @@ export function buildUnknownNamesBlock(standard, vocabCheck) {
   const { notFound, wrongType } = vocabCheck;
   let block = '';
   if (notFound && notFound.length > 0) {
-    block += `\n\nThe following names do NOT exist in the ${standard} schema: ${notFound.join(', ')}. Point this out explicitly; do not treat them as valid elements or attributes.`;
+    // "Ask: comprobar los nombres de la respuesta", Part 2: a real answer
+    // turned `@ncage` (listed here) into "ncage es un atributo del
+    // elemento <identAndStatusSection>" -- the name written bare and with
+    // other capitalisation, placed inside an element. The example uses
+    // the first listed name so it is always about a name actually at hand.
+    const bare = notFound[0].replace(/^[<@]|>$/g, '');
+    const capitalised = bare.charAt(0).toUpperCase() + bare.slice(1);
+    block += `\n\nThe following names do NOT exist in the ${standard} schema: ${notFound.join(', ')}. Point this out explicitly; do not treat them as valid elements or attributes. Never describe any of them as existing in any form — not written without "@" or angle brackets, and not with a different capitalisation (for example "${capitalised}" for ${notFound[0]}) — and never say which element they belong to or where they can go.`;
   }
   if (wrongType && wrongType.length > 0) {
     const lines = wrongType.map((w) => formatWrongTypeMessage(standard, w));

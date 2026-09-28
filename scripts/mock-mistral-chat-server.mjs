@@ -274,6 +274,12 @@ const server = http.createServer((req, res) => {
         "Use `objectPath` for the context.";
     } else if (isHtmlTest(userText)) {
       reply = "MOCK-HTML-TEST: the element <table> and the tag <originator> must render as literal text, never as real HTML.";
+    } else if (/NCAGE/.test(userText)) {
+      // "Ask: comprobar los nombres de la respuesta": the real wrong answer
+      // (S1000D 3.0.1) -- a 4.x element and the BRDP's nonexistent @ncage.
+      reply = "ncage es un atributo del elemento `<identAndStatusSection>`, que agrupa los datos de identificación y estado del módulo de datos.";
+    } else if (/IDSTATUS_TEST/.test(userText)) {
+      reply = "En S1000D 3.0.1 los datos de identificación y estado van en `<idstatus>`, dentro de `<dmodule>`.";
     } else if (isSuggestDefinition(userText)) {
       reply =
         "MOCK-LONG-DEFINITION: This decision point governs the applicability and scope of the allowedObjectFlag attribute across every structureObjectRule and nonContextRule in the data module, including split-rule variants, and must be evaluated consistently for every objectPath regardless of dmCode context or system differences. " +

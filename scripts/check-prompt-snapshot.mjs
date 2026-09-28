@@ -181,6 +181,15 @@ import { buildSuggestProposalPrompt } from '../src/prompts/suggestProposalPrompt
 import { buildSuggestRulePrompt } from '../src/prompts/suggestRulePrompt.js';
 // Test rule (T2): a new group, ruleTestExamples (4 cases), for the prompt
 // that asks for the test examples. No existing prompt changes.
+//
+// "Ask: comprobar los nombres de la respuesta" round: buildAskSystemPrompt
+// gains a static paragraph (an element/attribute named in the answer must
+// appear in SCHEMA FACTS or the BRDP; a concept with no facts -> "cannot
+// confirm the name, look it up in the specification"), so all Ask cases
+// change; buildUnknownNamesBlock's "do NOT exist" paragraph now also
+// forbids the listed names bare or with other capitalisation (changes the
+// notfound case). New case concept-without-facts-ncage-3-0-1 (the real
+// @ncage report). Suggest and rule-test prompts are unchanged.
 import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesPrompt.js';
 import { askCases, ruleTestExamplesCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

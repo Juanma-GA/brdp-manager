@@ -66,11 +66,16 @@ async function prepareSetup({ ruleXml, standard, schemaLocation }) {
 }
 
 export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary }) {
-  // status: 'loading' | 'error' | 'ready'
-  const [state, setState] = useState({ status: 'loading' });
-  const [copyablePrompt, setCopyablePrompt] = useState(null);
   // Known before any example: shown at the top from the start (T2b, Part 4).
   const analysis = useMemo(() => analyzeRule(ruleXml, format), [ruleXml, format]);
+  // "Ejemplos bajo demanda en reglas no ejecutables": when the WHOLE rule
+  // cannot be executed, the examples could only illustrate it (and a real
+  // run produced broken ones) -- they are not generated until the user
+  // asks. status: 'idle' (waiting for that click) | 'loading' | 'error' |
+  // 'ready'.
+  const onDemand = analysis.status === 'not_executable';
+  const [state, setState] = useState(() => ({ status: onDemand ? 'idle' : 'loading' }));
+  const [copyablePrompt, setCopyablePrompt] = useState(null);
   // Only the latest generation may land (Regenerate while one is running).
   const generationRef = useRef(0);
   const setupRef = useRef(null);
@@ -173,9 +178,10 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     }
   }, [ruleXml, format, standard, schemaLocation, brdp, aiProvider, runAll]);
 
-  // Generate once when the panel opens (it is remounted for another rule).
+  // Generate once when the panel opens (it is remounted for another rule),
+  // unless the rule is not executable at all: then only on request.
   useEffect(() => {
-    generate();
+    if (!onDemand) generate();
   }, []);
 
   // "Run again" on an edited example's content: rebuilt on its skeleton,
@@ -190,5 +196,5 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     });
 
   const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis) : null;
-  return { state, analysis, verdict, copyablePrompt, regenerate: generate, runAgain };
+  return { state, analysis, verdict, copyablePrompt, generate, regenerate: generate, runAgain };
 }
