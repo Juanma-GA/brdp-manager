@@ -371,10 +371,13 @@ async function main() {
     assert(xml301.includes("<para0>") && xml301.includes("<descript>") && !xml301.includes("levelledPara"), "3.0.1: descript/para0/para skeleton");
     assert((await verdict().textContent()).startsWith("Correct"), `3.0.1: verdict correct (${await verdict().textContent()})`);
 
-    // 9. DITA: no Test rule (the engine runs BREX only).
+    // 9. DITA: since T4 the engine runs Schematron too, so a DITA Draft rule
+    //    has Test rule (the DITA flow itself: verify-rule-test-dita.mjs).
     await openProject(pDita);
     await select("BRDP-RT-DITA");
-    assert((await page.getByRole("button", { name: "Test rule" }).count()) === 0, "DITA Draft rule: no Test rule button");
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await waitVerdict();
+    assert((await verdict().textContent()).startsWith("Correct"), `DITA Draft rule: Test rule runs (${await verdict().textContent()})`);
 
     // 10. Spanish UI.
     await openProject(p42);

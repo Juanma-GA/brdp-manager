@@ -48,6 +48,9 @@ class SchemaCardsOut(BaseModel):
     # variants a rule can be limited to), so the client can tell whether an
     # element exists in ALL of them. [] when not available.
     document_schemas: list[str] = []
+    # DITA (T4): for each requested name, the topic types whose graph has it
+    # (the card variants of the merged DITA schema cannot say). {} otherwise.
+    element_schemas: dict[str, list[str]] = {}
 
 
 class SchemaStructureElementOut(BaseModel):

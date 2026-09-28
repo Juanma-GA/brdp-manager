@@ -1001,6 +1001,114 @@
           "note": "the review's explanation is in the Proposal's language"
         }
       ]
+    },
+    {
+      "id": "rule-test-dita-xpath2-note-type",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath2.0",
+      "description": "Test rule (T4) on a known correct DITA XPath 2.0 Schematron rule, without the sch: prefix like the XPath 2.0 template: every <note> declares @type. The examples go into topic/body.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DN",
+        "title": "Note types",
+        "definition": "Decide whether notes must declare their type.",
+        "proposal": "Every <note> shall declare its type with @type.",
+        "validation": "Validated"
+      },
+      "rule": "<pattern id=\"p-BRDP-EVAL-RT-DN\"><rule context=\"note\"><assert id=\"BRDP-EVAL-RT-DN\" role=\"error\" test=\"@type\">Every note must declare its type (@type).</assert></rule></pattern>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks (DITA topic-type skeleton) after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on a rule known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "For each note: @type must hold",
+          "note": "deterministic description of the assert"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-dita-xpath3-let",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Test rule (T4) on a known correct DITA XPath 3.0 rule with sch:let (an inline function, like the XPath 3.0 template) and sch:value-of: each <step> has exactly one <cmd>. The examples go into task/taskbody/steps.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DL",
+        "title": "Commands per step",
+        "definition": "Decide how many commands a step may contain.",
+        "proposal": "Each <step> shall contain exactly one <cmd>.",
+        "validation": "Validated"
+      },
+      "rule": "<sch:pattern id=\"p-BRDP-EVAL-RT-DL\"><sch:rule context=\"step\"><sch:let name=\"cuenta\" value=\"function($s as element()) as xs:integer { count($s/cmd) }\"/><sch:let name=\"n\" value=\"$cuenta(.)\"/><sch:assert id=\"BRDP-EVAL-RT-DL\" role=\"error\" test=\"$n = 1\">Each step has exactly one command; found <sch:value-of select=\"$n\"/>.</sch:assert></sch:rule></sch:pattern>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks (DITA topic-type skeleton) after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on a rule known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "variables cuenta, n",
+          "note": "the description lists the sch:let variables"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-dita-wrong-inverted-assert",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath2.0",
+      "description": "Test rule (T4) on a known WRONG DITA Schematron rule: the Proposal requires @type on every <note>, but the assert is inverted (test=\"not(@type)\"). Examples written from the decision must expose it: verdict incorrect.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DW",
+        "title": "Note types",
+        "definition": "Decide whether notes must declare their type.",
+        "proposal": "Every <note> shall declare its type with @type.",
+        "validation": "Validated"
+      },
+      "rule": "<sch:pattern id=\"p-BRDP-EVAL-RT-DW\"><sch:rule context=\"note\"><sch:assert id=\"BRDP-EVAL-RT-DW\" role=\"error\" test=\"not(@type)\">Every note must declare its type (@type).</sch:assert></sch:rule></sch:pattern>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks (DITA topic-type skeleton) after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_incorrect",
+          "note": "examples from the decision catch the inverted assert"
+        }
+      ]
     }
   ]
 }

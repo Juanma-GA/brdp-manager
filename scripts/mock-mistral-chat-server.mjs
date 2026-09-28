@@ -89,6 +89,13 @@ function suggestRuleReply(systemPrompt) {
     const ref = /FORMAT — S1000D Issue 4\.2/.test(systemPrompt) ? `<brDecisionRef brDecisionIdentNumber="${id}"/>` : "";
     return `<structureObjectRule id="${id}"${ref ? ' brSeverityLevel="brsl01"' : ""}>${ref}<objectPath allowedObjectFlag="0">//${prohibited}</objectPath><objectUse>MOCK-RULE: &lt;${prohibited}&gt; is not used.</objectUse></structureObjectRule>`;
   }
+  // T4: a DITA Proposal about <note>/@type gets the note rule -- INVERTED
+  // in the Proposal gives the wrong (inverted) assert, unless the prompt
+  // carries the failed test (Suggest a corrected rule).
+  if (/FORMAT — ISO Schematron/.test(systemPrompt) && /<note>/.test(proposal) && /@type/.test(proposal)) {
+    const inverted = /INVERTED/.test(proposal) && !/PREVIOUS RULE FAILED ITS TEST/.test(systemPrompt);
+    return `<sch:pattern id="p-${id}"><sch:rule context="note"><sch:assert id="${id}" role="error" test="${inverted ? "not(@type)" : "@type"}">Every note must declare its type (@type).</sch:assert></sch:rule></sch:pattern>`;
+  }
   const element = /pokemon/i.test(proposal) ? "pokemon" : "table";
   if (/FORMAT — ISO Schematron/.test(systemPrompt)) {
     return `<sch:pattern id="p-${id}"><sch:rule context="${element}"><sch:assert id="${id}" role="error" test="@frame">MOCK-RULE: &lt;${element}&gt; must declare @frame.</sch:assert></sch:rule></sch:pattern>`;
@@ -135,6 +142,30 @@ function ruleTestReply(systemPrompt, messages) {
     ? "This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."
     : null;
   const answer = (examples) => JSON.stringify({ proposalMismatch: mismatch, examples });
+  // T4, DITA Schematron: the topic type the prompt offers; the examples
+  // follow the rule's context (step, the document root, or note).
+  const ditaType = (systemPrompt.match(/Every example is a DITA ([\w-]+) \("schema"/) || [])[1];
+  if (ditaType) {
+    if (/context="step"/.test(rule)) {
+      return answer([
+        { label: "Step with one command", expected: "accept", schema: ditaType, content: "<step><cmd>Remove the four bolts from the pump cover.</cmd></step>" },
+        { label: "Step with two commands", expected: "reject", schema: ditaType, content: "<step><cmd>Remove the bolts.</cmd><cmd>Lift the pump cover.</cmd></step>" },
+      ]);
+    }
+    if (/is the WHOLE document/.test(systemPrompt)) {
+      return answer([
+        { label: "Topic with xml:lang", expected: "accept", schema: ditaType, content: '<topic id="bilge-pump" xml:lang="en-GB"><title>Bilge pump</title><body><p>Check the pump seals.</p></body></topic>' },
+        { label: "Topic without xml:lang", expected: "reject", schema: ditaType, content: '<topic id="bilge-pump"><title>Bilge pump</title><body><p>Check the pump seals.</p></body></topic>' },
+      ]);
+    }
+    const broken = /BROKENSTRUCT|STUBBORN/.test(proposal) && (!correcting || /STUBBORN/.test(proposal));
+    return answer([
+      { label: "Note with a type", expected: "accept", schema: ditaType, content: '<note type="caution"><p>Isolate the bilge pump before removal.</p></note>' },
+      broken
+        ? { label: "Note without a type", expected: "reject", schema: ditaType, content: "<note><cmd>Isolate the bilge pump.</cmd></note>" }
+        : { label: "Note without a type", expected: "reject", schema: ditaType, content: "<note><p>Isolate the bilge pump before removal.</p></note>" },
+    ]);
+  }
   if (/@emphasisType/.test(rule)) {
     const broken = /BROKENSTRUCT|STUBBORN/.test(proposal) && (!correcting || /STUBBORN/.test(proposal));
     const examples = [
@@ -176,6 +207,11 @@ function ruleTestReviewReply(systemPrompt) {
   const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
   if (/UNCLEAR/.test(proposal)) {
     return JSON.stringify({ cause: "unclear", explanation: "MOCK-REVIEW: the Proposal does not say whether the attribute is required." });
+  }
+  // T4: an inverted Schematron assert (the Proposal requires @type; the
+  // rule rejects every note that has it) is the rule's fault.
+  if (/not\(@type\)/.test(systemPrompt)) {
+    return JSON.stringify({ cause: "rule", explanation: "MOCK-REVIEW: the assert is inverted: it requires notes WITHOUT @type, but the Proposal requires @type on every note." });
   }
   if (/cannot reject any content/.test(systemPrompt)) {
     return JSON.stringify({ cause: "rule", explanation: "MOCK-REVIEW: the rule allows <emphasis> (allowedObjectFlag 2 without values), but the Proposal forbids it; it should use allowedObjectFlag 0." });

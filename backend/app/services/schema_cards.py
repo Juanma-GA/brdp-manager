@@ -100,10 +100,19 @@ def _document_schemas(data: dict) -> list[str]:
 _DOCUMENT_SCHEMAS_BY_FILE = {filename: _document_schemas(data) for filename, data in _CARDS_BY_FILE.items()}
 
 
+# DITA (T4): the merged DITA cards have a single schema ("DITA 1.3"); for
+# the Test rule panel its document types are the topic types, in the order
+# the client prefers them for a general rule (app.services.
+# rule_test_skeletons builds one graph and skeleton per type).
+DITA_DOCUMENT_TYPES = ("topic", "concept", "task", "reference", "troubleshooting", "map")
+
+
 def get_document_schemas(standard: str) -> list[str]:
     """Sorted document-type schema names of `standard` ([] when it has no
-    cards)."""
+    cards); for DITA, its topic types in preference order."""
     filename = STANDARD_TO_SCHEMA_CARDS_FILE.get(standard)
+    if filename == "schema-cards-dita.json":
+        return list(DITA_DOCUMENT_TYPES)
     return list(_DOCUMENT_SCHEMAS_BY_FILE.get(filename, [])) if filename else []
 
 # "Pulido de fichas" round, point 1: real data (schema-cards-4-2.json,

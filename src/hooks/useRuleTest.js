@@ -42,7 +42,9 @@ async function fetchStructure(standard, schema) {
 
 export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onResult }) {
   // Known before any example: shown at the top from the start (T2b, Part 4).
-  const analysis = useMemo(() => analyzeRule(ruleXml, format), [ruleXml, format]);
+  // T4: the standard tells an XPath 2.0 DITA project apart (XPath 3.x
+  // syntax is a warning there).
+  const analysis = useMemo(() => analyzeRule(ruleXml, format, { standard }), [ruleXml, format, standard]);
   // T3b: what the rule checks, read from its XML -- shown in place of an
   // explanation by the LLM, and the ground truth the review is given.
   const description = useMemo(() => describeRule(ruleXml, format), [ruleXml, format]);

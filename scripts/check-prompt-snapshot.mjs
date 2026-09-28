@@ -215,6 +215,13 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // rule and a wrong example) and suggestRule/brex-4-2-corrected-after-
 // failed-test (the "PREVIOUS RULE FAILED ITS TEST" block). Every other
 // prompt is unchanged.
+//
+// Test de reglas T4: two new ruleTestExamples cases for DITA Schematron
+// (dita-xpath2-note-topic-body: topic type and topic/body insertion;
+// dita-xpath2-root-whole-document: a root context, the LLM writes the whole
+// topic). The DITA wording (topic type, ship or aircraft content, no S1000D
+// reference elements) only applies to SCH-DITA: every existing prompt,
+// the S1000D ruleTestExamples cases included, is unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

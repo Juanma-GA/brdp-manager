@@ -418,6 +418,39 @@ ruleTestExamplesCases.push({
   ],
 });
 
+// Test de reglas T4: DITA Schematron -- examples on topic-type skeletons
+// (topic/body for a note rule, the whole document for a root context).
+const ruleDitaNote =
+  '<sch:pattern id="p-BRDP-D1-00100"><sch:rule context="note"><sch:assert id="BRDP-D1-00100" role="error" test="@type">Every note must declare its type (@type).</sch:assert></sch:rule></sch:pattern>';
+const ruleDitaRootLang =
+  '<pattern id="p-BRDP-D1-00020"><rule context="/*[not(parent::*)]"><assert id="BRDP-D1-00020" role="error" test="@xml:lang">The topic must declare xml:lang.</assert></rule></pattern>';
+ruleTestExamplesCases.push(
+  {
+    name: 'dita-xpath2-note-topic-body',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-D1-00100', title: 'Note types', definition: 'Decide whether notes declare their type.', proposal: 'Every <note> shall declare its type with @type.' },
+        standard: 'DITA 1.3 Xpath2.0',
+        format: 'SCH-DITA',
+        ruleXml: ruleDitaNote,
+        placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaNote, [['topic', 'rule']]),
+      },
+    ],
+  },
+  {
+    name: 'dita-xpath2-root-whole-document',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-D1-00020', title: 'Specify the language', definition: 'Decide how the language is declared.', proposal: 'The root of every topic shall declare xml:lang.' },
+        standard: 'DITA 1.3 Xpath2.0',
+        format: 'SCH-DITA',
+        ruleXml: ruleDitaRootLang,
+        placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaRootLang, [['topic', 'rule']]),
+      },
+    ],
+  }
+);
+
 // T3b "Review with the assistant": the review prompt, with the rule's
 // deterministic description (describeRule, English) -- a wrong rule (flag 2
 // on //emphasis, "cannot reject any content") and a right rule with a

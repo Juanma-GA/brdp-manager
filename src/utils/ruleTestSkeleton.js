@@ -17,6 +17,14 @@
 //   and shown, with xsi:noNamespaceSchemaLocation in the project's form;
 // - checkExampleStructure: every element exists in the schema, every child
 //   is allowed inside its parent, every attribute exists on its element.
+//
+// DITA (T4): the "schemas" are the topic types (topic, concept, task,
+// reference, troubleshooting, map -- GET /api/schema-cards' document_schemas),
+// each with its own skeleton (topic/body, task/taskbody/steps/step, …). For
+// a Schematron rule, what it checks comes from its sch:rule contexts only
+// (the tests speak about the context node, not about where it sits); a
+// context anchored at the document root (/*, /topic) makes the example the
+// whole document: the LLM writes the complete root element.
 import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js';
 import { extractRuleXPaths } from './ruleNameCheck.js';
 
@@ -116,13 +124,40 @@ function analyzeAlternative(alternative, out) {
   }
 }
 
-// { checked: [element names], absolutePrefixes: [[names]] }
+const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+const decodeEntities = (text) =>
+  text.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|(lt|gt|amp|quot|apos));/g, (_m, dec, hex, name) =>
+    dec ? String.fromCodePoint(Number(dec)) : hex ? String.fromCodePoint(parseInt(hex, 16)) : ENTITIES[name]
+  );
+// The @context of every Schematron rule (sch:rule, any prefix or none).
+const SCH_RULE_CONTEXT_RE = /<(?:[\w.-]+:)?rule\b[^>]*?\scontext\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
+export function schematronContexts(ruleXml) {
+  const out = [];
+  for (const m of String(ruleXml || '').matchAll(SCH_RULE_CONTEXT_RE)) out.push(decodeEntities(m[1] ?? m[2]));
+  return out;
+}
+
+// An XSLT pattern that matches only the document's root element: "/*",
+// "/topic", "/*[not(parent::*)]".
+function isRootContext(alternative) {
+  return /^\/(?:\*|[A-Za-z_][\w.-]*)$/.test(alternative.trim());
+}
+
+// { checked: [element names], absolutePrefixes: [[names]], wholeDocument }
+// wholeDocument: a Schematron context that matches the document's root
+// element -- the example has to be a whole document.
 export function ruleTargets(ruleXml) {
   const out = { checked: new Set(), absolutePrefixes: [] };
-  for (const expression of extractRuleXPaths(ruleXml || '')) {
-    for (const alternative of splitTopLevel(stripPredicates(expression), '|')) analyzeAlternative(alternative, out);
+  const contexts = schematronContexts(ruleXml);
+  let wholeDocument = false;
+  for (const expression of contexts.length ? contexts : extractRuleXPaths(ruleXml || '')) {
+    for (const alternative of splitTopLevel(stripPredicates(expression), '|')) {
+      if (contexts.length && isRootContext(alternative)) wholeDocument = true;
+      analyzeAlternative(alternative, out);
+    }
   }
-  return { checked: [...out.checked], absolutePrefixes: out.absolutePrefixes };
+  return { checked: [...out.checked], absolutePrefixes: out.absolutePrefixes, wholeDocument };
 }
 
 // ─── Which schemas the examples use ─────────────────────────────────────────
@@ -131,18 +166,28 @@ export function ruleTargets(ruleXml) {
 // element the rule checks (and the root of its absolute paths).
 const TEST_SCHEMA_PREFERENCE = ['descript', 'proced', 'process', 'fault', 'ipd', 'schedul', 'crew', 'comrep', 'sb'];
 
-function schemasHavingAll(names, cards, documentSchemas) {
-  return documentSchemas.filter((schema) =>
-    names.every((name) => (cards[name]?.variants || []).some((v) => (v.schemas || []).includes(schema)))
-  );
+// `elementSchemas` (DITA): { name: [topic types whose graph has it] } --
+// the merged DITA cards list a single schema, so the backend answers it.
+function schemasHavingAll(names, cards, documentSchemas, elementSchemas) {
+  const has = (name, schema) =>
+    elementSchemas && elementSchemas[name]
+      ? elementSchemas[name].includes(schema)
+      : (cards[name]?.variants || []).some((v) => (v.schemas || []).includes(schema));
+  return documentSchemas.filter((schema) => names.every((name) => has(name, schema)));
 }
 
-function byPreference(schemas) {
+// TEST_SCHEMA_PREFERENCE first (S1000D), then the order the backend lists
+// them in (alphabetical for S1000D; topic, concept, task, … for DITA).
+function byPreference(schemas, documentSchemas = []) {
   const rank = (s) => {
     const i = TEST_SCHEMA_PREFERENCE.indexOf(s);
     return i === -1 ? TEST_SCHEMA_PREFERENCE.length : i;
   };
-  return [...schemas].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const listed = (s) => {
+    const i = documentSchemas.indexOf(s);
+    return i === -1 ? documentSchemas.length : i;
+  };
+  return [...schemas].sort((a, b) => rank(a) - rank(b) || listed(a) - listed(b) || a.localeCompare(b));
 }
 
 // { testSchema, otherSchema }: the schema the rule's examples use, and, for a
@@ -150,17 +195,19 @@ function byPreference(schemas) {
 // example (one that has the checked elements too, so the example can show
 // them). `cards` is GET /api/schema-cards's answer for the checked names and
 // absolute roots ({} when unavailable).
-export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, targets }) {
+export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, targets }) {
+  const known = (name) => Boolean(cards[name]) || Boolean(elementSchemas?.[name]?.length);
   const required = [...new Set([...(targets?.checked || []), ...(targets?.absolutePrefixes || []).map((p) => p[0])])]
-    .filter((name) => cards[name]);
-  const fitting = byPreference(schemasHavingAll(required, cards, documentSchemas));
+    .filter(known);
+  const order = (list) => byPreference(list, documentSchemas);
+  const fitting = order(schemasHavingAll(required, cards, documentSchemas, elementSchemas));
   if (contextSchemas.length > 0) {
     const taken = new Set(contextSchemas);
     const others = fitting.filter((s) => !taken.has(s));
-    const fallback = byPreference(documentSchemas.filter((s) => !taken.has(s)));
+    const fallback = order(documentSchemas.filter((s) => !taken.has(s)));
     return { testSchema: contextSchemas[0], otherSchema: others[0] || fallback[0] || null };
   }
-  const fallback = byPreference(documentSchemas);
+  const fallback = order(documentSchemas);
   return { testSchema: fitting[0] || fallback[0] || null, otherSchema: null };
 }
 
@@ -186,11 +233,16 @@ function reachable(elements, from, target, maxDepth = 8) {
 }
 
 // { path, insertion, allowedChildren } for one schema's structure
-// (GET /api/schema-cards/structure) and the rule's targets.
+// (GET /api/schema-cards/structure) and the rule's targets. A whole-document
+// example (the rule checks the root element) has an empty path and no
+// insertion point: the content is the complete root element.
 export function placeExample(structure, targets) {
   const chain = structure.skeleton.path;
   const elements = structure.elements;
   const checked = (targets?.checked || []).filter((name) => elements[name]);
+  if (targets?.wholeDocument || checked.includes(chain[0])) {
+    return { path: [], insertion: null, root: chain[0], allowedChildren: [...(elements[chain[0]]?.children || [])] };
+  }
 
   // The example that complies must be able to leave out what the rule
   // checks, so the skeleton stops before the first element it checks.
@@ -218,7 +270,7 @@ export function placeExample(structure, targets) {
     }
   }
   const insertion = chain[index];
-  return { path: chain.slice(0, index + 1), insertion, allowedChildren: [...(elements[insertion]?.children || [])] };
+  return { path: chain.slice(0, index + 1), insertion, root: chain[0], allowedChildren: [...(elements[insertion]?.children || [])] };
 }
 
 // ─── The complete fragment ──────────────────────────────────────────────────
@@ -226,14 +278,19 @@ export function placeExample(structure, targets) {
 const indentOf = (n) => '  '.repeat(n);
 
 // { xml, skeletonNodePaths }: the skeleton path around the LLM's content.
-// The root carries xsi:noNamespaceSchemaLocation with the schema's URL in the
-// project's form (flat/master), so a rule limited to that schema applies.
+// S1000D: the root carries xsi:noNamespaceSchemaLocation with the schema's
+// URL in the project's form (flat/master), so a rule limited to that schema
+// applies. DITA: no schema location (a DITA document names its DTD/shell,
+// never an XSD URL), so the root gets no namespace declaration either.
+// A whole-document placement (empty path) is the content alone.
 export function assembleExample({ standard, schema, schemaLocation, placement, content }) {
   const path = placement.path;
   const body = String(content ?? '').trim();
-  const rootAttrs = [`xmlns:xsi="${XSI_NS}"`];
+  if (path.length === 0) return { xml: body, skeletonNodePaths: [] };
+  const withSchemaLocation = supportsSchemaContext(standard);
+  const rootAttrs = withSchemaLocation ? [`xmlns:xsi="${XSI_NS}"`] : [];
   if (/\bxlink:/.test(body)) rootAttrs.push(`xmlns:xlink="${XLINK_NS}"`);
-  if (supportsSchemaContext(standard) && schema) {
+  if (withSchemaLocation && schema) {
     rootAttrs.push(`xsi:noNamespaceSchemaLocation="${schemaContextUrl(standard, schema, schemaLocation)}"`);
   }
   // Whitespace only between skeleton elements (element-only content); the
@@ -243,7 +300,7 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
   const last = path.length - 1;
   const lines = [];
   path.forEach((name, i) => {
-    const open = `${indentOf(i)}<${name}${i === 0 ? ` ${rootAttrs.join(' ')}` : ''}>`;
+    const open = `${indentOf(i)}<${name}${i === 0 && rootAttrs.length ? ` ${rootAttrs.join(' ')}` : ''}>`;
     lines.push(i === last ? `${open}${body}</${name}>` : open);
   });
   for (let i = last - 1; i >= 0; i -= 1) lines.push(`${indentOf(i)}</${path[i]}>`);

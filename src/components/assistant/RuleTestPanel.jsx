@@ -7,8 +7,8 @@ import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTes
 import { formatRuleDescription, formatRuleTestReason } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 
-// Test rule (T2 of 4): which rule formats can be tested (the T1 engine runs
-// S1000D BREX only). Used by both places that show the button.
+// Test rule (T2 of 4): which rule formats can be tested (S1000D BREX since
+// T1, DITA Schematron since T4). Used by both places that show the button.
 export function canTestRule(format) {
   return RULE_TEST_FORMATS.includes(format);
 }
@@ -110,7 +110,7 @@ function ValidationProblems({ validation, standard, schema }) {
   );
 }
 
-function ExampleCard({ example, run, index, standard, showResult, onRunAgain }) {
+function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(example.content);
@@ -133,7 +133,9 @@ function ExampleCard({ example, run, index, standard, showResult, onRunAgain }) 
     <div className={styles.ruleTestExample} data-testid={`rule-test-example-${index}`}>
       <div className={styles.ruleTestExampleHead}>
         <strong>{example.label}</strong>
-        {example.schema && <span className={styles.muted}>{t('records.ruleTest.schema', { schema: example.schema })}</span>}
+        {example.schema && (
+          <span className={styles.muted}>{t(dita ? 'records.ruleTest.topicType' : 'records.ruleTest.schema', { schema: example.schema })}</span>
+        )}
       </div>
       <div className={styles.ruleTestOutcomes}>
         <span>{t('records.ruleTest.expected', { outcome: t(`records.ruleTest.outcomes.${example.expected}`) })}</span>
@@ -162,7 +164,11 @@ function ExampleCard({ example, run, index, standard, showResult, onRunAgain }) 
             spellCheck={false}
             rows={Math.min(14, Math.max(4, draft.split('\n').length + 1))}
           />
-          <p className={styles.hint}>{t('records.ruleTest.editContentHint', { insertion: example.insertion || 'para' })}</p>
+          <p className={styles.hint}>
+            {example.insertion
+              ? t('records.ruleTest.editContentHint', { insertion: example.insertion })
+              : t('records.ruleTest.editWholeDocumentHint')}
+          </p>
           <div className={styles.suggestionActions}>
             <button
               onClick={() => {
@@ -207,9 +213,17 @@ function ExampleCard({ example, run, index, standard, showResult, onRunAgain }) 
         result?.status === 'rejected' &&
         result.violations
           .filter((v) => v.message)
-          .map((v) => (
-            <p key={v.ruleId} className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`}>
+          .map((v, i) => (
+            <p key={`${v.ruleId}:${i}`} className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`}>
               {t('records.ruleTest.ruleMessage', { message: v.message })}
+            </p>
+          ))}
+      {showResult &&
+        (result?.warnings || [])
+          .filter((w) => w.message)
+          .map((w, i) => (
+            <p key={`w:${w.ruleId}:${i}`} className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-rule-warning">
+              {t('records.ruleTest.ruleWarning', { message: w.message })}
             </p>
           ))}
     </div>
@@ -377,6 +391,12 @@ export default function RuleTestPanel({
         </p>
       )}
 
+      {(analysis.warnings || []).map((w) => (
+        <p key={w.code} className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-analysis-warning">
+          ⚠ {formatRuleTestReason(w, t)}
+        </p>
+      ))}
+
       <RuleDescription description={description} />
 
       {state.status === 'idle' && (
@@ -435,6 +455,7 @@ export default function RuleTestPanel({
               run={state.runs[i]}
               index={i}
               standard={standard}
+              dita={format === 'SCH-DITA'}
               showResult={showResults}
               onRunAgain={(content) => runAgain(i, content)}
             />

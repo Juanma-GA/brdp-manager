@@ -621,7 +621,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
   const schemas = testCase.schemas || [];
   const ruleXml = schemas.length ? wrapRuleInSchemaContexts(testCase.rule, format, testCase.standard, schemas, location) : testCase.rule;
   const vocabulary = loadSchemaVocabulary(testCase.standard);
-  const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse });
+  const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse, standard: testCase.standard });
   const result = await generateRuleTestExamples({
     ruleXml,
     format,

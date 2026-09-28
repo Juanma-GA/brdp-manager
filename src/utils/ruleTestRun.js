@@ -30,15 +30,18 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   // choice falls back to the standard's preference order without them.
   let cards = {};
   let documentSchemas = [];
+  let elementSchemas = null;
   try {
     const res = await fetchSchemaCards(standard, lookup);
     cards = res.cards || {};
     documentSchemas = res.document_schemas || [];
+    // DITA (T4): which topic types have each name.
+    if (res.element_schemas && Object.keys(res.element_schemas).length) elementSchemas = res.element_schemas;
   } catch {
     // no facts
   }
   const schemaFacts = factNames.filter((n) => cards[n]).map((name) => ({ name, entry: cards[name] }));
-  const { testSchema, otherSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, targets });
+  const { testSchema, otherSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, targets });
   const placements = {};
   const promptPlacements = [];
   for (const [schema, role] of [[testSchema, 'rule'], [otherSchema, 'other']]) {

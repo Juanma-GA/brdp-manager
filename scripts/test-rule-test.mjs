@@ -29,6 +29,7 @@ import {
   assembleExample,
   checkExampleStructure,
   chooseTestSchemas,
+  formatStructureProblem,
   placeExample,
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
@@ -371,6 +372,112 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const untestedDoc = w({}, 'BREX-4.2', docRule);
   check('verify: never tested but not executable → explained, no Test now', untestedDoc.kind === 'not_executable' && !untestedDoc.canTestNow && untestedDoc.reason.code === 'external_document', JSON.stringify(untestedDoc));
   check('verify: unknown format (not testable) → no dialog', w({}, 'XSD-1.1') === null);
+}
+
+// ─── T4: DITA Schematron on topic-type skeletons ────────────────────────────
+{
+  const DITA = 'DITA 1.3 Xpath2.0';
+  const vocabDita = vocabOf('schema-vocabulary-dita.json');
+  const TYPES = ['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'];
+  // What the backend answers in element_schemas: the types whose graph has
+  // each name (the fixture has the topic, task and map graphs).
+  const elementSchemasFor = (names) =>
+    Object.fromEntries(names.map((n) => [n, ['topic', 'task', 'map'].filter((t) => structureOf(DITA, t).elements[n])]));
+  const NOTE = '<sch:pattern id="p-note"><sch:rule context="note"><sch:assert id="N1" role="error" test="@type">Every note must declare @type.</sch:assert></sch:rule></sch:pattern>';
+  const NOTE_WRONG = NOTE.replace('test="@type"', 'test="not(@type)"');
+  const STEP = '<pattern><rule context="step"><assert id="S1" test="count(cmd) = 1">One command per step.</assert></rule></pattern>';
+  const ROOT_LANG = '<sch:pattern><sch:rule context="/*[not(parent::*)]"><sch:assert id="L" test="@xml:lang">Declare xml:lang.</sch:assert></sch:rule></sch:pattern>';
+  const SHORTDESC = '<sch:pattern><sch:rule context="shortdesc"><sch:assert id="SD" test="string-length(.) le 80">Short description too long.</sch:assert></sch:rule></sch:pattern>';
+
+  check('T4 targets: Schematron → contexts only', JSON.stringify(ruleTargets(STEP)) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], wholeDocument: false }), JSON.stringify(ruleTargets(STEP)));
+  check('T4 targets: note', ruleTargets(NOTE).checked.join() === 'note');
+  check('T4 targets: root context → whole document', ruleTargets(ROOT_LANG).wholeDocument === true);
+  check('T4 targets: entities decoded in the context', ruleTargets('<rule context="p[. = &apos;x&apos;]"><assert test="1">x</assert></rule>').checked.join() === 'p');
+
+  const choose = (rule) => {
+    const targets = ruleTargets(rule);
+    return chooseTestSchemas({ documentSchemas: TYPES, cards: {}, elementSchemas: elementSchemasFor(targets.checked), targets }).testSchema;
+  };
+  check('T4 type: note → topic', choose(NOTE) === 'topic');
+  check('T4 type: step → task', choose(STEP) === 'task');
+  check('T4 type: cmd → task', choose('<rule context="cmd"><assert test="1">x</assert></rule>') === 'task');
+  check('T4 type: topicref → map', choose('<rule context="topicref"><assert test="@href">x</assert></rule>') === 'map');
+  check('T4 type: whole document → topic', choose(ROOT_LANG) === 'topic');
+
+  const place = (rule, type) => placeExample(structureOf(DITA, type), ruleTargets(rule));
+  check('T4 placement: note in topic/body', place(NOTE, 'topic').path.join('/') === 'topic/body');
+  check('T4 placement: step → inside steps', place(STEP, 'task').path.join('/') === 'task/taskbody/steps');
+  check('T4 placement: cmd → inside step', place('<rule context="cmd"><assert test="1">x</assert></rule>', 'task').path.join('/') === 'task/taskbody/steps/step');
+  check('T4 placement: shortdesc → up a level, inside topic', place(SHORTDESC, 'topic').path.join('/') === 'topic', place(SHORTDESC, 'topic').path.join('/'));
+  check('T4 placement: prolog → inside topic', place('<rule context="prolog"><assert test="copyright">x</assert></rule>', 'topic').insertion === 'topic');
+  const whole = place(ROOT_LANG, 'topic');
+  check('T4 placement: whole document', whole.path.length === 0 && whole.insertion === null && whole.root === 'topic' && whole.allowedChildren.includes('body'));
+
+  const a = assembleExample({ standard: DITA, schema: 'topic', placement: place(NOTE, 'topic'), content: '<note type="caution">Close the valve.</note>' });
+  check('T4 assembly: DITA root has no xsi', a.xml.startsWith('<topic>') && !a.xml.includes('xsi'), a.xml);
+  check('T4 assembly: whole document is the content', assembleExample({ standard: DITA, schema: 'topic', placement: whole, content: ' <topic id="t"/> ' }).xml === '<topic id="t"/>');
+
+  const structure = structureOf(DITA, 'topic');
+  const problems = (xml) => checkExampleStructure(parseXml(xml), structure).map((p) => formatStructureProblem(p, 'topic'));
+  check('T4 structure: valid topic', problems('<topic id="t"><title>x</title><body><note type="tip"><p>x</p></note></body></topic>').length === 0);
+  check('T4 structure: <cmd> is not in a topic', problems('<topic><body><cmd>x</cmd></body></topic>').includes('<cmd> does not exist in the topic schema'), problems('<topic><body><cmd>x</cmd></body></topic>').join());
+  check('T4 structure: <title> not inside <p>', problems('<topic><body><p><title>x</title></p></body></topic>').includes('<title> is not allowed inside <p>'));
+  check('T4 structure: @frame not on <note>', problems('<topic><body><note frame="all">x</note></body></topic>').includes('@frame does not exist on <note>'));
+  check('T4 structure: xml:lang never flagged', problems('<topic xml:lang="en"><body/></topic>').length === 0);
+
+  const setupNote = setupFor(DITA, NOTE, ['topic']);
+  const examples = [
+    { label: 'typed note', expected: 'accept', schema: 'topic', content: '<note type="caution"><p>Isolate the bilge pump before removal.</p></note>' },
+    { label: 'untyped note', expected: 'reject', schema: 'topic', content: '<note><p>Isolate the bilge pump before removal.</p></note>' },
+  ];
+  const good = testRun(NOTE, examples, setupNote, { format: 'SCH-DITA', vocab: vocabDita });
+  check('T4 run: note rule correct', good.verdict.kind === 'correct', JSON.stringify(good.verdict));
+  check('T4 run: rejected example carries the rule message', good.runs[1].result.violations[0].message === 'Every note must declare @type.');
+  check('T4 run: highlighted node path', good.runs[1].result.violations[0].nodePaths[0] === '/topic[1]/body[1]/note[1]');
+  const wrong = testRun(NOTE_WRONG, examples, setupFor(DITA, NOTE_WRONG, ['topic']), { format: 'SCH-DITA', vocab: vocabDita });
+  check('T4 run: inverted assert → incorrect in both directions', wrong.verdict.kind === 'incorrect' && wrong.verdict.permissive && wrong.verdict.strict, JSON.stringify(wrong.verdict));
+
+  const stepRun = testRun(STEP, [
+    { label: 'one cmd', expected: 'accept', schema: 'task', content: '<step><cmd>Remove the four bolts.</cmd></step>' },
+    { label: 'two cmds', expected: 'reject', schema: 'task', content: '<step><cmd>Remove the bolts.</cmd><cmd>Lift the cover.</cmd></step>' },
+  ], setupFor(DITA, STEP, ['task']), { format: 'SCH-DITA', vocab: vocabDita });
+  check('T4 run: step rule on the task skeleton', stepRun.verdict.kind === 'correct' && stepRun.materialized[0].xml.startsWith('<task>'), JSON.stringify(stepRun.verdict));
+
+  const lang = testRun(ROOT_LANG, [
+    { label: 'with lang', expected: 'accept', schema: 'topic', content: '<topic id="t" xml:lang="en-GB"><title>Bilge pump</title><body><p>Check the seals.</p></body></topic>' },
+    { label: 'without lang', expected: 'reject', schema: 'topic', content: '<topic id="t"><title>Bilge pump</title><body><p>Check the seals.</p></body></topic>' },
+  ], setupFor(DITA, ROOT_LANG, ['topic']), { format: 'SCH-DITA', vocab: vocabDita });
+  check('T4 run: whole-document rule', lang.verdict.kind === 'correct' && lang.materialized[1].skeletonNodePaths.length === 0, JSON.stringify(lang.verdict));
+
+  const warnRule = NOTE.replace('role="error"', 'role="warning"');
+  const warnRun = testRun(warnRule, examples, setupFor(DITA, warnRule, ['topic']), { format: 'SCH-DITA', vocab: vocabDita });
+  check('T4 run: role="warning" never rejects', warnRun.runs[1].result.status === 'accepted' && warnRun.runs[1].result.warnings.length === 1);
+  check('  so the reject example is not met', warnRun.verdict.kind === 'incorrect');
+
+  const prompt = buildRuleTestExamplesPrompt({
+    brdp: { identifier: 'BRDP-D1-00001', title: 'Note types', definition: 'Notes declare their type.', proposal: 'Every note declares @type.' },
+    standard: DITA,
+    format: 'SCH-DITA',
+    ruleXml: NOTE,
+    placements: [{ schema: 'topic', role: 'rule', ...setupNote.placements.topic.placement }],
+  });
+  check('T4 prompt: topic type wording', prompt.includes('Every example is a DITA topic ("schema": "topic").') && prompt.includes('- topic type "topic": your content goes directly inside <body>, at\n  topic/body.'), prompt);
+  check('T4 prompt: ship or aircraft content', prompt.includes('a ship or aircraft maintenance manual'));
+  check('T4 prompt: no S1000D reference elements', !prompt.includes('dmRef'));
+  const wholePrompt = buildRuleTestExamplesPrompt({
+    brdp: { identifier: 'BRDP-D1-00020', title: 'Language', definition: 'x', proposal: 'Declare xml:lang on the root.' },
+    standard: DITA,
+    format: 'SCH-DITA',
+    ruleXml: ROOT_LANG,
+    placements: [{ schema: 'topic', role: 'rule', ...whole }],
+  });
+  check('T4 prompt: whole document', wholePrompt.includes('your "content" is the whole DITA 1.3 Xpath2.0 document') && wholePrompt.includes('the complete\n  <topic> root element') && !wholePrompt.includes('never the document root'), wholePrompt);
+  const { verifyWarning } = await import('../src/utils/ruleTestStatus.js');
+  const approval = (fields) => ({ status: 'pending_review', last_test_result: null, last_test_reason: null, last_test_at: null, last_test_up_to_date: null, ...fields });
+  check('T4 verify: DITA rule never tested → dialog with Test now', verifyWarning(approval({ rule_xml: NOTE }), 'SCH-DITA', { parseXml }).kind === 'not_tested');
+  const docDita = '<sch:pattern><sch:rule context="map"><sch:assert test="doc-available(\'a.dita\')">x</sch:assert></sch:rule></sch:pattern>';
+  const docW = verifyWarning(approval({ rule_xml: docDita }), 'SCH-DITA', { parseXml });
+  check('T4 verify: doc() on the ditamap → not executable, explained', docW.kind === 'not_executable' && !docW.canTestNow && docW.reason.code === 'external_document', JSON.stringify(docW));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

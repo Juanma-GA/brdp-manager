@@ -20,9 +20,12 @@ export const RULE_TEST_USER_MESSAGE = 'Write the test examples for this rule.';
 // so the rule is stated in the prompt.
 const NO_TEXT_ELEMENTS = '<dmRef>, <dmRefIdent>, <dmCode>, <internalRef>, <pmRef>, <externalPubRef>';
 
-function schemaInstructions(contextSchemas, placements) {
+function schemaInstructions(contextSchemas, placements, dita) {
   const rulePlacement = placements.find((p) => p.role === 'rule');
   const other = placements.find((p) => p.role === 'other');
+  if (dita) {
+    return `Every example is a DITA ${rulePlacement.schema} ("schema": "${rulePlacement.schema}").`;
+  }
   if (!contextSchemas || contextSchemas.length === 0) {
     return `The rule is general: every example uses the "${rulePlacement.schema}" schema
 ("schema": "${rulePlacement.schema}").`;
@@ -39,11 +42,34 @@ the rule does not apply there.`;
   return text;
 }
 
-function placementLine(p) {
+function placementLine(p, dita) {
   const allowed = p.allowedChildren.length > 0 ? p.allowedChildren.join(', ') : 'text only';
-  return `- schema "${p.schema}": your content goes directly inside <${p.insertion}>, at
+  const kind = dita ? 'topic type' : 'schema';
+  if (!p.insertion) {
+    // T4: the rule checks the document's root element.
+    return `- ${kind} "${p.schema}": your content is the WHOLE document — the complete
+  <${p.root}> root element with everything inside it.
+  Allowed directly inside <${p.root}>: ${allowed}.`;
+  }
+  return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
   ${p.path.join('/')}.
-  Allowed directly inside <${p.insertion}> in this schema: ${allowed}.`;
+  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.`;
+}
+
+// T4: how each example is built, for the placements offered.
+function buildingInstructions(standard, placements, dita) {
+  const kind = dita ? 'topic type' : 'schema';
+  if (placements.every((p) => !p.insertion)) {
+    return `HOW EACH EXAMPLE IS BUILT: the rule checks the document's root element, so
+your "content" is the whole ${standard} document of the example's ${kind}:
+write the complete root element.
+${placements.map((p) => placementLine(p, dita)).join('\n')}`;
+  }
+  return `HOW EACH EXAMPLE IS BUILT: the application builds a real ${standard} document
+of the example's ${kind} and puts your "content" at one fixed point. Write
+ONLY that content — never the element it goes into, never the elements
+around it, never the document root.
+${placements.map((p) => placementLine(p, dita)).join('\n')}`;
 }
 
 // `input`: { brdp, standard, format, ruleXml, contextSchemas, placements,
@@ -56,6 +82,9 @@ function placementLine(p) {
 // mismatches: [{ label, expected, got, content }] } -- the regeneration must
 // not repeat that mistake.
 export function buildRuleTestExamplesPrompt({ brdp, standard, format, ruleXml, contextSchemas = [], placements = [], schemaFacts = [], previousReview = null }) {
+  // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
+  // aircraft content, and no S1000D reference elements.
+  const dita = format === 'SCH-DITA';
   const hasFacts = schemaFacts && schemaFacts.length > 0;
   const namesLine = hasFacts
     ? `use only element and attribute names that appear in
@@ -93,24 +122,24 @@ WHAT TO WRITE:
   the Proposal says it is required. The reject example goes against exactly
   what the Proposal decides (for example a value the Proposal does not
   allow), never against something the Proposal does not mention.
-${schemaInstructions(contextSchemas, placements)}
+${schemaInstructions(contextSchemas, placements, dita)}
 
-HOW EACH EXAMPLE IS BUILT: the application builds a real ${standard} document
-of the example's schema and puts your "content" at one fixed point. Write
-ONLY that content — never the element it goes into, never the elements
-around it, never the document root.
-${placements.map(placementLine).join('\n')}
+${buildingInstructions(standard, placements, dita)}
 
 EACH EXAMPLE:
-- A short piece of an aircraft maintenance manual: maintenance steps,
+- A short piece of ${dita ? 'a ship or aircraft maintenance manual' : 'an aircraft maintenance manual'}: maintenance steps,
   removal of components, torque values and the like. In English, at most 10
   lines of content.
 - Real ${standard} markup: ${namesLine}. Every
   element only inside a parent that allows it, every attribute only on an
-  element that has it.
+  element that has it.${
+    dita
+      ? ''
+      : `
 - Never put text directly inside an element that only references or groups
   other content (${NO_TEXT_ELEMENTS}): give it its child
-  elements and attributes instead.
+  elements and attributes instead.`
+  }
 - The reject example goes against the decision in one clear way; the
   accept example is otherwise similar, so the difference is easy to see.
 - No customer data, no real manufacturer names, part numbers or CAGE codes.
