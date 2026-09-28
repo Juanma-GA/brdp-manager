@@ -102,7 +102,7 @@ const ETYPE =
   check('document(): not checked, with the reason', dd.lines[0].startsWith('Not checked by the test engine: The rule reads another file (document())'), dd.lines[0]);
   const nc = '<nonContextRule id="R9"><simplePara>Use plain English.</simplePara></nonContextRule>';
   check('nonContextRule: described', lines(nc, 'BREX-4.2').lines[0].startsWith('A decision with no XPath check'));
-  check('unknown format: not available', describe(EMPH0, 'SCH-DITA').available === false);
+  check('unknown format: not available', describe(EMPH0, 'XSD-1.1').available === false);
   check('malformed rule: not available', describe('<structureObjectRule>', 'BREX-4.2').available === false);
   check('not available → formatRuleDescription null', formatRuleDescription({ available: false }, tEn) === null);
   check('no target (alternatives) → nodes of the path', lines('<structureObjectRule id="R"><objectPath allowedObjectFlag="0">//a | //b</objectPath><objectUse>x</objectUse></structureObjectRule>', 'BREX-4.2').lines[0].startsWith('The nodes selected by //a | //b must not appear'));

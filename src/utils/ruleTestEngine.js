@@ -89,12 +89,34 @@
 // select anything there, and "accepted" would be a verdict nobody computed.
 // A path starting with "(" ("(/a | /b)/c") is a location path for both
 // (REF treated it as a no-op until T2).
+//
+// Test de reglas T4: Schematron (SCH-DITA) goes through the same three entry
+// points -- runRuleOnFragment, analyzeRule, describeRule -- with the same
+// result shapes; its semantics (a table like the one above, with its
+// origin) and implementation live in utils/ruleTestSchematron.js. Every
+// result also carries `warnings` (T4): Schematron assert/report with
+// role="warning"/"info" that fired (they never reject), [] for BREX.
 import fontoxpath from 'fontoxpath';
 import { _isContextPattern, _splitTopLevel, _valueCheckXPath } from '../api/brexToSchematron.js';
 import { schemaNameFromContext } from './ruleSchemaContext.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
+import {
+  KNOWN_NAMESPACES,
+  NotExecutable,
+  OTHER_FILE_RE,
+  XPATH_LANGUAGE,
+  combinedReason,
+  localName,
+  nodePath,
+  parseXmlDocument,
+  reason,
+  xpathErrorMessage,
+} from './ruleTestCommon.js';
+import { analyzeSchematron, describeSchematron, runSchematronOnFragment, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
 
-export const RULE_TEST_FORMATS = ['BREX-4.2', 'BREX-4.1', 'BREX-3.0.1'];
+export { nodePath, parseXmlDocument };
+
+export const RULE_TEST_FORMATS = ['BREX-4.2', 'BREX-4.1', 'BREX-3.0.1', ...SCHEMATRON_FORMATS];
 
 const FORMATS = {
   'BREX-4.2': {
@@ -117,21 +139,6 @@ const WHOLE_DOCUMENT_ROOTS = new Set([
   'dmodule', 'pm', 'dml', 'ddn', 'comment', 'dataUpdateFile', 'scormContentPackage', 'icnMetadataFile',
 ]);
 
-// Prefixes a rule path may use without the fragment declaring them.
-const KNOWN_NAMESPACES = {
-  xsi: 'http://www.w3.org/2001/XMLSchema-instance',
-  xlink: 'http://www.w3.org/1999/xlink',
-  rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
-  dc: 'http://www.purl.org/dc/elements/1.1/',
-};
-
-const XPATH_LANGUAGE = fontoxpath.evaluateXPath.XPATH_3_1_LANGUAGE;
-const OTHER_FILE_RE = /\b(document|doc|doc-available|collection|unparsed-text(?:-lines|-available)?)\s*\(/;
-// Reasons are codes with parameters, never sentences (T3, Part 0): the UI
-// translates them (records.ruleTest.reasons.<code>, src/utils/
-// ruleTestReasons.js), and the recorded test result keeps the code so
-// History and the Rule Status indicator follow the viewer's language.
-const reason = (code, params = {}) => ({ code, params });
 const REASON = {
   otherFile: (fn) => reason('external_document', { fn }),
   nonContext: () => reason('non_context_rule'),
@@ -153,68 +160,10 @@ const REASON = {
   mixedRange: (from, to) => reason('mixed_range', { from, to }),
 };
 
-// The reason of a rule with several parts, some of which cannot run.
-function combinedReason(notRun, totalParts) {
-  if (notRun.length === 0) return null;
-  if (totalParts === 1) return notRun[0].reason;
-  return reason('parts', { parts: notRun });
-}
-
-class NotExecutable extends Error {
-  constructor(r) {
-    super(r.code);
-    this.reason = r;
-  }
-}
-
-export function parseXmlDocument(text) {
-  if (typeof DOMParser === 'undefined') throw new Error('No XML parser available.');
-  const doc = new DOMParser().parseFromString(text, 'application/xml');
-  const error = doc.getElementsByTagName('parsererror')[0];
-  if (error) {
-    // Chromium wraps the message: "This page contains the following errors:…Below is a rendering…"
-    const text = (error.textContent || 'parse error')
-      .replace(/^[\s\S]*?following errors:\s*/, '')
-      .replace(/Below is a rendering[\s\S]*$/, '');
-    throw new Error(text.trim().split('\n')[0]);
-  }
-  return doc;
-}
-
-// fontoxpath error messages can start with the expression and a caret line;
-// keep the line with the error code.
-function xpathErrorMessage(err) {
-  const text = String(err?.message || err || '');
-  const line = text.split('\n').find((l) => /\b[A-Z]{4}\d{4}\b/.test(l));
-  return (line || text.split('\n')[0]).replace(/^Error:\s*/, '').trim();
-}
-
 function childElements(el, name) {
   const out = [];
   for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1 && n.nodeName === name) out.push(n);
   return out;
-}
-
-function localName(node) {
-  return node.localName || String(node.nodeName).replace(/^.*:/, '');
-}
-
-// XPath-like path of a node for highlighting: /dmodule[1]/content[1]/para[2]/@x
-export function nodePath(node) {
-  if (!node) return '';
-  if (node.nodeType === 2) return `${nodePath(node.ownerElement)}/@${node.nodeName}`;
-  if (node.nodeType === 9) return '/';
-  const parent = node.parentNode;
-  const prefix = parent && parent.nodeType === 1 ? nodePath(parent) : '';
-  if (node.nodeType === 1) {
-    let index = 1;
-    for (let s = node.previousSibling; s; s = s.previousSibling) if (s.nodeType === 1 && s.nodeName === node.nodeName) index += 1;
-    return `${prefix}/${node.nodeName}[${index}]`;
-  }
-  let index = 1;
-  for (let s = node.previousSibling; s; s = s.previousSibling) if (s.nodeType === node.nodeType) index += 1;
-  const test = node.nodeType === 8 ? 'comment()' : node.nodeType === 7 ? 'processing-instruction()' : 'text()';
-  return `${prefix}/${test}[${index}]`;
 }
 
 // Names of the absolute location paths in an expression ("/dmodule/…" →
@@ -398,10 +347,11 @@ function collectParts(ruleRoot, spec) {
 }
 
 function notExecutable(r) {
-  return { status: 'not_executable', violations: [], selectedNodePaths: [], notExecutableReason: r, notExecutableParts: [], outOfScopeSchemas: [] };
+  return { status: 'not_executable', violations: [], warnings: [], selectedNodePaths: [], notExecutableReason: r, notExecutableParts: [], outOfScopeSchemas: [] };
 }
 
 export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema = null, options = {}) {
+  if (SCHEMATRON_FORMATS.includes(format)) return runSchematronOnFragment(ruleXml, fragmentXml, options);
   const spec = FORMATS[format];
   if (!spec) return notExecutable(REASON.format(format));
   const parseXml = options.parseXml || parseXmlDocument;
@@ -458,6 +408,7 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
   return {
     status: notApplicable ? 'accepted' : ran === 0 ? 'not_executable' : violations.length ? 'rejected' : 'accepted',
     violations,
+    warnings: [],
     selectedNodePaths: [...new Set(selected)],
     notExecutableReason,
     notExecutableParts: notRun,
@@ -479,9 +430,14 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
 //     { status: 'executable' | 'partial' | 'not_executable',
 //       reason: { code, params } | null,   // as notExecutableReason
 //       parts: [{ ruleId, reason }],       // the parts that cannot run
-//       total }                            // number of parts
+//       total,                             // number of parts
+//       warnings: [{ code, params }] }     // T4: runs anyway (Schematron
+//                                          // XPath 3.x syntax in an XPath
+//                                          // 2.0 project); [] for BREX
+// options.standard (T4) is the project's standard.
 export function analyzeRule(ruleXml, format, options = {}) {
-  const none = (r) => ({ status: 'not_executable', reason: r, parts: [], total: 0 });
+  if (SCHEMATRON_FORMATS.includes(format)) return analyzeSchematron(ruleXml, options);
+  const none = (r) => ({ status: 'not_executable', reason: r, parts: [], total: 0, warnings: [] });
   const spec = FORMATS[format];
   if (!spec) return none(REASON.format(format));
   const parseXml = options.parseXml || parseXmlDocument;
@@ -515,6 +471,7 @@ export function analyzeRule(ruleXml, format, options = {}) {
     reason: notExecutableReason,
     parts: notRun,
     total: parts.length,
+    warnings: [],
   };
 }
 
@@ -638,6 +595,7 @@ const CAN_REJECT = new Set([
 ]);
 
 export function describeRule(ruleXml, format, options = {}) {
+  if (SCHEMATRON_FORMATS.includes(format)) return describeSchematron(ruleXml, options);
   const spec = FORMATS[format];
   if (!spec) return { available: false };
   const parseXml = options.parseXml || parseXmlDocument;

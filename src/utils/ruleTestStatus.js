@@ -27,7 +27,7 @@ export function ruleTestStatus(approval) {
 // A rule never tested (or tested before it changed) that the engine cannot
 // run anyway gets the not_executable warning straight away, from
 // analyzeRule: "Test now" would only tell the same thing. Only the formats
-// the engine runs (S1000D BREX) are checked; another format (SCH-DITA) has
+// the engine runs (BREX and, since T4, SCH-DITA) are checked; another format has
 // no test to ask for, so no dialog.
 export function verifyWarning(approval, format, options = {}) {
   if (!RULE_TEST_FORMATS.includes(format) || !approval) return null;

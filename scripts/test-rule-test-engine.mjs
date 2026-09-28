@@ -236,7 +236,7 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
     { reason: 'This rule has no XPath to execute (nonContextRule).' });
   expect('3.0.1 nonContextRule comment only', run('<!-- nonContextRule id="BRDP-1": no XPath -->', 'BREX-3.0.1', '<x/>'), 'not_executable',
     { reason: 'This rule has no XPath to execute (nonContextRule).' });
-  expect('unknown rule format', run(sor('0', '//x'), 'SCH-DITA', '<x/>'), 'not_executable', { reason: /^Rule format 'SCH-DITA' is not supported/ });
+  expect('unknown rule format', run(sor('0', '//x'), 'XSD-1.1', '<x/>'), 'not_executable', { reason: /^Rule format 'XSD-1.1' is not supported/ });
   expect('malformed fragment', run(sor('0', '//x'), 'BREX-4.2', '<a><b></a>'), 'not_executable', { reason: /^The test fragment is not well-formed XML: / });
   expect('malformed rule', run('<structureObjectRule><objectPath>//x</structureObjectRule>', 'BREX-4.2', '<x/>'), 'not_executable', { reason: /^The rule is not well-formed XML: / });
   expect('no rule element', run('<objectUse>x</objectUse>', 'BREX-4.2', '<x/>'), 'not_executable', { reason: 'The rule contains no <structureObjectRule> to execute.' });
@@ -437,7 +437,7 @@ console.log(`Coherence: ${coherent} engine runs on rules with values replayed th
     ['unsupported valueForm', run(sor('2', '//@a', '<objectValue valueForm="list" valueAllowed="x"/>'), 'BREX-4.2', '<x a="1"/>'), 'unsupported_value_form', { form: 'list' }],
     ['3.0.1 single with val2', run('<objrule><objpath objappl="0">//@a</objpath><objuse>u</objuse><objval valtype="single" val1="x" val2="y"/></objrule>', 'BREX-3.0.1', '<x a="1"/>'), 'unsupported_value_form', { form: 'single with val2' }],
     ['mixed range', run(sor('2', '//@a', ov('range', '1~b')), 'BREX-4.2', '<x a="1"/>'), 'mixed_range', { from: '1', to: 'b' }],
-    ['unknown format', run(sor('0', '//x'), 'SCH-DITA', '<x/>'), 'unsupported_format', { format: 'SCH-DITA' }],
+    ['unknown format', run(sor('0', '//x'), 'XSD-1.1', '<x/>'), 'unsupported_format', { format: 'XSD-1.1' }],
     ['absolute path with another root', run(sor('0', '/dmodule/content//thead'), 'BREX-4.2', '<table><thead/></table>'), 'absolute_root', { name: 'dmodule', root: 'table' }],
     ['malformed fragment', run(sor('0', '//x'), 'BREX-4.2', '<a><b></a>'), 'fragment_not_well_formed', null],
     ['malformed rule', run('<structureObjectRule><objectPath>//x</structureObjectRule>', 'BREX-4.2', '<x/>'), 'rule_not_well_formed', null],
