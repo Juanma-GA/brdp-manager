@@ -71,3 +71,48 @@ export function verdictToTestRecord(verdict) {
       return null;
   }
 }
+
+// ─── The deterministic rule description (T3b, Part 1) ───────────────────────
+// ruleTestEngine.js's describeRule → one sentence per statement, in the
+// language of `t` (records.ruleTest.describe.*). The same text, in English,
+// goes to the LLM in "Review with the assistant".
+function formatValues(values, t) {
+  return values
+    .map((v) => {
+      if (v.unsupported) return t('records.ruleTest.describe.valueUnsupported', { form: v.form });
+      if (v.form === 'range') return t('records.ruleTest.describe.valueRange', { from: v.from, to: v.to });
+      if (v.form === 'pattern') return t('records.ruleTest.describe.valuePattern', { pattern: v.pattern });
+      return v.value;
+    })
+    .join(', ');
+}
+
+export function formatRuleStatement(statement, schemas, t) {
+  const params = statement.params || {};
+  if (statement.code === 'describe_not_executable') {
+    return t('records.ruleTest.describe.describe_not_executable', { reason: formatRuleTestReason(params.reason, t) });
+  }
+  const values = { ...params };
+  if ('target' in params) values.target = params.target || t('records.ruleTest.describe.nodesOf', { path: params.path });
+  if (params.values) values.values = formatValues(params.values, t);
+  const text = t(`records.ruleTest.describe.${statement.code}`, { ...values, defaultValue: statement.code });
+  return schemas && schemas.length ? t('records.ruleTest.describe.onlyInSchemas', { text, schemas: schemas.join(', ') }) : text;
+}
+
+// → { lines: [text], cannotReject } | null when the rule cannot be described.
+export function formatRuleDescription(description, t) {
+  if (!description?.available) return null;
+  return {
+    lines: description.statements.map((s) => formatRuleStatement(s.statement, s.schemas, t)),
+    cannotReject: description.cannotReject,
+  };
+}
+
+// The description as one English text block, for a prompt.
+export function ruleDescriptionText(description, t) {
+  const formatted = formatRuleDescription(description, t);
+  if (!formatted) return '';
+  const lines = formatted.lines.map((l) => `- ${l}`);
+  if (formatted.cannotReject) lines.push(`- ${t('records.ruleTest.describe.cannotReject')}`);
+  return lines.join('\n');
+}

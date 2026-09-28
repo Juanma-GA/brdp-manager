@@ -1,6 +1,6 @@
 // Live verification for "Test de reglas" (T2, T2b): the Test rule button on
 // a Suggest Rule suggestion and on a saved Draft rule, the panel (what cannot
-// be tested shown from the start, verdict, explanation, "does not implement
+// be tested shown from the start, verdict, description, "does not implement
 // the Proposal" warning, examples built on the application's skeleton with
 // the skeleton dimmed and the content highlighted, highlighted nodes, the
 // rule's message, structural problems, the one automatic correction round,
@@ -196,7 +196,7 @@ async function main() {
     assert(sys1.includes('your content goes directly inside <para>, at\n  dmodule/content/description/levelledPara/para.'), "general rule: the prompt offers the descript skeleton's <para>");
     assert(sys1.includes("SCHEMA FACTS") && sys1.includes("<emphasis>"), "the prompt carries the schema facts of the rule's element");
     assert((await verdict().textContent()).startsWith("Correct"), `//emphasis: verdict correct (${await verdict().textContent()})`);
-    assert((await panel().textContent()).includes("La regla prohíbe el elemento <emphasis>"), "explanation shown");
+    assert((await page.getByTestId("rule-test-description").textContent()).includes("<emphasis> must not appear (path //emphasis)."), "deterministic description shown (T3b: no LLM explanation)");
     assert((await example(0).getByTestId("rule-test-result").textContent()).includes("Result: accepted ✓"), "//emphasis: accept example accepted");
     assert((await example(1).getByTestId("rule-test-result").textContent()).includes("Result: rejected ✓"), "//emphasis: reject example rejected");
     assert((await example(1).locator("pre").textContent()).includes("<levelledPara>"), "//emphasis: example built on the real descript skeleton");
@@ -352,7 +352,7 @@ async function main() {
     const mism = await page.getByTestId("rule-test-mismatch").textContent();
     assert(mism.includes("Indicative: This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."), `mismatch warning (${mism})`);
     const sys6 = (await lastRequest()).messages.find((m) => m.role === "system").content;
-    assert(sys6.includes("saying what the RULE checks, read from its XML") && sys6.includes("<dmRef>"), "prompt: explanation from the rule, no text in references");
+    assert(sys6.includes("written from the Proposal's DECISION") && sys6.includes("<dmRef>"), "prompt: examples from the decision, no text in references");
 
     // 7. Broken JSON: error with Regenerate, nothing run.
     await select("BRDP-RT-BROKEN");

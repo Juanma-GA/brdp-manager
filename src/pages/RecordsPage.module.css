@@ -1193,3 +1193,9 @@
   margin: 0 0 10px;
   font-size: 13.5px;
 }
+
+/* T3b: the deterministic description of the rule, at the top of the panel. */
+.ruleTestDescription {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+}

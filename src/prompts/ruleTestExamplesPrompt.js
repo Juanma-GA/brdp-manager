@@ -1,6 +1,11 @@
 // Test rule (T2 of 4, T2b): the system prompt that asks the LLM for short
-// aeronautical examples -- one that complies with the rule and one that
-// breaks it (plus one of another schema for a context-scoped rule).
+// aeronautical examples -- one that follows the Proposal's DECISION and one
+// that goes against it (plus one of another schema for a context-scoped
+// rule). T3b: the examples follow the decision, not the rule -- examples
+// written from the rule followed a wrong rule too, so the test never caught
+// it -- and the LLM no longer explains the rule (describeRule does,
+// deterministically); it only flags a rule that does not seem to implement
+// the Proposal.
 // Pure function, same architecture as the other prompts: the application,
 // not the LLM, builds each example on a real skeleton of its schema
 // (utils/ruleTestSkeleton.js; T2b: the LLM only writes the content of the
@@ -42,12 +47,15 @@ function placementLine(p) {
 }
 
 // `input`: { brdp, standard, format, ruleXml, contextSchemas, placements,
-// schemaFacts } -- contextSchemas are the schemas of the rule's context
-// blocks ([] for a general rule); placements (T2b) say where each offered
-// schema takes the LLM's content: [{ schema, role: 'rule' | 'other', path,
-// insertion, allowedChildren }]; schemaFacts the cards of the rule's element
-// names (as for Ask / Suggest Rule).
-export function buildRuleTestExamplesPrompt({ brdp, standard, format, ruleXml, contextSchemas = [], placements = [], schemaFacts = [] }) {
+// schemaFacts, previousReview } -- contextSchemas are the schemas of the
+// rule's context blocks ([] for a general rule); placements (T2b) say where
+// each offered schema takes the LLM's content: [{ schema, role: 'rule' |
+// 'other', path, insertion, allowedChildren }]; schemaFacts the cards of the
+// rule's element names (as for Ask / Suggest Rule); previousReview (T3b,
+// "Review with the assistant" found the examples at fault): { explanation,
+// mismatches: [{ label, expected, got, content }] } -- the regeneration must
+// not repeat that mistake.
+export function buildRuleTestExamplesPrompt({ brdp, standard, format, ruleXml, contextSchemas = [], placements = [], schemaFacts = [], previousReview = null }) {
   const hasFacts = schemaFacts && schemaFacts.length > 0;
   const namesLine = hasFacts
     ? `use only element and attribute names that appear in
@@ -60,25 +68,31 @@ export function buildRuleTestExamplesPrompt({ brdp, standard, format, ruleXml, c
 decides whether the example is accepted or rejected. You never judge the
 rule: you only write the examples.
 
-The rule (${format}):
-${ruleXml}
-
-The decision the rule is meant to implement (BRDP ${brdp.identifier}):
+The decision (BRDP ${brdp.identifier}) — the examples test THIS:
 Title: ${brdp.title}
 Definition: ${brdp.definition}
 Proposal: ${brdp.proposal}
 
+The rule under test (${format}) — use it only to know which elements,
+attributes and schemas are involved:
+${ruleXml}
+
 WHAT TO WRITE:
-- "explanation": one or two sentences, in the same language as the Proposal,
-  saying what the RULE checks, read from its XML (its path, its flag, its
-  values) — not what the Proposal says. For a technical publications author.
 - "proposalMismatch": null when the rule implements the Proposal's decision.
   When it does not seem to, one short sentence in the same language as the
   Proposal saying why — for example: "This rule does not seem to implement
   the Proposal (the Proposal is about CAGE codes; the rule checks
   <emphasis>)." It is only an indication, so keep it short.
-- "examples": at least two examples: one that complies with the rule
-  ("expected": "accept") and one that breaks it ("expected": "reject").
+- "examples": at least two examples, written from the Proposal's DECISION,
+  never from the rule: one that follows the decision ("expected": "accept")
+  and one that goes against it ("expected": "reject"). If the rule does not
+  implement the decision, the examples still follow the decision — finding
+  that out is what the test is for.
+- A restriction on values does not make an attribute or element mandatory:
+  an example without the attribute or element follows the decision unless
+  the Proposal says it is required. The reject example goes against exactly
+  what the Proposal decides (for example a value the Proposal does not
+  allow), never against something the Proposal does not mention.
 ${schemaInstructions(contextSchemas, placements)}
 
 HOW EACH EXAMPLE IS BUILT: the application builds a real ${standard} document
@@ -97,18 +111,31 @@ EACH EXAMPLE:
 - Never put text directly inside an element that only references or groups
   other content (${NO_TEXT_ELEMENTS}): give it its child
   elements and attributes instead.
-- The reject example breaks the rule in one clear way; the accept example
-  is otherwise similar, so the difference is easy to see.
+- The reject example goes against the decision in one clear way; the
+  accept example is otherwise similar, so the difference is easy to see.
 - No customer data, no real manufacturer names, part numbers or CAGE codes.
 - "label": a few words saying what the example shows.`;
 
   prompt += buildSchemaFactsBlock(standard, schemaFacts);
 
+  if (previousReview) {
+    const lines = previousReview.mismatches.map(
+      (m) => `- "${m.label}" (expected ${m.expected}, the rule ${m.got} it):\n  ${m.content}`
+    );
+    prompt += `
+
+PREVIOUS EXAMPLES WERE WRONG: a review of the last test found that these
+examples, not the rule, caused its failure:
+${lines.join('\n')}
+Diagnosis: ${previousReview.explanation}
+Write new examples that do not repeat this mistake.`;
+  }
+
   const firstSchema = placements[0]?.schema || 'descript';
   prompt += `
 
 OUTPUT: strict JSON only — no markdown, no comments, nothing before or after:
-{"explanation": "…", "proposalMismatch": null, "examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", "content": "…"}]}`;
+{"proposalMismatch": null, "examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", "content": "…"}]}`;
   return prompt;
 }
 
@@ -120,8 +147,7 @@ export function buildRuleTestCorrectionMessage(failures) {
     (f) => `Example ${f.index + 1} ("${f.label}"):\n${f.problems.map((p) => `- ${p}`).join('\n')}`
   );
   return `Some examples are not valid. Fix exactly these problems and
-return the complete JSON again: the same explanation, the same examples in
-the same order with the same "expected" and "schema" — change only the
+return the complete JSON again: the same examples in the same order with the same "expected" and "schema" — change only the
 "content" of the examples listed.
 
 ${blocks.join('\n\n')}`;
@@ -132,8 +158,10 @@ export function buildCopyableTestPrompt(systemPrompt) {
   return `${systemPrompt}\n\n${RULE_TEST_USER_MESSAGE}`;
 }
 
-// { ok: true, explanation, proposalMismatch, examples } | { ok: false, error } -- tolerant of a
+// { ok: true, proposalMismatch, examples } | { ok: false, error } -- tolerant of a
 // markdown fence and of text around the JSON object, strict about its shape.
+// An "explanation" (asked for until T3b) is ignored: the panel shows
+// describeRule's instead.
 export function parseRuleTestResponse(raw) {
   let text = (raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
   const start = text.indexOf('{');
@@ -148,7 +176,6 @@ export function parseRuleTestResponse(raw) {
   } catch (err) {
     return { ok: false, error: `The answer is not valid JSON (${err.message}).` };
   }
-  if (typeof data.explanation !== 'string') return { ok: false, error: 'The answer has no "explanation" text.' };
   const proposalMismatch =
     typeof data.proposalMismatch === 'string' && data.proposalMismatch.trim() ? data.proposalMismatch.trim() : null;
   if (!Array.isArray(data.examples) || data.examples.length === 0) {
@@ -175,5 +202,5 @@ export function parseRuleTestResponse(raw) {
       content: content.trim(),
     });
   }
-  return { ok: true, explanation: data.explanation.trim(), proposalMismatch, examples };
+  return { ok: true, proposalMismatch, examples };
 }

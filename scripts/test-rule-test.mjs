@@ -205,7 +205,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const placements = [{ schema: 'descript', role: 'rule', ...setup.placements.descript.placement }];
   const p = buildRuleTestExamplesPrompt({ brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: EMPH, placements });
   check('prompt: contains the rule verbatim', p.includes(EMPH));
-  check('prompt: explanation from the rule XML, not the Proposal', p.includes('saying what the RULE checks, read from its XML') && p.includes('not what the Proposal says'));
+  check('prompt: no explanation asked (describeRule gives it, T3b)', !p.includes('"explanation"'));
   check('prompt: proposalMismatch field, marked as an indication', p.includes('"proposalMismatch": null when the rule implements') && p.includes('It is only an indication'));
   check('prompt: the application builds the document; only the content', p.includes('Write\nONLY that content'));
   check('prompt: insertion point with the skeleton path', p.includes('your content goes directly inside <para>, at\n  dmodule/content/description/levelledPara/para.'), p);

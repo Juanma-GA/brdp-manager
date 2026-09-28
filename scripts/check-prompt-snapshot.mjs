@@ -203,18 +203,32 @@ import { buildSuggestRulePrompt } from '../src/prompts/suggestRulePrompt.js';
 // schema-identandstatussection (the real 4.2 <identAndStatusSection>).
 // Single-variant cards (<table>) and every other prompt are unchanged.
 import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesPrompt.js';
-import { askCases, ruleTestExamplesCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
+// Test de reglas T3b: the examples follow the Proposal's DECISION, not the
+// rule (the decision comes first, "the examples test THIS"; the rule only
+// says which names and schemas are involved; a value restriction never
+// makes an attribute or element mandatory; the reject example breaks
+// exactly what the Proposal decides) and the LLM no longer explains the
+// rule (describeRule does) -- all 5 ruleTestExamples cases change. New:
+// ruleTestExamples/brex-4-2-value-list-previous-review (the "PREVIOUS
+// EXAMPLES WERE WRONG" block after a review that blamed the examples), a
+// new group ruleTestReview (the review prompt, 2 cases: a wrong flag-2
+// rule and a wrong example) and suggestRule/brex-4-2-corrected-after-
+// failed-test (the "PREVIOUS RULE FAILED ITS TEST" block). Every other
+// prompt is unchanged.
+import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
+import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXPECTED_PATH = path.join(__dirname, 'prompt-snapshot', 'expected-prompts.json');
 
 function buildActual() {
-  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {} };
+  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {} };
   for (const c of askCases) actual.ask[c.name] = buildAskSystemPrompt(...c.args);
   for (const c of suggestDefinitionCases) actual.suggestDefinition[c.name] = buildSuggestDefinitionPrompt(...c.args);
   for (const c of suggestProposalCases) actual.suggestProposal[c.name] = buildSuggestProposalPrompt(...c.args);
   for (const c of suggestRuleCases) actual.suggestRule[c.name] = buildSuggestRulePrompt(...c.args);
   for (const c of ruleTestExamplesCases) actual.ruleTestExamples[c.name] = buildRuleTestExamplesPrompt(...c.args);
+  for (const c of ruleTestReviewCases) actual.ruleTestReview[c.name] = buildRuleTestReviewPrompt(...c.args);
   return actual;
 }
 

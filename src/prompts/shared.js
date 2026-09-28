@@ -26,6 +26,9 @@ export const SUGGEST_TEMPERATURE = 0.3;
 // Test rule (T2): the examples must vary between regenerations to be
 // useful, but stay plain and on-topic.
 export const RULE_TEST_TEMPERATURE = 0.5;
+// Test de reglas T3b: "Review with the assistant" -- a diagnosis, not a
+// creative text: as steady as Suggest.
+export const RULE_TEST_REVIEW_TEMPERATURE = 0.3;
 
 // A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
 // examples with inline function expressions run well past this) -- rather

@@ -52,9 +52,16 @@ import {
   buildSuggestRulePrompt,
   parseSuggestRuleResponse,
 } from "../src/prompts/suggestRulePrompt.js";
-import { ASK_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { ASK_TEMPERATURE, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import {
+  buildRuleTestReviewPrompt,
+  parseRuleTestReviewResponse,
+  RULE_TEST_REVIEW_USER_MESSAGE,
+} from "../src/prompts/ruleTestReviewPrompt.js";
+import i18n from "../src/i18n/index.js";
+import { ruleDescriptionText } from "../src/utils/ruleTestReasons.js";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
-import { analyzeRule } from "../src/utils/ruleTestEngine.js";
+import { analyzeRule, describeRule } from "../src/utils/ruleTestEngine.js";
 import { ruleTestVerdict } from "../src/utils/ruleTest.js";
 import { generateRuleTestExamples } from "../src/utils/ruleTestRun.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
@@ -181,9 +188,14 @@ async function runCheck(check, answer, ctx = {}) {
   // "xpath": only the rule's XPath expressions (objectPath/objpath, or
   // Schematron @context/@test), entity-decoded, one per line -- so a check
   // on the path never matches the objectUse text.
+  // T3b: "description" = the rule's deterministic description (describeRule,
+  // English -- what the panel shows in place of an LLM explanation);
+  // "explanation" = the review's explanation (rule-review).
   const target =
-    check.target === "explanation"
-      ? ctx.ruleTest?.explanation ?? ""
+    check.target === "description"
+      ? ctx.description ?? ""
+      : check.target === "explanation"
+      ? ctx.review?.explanation ?? ""
       : check.target === "final"
       ? ctx.finalRule ?? ""
       : check.target === "xml"
@@ -251,6 +263,36 @@ async function runCheck(check, answer, ctx = {}) {
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis);
       return { status: verdict.kind === "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+    }
+    case "rule_test_verdict_incorrect": {
+      // T3b: a known WRONG rule -- examples written from the decision must
+      // expose it.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis);
+      return { status: verdict.kind === "incorrect" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+    }
+    case "rule_test_reject_examples_contain": {
+      // T3b: every example meant to be rejected carries `pattern` (e.g. the
+      // attribute whose values the Proposal restricts -- never relying on
+      // its absence).
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const re = new RegExp(check.pattern, flags);
+      const rejects = r.examples.filter((ex) => ex.expected === "reject");
+      const bad = rejects.filter((ex) => !re.test(ex.content));
+      if (rejects.length === 0) return { status: "fail", detail: "no reject example" };
+      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `without /${check.pattern}/: ${bad.map((ex) => ex.label).join(", ")}` : `all ${rejects.length} reject example(s) match /${check.pattern}/` };
+    }
+    // T3b "Review with the assistant" (rule-review).
+    case "review_json_valid": {
+      const r = ctx.review;
+      return { status: r?.ok ? "pass" : "fail", detail: r?.ok ? `cause "${r.cause}"` : `not usable: ${r?.error || "no answer"}` };
+    }
+    case "review_cause": {
+      const r = ctx.review;
+      if (!r?.ok) return { status: "fail", detail: `not usable: ${r?.error || "no answer"}` };
+      return { status: r.cause === check.expect ? "pass" : "fail", detail: `cause "${r.cause}" (expected "${check.expect}")` };
     }
     case "rule_test_other_schema_accepted": {
       // A rule limited to one schema: an example of another schema, meant
@@ -595,6 +637,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
     parseXml: xmldomParse,
   });
   const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis) : null;
+  const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));
   return {
     systemPrompt: result.systemPrompt,
     userMessage: "Write the test examples for this rule.",
@@ -603,24 +646,48 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
     ruleTest: {
       status: result.status,
       error: result.error || null,
-      explanation: result.explanation ?? null,
+      description,
       correction: result.correction ?? null,
       verdict,
       examples: (result.examples || []).map((ex, i) => ({
         label: ex.label,
         expected: ex.expected,
         schema: ex.schema,
+        content: ex.content,
         xml: ex.xml,
         runnable: result.runs[i].validation.runnable,
         result: result.runs[i].result?.status ?? null,
       })),
     },
-    checkContext: { ruleTest: result, analysis, ruleSchemas: schemas, standard: testCase.standard },
+    checkContext: { ruleTest: result, analysis, description, ruleSchemas: schemas, standard: testCase.standard },
+  };
+}
+
+// T3b "Review with the assistant": the same prompt the panel builds -- the
+// Proposal, the rule, its deterministic description (English) and the
+// case's fixed mismatched examples -- at RULE_TEST_REVIEW_TEMPERATURE.
+async function runRuleReviewCase(project, aiProvider, createdBrdp, testCase) {
+  const format = STANDARD_TO_RULE_FORMAT[testCase.standard];
+  const location = schemaLocationOf({ schemaLocation: testCase.schemaLocation });
+  const schemas = testCase.schemas || [];
+  const ruleXml = schemas.length ? wrapRuleInSchemaContexts(testCase.rule, format, testCase.standard, schemas, location) : testCase.rule;
+  const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));
+  const mismatches = testCase.mismatches.map((m) => ({ label: m.label, expected: m.expected, got: m.got, content: m.content || m.xml, xml: m.xml }));
+  const systemPrompt = buildRuleTestReviewPrompt({ brdp: createdBrdp, standard: testCase.standard, format, ruleXml, ruleDescription: description, mismatches });
+  const answer = await sendMessagesToLlm(aiProvider, systemPrompt, [{ role: "user", content: RULE_TEST_REVIEW_USER_MESSAGE }], RULE_TEST_REVIEW_TEMPERATURE);
+  const review = parseRuleTestReviewResponse(answer);
+  return {
+    systemPrompt,
+    userMessage: RULE_TEST_REVIEW_USER_MESSAGE,
+    answer,
+    finalRule: ruleXml,
+    checkContext: { review, description, standard: testCase.standard },
   };
 }
 
 async function runCaseOnce(project, aiProvider, createdBrdp, testCase) {
   if (testCase.type === "rule-test") return runRuleTestCase(project, aiProvider, createdBrdp, testCase);
+  if (testCase.type === "rule-review") return runRuleReviewCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-rule") return runSuggestRuleCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "ask") return runAskCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-definition") return runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCase);
@@ -731,7 +798,7 @@ function buildReportHeader(meta, runs) {
     model: meta.aiProvider.model,
     commit: meta.gitInfo.commit,
     uncommittedChanges: meta.gitInfo.dirty,
-    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE },
+    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE },
     runs,
     generatedAt: meta.generatedAt,
   };
@@ -748,7 +815,7 @@ function writeReport(results, runs, meta) {
   lines.push(`- Provider: ${header.provider} / ${header.model}`);
   lines.push(`- Commit: ${header.commit}${header.uncommittedChanges ? " (+ uncommitted changes)" : ""}`);
   lines.push(
-    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}`
+    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}`
   );
   lines.push(`- Runs per case: ${header.runs}`);
   lines.push(`- Generated: ${header.generatedAt}`);

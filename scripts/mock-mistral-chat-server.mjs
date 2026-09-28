@@ -109,26 +109,32 @@ function isRuleTest(text) {
 // Test rule (T2b): the LLM writes only the content of an insertion point.
 // The examples follow the rule quoted in the prompt and the schemas it
 // offers ('- schema "proced": your content goes directly inside <para>');
-// Proposal markers pick a scenario:
+// T3b: no "explanation" any more (describeRule gives it). Proposal markers
+// pick a scenario:
 //   BROKENJSON   truncated answer
 //   BROKENSTRUCT the reject example is <warning><content> inside <para>
 //                (the first real run); the correction round fixes it
 //   STUBBORN     same, but the correction keeps it broken
 //   MISMATCH     "proposalMismatch" filled in
+//   MISSINGATTR  (@emphasisType rule) the reject example relies on the
+//                attribute's ABSENCE -- the real disagreement of the T3
+//                report; a regeneration carrying "PREVIOUS EXAMPLES WERE
+//                WRONG" writes correct examples
 function ruleTestReply(systemPrompt, messages) {
-  const rule = (systemPrompt.match(/\nThe rule \([^)]*\):\n([\s\S]*?)\n\nThe decision the rule is meant to implement/) || [])[1] || "";
+  const rule = (systemPrompt.match(/\nThe rule under test \([^)]*\)[^\n]*\n[^\n]*\n([\s\S]*?)\n\nWHAT TO WRITE/) || [])[1] || "";
   const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
   const schemas = [...systemPrompt.matchAll(/- schema "([\w-]+)": your content goes directly inside/g)].map((m) => m[1]);
   const [ruleSchema, otherSchema] = schemas;
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content || "";
   const correcting = lastUser.startsWith("Some examples are not valid.");
+  const reviewed = /\nPREVIOUS EXAMPLES WERE WRONG:/.test(systemPrompt);
   if (/BROKENJSON/.test(proposal)) {
-    return '{"explanation": "Truncated answer", "examples": [ {"label": "cut", "expected": "accept", "content": "<para>';
+    return '{"proposalMismatch": null, "examples": [ {"label": "cut", "expected": "accept", "content": "<para>';
   }
   const mismatch = /MISMATCH/.test(proposal)
     ? "This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."
     : null;
-  const answer = (explanation, examples) => JSON.stringify({ explanation, proposalMismatch: mismatch, examples });
+  const answer = (examples) => JSON.stringify({ proposalMismatch: mismatch, examples });
   if (/@emphasisType/.test(rule)) {
     const broken = /BROKENSTRUCT|STUBBORN/.test(proposal) && (!correcting || /STUBBORN/.test(proposal));
     const examples = [
@@ -137,22 +143,50 @@ function ruleTestReply(systemPrompt, messages) {
         ? { label: "Hot surface warning with em03", expected: "reject", schema: ruleSchema, content: '<warning emphasisType="em03"><content>Hot surface.</content></warning>' }
         : { label: "Sealant step with em03", expected: "reject", schema: ruleSchema, content: 'Apply <emphasis emphasisType="em03">sealant</emphasis> to the fastener threads.' },
     ];
+    if (/MISSINGATTR/.test(proposal) && !reviewed) {
+      examples.push({ label: "Sealant step without emphasisType", expected: "reject", schema: ruleSchema, content: "Apply <emphasis>sealant</emphasis> to the fastener threads." });
+    }
     if (otherSchema) {
       examples.push({ label: "Description with em03", expected: "accept", schema: otherSchema, content: 'The <emphasis emphasisType="em03">sealant</emphasis> is applied to the threads.' });
     }
-    return answer("La regla solo admite los valores em01 y em02 en el atributo @emphasisType de <emphasis>.", examples);
+    return answer(examples);
   }
   if (otherSchema) {
-    return answer("La regla prohíbe <emphasis> solo en los módulos de datos procedimentales.", [
+    return answer([
       { label: "Step without emphasis", expected: "accept", schema: ruleSchema, content: "Remove the four bolts from the access panel." },
       { label: "Step with emphasis", expected: "reject", schema: ruleSchema, content: "Remove the <emphasis>four</emphasis> bolts from the access panel." },
       { label: "Description with emphasis", expected: "accept", schema: otherSchema, content: "The access panel is held by <emphasis>four</emphasis> bolts." },
     ]);
   }
-  return answer("La regla prohíbe el elemento <emphasis> en cualquier módulo de datos.", [
+  return answer([
     { label: "Torque step without emphasis", expected: "accept", schema: ruleSchema, content: "Torque the bolts to 25 N.m." },
     { label: "Torque step with emphasis", expected: "reject", schema: ruleSchema, content: "Torque the bolts to <emphasis>25 N.m</emphasis>." },
   ]);
+}
+
+// T3b "Review with the assistant": the cause follows the deterministic
+// description the prompt carries -- a rule that "cannot reject any content"
+// is the rule's fault; otherwise the examples'. UNCLEAR in the Proposal
+// forces "unclear".
+function isRuleTestReview(text) {
+  return text === "Review this failed rule test.";
+}
+
+function ruleTestReviewReply(systemPrompt) {
+  const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
+  if (/UNCLEAR/.test(proposal)) {
+    return JSON.stringify({ cause: "unclear", explanation: "MOCK-REVIEW: the Proposal does not say whether the attribute is required." });
+  }
+  if (/cannot reject any content/.test(systemPrompt)) {
+    return JSON.stringify({ cause: "rule", explanation: "MOCK-REVIEW: the rule allows <emphasis> (allowedObjectFlag 2 without values), but the Proposal forbids it; it should use allowedObjectFlag 0." });
+  }
+  const spanish = /\b(el|la|los|las|solo|admitirá|atributo)\b/i.test(proposal);
+  return JSON.stringify({
+    cause: "example",
+    explanation: spanish
+      ? "MOCK-REVIEW: la Proposal solo restringe los valores de @emphasisType; un <emphasis> sin el atributo cumple la decisión."
+      : "MOCK-REVIEW: the Proposal only restricts the values of @emphasisType; an <emphasis> without the attribute follows the decision.",
+  });
 }
 
 // "Suggest: clear state on BRDP change" round (docs request): opt-in
@@ -290,6 +324,8 @@ const server = http.createServer((req, res) => {
         "Alsounabrokenverylongsingletokenwithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     } else if (isSuggestRule(userText)) {
       reply = suggestRuleReply(messages.find((m) => m.role === "system")?.content || "");
+    } else if (isRuleTestReview(userText)) {
+      reply = ruleTestReviewReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (isRuleTest(userText)) {
       reply = ruleTestReply(messages.find((m) => m.role === "system")?.content || "", messages);
     } else if (hasPriorTurn) {

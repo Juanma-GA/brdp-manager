@@ -517,3 +517,152 @@ export function analyzeRule(ruleXml, format, options = {}) {
     total: parts.length,
   };
 }
+
+// ─── describeRule (Test de reglas T3b, Part 1) ─────────────────────────────
+// What a rule checks, read from its XML with the semantics table above --
+// never from the Proposal and never by an LLM. The Test rule panel shows it
+// in place of an explanation written by the LLM (which described the rule it
+// was asked to test the Proposal against, not always the rule itself), and
+// "Review with the assistant" sends it to the LLM as the ground truth of
+// what the rule does. Statements are codes with parameters, translated like
+// the not-executable reasons (utils/ruleTestReasons.js's
+// formatRuleDescription, records.ruleTest.describe.*):
+//   describe_forbidden {target, path}                  flag 0, no values
+//   describe_forbidden_values {target, values, path}   flag 0 with values
+//   describe_mandatory {parent, target, path}          flag 1, <parent>/<step>
+//   describe_mandatory_values {parent, target, values, path}
+//   describe_mandatory_somewhere {target, path}        flag 1, not divisible
+//   describe_mandatory_somewhere_values {target, values, path}
+//   describe_restricted_values {target, values, path}  flag 2 (or no objappl) with values
+//   describe_allowed {target, path}                    flag 2 (or no objappl), no values:
+//                                                      rejects nothing
+//   describe_non_context {}                            nonContextRule
+//   describe_not_executable {reason}                   a part the engine cannot run
+// `target` is the node the path points at ("<emphasis>", "@emphasisType"),
+// or null when the path does not end in a plain name (then the text names
+// the path itself). values: [{form:'single', value} | {form:'range', from,
+// to} | {form:'pattern', pattern} | {form, unsupported:true}].
+//
+//   describeRule(ruleXml, format, options) →
+//     { available: false } (unknown format / unparsable rule)
+//     | { available: true,
+//         statements: [{ ruleIds: [...], statement: {code, params}, schemas: [...] }],
+//         cannotReject }   // no part can ever reject anything
+// Identical statements that only differ by their context block (the copies
+// {id}-{schema} of a rule limited to several schemas) are merged into one
+// with all their schemas.
+
+// The top-level "/" positions of a path, outside brackets and quotes.
+function lastTopLevelStep(expression) {
+  let depth = 0;
+  let quote = '';
+  let last = -1;
+  for (let i = 0; i < expression.length; i += 1) {
+    const ch = expression[i];
+    if (quote) { if (ch === quote) quote = ''; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    if (ch === '[' || ch === '(') depth += 1;
+    else if (ch === ']' || ch === ')') depth -= 1;
+    else if (ch === '|' && depth === 0) return null; // alternatives: no single target
+    else if (ch === '/' && depth === 0) last = i;
+  }
+  return expression.slice(last + 1).trim();
+}
+
+// "<name>" / "@name" for a path's last step, or null.
+function pathTarget(expression) {
+  const step = lastTopLevelStep(String(expression || '').trim());
+  if (!step) return null;
+  const bare = step.replace(/\[[\s\S]*$/, '').trim();
+  const attr = /^(?:@|attribute::)((?:[A-Za-z_][\w.-]*:)?[A-Za-z_][\w.-]*)$/.exec(bare);
+  if (attr) return `@${attr[1]}`;
+  const el = /^(?:child::|descendant::|descendant-or-self::)?((?:[A-Za-z_][\w.-]*:)?[A-Za-z_][\w.-]*)$/.exec(bare);
+  return el ? `<${el[1]}>` : null;
+}
+
+function describeValues(part, spec) {
+  const is301 = spec.value === 'objval';
+  return childElements(part.element, spec.value).map((v) => {
+    const form = (is301 ? v.getAttribute('valtype') : v.getAttribute('valueForm')) || 'single';
+    const attr = (name) => (v.hasAttribute(name) ? v.getAttribute(name) : '');
+    if (form === 'single') return { form, value: is301 ? attr('val1') : attr('valueAllowed') };
+    if (form === 'range') {
+      if (is301) return { form, from: attr('val1'), to: attr('val2') };
+      const [from = '', to = ''] = attr('valueAllowed').split('~');
+      return { form, from, to };
+    }
+    if (form === 'pattern' && !is301) return { form, pattern: attr('valueAllowed') };
+    return { form, unsupported: true };
+  });
+}
+
+function describePart(part, spec) {
+  if (part.kind === 'nonContext') return { code: 'describe_non_context', params: {} };
+  let basics;
+  try {
+    basics = partBasics(part, spec);
+  } catch (err) {
+    if (!(err instanceof NotExecutable)) throw err;
+    return { code: 'describe_not_executable', params: { reason: err.reason } };
+  }
+  const { expression: path, flag } = basics;
+  const target = pathTarget(path);
+  const values = describeValues(part, spec);
+  const withValues = values.length > 0;
+  if (flag === '0') {
+    return withValues
+      ? { code: 'describe_forbidden_values', params: { target, values, path } }
+      : { code: 'describe_forbidden', params: { target, path } };
+  }
+  if (flag === '1') {
+    const split = _splitTopLevel(path);
+    if (split && _isContextPattern(split.parent)) {
+      const parent = pathTarget(split.parent) || split.parent;
+      return withValues
+        ? { code: 'describe_mandatory_values', params: { parent, target: pathTarget(split.step) || target, values, path } }
+        : { code: 'describe_mandatory', params: { parent, target: pathTarget(split.step) || target, path } };
+    }
+    return withValues
+      ? { code: 'describe_mandatory_somewhere_values', params: { target, values, path } }
+      : { code: 'describe_mandatory_somewhere', params: { target, path } };
+  }
+  // flag 2, or 3.0.1 without objappl: only the values are checked.
+  return withValues
+    ? { code: 'describe_restricted_values', params: { target, values, path } }
+    : { code: 'describe_allowed', params: { target, path } };
+}
+
+const CAN_REJECT = new Set([
+  'describe_forbidden', 'describe_forbidden_values', 'describe_mandatory', 'describe_mandatory_values',
+  'describe_mandatory_somewhere', 'describe_mandatory_somewhere_values', 'describe_restricted_values',
+]);
+
+export function describeRule(ruleXml, format, options = {}) {
+  const spec = FORMATS[format];
+  if (!spec) return { available: false };
+  const parseXml = options.parseXml || parseXmlDocument;
+  let ruleDoc;
+  try {
+    ruleDoc = parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+  } catch {
+    return { available: false };
+  }
+  const statements = [];
+  for (const part of collectParts(ruleDoc.documentElement, spec)) {
+    const statement = describePart(part, spec);
+    const key = JSON.stringify(statement);
+    const same = statements.find((s) => s.key === key && (s.schemas.length > 0) === Boolean(part.schema));
+    if (same) {
+      same.ruleIds.push(part.ruleId);
+      if (part.schema && !same.schemas.includes(part.schema)) same.schemas.push(part.schema);
+    } else {
+      statements.push({ key, ruleIds: [part.ruleId], statement, schemas: part.schema ? [part.schema] : [] });
+    }
+  }
+  const codes = statements.map((s) => s.statement.code);
+  return {
+    available: true,
+    statements: statements.map(({ key: _key, ...s }) => s),
+    cannotReject: codes.includes('describe_allowed') && !codes.some((c) => CAN_REJECT.has(c)),
+  };
+}

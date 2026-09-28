@@ -25,6 +25,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { placeExample, ruleTargets } from '../../src/utils/ruleTestSkeleton.js';
+import { DOMParser } from '@xmldom/xmldom';
+import i18n from '../../src/i18n/index.js';
+import { describeRule } from '../../src/utils/ruleTestEngine.js';
+import { ruleDescriptionText } from '../../src/utils/ruleTestReasons.js';
+
+const xmldomParse = (text) => new DOMParser().parseFromString(text, 'text/xml');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -386,3 +392,91 @@ export const ruleTestExamplesCases = [
     ],
   },
 ];
+
+// Test de reglas T3b: a regeneration after a review that blamed the
+// EXAMPLES -- the real disagreement of the T3 report (an example with no
+// @emphasisType expected a rejection), with the review's diagnosis.
+const mismatchMissingAttr = {
+  label: 'Sealant step without emphasisType',
+  expected: 'reject',
+  got: 'accepted',
+  content: 'Apply <emphasis>sealant</emphasis> to the fastener threads.',
+  xml: '<dmodule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd"><content><description><levelledPara><para>Apply <emphasis>sealant</emphasis> to the fastener threads.</para></levelledPara></description></content></dmodule>',
+};
+const diagnosisExample = 'The Proposal only restricts the values of @emphasisType; an <emphasis> without the attribute follows the decision.';
+ruleTestExamplesCases.push({
+  name: 'brex-4-2-value-list-previous-review',
+  args: [
+    {
+      brdp: { ...brdpRuleTest, title: 'Emphasis types', proposal: '@emphasisType shall only take em01 and em02.' },
+      standard: 'S1000D 4.2',
+      format: 'BREX-4.2',
+      ruleXml: ruleEmphasisType,
+      placements: placementsFor('S1000D 4.2', ruleEmphasisType, [['descript', 'rule']]),
+      previousReview: { explanation: diagnosisExample, mismatches: [mismatchMissingAttr] },
+    },
+  ],
+});
+
+// T3b "Review with the assistant": the review prompt, with the rule's
+// deterministic description (describeRule, English) -- a wrong rule (flag 2
+// on //emphasis, "cannot reject any content") and a right rule with a
+// wrong example (the report's missing-attribute example).
+const tEnglish = i18n.getFixedT('en');
+const describeText = (ruleXml, format) => ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), tEnglish);
+const ruleEmphasisFlag2 =
+  '<structureObjectRule>\n  <objectPath allowedObjectFlag="2">//emphasis</objectPath>\n  <objectUse>BRDP-TEST-001. The element &lt;emphasis&gt; must not be used.</objectUse>\n</structureObjectRule>';
+const mismatchEmphasisAccepted = {
+  label: 'Torque step with emphasis',
+  expected: 'reject',
+  got: 'accepted',
+  content: 'Torque the bolts to <emphasis>25 N.m</emphasis>.',
+  xml: '<dmodule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd"><content><description><levelledPara><para>Torque the bolts to <emphasis>25 N.m</emphasis>.</para></levelledPara></description></content></dmodule>',
+};
+export const ruleTestReviewCases = [
+  {
+    name: 'brex-4-2-wrong-rule-flag2',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, proposal: '<emphasis> shall not be used.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleEmphasisFlag2,
+        ruleDescription: describeText(ruleEmphasisFlag2, 'BREX-4.2'),
+        mismatches: [mismatchEmphasisAccepted],
+      },
+    ],
+  },
+  {
+    name: 'brex-4-2-wrong-example-missing-attribute',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Emphasis types', proposal: '@emphasisType shall only take em01 and em02.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleEmphasisType,
+        ruleDescription: describeText(ruleEmphasisType, 'BREX-4.2'),
+        mismatches: [mismatchMissingAttr],
+      },
+    ],
+  },
+];
+
+// T3b "Suggest a corrected rule": Suggest Rule with the failed test of the
+// wrong flag-2 rule and the review's diagnosis.
+suggestRuleCases.push({
+  name: 'brex-4-2-corrected-after-failed-test',
+  args: [
+    { ...brdpRule, title: 'Use of <emphasis>', proposal: '<emphasis> shall not be used.' },
+    'S1000D 4.2',
+    'BREX-4.2',
+    { sameBrdp: [], similar: [], formatExamples: ruleFormatExamples },
+    [],
+    null,
+    {
+      ruleXml: ruleEmphasisFlag2,
+      mismatches: [mismatchEmphasisAccepted],
+      diagnosis: 'The rule allows <emphasis> (allowedObjectFlag 2 without values), but the Proposal forbids it.',
+    },
+  ],
+});

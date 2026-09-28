@@ -792,10 +792,10 @@
           "note": "the engine agrees with every example on a rule known to be correct"
         },
         {
-          "type": "language",
-          "target": "explanation",
-          "expect": "en",
-          "note": "the explanation is in the Proposal's language"
+          "type": "contains",
+          "target": "description",
+          "pattern": "<emphasis> must not appear",
+          "note": "the deterministic description (describeRule) says the element is forbidden; no LLM explanation any more"
         }
       ]
     },
@@ -830,10 +830,15 @@
           "note": "the engine agrees with every example on a rule known to be correct"
         },
         {
-          "type": "language",
-          "target": "explanation",
-          "expect": "es",
-          "note": "the explanation is in the Proposal's language"
+          "type": "contains",
+          "target": "description",
+          "pattern": "when it appears, can only take: em01, em02; if it does not appear, it is not rejected",
+          "note": "the deterministic description (describeRule) says a missing @emphasisType is not rejected"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "emphasisType\\s*=\\s*[\"']",
+          "note": "no reject example relies on the attribute's absence: every one carries @emphasisType (with a value outside em01/em02)"
         }
       ]
     },
@@ -868,10 +873,10 @@
           "note": "the engine agrees with every example on a rule known to be correct"
         },
         {
-          "type": "language",
-          "target": "explanation",
-          "expect": "en",
-          "note": "the explanation is in the Proposal's language"
+          "type": "contains",
+          "target": "description",
+          "pattern": "<randlist> must not appear",
+          "note": "3.0.1 objrule described with its own semantics (objappl 0)"
         }
       ]
     },
@@ -909,14 +914,91 @@
           "note": "the engine agrees with every example on a rule known to be correct"
         },
         {
-          "type": "language",
-          "target": "explanation",
-          "expect": "en",
-          "note": "the explanation is in the Proposal's language"
+          "type": "contains",
+          "target": "description",
+          "pattern": "Only in the schemas: proced.",
+          "note": "the description says the rule applies only to the proced schema"
         },
         {
           "type": "rule_test_other_schema_accepted",
           "note": "an example of another schema, meant to be accepted: the rule does not apply there"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-wrong-rule-flag2",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Test rule on a known WRONG rule (T3b): the Proposal forbids <emphasis>, but the rule is allowedObjectFlag 2 on //emphasis without values, so it can reject nothing. Examples written from the decision must expose it: the verdict must be incorrect, and the deterministic description must carry the 'cannot reject' warning.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-WRONG",
+        "title": "Use of emphasis",
+        "definition": "Decide whether the <emphasis> element may be used in the project's data modules.",
+        "proposal": "<emphasis> shall not be used.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-WRONG\"><objectPath allowedObjectFlag=\"2\">//emphasis</objectPath><objectUse>The element &lt;emphasis&gt; shall not be used.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_incorrect",
+          "note": "examples follow the decision, not the rule: the engine accepts the reject example, so the verdict is incorrect"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "This rule cannot reject any content.",
+          "note": "the deterministic description warns that the rule can reject nothing"
+        }
+      ]
+    },
+    {
+      "id": "rule-review-example-missing-attribute",
+      "type": "rule-review",
+      "standard": "S1000D 4.2",
+      "description": "Review with the assistant (T3b), the real disagreement of the T3 report: a correct @emphasisType em01/em02 rule accepted an example with no @emphasisType that expected a rejection. The Proposal only restricts the values, so the fault is the example's: cause must be \"example\".",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RV-001",
+        "title": "Valores de @emphasisType",
+        "definition": "Decidir qué valores del atributo @emphasisType de <emphasis> se admiten.",
+        "proposal": "El atributo @emphasisType de <emphasis> solo admitirá los valores em01 y em02.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RV-001\"><objectPath allowedObjectFlag=\"2\">//emphasis/@emphasisType</objectPath><objectUse>Only em01 and em02 are allowed for @emphasisType.</objectUse><objectValue valueForm=\"single\" valueAllowed=\"em01\"/><objectValue valueForm=\"single\" valueAllowed=\"em02\"/></structureObjectRule>",
+      "mismatches": [
+        {
+          "label": "Sealant step without emphasisType",
+          "expected": "reject",
+          "got": "accepted",
+          "xml": "<dmodule xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd\"><content><description><levelledPara><para>Apply <emphasis>sealant</emphasis> to the fastener threads.</para></levelledPara></description></content></dmodule>"
+        }
+      ],
+      "checks": [
+        {
+          "type": "review_json_valid",
+          "note": "the review answer is valid JSON with a cause and an explanation"
+        },
+        {
+          "type": "review_cause",
+          "expect": "example",
+          "note": "the Proposal only restricts the values: a missing attribute is not a violation, so the example is wrong"
+        },
+        {
+          "type": "language",
+          "target": "explanation",
+          "expect": "es",
+          "note": "the review's explanation is in the Proposal's language"
         }
       ]
     }

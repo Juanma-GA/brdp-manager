@@ -20,12 +20,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { fetchSchemaCards } from '../api/schemaFacts.js';
-import { RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
+import i18n from '../i18n';
+import { RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
 import { buildCopyableTestPrompt } from '../prompts/ruleTestExamplesPrompt.js';
-import { analyzeRule } from '../utils/ruleTestEngine.js';
+import {
+  buildRuleTestReviewPrompt,
+  mismatchedExamples,
+  parseRuleTestReviewResponse,
+  RULE_TEST_REVIEW_USER_MESSAGE,
+} from '../prompts/ruleTestReviewPrompt.js';
+import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
 import { materializeExample, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
 import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
-import { verdictToTestRecord } from '../utils/ruleTestReasons.js';
+import { ruleDescriptionText, verdictToTestRecord } from '../utils/ruleTestReasons.js';
 
 async function fetchStructure(standard, schema) {
   return authFetchJson(
@@ -36,6 +43,9 @@ async function fetchStructure(standard, schema) {
 export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onResult }) {
   // Known before any example: shown at the top from the start (T2b, Part 4).
   const analysis = useMemo(() => analyzeRule(ruleXml, format), [ruleXml, format]);
+  // T3b: what the rule checks, read from its XML -- shown in place of an
+  // explanation by the LLM, and the ground truth the review is given.
+  const description = useMemo(() => describeRule(ruleXml, format), [ruleXml, format]);
   // "Ejemplos bajo demanda en reglas no ejecutables": when the WHOLE rule
   // cannot be executed, the examples could only illustrate it (and a real
   // run produced broken ones) -- they are not generated until the user
@@ -44,6 +54,10 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   const onDemand = analysis.status === 'not_executable';
   const [state, setState] = useState(() => ({ status: onDemand ? 'idle' : 'loading' }));
   const [copyablePrompt, setCopyablePrompt] = useState(null);
+  // T3b "Review with the assistant": { status: 'loading' | 'ready' |
+  // 'error', cause, explanation, mismatches, error } | null. Indicative
+  // only: it never changes the verdict shown or recorded.
+  const [review, setReview] = useState(null);
   // Only the latest generation may land (Regenerate while one is running).
   const generationRef = useRef(0);
   const setupRef = useRef(null);
@@ -54,10 +68,14 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     if (record && onResultRef.current) onResultRef.current(record);
   };
 
-  const generate = useCallback(async () => {
+  // `previousReview` (T3b): { explanation, mismatches } when the review
+  // found the EXAMPLES at fault -- the new generation is told not to repeat
+  // that mistake. A new generation is a new test: it is recorded as usual.
+  const generate = useCallback(async (previousReview = null) => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     setState({ status: 'loading' });
+    setReview(null);
     const result = await generateRuleTestExamples({
       ruleXml,
       format,
@@ -75,6 +93,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       fetchStructure,
       isCurrent: () => generationRef.current === generation,
       onPrompt: (systemPrompt) => setCopyablePrompt(buildCopyableTestPrompt(systemPrompt)),
+      previousReview: previousReview?.mismatches ? previousReview : null,
     });
     if (!result) return; // a newer generation started
     if (result.status !== 'ready') {
@@ -82,14 +101,20 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       return;
     }
     setupRef.current = result.setup;
-    const { explanation, proposalMismatch, examples, runs, correction } = result;
-    setState({ status: 'ready', explanation, proposalMismatch, examples, runs, correction });
+    const { proposalMismatch, examples, runs, correction } = result;
+    setState({ status: 'ready', proposalMismatch, examples, runs, correction });
     if (!onDemand) report(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis)));
   }, [ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, analysis, onDemand]);
 
   // Generate once when the panel opens (it is remounted for another rule),
-  // unless the rule is not executable at all: then only on request.
+  // unless the rule is not executable at all: then only on request. The ref
+  // keeps it to once per panel: React's StrictMode (development) runs a
+  // mount effect twice, which recorded "not executable" twice in History
+  // and asked the LLM twice (found verifying T3b).
+  const openedRef = useRef(false);
   useEffect(() => {
+    if (openedRef.current) return;
+    openedRef.current = true;
     if (onDemand) report({ result: 'not_executable', reason: analysis.reason });
     else generate();
   }, []);
@@ -106,5 +131,51 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     });
 
   const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis) : null;
-  return { state, analysis, verdict, copyablePrompt, generate, regenerate: generate, runAgain };
+
+  // T3b "Review with the assistant" (incorrect verdict only): the Proposal,
+  // the rule, its deterministic description (in English, whatever the
+  // interface language) and the examples whose result did not match.
+  const reviewFailure = async () => {
+    if (state.status !== 'ready') return;
+    const mismatches = mismatchedExamples(state.examples, state.runs);
+    if (mismatches.length === 0) return;
+    const generation = generationRef.current;
+    setReview({ status: 'loading', mismatches });
+    const systemPrompt = buildRuleTestReviewPrompt({
+      brdp,
+      standard,
+      format,
+      ruleXml,
+      ruleDescription: ruleDescriptionText(description, i18n.getFixedT('en')),
+      mismatches,
+    });
+    try {
+      const res = await sendMessage([{ role: 'user', content: RULE_TEST_REVIEW_USER_MESSAGE }], null, aiProvider.model, aiProvider.provider, systemPrompt, {
+        temperature: RULE_TEST_REVIEW_TEMPERATURE,
+      });
+      if (generationRef.current !== generation) return; // examples replaced meanwhile
+      const parsed = parseRuleTestReviewResponse(res.content);
+      setReview(parsed.ok ? { status: 'ready', cause: parsed.cause, explanation: parsed.explanation, mismatches } : { status: 'error', error: parsed.error, mismatches });
+    } catch (err) {
+      if (generationRef.current === generation) setReview({ status: 'error', error: err.message, mismatches });
+    }
+  };
+
+  // "Regenerate examples" after a review that blamed the examples.
+  const regenerateWithReview = () =>
+    review?.status === 'ready' ? generate({ explanation: review.explanation, mismatches: review.mismatches }) : generate();
+
+  return {
+    state,
+    analysis,
+    description,
+    verdict,
+    copyablePrompt,
+    generate,
+    regenerate: generate,
+    runAgain,
+    review,
+    reviewFailure,
+    regenerateWithReview,
+  };
 }

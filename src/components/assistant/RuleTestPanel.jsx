@@ -4,7 +4,8 @@ import styles from '../../pages/RecordsPage.module.css';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
-import { formatRuleTestReason } from '../../utils/ruleTestReasons.js';
+import { formatRuleDescription, formatRuleTestReason } from '../../utils/ruleTestReasons.js';
+import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 
 // Test rule (T2 of 4): which rule formats can be tested (the T1 engine runs
 // S1000D BREX only). Used by both places that show the button.
@@ -230,14 +231,111 @@ function CorrectionNote({ correction }) {
   );
 }
 
+// T3b: what the rule checks, from describeRule (never from the LLM), in the
+// interface language; a rule that can never reject anything is flagged.
+function RuleDescription({ description }) {
+  const { t } = useTranslation();
+  const formatted = formatRuleDescription(description, t);
+  if (!formatted) return null;
+  return (
+    <div className={styles.ruleTestDescription} data-testid="rule-test-description">
+      <strong>{t('records.ruleTest.describe.title')}</strong>
+      <ul className={styles.ruleTestProblems}>
+        {formatted.lines.map((line, i) => (
+          <li key={i}>{line}</li>
+        ))}
+      </ul>
+      {formatted.cannotReject && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-cannot-reject">
+          ⚠ {t('records.ruleTest.describe.cannotReject')}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// T3b "Review with the assistant": shown only with an incorrect verdict.
+// Indicative; its actions start a new test or a new suggestion, never
+// change the recorded result.
+function ReviewSection({ review, onReview, onRegenerate, onSuggestCorrected, correctedBlockedReason, busy }) {
+  const { t } = useTranslation();
+  if (!review) {
+    return (
+      <div className={styles.suggestionActions}>
+        <button type="button" onClick={onReview} disabled={busy} data-testid="rule-test-review">
+          {t('records.ruleTest.review.button')}
+        </button>
+      </div>
+    );
+  }
+  if (review.status === 'loading') return <p className={styles.muted}>{t('records.ruleTest.review.loading')}</p>;
+  if (review.status === 'error') {
+    return (
+      <div>
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} role="alert">
+          ⚠ {t('records.ruleTest.review.error', { error: review.error })}
+        </p>
+        <div className={styles.suggestionActions}>
+          <button type="button" onClick={onReview}>
+            {t('records.ruleTest.review.retry')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  const showRegenerate = review.cause === 'example' || review.cause === 'unclear';
+  const showCorrect = (review.cause === 'rule' || review.cause === 'unclear') && onSuggestCorrected;
+  return (
+    <div className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-review-result" data-cause={review.cause}>
+      <p className={styles.ruleTestExplanation}>
+        <strong>{t(`records.ruleTest.review.causes.${review.cause}`)}</strong>{' '}
+        {t('records.ruleTest.review.indicative', { text: review.explanation })}
+      </p>
+      <div className={styles.suggestionActions}>
+        {showRegenerate && (
+          <button type="button" onClick={onRegenerate} data-testid="rule-test-regenerate-with-review">
+            {t('records.ruleTest.review.regenerate')}
+          </button>
+        )}
+        {showCorrect && (
+          <button
+            type="button"
+            onClick={onSuggestCorrected}
+            disabled={Boolean(correctedBlockedReason)}
+            title={correctedBlockedReason || t('records.ruleTest.review.suggestCorrectedTitle')}
+            data-testid="rule-test-suggest-corrected"
+          >
+            {t('records.ruleTest.review.suggestCorrected')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // The panel: what cannot be tested first (T2b: known before any example),
 // then the verdict, the explanation and each example. Opened by
 // TestRuleButton; mounted with key={rule} so another rule starts afresh.
 // onResult({ result, reason }) receives the result to record (T3; see
 // useRuleTest for what is -- and is not -- recorded).
-export default function RuleTestPanel({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onClose, onResult }) {
+// onSuggestCorrectedRule({ ruleXml, schemas, mismatches, diagnosis }) (T3b)
+// starts Suggest Rule with the failed test in its prompt; absent where the
+// panel cannot offer it, disabled with correctedRuleBlockedReason.
+export default function RuleTestPanel({
+  ruleXml,
+  format,
+  standard,
+  schemaLocation,
+  brdp,
+  aiProvider,
+  vocabulary,
+  onClose,
+  onResult,
+  onSuggestCorrectedRule,
+  correctedRuleBlockedReason = null,
+}) {
   const { t } = useTranslation();
-  const { state, analysis, verdict, copyablePrompt, generate, regenerate, runAgain } = useRuleTest({
+  const { state, analysis, description, verdict, copyablePrompt, generate, regenerate, runAgain, review, reviewFailure, regenerateWithReview } = useRuleTest({
     ruleXml,
     format,
     standard,
@@ -279,9 +377,11 @@ export default function RuleTestPanel({ ruleXml, format, standard, schemaLocatio
         </p>
       )}
 
+      <RuleDescription description={description} />
+
       {state.status === 'idle' && (
         <div className={styles.suggestionActions}>
-          <button type="button" onClick={generate} data-testid="rule-test-show-examples">
+          <button type="button" onClick={() => generate()} data-testid="rule-test-show-examples">
             {t('records.ruleTest.showIllustrativeExamples')}
           </button>
         </div>
@@ -300,7 +400,25 @@ export default function RuleTestPanel({ ruleXml, format, standard, schemaLocatio
               {view.text}
             </p>
           )}
-          {state.explanation && <p className={styles.ruleTestExplanation}>{state.explanation}</p>}
+          {verdict?.kind === 'incorrect' && (
+            <ReviewSection
+              review={review}
+              onReview={reviewFailure}
+              onRegenerate={regenerateWithReview}
+              onSuggestCorrected={
+                onSuggestCorrectedRule &&
+                (() =>
+                  onSuggestCorrectedRule({
+                    ruleXml,
+                    schemas: contextSchemasOfRule(ruleXml).schemas,
+                    mismatches: review.mismatches,
+                    diagnosis: review.explanation,
+                  }))
+              }
+              correctedBlockedReason={correctedRuleBlockedReason}
+              busy={!aiProvider}
+            />
+          )}
           {state.proposalMismatch && (
             <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-mismatch">
               ⚠ {t('records.ruleTest.proposalMismatch', { text: state.proposalMismatch })}
@@ -326,7 +444,7 @@ export default function RuleTestPanel({ ruleXml, format, standard, schemaLocatio
 
       {state.status !== 'loading' && state.status !== 'idle' && (
         <div className={styles.suggestionActions}>
-          <button onClick={regenerate}>{t('records.ruleTest.regenerate')}</button>
+          <button onClick={() => regenerate()}>{t('records.ruleTest.regenerate')}</button>
           {copyablePrompt && (
             <button onClick={copyPrompt} title={t('records.ruleTest.copyPromptTitle')}>
               {copyStatus === 'copied' ? t('records.assistant.promptCopied') : t('records.ruleTest.copyPrompt')}

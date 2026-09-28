@@ -165,9 +165,10 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
   // it is the project's only pending embedding. Its failure becomes the
   // entry's error (with Discard), like any other.
   // `options` (Suggest Rule part 2): { schemas, coverageByName,
-  // fromSelector } -- the schemas chosen in the selector (empty = general
-  // rule), the element coverage already fetched for the decision, and
-  // whether the call replaces this BRDP's own selector entry.
+  // fromSelector, failedTest } -- the schemas chosen in the selector (empty
+  // = general rule), the element coverage already fetched for the decision,
+  // whether the call replaces this BRDP's own entry, and (T3b) the failed
+  // test of the rule being corrected.
   const requestSuggestion = async (kind, prepare = null, options = {}) => {
     if (!selected || !aiProvider) return;
     const brdpId = selected.id;
@@ -298,7 +299,8 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
         similar.format,
         { sameBrdp, similar: ruleSimilar, formatExamples: [...standardFallback, ...templateFallback] },
         schemaFacts,
-        { schemas }
+        { schemas },
+        options.failedTest || null
       );
       const ruleBase = {
         brdpId,
@@ -318,6 +320,9 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
         // Only real BRDPs -- template rows are not BRDPs.
         sourceBrdpIds: [...sameBrdp, ...ruleSimilar, ...standardFallback].map((c) => c.id),
         excludedPendingOtherProjects,
+        // T3b: written to correct a rule whose test the review blamed on
+        // the rule -- shown as a note; testable straight away like any other.
+        correctedFromTest: Boolean(options.failedTest),
         copyablePrompt: buildCopyablePrompt(systemPrompt),
         pastedRule: '',
         expandedReferenceIds: new Set(),
@@ -432,6 +437,24 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
       schemas,
       coverageByName: entry.coverageByName,
       fromSelector: true,
+    });
+  };
+
+  // T3b "Suggest a corrected rule": the review of a failed test blamed the
+  // rule. Opens Suggest Rule with a "PREVIOUS RULE FAILED ITS TEST" block
+  // (previous rule, mismatched examples, diagnosis), limited to the same
+  // schemas as the previous rule. Replaces this BRDP's current entry -- the
+  // suggestion under test, when the review ran on one (logged as
+  // discarded, it was never accepted). Nothing is recorded: only a new
+  // test of the new rule is.
+  const suggestCorrectedRule = async ({ ruleXml, schemas, mismatches, diagnosis }, prepare = null) => {
+    if (!selected || !aiProvider) return;
+    const existing = suggestionsByBrdpId.get(selected.id);
+    if (existing?.text) await logSuggestionFeedback(existing, 'discarded');
+    await requestSuggestion('rule', prepare, {
+      schemas: schemas || [],
+      fromSelector: true,
+      failedTest: { ruleXml, mismatches, diagnosis },
     });
   };
 
@@ -562,6 +585,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     requestSuggestion,
     startRuleSuggestion,
     generateRuleWithSchemas,
+    suggestCorrectedRule,
     ensurePastedCoverage,
     acceptSuggestion,
     acceptPastedRule,

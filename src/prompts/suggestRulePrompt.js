@@ -69,7 +69,11 @@ document type. Example (invented names, not from this BRDP):
 // being /similar's standard_fallback followed by template_fallback.
 // `schemaContext` (optional): { schemas: [...] } -- the schemas the user
 // limited the rule to; absent or empty = a general rule.
-export function buildSuggestRulePrompt(brdp, standard, format, references, schemaFacts, schemaContext = null) {
+// `failedTest` (Test de reglas T3b, "Suggest a corrected rule"): { ruleXml,
+// mismatches: [{ label, expected, got, xml }], diagnosis } -- the previous
+// rule, the test examples it got wrong and the review's diagnosis, so the
+// new rule fixes exactly that.
+export function buildSuggestRulePrompt(brdp, standard, format, references, schemaFacts, schemaContext = null, failedTest = null) {
   const { sameBrdp = [], similar = [], formatExamples = [] } = references;
 
   let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
@@ -131,6 +135,22 @@ ${precedentLines(similar, true)}`;
 Format examples — unrelated to this BRDP; they show what the format can
 express, never copy their element or attribute names:
 ${precedentLines(formatExamples, false)}`;
+  }
+
+  if (failedTest) {
+    const lines = failedTest.mismatches.map(
+      (m) => `- "${m.label}" (expected ${m.expected === 'reject' ? 'rejected' : 'accepted'}, the rule ${m.got} it):\n${m.xml}`
+    );
+    prompt += `
+
+PREVIOUS RULE FAILED ITS TEST: this rule was written for this BRDP before,
+and a review of its test found the RULE at fault:
+${failedTest.ruleXml}
+Test examples it got wrong:
+${lines.join('\n')}
+Diagnosis: ${failedTest.diagnosis}
+Write a corrected rule that implements the Proposal's decision and gets these
+examples right. Do not copy the previous rule's mistake.`;
   }
 
   prompt += `

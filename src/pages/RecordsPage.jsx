@@ -1299,6 +1299,19 @@ export default function RecordsPage() {
                       vocabulary={vocabulary}
                       onClose={() => setDraftTestOpenFor(null)}
                       onResult={(record) => recordDraftRuleTest(selected.id, ruleApproval.rule_xml, record)}
+                      onSuggestCorrectedRule={(failed) =>
+                        suggestions.suggestCorrectedRule(
+                          failed,
+                          onlySelectedPendingEmbedding ? () => embedSelectedBrdpFirst(selected.id) : null
+                        )
+                      }
+                      correctedRuleBlockedReason={
+                        selectedSuggestion
+                          ? t('records.assistant.pendingSuggestionBlocksNew')
+                          : suggestDisabledByEmbeddings
+                            ? t('records.ruleTest.review.blockedByEmbeddings')
+                            : suggestRuleBlockedReason()
+                      }
                     />
                   )}
                   {verifyDialog && (
@@ -1751,6 +1764,8 @@ export default function RecordsPage() {
                     onAcceptPasted={suggestions.acceptPastedRule}
                     onEnsurePastedCoverage={(rule) => suggestions.ensurePastedCoverage(selected.id, rule)}
                     onTestResult={(ruleXml, record) => suggestions.recordSuggestionTest(selected.id, ruleXml, record)}
+                    onSuggestCorrectedRule={(failed) => suggestions.suggestCorrectedRule(failed)}
+                    correctedRuleBlockedReason={suggestDisabledByEmbeddings ? t('records.ruleTest.review.blockedByEmbeddings') : null}
                   />
                 )}
 

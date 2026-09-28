@@ -128,6 +128,8 @@ export default function RuleSuggestionPanel({
   onAcceptPasted,
   onEnsurePastedCoverage,
   onTestResult,
+  onSuggestCorrectedRule,
+  correctedRuleBlockedReason,
 }) {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(null); // null | 'copied' | 'failed'
@@ -187,6 +189,11 @@ export default function RuleSuggestionPanel({
           {t('records.assistant.ruleNotCheckable', { reason: entry.notCheckable })}
         </p>
       )}
+      {entry.correctedFromTest && (
+        <p className={styles.hint} data-testid="rule-corrected-note">
+          {t('records.ruleTest.review.correctedNote')}
+        </p>
+      )}
       {(entry.text || entry.notCheckable !== undefined) && <AppliesTo entry={entry} />}
       {entry.text && (
         <>
@@ -227,6 +234,8 @@ export default function RuleSuggestionPanel({
           vocabulary={vocabulary}
           onClose={() => setTestOpen(false)}
           onResult={(record) => onTestResult?.(entry.text, record)}
+          onSuggestCorrectedRule={onSuggestCorrectedRule}
+          correctedRuleBlockedReason={correctedRuleBlockedReason}
         />
       )}
 

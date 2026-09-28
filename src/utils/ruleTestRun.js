@@ -60,7 +60,7 @@ export function runRuleTestExamples(examples, { ruleXml, format, setup, vocabula
   return { materialized, runs };
 }
 
-// → { status: 'ready', explanation, proposalMismatch, examples, runs,
+// → { status: 'ready', proposalMismatch, examples, runs,
 //     correction, setup, systemPrompt, responses }
 //   | { status: 'error', error, badResponse?, systemPrompt?, responses? }
 //   | null when isCurrent() turned false (a newer generation started).
@@ -79,6 +79,7 @@ export async function generateRuleTestExamples({
   parseXml = parseXmlDocument,
   isCurrent = () => true,
   onPrompt,
+  previousReview = null,
 }) {
   let systemPrompt = null;
   const responses = [];
@@ -93,6 +94,7 @@ export async function generateRuleTestExamples({
       contextSchemas: prepared.contextSchemas,
       placements: prepared.promptPlacements,
       schemaFacts: prepared.schemaFacts,
+      previousReview,
     });
     onPrompt?.(systemPrompt);
     const run = (examples) => runRuleTestExamples(examples, { ruleXml, format, setup: prepared.setup, vocabulary, parseXml });
@@ -149,7 +151,6 @@ export async function generateRuleTestExamples({
     }
     return {
       status: 'ready',
-      explanation: parsed.explanation,
       proposalMismatch: parsed.proposalMismatch,
       examples: materialized,
       runs,
