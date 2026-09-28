@@ -28,6 +28,10 @@ import { schemaLocationOf, supportsSchemaContext } from '../utils/ruleSchemaCont
 import { hasUnfilledMarkers } from '../utils/proposalMarkers';
 import RuleStatusStepper from '../components/RuleStatusStepper';
 import RuleTestPanel, { canTestRule, TestRuleButton } from '../components/assistant/RuleTestPanel';
+import { RuleTestIndicator, VerifyWarningDialog } from '../components/assistant/RuleTestIndicator';
+import { registerRuleTest } from '../api/ruleTests';
+import { verifyWarning } from '../utils/ruleTestStatus.js';
+import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
 import styles from './RecordsPage.module.css';
 
@@ -77,7 +81,30 @@ const HISTORY_TRANSLATED_FIELDS = {
 // collapsed first so the shortened text shows content, not whitespace.
 const HISTORY_MAX_CHARS = 160;
 
+// A "rule_test" History value (T3) is JSON codes, {"result", "reason"},
+// never a sentence: translated here, so it reads in the viewer's language.
+function formatRuleTestHistoryValue(t, value) {
+  if (!value) return t('records.ruleTest.indicator.notTested');
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return value;
+  }
+  const result = t(`records.ruleTest.results.${parsed.result}`, { defaultValue: parsed.result });
+  const reason = formatRuleTestReason(parsed.reason, t);
+  return reason ? t('records.ruleTest.results.withReason', { result, reason }) : result;
+}
+
+// The full value on hover: the raw text, except a rule test (its codes
+// would read as JSON), which shows its translated text.
+function historyValueTitle(t, fieldName, value) {
+  if (!value) return undefined;
+  return fieldName === 'rule_test' ? formatRuleTestHistoryValue(t, value) : value;
+}
+
 function formatHistoryValue(t, fieldName, value) {
+  if (fieldName === 'rule_test') return formatRuleTestHistoryValue(t, value);
   const prefix = HISTORY_TRANSLATED_FIELDS[fieldName];
   if (prefix) return t(`${prefix}.${value}`, { defaultValue: value });
   if (!value) return '—';
@@ -202,6 +229,10 @@ export default function RecordsPage() {
   // and Edit/Verify/Revoke actions live here in the detail panel (v1's
   // large plain-text editor), not in the table cell above.
   const [ruleApproval, setRuleApproval] = useState(undefined); // undefined = loading, null = none
+  // Test de reglas T3: the warning shown before Verify (utils/ruleTestStatus
+  // verifyWarning), and an error recording a test result.
+  const [verifyDialog, setVerifyDialog] = useState(null);
+  const [ruleTestRecordError, setRuleTestRecordError] = useState(null);
   const [ruleEditing, setRuleEditing] = useState(false);
   // Read-only view of the saved rule_xml while Verified -- the only state
   // where the actual rule text was otherwise invisible without Revoke
@@ -386,6 +417,14 @@ export default function RecordsPage() {
     };
   }, [projectId, ruleFormat, approvalsRefreshToken]);
 
+  // T3: another BRDP starts without the previous one's warning or error
+  // (not on an approvals refresh -- that one follows the very recording
+  // whose error must stay visible).
+  useEffect(() => {
+    setRuleTestRecordError(null);
+    setVerifyDialog(null);
+  }, [selected?.id]);
+
   useEffect(() => {
     setRuleEditing(false);
     setRulePreviewOpen(false);
@@ -462,6 +501,7 @@ export default function RecordsPage() {
     ruleApproval,
     handleUpdate,
     recomputeVocabResult,
+    onRuleTestRecordError: setRuleTestRecordError,
     // Accepting a rule (suggested or pasted) changes both the rule and the
     // BRDP's History -- refresh both at once (Suggest Rule adjustments
     // round: History used to show the change only after a reload).
@@ -553,16 +593,49 @@ export default function RecordsPage() {
     }
   };
 
-  const verifyRule = async () => {
+  const doVerifyRule = async () => {
     setRuleBusy(true);
     try {
       await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}/approve`, {
         method: 'POST',
       });
+      setVerifyDialog(null);
       setApprovalsRefreshToken((n) => n + 1);
       setHistoryRefreshToken((n) => n + 1);
     } finally {
       setRuleBusy(false);
+    }
+  };
+
+  // Test de reglas T3, Part 3: moving a rule to Verified warns -- never
+  // blocks (user decision) -- when its recorded test is missing, outdated,
+  // failed, inconclusive or could not run. This is the only path in the
+  // application that moves a rule to Verified (the Excel import is left as
+  // it is, docs request; v1's BRDPPage/DetailPanel are not routed).
+  const verifyRule = () => {
+    const warning = verifyWarning(ruleApproval, ruleFormat);
+    if (warning) setVerifyDialog(warning);
+    else doVerifyRule();
+  };
+
+  const testNowFromVerifyDialog = () => {
+    setVerifyDialog(null);
+    setDraftTestOpenFor(selected.id);
+  };
+
+  // Records the result of a Test rule run on the saved Draft rule (T3,
+  // Part 1). Editor only: a viewer can run the test, but only an editor's
+  // run is recorded (the backend requires editor too). A failure to record
+  // is shown next to the Rule Status indicator, never swallowed (HR7).
+  const recordDraftRuleTest = async (brdpId, testedRuleXml, record) => {
+    if (!canEdit || !ruleFormat) return;
+    setRuleTestRecordError(null);
+    try {
+      await registerRuleTest(projectId, brdpId, ruleFormat, testedRuleXml, record);
+      setApprovalsRefreshToken((n) => n + 1);
+      setHistoryRefreshToken((n) => n + 1);
+    } catch (err) {
+      setRuleTestRecordError(err.message);
     }
   };
 
@@ -1175,6 +1248,12 @@ export default function RecordsPage() {
               ) : (
                 <div className={styles.ruleStatusRow}>
                   <RuleStatusStepper state={ruleStateOf(ruleApproval)} />
+                  {ruleApproval && canTestRule(ruleFormat) && <RuleTestIndicator approval={ruleApproval} />}
+                  {ruleTestRecordError && (
+                    <p className={styles.ruleErrorText} role="alert">
+                      {t('records.ruleTest.recordError', { error: ruleTestRecordError })}
+                    </p>
+                  )}
                   <div className={styles.suggestionActions}>
                     {ruleStateOf(ruleApproval) === 'draft' && canTestRule(ruleFormat) && (
                       <TestRuleButton
@@ -1219,6 +1298,16 @@ export default function RecordsPage() {
                       aiProvider={aiProvider}
                       vocabulary={vocabulary}
                       onClose={() => setDraftTestOpenFor(null)}
+                      onResult={(record) => recordDraftRuleTest(selected.id, ruleApproval.rule_xml, record)}
+                    />
+                  )}
+                  {verifyDialog && (
+                    <VerifyWarningDialog
+                      warning={verifyDialog}
+                      busy={ruleBusy}
+                      onTestNow={testNowFromVerifyDialog}
+                      onVerifyAnyway={doVerifyRule}
+                      onCancel={() => setVerifyDialog(null)}
                     />
                   )}
                   {rulePreviewOpen && ruleStateOf(ruleApproval) === 'verified' && (
@@ -1661,6 +1750,7 @@ export default function RecordsPage() {
                     onPastedRuleChange={(value) => suggestions.setPastedRule(selected.id, value)}
                     onAcceptPasted={suggestions.acceptPastedRule}
                     onEnsurePastedCoverage={(rule) => suggestions.ensurePastedCoverage(selected.id, rule)}
+                    onTestResult={(ruleXml, record) => suggestions.recordSuggestionTest(selected.id, ruleXml, record)}
                   />
                 )}
 
@@ -1845,11 +1935,11 @@ export default function RecordsPage() {
                           {t(`records.history.fields.${h.field_name}`, { defaultValue: h.field_name })}
                         </div>
                         <div className={styles.historyChange}>
-                          <span className={styles.historyOld} title={h.old_value || undefined}>
+                          <span className={styles.historyOld} title={historyValueTitle(t, h.field_name, h.old_value)}>
                             {formatHistoryValue(t, h.field_name, h.old_value)}
                           </span>
                           <span className={styles.historyArrow}>→</span>
-                          <span className={styles.historyNew} title={h.new_value || undefined}>
+                          <span className={styles.historyNew} title={historyValueTitle(t, h.field_name, h.new_value)}>
                             {formatHistoryValue(t, h.field_name, h.new_value)}
                           </span>
                         </div>

@@ -1145,3 +1145,51 @@
   font-family: monospace;
   font-size: 12px;
 }
+
+/* Test de reglas T3: the recorded test of the saved rule (Rule Status box),
+   same tones as the Test rule panel's verdict; "Not tested" is neutral. */
+.ruleTestIndicator {
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  align-self: flex-start;
+}
+
+.ruleTestToneNeutral {
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+/* The warning before Verify: a real modal (the user has to choose), same
+   shape as SettingsPage.module.css's modalOverlay/modal. */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.modalTitle {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.modalMessage {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+}

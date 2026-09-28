@@ -127,6 +127,7 @@ export default function RuleSuggestionPanel({
   onPastedRuleChange,
   onAcceptPasted,
   onEnsurePastedCoverage,
+  onTestResult,
 }) {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(null); // null | 'copied' | 'failed'
@@ -225,6 +226,7 @@ export default function RuleSuggestionPanel({
           aiProvider={aiProvider}
           vocabulary={vocabulary}
           onClose={() => setTestOpen(false)}
+          onResult={(record) => onTestResult?.(entry.text, record)}
         />
       )}
 

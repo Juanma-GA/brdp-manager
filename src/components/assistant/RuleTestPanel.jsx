@@ -4,6 +4,7 @@ import styles from '../../pages/RecordsPage.module.css';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
+import { formatRuleTestReason } from '../../utils/ruleTestReasons.js';
 
 // Test rule (T2 of 4): which rule formats can be tested (the T1 engine runs
 // S1000D BREX only). Used by both places that show the button.
@@ -47,7 +48,7 @@ function verdictView(t, verdict) {
         text: t(verdict.why === 'nothing_selected' ? 'records.ruleTest.verdicts.nothingSelected' : 'records.ruleTest.verdicts.missingExpectation'),
       };
     case 'not_executable':
-      return { tone: 'warn', text: t('records.ruleTest.verdicts.notExecutable', { reason: verdict.reason }) };
+      return { tone: 'warn', text: t('records.ruleTest.verdicts.notExecutable', { reason: formatRuleTestReason(verdict.reason, t) }) };
     default:
       return { tone: 'warn', text: t('records.ruleTest.verdicts.noRunnable') };
   }
@@ -232,7 +233,9 @@ function CorrectionNote({ correction }) {
 // The panel: what cannot be tested first (T2b: known before any example),
 // then the verdict, the explanation and each example. Opened by
 // TestRuleButton; mounted with key={rule} so another rule starts afresh.
-export default function RuleTestPanel({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onClose }) {
+// onResult({ result, reason }) receives the result to record (T3; see
+// useRuleTest for what is -- and is not -- recorded).
+export default function RuleTestPanel({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onClose, onResult }) {
   const { t } = useTranslation();
   const { state, analysis, verdict, copyablePrompt, generate, regenerate, runAgain } = useRuleTest({
     ruleXml,
@@ -242,6 +245,7 @@ export default function RuleTestPanel({ ruleXml, format, standard, schemaLocatio
     brdp,
     aiProvider,
     vocabulary,
+    onResult,
   });
   const [copyStatus, setCopyStatus] = useState(null);
 
@@ -270,7 +274,7 @@ export default function RuleTestPanel({ ruleXml, format, standard, schemaLocatio
       {analysis.status !== 'executable' && (
         <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneWarn}`} data-testid="rule-test-analysis">
           {t(ruleNotExecutable ? 'records.ruleTest.analysisNotExecutable' : 'records.ruleTest.analysisPartial', {
-            reason: analysis.reason,
+            reason: formatRuleTestReason(analysis.reason, t),
           })}
         </p>
       )}

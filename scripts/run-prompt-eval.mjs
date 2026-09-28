@@ -52,7 +52,11 @@ import {
   buildSuggestRulePrompt,
   parseSuggestRuleResponse,
 } from "../src/prompts/suggestRulePrompt.js";
-import { ASK_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { ASK_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
+import { analyzeRule } from "../src/utils/ruleTestEngine.js";
+import { ruleTestVerdict } from "../src/utils/ruleTest.js";
+import { generateRuleTestExamples } from "../src/utils/ruleTestRun.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { checkRuleNames, extractRuleXPaths } from "../src/utils/ruleNameCheck.js";
@@ -178,7 +182,9 @@ async function runCheck(check, answer, ctx = {}) {
   // Schematron @context/@test), entity-decoded, one per line -- so a check
   // on the path never matches the objectUse text.
   const target =
-    check.target === "final"
+    check.target === "explanation"
+      ? ctx.ruleTest?.explanation ?? ""
+      : check.target === "final"
       ? ctx.finalRule ?? ""
       : check.target === "xml"
         ? ctx.xml ?? ""
@@ -217,6 +223,49 @@ async function runCheck(check, answer, ctx = {}) {
       const is = answer.trim().replace(/^```\w*\s*/, "").startsWith(NOT_CHECKABLE_PREFIX);
       const expect = check.expect !== false;
       return { status: is === expect ? "pass" : "fail", detail: expect ? `answer starts with ${NOT_CHECKABLE_PREFIX}` : `answer is a rule, not ${NOT_CHECKABLE_PREFIX}` };
+    }
+    // Rule test (Test de reglas T3, Part 4): the generation of discriminating
+    // examples for a known correct rule. ctx.ruleTest is the result of the
+    // shared generation (src/utils/ruleTestRun.js), as the panel gets it.
+    case "rule_test_json_valid": {
+      const r = ctx.ruleTest;
+      const ok = r && !r.badResponse && r.status === "ready";
+      return { status: ok ? "pass" : "fail", detail: ok ? "valid JSON with examples" : `not usable: ${r?.error || "no answer"}` };
+    }
+    case "rule_test_examples_valid": {
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const bad = r.runs.map((run, i) => (run.validation.runnable ? null : r.examples[i].label)).filter(Boolean);
+      const corrected = r.correction ? ` (correction round: ${r.correction.fixed}/${r.correction.attempted} fixed)` : "";
+      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `still invalid after the correction round: ${bad.join(", ")}${corrected}` : `all ${r.examples.length} examples valid${corrected}` };
+    }
+    case "rule_test_accept_and_reject": {
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const expectations = new Set(r.examples.map((ex) => ex.expected));
+      const ok = expectations.has("accept") && expectations.has("reject");
+      return { status: ok ? "pass" : "fail", detail: `expectations: ${[...expectations].join(", ") || "none"}` };
+    }
+    case "rule_test_verdict_correct": {
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis);
+      return { status: verdict.kind === "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+    }
+    case "rule_test_other_schema_accepted": {
+      // A rule limited to one schema: an example of another schema, meant
+      // to be accepted, and the engine says the rule does not apply there.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const ruleSchemas = new Set(ctx.ruleSchemas || []);
+      const other = r.examples
+        .map((ex, i) => ({ ex, run: r.runs[i] }))
+        .filter(({ ex }) => ex.schema && !ruleSchemas.has(ex.schema));
+      const good = other.find(({ ex, run }) => ex.expected === "accept" && run.result?.status === "accepted" && run.result.outOfScopeSchemas.length > 0);
+      return {
+        status: good ? "pass" : "fail",
+        detail: good ? `"${good.ex.label}" (${good.ex.schema}): accepted, the rule does not apply` : `other-schema examples: ${other.map(({ ex, run }) => `${ex.label} (${ex.schema}, expected ${ex.expected}, got ${run.result?.status || "not run"})`).join("; ") || "none"}`,
+      };
     }
     case "uses_object_value": {
       const r = usesObjectValue(ctx.xml || "");
@@ -499,7 +548,79 @@ async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
   };
 }
 
+// Rule test (Test de reglas T3, Part 4): given a known correct rule (the
+// case's `rule`, wrapped in its optional `schemas` context blocks exactly as
+// Suggest Rule would save it), the same generation the Test rule panel runs
+// -- src/utils/ruleTestRun.js, with the real schema cards/structure
+// endpoints, the real LLM through /api/llm-proxy at RULE_TEST_TEMPERATURE,
+// the one correction round, and the T1 engine. The checks look at whether
+// the LLM's examples tell a correct rule apart: valid JSON, examples valid
+// after the correction round, an accept and a reject, verdict "correct".
+function xmldomParse(text) {
+  const messages = [];
+  const doc = new XmlDomParser({ errorHandler: (_level, msg) => messages.push(msg) }).parseFromString(text, "text/xml");
+  if (messages.length) throw new Error(String(messages[0]).replace(/^\[xmldom \w+\]\s*/, "").split("\n")[0]);
+  return doc;
+}
+
+async function sendMessagesToLlm(aiProvider, systemPrompt, messages, temperature) {
+  const payload =
+    aiProvider.provider === "Anthropic"
+      ? { model: aiProvider.model, max_tokens: 4000, temperature, system: systemPrompt, messages }
+      : { model: aiProvider.model, max_tokens: 4000, temperature, messages: [{ role: "system", content: systemPrompt }, ...messages] };
+  const res = await apiFetch("/api/llm-proxy", { method: "POST", body: JSON.stringify({ payload }) });
+  if (aiProvider.provider === "Anthropic") return res.content[0].text;
+  return res.choices[0].message.content;
+}
+
+async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
+  const format = STANDARD_TO_RULE_FORMAT[testCase.standard];
+  const location = schemaLocationOf({ schemaLocation: testCase.schemaLocation });
+  const schemas = testCase.schemas || [];
+  const ruleXml = schemas.length ? wrapRuleInSchemaContexts(testCase.rule, format, testCase.standard, schemas, location) : testCase.rule;
+  const vocabulary = loadSchemaVocabulary(testCase.standard);
+  const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse });
+  const result = await generateRuleTestExamples({
+    ruleXml,
+    format,
+    standard: testCase.standard,
+    schemaLocation: location,
+    brdp: createdBrdp,
+    vocabulary,
+    ask: (messages, systemPrompt) => sendMessagesToLlm(aiProvider, systemPrompt, messages, RULE_TEST_TEMPERATURE),
+    fetchSchemaCards: (standard, names) =>
+      apiFetch(`/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(names.join(","))}`),
+    fetchStructure: (standard, schema) =>
+      apiFetch(`/api/schema-cards/structure?standard=${encodeURIComponent(standard)}&schema=${encodeURIComponent(schema)}`),
+    parseXml: xmldomParse,
+  });
+  const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis) : null;
+  return {
+    systemPrompt: result.systemPrompt,
+    userMessage: "Write the test examples for this rule.",
+    answer: (result.responses || []).join("\n\n--- correction round ---\n\n"),
+    finalRule: ruleXml,
+    ruleTest: {
+      status: result.status,
+      error: result.error || null,
+      explanation: result.explanation ?? null,
+      correction: result.correction ?? null,
+      verdict,
+      examples: (result.examples || []).map((ex, i) => ({
+        label: ex.label,
+        expected: ex.expected,
+        schema: ex.schema,
+        xml: ex.xml,
+        runnable: result.runs[i].validation.runnable,
+        result: result.runs[i].result?.status ?? null,
+      })),
+    },
+    checkContext: { ruleTest: result, analysis, ruleSchemas: schemas, standard: testCase.standard },
+  };
+}
+
 async function runCaseOnce(project, aiProvider, createdBrdp, testCase) {
+  if (testCase.type === "rule-test") return runRuleTestCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-rule") return runSuggestRuleCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "ask") return runAskCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-definition") return runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCase);
@@ -570,10 +691,10 @@ async function main() {
       for (let run = 1; run <= args.runs; run++) {
         process.stdout.write(`  ${testCase.id} (run ${run}/${args.runs})... `);
         try {
-          const { systemPrompt, userMessage, answer, finalRule, checkContext } = await runCaseOnce(project, aiProvider, createdBrdp, testCase);
+          const { systemPrompt, userMessage, answer, finalRule, ruleTest, checkContext } = await runCaseOnce(project, aiProvider, createdBrdp, testCase);
           const checkResults = [];
           for (const check of testCase.checks) checkResults.push({ check, result: await runCheck(check, answer, checkContext) });
-          caseResult.runs.push({ run, systemPrompt, userMessage, answer, ...(finalRule !== undefined ? { finalRule } : {}), checkResults });
+          caseResult.runs.push({ run, systemPrompt, userMessage, answer, ...(finalRule !== undefined ? { finalRule } : {}), ...(ruleTest ? { ruleTest } : {}), checkResults });
           const failed = checkResults.filter((c) => c.result.status === "fail").length;
           console.log(failed === 0 ? "ok" : `${failed} check(s) failed`);
         } catch (err) {
@@ -610,7 +731,7 @@ function buildReportHeader(meta, runs) {
     model: meta.aiProvider.model,
     commit: meta.gitInfo.commit,
     uncommittedChanges: meta.gitInfo.dirty,
-    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE },
+    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE },
     runs,
     generatedAt: meta.generatedAt,
   };
@@ -627,7 +748,7 @@ function writeReport(results, runs, meta) {
   lines.push(`- Provider: ${header.provider} / ${header.model}`);
   lines.push(`- Commit: ${header.commit}${header.uncommittedChanges ? " (+ uncommitted changes)" : ""}`);
   lines.push(
-    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}`
+    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}`
   );
   lines.push(`- Runs per case: ${header.runs}`);
   lines.push(`- Generated: ${header.generatedAt}`);

@@ -187,14 +187,14 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const a = (xml, format = 'BREX-4.2') => analyzeRule(xml, format, { parseXml });
   check('analyze: //emphasis executable', a(EMPH).status === 'executable');
   const doc = a("<structureObjectRule><objectPath allowedObjectFlag=\"0\">document('other.xml')//emphasis</objectPath></structureObjectRule>");
-  check('analyze: document() → not executable, with the reason', doc.status === 'not_executable' && /reads another file/.test(doc.reason), JSON.stringify(doc));
+  check('analyze: document() → not executable, with the reason', doc.status === 'not_executable' && doc.reason?.code === 'external_document' && doc.reason.params.fn === 'document()', JSON.stringify(doc));
   check('analyze: only nonContextRule → not executable', a('<nonContextRule id="x"><simplePara>Text</simplePara></nonContextRule>').status === 'not_executable');
   const partial = a(`<nonContextRule id="n1"><simplePara>Text</simplePara></nonContextRule>${EMPH}`);
-  check('analyze: nonContextRule next to a rule → partial, says which part', partial.status === 'partial' && /n1: This rule has no XPath/.test(partial.reason), JSON.stringify(partial));
+  check('analyze: nonContextRule next to a rule → partial, says which part', partial.status === 'partial' && partial.reason?.code === 'parts' && partial.parts[0]?.ruleId === 'n1' && partial.parts[0].reason.code === 'non_context_rule', JSON.stringify(partial));
   const bool = a('<structureObjectRule><objectPath allowedObjectFlag="2">//updateCode[@x] and (//zoneSpec or //zone)</objectPath></structureObjectRule>');
-  check('analyze: a boolean objectPath is not a path', bool.status === 'not_executable' && /does not select nodes/.test(bool.reason), JSON.stringify(bool));
+  check('analyze: a boolean objectPath is not a path', bool.status === 'not_executable' && bool.reason?.code === 'path_not_nodes' && bool.reason.params.kind === 'boolean', JSON.stringify(bool));
   check('analyze: unknown format', a(EMPH, 'SCH-DITA').status === 'not_executable');
-  check('analyze: XPath syntax error', /XPath error/.test(a('<structureObjectRule><objectPath>//&lt;emphasis&gt;</objectPath></structureObjectRule>').reason || ''));
+  check('analyze: XPath syntax error', a('<structureObjectRule><objectPath>//&lt;emphasis&gt;</objectPath></structureObjectRule>').reason?.code === 'xpath_error');
   check('analyze: mandatory-node rule is executable (examples are whole documents)', a('<objrule><objpath objappl="1">//dmodule/content</objpath></objrule>', 'BREX-3.0.1').status === 'executable');
   check('analyze: absolute path to another root is still executable (the schema choice follows the root)', a('<structureObjectRule><objectPath allowedObjectFlag="0">/pm/content//dmRef</objectPath></structureObjectRule>').status === 'executable');
 }
@@ -301,7 +301,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     { label: 'a', expected: 'accept', schema: null, content: 'a' },
     { label: 'b', expected: 'reject', schema: null, content: '<emphasis>b</emphasis>' },
   ], setup);
-  check('document(): verdict not executable with the reason', verdict.kind === 'not_executable' && /reads another file/.test(verdict.reason), JSON.stringify(verdict));
+  check('document(): verdict not executable with the reason', verdict.kind === 'not_executable' && verdict.reason?.code === 'external_document', JSON.stringify(verdict));
   check('document(): examples still validated and kept', runs.every((r) => r.validation.wellFormed));
   const noneRunnable = ruleTestVerdict([{ expected: 'accept' }], [{ validation: { runnable: false }, result: null, matches: null }], analyzeRule(rule, 'BREX-4.2', { parseXml }));
   check('document(): the reason shows even when no example could run', noneRunnable.kind === 'not_executable', JSON.stringify(noneRunnable));
@@ -327,6 +327,50 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   ], setup);
   check('invalid examples: not run, verdict no_runnable', bad.runs.every((r) => r.result === null) && bad.verdict.kind === 'no_runnable', JSON.stringify(bad.verdict));
   check('display: malformed XML → null', xmlDisplayLines('<para><emphasis>b</para>', [], parseXml) === null);
+}
+
+// ─── T3: what is recorded, the indicator state and the Verify warning ──────
+{
+  const { verdictToTestRecord } = await import('../src/utils/ruleTestReasons.js');
+  const { ruleTestStatus, verifyWarning } = await import('../src/utils/ruleTestStatus.js');
+  const { ruleXmlHash } = await import('../src/utils/ruleHash.js');
+  const { createHash } = await import('node:crypto');
+
+  check('record: correct → passed, no reason', JSON.stringify(verdictToTestRecord({ kind: 'correct' })) === '{"result":"passed","reason":null}');
+  check('record: incorrect → failed with direction',
+    JSON.stringify(verdictToTestRecord({ kind: 'incorrect', permissive: true, strict: false })) ===
+      '{"result":"failed","reason":{"code":"test_incorrect","params":{"permissive":true,"strict":false}}}');
+  check('record: nothing selected → inconclusive', verdictToTestRecord({ kind: 'inconclusive', why: 'nothing_selected' }).reason.code === 'test_nothing_selected');
+  check('record: missing expectation → inconclusive', verdictToTestRecord({ kind: 'inconclusive', why: 'missing_expectation' }).reason.code === 'test_missing_expectation');
+  check('record: no runnable example → inconclusive', JSON.stringify(verdictToTestRecord({ kind: 'no_runnable' })) === '{"result":"inconclusive","reason":{"code":"test_no_runnable","params":{}}}');
+  const docReason = { code: 'external_document', params: { fn: 'document()' } };
+  check('record: not executable keeps the engine reason', JSON.stringify(verdictToTestRecord({ kind: 'not_executable', reason: docReason })) === JSON.stringify({ result: 'not_executable', reason: docReason }));
+  check('record: no verdict → nothing', verdictToTestRecord(null) === null);
+
+  for (const text of ['', EMPH, 'ñ <x a="é"/> 😀', 'x'.repeat(1000)]) {
+    check(`hash = backend's SHA-256 (${text.length} chars)`, ruleXmlHash(text) === createHash('sha256').update(text, 'utf8').digest('hex'));
+  }
+
+  const approval = (fields) => ({ rule_xml: EMPH, status: 'pending_review', last_test_result: null, last_test_reason: null, last_test_at: null, last_test_up_to_date: null, ...fields });
+  const at = '2026-09-28T10:00:00Z';
+  check('status: never tested', ruleTestStatus(approval({})).kind === 'not_tested');
+  check('status: passed', ruleTestStatus(approval({ last_test_result: 'passed', last_test_at: at, last_test_up_to_date: true })).kind === 'passed');
+  check('status: outdated wins over the result', ruleTestStatus(approval({ last_test_result: 'passed', last_test_at: at, last_test_up_to_date: false })).kind === 'outdated');
+  check('status: failed keeps its reason', ruleTestStatus(approval({ last_test_result: 'failed', last_test_reason: { code: 'test_incorrect', params: { permissive: true } }, last_test_up_to_date: true })).reason.code === 'test_incorrect');
+
+  const w = (fields, format = 'BREX-4.2', xml = EMPH) => verifyWarning(approval({ rule_xml: xml, ...fields }), format, { parseXml });
+  check('verify: passed and up to date → no dialog', w({ last_test_result: 'passed', last_test_up_to_date: true }) === null);
+  check('verify: never tested → not_tested, Test now', JSON.stringify(w({})) === '{"kind":"not_tested","reason":null,"canTestNow":true}');
+  check('verify: outdated → outdated, Test now', w({ last_test_result: 'passed', last_test_up_to_date: false }).kind === 'outdated');
+  const failedW = w({ last_test_result: 'failed', last_test_reason: { code: 'test_incorrect', params: { permissive: true, strict: false } }, last_test_up_to_date: true });
+  check('verify: failed → reason + Test now', failedW.kind === 'failed' && failedW.reason.code === 'test_incorrect' && failedW.canTestNow);
+  check('verify: inconclusive → Test now', w({ last_test_result: 'inconclusive', last_test_reason: { code: 'test_nothing_selected', params: {} }, last_test_up_to_date: true }).kind === 'inconclusive');
+  const neW = w({ last_test_result: 'not_executable', last_test_reason: docReason, last_test_up_to_date: true });
+  check('verify: recorded not executable → no Test now', neW.kind === 'not_executable' && !neW.canTestNow && neW.reason.code === 'external_document');
+  const docRule = "<structureObjectRule><objectPath allowedObjectFlag=\"0\">document('other.xml')//emphasis</objectPath></structureObjectRule>";
+  const untestedDoc = w({}, 'BREX-4.2', docRule);
+  check('verify: never tested but not executable → explained, no Test now', untestedDoc.kind === 'not_executable' && !untestedDoc.canTestNow && untestedDoc.reason.code === 'external_document', JSON.stringify(untestedDoc));
+  check('verify: DITA (not testable) → no dialog', w({}, 'SCH-DITA') === null);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

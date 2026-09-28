@@ -11,6 +11,8 @@ import { SUGGEST_TEMPERATURE } from '../prompts/shared.js';
 import { buildCopyablePrompt, buildSuggestRulePrompt, parseSuggestRuleResponse, SUGGEST_RULE_USER_MESSAGE } from '../prompts/suggestRulePrompt.js';
 import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
+import { registerRuleTest } from '../api/ruleTests';
+import { ruleXmlHash } from '../utils/ruleHash.js';
 import { checkRuleNames, extractRuleNames } from '../utils/ruleNameCheck.js';
 import { invalidRuleXPaths } from '../utils/ruleXPathSyntax.js';
 import { selectSchemaFactNames } from '../utils/vocabularyCheck.js';
@@ -55,7 +57,7 @@ export function validateRuleXml(xml, vocabulary) {
   };
 }
 
-export function useSuggestions({ projectId, standard, schemaLocation, selected, aiProvider, vocabulary, ruleApproval, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, t }) {
+export function useSuggestions({ projectId, standard, schemaLocation, selected, aiProvider, vocabulary, ruleApproval, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, onRuleTestRecordError, t }) {
   // Suggest Definition catalog guard (docs request, Suggest Definition
   // corpus round): identifiers of this standard's official catalog,
   // fetched once per project (eagerly, unlike other catalog pickers which
@@ -462,6 +464,20 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
       }),
     });
 
+  // Test de reglas T3: a Test rule run on a suggestion (the rule in
+  // memory) is kept in its entry, with the exact rule it tested, and
+  // recorded when that rule is accepted -- only if the accepted rule is the
+  // tested one, byte for byte (a new suggestion replaces the entry, so a
+  // test of an earlier suggestion never carries over).
+  const recordSuggestionTest = (brdpId, testedRuleXml, record) =>
+    setSuggestionsByBrdpId((prev) => {
+      const entry = prev.get(brdpId);
+      if (!entry || entry.text !== testedRuleXml) return prev;
+      const next = new Map(prev);
+      next.set(brdpId, { ...entry, testRecord: { ...record, ruleXml: testedRuleXml } });
+      return next;
+    });
+
   const saveRuleAsDraft = async (entry, ruleXml, source) => {
     // A Draft already exists -> the user confirms replacing it (docs
     // request). A Verified rule can't get here: Suggest Rule is disabled
@@ -474,6 +490,15 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rule_xml: ruleXml, source, status: 'pending_review' }),
     });
+    const tested = entry.testRecord;
+    if (tested && ruleXmlHash(tested.ruleXml) === ruleXmlHash(ruleXml)) {
+      try {
+        await registerRuleTest(projectId, selected.id, entry.format, ruleXml, tested);
+      } catch (err) {
+        // The rule is saved; only its test result is missing -- say so.
+        onRuleTestRecordError?.(err.message);
+      }
+    }
     bumpApprovalsRefreshToken();
     return true;
   };
@@ -541,6 +566,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     acceptSuggestion,
     acceptPastedRule,
     setPastedRule,
+    recordSuggestionTest,
     discardSuggestion,
     removeSuggestionEntry,
   };

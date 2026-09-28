@@ -22,6 +22,14 @@ import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { brexToSchematron } from '../src/api/brexToSchematron.js';
 import { wrapRuleXmlFragment } from '../src/utils/ruleXmlFragment.js';
 import fontoxpath from 'fontoxpath';
+import i18n from '../src/i18n/index.js';
+import { formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
+
+// Reasons are { code, params } since T3; the checks below compare the
+// English text the interface shows for them (the real i18n resources), and
+// section 4 checks the codes themselves.
+const tEn = i18n.getFixedT('en');
+const reasonText = (reason) => formatRuleTestReason(reason, tEn);
 
 let passed = 0;
 let failed = 0;
@@ -74,8 +82,9 @@ function schematronVerdict(rule, fragment) {
 function expect(name, result, status, extra = {}) {
   check(`${name}: status ${status}`, result.status === status, JSON.stringify(result));
   if (extra.reason !== undefined) {
-    const ok = extra.reason instanceof RegExp ? extra.reason.test(result.notExecutableReason || '') : result.notExecutableReason === extra.reason;
-    check(`${name}: reason`, ok, `got: ${result.notExecutableReason}`);
+    const got = extra.reason === null ? result.notExecutableReason : reasonText(result.notExecutableReason);
+    const ok = extra.reason instanceof RegExp ? extra.reason.test(got) : got === extra.reason;
+    check(`${name}: reason`, ok, `got: ${got}`);
   }
   if (extra.nodePaths) {
     const got = result.violations.flatMap((v) => v.nodePaths);
@@ -85,7 +94,7 @@ function expect(name, result, status, extra = {}) {
     check(`${name}: selectedNodePaths`, JSON.stringify(result.selectedNodePaths) === JSON.stringify(extra.selected), `got: ${JSON.stringify(result.selectedNodePaths)}`);
   }
   if (extra.partial) {
-    check(`${name}: reports the non-executable part`, extra.partial.test(result.notExecutableReason || ''), `got: ${result.notExecutableReason}`);
+    check(`${name}: reports the non-executable part`, extra.partial.test(reasonText(result.notExecutableReason)), `got: ${reasonText(result.notExecutableReason)}`);
   }
   return result;
 }
@@ -217,11 +226,11 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
 // Not executable
 {
   expect('document()', run(sor('0', "document('other.xml')//dmodule"), 'BREX-4.2', '<x/>'), 'not_executable',
-    { reason: 'The rule reads another file (document()), which is not available in a test fragment.' });
+    { reason: 'The rule reads another file (document()), which is not available in a test.' });
   expect('doc()', run(sor('0', 'doc($uri)//x'), 'BREX-4.2', '<x/>'), 'not_executable', { reason: /reads another file/ });
   expect('"doc(" inside a string literal is not a call', run(sor('0', "//p[. = 'see doc(1)']"), 'BREX-4.2', '<x><p>see doc(1)</p></x>'), 'rejected');
   const bad = expect('invalid XPath', run(sor('0', '//para['), 'BREX-4.2', '<x/>'), 'not_executable', { reason: /^XPath error: .*XPST0003/ });
-  check('XPath error message is one line', !bad.notExecutableReason.includes('\n'), bad.notExecutableReason);
+  check('XPath error message is one line', !bad.notExecutableReason.params.message.includes('\n'), bad.notExecutableReason.params.message);
   expect('unknown prefix is an XPath error', run(sor('0', '//foo:bar'), 'BREX-4.2', '<x/>'), 'not_executable', { reason: /^XPath error: .*XPST0081/ });
   expect('nonContextRule only', run('<nonContextRule><simplePara>Decide X.</simplePara></nonContextRule>', 'BREX-4.2', '<x/>'), 'not_executable',
     { reason: 'This rule has no XPath to execute (nonContextRule).' });
@@ -410,6 +419,58 @@ for (const r of valueRuns) {
 check('coherence compared both accepted and rejected verdicts', coherentStatuses.size === 2, [...coherentStatuses].join(','));
 check('coherence covered the template value rules', coherent >= 20, `only ${coherent} runs compared`);
 console.log(`Coherence: ${coherent} engine runs on rules with values replayed through the generated Schematron.`);
+
+// ─── 4. Reasons are codes (T3, Part 0) ──────────────────────────────────────
+// Every reason the engine gives is { code, params }, and every code has an
+// English and a Spanish text in the real i18n resources.
+{
+  const tEs = i18n.getFixedT('es');
+  const codeOf = (r) => r.notExecutableReason && r.notExecutableReason.code;
+  const cases = [
+    ['document()', run(sor('0', "document('x.xml')//dmodule"), 'BREX-4.2', '<x/>'), 'external_document', { fn: 'document()' }],
+    ['doc()', run(sor('0', 'doc($u)//x'), 'BREX-4.2', '<x/>'), 'external_document', { fn: 'doc()' }],
+    ['collection()', run(sor('0', "collection('c')//x"), 'BREX-4.2', '<x/>'), 'external_document', { fn: 'collection()' }],
+    ['nonContextRule', run('<nonContextRule><simplePara>y</simplePara></nonContextRule>', 'BREX-4.2', '<x/>'), 'non_context_rule', {}],
+    ['path that is not a path', run(sor('0', '//a and //b'), 'BREX-4.2', '<x/>'), 'path_not_nodes', { kind: 'boolean' }],
+    ['XPath error', run(sor('0', '//para['), 'BREX-4.2', '<x/>'), 'xpath_error', null],
+    ['allowedObjectFlag="1" outside a whole DM', run(sor('1', '//para/title'), 'BREX-4.2', '<levelledPara><para/></levelledPara>'), 'mandatory_whole_document', {}],
+    ['unsupported valueForm', run(sor('2', '//@a', '<objectValue valueForm="list" valueAllowed="x"/>'), 'BREX-4.2', '<x a="1"/>'), 'unsupported_value_form', { form: 'list' }],
+    ['3.0.1 single with val2', run('<objrule><objpath objappl="0">//@a</objpath><objuse>u</objuse><objval valtype="single" val1="x" val2="y"/></objrule>', 'BREX-3.0.1', '<x a="1"/>'), 'unsupported_value_form', { form: 'single with val2' }],
+    ['mixed range', run(sor('2', '//@a', ov('range', '1~b')), 'BREX-4.2', '<x a="1"/>'), 'mixed_range', { from: '1', to: 'b' }],
+    ['unknown format', run(sor('0', '//x'), 'SCH-DITA', '<x/>'), 'unsupported_format', { format: 'SCH-DITA' }],
+    ['absolute path with another root', run(sor('0', '/dmodule/content//thead'), 'BREX-4.2', '<table><thead/></table>'), 'absolute_root', { name: 'dmodule', root: 'table' }],
+    ['malformed fragment', run(sor('0', '//x'), 'BREX-4.2', '<a><b></a>'), 'fragment_not_well_formed', null],
+    ['malformed rule', run('<structureObjectRule><objectPath>//x</structureObjectRule>', 'BREX-4.2', '<x/>'), 'rule_not_well_formed', null],
+    ['no rule element', run('<objectUse>x</objectUse>', 'BREX-4.2', '<x/>'), 'no_rule_element', { element: 'structureObjectRule' }],
+    ['empty path', run(sor('0', ''), 'BREX-4.2', '<x/>'), 'empty_path', { element: 'objectPath' }],
+    ['invalid flag', run(sor('7', '//x'), 'BREX-4.2', '<x/>'), 'invalid_flag', { attr: 'allowedObjectFlag', value: '7', allowed: '0, 1, 2' }],
+    ['bad range', run(sor('2', '//@a', ov('range', '1-5')), 'BREX-4.2', '<x a="1"/>'), 'bad_range', { text: '1-5' }],
+    ['missing value', run(sor('2', '//@a', '<objectValue valueForm="single"/>'), 'BREX-4.2', '<x a="1"/>'), 'missing_value', { element: 'objectValue', attr: 'valueAllowed' }],
+  ];
+  for (const [name, result, code, params] of cases) {
+    check(`code: ${name} → ${code}`, codeOf(result) === code, JSON.stringify(result.notExecutableReason));
+    if (params) check(`code: ${name} params`, JSON.stringify(result.notExecutableReason?.params) === JSON.stringify(params), JSON.stringify(result.notExecutableReason?.params));
+    const en = reasonText(result.notExecutableReason);
+    const es = formatRuleTestReason(result.notExecutableReason, tEs);
+    check(`code: ${name} has English text`, en && en !== code && !en.includes('{{'), en);
+    check(`code: ${name} has a different Spanish text`, es && es !== code && es !== en && !es.includes('{{'), es);
+  }
+  // Several parts: a "parts" reason naming each part, translated part by part.
+  const multi = run(`<rules>${sor('0', "document('x')//a")}<nonContextRule><simplePara>y</simplePara></nonContextRule></rules>`, 'BREX-4.2', '<a/>');
+  check('code: several parts → parts', codeOf(multi) === 'parts' && multi.notExecutableReason.params.parts.length === 2, JSON.stringify(multi.notExecutableReason));
+  check('code: parts in English', reasonText(multi.notExecutableReason) === 'rule 1: The rule reads another file (document()), which is not available in a test. rule 2: This rule has no XPath to execute (nonContextRule).', reasonText(multi.notExecutableReason));
+  check('code: parts in Spanish', formatRuleTestReason(multi.notExecutableReason, tEs) === 'rule 1: La regla lee otro fichero (document()), que no está disponible en una prueba. rule 2: Esta regla no tiene XPath que ejecutar (nonContextRule).', formatRuleTestReason(multi.notExecutableReason, tEs));
+  // Every code the module declares has a text in both languages.
+  const { ENGINE_REASON_CODES, VERDICT_REASON_CODES } = await import('../src/utils/ruleTestReasons.js');
+  for (const code of [...ENGINE_REASON_CODES, ...VERDICT_REASON_CODES.filter((c) => c !== 'test_incorrect'), 'part']) {
+    for (const lng of ['en', 'es']) check(`i18n ${lng}: records.ruleTest.reasons.${code}`, i18n.exists(`records.ruleTest.reasons.${code}`, { lng }));
+  }
+  for (const which of ['permissive', 'strict', 'both']) {
+    for (const lng of ['en', 'es']) check(`i18n ${lng}: test_incorrect.${which}`, i18n.exists(`records.ruleTest.reasons.test_incorrect.${which}`, { lng }));
+  }
+  // An unknown code (a newer build's reason) shows the code, never "".
+  check('unknown code falls back to the code', reasonText({ code: 'from_the_future', params: {} }) === 'from_the_future');
+}
 
 console.log('\nTemplate rules not executable (whole or in part):');
 for (const line of notExecutableInTemplates) console.log(`  - ${line}`);

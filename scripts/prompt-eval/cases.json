@@ -760,6 +760,165 @@
           "note": "the saved rule's context is the master URL of descript"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-emphasis-flag0",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Test rule on a known correct 4.2 rule: //emphasis prohibited (allowedObjectFlag 0). The examples must tell it apart: one without <emphasis> accepted, one with it rejected.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-001",
+        "title": "Use of emphasis",
+        "definition": "Decide whether the <emphasis> element may be used in the project's data modules.",
+        "proposal": "The <emphasis> element shall not be used.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-001\"><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>The element &lt;emphasis&gt; shall not be used.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on a rule known to be correct"
+        },
+        {
+          "type": "language",
+          "target": "explanation",
+          "expect": "en",
+          "note": "the explanation is in the Proposal's language"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-emphasis-type-values",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Test rule on a known correct 4.2 value rule: @emphasisType limited to em01/em02 (objectValue). Spanish Proposal, so the explanation must be in Spanish.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-002",
+        "title": "Valores de @emphasisType",
+        "definition": "Decidir qué valores del atributo @emphasisType de <emphasis> se admiten.",
+        "proposal": "El atributo @emphasisType de <emphasis> solo admitirá los valores em01 y em02.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-002\"><objectPath allowedObjectFlag=\"2\">//emphasis/@emphasisType</objectPath><objectUse>Only em01 and em02 are allowed for @emphasisType.</objectUse><objectValue valueForm=\"single\" valueAllowed=\"em01\"/><objectValue valueForm=\"single\" valueAllowed=\"em02\"/></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on a rule known to be correct"
+        },
+        {
+          "type": "language",
+          "target": "explanation",
+          "expect": "es",
+          "note": "the explanation is in the Proposal's language"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-objrule",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Test rule on a known correct 3.0.1 objrule: <randlist> prohibited (objappl 0). The examples use the 3.0.1 skeleton and names.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-301",
+        "title": "Use of random lists",
+        "definition": "Decide whether random lists (<randlist>) may be used.",
+        "proposal": "The <randlist> element shall not be used.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"BRDP-EVAL-RT-301\"><objpath objappl=\"0\">//randlist</objpath><objuse>The element &lt;randlist&gt; shall not be used.</objuse></objrule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on a rule known to be correct"
+        },
+        {
+          "type": "language",
+          "target": "explanation",
+          "expect": "en",
+          "note": "the explanation is in the Proposal's language"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-limited-to-proced",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "schemas": [
+        "proced"
+      ],
+      "description": "Test rule on a known correct rule limited to the proced schema (//emphasis prohibited, wrapped in the proced contextRules block exactly as Suggest Rule saves it). The examples must include one of another schema, meant to be accepted, where the rule does not apply.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-PROC",
+        "title": "Emphasis in procedures",
+        "definition": "Decide whether <emphasis> may be used in procedural data modules.",
+        "proposal": "In procedural data modules, the <emphasis> element shall not be used.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-PROC\"><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>The element &lt;emphasis&gt; shall not be used in procedural data modules.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on a rule known to be correct"
+        },
+        {
+          "type": "language",
+          "target": "explanation",
+          "expect": "en",
+          "note": "the explanation is in the Proposal's language"
+        },
+        {
+          "type": "rule_test_other_schema_accepted",
+          "note": "an example of another schema, meant to be accepted: the rule does not apply there"
+        }
+      ]
     }
   ]
 }

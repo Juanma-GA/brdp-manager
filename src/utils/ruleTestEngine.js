@@ -8,8 +8,8 @@
 //     { status: 'accepted' | 'rejected' | 'not_executable',
 //       violations: [{ ruleId, message, nodePaths }],
 //       selectedNodePaths: [...],        // every node each executed path selected
-//       notExecutableReason: string | null,
-//       notExecutableParts: [{ ruleId, reason }],
+//       notExecutableReason: { code, params } | null,   // see REASON below
+//       notExecutableParts: [{ ruleId, reason: { code, params } }],
 //       outOfScopeSchemas: [...] }       // context blocks skipped: other schema
 //
 // A rule with several parts (a group, context blocks, a nonContextRule next
@@ -19,7 +19,7 @@
 // except when every part sits in a context block of ANOTHER schema: the rule
 // does not apply to that fragment, so it is 'accepted' (T2), with
 // outOfScopeSchemas naming those schemas.
-// Reasons are short English sentences; the UI (T2) translates them.
+// Reasons are { code, params } (T3); the UI translates them.
 //
 // options.parseXml(text) → Document may be injected (it must throw on
 // malformed XML); by default the global DOMParser is used (browser).
@@ -126,28 +126,46 @@ const KNOWN_NAMESPACES = {
 };
 
 const XPATH_LANGUAGE = fontoxpath.evaluateXPath.XPATH_3_1_LANGUAGE;
-const OTHER_FILE_RE = /\b(?:document|doc|doc-available|collection|unparsed-text(?:-lines|-available)?)\s*\(/;
+const OTHER_FILE_RE = /\b(document|doc|doc-available|collection|unparsed-text(?:-lines|-available)?)\s*\(/;
+// Reasons are codes with parameters, never sentences (T3, Part 0): the UI
+// translates them (records.ruleTest.reasons.<code>, src/utils/
+// ruleTestReasons.js), and the recorded test result keeps the code so
+// History and the Rule Status indicator follow the viewer's language.
+const reason = (code, params = {}) => ({ code, params });
 const REASON = {
-  otherFile: 'The rule reads another file (document()), which is not available in a test fragment.',
-  nonContext: 'This rule has no XPath to execute (nonContextRule).',
-  mandatory: 'A mandatory-node rule can only be judged on a whole data module.',
-  xpath: (message) => `XPath error: ${message}`,
-  valueForm: (form) => `Value check '${form}' is not supported by the test engine.`,
-  format: (format) => `Rule format '${format || '(none)'}' is not supported by the test engine; only S1000D BREX 4.2, 4.1 and 3.0.1 rules can be tested.`,
-  fragmentXml: (message) => `The test fragment is not well-formed XML: ${message}`,
-  ruleXml: (message) => `The rule is not well-formed XML: ${message}`,
-  noRule: (element) => `The rule contains no <${element}> to execute.`,
-  emptyPath: (element) => `The rule's <${element}> is empty.`,
-  badFlag: (attr, value, allowed) => `${attr}="${value}" is not a valid value (only ${allowed.join(', ')}).`,
-  notNodes: (kind) => `The rule's path does not select nodes (it returns ${kind}), so there is nothing to judge.`,
-  absoluteRoot: (name, root) => `The rule's path starts at /${name}, but this fragment's root element is <${root}>; it can only be judged on a fragment whose root is <${name}>.`,
-  schemaUnknown: (schema) => `This rule applies only to the ${schema} schema, and the fragment's schema is not known.`,
-  missingValue: (element, attr) => `An <${element}> has no ${attr} to compare with.`,
-  badRange: (text) => `Range '${text}' is not in the form from~to.`,
-  mixedRange: (from, to) => `Range '${from}~${to}' mixes a number and text; Generate compares it as text and flags it, so the test gives no verdict.`,
+  otherFile: (fn) => reason('external_document', { fn }),
+  nonContext: () => reason('non_context_rule'),
+  mandatory: () => reason('mandatory_whole_document'),
+  xpath: (message) => reason('xpath_error', { message }),
+  valueForm: (form) => reason('unsupported_value_form', { form }),
+  format: (format) => reason('unsupported_format', { format: format || '(none)' }),
+  fragmentXml: (message) => reason('fragment_not_well_formed', { message }),
+  ruleXml: (message) => reason('rule_not_well_formed', { message }),
+  noRule: (element) => reason('no_rule_element', { element }),
+  emptyPath: (element) => reason('empty_path', { element }),
+  badFlag: (attr, value, allowed) => reason('invalid_flag', { attr, value, allowed: allowed.join(', ') }),
+  // kind: 'boolean' | 'number' | 'value'
+  notNodes: (kind) => reason('path_not_nodes', { kind }),
+  absoluteRoot: (name, root) => reason('absolute_root', { name, root }),
+  schemaUnknown: (schema) => reason('schema_unknown', { schema }),
+  missingValue: (element, attr) => reason('missing_value', { element, attr }),
+  badRange: (text) => reason('bad_range', { text }),
+  mixedRange: (from, to) => reason('mixed_range', { from, to }),
 };
 
-class NotExecutable extends Error {}
+// The reason of a rule with several parts, some of which cannot run.
+function combinedReason(notRun, totalParts) {
+  if (notRun.length === 0) return null;
+  if (totalParts === 1) return notRun[0].reason;
+  return reason('parts', { parts: notRun });
+}
+
+class NotExecutable extends Error {
+  constructor(r) {
+    super(r.code);
+    this.reason = r;
+  }
+}
 
 export function parseXmlDocument(text) {
   if (typeof DOMParser === 'undefined') throw new Error('No XML parser available.');
@@ -244,21 +262,24 @@ function buildValueMatcher(valueEl, spec, evaluate) {
   const is301 = spec.value === 'objval';
   const form = (is301 ? valueEl.getAttribute('valtype') : valueEl.getAttribute('valueForm')) || 'single';
   const attr = (name) => valueEl.getAttribute(name);
+  // hasAttribute, not getAttribute() === null: some DOMs (xmldom) return
+  // "" for a missing attribute.
+  const missing = (name) => !valueEl.hasAttribute(name);
   if (form === 'single') {
     if (is301 && attr('val2')) throw new NotExecutable(REASON.valueForm('single with val2'));
-    if ((is301 ? attr('val1') : attr('valueAllowed')) === null) {
+    if (missing(is301 ? 'val1' : 'valueAllowed')) {
       throw new NotExecutable(REASON.missingValue(spec.value, is301 ? 'val1' : 'valueAllowed'));
     }
   } else if (form === 'range') {
     if (is301) {
-      if (attr('val1') === null || attr('val2') === null) throw new NotExecutable(REASON.badRange(`${attr('val1') ?? ''}~${attr('val2') ?? ''}`));
+      if (missing('val1') || missing('val2')) throw new NotExecutable(REASON.badRange(`${attr('val1') ?? ''}~${attr('val2') ?? ''}`));
     } else {
       const text = attr('valueAllowed') ?? '';
       const parts = text.split('~');
       if (parts.length !== 2 || !parts[0] || !parts[1]) throw new NotExecutable(REASON.badRange(text));
     }
   } else if (form === 'pattern' && !is301) {
-    if (attr('valueAllowed') === null) throw new NotExecutable(REASON.missingValue(spec.value, 'valueAllowed'));
+    if (missing('valueAllowed')) throw new NotExecutable(REASON.missingValue(spec.value, 'valueAllowed'));
   } else {
     throw new NotExecutable(REASON.valueForm(form));
   }
@@ -273,7 +294,8 @@ function partBasics(part, spec) {
   const pathEl = childElements(part.element, spec.path)[0];
   const expression = pathEl ? String(pathEl.textContent || '').trim() : '';
   if (!expression) throw new NotExecutable(REASON.emptyPath(spec.path));
-  if (OTHER_FILE_RE.test(expression.replace(/'[^']*'|"[^"]*"/g, "''"))) throw new NotExecutable(REASON.otherFile);
+  const otherFile = OTHER_FILE_RE.exec(expression.replace(/'[^']*'|"[^"]*"/g, "''"));
+  if (otherFile) throw new NotExecutable(REASON.otherFile(`${otherFile[1]}()`));
 
   const rawFlag = pathEl.getAttribute(spec.flagAttr);
   const flag = rawFlag === null || rawFlag === '' ? spec.defaultFlag : rawFlag.trim();
@@ -289,7 +311,7 @@ function runPart(part, spec, doc, evaluate) {
   for (const name of absoluteRootNames(expression)) {
     if (name !== localName(root)) throw new NotExecutable(REASON.absoluteRoot(name, root.nodeName));
   }
-  if (flag === '1' && !WHOLE_DOCUMENT_ROOTS.has(localName(root))) throw new NotExecutable(REASON.mandatory);
+  if (flag === '1' && !WHOLE_DOCUMENT_ROOTS.has(localName(root))) throw new NotExecutable(REASON.mandatory());
 
   const selected = evaluate(expression, doc, null, 'nodes');
   const matches = (node) => matchers.some((m) => m(node));
@@ -336,7 +358,7 @@ function makeEvaluator(doc) {
       if (kind === 'boolean') return fontoxpath.evaluateXPathToBoolean(expression, contextNode, null, variables, options);
       const items = evaluateXPath(expression, contextNode, null, variables, evaluateXPath.ALL_RESULTS_TYPE, options);
       const nonNode = items.find((item) => item === null || typeof item !== 'object' || typeof item.nodeType !== 'number');
-      if (nonNode !== undefined) throw new NotExecutable(REASON.notNodes(typeof nonNode === 'boolean' ? 'a boolean' : typeof nonNode === 'number' ? 'a number' : 'a value'));
+      if (nonNode !== undefined) throw new NotExecutable(REASON.notNodes(typeof nonNode === 'boolean' ? 'boolean' : typeof nonNode === 'number' ? 'number' : 'value'));
       return items;
     } catch (err) {
       if (err instanceof NotExecutable) throw err;
@@ -375,8 +397,8 @@ function collectParts(ruleRoot, spec) {
   return parts;
 }
 
-function notExecutable(reason) {
-  return { status: 'not_executable', violations: [], selectedNodePaths: [], notExecutableReason: reason, notExecutableParts: [], outOfScopeSchemas: [] };
+function notExecutable(r) {
+  return { status: 'not_executable', violations: [], selectedNodePaths: [], notExecutableReason: r, notExecutableParts: [], outOfScopeSchemas: [] };
 }
 
 export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema = null, options = {}) {
@@ -414,7 +436,7 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
   let ran = 0;
   for (const part of parts) {
     try {
-      if (part.kind === 'nonContext') throw new NotExecutable(REASON.nonContext);
+      if (part.kind === 'nonContext') throw new NotExecutable(REASON.nonContext());
       if (part.schema && !schema) throw new NotExecutable(REASON.schemaUnknown(part.schema));
       if (part.schema && part.schema !== schema) { outOfScope.push(part.schema); continue; }
       const result = runPart(part, spec, doc, evaluate);
@@ -423,7 +445,7 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
       if (result.violation) violations.push(result.violation);
     } catch (err) {
       if (!(err instanceof NotExecutable)) throw err;
-      notRun.push({ ruleId: part.ruleId, reason: err.message });
+      notRun.push({ ruleId: part.ruleId, reason: err.reason });
     }
   }
 
@@ -432,16 +454,12 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
   // outOfScopeSchemas telling why (T2: "an example of another schema shows
   // the rule does not apply there").
   const notApplicable = ran === 0 && notRun.length === 0;
-  const reason = notRun.length === 0
-    ? null
-    : parts.length === 1
-      ? notRun[0].reason
-      : notRun.map((p) => `${p.ruleId}: ${p.reason}`).join(' ');
+  const notExecutableReason = combinedReason(notRun, parts.length);
   return {
     status: notApplicable ? 'accepted' : ran === 0 ? 'not_executable' : violations.length ? 'rejected' : 'accepted',
     violations,
     selectedNodePaths: [...new Set(selected)],
-    notExecutableReason: reason,
+    notExecutableReason,
     notExecutableParts: notRun,
     outOfScopeSchemas: [...new Set(outOfScope)],
   };
@@ -459,11 +477,11 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
 //
 //   analyzeRule(ruleXml, format, options) →
 //     { status: 'executable' | 'partial' | 'not_executable',
-//       reason: string | null,             // as notExecutableReason
+//       reason: { code, params } | null,   // as notExecutableReason
 //       parts: [{ ruleId, reason }],       // the parts that cannot run
 //       total }                            // number of parts
 export function analyzeRule(ruleXml, format, options = {}) {
-  const none = (reason) => ({ status: 'not_executable', reason, parts: [], total: 0 });
+  const none = (r) => ({ status: 'not_executable', reason: r, parts: [], total: 0 });
   const spec = FORMATS[format];
   if (!spec) return none(REASON.format(format));
   const parseXml = options.parseXml || parseXmlDocument;
@@ -479,7 +497,7 @@ export function analyzeRule(ruleXml, format, options = {}) {
   const notRun = [];
   for (const part of parts) {
     try {
-      if (part.kind === 'nonContext') throw new NotExecutable(REASON.nonContext);
+      if (part.kind === 'nonContext') throw new NotExecutable(REASON.nonContext());
       const { expression } = partBasics(part, spec);
       const root = absoluteRootNames(expression)[0] || 'dmodule';
       const doc = parseXml(`<${root}/>`);
@@ -488,17 +506,13 @@ export function analyzeRule(ruleXml, format, options = {}) {
       evaluate(expression, doc, null, 'nodes');
     } catch (err) {
       if (!(err instanceof NotExecutable)) throw err;
-      notRun.push({ ruleId: part.ruleId, reason: err.message });
+      notRun.push({ ruleId: part.ruleId, reason: err.reason });
     }
   }
-  const reason = notRun.length === 0
-    ? null
-    : parts.length === 1
-      ? notRun[0].reason
-      : notRun.map((p) => `${p.ruleId}: ${p.reason}`).join(' ');
+  const notExecutableReason = combinedReason(notRun, parts.length);
   return {
     status: notRun.length === 0 ? 'executable' : notRun.length === parts.length ? 'not_executable' : 'partial',
-    reason,
+    reason: notExecutableReason,
     parts: notRun,
     total: parts.length,
   };
