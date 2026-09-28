@@ -2,7 +2,7 @@
 // Rule's validation and gating, importing the REAL production modules under
 // plain Node (this repo has no JS test runner -- same convention as
 // test-vocabulary-check.mjs):
-//   - src/utils/ruleNameCheck.js: XPath name extraction from objectPath
+//   - src/validation/schemaValidation.js (was utils/ruleNameCheck.js): XPath name extraction from objectPath
 //     (BREX 4.x), objpath (BREX 3.0.1) and @context/@test (Schematron),
 //     checked against the REAL schema vocabularies, using the REAL rules of
 //     the curated Excel templates of all five standards (four formats).
@@ -10,7 +10,7 @@
 //     detection (mirrors backend UNFILLED_MARKER_RE -- same fixtures as
 //     backend/tests/test_similar.py).
 //   - src/prompts/suggestRulePrompt.js: parseSuggestRuleResponse.
-//   - src/utils/ruleXPathSyntax.js: XPath syntax of every expression of a
+//   - src/validation/schemaValidation.js (was utils/ruleXPathSyntax.js): XPath syntax of every expression of a
 //     rule (schema-location encargo, Part 3) -- the encargo's edge cases and
 //     EVERY real rule of the five curated templates (a false "invalid" would
 //     block Accept on a correct rule).
@@ -20,10 +20,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as XLSX from 'xlsx';
-import { extractRuleXPaths, extractXPathNames, extractRuleNames, checkRuleNames } from '../src/utils/ruleNameCheck.js';
+import { extractRuleXPaths, extractXPathNames, extractRuleNames, checkRuleNames } from '../src/validation/schemaValidation.js';
 import { hasUnfilledMarkers } from '../src/utils/proposalMarkers.js';
 import { parseSuggestRuleResponse } from '../src/prompts/suggestRulePrompt.js';
-import { invalidRuleXPaths, isXPathSyntaxValid } from '../src/utils/ruleXPathSyntax.js';
+import { invalidRuleXPaths, isXPathSyntaxValid } from '../src/validation/schemaValidation.js';
 import { ruleFormatRules } from '../src/prompts/ruleFormatRules.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');

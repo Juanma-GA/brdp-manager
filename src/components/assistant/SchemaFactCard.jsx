@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { summarizeSchemaFactEntry } from '../../utils/vocabularyCheck.js';
+import { summarizeSchemaFactEntry } from '../../utils/schemaFactSummary.js';
 import styles from '../../pages/RecordsPage.module.css';
 
 // Docs request ("Servicio de fichas de esquema y su uso en Ask"): renders

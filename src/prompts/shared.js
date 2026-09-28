@@ -4,8 +4,9 @@
 // of RecordsPage.jsx verbatim (no behavior change; see
 // scripts/verify-prompts-byte-identical.mjs for the before/after proof).
 // Importable from plain Node (no React, no browser globals), same
-// convention already established by src/utils/vocabularyCheck.js.
-import { formatWrongTypeMessage, summarizeSchemaFactEntry } from '../utils/vocabularyCheck.js';
+// convention already established by src/validation/schemaValidation.js.
+import { formatWrongTypeMessage } from '../validation/schemaValidation.js';
+import { summarizeSchemaFactEntry } from '../utils/schemaFactSummary.js';
 
 // Same local map as ProjectConfigPage.jsx/GenerateBREXdocPage.jsx (not
 // centralized -- established convention in this codebase, see CLAUDE.md).

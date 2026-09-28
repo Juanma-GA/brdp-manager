@@ -163,7 +163,7 @@ async function main() {
     // network/UI needed -- unit-level, but re-confirmed here against the
     // REAL module import path the app itself uses, for the closeout's
     // "test de la corrección con marcado incompleto"). ====
-    const { applyRenameSuggestion } = await import("../src/utils/vocabularyCheck.js");
+    const { applyRenameSuggestion } = await import("../src/validation/schemaValidation.js");
     assert(applyRenameSuggestion("Element <table", { name: "table", type: "element" }) === "Element <table>", "unit-level: dangling leading \"<\" is completed");
     assert(applyRenameSuggestion("Element table>", { name: "table", type: "element" }) === "Element <table>", "unit-level: dangling trailing \">\" is completed, never doubled");
 

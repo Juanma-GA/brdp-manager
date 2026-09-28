@@ -3,7 +3,7 @@
 // suggestDefinitionPrompt.js/suggestProposalPrompt.js) by
 // scripts/check-prompt-snapshot.mjs, committed to the repo so a future
 // refactor of those builders (or of anything they call into, like
-// vocabularyCheck.js) can be checked for accidental prompt drift with
+// validation/schemaValidation.js) can be checked for accidental prompt drift with
 // `node scripts/check-prompt-snapshot.mjs`, without needing a live backend,
 // Postgres, or a real LLM provider.
 //

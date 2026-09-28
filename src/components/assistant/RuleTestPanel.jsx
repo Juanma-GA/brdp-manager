@@ -6,6 +6,7 @@ import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
 import { formatRuleDescription, formatRuleTestReason } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
+import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 
 // Test rule (T2 of 4): which rule formats can be tested (S1000D BREX since
 // T1, DITA Schematron since T4). Used by both places that show the button.
@@ -91,13 +92,9 @@ function ValidationProblems({ validation, standard, schema }) {
   const problems = [];
   if (validation.unknownSchema) problems.push(t('records.ruleTest.unknownSchema', { schema: validation.unknownSchema }));
   if (!validation.wellFormed) problems.push(t('records.ruleTest.malformed', { error: validation.error }));
-  if (validation.names.notFound.length > 0) {
-    problems.push(t('records.ruleTest.unknownNames', { standard, names: validation.names.notFound.join(', ') }));
+  for (const issue of [...nameIssues(validation.names, 'example', { standard }), ...structureIssues(validation.structure, { schema })]) {
+    problems.push(formatSchemaIssue(issue, t));
   }
-  if (validation.names.wrongType.length > 0) {
-    problems.push(t('records.ruleTest.wrongTypeNames', { names: validation.names.wrongType.map((w) => w.name).join(', ') }));
-  }
-  for (const p of validation.structure || []) problems.push(t(`records.ruleTest.structure.${p.kind}`, { ...p, schema }));
   return (
     <div className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`}>
       ⚠ {t('records.ruleTest.notRun')}

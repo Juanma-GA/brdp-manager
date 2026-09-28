@@ -13,9 +13,7 @@ import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { registerRuleTest } from '../api/ruleTests';
 import { ruleXmlHash } from '../utils/ruleHash.js';
-import { checkRuleNames, extractRuleNames } from '../utils/ruleNameCheck.js';
-import { invalidRuleXPaths } from '../utils/ruleXPathSyntax.js';
-import { selectSchemaFactNames } from '../utils/vocabularyCheck.js';
+import { checkRuleNames, extractRuleNames, invalidRuleXPaths, selectSchemaFactNames } from '../validation/schemaValidation.js';
 import {
   coverageOf,
   decideRuleSchemaContext,

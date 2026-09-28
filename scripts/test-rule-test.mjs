@@ -28,13 +28,12 @@ import {
 } from '../src/utils/ruleTest.js';
 import {
   assembleExample,
-  checkExampleStructure,
   chooseTestSchemas,
-  formatStructureProblem,
   placeExample,
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
 import { analyzeRule } from '../src/utils/ruleTestEngine.js';
+import { checkExampleStructure, formatStructureProblem } from '../src/validation/schemaValidation.js';
 import { exampleFailures, generateRuleTestExamples, missesRuleProblem } from '../src/utils/ruleTestRun.js';
 import { ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
 import XLSX from 'xlsx';

@@ -10,12 +10,12 @@ import {
   extractContextCandidates,
   hashVocabInputText,
   loadSchemaVocabulary,
-} from '../utils/vocabularyCheck.js';
+} from '../validation/schemaValidation.js';
 
 export function useVocabularyCheck(standard, selected) {
   // Follow-up round ("sin falsos positivos"): the real schema vocabulary
   // for this project's standard, loaded once and kept in state so the
-  // "Did you mean" suggestion (resolvePhraseCandidates, vocabularyCheck.js)
+  // "Did you mean" suggestion (resolvePhraseCandidates, validation/schemaValidation.js)
   // can be computed SYNCHRONOUSLY on every render of every field -- unlike
   // the big red notice (recomputeVocabResult below), which only needs to
   // run on selection/save and can afford to be async. `loadSchemaVocabulary`

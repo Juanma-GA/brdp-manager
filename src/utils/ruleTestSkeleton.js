@@ -15,8 +15,9 @@
 //   complies must be able to leave it out);
 // - assembleExample: the complete fragment (skeleton + content) that is run
 //   and shown, with xsi:noNamespaceSchemaLocation in the project's form;
-// - checkExampleStructure: every element exists in the schema, every child
-//   is allowed inside its parent, every attribute exists on its element.
+// The structural check of the examples (every element exists in the schema,
+// every child is allowed inside its parent, every attribute exists on its
+// element) is validation/schemaValidation.js's checkExampleStructure.
 //
 // DITA (T4): the "schemas" are the topic types (topic, concept, task,
 // reference, troubleshooting, map -- GET /api/schema-cards' document_schemas),
@@ -26,7 +27,7 @@
 // context anchored at the document root (/*, /topic) makes the example the
 // whole document: the LLM writes the complete root element.
 import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js';
-import { extractRuleXPaths } from './ruleNameCheck.js';
+import { extractRuleXPaths } from '../validation/schemaValidation.js';
 
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -358,63 +359,4 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
     }
   }
   return { xml: lines.join('\n'), skeletonNodePaths };
-}
-
-// ─── Structural check ───────────────────────────────────────────────────────
-
-// [{ kind: 'unknownElement', element } | { kind: 'notAllowed', element, parent }
-//  | { kind: 'unknownAttribute', attribute, element } | { kind: 'wrongRoot', element, expected }]
-// against one schema's structure. Prefixed attributes other than xlink:* and
-// namespace declarations are not schema vocabulary and are left out.
-export function checkExampleStructure(doc, structure) {
-  const elements = structure.elements;
-  const problems = [];
-  const seen = new Set();
-  const add = (problem) => {
-    const key = JSON.stringify(problem);
-    if (!seen.has(key)) {
-      seen.add(key);
-      problems.push(problem);
-    }
-  };
-  const root = doc.documentElement;
-  if (structure.skeleton && root.nodeName !== structure.skeleton.root) {
-    add({ kind: 'wrongRoot', element: root.nodeName, expected: structure.skeleton.root });
-  }
-  const walk = (el, parentName) => {
-    const name = el.nodeName;
-    const known = Boolean(elements[name]);
-    if (!known) add({ kind: 'unknownElement', element: name });
-    else if (parentName && elements[parentName] && !elements[parentName].children.includes(name)) {
-      add({ kind: 'notAllowed', element: name, parent: parentName });
-    }
-    if (known) {
-      for (const a of Array.from(el.attributes || [])) {
-        if (a.name === 'xmlns' || a.name.startsWith('xmlns:') || a.name.startsWith('xsi:')) continue;
-        if (a.name.includes(':') && !a.name.startsWith('xlink:')) continue;
-        const local = a.name.replace(/^xlink:/, '');
-        if (!elements[name].attributes.includes(local)) add({ kind: 'unknownAttribute', attribute: a.name, element: name });
-      }
-    }
-    for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) walk(n, name);
-  };
-  walk(root, null);
-  return problems;
-}
-
-// English, for the correction request sent back to the LLM (the panel
-// translates the same problems through i18n).
-export function formatStructureProblem(problem, schema) {
-  switch (problem.kind) {
-    case 'unknownElement':
-      return `<${problem.element}> does not exist in the ${schema} schema`;
-    case 'notAllowed':
-      return `<${problem.element}> is not allowed inside <${problem.parent}>`;
-    case 'unknownAttribute':
-      return `@${problem.attribute} does not exist on <${problem.element}>`;
-    case 'wrongRoot':
-      return `the root element is <${problem.element}>, not <${problem.expected}>`;
-    default:
-      return String(problem.kind);
-  }
 }

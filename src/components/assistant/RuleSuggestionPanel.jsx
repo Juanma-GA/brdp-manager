@@ -4,7 +4,8 @@ import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
 import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
 import { finalRuleXml, validateRuleXml } from '../../hooks/useSuggestions';
-import { extractRuleNames } from '../../utils/ruleNameCheck.js';
+import { extractRuleNames, nameIssues, xpathIssues } from '../../validation/schemaValidation.js';
+import SchemaIssueLines from './SchemaIssueLines';
 import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
 
 // Part 5 (Suggest Rule part 2): with schemas chosen, an element of the
@@ -52,28 +53,7 @@ function RuleValidationWarnings({ validation, standard }) {
           ⚠ {t('records.assistant.ruleNotWellFormed', { error: wellFormedError })}
         </p>
       )}
-      {invalidXPaths.map((expression) => (
-        <p key={expression} className={styles.vocabWarning}>
-          ⚠ {t('records.assistant.ruleInvalidXPath', { expression })}
-        </p>
-      ))}
-      {names.available && names.notFound.length > 0 && (
-        <p className={styles.vocabWarning}>
-          ⚠ {t('records.assistant.ruleNamesNotFound', { standard, names: names.notFound.join(', ') })}
-        </p>
-      )}
-      {names.available &&
-        names.wrongType.map((w) => (
-          <p key={w.name} className={styles.vocabWarning}>
-            ⚠{' '}
-            {t(
-              w.usedAs === 'element'
-                ? 'records.assistant.vocabWrongTypeAsElement'
-                : 'records.assistant.vocabWrongTypeAsAttribute',
-              { standard, name: w.name }
-            )}
-          </p>
-        ))}
+      <SchemaIssueLines issues={[...xpathIssues(invalidXPaths), ...nameIssues(names, 'rule', { standard })]} />
     </>
   );
 }

@@ -9,8 +9,7 @@ import { ruleStateOf } from '../utils/ruleState';
 import { fetchSchemaFacts } from '../api/schemaFacts.js';
 import { buildAskSystemPrompt } from '../prompts/askPrompt.js';
 import { ASK_TEMPERATURE } from '../prompts/shared.js';
-import { checkAnswerNames } from '../utils/answerNameCheck.js';
-import { loadSchemaVocabulary } from '../utils/vocabularyCheck.js';
+import { checkAnswerNames, loadSchemaVocabulary } from '../validation/schemaValidation.js';
 
 export function useAskAssistant({ projectId, standard, ruleFormat, selected, ruleApproval, aiProvider, vocabulary, recomputeVocabResult }) {
   // `question` is only ever the live DRAFT in the textarea -- it auto-
@@ -52,7 +51,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   const [expandedSchemaFactNames, setExpandedSchemaFactNames] = useState(new Set());
   // "Ask: comprobar los nombres de la respuesta": the names the displayed
   // answer mentions as schema names, checked against the standard's
-  // vocabulary (utils/answerNameCheck.js) -- { available, notFound,
+  // vocabulary (validation/schemaValidation.js) -- { available, notFound,
   // wrongType } or null. Only a warning under the answer; the answer
   // itself is never changed.
   const [answerNameCheck, setAnswerNameCheck] = useState(null);

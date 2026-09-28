@@ -66,17 +66,18 @@ import { ruleTestVerdict } from "../src/utils/ruleTest.js";
 import { generateRuleTestExamples } from "../src/utils/ruleTestRun.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
-import { checkRuleNames, extractRuleXPaths } from "../src/utils/ruleNameCheck.js";
-import { invalidRuleXPaths } from "../src/utils/ruleXPathSyntax.js";
-import { checkAnswerNames } from "../src/utils/answerNameCheck.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
 import { validateXML } from "xmllint-wasm";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
+  checkAnswerNames,
+  checkRuleNames,
   extractContextCandidates,
+  extractRuleXPaths,
+  invalidRuleXPaths,
   selectSchemaFactNames,
-} from "../src/utils/vocabularyCheck.js";
+} from "../src/validation/schemaValidation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -213,7 +214,7 @@ async function runCheck(check, answer, ctx = {}) {
       return { status: r.ok ? "pass" : "fail", detail: r.ok ? "well-formed" : r.error };
     }
     case "xpath_valid": {
-      // Same parser and rule as the app's Accept gate (ruleXPathSyntax.js):
+      // Same parser and rule as the app's Accept gate (validation/schemaValidation.js):
       // every objectPath/objpath / @context / @test, entity-decoded, must parse.
       const count = extractRuleXPaths(ctx.xml || "").length;
       const invalid = invalidRuleXPaths(ctx.xml || "");
@@ -228,7 +229,7 @@ async function runCheck(check, answer, ctx = {}) {
     }
     case "answer_names_in_vocabulary": {
       // Ask: the same check as the red warning under the answer in the app
-      // (utils/answerNameCheck.js); the names the BRDP's own notice already
+      // (validation/schemaValidation.js); the names the BRDP's own notice already
       // reports are left out, as in the app.
       const names = checkAnswerNames(answer, ctx.vocabulary, ctx.vocabCheck);
       if (!names.available) return { status: "manual", detail: `no schema vocabulary for ${ctx.standard}` };

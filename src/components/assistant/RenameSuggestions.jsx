@@ -4,7 +4,7 @@ import {
   extractContextCandidates,
   resolveDanglingElementSuggestions,
   resolvePhraseCandidates,
-} from '../../utils/vocabularyCheck.js';
+} from '../../validation/schemaValidation.js';
 import styles from '../../pages/RecordsPage.module.css';
 
 // Follow-up round ("consejo de nombres sin falsos positivos"): pure

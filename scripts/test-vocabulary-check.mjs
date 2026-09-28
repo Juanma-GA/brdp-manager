@@ -1,6 +1,6 @@
 // Docs request ("consejo de nombres sin Don't show again y sugerencias
 // contextuales sin falsos positivos") -- closeout requires tests of
-// vocabularyCheck.js covering: Unicode-aware tokenization (accented words
+// validation/schemaValidation.js (was utils/vocabularyCheck.js) covering: Unicode-aware tokenization (accented words
 // never fragment), the new etiqueta(s)/tag(s) trigger synonyms, and the
 // vocabulary-gated resolvePhraseCandidates (a phrase-triggered bare word
 // is ONLY ever a suggestion, never a "Not found" warning, and only when it
@@ -26,8 +26,8 @@ import {
   hashVocabInputText,
   extractSchemaFactCandidates,
   selectSchemaFactNames,
-  summarizeSchemaFactEntry,
-} from "../src/utils/vocabularyCheck.js";
+} from "../src/validation/schemaValidation.js";
+import { summarizeSchemaFactEntry } from "../src/utils/schemaFactSummary.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

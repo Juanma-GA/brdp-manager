@@ -1,3 +1,29 @@
+// Consolidation C1, Part 1: the ONE schema-validation service. Everything
+// that checks names or structure against a standard's real schema lives
+// here -- before this round it was spread over five modules, each with its
+// own extraction and messages:
+//   utils/vocabularyCheck.js   BRDP text (Title/Definition/Proposal)
+//   utils/ruleNameCheck.js     rule XPath expressions (objectPath, @context, @test)
+//   utils/answerNameCheck.js   Ask answers
+//   utils/ruleTestSkeleton.js  structure of the Test rule examples
+//   utils/ruleXPathSyntax.js   XPath syntax of a rule
+// The code below is the same code, moved without changing its behavior
+// (every existing test passes unchanged; only import paths moved). Pure and
+// framework-free, importable from plain Node like src/prompts/.
+//
+// Sections:
+//   1. Vocabulary loading
+//   2. Name extraction by source: free text, XPath expressions, Ask answers,
+//      XML documents (the Test rule examples)
+//   3. Contrast with the vocabulary (not found / wrong type)
+//   4. Structure (child allowed in its parent, attribute on its element)
+//   5. XPath syntax (fontoxpath, syntax errors only)
+//   6. Messages: every finding as { source, code, params }, one i18n key
+//      table and one formatter -- the texts each panel showed before.
+import fontoxpath from 'fontoxpath';
+
+// ═══ 1-3. BRDP text: vocabulary, free-text extraction, contrast ════════════
+
 // Docs request (Suggest Proposal round, "comprobación de vocabulario contra
 // el esquema"): checks element/attribute names mentioned in a BRDP's
 // Title/Definition/Proposal against the REAL schema vocabulary of the
@@ -576,97 +602,6 @@ export function selectSchemaFactNames(orderedTexts, vocabulary, max = 6) {
   return selected;
 }
 
-// Ask-with-schema-cards follow-up round, point 4 ("fichas más compactas con
-// variantes"): a real report against this app -- `<para>` in S1000D 4.2
-// has 8 variants, and the previous rendering repeated every attribute and
-// child for EACH of the 8, producing a wall of near-identical text that
-// buried the one or two things that actually differ between variants.
-// `entry` is the exact shape GET /api/schema-cards returns for one name
-// ({variants: [{schemas, attributes, children, resolved, ...}], parents,
-// ...}) -- this function never re-fetches or reformats that data, only
-// re-partitions it into "common to every variant" vs "per-variant diff",
-// so buildSchemaFactsBlock (the prompt) and SchemaFactCard (the UI) can
-// share one single, testable computation instead of two independently-
-// drifting formatters.
-//
-// `parents` is already NOT per-variant in this data (one list for the
-// whole element, see backend/app/services/schema_cards.py) -- so it is
-// already "common" by construction and is returned as-is, never diffed.
-//
-// Attributes: an attribute counts as common only if EVERY variant has one
-// with the exact same name AND required-ness AND enum (including its own
-// truncation flags) -- a same-named attribute that differs in any of
-// those between variants is genuinely a difference, so it is left OUT of
-// the common set and shown per-variant instead, never silently merged.
-// Children: common iff the name appears in every variant's children list
-// (plain set membership, no attached properties to compare).
-//
-// A single-variant entry (the overwhelmingly common case) returns
-// `common: null` -- there is nothing to summarize across variants, so
-// callers should render it the old, simple way (this function only ever
-// changes the OUTPUT SHAPE for entries that genuinely have more than one
-// variant, per the encargo's own "si un elemento tiene varias variantes").
-function attributeSignature(attr) {
-  return [attr.name, attr.required, JSON.stringify(attr.enum || null), !!attr.enum_truncated, attr.enum_omitted || 0].join('\u0000');
-}
-
-// "Fichas sin hijos comunes" round: a real 4.2 answer said
-// <identAndStatusSection> "has no children" because the card said
-// "children: none" under "common to all 6 schema variants" -- no child is
-// common to every schema (dmAddress/dmStatus, commentAddress/
-// commentStatus, ...), but every schema has some. So each kind now has a
-// mode, and callers never write "none" unless no variant has any:
-//   'common'   -- something is common to all variants (listed as such,
-//                 with per-variant "additional" diffs below);
-//   'bySchema' -- nothing is common but some variant has some: listed per
-//                 variant group (the diff IS the variant's full list);
-//   'none'     -- no variant has any.
-// `schemaCount` is how many schemas the card covers (the union of every
-// variant's schemas), not how many variant groups there are.
-export function summarizeSchemaFactEntry(entry) {
-  const variants = entry.variants || [];
-  const schemaCount = new Set(variants.flatMap((v) => v.schemas || [])).size;
-  if (variants.length <= 1) return { common: null, variants, schemaCount, anyUnresolved: variants.some((v) => !v.resolved) };
-
-  const attrSigSets = variants.map((v) => new Set((v.attributes || []).map(attributeSignature)));
-  const commonAttrSigs = [...attrSigSets[0]].filter((sig) => attrSigSets.every((s) => s.has(sig)));
-  const commonAttrSigSet = new Set(commonAttrSigs);
-  const commonAttributes = (variants[0].attributes || []).filter((a) => commonAttrSigSet.has(attributeSignature(a)));
-
-  const childSets = variants.map((v) => new Set(v.children || []));
-  const commonChildren = [...childSets[0]].filter((name) => childSets.every((s) => s.has(name)));
-  const commonChildSet = new Set(commonChildren);
-
-  const perVariant = variants.map((v) => ({
-    schemas: v.schemas,
-    resolved: v.resolved,
-    diffAttributes: (v.attributes || []).filter((a) => !commonAttrSigSet.has(attributeSignature(a))),
-    attributes_truncated: v.attributes_truncated,
-    attributes_omitted: v.attributes_omitted,
-    diffChildren: (v.children || []).filter((name) => !commonChildSet.has(name)),
-    children_truncated: v.children_truncated,
-    children_omitted: v.children_omitted,
-  }));
-
-  // A variant whose list was cut counts as having some (its names were
-  // just not shown), so "none" is never written over a truncated list.
-  const modeOf = (commonList, key) =>
-    commonList.length > 0
-      ? 'common'
-      : variants.some((v) => (v[key] || []).length > 0 || v[`${key}_truncated`])
-        ? 'bySchema'
-        : 'none';
-
-  return {
-    common: { attributes: commonAttributes, children: commonChildren },
-    attributesMode: modeOf(commonAttributes, 'attributes'),
-    childrenMode: modeOf(commonChildren, 'children'),
-    perVariant,
-    schemaCount,
-    anyUnresolved: variants.some((v) => !v.resolved),
-  };
-}
-
 // A cheap, stable, non-cryptographic hash of the three text fields --
 // only used as an in-memory key to avoid recomputing when nothing changed,
 // never for anything security-sensitive.
@@ -677,4 +612,507 @@ export function hashVocabInputText(title, definition, proposal) {
     hash = (Math.imul(hash, 31) + s.charCodeAt(i)) | 0;
   }
   return hash.toString(36);
+}
+
+// ═══ 2. XPath expressions of a rule ════════════════════════════════════════
+
+// Suggest Rule validation (docs request, Suggest Rule round, Part 4):
+// deterministic, only ever WARNS, never blocks. Pulls the element and
+// attribute names a rule's XPath expressions actually reference and checks
+// them against the standard's real schema vocabulary (the same
+// public/schema-vocabulary-*.json the BRDP text check uses), so an invented
+// element in a generated -- or hand-pasted -- rule is flagged before it is
+// saved as Draft.
+//
+// Where the XPath lives, per format:
+//   BREX 4.2/4.1 -> <objectPath> text      BREX 3.0.1 -> <objpath> text
+//   Schematron   -> @context and @test (sch:rule / sch:assert / sch:report,
+//                   with or without the sch: prefix)
+//
+// Pure string processing (no DOMParser) so it runs the same under plain
+// Node for scripts/test-rule-name-check.mjs.
+
+const XML_ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+
+function decodeEntities(text) {
+  return text.replace(/&(lt|gt|amp|quot|apos);/g, (_, name) => XML_ENTITIES[name]);
+}
+
+const TEXT_PATH_RE = /<(objectPath|objpath)\b[^>]*>([\s\S]*?)<\/\1>/g;
+const SCH_ATTR_RE = /<(?:[A-Za-z_][\w.-]*:)?(?:rule|assert|report)\b([^>]*)>/g;
+const CONTEXT_TEST_ATTR_RE = /\s(context|test)\s*=\s*("([^"]*)"|'([^']*)')/g;
+
+// Every XPath expression in a rule fragment, entity-decoded.
+export function extractRuleXPaths(ruleXml) {
+  const source = ruleXml || '';
+  const out = [];
+  let m;
+  TEXT_PATH_RE.lastIndex = 0;
+  while ((m = TEXT_PATH_RE.exec(source))) out.push(decodeEntities(m[2].trim()));
+  SCH_ATTR_RE.lastIndex = 0;
+  while ((m = SCH_ATTR_RE.exec(source))) {
+    let a;
+    CONTEXT_TEST_ATTR_RE.lastIndex = 0;
+    while ((a = CONTEXT_TEST_ATTR_RE.exec(m[1]))) {
+      out.push(decodeEntities(a[3] !== undefined ? a[3] : a[4]));
+    }
+  }
+  return out.filter(Boolean);
+}
+
+// XPath 2.0/3.0 operator/keyword words. Only treated as operators when they
+// are NOT in a path-step position (see extractXPathNames) -- "//map" is
+// DITA's real <map> element, "a map b" never happens.
+const XPATH_KEYWORDS = new Set([
+  'and', 'or', 'div', 'idiv', 'mod', 'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'is',
+  'if', 'then', 'else', 'for', 'let', 'in', 'return', 'some', 'every', 'satisfies',
+  'as', 'instance', 'of', 'treat', 'cast', 'castable', 'to', 'union', 'intersect', 'except',
+]);
+
+const NAME_START = /[A-Za-z_]/;
+const NAME_CHAR = /[\w.-]/;
+
+// Element/attribute names referenced by ONE XPath expression. Ignored:
+// string literals, variables ($x), function calls and kind tests (a name
+// followed by "("), axes (name followed by "::"), wildcards, numbers,
+// operator keywords, and any namespace-prefixed name (xs:string, fn:head,
+// sch:..., xlink:href) -- the vocabulary is unprefixed local names, and a
+// prefixed token is far more often a type or function than a schema name,
+// so checking it would only produce false red warnings.
+export function extractXPathNames(xpath) {
+  const src = xpath || '';
+  const elements = new Set();
+  const attributes = new Set();
+  let i = 0;
+  let prevSignificant = ''; // last non-space character consumed
+  let pendingAttributeAxis = false;
+
+  const peekNonSpace = (from) => {
+    let j = from;
+    while (j < src.length && /\s/.test(src[j])) j++;
+    return j;
+  };
+
+  while (i < src.length) {
+    const ch = src[i];
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      const close = src.indexOf(ch, i + 1);
+      i = close === -1 ? src.length : close + 1;
+      prevSignificant = ch;
+      continue;
+    }
+    if (ch === '$') {
+      i++;
+      while (i < src.length && (NAME_CHAR.test(src[i]) || src[i] === ':')) i++;
+      prevSignificant = 'v';
+      continue;
+    }
+    if (/[0-9]/.test(ch) || (ch === '.' && /[0-9]/.test(src[i + 1] || ''))) {
+      i++;
+      while (i < src.length && /[0-9.eE]/.test(src[i])) i++;
+      prevSignificant = '0';
+      continue;
+    }
+    if (NAME_START.test(ch)) {
+      const start = i;
+      while (i < src.length && NAME_CHAR.test(src[i])) i++;
+      let name = src.slice(start, i);
+      // A trailing "." or "-" is never part of a name here ("a -1", "x.").
+      while (/[.-]$/.test(name)) {
+        name = name.slice(0, -1);
+        i--;
+      }
+      let prefixed = false;
+      if (src[i] === ':' && src[i + 1] !== ':' && NAME_START.test(src[i + 1] || '')) {
+        prefixed = true;
+        i++;
+        while (i < src.length && NAME_CHAR.test(src[i])) i++;
+      }
+      const next = peekNonSpace(i);
+      const isAxis = src[next] === ':' && src[next + 1] === ':';
+      const isCall = src[next] === '(';
+      const afterAt = prevSignificant === '@';
+      const inStepPosition = prevSignificant === '' || '/@[(,|:'.includes(prevSignificant);
+      // "for $x in", "some $r in", "let $v :=" -- a keyword binding a
+      // variable is always an operator, even at the start of the path.
+      const isOperator = XPATH_KEYWORDS.has(name) && (!inStepPosition || src[next] === '$');
+
+      if (isAxis) {
+        pendingAttributeAxis = name === 'attribute';
+        i = next + 2;
+        prevSignificant = ':';
+        continue;
+      }
+      if (!prefixed && !isCall && !isOperator) {
+        if (afterAt || pendingAttributeAxis) attributes.add(name);
+        else elements.add(name);
+      }
+      pendingAttributeAxis = false;
+      prevSignificant = 'n';
+      continue;
+    }
+    // Any other punctuation: operators, brackets, "/", "@", "*", "|", ",".
+    if (ch !== '*') pendingAttributeAxis = false;
+    prevSignificant = ch;
+    i++;
+  }
+  return { elements: [...elements], attributes: [...attributes] };
+}
+
+// All names referenced by a whole rule fragment.
+export function extractRuleNames(ruleXml) {
+  const elements = new Set();
+  const attributes = new Set();
+  for (const xpath of extractRuleXPaths(ruleXml)) {
+    const names = extractXPathNames(xpath);
+    names.elements.forEach((n) => elements.add(n));
+    names.attributes.forEach((n) => attributes.add(n));
+  }
+  return { elements: [...elements].sort(), attributes: [...attributes].sort() };
+}
+
+// Same result shape as checkAgainstVocabulary ({available, notFound,
+// wrongType}), so the UI renders it with the exact same red warning.
+export function checkRuleNames(ruleXml, vocabulary) {
+  const { elements, attributes } = extractRuleNames(ruleXml);
+  return checkAgainstVocabulary({ elements, attributes, camelCase: [] }, vocabulary);
+}
+
+// ═══ 2. Ask answers ════════════════════════════════════════════════════════
+
+// "Ask: comprobar los nombres de la respuesta" round, Part 1: after Ask's
+// answer arrives, the element/attribute names it mentions are checked
+// deterministically against the project standard's vocabulary -- the same
+// vocabulary and the same checkAgainstVocabulary the BRDP's own red notice
+// uses. Only warns (the caller shows a red line under the answer); never
+// edits or hides the answer. Pure and framework-free, so the Node test
+// scripts import it directly.
+//
+// Real case behind it (S1000D 3.0.1): the BRDP says `@ncage` (correctly
+// flagged: no such attribute in 3.0.1), and "¿Cuál es el elemento usado
+// para Ncage?" got "ncage es un atributo del elemento
+// `<identAndStatusSection>`" -- `<identAndStatusSection>` is 4.x only
+// (3.0.1 uses `<idstatus>`).
+//
+// "Aviso de nombres sin heurísticas" round: the check no longer tries to
+// read sentences. The first version skipped names the answer denied ("no
+// existe", "instead of", ...) and matched the BRDP's own nonexistent names
+// even when written bare; against real Mistral answers that guessed wrong
+// in both directions ("The attribute **@ncage** does not exist" and "does
+// not contain ... including @ncage" were read as claims that it exists).
+// Now:
+//   - the names the BRDP's own notice already reports (its notFound /
+//     wrongType, the list the prompt receives) are never checked in the
+//     answer -- the user has already been warned about them, and an
+//     answer that repeats them is usually saying they do not exist;
+//   - every other name the answer mentions is checked as written, with no
+//     interpretation of the sentence around it; the warning text is
+//     neutral ("names mentioned in the answer that do not exist ...").
+//
+// What counts as a name in the answer:
+//   - the existing extractor (extractContextCandidates): `<x>` tags,
+//     half-typed `<x`/`x>`, `@x`, and camelCase words;
+//   - a name inside inline code (`x`) that sits next to an element/
+//     attribute word ("el atributo `ncage`", "the `ncage` attribute"),
+//     which gives its kind. A bare code token with no such word is
+//     ignored: in an answer it is as often an attribute VALUE (`em01`) or
+//     a keyword as a name, and guessing would produce false warnings.
+// Names with a namespace prefix (`<xsl:template>`, `@xlink:href`) are
+// never schema vocabulary and are skipped.
+
+const CODE_SPAN_RE = /`([^`\n]+)`/g;
+const CODE_NAME_RE = /^(@)?<?\/?([A-Za-z][\w.-]*)>?$/;
+const KIND_WORDS = {
+  element: ['elemento', 'elementos', 'element', 'elements', 'etiqueta', 'etiquetas', 'tag', 'tags'],
+  attribute: ['atributo', 'atributos', 'attribute', 'attributes'],
+};
+const CONNECTORS = new Set(['el', 'la', 'los', 'las', 'del', 'de', 'un', 'una', 'the', 'of', 'a', 'an']);
+
+function kindOfWord(word) {
+  const w = (word || '').toLowerCase();
+  if (KIND_WORDS.element.includes(w)) return 'element';
+  if (KIND_WORDS.attribute.includes(w)) return 'attribute';
+  return null;
+}
+
+// The element/attribute word right before a code span (skipping
+// articles/prepositions) or right after it.
+function kindAround(text, start, end) {
+  const before = text.slice(Math.max(0, start - 40), start).match(/[\p{L}]+/gu) || [];
+  for (let i = before.length - 1; i >= 0 && i >= before.length - 3; i--) {
+    const kind = kindOfWord(before[i]);
+    if (kind) return kind;
+    if (!CONNECTORS.has(before[i].toLowerCase())) break;
+  }
+  const after = text.slice(end, end + 20).match(/^\s*([\p{L}]+)/u);
+  return after ? kindOfWord(after[1]) : null;
+}
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Deterministic candidates in the answer text: { elements, attributes,
+// camelCase } in the shape checkAgainstVocabulary takes.
+export function extractAnswerNames(text) {
+  const source = text || '';
+  const base = extractContextCandidates(source);
+  const elements = new Set(base.elements);
+  const attributes = new Set(base.attributes);
+  let m;
+  CODE_SPAN_RE.lastIndex = 0;
+  while ((m = CODE_SPAN_RE.exec(source))) {
+    const code = m[1].trim();
+    const nm = code.match(CODE_NAME_RE);
+    if (!nm) continue;
+    const name = nm[2];
+    // `<x>` and `@x` inside code are already taken by the extractor above.
+    if (nm[1] || code.startsWith('<')) continue;
+    const kind = kindAround(source, m.index, m.index + m[0].length);
+    if (kind === 'element') elements.add(name);
+    else if (kind === 'attribute') attributes.add(name);
+  }
+  // The prefix of `<xsl:template>` / `@xlink:href`, or the local part of
+  // `<xsl:template>` (which the half-typed-tag reader sees as `template>`).
+  const prefixed = (name, marker) =>
+    new RegExp(`${marker}${escapeRegExp(name)}:|[\\w-]:${escapeRegExp(name)}(?![\\w-])`).test(source);
+  return {
+    elements: [...elements].filter((n) => !prefixed(n, '</?')),
+    attributes: [...attributes].filter((n) => !prefixed(n, '@')),
+    camelCase: base.camelCase,
+  };
+}
+
+const bareName = (display) => display.replace(/^[<@]|>$/g, '');
+
+// Returns { available, notFound: ["<x>", "@y", ...], wrongType: [{ name,
+// usedAs, actualAs }] } -- the same shapes as checkAgainstVocabulary, so
+// the UI formats them the same way. `brdpVocabCheck` is the BRDP's own
+// vocabulary result ({ notFound, wrongType }, what the prompt receives);
+// its names are left out of the answer check.
+export function checkAnswerNames(answerText, vocabulary, brdpVocabCheck = null) {
+  if (!vocabulary) return { available: false, notFound: [], wrongType: [] };
+  const alreadyWarned = new Set([
+    ...(brdpVocabCheck?.notFound || []).map(bareName),
+    ...(brdpVocabCheck?.wrongType || []).map((w) => w.name),
+  ]);
+  const checked = checkAgainstVocabulary(extractAnswerNames(answerText || ''), vocabulary);
+  return {
+    available: true,
+    notFound: checked.notFound.filter((display) => !alreadyWarned.has(bareName(display))),
+    wrongType: checked.wrongType.filter((w) => !alreadyWarned.has(w.name)),
+  };
+}
+
+// Whether the check found anything to warn about.
+export function answerNameCheckHasWarnings(result) {
+  return Boolean(result && result.available && (result.notFound.length > 0 || result.wrongType.length > 0));
+}
+
+// ═══ 2. XML documents (Test rule examples) ═════════════════════════════════
+
+// The element and attribute names of a parsed XML document (no prefixed
+// names, no xmlns) -- what the Test rule checks against the vocabulary.
+export function extractDocumentNames(doc) {
+  const elements = new Set();
+  const attributes = new Set();
+  const walk = (el) => {
+    if (!String(el.nodeName).includes(':')) elements.add(el.nodeName);
+    for (const a of Array.from(el.attributes || [])) {
+      if (!a.name.includes(':') && a.name !== 'xmlns') attributes.add(a.name);
+    }
+    for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) walk(n);
+  };
+  walk(doc.documentElement);
+  return { elements: [...elements], attributes: [...attributes], camelCase: [] };
+}
+
+// ═══ 4. Structure ══════════════════════════════════════════════════════════
+
+// ─── Structural check ───────────────────────────────────────────────────────
+
+// [{ kind: 'unknownElement', element } | { kind: 'notAllowed', element, parent }
+//  | { kind: 'unknownAttribute', attribute, element } | { kind: 'wrongRoot', element, expected }]
+// against one schema's structure. Prefixed attributes other than xlink:* and
+// namespace declarations are not schema vocabulary and are left out.
+export function checkExampleStructure(doc, structure) {
+  const elements = structure.elements;
+  const problems = [];
+  const seen = new Set();
+  const add = (problem) => {
+    const key = JSON.stringify(problem);
+    if (!seen.has(key)) {
+      seen.add(key);
+      problems.push(problem);
+    }
+  };
+  const root = doc.documentElement;
+  if (structure.skeleton && root.nodeName !== structure.skeleton.root) {
+    add({ kind: 'wrongRoot', element: root.nodeName, expected: structure.skeleton.root });
+  }
+  const walk = (el, parentName) => {
+    const name = el.nodeName;
+    const known = Boolean(elements[name]);
+    if (!known) add({ kind: 'unknownElement', element: name });
+    else if (parentName && elements[parentName] && !elements[parentName].children.includes(name)) {
+      add({ kind: 'notAllowed', element: name, parent: parentName });
+    }
+    if (known) {
+      for (const a of Array.from(el.attributes || [])) {
+        if (a.name === 'xmlns' || a.name.startsWith('xmlns:') || a.name.startsWith('xsi:')) continue;
+        if (a.name.includes(':') && !a.name.startsWith('xlink:')) continue;
+        const local = a.name.replace(/^xlink:/, '');
+        if (!elements[name].attributes.includes(local)) add({ kind: 'unknownAttribute', attribute: a.name, element: name });
+      }
+    }
+    for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) walk(n, name);
+  };
+  walk(root, null);
+  return problems;
+}
+
+// English, for the correction request sent back to the LLM (the panel
+// translates the same problems through i18n).
+export function formatStructureProblem(problem, schema) {
+  switch (problem.kind) {
+    case 'unknownElement':
+      return `<${problem.element}> does not exist in the ${schema} schema`;
+    case 'notAllowed':
+      return `<${problem.element}> is not allowed inside <${problem.parent}>`;
+    case 'unknownAttribute':
+      return `@${problem.attribute} does not exist on <${problem.element}>`;
+    case 'wrongRoot':
+      return `the root element is <${problem.element}>, not <${problem.expected}>`;
+    default:
+      return String(problem.kind);
+  }
+}
+
+// ═══ 5. XPath syntax ═══════════════════════════════════════════════════════
+
+// Suggest Rule validation -- XPath syntax (schema-location encargo, Part 3).
+// A real Mistral run wrote <objectPath>//&lt;emphasis&gt;</objectPath>: the
+// name check (ruleNameCheck.js) extracts "emphasis", which IS a real 4.2
+// element, so nothing was flagged -- the expression itself is not XPath.
+// This checks that every XPath expression of a rule (objectPath/objpath in
+// BREX, @context and @test in Schematron -- extractRuleXPaths(), already
+// entity-decoded) parses.
+//
+// Parser: fontoxpath (XPath 3.1), the same code in the browser and in plain
+// Node (scripts/run-prompt-eval.mjs's xpath_valid check), so the app and the
+// eval suite always agree. document.createExpression was not used: it is
+// XPath 1.0 only and would reject valid DITA Schematron XPath 2.0/3.0
+// (`every $r in … satisfies`, `('a','b')`, inline functions) and block
+// Accept on correct rules. Consequence, accepted: XPath 2.0+ syntax in a
+// BREX objectPath is not reported (only real syntax errors are).
+//
+// Only syntax errors count (XPST0003). Static errors that are normal in a
+// rule fragment -- an undeclared $variable (sch:let), a prefix (xlink:,
+// sch:, xs:) or a function this parser doesn't register (matches/3, doc) --
+// and dynamic errors (no context item) never make an expression invalid.
+
+const SYNTAX_ERROR = 'XPST0003';
+
+export function isXPathSyntaxValid(expression) {
+  try {
+    fontoxpath.evaluateXPath(expression, null, null, null, fontoxpath.evaluateXPath.ANY_TYPE, {
+      language: fontoxpath.evaluateXPath.XPATH_3_1_LANGUAGE,
+    });
+    return true;
+  } catch (err) {
+    return !String(err?.message || '').includes(SYNTAX_ERROR);
+  }
+}
+
+// The rule's XPath expressions that are not syntactically valid (after
+// undoing the XML escapes), in document order, without duplicates.
+export function invalidRuleXPaths(ruleXml) {
+  const invalid = [];
+  for (const expression of extractRuleXPaths(ruleXml)) {
+    if (!isXPathSyntaxValid(expression) && !invalid.includes(expression)) invalid.push(expression);
+  }
+  return invalid;
+}
+
+// ═══ 6. Messages ═══════════════════════════════════════════════════════════
+
+// Every finding as { source, code, params } -- never a finished sentence --
+// so each panel translates it through one table (SCHEMA_ISSUE_KEYS) and one
+// formatter (formatSchemaIssue). The keys are exactly the ones each panel
+// used before this consolidation, so the texts on screen do not change.
+// Sources: 'brdp' (the BRDP's own text), 'rule' (a suggested or pasted
+// rule), 'answer' (an Ask answer), 'example' (a Test rule example).
+export const SCHEMA_ISSUE_KEYS = {
+  brdp: {
+    names_not_found: 'records.assistant.vocabUnknownNames',
+    wrong_type_as_element: 'records.assistant.vocabWrongTypeAsElement',
+    wrong_type_as_attribute: 'records.assistant.vocabWrongTypeAsAttribute',
+  },
+  rule: {
+    names_not_found: 'records.assistant.ruleNamesNotFound',
+    wrong_type_as_element: 'records.assistant.vocabWrongTypeAsElement',
+    wrong_type_as_attribute: 'records.assistant.vocabWrongTypeAsAttribute',
+    invalid_xpath: 'records.assistant.ruleInvalidXPath',
+  },
+  answer: {
+    names_not_found: 'records.assistant.answerUnknownNames',
+    wrong_type_as_element: 'records.assistant.answerWrongTypeAsElement',
+    wrong_type_as_attribute: 'records.assistant.answerWrongTypeAsAttribute',
+  },
+  example: {
+    names_not_found: 'records.ruleTest.unknownNames',
+    wrong_types: 'records.ruleTest.wrongTypeNames',
+    unknownElement: 'records.ruleTest.structure.unknownElement',
+    notAllowed: 'records.ruleTest.structure.notAllowed',
+    unknownAttribute: 'records.ruleTest.structure.unknownAttribute',
+    wrongRoot: 'records.ruleTest.structure.wrongRoot',
+  },
+};
+
+// A vocabulary result ({ available, notFound, wrongType } from
+// checkAgainstVocabulary / checkRuleNames / checkAnswerNames) as issues.
+// 'example' lists every wrong-type name in one issue, as its panel always
+// did; the other sources give one issue per name.
+export function nameIssues(result, source, { standard } = {}) {
+  if (!result?.available) return [];
+  const issues = [];
+  if (result.notFound.length > 0) {
+    issues.push({ source, code: 'names_not_found', params: { standard, names: result.notFound.join(', ') } });
+  }
+  if (source === 'example') {
+    if (result.wrongType.length > 0) {
+      issues.push({ source, code: 'wrong_types', params: { names: result.wrongType.map((w) => w.name).join(', ') } });
+    }
+  } else {
+    for (const w of result.wrongType) {
+      issues.push({ source, code: `wrong_type_as_${w.usedAs}`, params: { standard, name: w.name } });
+    }
+  }
+  return issues;
+}
+
+// checkExampleStructure's problems ({ kind, ... }) as issues.
+export function structureIssues(problems, { schema } = {}) {
+  return (problems || []).map(({ kind, ...params }) => ({ source: 'example', code: kind, params: { ...params, schema } }));
+}
+
+// invalidRuleXPaths' expressions as issues.
+export function xpathIssues(expressions) {
+  return (expressions || []).map((expression) => ({ source: 'rule', code: 'invalid_xpath', params: { expression } }));
+}
+
+// The issue in the interface language (`t` from i18next). An unknown code
+// shows as the code itself, never as nothing (HR7).
+export function formatSchemaIssue(issue, t) {
+  const key = SCHEMA_ISSUE_KEYS[issue.source]?.[issue.code];
+  return key ? t(key, issue.params) : issue.code;
+}
+
+// A stable React key for an issue.
+export function schemaIssueKey(issue) {
+  return `${issue.source}:${issue.code}:${JSON.stringify(issue.params)}`;
 }

@@ -1,6 +1,6 @@
 // "Ask: comprobar los nombres de la respuesta" -- plain Node test, no runner
 // (same convention as the other scripts/test-*.mjs). Imports the REAL
-// module (src/utils/answerNameCheck.js) and the REAL schema vocabularies
+// module (src/validation/schemaValidation.js) and the REAL schema vocabularies
 // (public/schema-vocabulary-*.json).
 //
 // "Aviso de nombres sin heurísticas" round: no sentence interpretation any
@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { answerNameCheckHasWarnings, checkAnswerNames, extractAnswerNames } from '../src/utils/answerNameCheck.js';
+import { answerNameCheckHasWarnings, checkAnswerNames, extractAnswerNames } from '../src/validation/schemaValidation.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0;

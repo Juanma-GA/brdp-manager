@@ -18,25 +18,12 @@
 // - xmlDisplayLines: the example re-indented, split into segments so the
 //   panel can highlight the nodes the rule selected and dim the skeleton.
 import { nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
-import { checkAgainstVocabulary } from './vocabularyCheck.js';
-import { SKELETON_TEXT_SUFFIX, assembleExample, checkExampleStructure, formatStructureProblem } from './ruleTestSkeleton.js';
+import { checkAgainstVocabulary, checkExampleStructure, extractDocumentNames, formatStructureProblem } from '../validation/schemaValidation.js';
+import { SKELETON_TEXT_SUFFIX, assembleExample } from './ruleTestSkeleton.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
 // names (xsi:…, xlink:…) and namespace declarations are not schema
 // vocabulary and are left out.
-function fragmentNames(doc) {
-  const elements = new Set();
-  const attributes = new Set();
-  const walk = (el) => {
-    if (!String(el.nodeName).includes(':')) elements.add(el.nodeName);
-    for (const a of Array.from(el.attributes || [])) {
-      if (!a.name.includes(':') && a.name !== 'xmlns') attributes.add(a.name);
-    }
-    for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) walk(n);
-  };
-  walk(doc.documentElement);
-  return { elements: [...elements], attributes: [...attributes], camelCase: [] };
-}
 
 // T2b: the LLM's example ({ label, expected, schema, content }) on its
 // schema's skeleton → the same example with `xml` (the complete fragment
@@ -75,7 +62,7 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
   } catch (err) {
     return { wellFormed: false, error: err.message, names: empty, structure: [], unknownSchema: null, runnable: false };
   }
-  const names = checkAgainstVocabulary(fragmentNames(doc), vocabulary);
+  const names = checkAgainstVocabulary(extractDocumentNames(doc), vocabulary);
   const namesOk = !names.available || (names.notFound.length === 0 && names.wrongType.length === 0);
   // A name the vocabulary already reports is not repeated as "does not exist
   // in the <schema> schema".

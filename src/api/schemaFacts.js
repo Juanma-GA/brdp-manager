@@ -1,5 +1,5 @@
 import { authFetchJson } from '../services/apiClient';
-import { selectSchemaFactNames } from '../utils/vocabularyCheck.js';
+import { selectSchemaFactNames } from '../validation/schemaValidation.js';
 
 // Real structural facts from GET /api/schema-cards for the element names
 // mentioned in `orderedTexts` (priority order, capped at `max`) -- shared by

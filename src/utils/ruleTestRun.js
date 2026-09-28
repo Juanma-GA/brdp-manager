@@ -11,7 +11,7 @@
 // prompt, the LLM's answer, the checks of each example, ONE automatic
 // correction round for the examples that fail them, and the engine run.
 import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleTestResponse, RULE_TEST_USER_MESSAGE } from '../prompts/ruleTestExamplesPrompt.js';
-import { extractRuleNames } from './ruleNameCheck.js';
+import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { parseXmlDocument } from './ruleTestEngine.js';
 import { chooseTestSchemas, placeExample, ruleMatchExpressions, ruleTargets } from './ruleTestSkeleton.js';

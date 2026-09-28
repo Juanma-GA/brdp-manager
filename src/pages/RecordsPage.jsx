@@ -33,7 +33,17 @@ import { registerRuleTest } from '../api/ruleTests';
 import { verifyWarning } from '../utils/ruleTestStatus.js';
 import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
+import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
+import { nameIssues } from '../validation/schemaValidation.js';
 import styles from './RecordsPage.module.css';
+
+// The data-testids the verification scripts read on the Ask answer's
+// name warnings.
+const ANSWER_ISSUE_TEST_IDS = {
+  names_not_found: 'ask-answer-unknown-names',
+  wrong_type_as_element: 'ask-answer-wrong-type',
+  wrong_type_as_attribute: 'ask-answer-wrong-type',
+};
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
 const SUGGEST_KINDS = ['definition', 'proposal', 'rule'];
@@ -1355,27 +1365,7 @@ export default function RecordsPage() {
                         {t('records.assistant.vocabCheckUnavailable', { standard: project.standard })}
                       </p>
                     )}
-                    {vocabResult.available && vocabResult.notFound.length > 0 && (
-                      <p className={styles.vocabWarning}>
-                        ⚠{' '}
-                        {t('records.assistant.vocabUnknownNames', {
-                          standard: project.standard,
-                          names: vocabResult.notFound.join(', '),
-                        })}
-                      </p>
-                    )}
-                    {vocabResult.available &&
-                      vocabResult.wrongType.map((w) => (
-                        <p key={w.name} className={styles.vocabWarning}>
-                          ⚠{' '}
-                          {t(
-                            w.usedAs === 'element'
-                              ? 'records.assistant.vocabWrongTypeAsElement'
-                              : 'records.assistant.vocabWrongTypeAsAttribute',
-                            { standard: project.standard, name: w.name }
-                          )}
-                        </p>
-                      ))}
+                    <SchemaIssueLines issues={nameIssues(vocabResult, 'brdp', { standard: project.standard })} />
                   </div>
                 )}
 
@@ -1409,29 +1399,11 @@ export default function RecordsPage() {
                         answer presents as real that the standard's schema
                         does not have (or has only as the other kind). A
                         warning only -- the answer above is never changed. */}
-                    {!ask.askPending && !ask.askError && ask.answerNameCheck?.available && (
-                      <>
-                        {ask.answerNameCheck.notFound.length > 0 && (
-                          <p className={styles.vocabWarning} data-testid="ask-answer-unknown-names">
-                            ⚠{' '}
-                            {t('records.assistant.answerUnknownNames', {
-                              standard: project.standard,
-                              names: ask.answerNameCheck.notFound.join(', '),
-                            })}
-                          </p>
-                        )}
-                        {ask.answerNameCheck.wrongType.map((w) => (
-                          <p key={w.name} className={styles.vocabWarning} data-testid="ask-answer-wrong-type">
-                            ⚠{' '}
-                            {t(
-                              w.usedAs === 'element'
-                                ? 'records.assistant.answerWrongTypeAsElement'
-                                : 'records.assistant.answerWrongTypeAsAttribute',
-                              { standard: project.standard, name: w.name }
-                            )}
-                          </p>
-                        ))}
-                      </>
+                    {!ask.askPending && !ask.askError && (
+                      <SchemaIssueLines
+                        issues={nameIssues(ask.answerNameCheck, 'answer', { standard: project.standard })}
+                        testIds={ANSWER_ISSUE_TEST_IDS}
+                      />
                     )}
                     {/* Docs request ("Servicio de fichas de esquema y su uso
                         en Ask"): discrete, clickable line under the ask.answer

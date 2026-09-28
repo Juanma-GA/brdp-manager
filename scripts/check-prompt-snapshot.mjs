@@ -4,7 +4,7 @@
 // suggestProposalPrompt.js) against a fixed set of expected outputs
 // (expected-prompts.json), built from a fixed set of inputs
 // (prompt-snapshot/cases.mjs). A future refactor of those builders, or of
-// anything they call into (vocabularyCheck.js's summarizeSchemaFactEntry/
+// anything they call into (utils/schemaFactSummary.js's summarizeSchemaFactEntry, validation/schemaValidation.js's
 // formatWrongTypeMessage), can be checked for accidental prompt drift with:
 //
 //     node scripts/check-prompt-snapshot.mjs
