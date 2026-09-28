@@ -18,6 +18,7 @@ import {
 import { useVocabularyCheck } from '../hooks/useVocabularyCheck';
 import { useAskAssistant } from '../hooks/useAskAssistant';
 import { useSuggestions } from '../hooks/useSuggestions';
+import { useResizableSplit } from '../hooks/useResizableSplit';
 import ReferenceRow from '../components/assistant/ReferenceRow';
 import SchemaFactCard from '../components/assistant/SchemaFactCard';
 import NamingTip from '../components/assistant/NamingTip';
@@ -67,6 +68,13 @@ function estimateEmbeddingEtaSeconds(job) {
 // v1's BRDPTable/useTableLogic used 25 rows/page (see src/hooks/useTableLogic.js)
 // -- this docs request specifically asks for 15 here, same prev/next pattern.
 const TABLE_PAGE_SIZE = 15;
+
+// Split between the table and the detail panel (C1, Part 3). The divider is
+// also the gap between the two (it replaces the layout's 16px gap).
+const DETAIL_PANEL_DEFAULT_WIDTH = 460;
+const DETAIL_PANEL_MIN_WIDTH = 360;
+const TABLE_MIN_WIDTH = 480;
+const SPLIT_DIVIDER_WIDTH = 16;
 
 // rule_status/proposal_status history values are internal keys ("draft",
 // "Validated"...) -- translate them through the same i18n tables the live
@@ -770,6 +778,16 @@ export default function RecordsPage() {
   // either way, so the UI reflects whatever IS actually running.
   const handleComputeEmbeddings = () => computeEmbeddings.mutate();
 
+  // Consolidation C1, Part 3: draggable divider between the table and the
+  // detail panel (width remembered in this browser only).
+  const split = useResizableSplit({
+    storageKey: 'brdp-records-detail-width',
+    defaultSize: DETAIL_PANEL_DEFAULT_WIDTH,
+    minSize: DETAIL_PANEL_MIN_WIDTH,
+    minOther: TABLE_MIN_WIDTH,
+    dividerSize: SPLIT_DIVIDER_WIDTH,
+  });
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -785,7 +803,7 @@ export default function RecordsPage() {
         </div>
       </div>
 
-      <div className={styles.layout}>
+      <div className={styles.layout} ref={split.containerRef}>
         <div className={styles.tableWrap}>
           <div className={styles.createForm}>
             <input
@@ -956,7 +974,15 @@ export default function RecordsPage() {
           )}
         </div>
 
-        <div className={styles.detailPanel}>
+        <div
+          {...split.dividerProps}
+          className={`${styles.splitDivider}${split.dragging ? ` ${styles.splitDividerDragging}` : ''}`}
+          aria-label={t('records.resizeDivider.label')}
+          title={t('records.resizeDivider.hint')}
+          data-testid="records-split-divider"
+        />
+
+        <div className={styles.detailPanel} style={{ width: split.size }}>
           {isCreatingNew ? (
             <>
               <label className={styles.fieldLabel}>{t('records.fieldId')}</label>
@@ -1392,6 +1418,13 @@ export default function RecordsPage() {
                       </div>
                     ) : (
                       <div className={styles.answerBox}>
+                        {/* C1, Part 2: a structural question answered from the
+                            schema cards, without the LLM. */}
+                        {ask.answerSource === 'schema' && (
+                          <p className={styles.schemaAnswerLabel} data-testid="ask-answer-deterministic">
+                            {t('records.assistant.answerFromSchema', { standard: project.standard })}
+                          </p>
+                        )}
                         <ReactMarkdown>{ask.answer}</ReactMarkdown>
                       </div>
                     )}

@@ -216,6 +216,10 @@ const resources = {
       },
       records: {
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
+        resizeDivider: {
+          label: 'Resize the detail panel',
+          hint: 'Drag or use the arrow keys to resize; double-click to reset',
+        },
         searchPlaceholder: 'Search by ID or Title…',
         addButton: 'Add BRDP',
         selectHint: 'Select a BRDP from the table.',
@@ -457,6 +461,7 @@ const resources = {
           vocabWrongTypeAsElement: '<{{name}}> is not an element in {{standard}} — it exists as attribute @{{name}}.',
           vocabWrongTypeAsAttribute: '@{{name}} is not an attribute in {{standard}} — it exists as element <{{name}}>.',
           answerUnknownNames: 'Names mentioned in the answer that do not exist in the {{standard}} schema: {{names}}',
+          answerFromSchema: 'Answer taken from the {{standard}} schema (no AI)',
           answerWrongTypeAsElement: 'The answer mentions <{{name}}> as an element; in {{standard}} it exists only as attribute @{{name}}.',
           answerWrongTypeAsAttribute: 'The answer mentions @{{name}} as an attribute; in {{standard}} it exists only as element <{{name}}>.',
           askLabel: 'Ask a question',
@@ -956,6 +961,10 @@ const resources = {
       },
       records: {
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
+        resizeDivider: {
+          label: 'Redimensionar el panel de detalle',
+          hint: 'Arrastra o usa las flechas para redimensionar; doble clic para restablecer',
+        },
         searchPlaceholder: 'Buscar por ID o Título…',
         addButton: 'Añadir BRDP',
         selectHint: 'Selecciona un BRDP de la tabla.',
@@ -1191,6 +1200,7 @@ const resources = {
           vocabWrongTypeAsElement: '<{{name}}> no es un elemento en {{standard}} — existe como atributo @{{name}}.',
           vocabWrongTypeAsAttribute: '@{{name}} no es un atributo en {{standard}} — existe como elemento <{{name}}>.',
           answerUnknownNames: 'Nombres mencionados en la respuesta que no existen en el esquema {{standard}}: {{names}}',
+          answerFromSchema: 'Respuesta obtenida del esquema {{standard}} (sin IA)',
           answerWrongTypeAsElement: 'La respuesta menciona <{{name}}> como elemento; en {{standard}} solo existe como atributo @{{name}}.',
           answerWrongTypeAsAttribute: 'La respuesta menciona @{{name}} como atributo; en {{standard}} solo existe como elemento <{{name}}>.',
           askLabel: 'Haz una pregunta',
