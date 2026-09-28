@@ -39,6 +39,7 @@ function placementsFor(standard, ruleXml, roles) {
 }
 const paraEntry = realCards['S1000D 4.2'].para;
 const tableEntry = realCards['S1000D 4.2'].table;
+const identAndStatusSectionEntry = realCards['S1000D 4.2'].identAndStatusSection;
 
 const brdpBase = {
   identifier: 'BRDP-S1-00042',
@@ -126,6 +127,12 @@ export const askCases = [
   {
     name: 'no-vocab-no-facts-no-compare',
     args: [brdpBase, ruleApprovalVerified, null, 'S1000D 3.0.1', vocabNone, []],
+  },
+  // "Fichas sin hijos comunes": a card with no child common to all its
+  // schemas (the real 4.2 <identAndStatusSection>).
+  {
+    name: 'children-vary-by-schema-identandstatussection',
+    args: [brdpBase, ruleApprovalNone, null, 'S1000D 4.2', vocabClean, [{ name: 'identAndStatusSection', entry: identAndStatusSectionEntry }]],
   },
   // "Ask: comprobar los nombres de la respuesta": the real case -- a 3.0.1
   // BRDP that says @ncage (no such attribute in 3.0.1), no schema facts.

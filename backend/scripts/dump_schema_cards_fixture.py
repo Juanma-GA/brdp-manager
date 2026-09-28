@@ -24,9 +24,11 @@ from app.services.schema_cards import get_schema_cards
 
 # The only (standard, names) pairs the prompt-snapshot fixture cases need --
 # <para> in S1000D 4.2 for its real 8-variant/enum-range shape (docs
-# request's own edge case), <table> for the single-variant common case.
+# request's own edge case), <table> for the single-variant common case,
+# <identAndStatusSection> for a card with no child common to all schemas
+# ("fichas sin hijos comunes" round).
 _REQUESTS = [
-    ("S1000D 4.2", ["para", "table"]),
+    ("S1000D 4.2", ["identAndStatusSection", "para", "table"]),
 ]
 
 _OUT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "prompt-snapshot" / "schema-cards-fixture.json"

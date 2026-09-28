@@ -51,7 +51,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   const [lastAskedSchemaFacts, setLastAskedSchemaFacts] = useState([]);
   const [expandedSchemaFactNames, setExpandedSchemaFactNames] = useState(new Set());
   // "Ask: comprobar los nombres de la respuesta": the names the displayed
-  // answer presents as schema names, checked against the standard's
+  // answer mentions as schema names, checked against the standard's
   // vocabulary (utils/answerNameCheck.js) -- { available, notFound,
   // wrongType } or null. Only a warning under the answer; the answer
   // itself is never changed.
@@ -135,11 +135,10 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
         temperature: ASK_TEMPERATURE,
       });
       setAnswer(res.content);
-      // The same vocabulary as the BRDP's own notice; the names the prompt
-      // already called nonexistent count too if the answer presents them
-      // as real.
+      // The same vocabulary as the BRDP's own notice; the names that notice
+      // already reports are left out (the user has been warned about them).
       const answerVocabulary = vocabulary || (await loadSchemaVocabulary(standard).catch(() => null));
-      setAnswerNameCheck(checkAnswerNames(res.content, answerVocabulary, vocab?.notFound || []));
+      setAnswerNameCheck(checkAnswerNames(res.content, answerVocabulary, vocab));
       setPrevTurn({ question: askedQuestion, answer: res.content });
       // Auto-clear on success only (docs request) -- an errored question
       // stays in the textarea below so the user never loses what they typed.

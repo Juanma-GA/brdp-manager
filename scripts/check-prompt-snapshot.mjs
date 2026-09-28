@@ -190,6 +190,18 @@ import { buildSuggestRulePrompt } from '../src/prompts/suggestRulePrompt.js';
 // forbids the listed names bare or with other capitalisation (changes the
 // notfound case). New case concept-without-facts-ncage-3-0-1 (the real
 // @ncage report). Suggest and rule-test prompts are unchanged.
+//
+// "Aviso de nombres sin heurísticas y fichas sin hijos comunes" round: the
+// multi-variant schema-facts card changed (buildSchemaFactsBlock): the
+// header counts the schemas the card covers ("defined in 28 schemas"), not
+// the variant groups ("common to all 8 schema variants"); the common lists
+// are labelled "attributes/children common to all"; and a kind with
+// nothing common but present somewhere is listed per schema group ("children
+// depend on the schema (none common to all)") instead of "children: none".
+// Only one existing case has a multi-variant card, ask/multi-variant-para-
+// refused-notfound (<para>, 28 schemas); new case ask/children-vary-by-
+// schema-identandstatussection (the real 4.2 <identAndStatusSection>).
+// Single-variant cards (<table>) and every other prompt are unchanged.
 import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesPrompt.js';
 import { askCases, ruleTestExamplesCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

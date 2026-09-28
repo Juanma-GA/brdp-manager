@@ -3,8 +3,11 @@
 // (scripts/mock-mistral-chat-server.mjs): a question containing "NCAGE"
 // gets the real wrong answer of the report ("ncage es un atributo del
 // elemento `<identAndStatusSection>`..."), one containing IDSTATUS_TEST a
-// correct 3.0.1 answer. Self-cleaning (the two seeded projects are
-// deleted at the end).
+// correct 3.0.1 answer, NCAGE_CORRECT the shape of the real correct
+// answers. "Aviso de nombres sin heurísticas y fichas sin hijos comunes"
+// round: neutral warning without the BRDP's own names, and the
+// <identAndStatusSection> card (children per schema) in prompt and UI.
+// Self-cleaning (the two seeded projects are deleted at the end).
 //
 //   node scripts/verify-ask-answer-names.mjs
 import { chromium } from "playwright-core";
@@ -91,8 +94,8 @@ async function main() {
     const sys = await ask("Which element is used for the NCAGE code?", REAL_ANSWER_START);
     const text = await warning().textContent();
     assert(
-      text === "⚠ This answer mentions names that do not exist in the S1000D 3.0.1 schema: <identAndStatusSection>, @ncage",
-      `warning lists <identAndStatusSection> and @ncage (${text})`
+      text === "⚠ Names mentioned in the answer that do not exist in the S1000D 3.0.1 schema: <identAndStatusSection>",
+      `neutral warning lists <identAndStatusSection> only -- @ncage is already in the BRDP's notice (${text})`
     );
     const color = await warning().evaluate((el) => getComputedStyle(el).color);
     assert(color === "rgb(185, 28, 28)", `the warning is red (${color})`);
@@ -114,7 +117,7 @@ async function main() {
     await page.waitForTimeout(300);
     const es = await warning().textContent();
     assert(
-      es === "⚠ Esta respuesta menciona nombres que no existen en el esquema S1000D 3.0.1: <identAndStatusSection>, @ncage",
+      es === "⚠ Nombres mencionados en la respuesta que no existen en el esquema S1000D 3.0.1: <identAndStatusSection>",
       `Spanish warning (${es})`
     );
     await language.selectOption("en");
@@ -124,11 +127,37 @@ async function main() {
     await ask("IDSTATUS_TEST where do the identification data go?", "En S1000D 3.0.1 los datos de identificación");
     assert((await warning().count()) === 0, "correct 3.0.1 answer (<idstatus>, <dmodule>): no warning");
 
+    // 3b. A correct answer about @ncage (shape of the real Mistral answers:
+    //     "The attribute **@ncage** does not exist ...", "does not contain
+    //     ... including @ncage"): no warning -- @ncage is the BRDP's own
+    //     reported name and no sentence is interpreted.
+    await ask("NCAGE_CORRECT which element is used for the NCAGE code?", "does not exist in the S1000D 3.0.1 schema");
+    assert((await warning().count()) === 0, "correct answer about @ncage (bold, 'does not contain ... including @ncage'): no warning");
+
     // 4. The same wrong answer in a 4.2 project: <identAndStatusSection>
     //    exists there, and this BRDP has no @ncage -> no warning.
     await open(p42, "BRDP-AN-42");
     await ask("Which element is used for the NCAGE code?", REAL_ANSWER_START);
     assert((await warning().count()) === 0, "4.2: <identAndStatusSection> exists, no warning");
+
+    // 4b. The schema card of <identAndStatusSection> in 4.2: no child is
+    //     common to all 26 schemas, so the children are listed per schema,
+    //     never "children: none" -- in the prompt and in the expandable card.
+    const sys42 = await ask("What can <identAndStatusSection> contain?", "MOCK-");
+    assert(sys42.includes("<identAndStatusSection> — defined in 26 schemas:"), "prompt card: 26 schemas in the header");
+    assert(sys42.includes("\n  children depend on the schema (none common to all):"), "prompt card: children depend on the schema");
+    assert(sys42.includes("\n    [comment]: commentAddress, commentStatus"), "prompt card: the comment schema group");
+    assert(!sys42.includes("children: none"), "prompt card: never 'children: none'");
+    await page.getByRole("button", { name: "<identAndStatusSection>", exact: true }).click();
+    const card = page.locator('[class*="referenceDefinition"]').filter({ hasText: "defined in 26 schemas" });
+    await card.waitFor({ timeout: 3000 });
+    const cardText = await card.textContent();
+    assert(cardText.includes("children depend on the schema (none common to all):"), "UI card: children depend on the schema");
+    assert(/\[appliccrossreftable, [^\]]*wrngflds\]: dmAddress, dmStatus/.test(cardText), "UI card: data-module group lists dmAddress, dmStatus");
+    assert(cardText.includes("[comment]: commentAddress, commentStatus"), "UI card: [comment] lists commentAddress, commentStatus");
+    assert(cardText.includes("attributes: none") && !cardText.includes("children: none"), "UI card: attributes none, never children none");
+    assert(!cardText.includes("additional"), "UI card: no 'additional' labels");
+    await card.screenshot({ path: "/tmp/schema-card-identandstatussection.png" });
 
     // 5. Switching BRDP clears the exchange and its warning.
     await open(p301, "BRDP-AN-NCAGE");

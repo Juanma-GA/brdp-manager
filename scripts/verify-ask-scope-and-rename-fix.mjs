@@ -191,7 +191,7 @@ async function main() {
       prompts.push(await ask("Where can <para> go?"));
     }
     assert(prompts[0] === prompts[1] && prompts[1] === prompts[2], "asking the identical question three times in a row produces the byte-identical system prompt every time");
-    assert(prompts[0].includes("<para> — common to all 8 schema variants:"), "the <para> parents question's prompt carries the real, compact 8-variant schema facts");
+    assert(prompts[0].includes("<para> — defined in 28 schemas:"), "the <para> parents question's prompt carries the real, compact schema facts (28 schemas)");
     assert(prompts[0].includes("allowed inside:"), "the prompt for a parents question includes the \"allowed inside\" (parents) line the model needs to answer it");
 
     console.log("\nALL CHECKS PASSED\n");

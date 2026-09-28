@@ -610,9 +610,23 @@ function attributeSignature(attr) {
   return [attr.name, attr.required, JSON.stringify(attr.enum || null), !!attr.enum_truncated, attr.enum_omitted || 0].join('\u0000');
 }
 
+// "Fichas sin hijos comunes" round: a real 4.2 answer said
+// <identAndStatusSection> "has no children" because the card said
+// "children: none" under "common to all 6 schema variants" -- no child is
+// common to every schema (dmAddress/dmStatus, commentAddress/
+// commentStatus, ...), but every schema has some. So each kind now has a
+// mode, and callers never write "none" unless no variant has any:
+//   'common'   -- something is common to all variants (listed as such,
+//                 with per-variant "additional" diffs below);
+//   'bySchema' -- nothing is common but some variant has some: listed per
+//                 variant group (the diff IS the variant's full list);
+//   'none'     -- no variant has any.
+// `schemaCount` is how many schemas the card covers (the union of every
+// variant's schemas), not how many variant groups there are.
 export function summarizeSchemaFactEntry(entry) {
   const variants = entry.variants || [];
-  if (variants.length <= 1) return { common: null, variants, anyUnresolved: variants.some((v) => !v.resolved) };
+  const schemaCount = new Set(variants.flatMap((v) => v.schemas || [])).size;
+  if (variants.length <= 1) return { common: null, variants, schemaCount, anyUnresolved: variants.some((v) => !v.resolved) };
 
   const attrSigSets = variants.map((v) => new Set((v.attributes || []).map(attributeSignature)));
   const commonAttrSigs = [...attrSigSets[0]].filter((sig) => attrSigSets.every((s) => s.has(sig)));
@@ -634,9 +648,21 @@ export function summarizeSchemaFactEntry(entry) {
     children_omitted: v.children_omitted,
   }));
 
+  // A variant whose list was cut counts as having some (its names were
+  // just not shown), so "none" is never written over a truncated list.
+  const modeOf = (commonList, key) =>
+    commonList.length > 0
+      ? 'common'
+      : variants.some((v) => (v[key] || []).length > 0 || v[`${key}_truncated`])
+        ? 'bySchema'
+        : 'none';
+
   return {
     common: { attributes: commonAttributes, children: commonChildren },
+    attributesMode: modeOf(commonAttributes, 'attributes'),
+    childrenMode: modeOf(commonChildren, 'children'),
     perVariant,
+    schemaCount,
     anyUnresolved: variants.some((v) => !v.resolved),
   };
 }

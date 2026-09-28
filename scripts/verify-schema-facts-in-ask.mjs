@@ -215,7 +215,8 @@ async function main() {
     await ask("What children does <para> allow?");
     req = await lastMockRequest();
     sys = req.messages.find((m) => m.role === "system").content;
-    assert(sys.includes("<para> — common to all 8 schema variants:"), "the real, 8-variant <para> card is summarized as one common-to-all-8 block, not repeated once per variant");
+    assert(sys.includes("<para> — defined in 28 schemas:"), "the real <para> card is summarized as one block that counts its 28 schemas (not its 8 variant groups), not repeated once per variant");
+    assert(sys.includes("\n  children common to all: acronym"), "the common children are labelled as common to all");
     // "Falsos avisos... y ajustes de los prompts de Proposal y fichas"
     // round, Part 4: "Differences by schema" no longer ends right after
     // the colon -- it now says explicitly, in the same line, that it only
@@ -223,7 +224,7 @@ async function main() {
     // had claimed <para>'s variants "differ in additional allowed
     // parents").
     assert(
-      sys.includes("Differences by schema (attributes and children ONLY — parents are never part of this comparison, see \"allowed inside\" above):"),
+      sys.includes("Differences by schema (beyond what is common to all — attributes and children ONLY; parents are never part of this comparison, see \"allowed inside\" above):"),
       "the compact block's 'Differences by schema' header now says explicitly it never covers parents"
     );
     assert(!/\n<para> \(schemas:/.test(sys), "the OLD per-variant repeated block format no longer appears for a multi-variant element");
@@ -235,7 +236,7 @@ async function main() {
     // "footnote" is a real per-variant DIFFERENCE for <para> (present in
     // some schema files' content models, absent from others) -- it must
     // show up under "Differences by schema", not in the common list.
-    assert(/Differences by schema \(attributes[\s\S]*footnote/.test(sys), '"footnote" (a genuine per-variant difference) appears in the differences section');
+    assert(/Differences by schema \(beyond[\s\S]*footnote/.test(sys), '"footnote" (a genuine per-variant difference) appears in the differences section');
 
     // "Did you mean con marcado a medias y listas de padres cortadas"
     // round, Part 2: <para> in S1000D 4.2 has 43 real parents (confirmed
@@ -257,7 +258,7 @@ async function main() {
     // Part 4's own new wording, present verbatim right after the parents
     // list, on the same "allowed inside" line.
     assert(
-      sys.includes("(this is the same for every schema variant listed above — allowed-inside parents never differ by schema variant)"),
+      sys.includes("(this is the same for every schema listed above — allowed-inside parents never differ by schema)"),
       '"allowed inside" line explicitly states parents are the same across every variant'
     );
 
@@ -265,8 +266,8 @@ async function main() {
     const paraChip = page.getByRole("button", { name: "<para>", exact: true });
     assert((await paraChip.count()) > 0, 'UI shows a clickable "<para>" chip under the answer');
     await paraChip.click();
-    await page.waitForSelector("text=/common to all 8 schema variants/", { timeout: 3000 });
-    assert(true, 'the expanded UI card also shows the compact "common to all 8 schema variants" summary');
+    await page.waitForSelector("text=/defined in 28 schemas/", { timeout: 3000 });
+    assert(true, 'the expanded UI card also shows the compact "defined in 28 schemas" summary');
     await page.waitForSelector("text=/Differences by schema/", { timeout: 3000 });
     assert(true, "the expanded UI card also shows the per-schema differences section");
     const allowedInsideUi = await page.locator("text=/allowed inside:/").first().textContent();

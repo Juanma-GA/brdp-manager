@@ -206,12 +206,12 @@ async function runCheck(check, answer, ctx = {}) {
     }
     case "answer_names_in_vocabulary": {
       // Ask: the same check as the red warning under the answer in the app
-      // (utils/answerNameCheck.js), including the BRDP's own nonexistent
-      // names when the answer presents them as real.
-      const names = checkAnswerNames(answer, ctx.vocabulary, ctx.vocabCheck?.notFound || []);
+      // (utils/answerNameCheck.js); the names the BRDP's own notice already
+      // reports are left out, as in the app.
+      const names = checkAnswerNames(answer, ctx.vocabulary, ctx.vocabCheck);
       if (!names.available) return { status: "manual", detail: `no schema vocabulary for ${ctx.standard}` };
       const bad = [...names.notFound, ...names.wrongType.map((w) => `${w.usedAs === "element" ? "<" + w.name + ">" : "@" + w.name} (wrong kind)`)];
-      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `presented as real but not in the schema: ${bad.join(", ")}` : "no nonexistent name presented as real" };
+      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `mentioned but not in the schema: ${bad.join(", ")}` : "no nonexistent name mentioned" };
     }
     case "not_checkable": {
       const is = answer.trim().replace(/^```\w*\s*/, "").startsWith(NOT_CHECKABLE_PREFIX);

@@ -1,5 +1,130 @@
 {
   "S1000D 4.2": {
+    "identAndStatusSection": {
+      "parents": [
+        "comment",
+        "ddn",
+        "dml",
+        "dmodule",
+        "pm",
+        "scormContentPackage"
+      ],
+      "parents_omitted": 0,
+      "parents_truncated": false,
+      "variants": [
+        {
+          "attributes": [],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "dmAddress",
+            "dmStatus"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "appliccrossreftable",
+            "brdoc",
+            "brex",
+            "checklist",
+            "comrep",
+            "condcrossreftable",
+            "container",
+            "crew",
+            "descript",
+            "fault",
+            "frontmatter",
+            "ipd",
+            "learning",
+            "prdcrossreftable",
+            "proced",
+            "process",
+            "sb",
+            "schedul",
+            "scocontent",
+            "wrngdata",
+            "wrngflds"
+          ]
+        },
+        {
+          "attributes": [],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "commentAddress",
+            "commentStatus"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "comment"
+          ]
+        },
+        {
+          "attributes": [],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "ddnAddress",
+            "ddnStatus"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "ddn"
+          ]
+        },
+        {
+          "attributes": [],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "dmlAddress",
+            "dmlStatus"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "dml"
+          ]
+        },
+        {
+          "attributes": [],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "pmAddress",
+            "pmStatus"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "pm"
+          ]
+        },
+        {
+          "attributes": [],
+          "attributes_omitted": 0,
+          "attributes_truncated": false,
+          "children": [
+            "lom",
+            "scormContentPackageAddress",
+            "scormContentPackageStatus"
+          ],
+          "children_omitted": 0,
+          "children_truncated": false,
+          "resolved": true,
+          "schemas": [
+            "scormcontentpackage"
+          ]
+        }
+      ]
+    },
     "para": {
       "parents": [
         "brAction",

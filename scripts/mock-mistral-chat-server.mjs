@@ -274,6 +274,10 @@ const server = http.createServer((req, res) => {
         "Use `objectPath` for the context.";
     } else if (isHtmlTest(userText)) {
       reply = "MOCK-HTML-TEST: the element <table> and the tag <originator> must render as literal text, never as real HTML.";
+    } else if (/NCAGE_CORRECT/.test(userText)) {
+      // The shape of the real correct answers (bold name, "does not
+      // contain ... including @ncage").
+      reply = "The attribute **@ncage** does not exist in the S1000D 3.0.1 schema. The schema facts do not contain any element or attribute for the NCAGE code, including @ncage, so I cannot confirm the name; look up NCAGE in the S1000D 3.0.1 specification.";
     } else if (/NCAGE/.test(userText)) {
       // "Ask: comprobar los nombres de la respuesta": the real wrong answer
       // (S1000D 3.0.1) -- a 4.x element and the BRDP's nonexistent @ncage.

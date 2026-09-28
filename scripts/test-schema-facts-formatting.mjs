@@ -72,9 +72,12 @@ function makeVariant(schemas, { attributes = [], children = [], attributes_trunc
   // still show a line (a real difference could be hiding past the
   // truncation), but reworded, never "none beyond the common set".
   const entry = makeEntry([
-    makeVariant(["a"], { attributes: [{ name: "shared", required: false, enum: null }] }),
+    // Both share child c1, so children are in 'common' mode and b's
+    // truncated-but-empty children diff is the case under test.
+    makeVariant(["a"], { attributes: [{ name: "shared", required: false, enum: null }], children: ["c1"] }),
     makeVariant(["b"], {
       attributes: [{ name: "shared", required: false, enum: null }],
+      children: ["c1"],
       attributes_truncated: true,
       attributes_omitted: 5,
       children_truncated: true,
@@ -228,6 +231,70 @@ assert(realBlock.includes("@changeType [add|delete|modify]"), "real <para>: @cha
 assert(!realBlock.includes("none beyond the common set"), "real <para>: the old phrase never appears");
 assert(realBlock.includes("additional children:"), "real <para>: at least one variant has a real children difference, shown under the new label");
 assert(!realBlock.includes("\n    attributes:"), "real <para>: no variant needs an 'additional attributes' line (all 11 real attributes are common to all 8 variants) -- confirms empty diffs are omitted, not just relabeled");
+
+// ---- "Fichas sin hijos comunes" round -------------------------------------
+// The header counts schemas (the union of the variants' schemas), never
+// variant groups; "none" only when no variant has any; nothing common but
+// some present -> listed per schema group, without "additional".
+
+assert(realBlock.includes("<para> — defined in 28 schemas:"), "real <para>: header counts the 28 schemas, not the 8 variant groups");
+assert(!realBlock.includes("schema variants:"), "real <para>: the old 'common to all N schema variants' header is gone");
+assert(realBlock.includes("\n  attributes common to all: @applicRefId"), "real <para>: common attributes labelled as common to all");
+assert(realBlock.includes("\n  children common to all: acronym"), "real <para>: common children labelled as common to all");
+assert(realBlock.includes("Differences by schema (beyond what is common to all"), "real <para>: differences section kept");
+
+// Real <identAndStatusSection> in 4.2: 6 variant groups, 26 schemas, no
+// attributes anywhere, no child common to all.
+{
+  const variants = realCards.cards.identAndStatusSection;
+  const entry = {
+    variants: variants.map((v) => ({
+      schemas: v.schemas,
+      resolved: v.resolved !== false,
+      attributes: v.attributes || [],
+      attributes_truncated: false,
+      attributes_omitted: 0,
+      children: v.children || [],
+      children_truncated: false,
+      children_omitted: 0,
+    })),
+    parents: realCards.parents.identAndStatusSection || [],
+    parents_truncated: false,
+    parents_omitted: 0,
+  };
+  assert(variants.length === 6, `real <identAndStatusSection>: 6 variant groups (got ${variants.length})`);
+  const block = buildSchemaFactsBlock("S1000D 4.2", [{ name: "identAndStatusSection", entry }]);
+  assert(block.includes("<identAndStatusSection> — defined in 26 schemas:"), "real <identAndStatusSection>: 26 schemas in the header");
+  assert(block.includes("\n  children depend on the schema (none common to all):"), "real <identAndStatusSection>: children depend on the schema");
+  assert(/\n    \[appliccrossreftable, [^\]]*wrngflds\]: dmAddress, dmStatus/.test(block), "real <identAndStatusSection>: the data-module group lists dmAddress, dmStatus");
+  assert(block.includes("\n    [comment]: commentAddress, commentStatus"), "real <identAndStatusSection>: [comment] lists commentAddress, commentStatus");
+  assert(!block.includes("children: none"), "real <identAndStatusSection>: never 'children: none'");
+  assert(!block.includes("additional"), "real <identAndStatusSection>: no 'additional' anywhere");
+  assert(block.includes("\n  attributes: none"), "real <identAndStatusSection>: attributes none (no schema has any)");
+  assert(!block.includes("Differences by schema"), "real <identAndStatusSection>: no differences section (nothing is common)");
+}
+
+// An element empty in every variant: "none" for both.
+{
+  const entry = makeEntry([makeVariant(["a"]), makeVariant(["b"], { resolved: true })]);
+  const block = buildSchemaFactsBlock("S1000D 4.2", [{ name: "empty", entry }]);
+  assert(block.includes("<empty> — defined in 2 schemas:"), "empty element: header counts schemas");
+  assert(block.includes("\n  attributes: none") && block.includes("\n  children: none"), "empty element: attributes none, children none");
+  assert(!block.includes("depend on the schema"), "empty element: nothing depends on the schema");
+}
+
+// Attributes with nothing common but some present: listed per schema.
+{
+  const entry = makeEntry([
+    makeVariant(["a", "c"], { attributes: [{ name: "onlyA", required: true, enum: null }], children: ["k"] }),
+    makeVariant(["b"], { children: ["k"] }),
+  ]);
+  const block = buildSchemaFactsBlock("S1000D 4.2", [{ name: "z", entry }]);
+  assert(block.includes("<z> — defined in 3 schemas:"), "attributes by schema: header counts 3 schemas over 2 groups");
+  assert(block.includes("\n  attributes depend on the schema (none common to all):\n    [a, c]: @onlyA (required)\n    [b]: none"), "attributes by schema: per-group lines, 'none' for the group without any");
+  assert(block.includes("\n  children common to all: k"), "attributes by schema: children still common");
+  assert(!block.includes("additional attributes"), "attributes by schema: never 'additional attributes'");
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

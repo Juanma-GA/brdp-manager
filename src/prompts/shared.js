@@ -179,69 +179,93 @@ instead of guessing.`;
       continue;
     }
 
-    block += `\n<${name}> — common to all ${entry.variants.length} schema variants:`;
+    // "Fichas sin hijos comunes" round: the header counts the schemas the
+    // card covers (26 for <identAndStatusSection> in 4.2), never the
+    // number of variant groups (6) -- "all 6 schema variants" read as if
+    // the element existed in only six schemas.
+    block += `\n<${name}> — defined in ${summary.schemaCount} schemas:`;
     if (summary.anyUnresolved) {
-      block += `\n  note: not every variant's content model was fully resolved — the common set below may be incomplete.`;
+      block += `\n  note: not every schema's content model was fully resolved — the lists below may be incomplete.`;
     }
-    block += `\n  attributes: ${formatSchemaFactAttributeList(summary.common.attributes)}`;
-    block += `\n  children: ${formatSchemaFactNameList(summary.common.children, false, 0)}`;
+    block += kindLines('attributes', summary.attributesMode, summary.common.attributes, summary.perVariant);
+    block += kindLines('children', summary.childrenMode, summary.common.children, summary.perVariant);
     // "Ajustes a los prompts de Proposal y fichas" round, Part 4: a real
     // Mistral test answered that <para>'s schema variants "differ in
     // additional allowed parents (e.g. footnote)" -- factually wrong on
     // two counts at once (footnote is a CHILDREN difference, and parents
     // never vary per variant in this data model at all -- there is only
     // ever one parents list per element, see summarizeSchemaFactEntry's
-    // own docstring). The block already implied this structurally (one
-    // "allowed inside" line above, entirely outside the per-variant loop
-    // below), but never said so in words the model could not misread --
-    // now it does, on both ends: where "allowed inside" is stated, and
-    // where "Differences by schema" is introduced.
-    block += `\n  allowed inside: ${parentsText} (this is the same for every schema variant listed above — allowed-inside parents never differ by schema variant)`;
-    block += `\n  Differences by schema (attributes and children ONLY — parents are never part of this comparison, see "allowed inside" above):`;
-    // "Pulido de fichas" round, points 2-3: a variant with nothing to add
-    // beyond the common set used to still print an "attributes: none
-    // beyond the common set" / "children: none beyond the common set"
-    // line -- pure noise for the overwhelmingly common case (most
-    // variants of most elements differ in at most one of the two). Now
-    // that line is OMITTED ENTIRELY when there is genuinely nothing to
-    // add; a variant whose raw list was itself truncated (so a real
-    // difference could be hiding past the cutoff) still gets a line, but
-    // reworded away from "none beyond the common set" -- that phrase
-    // claimed certainty ("nothing more") the truncation doesn't actually
-    // have (HR7: never silently claim completeness that isn't there). The
-    // two labels that DO print are "additional attributes"/"additional
-    // children" (clearer than the old bare "attributes"/"children", which
-    // read as if it were the variant's FULL list rather than a diff).
-    // `parents` has no per-variant diff to label "additional parents" for
-    // -- it's a single, always-common list (see summarizeSchemaFactEntry's
-    // own docstring) -- so that third label never has a call site here.
-    //
-    // "Did you mean con marcado a medias" round, Part 2: a per-variant diff
-    // is a SUBSET of that variant's raw (pre-diff) list -- so its raw
-    // omitted count cannot honestly be attributed to the diff shown here
-    // (some of what was cut could belong to the common set already
-    // reported above). PARTIAL_DIFF_NOTE says so in prose, deliberately
-    // WITHOUT a number the diff itself has no way to back up -- unlike
-    // truncationMarker() above, which is only used where shown+omitted is
-    // an exact, verifiable total.
-    const PARTIAL_DIFF_NOTE = ' (this variant’s own list was cut before comparison — further differences may exist beyond what is shown)';
-    for (const pv of summary.perVariant) {
-      let variantBlock = `\n  [${pv.schemas.join(', ')}]`;
-      if (!pv.resolved) {
-        variantBlock += `\n    content model not fully resolved for this schema — do not assume this list is complete.`;
-      }
-      if (pv.diffAttributes.length > 0) {
-        variantBlock += `\n    additional attributes: ${formatSchemaFactAttributeList(pv.diffAttributes)}${pv.attributes_truncated ? PARTIAL_DIFF_NOTE : ''}`;
-      } else if (pv.attributes_truncated) {
-        variantBlock += `\n    additional attributes: not confirmed — this variant's attribute list was cut off before comparison, so a real difference could be hiding past the cutoff`;
-      }
-      if (pv.diffChildren.length > 0) {
-        variantBlock += `\n    additional children: ${formatSchemaFactNameList(pv.diffChildren, false, 0)}${pv.children_truncated ? PARTIAL_DIFF_NOTE : ''}`;
-      } else if (pv.children_truncated) {
-        variantBlock += `\n    additional children: not confirmed — this variant's children list was cut off before comparison, so a real difference could be hiding past the cutoff`;
-      }
-      block += variantBlock;
+    // own docstring). Said in words on both ends: where "allowed inside"
+    // is stated, and where "Differences by schema" is introduced.
+    block += `\n  allowed inside: ${parentsText} (this is the same for every schema listed above — allowed-inside parents never differ by schema)`;
+    // Every variant group is still named here (the only place the schemas
+    // of a 'common'-mode card are listed); a 'bySchema' kind is already
+    // listed per group by kindLines(), so with no 'common' kind there is
+    // no section at all.
+    if (summary.attributesMode === 'common' || summary.childrenMode === 'common') {
+      block += `\n  Differences by schema (beyond what is common to all — attributes and children ONLY; parents are never part of this comparison, see "allowed inside" above):`;
+      block += summary.perVariant.map((pv) => variantDiffLines(pv, summary)).join('');
     }
   }
   return block;
 }
+
+// "Pulido de fichas" round, points 2-3 (kept): a variant with nothing to
+// add beyond the common set prints no line at all; one whose raw list was
+// truncated still gets a line, worded without claiming "nothing more"
+// (HR7). The labels are "additional attributes"/"additional children"
+// because they are a diff against the common set. Only kinds in 'common'
+// mode have a diff -- a 'bySchema' kind is already listed per schema
+// group in full by kindLines().
+//
+// "Did you mean con marcado a medias" round, Part 2: a per-variant diff is
+// a SUBSET of that variant's raw list, so the raw omitted count cannot be
+// attributed to it -- PARTIAL_DIFF_NOTE says so without a number.
+const PARTIAL_DIFF_NOTE = ' (this variant’s own list was cut before comparison — further differences may exist beyond what is shown)';
+
+function variantDiffLines(pv, summary) {
+  let lines = '';
+  if (summary.attributesMode === 'common') {
+    if (pv.diffAttributes.length > 0) {
+      lines += `\n    additional attributes: ${formatSchemaFactAttributeList(pv.diffAttributes)}${pv.attributes_truncated ? PARTIAL_DIFF_NOTE : ''}`;
+    } else if (pv.attributes_truncated) {
+      lines += `\n    additional attributes: not confirmed — this variant's attribute list was cut off before comparison, so a real difference could be hiding past the cutoff`;
+    }
+  }
+  if (summary.childrenMode === 'common') {
+    if (pv.diffChildren.length > 0) {
+      lines += `\n    additional children: ${formatSchemaFactNameList(pv.diffChildren, false, 0)}${pv.children_truncated ? PARTIAL_DIFF_NOTE : ''}`;
+    } else if (pv.children_truncated) {
+      lines += `\n    additional children: not confirmed — this variant's children list was cut off before comparison, so a real difference could be hiding past the cutoff`;
+    }
+  }
+  let head = `\n  [${pv.schemas.join(', ')}]`;
+  if (!pv.resolved) head += `\n    content model not fully resolved for this schema — do not assume this list is complete.`;
+  return head + lines;
+}
+
+// "Fichas sin hijos comunes" round: one kind (attributes or children) of a
+// multi-variant card. 'none' is written only when no schema has any;
+// 'bySchema' lists each variant group's full list (no "additional": there
+// is no common set it would be added to).
+function kindLines(kind, mode, commonList, perVariant) {
+  const format = (list) => (kind === 'attributes' ? formatSchemaFactAttributeList(list) : formatSchemaFactNameList(list, false, 0));
+  if (mode === 'none') return `\n  ${kind}: none`;
+  if (mode === 'common') return `\n  ${kind} common to all: ${format(commonList)}`;
+  let out = `\n  ${kind} depend on the schema (none common to all):`;
+  for (const pv of perVariant) {
+    const list = kind === 'attributes' ? pv.diffAttributes : pv.diffChildren;
+    const truncated = kind === 'attributes' ? pv.attributes_truncated : pv.children_truncated;
+    const omitted = kind === 'attributes' ? pv.attributes_omitted : pv.children_omitted;
+    const text =
+      list.length === 0
+        ? truncated
+          ? `none shown${truncationMarker(0, omitted)}`
+          : 'none'
+        : format(list) + (truncated ? truncationMarker(list.length, omitted) : '');
+    out += `\n    [${pv.schemas.join(', ')}]: ${text}`;
+    if (!pv.resolved) out += ' (content model not fully resolved for this schema)';
+  }
+  return out;
+}
+

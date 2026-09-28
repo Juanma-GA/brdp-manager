@@ -365,6 +365,24 @@
       ]
     },
     {
+      "id": "ask-children-vary-by-schema",
+      "description": "'Fichas sin hijos comunes' round: in S1000D 4.2 no child of <identAndStatusSection> is common to all 26 schemas (dmAddress/dmStatus in data modules, commentAddress/commentStatus in comment, ...). A real answer said it has no children because the card read 'children: none'.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-12",
+        "title": "Identification and status section content",
+        "definition": "Decide which identification and status information the <identAndStatusSection> of each data module shall carry.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What can <identAndStatusSection> contain?",
+      "checks": [
+        { "type": "contains", "pattern": "dmAddress", "note": "the data-module children (dmAddress, dmStatus)" },
+        { "type": "not_contains_any", "patterns": ["no children", "has no child", "does not contain any"], "flags": "i", "note": "must not say it has no children" }
+      ]
+    },
+    {
       "id": "rule-4-2-prohibit-element",
       "description": "Suggest Rule, S1000D 4.2: prohibiting an element -> one structureObjectRule with allowedObjectFlag=\"0\" on that element, real names only, no context block.",
       "standard": "S1000D 4.2",
