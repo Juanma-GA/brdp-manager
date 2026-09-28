@@ -4,7 +4,7 @@ import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
 import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
 import { finalRuleXml, validateRuleXml } from '../../hooks/useSuggestions';
-import { extractRuleNames, nameIssues, xpathIssues } from '../../validation/schemaValidation.js';
+import { extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
 import SchemaIssueLines from './SchemaIssueLines';
 import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
 
@@ -40,9 +40,17 @@ function AppliesTo({ entry }) {
   );
 }
 
+// Every rule-format problem shares one test id.
+const RULE_FORMAT_TEST_IDS = Object.fromEntries(
+  ['rule_format_missing', 'rule_format_text', 'rule_format_wrapper', 'rule_format_empty_block', 'rule_format_other_format', 'rule_format_foreign'].map(
+    (code) => [code, 'rule-format-error']
+  )
+);
+
 // Red warnings for one rule fragment (docs request, Suggest Rule round,
 // Part 4) -- same style as the BRDP text's vocabulary warning. Malformed
-// XML and an invalid XPath expression disable Accept; name warnings never do.
+// XML, an invalid XPath expression and content that is not a rule of the
+// project's format (C2, Part 0) disable Accept; name warnings never do.
 function RuleValidationWarnings({ validation, standard }) {
   const { t } = useTranslation();
   const { wellFormed, wellFormedError, invalidXPaths, names } = validation;
@@ -53,7 +61,10 @@ function RuleValidationWarnings({ validation, standard }) {
           ⚠ {t('records.assistant.ruleNotWellFormed', { error: wellFormedError })}
         </p>
       )}
-      <SchemaIssueLines issues={[...xpathIssues(invalidXPaths), ...nameIssues(names, 'rule', { standard })]} />
+      <SchemaIssueLines
+        issues={[...ruleFormatIssues(validation.ruleFormat), ...xpathIssues(invalidXPaths), ...nameIssues(names, 'rule', { standard })]}
+        testIds={RULE_FORMAT_TEST_IDS}
+      />
     </>
   );
 }
@@ -61,6 +72,7 @@ function RuleValidationWarnings({ validation, standard }) {
 function acceptDisabledTitle(t, canEdit, validation) {
   if (!canEdit) return t('records.assistant.acceptDisabledTitle');
   if (!validation.wellFormed) return t('records.assistant.ruleAcceptDisabledMalformed');
+  if (validation.ruleFormat && !validation.ruleFormat.ok) return t('records.assistant.ruleAcceptDisabledFormat');
   if (validation.invalidXPaths.length > 0) return t('records.assistant.ruleAcceptDisabledInvalidXPath');
   return undefined;
 }
@@ -118,12 +130,12 @@ export default function RuleSuggestionPanel({
   const [testOpen, setTestOpen] = useState(false);
   const testable = !!entry.text && canTestRule(entry.format);
 
-  const generatedValidation = entry.text ? validateRuleXml(entry.text, vocabulary) : null;
+  const generatedValidation = entry.text ? validateRuleXml(entry.text, vocabulary, entry.format) : null;
   const pasted = (entry.pastedRule || '').trim();
   // A pasted rule is validated -- and shown -- exactly as it will be saved:
   // wrapped in the chosen schemas' context blocks.
   const pastedFinal = pasted ? finalRuleXml(entry, pasted) : '';
-  const pastedValidation = pasted ? validateRuleXml(pastedFinal, vocabulary) : null;
+  const pastedValidation = pasted ? validateRuleXml(pastedFinal, vocabulary, entry.format) : null;
   const hasSchemas = (entry.schemas || []).length > 0;
 
   // Coverage of the pasted rule's element names, for the per-schema

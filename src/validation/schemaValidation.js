@@ -18,6 +18,7 @@
 //   3. Contrast with the vocabulary (not found / wrong type)
 //   4. Structure (child allowed in its parent, attribute on its element)
 //   5. XPath syntax (fontoxpath, syntax errors only)
+//   5b. Rule format: what is saved as a rule contains a rule of the format
 //   6. Messages: every finding as { source, code, params }, one i18n key
 //      table and one formatter -- the texts each panel showed before.
 import fontoxpath from 'fontoxpath';
@@ -1038,6 +1039,140 @@ export function invalidRuleXPaths(ruleXml) {
   return invalid;
 }
 
+// ═══ 5b. Rule format ═══════════════════════════════════════════════════════
+
+// Consolidation C2, Part 0: what is saved as a rule must contain a rule of
+// the project's format. Real case: "Paste rule" with just the text
+// //&lt;emphasis&gt; -- well-formed XML, no element at all -- was accepted,
+// saved as Draft and could be tested. Checked on well-formed XML only (the
+// well-formedness check runs first and reports its own error).
+//
+// What the top level of the fragment may hold, per format:
+//   BREX 4.2/4.1  <structureObjectRule>, <nonContextRule>, or a
+//                 <contextRules> block holding at least one structureObjectRule
+//   BREX 3.0.1    <objrule>, a <contextrules> block holding at least one
+//                 objrule, or the 3.0.1 stand-in for a rule without context:
+//                 a comment starting with "nonContextRule" (the XSD has no
+//                 nonContextRule element; Generate writes the comment)
+//   SCH-DITA      <pattern> or <rule>, with or without a prefix
+// Comments are always allowed next to the rule. Loose text and any other
+// element are not; a wrapper around a rule (<rules>, a bare
+// <structureObjectRuleGroup>) is reported as such, and a rule of another
+// format (<sch:pattern> in a BREX project) says which format it belongs to.
+// An unknown format is not checked. The backend applies the same check on
+// PUT …/approvals/{format} (backend/app/services/rule_format_check.py --
+// keep both in sync); the Excel import does not (lint-curated-templates
+// reports existing rows).
+const RULE_FORMAT_SHAPES = {
+  'BREX-4.2': { label: 'BREX 4.2', rules: ['structureObjectRule', 'nonContextRule'], blocks: { contextRules: 'structureObjectRule' }, expected: 'structureObjectRule' },
+  'BREX-4.1': { label: 'BREX 4.1', rules: ['structureObjectRule', 'nonContextRule'], blocks: { contextRules: 'structureObjectRule' }, expected: 'structureObjectRule' },
+  'BREX-3.0.1': { label: 'BREX 3.0.1', rules: ['objrule'], blocks: { contextrules: 'objrule' }, expected: 'objrule', nonContextComment: true },
+  'SCH-DITA': { label: 'Schematron (DITA)', rules: ['pattern', 'rule'], blocks: {}, expected: 'sch:pattern' },
+};
+
+// Element names that belong to one format only -- to say which format a
+// misplaced rule element belongs to.
+const RULE_ELEMENT_FORMAT = {
+  structureObjectRule: 'BREX 4.x',
+  nonContextRule: 'BREX 4.x',
+  contextRules: 'BREX 4.x',
+  structureObjectRuleGroup: 'BREX 4.x',
+  objrule: 'BREX 3.0.1',
+  contextrules: 'BREX 3.0.1',
+  structrules: 'BREX 3.0.1',
+  pattern: 'Schematron (DITA)',
+  rule: 'Schematron (DITA)',
+};
+
+const TOP_LEVEL_TOKEN_RE =
+  /<!--([\s\S]*?)-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<!DOCTYPE[^>]*>|<(\/?)([^\s/>!?]+)(?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*(\/?)>/g;
+
+const localNameOf = (qname) => qname.replace(/^.*:/, '');
+
+// The top level of a well-formed fragment: elements (with the local names of
+// their descendants), comments and loose text.
+function scanTopLevel(xml) {
+  const top = [];
+  let depth = 0;
+  let current = null;
+  let last = 0;
+  let m;
+  const pushText = (text) => {
+    if (depth === 0 && text.trim()) top.push({ kind: 'text', text: decodeEntities(text.trim()) });
+  };
+  TOP_LEVEL_TOKEN_RE.lastIndex = 0;
+  while ((m = TOP_LEVEL_TOKEN_RE.exec(xml))) {
+    pushText(xml.slice(last, m.index));
+    last = TOP_LEVEL_TOKEN_RE.lastIndex;
+    const [, comment, cdata, closing, name, selfClosing] = m;
+    if (comment !== undefined) {
+      if (depth === 0) top.push({ kind: 'comment', text: comment.trim() });
+    } else if (cdata !== undefined) {
+      pushText(cdata);
+    } else if (name) {
+      if (closing) {
+        depth -= 1;
+        if (depth === 0) current = null;
+      } else if (depth === 0) {
+        current = { kind: 'element', name, local: localNameOf(name), descendants: new Set() };
+        top.push(current);
+        if (!selfClosing) depth += 1;
+        else current = null;
+      } else {
+        current?.descendants.add(localNameOf(name));
+        if (!selfClosing) depth += 1;
+      }
+    }
+  }
+  pushText(xml.slice(last));
+  return top;
+}
+
+// { checked, ok, problem: { code, params } | null } for a well-formed rule
+// fragment. Codes: rule_format_other_format, rule_format_wrapper,
+// rule_format_empty_block, rule_format_foreign, rule_format_missing,
+// rule_format_text.
+export function checkRuleFormat(ruleXml, format) {
+  const shape = RULE_FORMAT_SHAPES[format];
+  if (!shape) return { checked: false, ok: true, problem: null };
+  const base = { format: shape.label, expected: shape.expected };
+  const fail = (code, params = {}) => ({ checked: true, ok: false, problem: { code, params: { ...base, ...params } } });
+  const top = scanTopLevel(ruleXml || '');
+  let rules = 0;
+  for (const node of top) {
+    if (node.kind === 'comment') {
+      if (shape.nonContextComment && /^nonContextRule\b/.test(node.text)) rules += 1;
+      continue;
+    }
+    if (node.kind !== 'element') continue;
+    if (shape.rules.includes(node.local)) {
+      rules += 1;
+      continue;
+    }
+    const inner = shape.blocks[node.local];
+    if (inner) {
+      if (!node.descendants.has(inner)) return fail('rule_format_empty_block', { element: node.name, inner });
+      rules += 1;
+      continue;
+    }
+    const otherFormat = RULE_ELEMENT_FORMAT[node.local];
+    if (otherFormat && otherFormat !== shape.label && !(shape.label.startsWith('BREX 4') && otherFormat === 'BREX 4.x')) {
+      return fail('rule_format_other_format', { element: node.name, otherFormat });
+    }
+    if (shape.rules.some((r) => node.descendants.has(r))) return fail('rule_format_wrapper', { element: node.name });
+    return fail('rule_format_foreign', { element: node.name });
+  }
+  if (rules === 0) return fail('rule_format_missing');
+  const text = top.find((n) => n.kind === 'text');
+  if (text) return fail('rule_format_text', { text: text.text.length > 60 ? `${text.text.slice(0, 59)}…` : text.text });
+  return { checked: true, ok: true, problem: null };
+}
+
+// checkRuleFormat's problem as issues (none when it passes).
+export function ruleFormatIssues(result) {
+  return result?.problem ? [{ source: 'rule', code: result.problem.code, params: result.problem.params }] : [];
+}
+
 // ═══ 6. Messages ═══════════════════════════════════════════════════════════
 
 // Every finding as { source, code, params } -- never a finished sentence --
@@ -1057,6 +1192,12 @@ export const SCHEMA_ISSUE_KEYS = {
     wrong_type_as_element: 'records.assistant.vocabWrongTypeAsElement',
     wrong_type_as_attribute: 'records.assistant.vocabWrongTypeAsAttribute',
     invalid_xpath: 'records.assistant.ruleInvalidXPath',
+    rule_format_missing: 'records.assistant.ruleFormat.missing',
+    rule_format_text: 'records.assistant.ruleFormat.text',
+    rule_format_wrapper: 'records.assistant.ruleFormat.wrapper',
+    rule_format_empty_block: 'records.assistant.ruleFormat.emptyBlock',
+    rule_format_other_format: 'records.assistant.ruleFormat.otherFormat',
+    rule_format_foreign: 'records.assistant.ruleFormat.foreign',
   },
   answer: {
     names_not_found: 'records.assistant.answerUnknownNames',

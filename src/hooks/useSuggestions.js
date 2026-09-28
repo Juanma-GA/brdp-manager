@@ -13,7 +13,7 @@ import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { registerRuleTest } from '../api/ruleTests';
 import { ruleXmlHash } from '../utils/ruleHash.js';
-import { checkRuleNames, extractRuleNames, invalidRuleXPaths, selectSchemaFactNames } from '../validation/schemaValidation.js';
+import { checkRuleFormat, checkRuleNames, extractRuleNames, invalidRuleXPaths, selectSchemaFactNames } from '../validation/schemaValidation.js';
 import {
   coverageOf,
   decideRuleSchemaContext,
@@ -42,15 +42,20 @@ import { ruleStateOf } from '../utils/ruleState';
 // (schema-location encargo, Part 3 -- e.g. //&lt;emphasis&gt;). Unknown /
 // wrong-kind names in the rule's XPath are red warnings with Accept still
 // enabled. `acceptable` is the single gate every Accept path uses.
-export function validateRuleXml(xml, vocabulary) {
+// Consolidation C2, Part 0: a third blocker -- the content must contain a
+// rule of the project's format (checkRuleFormat), so loose text such as
+// //&lt;emphasis&gt; or a wrapper such as <rules> is never saved as a rule.
+export function validateRuleXml(xml, vocabulary, format) {
   const wellFormed = checkWellFormed(xml || '');
   // Only meaningful on well-formed XML (the expressions come out of it).
   const invalidXPaths = wellFormed.valid ? invalidRuleXPaths(xml || '') : [];
+  const ruleFormat = wellFormed.valid ? checkRuleFormat(xml || '', format) : null;
   return {
     wellFormed: wellFormed.valid,
     wellFormedError: wellFormed.error,
     invalidXPaths,
-    acceptable: wellFormed.valid && invalidXPaths.length === 0,
+    ruleFormat,
+    acceptable: wellFormed.valid && invalidXPaths.length === 0 && ruleFormat.ok,
     names: checkRuleNames(xml || '', vocabulary),
   };
 }
@@ -533,7 +538,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     // too before writing anything.
     if (entry.brdpId !== selected.id) return;
     if (entry.kind === 'rule') {
-      if (!validateRuleXml(entry.text, vocabulary).acceptable) return;
+      if (!validateRuleXml(entry.text, vocabulary, entry.format).acceptable) return;
       if (!(await saveRuleAsDraft(entry, entry.text, 'llm'))) return;
     } else {
       await handleUpdate(selected.id, { [entry.kind]: entry.text });
@@ -562,7 +567,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     const pasted = (entry?.pastedRule || '').trim();
     if (!entry || entry.kind !== 'rule' || !pasted) return;
     const ruleXml = finalRuleXml(entry, pasted);
-    if (!validateRuleXml(ruleXml, vocabulary).acceptable) return;
+    if (!validateRuleXml(ruleXml, vocabulary, entry.format).acceptable) return;
     if (!(await saveRuleAsDraft(entry, ruleXml, 'external_llm'))) return;
     removeSuggestionEntry(selected.id);
   };

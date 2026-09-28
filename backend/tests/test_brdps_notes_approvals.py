@@ -351,7 +351,7 @@ async def test_manual_propose_can_save_directly_as_approved(client, editor_and_p
     url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
 
     response = await client.put(
-        url, json={"rule_xml": "<manual/>", "source": "manual", "status": "approved"}, headers=headers
+        url, json={"rule_xml": "<structureObjectRule id='manual'/>", "source": "manual", "status": "approved"}, headers=headers
     )
     assert response.status_code == 200
     assert response.json()["status"] == "approved"
@@ -368,7 +368,7 @@ async def test_propose_accepts_external_llm_source_and_rejects_unknown_sources(c
     ).json()
     url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
 
-    pasted = await client.put(url, json={"rule_xml": "<pasted/>", "source": "external_llm"}, headers=headers)
+    pasted = await client.put(url, json={"rule_xml": "<structureObjectRule id='pasted'/>", "source": "external_llm"}, headers=headers)
     assert pasted.status_code == 200
     assert pasted.json()["source"] == "external_llm"
     assert pasted.json()["status"] == "pending_review"

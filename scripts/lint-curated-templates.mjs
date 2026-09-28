@@ -10,6 +10,9 @@
 //     Schematron message) says "must not" / "shall not" / "no debe" … but
 //     its semantics allow the node;
 //   - not executable (whole rule) or partially executable, with the reason.
+//   - not a rule of the format (C2, Part 0): what Paste rule, the manual
+//     editor and PUT …/approvals/{format} would now refuse -- loose text, a
+//     wrapper such as <rules>, or an element of another format.
 // Output: one markdown table per template (rules with no finding are left
 // out; a template with none says so). Exit code 0 always: the lint reports,
 // it never fixes a template.
@@ -22,6 +25,7 @@ import { CURATED_TEMPLATE_BY_STANDARD } from '../src/utils/excelUtils.js';
 import { STANDARD_TO_RULE_FORMAT } from '../src/constants/ruleFormats.js';
 import { analyzeRule, describeRule } from '../src/utils/ruleTestEngine.js';
 import { formatRuleStatement, formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
+import { checkRuleFormat, formatSchemaIssue, ruleFormatIssues } from '../src/validation/schemaValidation.js';
 
 function parseXml(text) {
   const messages = [];
@@ -77,6 +81,12 @@ const clip = (s, n = 140) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function lintRule(ruleXml, format) {
   const findings = [];
+  // C2, Part 0: the same check Paste rule, the manual editor and
+  // PUT …/approvals/{format} apply -- a row the import stored as it was
+  // would now be refused if saved from the interface.
+  for (const issue of ruleFormatIssues(checkRuleFormat(ruleXml, format))) {
+    findings.push({ kind: 'not a rule of the format', detail: formatSchemaIssue(issue, t) });
+  }
   const analysis = analyzeRule(ruleXml, format, { parseXml });
   if (analysis.status === 'not_executable') {
     findings.push({ kind: 'not executable', detail: formatRuleTestReason(analysis.reason, t) });

@@ -35,7 +35,7 @@ import { verifyWarning } from '../utils/ruleTestStatus.js';
 import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
 import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
-import { nameIssues } from '../validation/schemaValidation.js';
+import { checkRuleFormat, nameIssues, ruleFormatIssues } from '../validation/schemaValidation.js';
 import styles from './RecordsPage.module.css';
 
 // The data-testids the verification scripts read on the Ask answer's
@@ -585,6 +585,9 @@ export default function RecordsPage() {
       setRuleValidationError(wellFormed.error);
       return;
     }
+    // C2, Part 0: the Save button is already disabled while the draft is
+    // not a rule of the project's format; this is the same gate.
+    if (!checkRuleFormat(ruleDraftText, ruleFormat).ok) return;
     setRuleValidationError(null);
     setRuleSaveError(null);
     setRuleBusy(true);
@@ -610,6 +613,13 @@ export default function RecordsPage() {
       setRuleBusy(false);
     }
   };
+
+  // C2, Part 0: while editing, the draft must contain a rule of the
+  // project's format -- checked live (on well-formed XML; malformed XML keeps
+  // its own error on Save). An empty draft only disables Save, silently.
+  const ruleDraftFormat =
+    ruleEditing && ruleDraftText.trim() && checkWellFormed(ruleDraftText).valid ? checkRuleFormat(ruleDraftText, ruleFormat) : null;
+  const ruleDraftBlocked = ruleEditing && (!ruleDraftText.trim() || (ruleDraftFormat && !ruleDraftFormat.ok));
 
   const doVerifyRule = async () => {
     setRuleBusy(true);
@@ -1267,13 +1277,21 @@ export default function RecordsPage() {
                       {t('records.rule.notWellFormed', { error: ruleValidationError })}
                     </p>
                   )}
+                  <SchemaIssueLines
+                    issues={ruleFormatIssues(ruleDraftFormat)}
+                    testIds={Object.fromEntries(ruleFormatIssues(ruleDraftFormat).map((i) => [i.code, 'rule-editor-format-error']))}
+                  />
                   {ruleSaveError && (
                     <p className={styles.ruleErrorText} role="alert">
                       {ruleSaveError}
                     </p>
                   )}
                   <div className={styles.suggestionActions}>
-                    <button onClick={saveRuleEditor} disabled={ruleBusy}>
+                    <button
+                      onClick={saveRuleEditor}
+                      disabled={ruleBusy || ruleDraftBlocked}
+                      title={ruleDraftFormat && !ruleDraftFormat.ok ? t('records.assistant.ruleAcceptDisabledFormat') : undefined}
+                    >
                       {ruleBusy ? t('records.rule.saving') : t('records.rule.save')}
                     </button>
                     <button onClick={cancelRuleEditor} disabled={ruleBusy}>

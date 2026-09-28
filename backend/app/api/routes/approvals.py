@@ -22,6 +22,7 @@ from app.schemas.rule_approval import (
     rule_xml_hash,
 )
 from app.services.history import record_change
+from app.services.rule_format_check import check_rule_format
 
 router = APIRouter(
     prefix="/api/projects/{project_id}/brdps/{brdp_id}/approvals/{format}", tags=["approvals"]
@@ -161,6 +162,17 @@ def _xml_well_formed_error(xml_text: str) -> str | None:
         return str(exc)
 
 
+_XML_DECLARATION_RE = re.compile(r"^\s*<\?xml[^>]*\?>")
+
+
+def _rule_format_problem(xml_text: str, format: str) -> dict | None:
+    """check_rule_format on a well-formed rule_xml (a whole document is
+    checked as a one-element fragment, without its XML declaration)."""
+    fragment = _XML_DECLARATION_RE.sub("", xml_text, count=1)
+    root = etree.fromstring(_wrap_rule_xml_fragment(fragment).encode("utf-8"))
+    return check_rule_format(root, format)
+
+
 @router.get("", response_model=RuleApprovalOut | None)
 async def get_approval(
     project_id: uuid.UUID,
@@ -193,6 +205,11 @@ async def propose_approval(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"rule_xml is not well-formed XML: {xml_error}",
         )
+    # Consolidation C2, Part 0: well-formed is not enough -- the content must
+    # contain a rule of this format (same check the interface runs first).
+    format_problem = _rule_format_problem(body.rule_xml, format)
+    if format_problem is not None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=format_problem["message"])
     status_value = "approved" if body.status == "approved" else "pending_review"
     approval = await db.get(RuleApproval, (brdp_id, format))
     old_state = _rule_state(approval)

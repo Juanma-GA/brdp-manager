@@ -86,6 +86,22 @@ async function main() {
     });
     if (!r.ok) throw new Error(`seeding rule failed: ${r.status} ${await r.text()}`);
   }
+  // Legacy rule shapes (a <rules> wrapper, as in real customer data) arrive
+  // through the Excel import, which does not apply the rule-format check --
+  // PUT …/approvals refuses them since C2, Part 0.
+  async function importRows(project, rows) {
+    const body = { rows: rows.map((r, i) => ({ row_number: i + 2, definition: "A definition.", proposal_status: "Validated", ...r })) };
+    const job = await api(`/api/projects/${project.id}/brdps/import/apply`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
+    for (let i = 0; i < 80; i++) {
+      const s = await api(`/api/projects/${project.id}/brdps/import/status/${job.job_id}`).then((r) => r.json());
+      if (s.status !== "running") {
+        if (s.status !== "completed") throw new Error(`import job ${s.status}: ${s.error}`);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    throw new Error("import job did not finish");
+  }
   async function getRule(project, brdp, format) {
     return api(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${format}`).then((r) => r.json());
   }
@@ -122,9 +138,10 @@ async function main() {
   b.emph = await makeBrdp(p42, { identifier: "BRDP-SR-EMPH", title: "Emphasis", proposal: "@emphasisType shall only take em01 and em02." });
   b.edit = await makeBrdp(p42, { identifier: "BRDP-SR-EDIT", title: "Edited", proposal: "Every <table> shall be framed." });
   b.nc66 = await makeBrdp(p42, { identifier: "BRDP-EXT-00066", title: "CGM illustrations", proposal: "Illustrations shall be CGM." });
-  b.s489 = await makeBrdp(p42, { identifier: "BRDP-S1-00489", title: "Logo", proposal: "The element <logo> will not be used." });
+  await importRows(p42, [
+    { identifier: "BRDP-S1-00489", title: "Logo", proposal: "The element <logo> will not be used.", rule_status: "Verified", rule: RULE_S1_00489 },
+  ]);
   await putRule(p42, b.nc66, "BREX-4.2", RULE_EXT_00066, "approved");
-  await putRule(p42, b.s489, "BREX-4.2", RULE_S1_00489, "approved");
   await putRule(p42, b.verified, "BREX-4.2", VERIFIED_RULE("BRDP-SR-VERIFIED"), "approved");
   await putRule(p42, b.draft, "BREX-4.2", VERIFIED_RULE("BRDP-SR-DRAFT-OLD"), "pending_review");
 
