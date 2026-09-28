@@ -24,11 +24,20 @@ export async function fetchSchemaFacts(standard, vocabulary, orderedTexts, max =
 // for `names` -- { available, cards, unknown, document_schemas }. Unlike
 // fetchSchemaFacts, errors propagate: the schema-choice decision depends on
 // it, and it must never silently fall back to "general rule" (HR7).
-export async function fetchSchemaCards(standard, names) {
+// `full` (C1, Ask's structural answers): no list is cut.
+export async function fetchSchemaCards(standard, names, { full = false } = {}) {
   const unique = [...new Set(names)];
   // With no names the endpoint still answers document_schemas.
   const query = unique.length > 0 ? unique.join(',') : '_';
   return authFetchJson(
-    `/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(query)}`
+    `/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(query)}${full ? '&full=true' : ''}`
+  );
+}
+
+// C1: every element that declares attribute `name`, with its values --
+// { available, owners: [{ element, schemas, required, enum }] }.
+export async function fetchSchemaAttribute(standard, name) {
+  return authFetchJson(
+    `/api/schema-cards/attribute?standard=${encodeURIComponent(standard)}&name=${encodeURIComponent(name)}`
   );
 }

@@ -1,0 +1,4756 @@
+{
+ "cards": {
+  "S1000D 4.2": {
+   "identAndStatusSection": {
+    "variants": [
+     {
+      "schemas": [
+       "appliccrossreftable",
+       "brdoc",
+       "brex",
+       "checklist",
+       "comrep",
+       "condcrossreftable",
+       "container",
+       "crew",
+       "descript",
+       "fault",
+       "frontmatter",
+       "ipd",
+       "learning",
+       "prdcrossreftable",
+       "proced",
+       "process",
+       "sb",
+       "schedul",
+       "scocontent",
+       "wrngdata",
+       "wrngflds"
+      ],
+      "attributes": [],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "dmAddress",
+       "dmStatus"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "comment"
+      ],
+      "attributes": [],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "commentAddress",
+       "commentStatus"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "ddn"
+      ],
+      "attributes": [],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "ddnAddress",
+       "ddnStatus"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "dml"
+      ],
+      "attributes": [],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "dmlAddress",
+       "dmlStatus"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "pm"
+      ],
+      "attributes": [],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "pmAddress",
+       "pmStatus"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "scormcontentpackage"
+      ],
+      "attributes": [],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "lom",
+       "scormContentPackageAddress",
+       "scormContentPackageStatus"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     }
+    ],
+    "parents": [
+     "comment",
+     "ddn",
+     "dml",
+     "dmodule",
+     "pm",
+     "scormContentPackage"
+    ],
+    "parents_truncated": false,
+    "parents_omitted": 0
+   },
+   "para": {
+    "variants": [
+     {
+      "schemas": [
+       "appliccrossreftable",
+       "brdoc",
+       "comment",
+       "container",
+       "ddn",
+       "descript",
+       "dml",
+       "icnmetadata",
+       "learning",
+       "pm",
+       "sb",
+       "scocontent",
+       "scormcontentpackage"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "accessPointRef",
+       "acronym",
+       "acronymTerm",
+       "caption",
+       "captionGroup",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "definitionList",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "identNumber",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "randomList",
+       "sequentialList",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText",
+       "zoneRef"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "brex",
+       "condcrossreftable",
+       "prdcrossreftable",
+       "wrngdata",
+       "wrngflds"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "changeInline",
+       "circuitBreakerRef",
+       "definitionList",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "randomList",
+       "sequentialList",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "comrep",
+       "frontmatter",
+       "ipd",
+       "schedul",
+       "update"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "definitionList",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "functionalItemRef",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "randomList",
+       "sequentialList",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "checklist"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "captionGroup",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "definitionList",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "quantity",
+       "randomList",
+       "sequentialList",
+       "subScript",
+       "superScript",
+       "symbol"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "crew"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "caption",
+       "captionGroup",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "definitionList",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "quantity",
+       "randomList",
+       "sequentialList",
+       "subScript",
+       "superScript",
+       "symbol"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "fault"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "captionGroup",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "definitionList",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "functionalItemRef",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "randomList",
+       "sequentialList",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "proced"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "definitionList",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "randomList",
+       "sequentialList",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "process"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "definitionList",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "globalPropertyRef",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "randomList",
+       "sequentialList",
+       "subScript",
+       "superScript",
+       "symbol",
+       "variableRef",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     }
+    ],
+    "parents": [
+     "brAction",
+     "brCategoryDescription",
+     "brDecisionExplanation",
+     "brDecisionPointExplanation",
+     "brDecisionPointValue",
+     "brDecisionText",
+     "brDecisionValue",
+     "brDoc",
+     "brLevelledPara",
+     "challenge",
+     "checkListPara",
+     "checkListStep",
+     "commonInfo",
+     "commonInfoDescrPara",
+     "crewDrill",
+     "crewDrillStep",
+     "crewProcedureName",
+     "crewRefCard",
+     "description",
+     "endMatter",
+     "entry",
+     "equipmentNotAvailable",
+     "footnote",
+     "icnSupportingFilesDescr",
+     "levelledPara",
+     "listItem",
+     "listItemDefinition",
+     "proceduralStep",
+     "response",
+     "sbAccomplishmentInstructions",
+     "sbAdditionalInfo",
+     "sbIndustrySupport",
+     "sbMaterialInfo",
+     "sbMaterialSetList",
+     "sbPlanningInfo",
+     "sbRemovedSparesList",
+     "sbRevisionInfo",
+     "sbSparesList",
+     "sbSummary",
+     "sbSuppliesList",
+     "sbSupportEquipsList",
+     "sbTopicContent",
+     "subCrewDrill"
+    ],
+    "parents_truncated": false,
+    "parents_omitted": 0
+   },
+   "table": {
+    "variants": [
+     {
+      "schemas": [
+       "brdoc",
+       "brex",
+       "checklist",
+       "comrep",
+       "crew",
+       "descript",
+       "fault",
+       "learning",
+       "proced",
+       "process",
+       "sb",
+       "schedul",
+       "scocontent"
+      ],
+      "attributes": [
+       {
+        "name": "applicRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityDocument",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authorityName",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeMark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "changeType",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "colsep",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commercialClassification",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "derivativeClassificationRefId",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "frame",
+        "required": false,
+        "enum": [
+         "top",
+         "bottom",
+         "topbot",
+         "all",
+         "sides",
+         "none"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "orient",
+        "required": false,
+        "enum": [
+         "port",
+         "land"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "pgwide",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "reasonForUpdateRefIds",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rowsep",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "securityClassification",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "tabstyle",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "tocentry",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "graphic",
+       "tgroup",
+       "title"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     }
+    ],
+    "parents": [
+     "brAction",
+     "brDecisionExplanation",
+     "brDecisionPointExplanation",
+     "brDoc",
+     "brLevelledPara",
+     "challenge",
+     "commonInfoDescrPara",
+     "crewDrill",
+     "crewDrillStep",
+     "crewProcedureName",
+     "crewRefCard",
+     "descrCrew",
+     "description",
+     "dmNode",
+     "endMatter",
+     "extraResources",
+     "foldout",
+     "isolationMainProcedure",
+     "isolationProcedureEnd",
+     "isolationStep",
+     "levelledPara",
+     "mainProcedure",
+     "proceduralStep",
+     "response",
+     "sbTopicContent",
+     "subCrewDrill"
+    ],
+    "parents_truncated": false,
+    "parents_omitted": 0
+   },
+   "emphasis": {
+    "variants": [
+     {
+      "schemas": [
+       "appliccrossreftable",
+       "brdoc",
+       "comment",
+       "container",
+       "ddn",
+       "descript",
+       "dml",
+       "icnmetadata",
+       "learning",
+       "pm",
+       "sb",
+       "scocontent",
+       "scormcontentpackage"
+      ],
+      "attributes": [
+       {
+        "name": "emphasisType",
+        "required": false,
+        "enum": [
+         "em01–em99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "accessPointRef",
+       "acronym",
+       "acronymTerm",
+       "caption",
+       "captionGroup",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "identNumber",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText",
+       "zoneRef"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "brex",
+       "condcrossreftable",
+       "prdcrossreftable",
+       "wrngdata",
+       "wrngflds"
+      ],
+      "attributes": [
+       {
+        "name": "emphasisType",
+        "required": false,
+        "enum": [
+         "em01–em99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "changeInline",
+       "circuitBreakerRef",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "comrep",
+       "frontmatter",
+       "ipd",
+       "schedul",
+       "update"
+      ],
+      "attributes": [
+       {
+        "name": "emphasisType",
+        "required": false,
+        "enum": [
+         "em01–em99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "functionalItemRef",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "proced",
+       "process"
+      ],
+      "attributes": [
+       {
+        "name": "emphasisType",
+        "required": false,
+        "enum": [
+         "em01–em99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "checklist"
+      ],
+      "attributes": [
+       {
+        "name": "emphasisType",
+        "required": false,
+        "enum": [
+         "em01–em99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "captionGroup",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "quantity",
+       "subScript",
+       "superScript",
+       "symbol"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "crew"
+      ],
+      "attributes": [
+       {
+        "name": "emphasisType",
+        "required": false,
+        "enum": [
+         "em01–em99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "caption",
+       "captionGroup",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "footnote",
+       "footnoteRef",
+       "functionalItemRef",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "quantity",
+       "subScript",
+       "superScript",
+       "symbol"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "fault"
+      ],
+      "attributes": [
+       {
+        "name": "emphasisType",
+        "required": false,
+        "enum": [
+         "em01–em99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acronymTerm",
+       "captionGroup",
+       "changeInline",
+       "circuitBreakerRef",
+       "controlIndicatorRef",
+       "dmRef",
+       "emphasis",
+       "externalPubRef",
+       "functionalItemRef",
+       "indexFlag",
+       "inlineSignificantData",
+       "internalRef",
+       "pmRef",
+       "quantity",
+       "subScript",
+       "superScript",
+       "symbol",
+       "verbatimText"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     }
+    ],
+    "parents": [
+     "action",
+     "attentionListItemPara",
+     "brDecisionPointText",
+     "captionText",
+     "caseCond",
+     "changeInline",
+     "copyrightPara",
+     "definitionTitle",
+     "emphasis",
+     "listItemTerm",
+     "notePara",
+     "para",
+     "prompt",
+     "reasonForAmendment",
+     "reducedListItemPara",
+     "reducedPara",
+     "termTitle",
+     "title",
+     "warningAndCautionPara"
+    ],
+    "parents_truncated": false,
+    "parents_omitted": 0
+   },
+   "dmodule": {
+    "variants": [
+     {
+      "schemas": [
+       "appliccrossreftable",
+       "brdoc",
+       "brex",
+       "checklist",
+       "comrep",
+       "condcrossreftable",
+       "container",
+       "crew",
+       "descript",
+       "fault",
+       "frontmatter",
+       "ipd",
+       "learning",
+       "prdcrossreftable",
+       "proced",
+       "process",
+       "sb",
+       "schedul",
+       "scocontent",
+       "wrngdata",
+       "wrngflds"
+      ],
+      "attributes": [
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "Description",
+       "content",
+       "identAndStatusSection"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     }
+    ],
+    "parents": [],
+    "parents_truncated": false,
+    "parents_omitted": 0
+   }
+  },
+  "S1000D 3.0.1": {
+   "para": {
+    "variants": [
+     {
+      "schemas": [
+       "brex",
+       "condcrossreftable",
+       "fault",
+       "ipd",
+       "prdcrossreftable",
+       "schedul",
+       "techrep",
+       "wrngdata",
+       "wrngflds"
+      ],
+      "attributes": [
+       {
+        "name": "authdoc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authname",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "change",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "class",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commcls",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "level",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "mark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "refapplic",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rfc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acroterm",
+       "applic",
+       "cb",
+       "change",
+       "deflist",
+       "ein",
+       "emphasis",
+       "ftnote",
+       "ftnref",
+       "indxflag",
+       "parasigdata",
+       "quantity",
+       "randlist",
+       "refdm",
+       "reftp",
+       "seqlist",
+       "subscrpt",
+       "supscrpt",
+       "symbol",
+       "xref"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "appliccrossreftable",
+       "container"
+      ],
+      "attributes": [
+       {
+        "name": "authdoc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authname",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "change",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "class",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commcls",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "level",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "mark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "refapplic",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rfc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "accpnl",
+       "acronym",
+       "acroterm",
+       "applic",
+       "capgrp",
+       "caption",
+       "cb",
+       "change",
+       "deflist",
+       "ein",
+       "emphasis",
+       "ftnote",
+       "ftnref",
+       "identno",
+       "indxflag",
+       "parasigdata",
+       "quantity",
+       "randlist",
+       "refdm",
+       "reftp",
+       "seqlist",
+       "subscrpt",
+       "supscrpt",
+       "symbol",
+       "variable-ref",
+       "xref",
+       "zone"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "crew"
+      ],
+      "attributes": [
+       {
+        "name": "authdoc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authname",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "change",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "class",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commcls",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "level",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "mark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "refapplic",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rfc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acroterm",
+       "applic",
+       "capgrp",
+       "caption",
+       "cb",
+       "change",
+       "deflist",
+       "ein",
+       "emphasis",
+       "ftnote",
+       "ftnref",
+       "indxflag",
+       "parasigdata",
+       "quantity",
+       "randlist",
+       "refdm",
+       "reftp",
+       "seqlist",
+       "subscrpt",
+       "supscrpt",
+       "symbol",
+       "verbatim",
+       "xref"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "descript"
+      ],
+      "attributes": [
+       {
+        "name": "authdoc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authname",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "change",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "class",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commcls",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "level",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "mark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "refapplic",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rfc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "accpnl",
+       "acronym",
+       "acroterm",
+       "applic",
+       "capgrp",
+       "caption",
+       "cb",
+       "change",
+       "deflist",
+       "ein",
+       "emphasis",
+       "ftnote",
+       "ftnref",
+       "identno",
+       "indxflag",
+       "parasigdata",
+       "quantity",
+       "randlist",
+       "refdm",
+       "reftp",
+       "seqlist",
+       "subscrpt",
+       "supscrpt",
+       "symbol",
+       "verbatim",
+       "xref",
+       "zone"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "proced"
+      ],
+      "attributes": [
+       {
+        "name": "authdoc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authname",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "change",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "class",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commcls",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "level",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "mark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "refapplic",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rfc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acroterm",
+       "applic",
+       "capgrp",
+       "cb",
+       "change",
+       "deflist",
+       "ein",
+       "emphasis",
+       "ftnote",
+       "ftnref",
+       "indxflag",
+       "parasigdata",
+       "quantity",
+       "randlist",
+       "refdm",
+       "reftp",
+       "seqlist",
+       "subscrpt",
+       "supscrpt",
+       "symbol",
+       "verbatim",
+       "xref"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     },
+     {
+      "schemas": [
+       "process"
+      ],
+      "attributes": [
+       {
+        "name": "authdoc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "authname",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "caveat",
+        "required": false,
+        "enum": [
+         "cv01–cv99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "change",
+        "required": false,
+        "enum": [
+         "add",
+         "delete",
+         "modify"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "class",
+        "required": false,
+        "enum": [
+         "01–99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "commcls",
+        "required": false,
+        "enum": [
+         "cc01–cc99"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "level",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "mark",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "refapplic",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rfc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "acronym",
+       "acroterm",
+       "applic",
+       "capgrp",
+       "cb",
+       "change",
+       "deflist",
+       "ein",
+       "emphasis",
+       "ftnote",
+       "ftnref",
+       "indxflag",
+       "parasigdata",
+       "quantity",
+       "randlist",
+       "refdm",
+       "reftp",
+       "seqlist",
+       "subscrpt",
+       "supscrpt",
+       "symbol",
+       "variable-ref",
+       "verbatim",
+       "xref"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     }
+    ],
+    "parents": [
+     "caution",
+     "challeng",
+     "closetxt",
+     "copyright",
+     "def",
+     "descript",
+     "drill",
+     "endmattr",
+     "entry",
+     "frc",
+     "ftnote",
+     "item",
+     "note",
+     "para0",
+     "procd",
+     "response",
+     "step",
+     "step1",
+     "step2",
+     "step3",
+     "step4",
+     "step5",
+     "step6",
+     "step7",
+     "step8",
+     "subdrill",
+     "subpara1",
+     "subpara2",
+     "subpara3",
+     "subpara4",
+     "subpara5",
+     "subpara6",
+     "subpara7",
+     "warning"
+    ],
+    "parents_truncated": false,
+    "parents_omitted": 0
+   }
+  },
+  "DITA 1.3 Xpath2.0": {
+   "step": {
+    "variants": [
+     {
+      "schemas": [
+       "DITA 1.3"
+      ],
+      "attributes": [
+       {
+        "name": "audience",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "base",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "class",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "conaction",
+        "required": false,
+        "enum": [
+         "mark",
+         "pushafter",
+         "pushbefore",
+         "pushreplace",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "conkeyref",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "conref",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "conrefend",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "dir",
+        "required": false,
+        "enum": [
+         "lro",
+         "ltr",
+         "rlo",
+         "rtl",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "importance",
+        "required": false,
+        "enum": [
+         "optional",
+         "required",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "lang",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "otherprops",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "outputclass",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "platform",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "product",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "props",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rev",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "status",
+        "required": false,
+        "enum": [
+         "new",
+         "changed",
+         "deleted",
+         "unchanged",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "translate",
+        "required": false,
+        "enum": [
+         "no",
+         "yes",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "xtrc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "xtrf",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "choices",
+       "choicetable",
+       "cmd",
+       "hazardstatement",
+       "info",
+       "itemgroup",
+       "note",
+       "stepresult",
+       "steptroubleshooting",
+       "stepxmp",
+       "substeps",
+       "tutorialinfo"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     }
+    ],
+    "parents": [
+     "steps",
+     "steps-unordered"
+    ],
+    "parents_truncated": false,
+    "parents_omitted": 0
+   },
+   "note": {
+    "variants": [
+     {
+      "schemas": [
+       "DITA 1.3"
+      ],
+      "attributes": [
+       {
+        "name": "audience",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "base",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "class",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "conaction",
+        "required": false,
+        "enum": [
+         "mark",
+         "pushafter",
+         "pushbefore",
+         "pushreplace",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "conkeyref",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "conref",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "conrefend",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "dir",
+        "required": false,
+        "enum": [
+         "lro",
+         "ltr",
+         "rlo",
+         "rtl",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "id",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "importance",
+        "required": false,
+        "enum": [
+         "default",
+         "deprecated",
+         "high",
+         "low",
+         "normal",
+         "obsolete",
+         "optional",
+         "recommended",
+         "required",
+         "urgent",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "lang",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "otherprops",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "othertype",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "outputclass",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "platform",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "product",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "props",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "rev",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "spectitle",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "status",
+        "required": false,
+        "enum": [
+         "changed",
+         "deleted",
+         "new",
+         "unchanged",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "translate",
+        "required": false,
+        "enum": [
+         "no",
+         "yes",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "type",
+        "required": false,
+        "enum": [
+         "attention",
+         "caution",
+         "danger",
+         "fastpath",
+         "important",
+         "note",
+         "notice",
+         "other",
+         "remember",
+         "restriction",
+         "tip",
+         "trouble",
+         "warning",
+         "-dita-use-conref-target"
+        ],
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "xtrc",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       },
+       {
+        "name": "xtrf",
+        "required": false,
+        "enum": null,
+        "enum_truncated": false,
+        "enum_omitted": 0
+       }
+      ],
+      "attributes_truncated": false,
+      "attributes_omitted": 0,
+      "children": [
+       "abbreviated-form",
+       "apiname",
+       "b",
+       "boolean",
+       "cite",
+       "cmdname",
+       "codeblock",
+       "codeph",
+       "data",
+       "data-about",
+       "div",
+       "dl",
+       "draft-comment",
+       "equation-block",
+       "equation-figure",
+       "equation-inline",
+       "fig",
+       "filepath",
+       "fn",
+       "foreign",
+       "i",
+       "image",
+       "imagemap",
+       "indexterm",
+       "indextermref",
+       "keyword",
+       "line-through",
+       "lines",
+       "lq",
+       "markupname",
+       "mathml",
+       "menucascade",
+       "msgblock",
+       "msgnum",
+       "msgph",
+       "numcharref",
+       "object",
+       "ol",
+       "option",
+       "overline",
+       "p",
+       "parameterentity",
+       "parml",
+       "parmname",
+       "ph",
+       "pre",
+       "q",
+       "required-cleanup",
+       "screen",
+       "simpletable",
+       "sl",
+       "sort-as",
+       "state",
+       "sub",
+       "sup",
+       "svg-container",
+       "synph",
+       "syntaxdiagram",
+       "systemoutput",
+       "table",
+       "term",
+       "text",
+       "textentity",
+       "tm",
+       "tt",
+       "u",
+       "uicontrol",
+       "ul",
+       "unknown",
+       "userinput",
+       "varname",
+       "wintitle",
+       "xmlatt",
+       "xmlelement",
+       "xmlnsname",
+       "xmlpi",
+       "xref"
+      ],
+      "children_truncated": false,
+      "children_omitted": 0,
+      "resolved": true
+     }
+    ],
+    "parents": [
+     "abstract",
+     "body",
+     "bodydiv",
+     "cause",
+     "chdesc",
+     "chdeschd",
+     "choice",
+     "choption",
+     "choptionhd",
+     "conbody",
+     "condition",
+     "context",
+     "dd",
+     "div",
+     "draft-comment",
+     "entry",
+     "equation-figure",
+     "esttime",
+     "example",
+     "fig",
+     "figgroup",
+     "glossAlt",
+     "glossBody",
+     "glossdef",
+     "info",
+     "itemgroup",
+     "li",
+     "linkinfo",
+     "lq",
+     "p",
+     "pd",
+     "perscat",
+     "perskill",
+     "personnel",
+     "postreq",
+     "prereq",
+     "propdesc",
+     "propdeschd",
+     "proptypehd",
+     "propvaluehd",
+     "refsyn",
+     "reqcond",
+     "reqcontp",
+     "responsibleParty",
+     "result",
+     "safecond",
+     "section",
+     "sectiondiv",
+     "spare",
+     "stentry",
+     "step",
+     "stepresult",
+     "steps-informal",
+     "stepsection",
+     "steptroubleshooting",
+     "stepxmp",
+     "substep",
+     "supequi",
+     "supply",
+     "tasktroubleshooting",
+     "tutorialinfo"
+    ],
+    "parents_truncated": false,
+    "parents_omitted": 0
+   }
+  }
+ },
+ "attributes": {
+  "S1000D 4.2": {
+   "emphasisType": [
+    {
+     "element": "emphasis",
+     "schemas": [
+      "appliccrossreftable",
+      "brdoc",
+      "comment",
+      "container",
+      "ddn",
+      "descript",
+      "dml",
+      "icnmetadata",
+      "learning",
+      "pm",
+      "sb",
+      "scocontent",
+      "scormcontentpackage"
+     ],
+     "required": false,
+     "enum": [
+      "em01–em99"
+     ]
+    },
+    {
+     "element": "emphasis",
+     "schemas": [
+      "brex",
+      "condcrossreftable",
+      "prdcrossreftable",
+      "wrngdata",
+      "wrngflds"
+     ],
+     "required": false,
+     "enum": [
+      "em01–em99"
+     ]
+    },
+    {
+     "element": "emphasis",
+     "schemas": [
+      "comrep",
+      "frontmatter",
+      "ipd",
+      "schedul",
+      "update"
+     ],
+     "required": false,
+     "enum": [
+      "em01–em99"
+     ]
+    },
+    {
+     "element": "emphasis",
+     "schemas": [
+      "proced",
+      "process"
+     ],
+     "required": false,
+     "enum": [
+      "em01–em99"
+     ]
+    },
+    {
+     "element": "emphasis",
+     "schemas": [
+      "checklist"
+     ],
+     "required": false,
+     "enum": [
+      "em01–em99"
+     ]
+    },
+    {
+     "element": "emphasis",
+     "schemas": [
+      "crew"
+     ],
+     "required": false,
+     "enum": [
+      "em01–em99"
+     ]
+    },
+    {
+     "element": "emphasis",
+     "schemas": [
+      "fault"
+     ],
+     "required": false,
+     "enum": [
+      "em01–em99"
+     ]
+    }
+   ],
+   "frame": [
+    {
+     "element": "table",
+     "schemas": [
+      "brdoc",
+      "brex",
+      "checklist",
+      "comrep",
+      "crew",
+      "descript",
+      "fault",
+      "learning",
+      "proced",
+      "process",
+      "sb",
+      "schedul",
+      "scocontent"
+     ],
+     "required": false,
+     "enum": [
+      "top",
+      "bottom",
+      "topbot",
+      "all",
+      "sides",
+      "none"
+     ]
+    }
+   ]
+  },
+  "DITA 1.3 Xpath2.0": {
+   "type": [
+    {
+     "element": "SVG.Cursor.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "SVG.Filter.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "SVG.Hyperlink.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "SVG.Image.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "SVG.Pattern.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "SVG.Profile.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "SVG.Script.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": true,
+     "enum": null
+    },
+    {
+     "element": "SVG.Style.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": true,
+     "enum": null
+    },
+    {
+     "element": "SVG.Use.class",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "abbrevlist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "altGlyph",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "amendments",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "anchorref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "animate",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "animateColor",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "animateMotion",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "animateTransform",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "translate",
+      "scale",
+      "rotate",
+      "skewX",
+      "skewY"
+     ]
+    },
+    {
+     "element": "appendices",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "appendix",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "approved",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "audience",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "author",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "authorinformation",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "backmatter",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bibliolist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookabstract",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookchangehistory",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookevent",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookeventtype",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookid",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "booklist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "booklists",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookmap",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "booknumber",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookowner",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookpartno",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookrestriction",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "bookrights",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "chapter",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "ci",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "cn",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "coderef",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "colophon",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "contactnumber",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "contactnumbers",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "copyrfirst",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "copyright",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "copyrlast",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "csymbol",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "data",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "data-about",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "declare",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "dedication",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "defaultSubject",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "definition-src",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "draftintro",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "edited",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "edition",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "emailaddress",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "emailaddresses",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "feColorMatrix",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "matrix",
+      "saturate",
+      "hueRotate",
+      "luminanceToAlpha"
+     ]
+    },
+    {
+     "element": "feFuncA",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": true,
+     "enum": [
+      "identity",
+      "table",
+      "discrete",
+      "linear",
+      "gamma"
+     ]
+    },
+    {
+     "element": "feFuncB",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": true,
+     "enum": [
+      "identity",
+      "table",
+      "discrete",
+      "linear",
+      "gamma"
+     ]
+    },
+    {
+     "element": "feFuncG",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": true,
+     "enum": [
+      "identity",
+      "table",
+      "discrete",
+      "linear",
+      "gamma"
+     ]
+    },
+    {
+     "element": "feFuncR",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": true,
+     "enum": [
+      "identity",
+      "table",
+      "discrete",
+      "linear",
+      "gamma"
+     ]
+    },
+    {
+     "element": "feImage",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "feTurbulence",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "fractalNoise",
+      "turbulence"
+     ]
+    },
+    {
+     "element": "figurelist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "firstname",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "font-face-uri",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "frontmatter",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "generationidentifier",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "glossAlternateFor",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "glossPartOfSpeech",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "glossProperty",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "glossScopeNote",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "attention",
+      "caution",
+      "danger",
+      "fastpath",
+      "important",
+      "note",
+      "notice",
+      "other",
+      "remember",
+      "restriction",
+      "tip",
+      "warning",
+      "-dita-use-conref-target"
+     ]
+    },
+    {
+     "element": "glossStatus",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "glossUsage",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "attention",
+      "caution",
+      "danger",
+      "fastpath",
+      "important",
+      "note",
+      "notice",
+      "other",
+      "remember",
+      "restriction",
+      "tip",
+      "warning",
+      "-dita-use-conref-target"
+     ]
+    },
+    {
+     "element": "glossarylist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "glossref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "glyphRef",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "hasInstance",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "hasKind",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "hasNarrower",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "hasPart",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "hasRelated",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "hazardstatement",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "attention",
+      "caution",
+      "danger",
+      "fastpath",
+      "important",
+      "note",
+      "notice",
+      "other",
+      "remember",
+      "restriction",
+      "tip",
+      "warning",
+      "-dita-use-conref-target"
+     ]
+    },
+    {
+     "element": "honorific",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "indexlist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "isbn",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "keydef",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "lastname",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "linearGradient",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "link",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "linklist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "linkpool",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "longdescref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "longquoteref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "lq",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "maintainer",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "map",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "mapref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "mathmlref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "middlename",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "mpath",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "namedetails",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "nospares",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "nosupeq",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "nosupply",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "note",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "attention",
+      "caution",
+      "danger",
+      "fastpath",
+      "important",
+      "note",
+      "notice",
+      "other",
+      "remember",
+      "restriction",
+      "tip",
+      "trouble",
+      "warning",
+      "-dita-use-conref-target"
+     ]
+    },
+    {
+     "element": "notices",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "object",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "organization",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "organizationinfo",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "otherinfo",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "param",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "part",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "person",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "personinfo",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "personname",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "preface",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "printlocation",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "published",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "publisher",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "publisherinformation",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "publishtype",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "radialGradient",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "related-links",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "relatedSubjects",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "relcell",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "relcolspec",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "reltable",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "reviewed",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "schemeref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "set",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "source",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "subjectCell",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "subjectRelTable",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "subjectRole",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "subjectScheme",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "subjectdef",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "subjectref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "tablelist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "tendsto",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "tested",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "textPath",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "toc",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topicCell",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topicSubjectTable",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topicapply",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topicgroup",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topichead",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topicref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topicset",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topicsetref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "topicsubject",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "trademarklist",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "tref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": [
+      "simple"
+     ]
+    },
+    {
+     "element": "url",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "urls",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "volume",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    },
+    {
+     "element": "xref",
+     "schemas": [
+      "DITA 1.3"
+     ],
+     "required": false,
+     "enum": null
+    }
+   ]
+  }
+ }
+}

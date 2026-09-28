@@ -1418,6 +1418,13 @@ export default function RecordsPage() {
                         {ask.lastAskedSchemaFacts.map(({ name }, idx) => (
                           <span key={name}>
                             {idx > 0 && ', '}
+                        {/* C1, Part 2: a structural question answered from the
+                            schema cards, without the LLM. */}
+                        {ask.answerSource === 'schema' && (
+                          <p className={styles.schemaAnswerLabel} data-testid="ask-answer-deterministic">
+                            {t('records.assistant.answerFromSchema', { standard: project.standard })}
+                          </p>
+                        )}
                             <button
                               type="button"
                               className={styles.linkButton}

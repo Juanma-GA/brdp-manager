@@ -446,3 +446,77 @@ async def test_document_schemas_lists_the_rule_context_variants(client):
         "/api/schema-cards", params={"standard": "S1000D 5.0", "names": "para"}, headers=_headers(user)
     )
     assert unavailable.json()["document_schemas"] == []
+
+
+# ─── C1, Part 2: full cards and attribute owners (Ask's deterministic
+# structural answers) ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_full_cards_cut_no_list(client):
+    """full=true: every child, attribute and parent is returned -- a
+    structural answer lists them all. <refs> (S1000D 4.2) has 152 real parents,
+    cut to MAX_PARENTS without `full`."""
+    user = await _make_user()
+    data = _CARDS_BY_FILE[STANDARD_TO_SCHEMA_CARDS_FILE["S1000D 4.2"]]
+    name = "refs"
+    real_parents = data["parents"][name]
+    assert len(real_parents) > MAX_PARENTS
+    cut = await client.get("/api/schema-cards", params={"standard": "S1000D 4.2", "names": name}, headers=_headers(user))
+    full = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 4.2", "names": name, "full": "true"}, headers=_headers(user)
+    )
+    assert cut.json()["cards"][name]["parents_truncated"] is True
+    card = full.json()["cards"][name]
+    assert card["parents"] == real_parents and card["parents_truncated"] is False and card["parents_omitted"] == 0
+    for variant in card["variants"]:
+        assert variant["children_truncated"] is False and variant["attributes_truncated"] is False
+        assert all(not a["enum_truncated"] for a in variant["attributes"])
+
+
+@pytest.mark.asyncio
+async def test_full_cards_keep_long_enums_as_ranges(client):
+    """A long clean sequence still collapses (lossless): @caveat of <para>
+    in S1000D 4.2 is cv01–cv99 with or without `full`."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 4.2", "names": "para", "full": "true"}, headers=_headers(user)
+    )
+    variant = res.json()["cards"]["para"]["variants"][0]
+    caveat = next(a for a in variant["attributes"] if a["name"] == "caveat")
+    assert caveat["enum"] == ["cv01–cv99"]
+
+
+@pytest.mark.asyncio
+async def test_attribute_owners_with_complete_values(client):
+    """@emphasisType in S1000D 4.2 is declared only by <emphasis>, em01–em99
+    in every schema variant; @frame only by <table>."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards/attribute", params={"standard": "S1000D 4.2", "name": "emphasisType"}, headers=_headers(user)
+    )
+    body = res.json()
+    assert res.status_code == 200 and body["available"] is True
+    assert {o["element"] for o in body["owners"]} == {"emphasis"}
+    assert all(o["enum"] == ["em01–em99"] for o in body["owners"])
+    frame = await client.get(
+        "/api/schema-cards/attribute", params={"standard": "S1000D 4.2", "name": "frame"}, headers=_headers(user)
+    )
+    owners = frame.json()["owners"]
+    assert {o["element"] for o in owners} == {"table"}
+    assert owners[0]["enum"] == ["top", "bottom", "topbot", "all", "sides", "none"]
+
+
+@pytest.mark.asyncio
+async def test_attribute_owners_unknown_and_unavailable(client):
+    user = await _make_user()
+    unknown = await client.get(
+        "/api/schema-cards/attribute", params={"standard": "S1000D 4.2", "name": "pokemon"}, headers=_headers(user)
+    )
+    assert unknown.json() == {"standard": "S1000D 4.2", "name": "pokemon", "available": True, "owners": []}
+    missing = await client.get(
+        "/api/schema-cards/attribute", params={"standard": "S1000D 5.0", "name": "frame"}, headers=_headers(user)
+    )
+    assert missing.json()["available"] is False and missing.json()["owners"] == []
+    no_auth = await client.get("/api/schema-cards/attribute", params={"standard": "S1000D 4.2", "name": "frame"})
+    assert no_auth.status_code == 401

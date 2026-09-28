@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_current_user
 from app.models import User
-from app.schemas.schema_cards import SchemaCardsOut, SchemaStructureOut
+from app.schemas.schema_cards import SchemaAttributeOut, SchemaCardsOut, SchemaStructureOut
 from app.services.rule_test_skeletons import get_element_schemas, get_schema_structure
-from app.services.schema_cards import get_document_schemas, get_schema_cards
+from app.services.schema_cards import get_attribute_owners, get_document_schemas, get_schema_cards
 
 router = APIRouter(prefix="/api/schema-cards", tags=["schema-cards"])
 
@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api/schema-cards", tags=["schema-cards"])
 async def read_schema_cards(
     standard: str = Query(...),
     names: str = Query(..., description="Comma-separated element names to look up."),
+    full: bool = Query(False, description="No list is cut (Ask's deterministic structural answers)."),
     _current_user: User = Depends(get_current_user),
 ) -> SchemaCardsOut:
     """Docs request ("Servicio de fichas de esquema"): structural facts
@@ -24,7 +25,7 @@ async def read_schema_cards(
     same posture as GET /api/config/ai-provider.
     """
     name_list = [n.strip() for n in names.split(",") if n.strip()]
-    available, cards, unknown = get_schema_cards(standard, name_list)
+    available, cards, unknown = get_schema_cards(standard, name_list, full=full)
     return SchemaCardsOut(
         standard=standard,
         available=available,
@@ -33,6 +34,18 @@ async def read_schema_cards(
         document_schemas=get_document_schemas(standard),
         element_schemas=get_element_schemas(standard, name_list),
     )
+
+
+@router.get("/attribute", response_model=SchemaAttributeOut)
+async def read_schema_attribute(
+    standard: str = Query(...),
+    name: str = Query(...),
+    _current_user: User = Depends(get_current_user),
+) -> SchemaAttributeOut:
+    """C1: every element that declares attribute `name`, with its complete
+    values -- the data behind Ask's "which values does @x take" answer."""
+    available, owners = get_attribute_owners(standard, name)
+    return SchemaAttributeOut(standard=standard, name=name, available=available, owners=owners)
 
 
 @router.get("/structure", response_model=SchemaStructureOut)

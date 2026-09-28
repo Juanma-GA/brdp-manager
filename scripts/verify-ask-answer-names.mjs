@@ -143,7 +143,11 @@ async function main() {
     // 4b. The schema card of <identAndStatusSection> in 4.2: no child is
     //     common to all 26 schemas, so the children are listed per schema,
     //     never "children: none" -- in the prompt and in the expandable card.
-    const sys42 = await ask("What can <identAndStatusSection> contain?", "MOCK-");
+    //     (C1, Part 2: "What can <identAndStatusSection> contain?" is now
+    //     answered from the card without the LLM -- see
+    //     verify-ask-structural.mjs -- so the prompt card is checked with an
+    //     open question that still names it.)
+    const sys42 = await ask("What is the role of <identAndStatusSection> in this BRDP?", "MOCK-");
     assert(sys42.includes("<identAndStatusSection> — defined in 26 schemas:"), "prompt card: 26 schemas in the header");
     assert(sys42.includes("\n  children depend on the schema (none common to all):"), "prompt card: children depend on the schema");
     assert(sys42.includes("\n    [comment]: commentAddress, commentStatus"), "prompt card: the comment schema group");

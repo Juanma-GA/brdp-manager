@@ -53,6 +53,23 @@ class SchemaCardsOut(BaseModel):
     element_schemas: dict[str, list[str]] = {}
 
 
+class SchemaAttributeOwnerOut(BaseModel):
+    element: str
+    schemas: list[str]
+    required: bool
+    enum: list[str] | None = None
+
+
+class SchemaAttributeOut(BaseModel):
+    """C1: the elements that declare one attribute, with its values
+    (Ask's deterministic "which values does @x take" answer)."""
+
+    standard: str
+    name: str
+    available: bool
+    owners: list[SchemaAttributeOwnerOut] = []
+
+
 class SchemaStructureElementOut(BaseModel):
     children: list[str]
     attributes: list[str]

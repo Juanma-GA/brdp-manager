@@ -93,6 +93,11 @@
           "flags": "i",
           "tailChars": 300,
           "note": "must not end the answer with a scope reminder/disclaimer"
+        },
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "C1: a structural question is answered from the schema cards, with no LLM call"
         }
       ]
     },
@@ -130,6 +135,11 @@
           "pattern": "\\+\\s*\\d+\\s*(more|m[aá]s)",
           "flags": "i",
           "note": "'Did you mean con marcado a medias y listas de padres cortadas' round, Part 2: a real run against Mistral answered this exact question with the 40 shown parent names plus a literal '+3 more' copied verbatim from the (now-fixed) prompt truncation marker -- must never appear in the answer at all, whether the model paraphrases a partial list ('among others') or, since <para> in S1000D 4.2 has 43 real parents (comfortably under MAX_PARENTS=60), the list isn't even truncated any more."
+        },
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "C1: a structural question is answered from the schema cards, with no LLM call"
         }
       ]
     },
@@ -423,6 +433,11 @@
           ],
           "flags": "i",
           "note": "must never mention 4.x-only attribute names -- their presence would mean the wrong standard's schema card was fetched"
+        },
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "C1: a structural question is answered from the schema cards, with no LLM call"
         }
       ]
     },
@@ -458,6 +473,11 @@
           "flags": "i",
           "tailChars": 300,
           "note": "must not end the answer with a scope reminder/disclaimer"
+        },
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "C1: a structural question is answered from the schema cards, with no LLM call"
         }
       ]
     },
@@ -518,6 +538,150 @@
           ],
           "flags": "i",
           "note": "must not say it has no children"
+        },
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "C1: a structural question is answered from the schema cards, with no LLM call"
+        }
+      ]
+    },
+    {
+      "id": "ask-structural-parents-es",
+      "description": "C1, Part 2: where an element can go (parents) is answered from the schema card in the language of the question, complete, with no LLM call.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C1-1",
+        "title": "Paragraph placement",
+        "definition": "Decide where <para> may be used in data modules.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿Dónde puede ir <para>?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "parents from the schema card, no LLM call"
+        },
+        {
+          "type": "contains",
+          "pattern": "`<levelledPara>`",
+          "note": "a real parent of <para>"
+        },
+        {
+          "type": "contains",
+          "pattern": "43 elementos",
+          "note": "the complete list: <para> has 43 parents in S1000D 4.2"
+        },
+        {
+          "type": "language",
+          "expect": "es"
+        }
+      ]
+    },
+    {
+      "id": "ask-structural-attributes-en",
+      "description": "C1, Part 2: the attributes of an element, from the schema card, with their values.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C1-2",
+        "title": "Table frames",
+        "definition": "Decide how the frame of a <table> is drawn.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "What attributes does <table> admit?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "attributes from the schema card, no LLM call"
+        },
+        {
+          "type": "contains",
+          "pattern": "`@frame` — values: top, bottom, topbot, all, sides, none",
+          "note": "@frame with its closed list of values"
+        }
+      ]
+    },
+    {
+      "id": "ask-structural-values-es",
+      "description": "C1, Part 2: the values of an attribute, from every element that declares it (a long clean sequence shown as a range).",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C1-3",
+        "title": "Emphasis types",
+        "definition": "Decide which emphasis types are allowed.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿Qué valores admite @emphasisType?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "values from the schema, no LLM call"
+        },
+        {
+          "type": "contains",
+          "pattern": "em01–em99",
+          "note": "the complete range of values"
+        },
+        {
+          "type": "contains",
+          "pattern": "`<emphasis>`",
+          "note": "the element that declares it"
+        }
+      ]
+    },
+    {
+      "id": "ask-structural-unknown-name",
+      "description": "C1, Part 2: a structural question about a name that does not exist gets a deterministic \"does not exist\".",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C1-4",
+        "title": "Invented element",
+        "definition": "Decide whether <pokemon> is used.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿Qué contiene <pokemon>?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": true,
+          "note": "answered without the LLM"
+        },
+        {
+          "type": "contains",
+          "pattern": "no existe en el esquema S1000D 4.2",
+          "note": "says the name does not exist"
+        }
+      ]
+    },
+    {
+      "id": "ask-structural-open-question-llm",
+      "description": "C1, Part 2: a question about reasons (not structure) still goes to the LLM.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C1-5",
+        "title": "Use of the element <emphasis>",
+        "definition": "Decide whether <emphasis> may be used.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿Por qué se decidió no usar <emphasis>?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": false,
+          "note": "a \"why\" question goes to the LLM"
         }
       ]
     },

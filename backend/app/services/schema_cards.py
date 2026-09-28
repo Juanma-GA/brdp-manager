@@ -169,11 +169,30 @@ def _collapse_enum_to_ranges(values: list[str]) -> list[str] | None:
     return tokens
 
 
-def _compact_variant(variant: dict) -> dict:
+def _collapse_or_cut_enum(enum: list[str], cut: bool) -> tuple[list[str], bool, int]:
+    """(values, truncated, omitted) for one enum: a long one collapses into
+    ranges when it is a clean sequence (lossless); otherwise it is cut to
+    MAX_ENUM_VALUES only when `cut` (full cards keep every value)."""
+    if len(enum) <= MAX_ENUM_VALUES:
+        return enum, False, 0
+    collapsed = _collapse_enum_to_ranges(enum)
+    if collapsed is not None:
+        return collapsed, False, 0
+    if not cut:
+        return enum, False, 0
+    return enum[:MAX_ENUM_VALUES], True, len(enum) - MAX_ENUM_VALUES
+
+
+def _compact_variant(variant: dict, full: bool = False) -> dict:
+    """One card variant for the endpoint. `full` (C1, Ask's deterministic
+    answers): no list is cut -- a structural answer lists every child,
+    attribute and value; long enums still collapse into ranges."""
+    max_attributes = None if full else MAX_ATTRIBUTES
+    max_children = None if full else MAX_CHILDREN
     attributes = variant.get("attributes", [])
-    attributes_truncated = len(attributes) > MAX_ATTRIBUTES
+    attributes_truncated = max_attributes is not None and len(attributes) > max_attributes
     compact_attributes = []
-    for attr in attributes[:MAX_ATTRIBUTES]:
+    for attr in attributes[:max_attributes]:
         enum = attr.get("enum")
         enum_truncated = False
         enum_omitted = 0
@@ -181,22 +200,10 @@ def _compact_variant(variant: dict) -> dict:
             # "Ajustes al juego de pruebas de prompts" round, Part 4: only
             # collapse into a range when the enum actually NEEDS it -- a
             # short, already-readable enum (cat: 1-2, allowedObjectFlag:
-            # 0-2, asp: 1-3) reads better as a plain list than as a range
-            # token, and was never the problem this mechanism was built for
-            # (that was cv01..cv99/01..99, 99 near-identical values getting
-            # cut to "20 + 79 more"). Collapsing still runs on the FULL,
-            # untruncated enum -- BEFORE the MAX_ENUM_VALUES slice below --
-            # so a long range genuinely represents the complete list, never
-            # a truncated slice of it (unchanged from the previous round);
-            # it's just gated on actually being long enough to need it.
-            if len(enum) > MAX_ENUM_VALUES:
-                collapsed = _collapse_enum_to_ranges(enum)
-                if collapsed is not None:
-                    enum = collapsed
-                else:
-                    enum_truncated = True
-                    enum_omitted = len(enum) - MAX_ENUM_VALUES
-                    enum = enum[:MAX_ENUM_VALUES]
+            # 0-2, asp: 1-3) reads better as a plain list. Collapsing runs
+            # on the FULL enum, before any cut, so a range always represents
+            # the complete list.
+            enum, enum_truncated, enum_omitted = _collapse_or_cut_enum(enum, cut=not full)
         compact_attributes.append(
             {
                 "name": attr["name"],
@@ -208,28 +215,30 @@ def _compact_variant(variant: dict) -> dict:
         )
 
     children = variant.get("children", [])
-    children_truncated = len(children) > MAX_CHILDREN
-    children_omitted = max(0, len(children) - MAX_CHILDREN) if children_truncated else 0
+    children_truncated = max_children is not None and len(children) > max_children
+    children_omitted = len(children) - max_children if children_truncated else 0
 
     return {
         "schemas": variant.get("schemas", []),
         "attributes": compact_attributes,
         "attributes_truncated": attributes_truncated,
-        "attributes_omitted": max(0, len(attributes) - MAX_ATTRIBUTES) if attributes_truncated else 0,
-        "children": children[:MAX_CHILDREN],
+        "attributes_omitted": len(attributes) - max_attributes if attributes_truncated else 0,
+        "children": children[:max_children],
         "children_truncated": children_truncated,
         "children_omitted": children_omitted,
         "resolved": variant.get("resolved", True),
     }
 
 
-def get_schema_cards(standard: str, names: list[str]) -> tuple[bool, dict[str, list[dict]], list[str]]:
+def get_schema_cards(
+    standard: str, names: list[str], full: bool = False
+) -> tuple[bool, dict[str, list[dict]], list[str]]:
     """Returns (available, cards, unknown) for the requested element
     names against `standard`'s cards file. `available=False` (cards={},
     unknown=every requested name) means this standard has no generated
     schema cards at all -- distinct from a name simply not existing in a
     standard that DOES have cards (that name lands in `unknown` with
-    `available=True`)."""
+    `available=True`). `full`: no list is cut (see _compact_variant)."""
     filename = STANDARD_TO_SCHEMA_CARDS_FILE.get(standard)
     data = _CARDS_BY_FILE.get(filename) if filename else None
     if data is None:
@@ -249,11 +258,40 @@ def get_schema_cards(standard: str, names: list[str]) -> tuple[bool, dict[str, l
             unknown.append(name)
             continue
         parents = all_parents.get(name, [])
-        parents_truncated = len(parents) > MAX_PARENTS
+        max_parents = None if full else MAX_PARENTS
+        parents_truncated = max_parents is not None and len(parents) > max_parents
         cards[name] = {
-            "variants": [_compact_variant(v) for v in variants],
-            "parents": parents[:MAX_PARENTS],
+            "variants": [_compact_variant(v, full=full) for v in variants],
+            "parents": parents[:max_parents],
             "parents_truncated": parents_truncated,
-            "parents_omitted": max(0, len(parents) - MAX_PARENTS) if parents_truncated else 0,
+            "parents_omitted": len(parents) - max_parents if parents_truncated else 0,
         }
     return True, cards, sorted(unknown)
+
+
+def get_attribute_owners(standard: str, name: str) -> tuple[bool, list[dict]]:
+    """(available, owners): every element that declares attribute `name`,
+    one entry per card variant -- {element, schemas, required, enum} with
+    the enum complete (long ones collapsed into ranges). C1: what Ask's
+    deterministic "which values does @x take" answer reads. Sorted by
+    element name."""
+    filename = STANDARD_TO_SCHEMA_CARDS_FILE.get(standard)
+    data = _CARDS_BY_FILE.get(filename) if filename else None
+    if data is None:
+        return False, []
+    owners: list[dict] = []
+    for element, variants in sorted(data.get("cards", {}).items()):
+        for variant in variants:
+            for attr in variant.get("attributes", []):
+                if attr["name"] != name:
+                    continue
+                enum = attr.get("enum")
+                owners.append(
+                    {
+                        "element": element,
+                        "schemas": variant.get("schemas", []),
+                        "required": attr["required"],
+                        "enum": _collapse_or_cut_enum(enum, cut=False)[0] if enum else None,
+                    }
+                )
+    return True, owners

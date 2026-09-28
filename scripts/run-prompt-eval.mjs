@@ -64,6 +64,7 @@ import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import { analyzeRule, describeRule } from "../src/utils/ruleTestEngine.js";
 import { ruleTestVerdict } from "../src/utils/ruleTest.js";
 import { generateRuleTestExamples } from "../src/utils/ruleTestRun.js";
+import { answerStructuralQuestion } from "../src/utils/structuralAnswer.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
@@ -235,6 +236,14 @@ async function runCheck(check, answer, ctx = {}) {
       if (!names.available) return { status: "manual", detail: `no schema vocabulary for ${ctx.standard}` };
       const bad = [...names.notFound, ...names.wrongType.map((w) => `${w.usedAs === "element" ? "<" + w.name + ">" : "@" + w.name} (wrong kind)`)];
       return { status: bad.length ? "fail" : "pass", detail: bad.length ? `mentioned but not in the schema: ${bad.join(", ")}` : "no nonexistent name mentioned" };
+    }
+    case "answered_deterministically": {
+      // C1, Part 2: whether Ask answered from the schema cards (no LLM call)
+      // -- "expect": true for a structural question, false for one that
+      // must still go to the LLM.
+      const expect = check.expect !== false;
+      const is = ctx.deterministic === true;
+      return { status: is === expect ? "pass" : "fail", detail: is ? "answered from the schema, no LLM call" : "answered by the LLM" };
     }
     case "not_checkable": {
       const is = answer.trim().replace(/^```\w*\s*/, "").startsWith(NOT_CHECKABLE_PREFIX);
@@ -501,6 +510,28 @@ async function fetchSchemaFacts(standard, names) {
 async function runAskCase(project, aiProvider, createdBrdp, testCase) {
   const vocabulary = loadSchemaVocabulary(testCase.standard);
   const vocabCheck = computeVocabResult(createdBrdp, testCase.standard);
+  // C1, Part 2: the same step as the app -- a structural question (children,
+  // parents, attributes, values of one schema name) is answered from the
+  // full schema cards, with no LLM call.
+  if (vocabulary) {
+    const structural = await answerStructuralQuestion({
+      question: testCase.question,
+      standard: testCase.standard,
+      vocabulary,
+      fetchCards: (standard, names, { full = false } = {}) =>
+        apiFetch(`/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(names.join(","))}${full ? "&full=true" : ""}`),
+      fetchAttribute: (standard, name) =>
+        apiFetch(`/api/schema-cards/attribute?standard=${encodeURIComponent(standard)}&name=${encodeURIComponent(name)}`),
+    });
+    if (structural) {
+      return {
+        systemPrompt: null,
+        userMessage: testCase.question,
+        answer: structural.text,
+        checkContext: { vocabulary, vocabCheck, standard: testCase.standard, deterministic: true },
+      };
+    }
+  }
   const names = selectSchemaFactNames(
     [testCase.question, createdBrdp.title, createdBrdp.definition, createdBrdp.proposal],
     vocabulary,
@@ -520,7 +551,7 @@ async function runAskCase(project, aiProvider, createdBrdp, testCase) {
     systemPrompt,
     userMessage: testCase.question,
     answer,
-    checkContext: { vocabulary, vocabCheck, standard: testCase.standard },
+    checkContext: { vocabulary, vocabCheck, standard: testCase.standard, deterministic: false },
   };
 }
 

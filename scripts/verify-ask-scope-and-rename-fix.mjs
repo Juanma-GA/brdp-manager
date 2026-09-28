@@ -171,7 +171,10 @@ async function main() {
     // narrower wording is gone, and a schema-only question (no mention of
     // the BRDP at all) is answered without the model needing to see any
     // BRDP-specific phrase in the rule itself. ====
-    let sys = await ask("Where can <para> go?");
+    // Since C1 (Part 2) "Where can <para> go?" is answered from the schema
+    // card without the LLM; the prompt checks use a question that still goes
+    // to the LLM and still brings the <para> card into the prompt.
+    let sys = await ask("How is <para> handled in this BRDP?");
     assert(sys.includes("SCOPE: answer questions about the BRDP shown below AND questions about"), "the new literal SCOPE paragraph is present");
     assert(sys.includes("Never add scope reminders or disclaimers to an answer you have given."), "the new no-trailing-disclaimer instruction is present");
     assert(!sys.includes("If the question is not about this specific BRDP, say so plainly and ask"), "the OLD, narrower scope wording is gone");
@@ -188,11 +191,22 @@ async function main() {
     const prompts = [];
     for (let i = 0; i < 3; i++) {
       await openRecords("BRDP-ASK-PARA");
-      prompts.push(await ask("Where can <para> go?"));
+      prompts.push(await ask("How is <para> handled in this BRDP?"));
     }
     assert(prompts[0] === prompts[1] && prompts[1] === prompts[2], "asking the identical question three times in a row produces the byte-identical system prompt every time");
-    assert(prompts[0].includes("<para> — defined in 28 schemas:"), "the <para> parents question's prompt carries the real, compact schema facts (28 schemas)");
-    assert(prompts[0].includes("allowed inside:"), "the prompt for a parents question includes the \"allowed inside\" (parents) line the model needs to answer it");
+    assert(prompts[0].includes("<para> — defined in 28 schemas:"), "the <para> question's prompt carries the real, compact schema facts (28 schemas)");
+    assert(prompts[0].includes("allowed inside:"), "the prompt for a <para> question includes the \"allowed inside\" (parents) line the model needs to answer it");
+
+    // ==== 5. C1 (Part 2): the parents question itself never reaches the LLM. ====
+    {
+      const askTextarea = page.locator("label", { hasText: "Ask a question" }).locator("xpath=following::textarea[1]");
+      await resetMock();
+      await askTextarea.fill("Where can <para> go?");
+      await page.getByRole("button", { name: /^Ask$/ }).click();
+      await page.waitForSelector('[data-testid="ask-answer-deterministic"]', { timeout: 15000 });
+      const req = await lastMockRequest();
+      assert(!req || !req.messages, '"Where can <para> go?" is answered from the schema card -- no LLM call at all');
+    }
 
     console.log("\nALL CHECKS PASSED\n");
   } finally {

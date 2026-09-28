@@ -172,7 +172,9 @@ async function main() {
     // real card, since "table" resolves against the vocabulary. ====
     await resetMock();
     const askTextarea = page.locator("label", { hasText: "Ask a question" }).locator("xpath=following::textarea[1]");
-    await askTextarea.fill("What attributes does the element table admit?");
+    await // C1 (Part 2): "What attributes does the element table admit?" is now
+    // answered from the card without the LLM; same phrase trigger, open question.
+    await askTextarea.fill("How is the element table treated by this BRDP?");
     await page.getByRole("button", { name: /^Ask$/ }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     req = await lastMockRequest();
@@ -212,7 +214,8 @@ async function main() {
     // "<para> (schemas: ...)" block once per variant, which the OLD
     // assertion checked for and would now wrongly fail to find at all). ====
     await openRecords(`Schema Facts Verify S ${suffix}`, "BRDP-SF-PARA");
-    await ask("What children does <para> allow?");
+    // C1 (Part 2): a pure children question no longer reaches the LLM.
+    await ask("How does this BRDP treat the content of <para>?");
     req = await lastMockRequest();
     sys = req.messages.find((m) => m.role === "system").content;
     assert(sys.includes("<para> — defined in 28 schemas:"), "the real <para> card is summarized as one block that counts its 28 schemas (not its 8 variant groups), not repeated once per variant");
@@ -279,7 +282,8 @@ async function main() {
     // standard's worked example, per the docs request's own instruction
     // "elegir uno real de cada standard y documentarlo"). ====
     await openRecords(`Schema Facts Verify D ${suffix}`, "BRDP-SF-NOTE");
-    await ask("What are the allowed values for @type on <note>?");
+    // C1 (Part 2): a pure values question no longer reaches the LLM.
+    await ask("Does this BRDP restrict @type on <note>?");
     req = await lastMockRequest();
     sys = req.messages.find((m) => m.role === "system").content;
     assert(sys.includes("SCHEMA FACTS — extracted from the official DITA 1.3 Xpath2.0 schema."), "DITA project: prompt header names the real standard");
@@ -296,6 +300,20 @@ async function main() {
     sys = req.messages.find((m) => m.role === "system").content;
     assert(!sys.includes("SCHEMA FACTS — extracted from"), "S1000D 5.0 (no generated cards) -> no SCHEMA FACTS block, Ask still answers normally");
     assert((await page.locator("text=Schema facts used:").count()) === 0, "no UI line either");
+
+    // ==== 8. C1 (Part 2): the same question kinds, asked plainly, are
+    // answered from the complete card with no LLM call; a question that asks
+    // for two kinds at once (section 1) still goes to the LLM. ====
+    await openRecords(`Schema Facts Verify S ${suffix}`, "BRDP-SF-TABLE");
+    for (const q of ["What attributes does the element table admit?", "What children does <para> allow?"]) {
+      await resetMock();
+      const box = page.locator("label", { hasText: "Ask a question" }).locator("xpath=following::textarea[1]");
+      await box.fill(q);
+      await page.getByRole("button", { name: /^Ask$/ }).click();
+      await page.waitForSelector('[data-testid="ask-answer-deterministic"]', { timeout: 15000 });
+      const r = await lastMockRequest();
+      assert(!r || !r.messages, `"${q}" answered from the schema card, no LLM call`);
+    }
 
     console.log("\nALL CHECKS PASSED\n");
   } finally {

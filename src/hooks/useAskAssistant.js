@@ -6,10 +6,11 @@ import { useEffect, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { ruleStateOf } from '../utils/ruleState';
-import { fetchSchemaFacts } from '../api/schemaFacts.js';
+import { fetchSchemaAttribute, fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { buildAskSystemPrompt } from '../prompts/askPrompt.js';
 import { ASK_TEMPERATURE } from '../prompts/shared.js';
 import { checkAnswerNames, loadSchemaVocabulary } from '../validation/schemaValidation.js';
+import { answerStructuralQuestion } from '../utils/structuralAnswer.js';
 
 export function useAskAssistant({ projectId, standard, ruleFormat, selected, ruleApproval, aiProvider, vocabulary, recomputeVocabResult }) {
   // `question` is only ever the live DRAFT in the textarea -- it auto-
@@ -55,6 +56,10 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   // wrongType } or null. Only a warning under the answer; the answer
   // itself is never changed.
   const [answerNameCheck, setAnswerNameCheck] = useState(null);
+  // C1, Part 2: where the displayed answer came from -- 'schema' (a
+  // structural question answered from the schema cards, without the LLM),
+  // 'llm', or null while nothing is shown.
+  const [answerSource, setAnswerSource] = useState(null);
   // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
   // the chosen entry ({ source: 'records'|'catalog', identifier, title,
   // definition, and for 'records' also proposal/validation/ruleState/
@@ -84,6 +89,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setLastAskedSchemaFacts([]);
     setExpandedSchemaFactNames(new Set());
     setAnswerNameCheck(null);
+    setAnswerSource(null);
     setCompareOpen(false);
     setCompareQuery('');
     setCompareBrdp(null);
@@ -115,10 +121,33 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setLastAskedSchemaFacts([]);
     setExpandedSchemaFactNames(new Set());
     setAnswerNameCheck(null);
+    setAnswerSource(null);
     try {
       const vocab = await recomputeVocabResult(selected);
       const schemaFacts = await fetchAskSchemaFacts(askedQuestion, selected);
       setLastAskedSchemaFacts(schemaFacts);
+      // C1, Part 2: children / parents / attributes / values of one schema
+      // name are answered from the schema cards, without the LLM. The
+      // answer is a normal turn: a follow-up ("¿y por qué?") goes to the
+      // LLM with it as the previous turn. Its names come from the schema,
+      // so the answer-name check does not apply.
+      const questionVocabulary = vocabulary || (await loadSchemaVocabulary(standard).catch(() => null));
+      if (questionVocabulary) {
+        const structural = await answerStructuralQuestion({
+          question: askedQuestion,
+          standard,
+          vocabulary: questionVocabulary,
+          fetchCards: fetchSchemaCards,
+          fetchAttribute: fetchSchemaAttribute,
+        });
+        if (structural) {
+          setAnswer(structural.text);
+          setAnswerSource('schema');
+          setPrevTurn({ question: askedQuestion, answer: structural.text });
+          setQuestion('');
+          return;
+        }
+      }
       const systemPrompt = buildAskSystemPrompt(selected, ruleApproval, compareBrdp, standard, vocab, schemaFacts);
       // One turn of chaining (docs request): the previous Q/A, if any,
       // goes in first as real conversation history so a follow-up like
@@ -134,10 +163,10 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
         temperature: ASK_TEMPERATURE,
       });
       setAnswer(res.content);
+      setAnswerSource('llm');
       // The same vocabulary as the BRDP's own notice; the names that notice
       // already reports are left out (the user has been warned about them).
-      const answerVocabulary = vocabulary || (await loadSchemaVocabulary(standard).catch(() => null));
-      setAnswerNameCheck(checkAnswerNames(res.content, answerVocabulary, vocab));
+      setAnswerNameCheck(checkAnswerNames(res.content, questionVocabulary, vocab));
       setPrevTurn({ question: askedQuestion, answer: res.content });
       // Auto-clear on success only (docs request) -- an errored question
       // stays in the textarea below so the user never loses what they typed.
@@ -158,6 +187,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setLastAskedSchemaFacts([]);
     setExpandedSchemaFactNames(new Set());
     setAnswerNameCheck(null);
+    setAnswerSource(null);
   };
 
   const openCompareSearch = () => {
@@ -223,6 +253,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     prevTurn,
     lastAskedSchemaFacts,
     answerNameCheck,
+    answerSource,
     expandedSchemaFactNames,
     setExpandedSchemaFactNames,
     compareOpen,
