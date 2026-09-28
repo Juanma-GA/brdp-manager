@@ -14,7 +14,7 @@ import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleT
 import { extractRuleNames } from './ruleNameCheck.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { parseXmlDocument } from './ruleTestEngine.js';
-import { chooseTestSchemas, placeExample, ruleTargets } from './ruleTestSkeleton.js';
+import { chooseTestSchemas, placeExample, ruleMatchExpressions, ruleTargets } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 
 // Same cap as the schema facts of Ask / Suggest Rule.
@@ -54,6 +54,29 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   }
   if (promptPlacements.length === 0) throw new Error(`No schema structure is available for ${standard}.`);
   return { contextSchemas, schemaFacts, promptPlacements, setup: { standard, schemaLocation, placements } };
+}
+
+// T4b: an example meant to be rejected in which the rule selects nothing
+// (no node on its paths, no node any Schematron context matches) can never
+// be rejected -- the test then ends "inconclusive" although the example
+// is valid. It goes to the correction round too, with what it must contain.
+export function missesRuleProblem(example, run, ruleXml) {
+  if (example.expected !== 'reject' || !run.result || run.result.status === 'not_executable') return null;
+  if (run.result.selectedNodePaths.length > 0) return null;
+  const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
+  return `This example must contain a node matched by: ${matched}. Nothing in it matches, so the rule never runs.`;
+}
+
+// The examples the correction round must fix: [{ index, label, problems }].
+export function exampleFailures(examples, materialized, runs, { ruleXml, standard }) {
+  return runs
+    .map((r, index) => {
+      const problems = r.validation.runnable
+        ? [missesRuleProblem(examples[index], r, ruleXml)].filter(Boolean)
+        : exampleProblems(r.validation, { standard, schema: materialized[index].schema });
+      return { index, label: examples[index].label, problems };
+    })
+    .filter((f) => f.problems.length > 0);
 }
 
 // Materialize, validate and run every example.
@@ -98,6 +121,7 @@ export async function generateRuleTestExamples({
       placements: prepared.promptPlacements,
       schemaFacts: prepared.schemaFacts,
       previousReview,
+      matchExpressions: ruleMatchExpressions(ruleXml),
     });
     onPrompt?.(systemPrompt);
     const run = (examples) => runRuleTestExamples(examples, { ruleXml, format, setup: prepared.setup, vocabulary, parseXml });
@@ -114,15 +138,10 @@ export async function generateRuleTestExamples({
     let { materialized, runs } = run(examples);
 
     // One automatic correction round (T2b, Part 3): the exact problems of
-    // each failing example go back to the LLM once. What still fails is
+    // each failing example go back to the LLM once -- invalid examples and
+    // (T4b) reject examples the rule never runs on. What still fails is
     // shown as it is, with its warnings -- never dropped.
-    const failures = runs
-      .map((r, index) => ({
-        index,
-        label: examples[index].label,
-        problems: r.validation.runnable ? [] : exampleProblems(r.validation, { standard, schema: materialized[index].schema }),
-      }))
-      .filter((f) => f.problems.length > 0);
+    const failures = exampleFailures(examples, materialized, runs, { ruleXml, standard });
     let correction = null;
     if (failures.length > 0) {
       correction = { attempted: failures.length, fixed: 0, failed: null };
@@ -143,7 +162,8 @@ export async function generateRuleTestExamples({
               ? examples.map((ex, i) => (failing.has(i) ? reparsed.examples[i] : ex))
               : reparsed.examples;
           const rerun = run(next);
-          correction.fixed = failures.filter((f) => rerun.runs[f.index]?.validation.runnable).length;
+          const still = new Set(exampleFailures(next, rerun.materialized, rerun.runs, { ruleXml, standard }).map((f) => f.index));
+          correction.fixed = failures.filter((f) => rerun.runs[f.index] && !still.has(f.index)).length;
           examples = next;
           ({ materialized, runs } = rerun);
         }

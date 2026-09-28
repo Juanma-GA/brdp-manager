@@ -130,9 +130,10 @@ const TEMPLATE_CASES = {
     ...COMMON,
     'BRDP-EXT-00007': { notExecutable: 'external_document' },
     'BRDP-EXT-00008': { notExecutable: 'external_document' },
-    // Its only test compares a literal ('@@URI-CARPETA-DOSIER@@') with
-    // 'file:': as written it can never fail.
-    'BRDP-EXT-00009': { never: topic('<note type="warning" conref-no-resuelto="comunes.dita#n/n1">No leída</note>') },
+    // T4b: its only test compares '@@URI-CARPETA-DOSIER@@', a value the
+    // project's tooling replaces after Generate, with 'file:' -- the stored
+    // rule is not the rule that runs, so it is not executable here.
+    'BRDP-EXT-00009': { notExecutable: 'external_placeholder' },
     'BRDP-D1-00065': {
       bad: topic('<p>Texto.</p>'),
       ids: ['BRDP-D1-00065'],
@@ -402,6 +403,33 @@ expect(
   expect('abstract rule without extends is skipped', run(abstractRule, topic('<p>x</p>')), 'accepted');
   check('fragment not well formed', run(NOTE_TYPE, '<topic><p>').notExecutableReason?.code === 'fragment_not_well_formed');
 }
+// T4b: '@@…@@' placeholders, in both engines, from the start.
+{
+  const sch1 = sch('<§pattern id="ph"><§rule context="note"><§let name="dir" value="\'@@URI-CARPETA-DOSIER@@\'"/><§assert id="PH" test="starts-with($dir, \'file:\')">x</§assert></§rule></§pattern>');
+  const r = run(sch1, topic('<note>x</note>'));
+  check('placeholder: Schematron not executable', r.status === 'not_executable' && r.notExecutableReason?.code === 'external_placeholder' && r.notExecutableReason.params.placeholder === '@@URI-CARPETA-DOSIER@@', JSON.stringify(r.notExecutableReason));
+  check('placeholder: analyzeRule knows it', analyze(sch1).reason?.code === 'external_placeholder');
+  const brex = '<structureObjectRule id="X"><objectPath allowedObjectFlag="0">//dmRef[@href = \'@@BASE@@\']</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const rb = runRuleOnFragment(brex, 'BREX-4.2', '<dmodule/>', null, { parseXml });
+  check('placeholder: BREX not executable', rb.status === 'not_executable' && rb.notExecutableReason?.code === 'external_placeholder', JSON.stringify(rb.notExecutableReason));
+  check('placeholder: ES text', formatRuleTestReason(r.notExecutableReason, i18n.getFixedT('es')) === 'La regla contiene un valor que se sustituye fuera de la app (@@URI-CARPETA-DOSIER@@); no se puede probar aquí.');
+  const d = describe(sch1);
+  check('placeholder: described as not executable, never "cannot reject"', d.cannotReject === false && d.statements[0].statement.code === 'describe_not_executable', JSON.stringify(d));
+  check('an "@@" that is not a placeholder is fine', run(sch('<§pattern><§rule context="p"><§assert test="contains(., \'@@\')">x</§assert></§rule></§pattern>'), topic('<p>a @@ b</p>')).status === 'accepted');
+}
+// T4b: a test that never looks at the document can never reject.
+{
+  const constant = sch('<§pattern><§rule context="note"><§let name="u" value="\'http://x\'"/><§assert id="C" test="not(starts-with($u, \'file:\'))">x</§assert></§rule></§pattern>');
+  const d = describe(constant);
+  check('constant assert: flagged', d.statements.some((s) => s.statement.params?.constant === true) && d.cannotReject === true, JSON.stringify(d));
+  const line = formatRuleDescription(d, i18n.getFixedT('en')).lines.at(-1);
+  check('constant assert: EN text', line.endsWith('(this check never looks at the document, so it can never reject)'), line);
+  const alwaysFalse = describe(sch('<§pattern><§rule context="note"><§assert test="false()">never allowed</§assert></§rule></§pattern>'));
+  check('assert false(): rejects every context node, not constant', alwaysFalse.cannotReject === false && !alwaysFalse.statements[0].statement.params.constant);
+  const reportFalse = describe(sch('<§pattern><§rule context="note"><§report test="1 = 2">x</§report></§rule></§pattern>'));
+  check('report that never occurs: constant', reportFalse.cannotReject === true);
+  check('a test on the context is never constant', describe(NOTE_TYPE).cannotReject === false && describe(NOTE_TYPE).statements[0].statement.params.constant === false);
+}
 check('every engine reason code is listed', ['extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax'].every((c) => ENGINE_REASON_CODES.includes(c)));
 for (const [lang, t] of [['en', i18n.getFixedT('en')], ['es', i18n.getFixedT('es')]]) {
   const text = formatRuleTestReason({ code: 'xpath3_syntax', params: { features: 'inline function, head()' } }, t);
@@ -412,7 +440,7 @@ for (const [lang, t] of [['en', i18n.getFixedT('en')], ['es', i18n.getFixedT('es
 {
   const d = describe(NOTE_TYPE);
   check('describe: available', d.available && d.statements.length === 1 && !d.cannotReject, JSON.stringify(d));
-  check('describe: assert code + params', JSON.stringify(d.statements[0].statement) === JSON.stringify({ code: 'describe_sch_assert', params: { context: 'note', test: '@type', message: 'Every note must declare @type.', warning: false } }), JSON.stringify(d.statements[0].statement));
+  check('describe: assert code + params', JSON.stringify(d.statements[0].statement) === JSON.stringify({ code: 'describe_sch_assert', params: { context: 'note', test: '@type', message: 'Every note must declare @type.', warning: false, constant: false } }), JSON.stringify(d.statements[0].statement));
   const en = formatRuleDescription(d, i18n.getFixedT('en')).lines[0];
   const es = formatRuleDescription(d, i18n.getFixedT('es')).lines[0];
   check('describe EN', en === 'For each note: @type must hold — message: "Every note must declare @type."', en);

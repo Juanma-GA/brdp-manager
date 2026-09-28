@@ -24,7 +24,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { placeExample, ruleTargets } from '../../src/utils/ruleTestSkeleton.js';
+import { placeExample, ruleMatchExpressions, ruleTargets } from '../../src/utils/ruleTestSkeleton.js';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
 import { describeRule } from '../../src/utils/ruleTestEngine.js';
@@ -424,6 +424,8 @@ const ruleDitaNote =
   '<sch:pattern id="p-BRDP-D1-00100"><sch:rule context="note"><sch:assert id="BRDP-D1-00100" role="error" test="@type">Every note must declare its type (@type).</sch:assert></sch:rule></sch:pattern>';
 const ruleDitaRootLang =
   '<pattern id="p-BRDP-D1-00020"><rule context="/*[not(parent::*)]"><assert id="BRDP-D1-00020" role="error" test="@xml:lang">The topic must declare xml:lang.</assert></rule></pattern>';
+const ruleDitaTitledTable =
+  '<sch:pattern id="p-BRDP-D1-00200"><sch:rule context="*[title = (\'PARTS LIST\', \'TOOLS LIST\')]//table/tgroup/tbody/row"><sch:assert id="BRDP-D1-00200" role="error" test="entry[@colname = \'c3\'][normalize-space()]">Every row must give a quantity.</sch:assert></sch:rule></sch:pattern>';
 ruleTestExamplesCases.push(
   {
     name: 'dita-xpath2-note-topic-body',
@@ -446,6 +448,22 @@ ruleTestExamplesCases.push(
         format: 'SCH-DITA',
         ruleXml: ruleDitaRootLang,
         placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaRootLang, [['topic', 'rule']]),
+      },
+    ],
+  },
+  // T4b: a context that depends on an element's title -- the prompt asks
+  // for a titled <section> around the checked table (generic titles, never
+  // a real project's).
+  {
+    name: 'dita-xpath3-title-dependent-context',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-D1-00200', title: 'Quantity column', definition: 'Decide which tables carry a quantity.', proposal: 'Every row of a parts list table shall give a quantity.' },
+        standard: 'DITA 1.3 Xpath3.0',
+        format: 'SCH-DITA',
+        ruleXml: ruleDitaTitledTable,
+        placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaTitledTable, [['topic', 'rule']]),
+        matchExpressions: ruleMatchExpressions(ruleDitaTitledTable),
       },
     ],
   }

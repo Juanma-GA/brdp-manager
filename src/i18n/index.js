@@ -370,6 +370,7 @@ const resources = {
             describe_sch_assert: 'For each {{context}}: {{test}} must hold — message: "{{message}}"',
             describe_sch_report: 'For each {{context}}: {{test}} must not occur — message: "{{message}}"',
             schWarning: '{{text}} (warning: does not reject)',
+            schConstant: '{{text}} (this check never looks at the document, so it can never reject)',
             nodesOf: 'The nodes selected by {{path}}',
             valueRange: 'from {{from}} to {{to}}',
             valuePattern: 'text matching {{pattern}}',
@@ -399,6 +400,7 @@ const resources = {
             extension_function: 'The rule calls {{name}}(), an extension function that is not available in a test.',
             sch_unsupported: 'The rule uses {{feature}}, which the test engine does not support.',
             sch_missing_attribute: 'An <{{element}}> has no @{{attr}}.',
+            external_placeholder: 'The rule contains a value that is replaced outside the app ({{placeholder}}); it cannot be tested here.',
             xpath3_syntax: 'This project uses XPath 2.0, but the rule uses XPath 3.x syntax ({{features}}); an XPath 2.0 validator would refuse it. The test runs it anyway.',
             part: '{{ruleId}}: {{reason}}',
             test_incorrect: {
@@ -1104,6 +1106,7 @@ const resources = {
             describe_sch_assert: 'Para cada {{context}}: debe cumplirse {{test}} — mensaje: "{{message}}"',
             describe_sch_report: 'Para cada {{context}}: no debe darse {{test}} — mensaje: "{{message}}"',
             schWarning: '{{text}} (aviso: no rechaza)',
+            schConstant: '{{text}} (esta comprobación no mira el documento, así que nunca puede rechazar)',
             nodesOf: 'Los nodos que selecciona {{path}}',
             valueRange: 'de {{from}} a {{to}}',
             valuePattern: 'texto que cumpla {{pattern}}',
@@ -1133,6 +1136,7 @@ const resources = {
             extension_function: 'La regla llama a {{name}}(), una función de extensión que no está disponible en una prueba.',
             sch_unsupported: 'La regla usa {{feature}}, que el motor de pruebas no admite.',
             sch_missing_attribute: 'Un <{{element}}> no tiene @{{attr}}.',
+            external_placeholder: 'La regla contiene un valor que se sustituye fuera de la app ({{placeholder}}); no se puede probar aquí.',
             xpath3_syntax: 'Este proyecto usa XPath 2.0, pero la regla usa sintaxis de XPath 3.x ({{features}}); un validador XPath 2.0 la rechazaría. La prueba la ejecuta igualmente.',
             part: '{{ruleId}}: {{reason}}',
             test_incorrect: {

@@ -63,9 +63,13 @@ class RuleTestSkeletonOut(BaseModel):
     # Element names from the root down to the insertion point, inclusive.
     path: list[str]
     insertion: str
-    # "para" (a chain down to <para>) or the fallback used when the schema
-    # has none: "body", "content" or "root" (see rule_test_skeletons.py).
+    # "para" (a chain down to <para>), "step" (DITA task) or the fallback
+    # used when the schema has none: "body", "content" or "root" (see
+    # rule_test_skeletons.py).
     derivation: str
+    # T4b: elements of the path the application gives their required
+    # <title> as first child (DITA topics; [] for S1000D and maps).
+    titled: list[str] = []
 
 
 class SchemaStructureOut(BaseModel):

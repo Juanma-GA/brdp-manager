@@ -104,6 +104,7 @@ import {
   KNOWN_NAMESPACES,
   NotExecutable,
   OTHER_FILE_RE,
+  EXTERNAL_PLACEHOLDER_RE,
   XPATH_LANGUAGE,
   combinedReason,
   localName,
@@ -141,6 +142,7 @@ const WHOLE_DOCUMENT_ROOTS = new Set([
 
 const REASON = {
   otherFile: (fn) => reason('external_document', { fn }),
+  placeholder: (placeholder) => reason('external_placeholder', { placeholder }),
   nonContext: () => reason('non_context_rule'),
   mandatory: () => reason('mandatory_whole_document'),
   xpath: (message) => reason('xpath_error', { message }),
@@ -245,6 +247,8 @@ function partBasics(part, spec) {
   if (!expression) throw new NotExecutable(REASON.emptyPath(spec.path));
   const otherFile = OTHER_FILE_RE.exec(expression.replace(/'[^']*'|"[^"]*"/g, "''"));
   if (otherFile) throw new NotExecutable(REASON.otherFile(`${otherFile[1]}()`));
+  const placeholder = EXTERNAL_PLACEHOLDER_RE.exec(expression);
+  if (placeholder) throw new NotExecutable(REASON.placeholder(placeholder[0]));
 
   const rawFlag = pathEl.getAttribute(spec.flagAttr);
   const flag = rawFlag === null || rawFlag === '' ? spec.defaultFlag : rawFlag.trim();

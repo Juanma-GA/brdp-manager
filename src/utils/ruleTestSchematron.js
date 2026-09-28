@@ -51,7 +51,9 @@
 // |                          | (external_document); a prefixed function outside fn/xs/math/map/     |        |
 // |                          | array (extension_function); sch:include, abstract patterns (is-a),   |        |
 // |                          | sch:extends (sch_unsupported); a missing @context/@test/@value       |        |
-// |                          | (sch_missing_attribute); an XPath error (xpath_error)                |        |
+// |                          | (sch_missing_attribute); an XPath error (xpath_error); a literal      |        |
+// |                          | '@@…@@' replaced by the project's tooling after Generate             |        |
+// |                          | (external_placeholder, T4b)                                           |        |
 //
 // A "part" is a pattern (ruleId = its @id, or "pattern N"): each runs or
 // not independently, as in the BREX engine. A violation's ruleId is the
@@ -59,6 +61,7 @@
 import fontoxpath from 'fontoxpath';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
 import {
+  EXTERNAL_PLACEHOLDER_RE,
   KNOWN_NAMESPACES,
   NotExecutable,
   OTHER_FILE_RE,
@@ -92,6 +95,7 @@ const ROOT_VAR = '__sch_root';
 
 const REASON = {
   otherFile: (fn) => reason('external_document', { fn }),
+  placeholder: (placeholder) => reason('external_placeholder', { placeholder }),
   extension: (name) => reason('extension_function', { name }),
   unsupported: (feature) => reason('sch_unsupported', { feature }),
   missing: (element, attr) => reason('sch_missing_attribute', { element, attr }),
@@ -272,6 +276,10 @@ function staticChecks(pattern, globalLets, globalUnsupported) {
   for (const e of expressions) {
     const other = OTHER_FILE_RE.exec(stripLiterals(e));
     if (other) throw new NotExecutable(REASON.otherFile(`${other[1]}()`));
+  }
+  for (const e of expressions) {
+    const placeholder = EXTERNAL_PLACEHOLDER_RE.exec(e);
+    if (placeholder) throw new NotExecutable(REASON.placeholder(placeholder[0]));
   }
   for (const e of expressions) {
     const ext = extensionFunction(e);
@@ -541,8 +549,12 @@ export function analyzeSchematron(ruleXml, options = {}) {
 //   describe_sch_assert {context, test, message, warning}  "must hold"
 //   describe_sch_report {context, test, message, warning}  "must not occur"
 //   describe_not_executable {reason}                       a pattern the engine cannot run
-// warning: role warning/info (never rejects). cannotReject: no assert/report
-// that rejects (none at all, or only warnings).
+// warning: role warning/info (never rejects). constant (T4b): the test does
+// not depend on the document at all (it evaluates with no context node),
+// and an assert that always holds / a report that never occurs can never
+// reject. cannotReject: the executable patterns have no assert/report that
+// can reject (none at all, only warnings, or only constant checks); a rule
+// with no executable pattern is described as not executable instead.
 
 // Whitespace collapsed outside string literals (the template contexts carry
 // long runs of spaces from the spreadsheet cells).
@@ -582,18 +594,23 @@ export function describeSchematron(ruleXml, options = {}) {
   } catch {
     return { available: false };
   }
-  const { patterns, globalLets, globalUnsupported } = parseSchematron(ruleDoc.documentElement);
+  const { patterns, globalLets, namespaces, globalUnsupported } = parseSchematron(ruleDoc.documentElement);
   if (!patterns.length) return { available: false };
   const statements = [];
   let rejecting = false;
+  let executable = 0;
   for (const pattern of patterns) {
+    let runs = true;
     try {
       staticChecks(pattern, globalLets, globalUnsupported);
+      executable += 1;
     } catch (err) {
       if (!(err instanceof NotExecutable)) throw err;
+      runs = false;
       statements.push({ ruleIds: [pattern.ruleId], statement: { code: 'describe_not_executable', params: { reason: err.reason } }, schemas: [] });
     }
-    const patternLets = [...globalLets, ...pattern.lets].map((l) => l.name);
+    const lets = [...globalLets, ...pattern.lets];
+    const patternLets = lets.map((l) => l.name);
     for (const rule of pattern.rules.filter((r) => !r.abstract)) {
       const context = collapseXPath(rule.context);
       const names = [...patternLets, ...rule.lets.map((l) => l.name)];
@@ -602,17 +619,34 @@ export function describeSchematron(ruleXml, options = {}) {
       }
       for (const check of rule.checks) {
         const warning = WARNING_ROLES.has(check.role);
-        if (!warning) rejecting = true;
+        const constant = runs && constantCheck(check, lets, rule.lets, namespaces);
+        if (runs && !warning && !constant) rejecting = true;
         statements.push({
           ruleIds: [check.id || pattern.ruleId],
           statement: {
             code: check.kind === 'assert' ? 'describe_sch_assert' : 'describe_sch_report',
-            params: { context, test: collapseXPath(check.test), message: messageOf(check.element, null), warning },
+            params: { context, test: collapseXPath(check.test), message: messageOf(check.element, null), warning, constant },
           },
           schemas: [],
         });
       }
     }
   }
-  return { available: true, statements, cannotReject: !rejecting };
+  return { available: true, statements, cannotReject: executable > 0 && !rejecting };
+}
+
+// T4b: true when the check can never reject -- its test evaluates with no
+// context node at all (so it does not look at the document) to "holds" for
+// an assert or "does not occur" for a report. Any error (the test, or one of
+// its lets, reads the context) means it depends on the document: false.
+function constantCheck(check, patternLets, ruleLets, namespaces) {
+  try {
+    const value = fontoxpath.evaluateXPathToBoolean(nodeExpr(patternLets, ruleLets, `boolean(${check.test})`), null, null, null, {
+      language: XPATH_LANGUAGE,
+      namespaceResolver: (prefix) => (prefix ? BUILTIN_PREFIXES[prefix] ?? namespaces[prefix] ?? KNOWN_NAMESPACES[prefix] ?? null : null),
+    });
+    return check.kind === 'assert' ? value === true : value === false;
+  } catch {
+    return false;
+  }
 }

@@ -7,6 +7,12 @@
 // explained by Verify), and the wrong rule loop: inverted assert →
 // incorrect → review (cause rule) → Suggest a corrected rule (with the
 // PREVIOUS RULE FAILED ITS TEST block) → correct test → Accept records it.
+// T4b: the topic's own <title> in the skeleton (dimmed), the real template
+// rule BRDP-EXT-00001 (XPath 3.0, context on a title): the first answer
+// puts the title on the table, nothing matches, the correction round asks
+// for a node the rule matches and the reject example ends in a titled
+// <section> -- verdict correct; and the real BRDP-EXT-00009 (XPath 2.0,
+// @@URI-CARPETA-DOSIER@@): not executable from the start with its reason.
 //
 // Against the real app (Vite + FastAPI + Postgres); only the Mistral
 // TRANSPORT is mocked (mock-mistral-chat-server.mjs: DITA examples by the
@@ -18,7 +24,17 @@
 // 5173. Cleans up the projects it creates. Screenshots go to /tmp.
 //
 //     node scripts/verify-rule-test-dita.mjs
+import fs from "node:fs";
+import XLSX from "xlsx";
 import { chromium } from "playwright-core";
+
+// T4b: two real rules of the curated DITA templates.
+const templateRule = (file, id) => {
+  const wb = XLSX.read(fs.readFileSync(new URL(`../public/${file}`, import.meta.url)));
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).find((r) => r.ID === id);
+};
+const EXT1_XPATH3 = templateRule("brdp-template-dita-xpath3.xlsx", "BRDP-EXT-00001");
+const EXT9_XPATH2 = templateRule("brdp-template-dita-xpath2.xlsx", "BRDP-EXT-00009");
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -116,6 +132,8 @@ async function main() {
   const p3 = await makeProject("Rule test DITA XPath 3.0", "DITA 1.3 Xpath3.0");
   await makeBrdp(p3, "BRDP-DT-LET", "Each <step> shall contain exactly one <cmd>.", STEP_LET_RULE("BRDP-DT-LET"));
   await makeBrdp(p3, "BRDP-DT-DOC", "Notes reused from the map's topics shall declare their type.", MAP_DOC_RULE("BRDP-DT-DOC"));
+  await makeBrdp(p3, "BRDP-DT-TITLED", EXT1_XPATH3.Proposal, EXT1_XPATH3.Rule);
+  await makeBrdp(p2, "BRDP-DT-PLACEHOLDER", EXT9_XPATH2.Proposal, EXT9_XPATH2.Rule);
   for (const p of projects) await embed(p);
 
   const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
@@ -183,6 +201,10 @@ async function main() {
     assert((await ex1.getByTestId("rule-test-result").textContent()).startsWith("Result: rejected"), "note without @type: rejected");
     assert((await ex1.textContent()).includes("Rule's message: Every note must declare its type (@type)."), "rejected example shows the rule's message");
     assert((await ex0.getByTestId("rule-test-result").textContent()).startsWith("Result: accepted"), "note with @type: accepted");
+    // T4b: the topic's mandatory <title>, part of the dimmed skeleton.
+    assert((await ex0.textContent()).includes("<title>Example topic</title>"), "T4b: the topic skeleton carries its <title>");
+    const titleSpan = ex0.locator("span", { hasText: /^Example topic$/ }).first();
+    assert(/ruleTestSkeleton/.test((await titleSpan.getAttribute("class")) || ""), "T4b: the skeleton title is dimmed like the rest of the skeleton");
     await waitIndicator("passed");
     assert((await approvalOf("BRDP-DT-NOTE")).last_test_result === "passed", "DITA test recorded as passed");
     await panel1.screenshot({ path: "/tmp/rule-test-dita-note.png" });
@@ -280,6 +302,50 @@ async function main() {
     assert((await lastRequest()) === null, "doc(): recorded without calling the LLM");
     assert((await approvalOf("BRDP-DT-DOC")).last_test_result === "not_executable", "doc(): recorded as not executable");
     await panel7.screenshot({ path: "/tmp/rule-test-dita-doc.png" });
+    await panel7.getByRole("button", { name: "Close" }).click();
+
+    // 8. T4b: the real BRDP-EXT-00001 (XPath 3.0), a context on a title.
+    await select("BRDP-DT-TITLED");
+    await fetch(`${MOCK}/reset`, { method: "POST" });
+    const panel8 = await testDraft();
+    const req8 = await lastRequest();
+    const sys8 = systemOf(req8);
+    assert(sys8.includes("THE RULE DEPENDS ON A TITLE") && sys8.includes("<section><title>Parts list</title><table>…</table></section>"), "EXT-00001: prompt asks for a titled section, generic example");
+    const correction8 = req8.messages.filter((m) => m.role === "user").at(-1).content;
+    assert(correction8.startsWith("Some examples are not valid.") && correction8.includes('Example 2 ("Part row without quantity")') && correction8.includes("This example must contain a node matched by: `*[title = ('LISTA DE MATERIAL OBLIGATORIO',") && correction8.includes("Nothing in it matches, so the rule never runs."), `EXT-00001: one correction round, for the reject example (${correction8})`);
+    assert(!correction8.includes("Example 1 "), "EXT-00001: the accept example is never sent back");
+    assert((await panel8.getByTestId("rule-test-correction").textContent()).includes("1 example was corrected automatically."), "EXT-00001: 1 of 1 corrected");
+    const rej8 = examplesOf(panel8).nth(1);
+    const rej8Text = await rej8.textContent();
+    assert(rej8Text.includes("<section>") && rej8Text.includes("<title>LISTA DE MATERIAL OBLIGATORIO</title>") && rej8Text.includes("<title>Example topic</title>"), "EXT-00001: reject example in a titled section inside the titled topic");
+    assert((await rej8.getByTestId("rule-test-result").textContent()).startsWith("Result: rejected"), "EXT-00001: the row without quantity is rejected");
+    assert(rej8Text.includes("Rule's message: En tablas con columna"), "EXT-00001: the rule's own message");
+    assert((await panel8.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), `EXT-00001: verdict correct (${await panel8.getByTestId("rule-test-verdict").textContent()})`);
+    await waitIndicator("passed");
+    await panel8.screenshot({ path: "/tmp/rule-test-dita-titled-section.png" });
+    await panel8.getByRole("button", { name: "Close" }).click();
+
+    // 9. T4b: the real BRDP-EXT-00009 (XPath 2.0), @@URI-CARPETA-DOSIER@@.
+    await openProject(p2);
+    await select("BRDP-DT-PLACEHOLDER");
+    await fetch(`${MOCK}/reset`, { method: "POST" });
+    await page.getByRole("button", { name: "Verify", exact: true }).click();
+    await dialog().waitFor({ timeout: 3000 });
+    const reason9 = "The rule contains a value that is replaced outside the app (@@URI-CARPETA-DOSIER@@); it cannot be tested here.";
+    assert((await dialog().getAttribute("data-kind")) === "not_executable" && (await dialog().textContent()).includes(reason9), `@@…@@: Verify explains it is not executable (${await dialog().textContent()})`);
+    await dialog().getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Test rule" }).first().click();
+    const panel9 = panels().first();
+    await panel9.getByTestId("rule-test-analysis").waitFor({ timeout: 5000 });
+    assert((await panel9.getByTestId("rule-test-analysis").textContent()).includes(reason9), "@@…@@: reason shown from the start");
+    assert((await panel9.getByTestId("rule-test-cannot-reject").count()) === 0, "@@…@@: never described as 'cannot reject'");
+    await waitIndicator("not_executable");
+    assert((await lastRequest()) === null, "@@…@@: recorded without calling the LLM");
+    await language().selectOption("es");
+    await page.waitForTimeout(300);
+    assert((await panels().first().getByTestId("rule-test-analysis").textContent()).includes("La regla contiene un valor que se sustituye fuera de la app (@@URI-CARPETA-DOSIER@@); no se puede probar aquí."), "@@…@@: reason in Spanish");
+    await panels().first().screenshot({ path: "/tmp/rule-test-dita-placeholder-es.png" });
+    await language().selectOption("en");
   } finally {
     for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded projects.");

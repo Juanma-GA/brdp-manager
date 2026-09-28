@@ -19,6 +19,8 @@
 //     mixed_range {from, to};
 //   Schematron engine (T4): extension_function {name},
 //     sch_unsupported {feature}, sch_missing_attribute {element, attr};
+//   both engines (T4b): external_placeholder {placeholder} ('@@…@@'
+//     replaced by the project's tooling after Generate);
 //     analyzeRule warning (never a refusal): xpath3_syntax {features};
 //   several parts: parts {parts: [{ ruleId, reason }]};
 //   recorded verdicts (verdictToTestRecord below): test_incorrect
@@ -29,7 +31,7 @@ export const ENGINE_REASON_CODES = [
   'external_document', 'non_context_rule', 'mandatory_whole_document', 'xpath_error', 'unsupported_value_form',
   'unsupported_format', 'fragment_not_well_formed', 'rule_not_well_formed', 'no_rule_element', 'empty_path',
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
-  'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax',
+  'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
 ];
 export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable'];
 
@@ -102,6 +104,7 @@ export function formatRuleStatement(statement, schemas, t) {
   let text = t(`records.ruleTest.describe.${statement.code}`, { ...values, defaultValue: statement.code });
   // Schematron: a role="warning"/"info" check never rejects (T4).
   if (params.warning) text = t('records.ruleTest.describe.schWarning', { text });
+  else if (params.constant) text = t('records.ruleTest.describe.schConstant', { text });
   return schemas && schemas.length ? t('records.ruleTest.describe.onlyInSchemas', { text, schemas: schemas.join(', ') }) : text;
 }
 

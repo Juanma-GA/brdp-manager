@@ -8,6 +8,11 @@ export const XPATH_LANGUAGE = fontoxpath.evaluateXPath.XPATH_3_1_LANGUAGE;
 // Functions that read another file: never available in a test.
 export const OTHER_FILE_RE = /\b(document|doc|doc-available|collection|unparsed-text(?:-lines|-available)?)\s*\(/;
 
+// T4b: a literal the project's own tooling replaces AFTER Generate (e.g.
+// '@@URI-CARPETA-DOSIER@@' in the DITA XPath 2.0 template): the rule as
+// stored is not the rule that runs, so it cannot be tested here.
+export const EXTERNAL_PLACEHOLDER_RE = /@@[^@\s'"]+@@/;
+
 // Prefixes a rule path may use without the fragment declaring them.
 export const KNOWN_NAMESPACES = {
   xsi: 'http://www.w3.org/2001/XMLSchema-instance',

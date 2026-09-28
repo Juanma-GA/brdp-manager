@@ -222,6 +222,14 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // topic). The DITA wording (topic type, ship or aircraft content, no S1000D
 // reference elements) only applies to SCH-DITA: every existing prompt,
 // the S1000D ruleTestExamples cases included, is unchanged.
+//
+// Test de reglas T4b: the two DITA ruleTestExamples cases change on
+// purpose -- a topic's skeleton now carries its mandatory <title>, so the
+// placement line says the application writes it (topic/body) or that the
+// whole topic starts with it (root context). New case dita-xpath3-title-
+// dependent-context: a context that depends on an element's title gets the
+// "THE RULE DEPENDS ON A TITLE" block (a titled <section> around the
+// checked table). Every S1000D prompt is unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

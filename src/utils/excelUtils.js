@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { mockBRDPs } from '../data/mockBRDPs';
+import { mockBRDPs } from '../data/mockBRDPs.js';
 
 // Same 7 columns, same order, Import and Export to Excel now agree on
 // exactly (docs request) -- Import used to deliberately keep the old

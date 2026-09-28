@@ -191,6 +191,8 @@ async function runCheck(check, answer, ctx = {}) {
   // T3b: "description" = the rule's deterministic description (describeRule,
   // English -- what the panel shows in place of an LLM explanation);
   // "explanation" = the review's explanation (rule-review).
+  // T4b: "reject_examples" = the final content of the rule-test examples
+  // meant to be rejected (after the correction round), one per line.
   const target =
     check.target === "description"
       ? ctx.description ?? ""
@@ -198,6 +200,8 @@ async function runCheck(check, answer, ctx = {}) {
       ? ctx.review?.explanation ?? ""
       : check.target === "final"
       ? ctx.finalRule ?? ""
+      : check.target === "reject_examples"
+      ? (ctx.ruleTest?.examples || []).filter((ex) => ex.expected === "reject").map((ex) => ex.content).join("\n")
       : check.target === "xml"
         ? ctx.xml ?? ""
         : check.target === "xpath"

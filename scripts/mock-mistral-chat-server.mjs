@@ -146,6 +146,21 @@ function ruleTestReply(systemPrompt, messages) {
   // follow the rule's context (step, the document root, or note).
   const ditaType = (systemPrompt.match(/Every example is a DITA ([\w-]+) \("schema"/) || [])[1];
   if (ditaType) {
+    // T4b: a context that depends on an element's title and checks table
+    // rows (the real template rule BRDP-EXT-00001). The first answer puts
+    // the title on the table itself (table/title, the real run: nothing
+    // matches); the correction round -- which names the reject example --
+    // wraps the table in a <section> with the context's first title.
+    if (/THE RULE DEPENDS ON A TITLE/.test(systemPrompt) && /\/\/table/.test(rule)) {
+      const title = (rule.match(/context="[^"]*?'([^']+)'/) || [])[1] || "Parts list";
+      const table = (caption, qty) =>
+        `<table>${caption ? `<title>${caption}</title>` : ""}<tgroup cols="3"><colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/><thead><row><entry colname="c1">Part</entry><entry colname="c2">Descripción</entry><entry colname="c3">Cant.</entry></row></thead><tbody><row><entry colname="c1">P-100</entry><entry colname="c2">Junta tórica</entry>${qty ? `<entry colname="c3">${qty}</entry>` : ""}</row></tbody></tgroup></table>`;
+      const wrap = (qty) => (correcting ? `<section><title>${title}</title>${table("", qty)}</section>` : table(title, qty));
+      return answer([
+        { label: "Part row with quantity", expected: "accept", schema: ditaType, content: wrap("2") },
+        { label: "Part row without quantity", expected: "reject", schema: ditaType, content: wrap("") },
+      ]);
+    }
     if (/context="step"/.test(rule)) {
       return answer([
         { label: "Step with one command", expected: "accept", schema: ditaType, content: "<step><cmd>Remove the four bolts from the pump cover.</cmd></step>" },

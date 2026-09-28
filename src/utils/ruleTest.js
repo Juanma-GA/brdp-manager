@@ -19,7 +19,7 @@
 //   panel can highlight the nodes the rule selected and dim the skeleton.
 import { nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
 import { checkAgainstVocabulary } from './vocabularyCheck.js';
-import { assembleExample, checkExampleStructure, formatStructureProblem } from './ruleTestSkeleton.js';
+import { SKELETON_TEXT_SUFFIX, assembleExample, checkExampleStructure, formatStructureProblem } from './ruleTestSkeleton.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
 // names (xsi:…, xlink:…) and namespace declarations are not schema
@@ -199,10 +199,12 @@ export function xmlDisplayLines(xml, selectedNodePaths = [], parseXml = parseXml
       return startTag(el, true);
     }
     const segments = startTag(el, false);
+    // The text of a skeleton element the application wrote (a DITA title).
+    const skeletonText = skeleton.has(`${nodePath(el)}${SKELETON_TEXT_SUFFIX}`);
     for (const n of children) {
       if (n.nodeType === 1) segments.push(...inline(n));
       else if (n.nodeType === 8) segments.push({ text: `<!--${n.data}-->`, highlight: false, skeleton: false });
-      else segments.push({ text: escText(n.data.replace(/\s+/g, ' ')), highlight: false, skeleton: false });
+      else segments.push({ text: escText(n.data.replace(/\s+/g, ' ')), highlight: false, skeleton: skeletonText });
     }
     segments.push(endTag(el));
     return segments;

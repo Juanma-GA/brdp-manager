@@ -98,6 +98,11 @@ def test_dita_types_are_the_document_schemas_and_never_nest_other_types():
         # Another topic/map type is another document, never part of this graph.
         assert not (set(graph) - {schema}) & DITA_NESTED_TYPES, schema
         assert all(c in graph for entry in graph.values() for c in entry["children"]), schema
+    # T4b: topics carry their mandatory <title>; a map's is optional.
+    for schema in ("topic", "concept", "task", "reference", "troubleshooting"):
+        assert derive_skeleton("DITA 1.3 Xpath2.0", schema)["titled"] == [schema]
+    assert derive_skeleton("DITA 1.3 Xpath2.0", "map")["titled"] == []
+    assert derive_skeleton("S1000D 4.2", "descript")["titled"] == []
     # The merged "DITA 1.3" schema itself is not a test schema.
     assert derive_skeleton("DITA 1.3 Xpath2.0", "DITA 1.3") is None
 
@@ -153,6 +158,7 @@ async def test_structure_and_cards_endpoints_for_dita(client):
     body = res.json()
     assert body["available"] is True
     assert body["skeleton"]["path"] == ["task", "taskbody", "steps", "step"]
+    assert body["skeleton"]["titled"] == ["task"]
     assert "cmd" in body["elements"]["step"]["children"]
     assert "type" in body["elements"]["note"]["attributes"]
     res = await client.get(

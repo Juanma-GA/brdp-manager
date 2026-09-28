@@ -45,15 +45,49 @@ the rule does not apply there.`;
 function placementLine(p, dita) {
   const allowed = p.allowedChildren.length > 0 ? p.allowedChildren.join(', ') : 'text only';
   const kind = dita ? 'topic type' : 'schema';
+  const titled = p.titled || [];
   if (!p.insertion) {
-    // T4: the rule checks the document's root element.
+    // T4: the rule checks the document's root element. T4b: a topic's
+    // <title> is mandatory, so the LLM writes it here.
     return `- ${kind} "${p.schema}": your content is the WHOLE document — the complete
-  <${p.root}> root element with everything inside it.
+  <${p.root}> root element with everything inside it.${
+      titled.includes(p.root) ? `
+  <${p.root}> starts with its required <title>.` : ''
+    }
   Allowed directly inside <${p.root}>: ${allowed}.`;
   }
+  // T4b: the skeleton's own <title> (a DITA topic's, mandatory).
+  const titleLine =
+    titled.length > 0
+      ? `
+  The application already writes the <title> of ${titled.map((n) => `<${n}>`).join(', ')}; never write another one there.`
+      : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
-  ${p.path.join('/')}.
+  ${p.path.join('/')}.${titleLine}
   Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.`;
+}
+
+// T4b: a rule whose context depends on the title of an element (for example
+// *[title = ('A', 'B')]//table) only runs on content under an element with
+// that title. In a real run the LLM put the title on the table itself
+// (table/title), so nothing matched and the test was inconclusive. The
+// example here is generic on purpose (never a real project's titles).
+const TITLE_DEPENDENT_RE = /\[[^\]]*(?<![@\w:$-])title\b/;
+
+export function ruleDependsOnTitle(matchExpressions = []) {
+  return matchExpressions.some((e) => TITLE_DEPENDENT_RE.test(e));
+}
+
+function titleDependentInstructions() {
+  return `
+
+THE RULE DEPENDS ON A TITLE: it only runs on content under an element whose
+<title> has a given value. In every example that must be checked, create
+inside your content an element that takes a title — for example a
+<section> — give it that <title>, and put the checked content inside it:
+  <section><title>Parts list</title><table>…</table></section>
+Never put that title on the checked element itself (never <table><title>…),
+and never rely on the topic's own title.`;
 }
 
 // T4: how each example is built, for the placements offered.
@@ -73,7 +107,9 @@ ${placements.map((p) => placementLine(p, dita)).join('\n')}`;
 }
 
 // `input`: { brdp, standard, format, ruleXml, contextSchemas, placements,
-// schemaFacts, previousReview } -- contextSchemas are the schemas of the
+// schemaFacts, previousReview, matchExpressions } -- matchExpressions (T4b)
+// are the rule's match expressions (ruleMatchExpressions), used to tell a
+// title-dependent context; contextSchemas are the schemas of the
 // rule's context blocks ([] for a general rule); placements (T2b) say where
 // each offered schema takes the LLM's content: [{ schema, role: 'rule' |
 // 'other', path, insertion, allowedChildren }]; schemaFacts the cards of the
@@ -81,7 +117,17 @@ ${placements.map((p) => placementLine(p, dita)).join('\n')}`;
 // "Review with the assistant" found the examples at fault): { explanation,
 // mismatches: [{ label, expected, got, content }] } -- the regeneration must
 // not repeat that mistake.
-export function buildRuleTestExamplesPrompt({ brdp, standard, format, ruleXml, contextSchemas = [], placements = [], schemaFacts = [], previousReview = null }) {
+export function buildRuleTestExamplesPrompt({
+  brdp,
+  standard,
+  format,
+  ruleXml,
+  contextSchemas = [],
+  placements = [],
+  schemaFacts = [],
+  previousReview = null,
+  matchExpressions = [],
+}) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
   const dita = format === 'SCH-DITA';
@@ -144,6 +190,8 @@ EACH EXAMPLE:
   accept example is otherwise similar, so the difference is easy to see.
 - No customer data, no real manufacturer names, part numbers or CAGE codes.
 - "label": a few words saying what the example shows.`;
+
+  if (ruleDependsOnTitle(matchExpressions)) prompt += titleDependentInstructions();
 
   prompt += buildSchemaFactsBlock(standard, schemaFacts);
 

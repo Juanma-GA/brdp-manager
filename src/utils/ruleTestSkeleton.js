@@ -138,6 +138,14 @@ export function schematronContexts(ruleXml) {
   return out;
 }
 
+// T4b: the expressions whose nodes the rule runs on -- its Schematron
+// contexts, or its BREX paths -- whitespace collapsed, for the correction
+// request about an example that touches none of them.
+export function ruleMatchExpressions(ruleXml) {
+  const contexts = schematronContexts(ruleXml);
+  return (contexts.length ? contexts : extractRuleXPaths(ruleXml || '')).map((e) => e.replace(/\s+/g, ' ').trim());
+}
+
 // An XSLT pattern that matches only the document's root element: "/*",
 // "/topic", "/*[not(parent::*)]".
 function isRootContext(alternative) {
@@ -232,16 +240,27 @@ function reachable(elements, from, target, maxDepth = 8) {
   return false;
 }
 
-// { path, insertion, allowedChildren } for one schema's structure
-// (GET /api/schema-cards/structure) and the rule's targets. A whole-document
-// example (the rule checks the root element) has an empty path and no
-// insertion point: the content is the complete root element.
+// { path, insertion, root, allowedChildren, titled } for one schema's
+// structure (GET /api/schema-cards/structure) and the rule's targets. A
+// whole-document example (the rule checks the root element) has an empty
+// path and no insertion point: the content is the complete root element.
+// titled (T4b): the elements of the path the application writes a <title>
+// into (a DITA topic's mandatory title, skeleton.titled) -- none when the
+// rule itself checks <title>, so a skeleton title never decides a verdict;
+// for a whole document, the root when the LLM has to write that title.
 export function placeExample(structure, targets) {
   const chain = structure.skeleton.path;
   const elements = structure.elements;
   const checked = (targets?.checked || []).filter((name) => elements[name]);
+  const skeletonTitled = checked.includes('title') ? [] : structure.skeleton.titled || [];
   if (targets?.wholeDocument || checked.includes(chain[0])) {
-    return { path: [], insertion: null, root: chain[0], allowedChildren: [...(elements[chain[0]]?.children || [])] };
+    return {
+      path: [],
+      insertion: null,
+      root: chain[0],
+      allowedChildren: [...(elements[chain[0]]?.children || [])],
+      titled: (structure.skeleton.titled || []).includes(chain[0]) ? [chain[0]] : [],
+    };
   }
 
   // The example that complies must be able to leave out what the rule
@@ -270,19 +289,35 @@ export function placeExample(structure, targets) {
     }
   }
   const insertion = chain[index];
-  return { path: chain.slice(0, index + 1), insertion, root: chain[0], allowedChildren: [...(elements[insertion]?.children || [])] };
+  const path = chain.slice(0, index + 1);
+  return {
+    path,
+    insertion,
+    root: chain[0],
+    allowedChildren: [...(elements[insertion]?.children || [])],
+    titled: path.filter((name) => skeletonTitled.includes(name)),
+  };
 }
 
 // ─── The complete fragment ──────────────────────────────────────────────────
 
 const indentOf = (n) => '  '.repeat(n);
 
+// The neutral text of a skeleton <title> (T4b). The examples are in
+// English, like the rest of the test fragments.
+export const SKELETON_TITLE_TEXT = 'Example topic';
+// Marks, in skeletonNodePaths, the text of a skeleton element (the title's),
+// so the panel dims it with its tags.
+export const SKELETON_TEXT_SUFFIX = '/text()';
+
 // { xml, skeletonNodePaths }: the skeleton path around the LLM's content.
 // S1000D: the root carries xsi:noNamespaceSchemaLocation with the schema's
 // URL in the project's form (flat/master), so a rule limited to that schema
 // applies. DITA: no schema location (a DITA document names its DTD/shell,
 // never an XSD URL), so the root gets no namespace declaration either.
-// A whole-document placement (empty path) is the content alone.
+// A whole-document placement (empty path) is the content alone. A titled
+// path element (placement.titled) gets <title>SKELETON_TITLE_TEXT</title>
+// as its first child, part of the skeleton.
 export function assembleExample({ standard, schema, schemaLocation, placement, content }) {
   const path = placement.path;
   const body = String(content ?? '').trim();
@@ -298,10 +333,17 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
   // <para> is exactly what the LLM wrote (string(.) value checks see no
   // added spaces). The panel re-indents for display.
   const last = path.length - 1;
+  const titled = new Set(placement.titled || []);
+  const title = `<title>${SKELETON_TITLE_TEXT}</title>`;
   const lines = [];
   path.forEach((name, i) => {
     const open = `${indentOf(i)}<${name}${i === 0 && rootAttrs.length ? ` ${rootAttrs.join(' ')}` : ''}>`;
-    lines.push(i === last ? `${open}${body}</${name}>` : open);
+    if (i === last) {
+      lines.push(`${open}${titled.has(name) ? title : ''}${body}</${name}>`);
+    } else {
+      lines.push(open);
+      if (titled.has(name)) lines.push(`${indentOf(i + 1)}${title}`);
+    }
   });
   for (let i = last - 1; i >= 0; i -= 1) lines.push(`${indentOf(i)}</${path[i]}>`);
   const skeletonNodePaths = [];
@@ -309,6 +351,11 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
   for (const name of path) {
     prefix += `/${name}[1]`;
     skeletonNodePaths.push(prefix);
+    if (titled.has(name)) {
+      // The LLM's content never holds a <title> at this level (the prompt
+      // says the application writes it), so the skeleton's is title[1].
+      skeletonNodePaths.push(`${prefix}/title[1]`, `${prefix}/title[1]${SKELETON_TEXT_SUFFIX}`);
+    }
   }
   return { xml: lines.join('\n'), skeletonNodePaths };
 }

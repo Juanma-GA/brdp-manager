@@ -14,6 +14,7 @@ import {
   buildCopyableTestPrompt,
   buildRuleTestCorrectionMessage,
   parseRuleTestResponse,
+  ruleDependsOnTitle,
   RULE_TEST_USER_MESSAGE,
 } from '../src/prompts/ruleTestExamplesPrompt.js';
 import {
@@ -34,6 +35,9 @@ import {
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
 import { analyzeRule } from '../src/utils/ruleTestEngine.js';
+import { exampleFailures, generateRuleTestExamples, missesRuleProblem } from '../src/utils/ruleTestRun.js';
+import { ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
+import XLSX from 'xlsx';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
 
@@ -478,6 +482,121 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const docDita = '<sch:pattern><sch:rule context="map"><sch:assert test="doc-available(\'a.dita\')">x</sch:assert></sch:rule></sch:pattern>';
   const docW = verifyWarning(approval({ rule_xml: docDita }), 'SCH-DITA', { parseXml });
   check('T4 verify: doc() on the ditamap → not executable, explained', docW.kind === 'not_executable' && !docW.canTestNow && docW.reason.code === 'external_document', JSON.stringify(docW));
+}
+
+// ─── T4b: examples the rule never runs on, DITA topic titles ────────────────
+{
+  const DITA = 'DITA 1.3 Xpath2.0';
+  const vocabDita = vocabOf('schema-vocabulary-dita.json');
+  const NOTE = '<sch:pattern id="p-note"><sch:rule context="note"><sch:assert id="N1" role="error" test="@type">Every note must declare @type.</sch:assert></sch:rule></sch:pattern>';
+  const topic = structureOf(DITA, 'topic');
+
+  // Part 2: the topic's mandatory <title> in the skeleton.
+  check('T4b skeleton: topic titled', JSON.stringify(topic.skeleton.titled) === '["topic"]', JSON.stringify(topic.skeleton));
+  check('T4b skeleton: task titled', JSON.stringify(structureOf(DITA, 'task').skeleton.titled) === '["task"]');
+  check('T4b skeleton: map not titled', structureOf(DITA, 'map').skeleton.titled.length === 0);
+  check('T4b skeleton: S1000D never titled', (structureOf('S1000D 4.2', 'descript').skeleton.titled || []).length === 0);
+  check('T4b skeleton: <title> allowed inside <topic> (DITA cards)', topic.elements.topic.children.includes('title') && topic.elements.title !== undefined);
+  const notePlacement = placeExample(topic, ruleTargets(NOTE));
+  check('T4b placement: titled path elements', JSON.stringify(notePlacement.titled) === '["topic"]', JSON.stringify(notePlacement));
+  const titleRule = '<sch:pattern><sch:rule context="topic/title"><sch:assert id="T" test="string-length(.) le 60">Title too long.</sch:assert></sch:rule></sch:pattern>';
+  check('T4b placement: a rule on <title> gets no skeleton title', placeExample(topic, ruleTargets(titleRule)).titled.length === 0);
+  const whole = placeExample(topic, ruleTargets('<sch:pattern><sch:rule context="/*"><sch:assert id="L" test="@xml:lang">x</sch:assert></sch:rule></sch:pattern>'));
+  check('T4b placement: whole document → the LLM writes the root title', JSON.stringify(whole.titled) === '["topic"]');
+  const assembled = assembleExample({ standard: DITA, schema: 'topic', placement: notePlacement, content: '<note type="tip"><p>Close the valve.</p></note>' });
+  check('T4b assembly: title first in the topic', assembled.xml === `<topic>\n  <title>${SKELETON_TITLE_TEXT}</title>\n  <body><note type="tip"><p>Close the valve.</p></note></body>\n</topic>`, assembled.xml);
+  check('T4b assembly: title is skeleton', assembled.skeletonNodePaths.includes('/topic[1]/title[1]') && assembled.skeletonNodePaths.includes('/topic[1]/title[1]/text()'));
+  const shortdescPlacement = placeExample(topic, ruleTargets('<sch:pattern><sch:rule context="shortdesc"><sch:assert id="SD" test="1">x</sch:assert></sch:rule></sch:pattern>'));
+  const inline = assembleExample({ standard: DITA, schema: 'topic', placement: shortdescPlacement, content: '<shortdesc>Short.</shortdesc>' });
+  check('T4b assembly: title inline before the content at the insertion point', inline.xml === `<topic><title>${SKELETON_TITLE_TEXT}</title><shortdesc>Short.</shortdesc></topic>`, inline.xml);
+  check('T4b assembly: the assembled topic passes the structural check', checkExampleStructure(parseXml(assembled.xml), topic).length === 0);
+  const lines = xmlDisplayLines(assembled.xml, [], parseXml, assembled.skeletonNodePaths);
+  const titleLine = lines.find((l) => l.segments.some((sg) => sg.text === SKELETON_TITLE_TEXT));
+  check('T4b display: skeleton title text dimmed', titleLine && titleLine.segments.every((sg) => sg.skeleton), JSON.stringify(titleLine));
+  const paraLines = xmlDisplayLines('<topic><body><p>Mine</p></body></topic>', [], parseXml, ['/topic[1]', '/topic[1]/body[1]']);
+  check('T4b display: content text never dimmed', paraLines.find((l) => l.segments.some((sg) => sg.text === 'Mine')).segments.find((sg) => sg.text === 'Mine').skeleton === false);
+
+  // Part 1: a reject example the rule never runs on.
+  const setupNote = setupFor(DITA, NOTE, ['topic']);
+  const exNoNote = [
+    { label: 'note with type', expected: 'accept', schema: 'topic', content: '<note type="tip"><p>Close the valve.</p></note>' },
+    { label: 'no note at all', expected: 'reject', schema: 'topic', content: '<p>Close the valve.</p>' },
+  ];
+  const miss = testRun(NOTE, exNoNote, setupNote, { format: 'SCH-DITA', vocab: vocabDita });
+  const problem = missesRuleProblem(exNoNote[1], miss.runs[1], NOTE);
+  check('T4b misses: message', problem === 'This example must contain a node matched by: `note`. Nothing in it matches, so the rule never runs.', problem);
+  check('T4b misses: accept example never flagged', missesRuleProblem(exNoNote[0], miss.runs[0], NOTE) === null);
+  const failures = exampleFailures(exNoNote, miss.materialized, miss.runs, { ruleXml: NOTE, standard: DITA });
+  check('T4b failures: only the reject example', failures.length === 1 && failures[0].index === 1 && failures[0].problems[0] === problem, JSON.stringify(failures));
+  const EMPH = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const brexMiss = testRun(EMPH, [{ label: 'r', expected: 'reject', schema: 'descript', content: 'No emphasis here.' }], setupFor('S1000D 4.2', EMPH, ['descript']));
+  check('T4b misses: BREX path', missesRuleProblem({ expected: 'reject' }, brexMiss.runs[0], EMPH) === 'This example must contain a node matched by: `//emphasis`. Nothing in it matches, so the rule never runs.');
+  const docRule = '<structureObjectRule><objectPath allowedObjectFlag="0">document("x.xml")//a</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const docRun = testRun(docRule, [{ label: 'r', expected: 'reject', schema: 'descript', content: 'x' }], setupFor('S1000D 4.2', docRule, ['descript']));
+  check('T4b misses: a not-executable run is never sent back', missesRuleProblem({ expected: 'reject' }, docRun.runs[0], docRule) === null);
+  check('T4b match expressions: Schematron contexts, whitespace collapsed', JSON.stringify(ruleMatchExpressions('<rule context="a\n   //b"><assert test="1">x</assert></rule>')) === '["a //b"]');
+
+  check('T4b title-dependent: *[title = …]', ruleDependsOnTitle(["*[title = ('A')]//table"]));
+  check('T4b title-dependent: section[title]', ruleDependsOnTitle(['section[normalize-space(title) = "x"]/p']));
+  check('T4b title-dependent: never @title, $title or a title step', !ruleDependsOnTitle(['p[@title]', 'p[$title = 1]', 'topic/title', 'fig[x:title]']));
+
+  // The real template rule BRDP-EXT-00001 (DITA XPath 3.0): the title goes
+  // on the table in the first answer, in a titled <section> after the
+  // correction round.
+  const wb = XLSX.read(fs.readFileSync(new URL('../public/brdp-template-dita-xpath3.xlsx', import.meta.url)));
+  const ext1 = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).find((r) => r.ID === 'BRDP-EXT-00001');
+  const DITA3 = 'DITA 1.3 Xpath3.0';
+  check('T4b EXT-00001: target is the row', ruleTargets(ext1.Rule).checked.join() === 'row', JSON.stringify(ruleTargets(ext1.Rule)));
+  const table = (title, cant) =>
+    `<table>${title ? `<title>${title}</title>` : ''}<tgroup cols="3"><colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/><thead><row><entry colname="c1">Part</entry><entry colname="c2">Descripción</entry><entry colname="c3">Cant.</entry></row></thead><tbody><row><entry colname="c1">P-100</entry><entry colname="c2">Seal</entry>${cant ? `<entry colname="c3">${cant}</entry>` : ''}</row></tbody></tgroup></table>`;
+  const onTable = (cant) => table('LISTA DE MATERIAL OBLIGATORIO', cant);
+  const inSection = (cant) => `<section><title>LISTA DE MATERIAL OBLIGATORIO</title>${table('', cant)}</section>`;
+  const first = JSON.stringify({ proposalMismatch: null, examples: [
+    { label: 'quantity given', expected: 'accept', schema: 'topic', content: onTable('2') },
+    { label: 'quantity missing', expected: 'reject', schema: 'topic', content: onTable('') },
+  ] });
+  const second = JSON.stringify({ proposalMismatch: null, examples: [
+    { label: 'quantity given', expected: 'accept', schema: 'topic', content: inSection('2') },
+    { label: 'quantity missing', expected: 'reject', schema: 'topic', content: inSection('') },
+  ] });
+  const asked = [];
+  const result = await generateRuleTestExamples({
+    ruleXml: ext1.Rule,
+    format: 'SCH-DITA',
+    standard: DITA3,
+    schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00001', title: ext1.Title || '', definition: ext1.Definition || '', proposal: ext1.Proposal || '' },
+    vocabulary: vocabDita,
+    parseXml,
+    ask: async (messages, systemPrompt) => {
+      asked.push({ messages, systemPrompt });
+      return asked.length === 1 ? first : second;
+    },
+    fetchSchemaCards: async (_std, names) => ({ cards: {}, document_schemas: ['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'], element_schemas: Object.fromEntries(names.map((n) => [n, ['topic', 'task', 'map'].filter((t) => structureOf(DITA, t).elements[n])])) }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
+  });
+  check('T4b EXT-00001: prompt says the rule depends on a title', asked[0].systemPrompt.includes('THE RULE DEPENDS ON A TITLE'));
+  check('T4b EXT-00001: prompt never quotes a real title as the example', asked[0].systemPrompt.includes('<section><title>Parts list</title><table>…</table></section>'));
+  check('T4b EXT-00001: one correction round asked', asked.length === 2 && asked[1].messages.at(-1).content.includes('This example must contain a node matched by: `*[title = ('), asked[1]?.messages.at(-1).content);
+  check('T4b EXT-00001: correction names only the reject example', asked[1].messages.at(-1).content.includes('Example 2 ("quantity missing")') && !asked[1].messages.at(-1).content.includes('Example 1 '));
+  check('T4b EXT-00001: fixed', result.status === 'ready' && result.correction.attempted === 1 && result.correction.fixed === 1, JSON.stringify(result.correction));
+  check('T4b EXT-00001: reject example now in a titled section', result.examples[1].content.startsWith('<section><title>LISTA DE MATERIAL OBLIGATORIO</title><table>'));
+  check('T4b EXT-00001: reject example rejected', result.runs[1].result.status === 'rejected' && result.runs[1].result.selectedNodePaths.length > 0, JSON.stringify(result.runs[1].result));
+  check('T4b EXT-00001: topic title in the assembled document', result.examples[1].xml.startsWith(`<topic>\n  <title>${SKELETON_TITLE_TEXT}</title>`), result.examples[1].xml);
+  const verdict = ruleTestVerdict(result.examples, result.runs, analyzeRule(ext1.Rule, 'SCH-DITA', { parseXml }));
+  check('T4b EXT-00001: verdict correct', verdict.kind === 'correct', JSON.stringify(verdict));
+
+  // Still nothing selected after the round → inconclusive, as before.
+  const stubborn = await generateRuleTestExamples({
+    ruleXml: ext1.Rule, format: 'SCH-DITA', standard: DITA3, schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00001', title: '', definition: '', proposal: '' },
+    vocabulary: vocabDita, parseXml,
+    ask: async () => first,
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['topic'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
+  });
+  const stubbornVerdict = ruleTestVerdict(stubborn.examples, stubborn.runs, analyzeRule(ext1.Rule, 'SCH-DITA', { parseXml }));
+  check('T4b EXT-00001: still nothing → 0 of 1 fixed, inconclusive', stubborn.correction.fixed === 0 && stubbornVerdict.kind === 'inconclusive', JSON.stringify({ c: stubborn.correction, v: stubbornVerdict }));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

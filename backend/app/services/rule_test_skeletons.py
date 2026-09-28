@@ -45,7 +45,8 @@ DITA (T4): the DITA cards are one merged schema ("DITA 1.3"), so the
           figures, lists, …): <step> for task (task/taskbody/steps/step), the
           type's body for the others (topic/body, concept/conbody,
           reference/refbody, troubleshooting/troublebody), the root alone
-          for map.
+          for map. A topic's mandatory <title> is listed in "titled" (T4b):
+          the client writes it as the root's first child.
 
 Every link of every derived skeleton is re-checked against the cards by
 backend/tests/test_rule_test_skeletons.py.
@@ -109,6 +110,8 @@ DITA_SKELETON_EXCLUDED = frozenset({
     "refbodydiv", "bodydiv", "conbodydiv", "div", "section", "prereq", "context", "result", "postreq",
 })
 DITA_INSERTION_TARGET = {"task": "step"}
+# Topic types whose <title> is mandatory (T4b); a map's title is optional.
+DITA_TITLED_TYPES = frozenset({"topic", "concept", "task", "reference", "troubleshooting"})
 
 
 def is_dita_standard(standard: str) -> bool:
@@ -238,7 +241,7 @@ def derive_skeleton(standard: str, schema: str) -> dict | None:
     derivation = "para"
     if path is None:
         path, derivation = _body_path(graph, root)
-    return {"root": root, "path": path, "insertion": path[-1], "derivation": derivation}
+    return {"root": root, "path": path, "insertion": path[-1], "derivation": derivation, "titled": []}
 
 
 def _dita_skeleton(graph: dict[str, dict], root: str) -> dict:
@@ -246,9 +249,14 @@ def _dita_skeleton(graph: dict[str, dict], root: str) -> dict:
         (c for c in graph[root]["children"] if c.endswith("body")), None
     )
     path = _path_to_para(graph, root, target, DITA_SKELETON_EXCLUDED) if target else None
+    # T4b: a DITA topic's <title> is mandatory (a map's is optional), so the
+    # skeleton gives the root its title -- only when the root really takes
+    # one in its graph.
+    titled = [root] if root in DITA_TITLED_TYPES and "title" in graph[root]["children"] else []
     if path is None:
-        return {"root": root, "path": [root], "insertion": root, "derivation": "root"}
-    return {"root": root, "path": path, "insertion": path[-1], "derivation": "body" if target != "step" else "step"}
+        return {"root": root, "path": [root], "insertion": root, "derivation": "root", "titled": titled}
+    derivation = "body" if target != "step" else "step"
+    return {"root": root, "path": path, "insertion": path[-1], "derivation": derivation, "titled": titled}
 
 
 def get_element_schemas(standard: str, names: list[str]) -> dict[str, list[str]]:
