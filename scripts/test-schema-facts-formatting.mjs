@@ -296,5 +296,16 @@ assert(realBlock.includes("Differences by schema (beyond what is common to all")
   assert(!block.includes("additional attributes"), "attributes by schema: never 'additional attributes'");
 }
 
+// C3, Part 4: the "schema card" line, Ask only (userFacingName).
+{
+  const entry = { variants: [{ schemas: ["descript"], attributes: [], children: ["emphasis"], resolved: true }], parents: ["levelledPara"] };
+  const line = "The user does not see this block by that name; if you refer to it, call it the schema card.";
+  const withName = buildSchemaFactsBlock("S1000D 4.2", [{ name: "para", entry }], { coverageNote: false, userFacingName: true });
+  const without = buildSchemaFactsBlock("S1000D 4.2", [{ name: "para", entry }]);
+  assert(withName.includes(`own knowledge.\n${line}\n<para>`), "userFacingName: the schema-card line right after the header, before the facts");
+  assert(!without.includes("schema card"), "default (Suggest Rule, rule test): no schema-card line");
+  assert(buildSchemaFactsBlock("S1000D 4.2", [], { userFacingName: true }) === "", "no facts: no block, no line");
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

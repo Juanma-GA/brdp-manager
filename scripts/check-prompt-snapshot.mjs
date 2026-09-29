@@ -267,6 +267,12 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // and its language line (V5). All 7 ask, 9 suggestRule, 9
 // ruleTestExamples and 2 ruleTestReview cases change; suggestDefinition
 // and suggestProposal are unchanged.
+//
+// C3, Parte 4: Ask's SCHEMA FACTS header gains one line (buildSchemaFactsBlock's
+// userFacingName option, Ask only): "The user does not see this block by that
+// name; if you refer to it, call it the schema card." -- a real answer said
+// "(ver diferencias en SCHEMA FACTS)". Only the 3 ask cases that carry schema
+// facts change; every other module is unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

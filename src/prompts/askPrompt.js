@@ -76,7 +76,7 @@ and suggest looking the concept up in the ${standard} specification.`;
   // The paragraph above already says what to do when the facts do not
   // cover the question, so the block's own closing sentence is left out
   // here (Suggest Rule and the rule test keep it).
-  prompt += buildSchemaFactsBlock(standard, schemaFacts, { coverageNote: false });
+  prompt += buildSchemaFactsBlock(standard, schemaFacts, { coverageNote: false, userFacingName: true });
 
   prompt += `
 

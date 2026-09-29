@@ -154,6 +154,7 @@ async function main() {
     let req = await lastMockRequest();
     let sys = req.messages.find((m) => m.role === "system").content;
     assert(sys.includes("SCHEMA FACTS — extracted from the official S1000D 4.2 schema."), "prompt carries the SCHEMA FACTS header for S1000D 4.2");
+    assert(sys.includes("The user does not see this block by that name; if you refer to it, call it the schema card."), "C3: Ask tells the model to call the block the schema card");
     assert(sys.includes("<table> (schemas:"), "prompt names <table> with its schemas list");
     assert(sys.includes("@frame [top|bottom|topbot|all|sides|none]"), "prompt's @frame enum matches the real XSD exactly");
     assert(sys.includes("children: graphic, tgroup, title") || sys.includes("children: title, tgroup, graphic") || /children: [a-z, ]*graphic[a-z, ]*tgroup[a-z, ]*title/.test(sys) || /children:.*table.*/.test(sys) === false, "prompt lists table's real children");

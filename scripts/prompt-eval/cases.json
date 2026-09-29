@@ -1592,7 +1592,7 @@
         {
           "type": "not_contains",
           "pattern": "SCHEMA FACTS",
-          "note": "no cita el nombre interno del bloque de fichas (solo para medir)"
+          "note": "obligatorio (C3): nunca cita el nombre interno del bloque de fichas; el prompt de Ask dice llamarlo \"schema card\""
         }
       ]
     },
@@ -1644,7 +1644,7 @@
         {
           "type": "not_contains",
           "pattern": "SCHEMA FACTS",
-          "note": "no cita el nombre interno del bloque de fichas (solo para medir)"
+          "note": "obligatorio (C3): nunca cita el nombre interno del bloque de fichas; el prompt de Ask dice llamarlo \"schema card\""
         }
       ]
     },
@@ -1685,7 +1685,7 @@
         {
           "type": "not_contains",
           "pattern": "SCHEMA FACTS",
-          "note": "no cita el nombre interno del bloque de fichas (solo para medir)"
+          "note": "obligatorio (C3): nunca cita el nombre interno del bloque de fichas; el prompt de Ask dice llamarlo \"schema card\""
         }
       ]
     },

@@ -156,16 +156,21 @@ export function formatSchemaFactAttributeList(attrs) {
 // stay attached to whichever per-variant list they actually describe
 // (never claimed for the computed common set, which is exact given the
 // data available).
+// `userFacingName: true` (Ask only, C3 Part 4) adds one line: the user
+// never sees the name "SCHEMA FACTS" (a real answer said "ver diferencias en
+// SCHEMA FACTS"), so the answer must call it the schema card -- the card
+// shown under the answer.
 // `coverageNote: false` leaves out the header's last sentence ("If the facts
 // do not cover what is asked…") for a prompt that already says it in its
 // own words (Ask).
-export function buildSchemaFactsBlock(standard, schemaFacts, { coverageNote = true } = {}) {
+export function buildSchemaFactsBlock(standard, schemaFacts, { coverageNote = true, userFacingName = false } = {}) {
   if (!schemaFacts || schemaFacts.length === 0) return '';
   let block = `\n\nSCHEMA FACTS — extracted from the official ${standard} schema. These are
 authoritative: for questions about which attributes, values, child
 elements or parent elements are allowed, rely on these facts over your
 own knowledge.${coverageNote ? ` If the facts do not cover what is asked, say so plainly
-instead of guessing.` : ''}`;
+instead of guessing.` : ''}${userFacingName ? `
+The user does not see this block by that name; if you refer to it, call it the schema card.` : ''}`;
   for (const { name, entry } of schemaFacts) {
     const summary = summarizeSchemaFactEntry(entry);
     const parentsText = formatSchemaFactNameList(entry.parents, entry.parents_truncated, entry.parents_omitted);
