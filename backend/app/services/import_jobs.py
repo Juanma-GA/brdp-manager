@@ -62,6 +62,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.approvals import _rule_state, _wrap_rule_xml_fragment, _xml_well_formed_error
+from app.services.rule_wrappers import unwrap_rule_xml
 from app.api.routes.brdps import _HISTORY_FIELDS
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, ImportJob, Project, RuleApproval, User
@@ -312,11 +313,17 @@ def _classify_row(
     # the file's Rule and what's stored don't cry wolf. A brand-new BRDP
     # (action == "create") never reaches here with existing_approval set,
     # so it can never trigger this on its own.
+    # Both sides without legacy wrappers (rule_wrappers.py): the rule is
+    # stored clean, so a file that only differs from it by a <rules> or
+    # <structureObjectRuleGroup> around the same rules is not a new rule.
     rule_override = (
         action == "update"
         and existing_approval is not None
         and bool(rule_xml)
-        and not _rule_xml_structurally_equal(existing_approval.rule_xml, rule_xml)
+        and not _rule_xml_structurally_equal(
+            unwrap_rule_xml(existing_approval.rule_xml, rule_format)[0],
+            unwrap_rule_xml(rule_xml, rule_format)[0],
+        )
     )
 
     return ImportRowResult(
@@ -599,7 +606,12 @@ async def run_import_job(
                 if existing_approval is None:
                     existing_approval = RuleApproval(brdp_id=brdp.id, format=rule_format)
                     work_session.add(existing_approval)
-                existing_approval.rule_xml = row.rule
+                # Stored without legacy wrappers (a <rules> or a bare
+                # <structureObjectRuleGroup> around the rules): the format
+                # check and the rule test only accept the rules themselves,
+                # and Generate never used the wrapper anyway. A rule with no
+                # wrapper is stored exactly as in the file.
+                existing_approval.rule_xml = unwrap_rule_xml(row.rule, rule_format)[0]
                 existing_approval.source = "manual"
                 existing_approval.status = new_status
                 existing_approval.approved_at = datetime.now(timezone.utc) if new_status == "approved" else None

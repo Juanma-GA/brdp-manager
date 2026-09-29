@@ -1,5 +1,6 @@
 import { getApprovalsForFormat } from "./approvals.js";
 import { wrapRuleXmlFragment } from "../utils/ruleXmlFragment.js";
+import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
 
 let _schemaSummaryCache = null;
 
@@ -289,43 +290,30 @@ function assembleChunks(baseDoc, approvedRules) {
 
   for (const { id, xml } of approvedRules) {
     if (!xml || !xml.trim()) continue;
-    const root = parseRuleFragment(id, xml);
+    // Well-formedness first, attributed to this BRDP.
+    parseRuleFragment(id, xml);
 
     // Real hand-authored rule_xml (confirmed against the actual Lufthansa
     // 78-BRDP dataset) doesn't always put structureObjectRule/
     // nonContextRule as DIRECT children of the fragment -- some rows wrap
     // them in an extra container of their own (a bare <rules>, or even a
-    // stray <structureObjectRuleGroup>) that has no meaning here and was
-    // never part of any schema for this fragment shape. The old regex
-    // extraction never cared about nesting depth at all -- it matched
-    // these tags wherever they appeared in the raw text -- so
-    // querySelectorAll (any depth) is used here rather than root.children
-    // (one level only) to preserve that same tolerance; using children
-    // instead silently dropped every rule buried in such a wrapper.
-    //
-    // rulesContext="" (empty) is buildEmptyDocument()'s own generic
-    // container, never something an approved rule_xml fragment should
-    // produce on its own -- requiring a non-empty value keeps a stray/
-    // empty rulesContext in a fragment from ever being confused with the
-    // skeleton's container.
-    const contextBlocks = Array.from(root.querySelectorAll('contextRules')).filter((el) =>
-      el.getAttribute('rulesContext')
-    );
-    contextBlocks.forEach((el) => contextRulesNodes.push(el));
-
-    // A structureObjectRule/nonContextRule that legitimately lives INSIDE
-    // one of the contextRules blocks just extracted (its own
-    // structureObjectRuleGroup) must not also be picked up a second time
-    // as a "loose" rule -- removed from a scratch clone first, mirroring
-    // the old code's own two-phase approach (extract contextRules blocks,
-    // strip them out of the text, THEN scan what's left for loose rules).
-    const scratch = root.cloneNode(true);
-    Array.from(scratch.querySelectorAll('contextRules'))
-      .filter((el) => el.getAttribute('rulesContext'))
-      .forEach((el) => el.remove());
-
-    Array.from(scratch.querySelectorAll('structureObjectRule')).forEach((el) => structureNodes.push(el));
-    Array.from(scratch.querySelectorAll('nonContextRule')).forEach((el) => nonContextNodes.push(el));
+    // stray <structureObjectRuleGroup>) that has no meaning here. The
+    // fragment is taken apart by splitRuleXmlPieces (src/utils/
+    // ruleWrappers.js, the same scan the Excel import and
+    // normalize_rule_wrappers.py use to store rules clean): complete
+    // <contextRules rulesContext="..."> blocks whole (nothing inside them
+    // taken again as a loose rule), and every structureObjectRule /
+    // nonContextRule wherever it sits. rulesContext="" (empty) is
+    // buildEmptyDocument()'s own generic container, so a <contextRules>
+    // with an empty or missing rulesContext is only a wrapper, never a
+    // block. Each piece is parsed on its own.
+    for (const piece of splitRuleXmlPieces(xml, 'BREX-4.2')) {
+      if (piece.kind === 'comment') continue;
+      const node = parseRuleFragment(id, piece.text).firstElementChild;
+      if (piece.kind === 'block') contextRulesNodes.push(node);
+      else if (piece.kind === 'rule') structureNodes.push(node);
+      else nonContextNodes.push(node);
+    }
   }
 
   if (!structureNodes.length && !nonContextNodes.length && !contextRulesNodes.length) return baseDoc;

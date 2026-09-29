@@ -1,5 +1,6 @@
 import { extractXML, checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
+import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
 
 let _schemaSummaryCache41 = null;
 
@@ -170,35 +171,21 @@ function assembleChunks41(baseXml, additionalRules) {
   // S1000D 4.1 allows multiple <contextRules rulesContext="..."> as
   // siblings under <brex> (brex4.1.xsd: contextRules maxOccurs="unbounded",
   // same as 4.2), each scoped to a specific schema. See assembleChunks()
-  // in generateBREX.js for the full rationale (identical here) -- extract
-  // any complete blocks FIRST so their nested content never leaks into the
-  // loose-rule extraction below. rulesContext="[^"]+" (non-empty) keeps
-  // this from ever matching buildEmptyDocument41()'s own generic
-  // <contextRules rulesContext=""> (empty value).
+  // in generateBREX.js for the full rationale (identical here). The rules
+  // are taken apart by splitRuleXmlPieces (src/utils/ruleWrappers.js, the
+  // same scan the Excel import and normalize_rule_wrappers.py use to store
+  // them clean): complete context blocks whole, and every loose
+  // structureObjectRule / nonContextRule wherever it sits, so a legacy
+  // wrapper (<rules>, a bare <structureObjectRuleGroup>) never hides one.
+  // A <contextRules> with an empty rulesContext is not a block (it would be
+  // the generic container), only a wrapper.
   const contextRulesBlocks = [];
-  const contextRulesPattern = /<contextRules\b[^>]*\brulesContext="[^"]+"[^>]*>[\s\S]*?<\/contextRules>/g;
-  let crMatch;
-  while ((crMatch = contextRulesPattern.exec(additionalRules)) !== null) {
-    contextRulesBlocks.push(crMatch[0]);
-  }
-  const looseRulesText = additionalRules.replace(contextRulesPattern, '');
-
-  // Extraer structureObjectRule sueltos (igual que antes, sobre el texto ya
-  // sin los bloques con contexto). (?![a-zA-Z]) anchor: same real bug/fix
-  // as generateBREX.js's assembleChunks().
   const structureRules = [];
-  const rulePattern = /<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/g;
-  let match;
-  while ((match = rulePattern.exec(looseRulesText)) !== null) {
-    structureRules.push(match[0]);
-  }
-
-  // Extraer nonContextRule sueltos de los chunks (same anchor rationale --
-  // "<nonContextRule" is also a literal prefix of "<nonContextRules>").
   const nonContextRules = [];
-  const nonContextPattern = /<nonContextRule(?![a-zA-Z])[\s\S]*?<\/nonContextRule>/g;
-  while ((match = nonContextPattern.exec(looseRulesText)) !== null) {
-    nonContextRules.push(match[0]);
+  for (const piece of splitRuleXmlPieces(additionalRules, 'BREX-4.1')) {
+    if (piece.kind === 'block') contextRulesBlocks.push(piece.text);
+    else if (piece.kind === 'rule') structureRules.push(piece.text);
+    else if (piece.kind === 'noncontext') nonContextRules.push(piece.text);
   }
 
   const cleanedStructure = structureRules.join('\n');

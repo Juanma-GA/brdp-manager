@@ -1414,8 +1414,9 @@ export function invalidRuleXPaths(ruleXml) {
 // format (<sch:pattern> in a BREX project) says which format it belongs to.
 // An unknown format is not checked. The backend applies the same check on
 // PUT …/approvals/{format} (backend/app/services/rule_format_check.py --
-// keep both in sync); the Excel import does not (lint-curated-templates
-// reports existing rows).
+// keep both in sync); the Excel import does not reject with it, but stores a
+// rule without legacy wrappers (src/utils/ruleWrappers.js and its backend
+// twin), and lint-curated-templates reports anything else.
 const RULE_FORMAT_SHAPES = {
   'BREX-4.2': { label: 'BREX 4.2', rules: ['structureObjectRule', 'nonContextRule'], blocks: { contextRules: 'structureObjectRule' }, expected: 'structureObjectRule' },
   'BREX-4.1': { label: 'BREX 4.1', rules: ['structureObjectRule', 'nonContextRule'], blocks: { contextRules: 'structureObjectRule' }, expected: 'structureObjectRule' },

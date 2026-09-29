@@ -19,8 +19,11 @@ allowed shapes:
 
 Comments are always allowed next to the rule; loose text and any other
 top-level element are not. An unknown format is not checked. The Excel
-import does not apply this check (existing rows are reported by
-scripts/lint-curated-templates.mjs instead).
+import does not reject a row with this check, but it stores a rule without
+legacy wrappers (<rules>, a bare <structureObjectRuleGroup> -- see
+rule_wrappers.py, which scripts/normalize_rule_wrappers.py applies to what is
+already stored); anything else is reported by scripts/report_invalid_rules.py
+and scripts/lint-curated-templates.mjs.
 """
 
 from dataclasses import dataclass

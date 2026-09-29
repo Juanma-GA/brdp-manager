@@ -1,5 +1,6 @@
 import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
+import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
 
 let _schemaSummaryCache301 = null;
 
@@ -176,35 +177,22 @@ function assembleChunks301(baseXml, additionalRules) {
   // same mechanism as 4.x's contextRules/rulesContext, just lowercase
   // element/attribute names and "context" instead of "rulesContext". Not
   // dead code: this is the real 3.0.1 equivalent, not an assumption.
-  // Extracted FIRST from the raw text, same rationale as generateBREX.js's
-  // assembleChunks() -- so their nested <objrule> content never leaks into
-  // the loose-piece extraction below. context="[^"]+" (non-empty) keeps
-  // this from ever matching buildEmptyDocument301()'s own generic
-  // <contextrules> (which here doesn't carry the attribute at all).
+  // The rules are taken apart by splitRuleXmlPieces (src/utils/
+  // ruleWrappers.js, the same scan the Excel import and
+  // normalize_rule_wrappers.py use to store them clean): complete
+  // <contextrules context="..."> blocks whole (a <contextrules> without a
+  // context is the generic container, only a wrapper), and every objrule
+  // and nonContextRule comment wherever it sits, in document order
+  // (traceability), so a legacy wrapper (<rules>, a bare <structrules>)
+  // never hides one.
   const contextRulesBlocks = [];
-  const contextRulesPattern = /<contextrules\b[^>]*\bcontext="[^"]+"[^>]*>[\s\S]*?<\/contextrules>/g;
-  let crMatch;
-  while ((crMatch = contextRulesPattern.exec(additionalRules)) !== null) {
-    contextRulesBlocks.push(crMatch[0]);
-  }
-  const looseRulesText = additionalRules.replace(contextRulesPattern, '');
-  const contextRulesSiblings = contextRulesBlocks.length ? '\n' + contextRulesBlocks.join('\n') : '';
-
-  // Extrae objrule Y comentarios nonContextRule en orden de documento
-  // (preserva trazabilidad), sobre el texto ya sin los bloques con
-  // contexto extraídos arriba. No anchor needed here (unlike
-  // structureObjectRule/structureObjectRuleGroup in 4.x): confirmed
-  // against brex.xsd that no element name extends "objrule" (no
-  // "objruleGroup" or similar exists in 3.0.1), so "<objrule" can never
-  // accidentally match as a prefix of something else.
-  const piecePattern = /<objrule[\s\S]*?<\/objrule>|<!--\s*nonContextRule[\s\S]*?-->/g;
   const pieces = [];
-  let m;
-  while ((m = piecePattern.exec(looseRulesText)) !== null) {
-    let piece = m[0];
-    if (piece.startsWith('<!--')) piece = sanitizeNonContextComments301(piece);
-    pieces.push(piece);
+  for (const piece of splitRuleXmlPieces(additionalRules, 'BREX-3.0.1')) {
+    if (piece.kind === 'block') contextRulesBlocks.push(piece.text);
+    else if (piece.kind === 'rule') pieces.push(piece.text);
+    else if (piece.kind === 'noncontext') pieces.push(sanitizeNonContextComments301(piece.text));
   }
+  const contextRulesSiblings = contextRulesBlocks.length ? '\n' + contextRulesBlocks.join('\n') : '';
   if (!pieces.length && !contextRulesBlocks.length) return baseXml;
 
   // Insertar las piezas sueltas justo antes de </structrules> para

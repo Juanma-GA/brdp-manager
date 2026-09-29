@@ -8,6 +8,9 @@ Excel import (which does not apply it), may still be in the database. This
 script lists them -- project, BRDP, format, rule status and the reason --
 using the same check_rule_format() as the save endpoint. It changes nothing:
 fixing a rule is a decision for the project's editors, in the interface.
+Legacy wrappers (<rules>, a bare <structureObjectRuleGroup> around the rules)
+are removed by scripts/normalize_rule_wrappers.py instead; after it runs,
+none of them should be listed here.
 
     cd backend && .venv/bin/python scripts/report_invalid_rules.py
 
