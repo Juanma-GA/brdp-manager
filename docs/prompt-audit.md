@@ -72,6 +72,8 @@ No son instrucciones, pero forman parte del comportamiento:
 
 **Candidatas a eliminar por las preguntas estructurales deterministas (C1 y C2 Parte 3)**: A5 y A8. Además, A3 y A7 han perdido su caso protector y conviene reponerlo con un caso abierto.
 
+**Decisión (C2b, antes de la pasada de referencia)**: A5 y A8 no se eliminan sin más; en la Parte 5 de la Entrega 2 se sustituyen por una sola frase que conserva la correspondencia pregunta → relación: "Answer only what is asked: contain/inside it → its children, where/in which → its parents. Do not list schema facts nobody asked for; never dump long lists of names — the full lists are in the card shown to the user." La protege `ask-open-question-no-dump` (`max_names`, `no_parent_as_child`).
+
 ---
 
 ## 2. Suggest Definition — `src/prompts/suggestDefinitionPrompt.js`

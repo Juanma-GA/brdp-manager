@@ -1587,6 +1587,11 @@
         {
           "type": "language",
           "expect": "es"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "SCHEMA FACTS",
+          "note": "no cita el nombre interno del bloque de fichas (solo para medir)"
         }
       ]
     },
@@ -1634,6 +1639,11 @@
         {
           "type": "manual",
           "note": "If the answer lists where <refs> can go, it should say the list is partial ('among others') without counting what is missing."
+        },
+        {
+          "type": "not_contains",
+          "pattern": "SCHEMA FACTS",
+          "note": "no cita el nombre interno del bloque de fichas (solo para medir)"
         }
       ]
     },
@@ -1664,6 +1674,17 @@
           "type": "max_names",
           "max": 15,
           "note": "no dump of the parent/child lists: at most 15 distinct <name>s"
+        },
+        {
+          "type": "no_parent_as_child",
+          "element": "para",
+          "standard": "S1000D 4.2",
+          "note": "no presenta como hijos de <para> elementos que solo son sus padres (A5/A8)"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "SCHEMA FACTS",
+          "note": "no cita el nombre interno del bloque de fichas (solo para medir)"
         }
       ]
     },
@@ -1715,7 +1736,8 @@
             "±\\s*2\\s*%"
           ],
           "flags": "i",
-          "note": "no copia los valores de otro proyecto (P3): 90 días / ±2% del precedente BRDP-EVAL-SP-C2B-REF-01"
+          "note": "no copia los valores de otro proyecto (P3): 90 días / ±2% del precedente BRDP-EVAL-SP-C2B-REF-01",
+          "ignorePlaceholders": true
         },
         {
           "type": "not_contains_any",
@@ -1723,7 +1745,8 @@
             "\\b5 (years|años)\\b"
           ],
           "flags": "i",
-          "note": "no copia los valores de otro proyecto (P3): 5 años del precedente BRDP-EVAL-SP-C2B-REF-02"
+          "note": "no copia los valores de otro proyecto (P3): 5 años del precedente BRDP-EVAL-SP-C2B-REF-02",
+          "ignorePlaceholders": true
         }
       ]
     },

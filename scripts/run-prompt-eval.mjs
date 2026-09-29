@@ -69,6 +69,7 @@ import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
 import { validateXML } from "xmllint-wasm";
+import { distinctSchemaNames, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
@@ -327,18 +328,31 @@ async function runCheck(check, answer, ctx = {}) {
       const r = usesObjectValue(ctx.xml || "");
       return { status: r.ok ? "pass" : "fail", detail: r.detail };
     }
+    case "no_parent_as_child": {
+      // C2b: an answer that describes what goes INSIDE check.element must
+      // not name the element's parents as its children. Children/parents
+      // come from the standard's schema cards (any variant); see
+      // parentsPresentedAsChildren in prompt-eval/checks.mjs for which
+      // sentences count.
+      const standard = check.standard || ctx.standard;
+      const r = parentsPresentedAsChildren(answer, check.element, loadSchemaCards(standard), ctx.vocabulary || loadSchemaVocabulary(standard));
+      if (!r.available) return { status: "fail", detail: `no schema card for <${check.element}> in ${standard}` };
+      return {
+        status: r.offenders.length ? "fail" : "pass",
+        detail: r.offenders.length
+          ? `presented as children of <${check.element}> but only its parents: ${r.offenders.map((n) => `<${n}>`).join(", ")}`
+          : `${r.units.length} sentence(s) about what <${check.element}> contains, no parent presented as a child`,
+      };
+    }
     default:
-      return runTextCheck(check, target, flags);
+      // C2b: ignorePlaceholders -- the text check looks at the answer with
+      // every "[…]" placeholder emptied (UNFILLED_MARKER_RE), so a value
+      // offered as an example inside a placeholder is allowed.
+      return runTextCheck(check, check.ignorePlaceholders ? stripPlaceholders(target) : target, flags, ctx);
   }
 }
 
-function distinctElementNames(text) {
-  const names = new Set();
-  for (const m of String(text).matchAll(/<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?:\s[^<>]*)?\/?>/gu)) names.add(m[1]);
-  return [...names];
-}
-
-function runTextCheck(check, answer, flags) {
+function runTextCheck(check, answer, flags, ctx = {}) {
   switch (check.type) {
     case "contains": {
       const re = new RegExp(check.pattern, flags);
@@ -367,11 +381,13 @@ function runTextCheck(check, answer, flags) {
     }
     case "max_names": {
       // C2b: an answer must not dump long lists of schema names. Counts the
-      // DISTINCT element names written as <name> (or </name>, <name/>) in
-      // the answer -- the same name several times counts once.
-      const names = distinctElementNames(answer);
+      // DISTINCT schema names the answer mentions in any form -- <x>, *x*,
+      // **x**, `x`, @x, or a bare camelCase word -- when they are in the
+      // standard's vocabulary (<x> always counts). The same name several
+      // times counts once.
+      const names = distinctSchemaNames(answer, ctx.vocabulary);
       const shown = names.slice(0, 20).join(", ") + (names.length > 20 ? ", …" : "");
-      return { status: names.length <= check.max ? "pass" : "fail", detail: `${names.length} distinct <name>(s), max ${check.max}${names.length ? ": " + shown : ""}` };
+      return { status: names.length <= check.max ? "pass" : "fail", detail: `${names.length} distinct schema name(s), max ${check.max}${names.length ? ": " + shown : ""}` };
     }
     case "language": {
       const detected = detectLanguage(answer);
