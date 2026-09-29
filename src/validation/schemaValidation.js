@@ -989,6 +989,12 @@ export function checkExampleStructure(doc, structure) {
 //                                             column spanned from above
 //   { kind: 'morerowsPastEnd', row, column } -- the span of row N's entry
 //                                             runs past the last row
+//   { kind: 'rowFullyCovered', row }        -- every entry of row N sits in
+//                                             a spanned column (or the row
+//                                             has none and is fully spanned):
+//                                             removing them would leave an
+//                                             empty <row>, so this replaces
+//                                             the row's spannedEntry problems
 // `row` is 1-based within its thead/tbody/tfoot; `column` is the colspec's
 // colname, or c1, c2… by position when the table has no colspecs.
 // Columns come from @colname / @namest–@nameend when the entry has them
@@ -1036,6 +1042,7 @@ function calsSpanProblems(doc) {
           };
           const free = cols - spanned[r].size;
           const overfull = entries.length > free;
+          const rowProblems = [];
           let cursor = 0;
           entries.forEach((entry, e) => {
             let span = named(entry);
@@ -1051,19 +1058,26 @@ function calsSpanProblems(doc) {
             cursor = span.end + 1;
             for (let c = span.start; c <= span.end; c += 1) {
               if (spanned[r].has(c)) {
-                problems.push({ kind: 'spannedEntry', row: r + 1, column: label(c), entry });
+                rowProblems.push({ kind: 'spannedEntry', row: r + 1, column: label(c), entry });
                 break;
               }
             }
             const more = intAttr(entry, 'morerows');
             for (let k = 1; k <= more; k += 1) {
               if (r + k >= rows.length) {
-                problems.push({ kind: 'morerowsPastEnd', row: r + 1, column: label(span.start) });
+                rowProblems.push({ kind: 'morerowsPastEnd', row: r + 1, column: label(span.start) });
                 break;
               }
               for (let c = span.start; c <= span.end; c += 1) spanned[r + k].add(c);
             }
           });
+          const spannedCount = rowProblems.filter((p) => p.kind === 'spannedEntry').length;
+          const fullyCovered = entries.length > 0 ? spannedCount === entries.length : cols > 0 && spanned[r].size >= cols;
+          if (fullyCovered) {
+            problems.push({ kind: 'rowFullyCovered', row: r + 1 }, ...rowProblems.filter((p) => p.kind !== 'spannedEntry'));
+          } else {
+            problems.push(...rowProblems);
+          }
         });
       }
     }
@@ -1082,7 +1096,10 @@ function calsSpanProblems(doc) {
 // then returns { content, removedRows: [row numbers, in order] }. Content
 // that does not parse is returned unchanged -- its validation reports it.
 // morerows running past the last row is not touched: that one has no
-// single right fix and still goes to the LLM.
+// single right fix and still goes to the LLM. Neither is an example with a
+// row entirely covered from above (rowFullyCovered): removing its entries
+// would leave an empty <row>, so nothing in that example is adjusted and
+// the problem goes to the correction round.
 const TAG_TOKEN_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
 
 // [start, end) of the Nth <entry> element (0-based, document order) in text.
@@ -1105,7 +1122,8 @@ function entrySpans(text) {
 }
 
 export function removeSpannedCalsEntries(content, parseXml) {
-  let text = String(content ?? '');
+  const original = String(content ?? '');
+  let text = original;
   const removedRows = [];
   for (let pass = 0; pass < 10; pass += 1) {
     let doc;
@@ -1115,7 +1133,9 @@ export function removeSpannedCalsEntries(content, parseXml) {
     } catch {
       break;
     }
-    const offending = calsSpanProblems(doc).filter((p) => p.kind === 'spannedEntry');
+    const problems = calsSpanProblems(doc);
+    if (problems.some((p) => p.kind === 'rowFullyCovered')) return { content: original, removedRows: [] };
+    const offending = problems.filter((p) => p.kind === 'spannedEntry');
     if (offending.length === 0) break;
     const allEntries = Array.from(doc.getElementsByTagName('entry'));
     const spans = entrySpans(text);
@@ -1147,6 +1167,8 @@ export function formatStructureProblem(problem, schema) {
       return `row ${problem.row}: column ${problem.column} is already spanned by the entry above (morerows); remove this entry`;
     case 'morerowsPastEnd':
       return `row ${problem.row}: morerows spans past the last row (column ${problem.column})`;
+    case 'rowFullyCovered':
+      return `row ${problem.row} is entirely covered by morerows from above: give row ${problem.row} its own entries or lower the morerows`;
     case 'unknownElement':
       return `<${problem.element}> does not exist in the ${schema} schema`;
     case 'notAllowed':
@@ -1380,6 +1402,7 @@ export const SCHEMA_ISSUE_KEYS = {
     wrongRoot: 'records.ruleTest.structure.wrongRoot',
     spannedEntry: 'records.ruleTest.structure.spannedEntry',
     morerowsPastEnd: 'records.ruleTest.structure.morerowsPastEnd',
+    rowFullyCovered: 'records.ruleTest.structure.rowFullyCovered',
   },
 };
 

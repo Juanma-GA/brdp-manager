@@ -33,7 +33,8 @@ import {
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
 import { analyzeRule } from '../src/utils/ruleTestEngine.js';
-import { checkExampleStructure, extractRuleNames, formatStructureProblem, removeSpannedCalsEntries } from '../src/validation/schemaValidation.js';
+import { checkCalsTableSpans, checkExampleStructure, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
+import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, missesRuleProblem } from '../src/utils/ruleTestRun.js';
 import { ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
 import XLSX from 'xlsx';
@@ -798,6 +799,52 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('C3b titled-context: no correction round for spanned cells', asked.length === 1 && result.correction === null, JSON.stringify({ asked: asked.length, c: result.correction }));
   check('C3b titled-context: both examples adjusted in row 2', result.examples.every((e) => JSON.stringify(e.spannedEntriesRemoved) === '[2]'), JSON.stringify(result.examples.map((e) => e.spannedEntriesRemoved)));
   check('C3b titled-context: examples run with the fixed tables', result.runs.every((r) => r.validation.runnable), JSON.stringify(result.runs.map((r) => r.validation.structure)));
+
+  // C3b follow-up: the real titled-context table where row 1 spans c1 AND c2
+  // (morerows="1") and row 2 only has entry colname="c2". Removing that entry
+  // would leave row 2 empty, so the app adjusts nothing in the example and
+  // sends it to the correction round with rowFullyCovered.
+  const covered = (row2) =>
+    `<section><title>LISTA DE MATERIAL OBLIGATORIO</title><table><tgroup cols="3"><colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/><thead><row><entry colname="c1">Part</entry><entry colname="c2">Descripción</entry><entry colname="c3">Cant.</entry></row></thead><tbody><row><entry colname="c1" morerows="1">P-100</entry><entry colname="c2" morerows="1">Seal</entry><entry colname="c3">2</entry></row><row>${row2}</row></tbody></tgroup></table></section>`;
+  const coveredContent = covered('<entry colname="c2">Gasket</entry>');
+  const untouched = removeSpannedCalsEntries(coveredContent, parseXml);
+  check('C3b row covered: content left byte for byte', untouched.content === coveredContent, untouched.content);
+  check('C3b row covered: nothing reported as removed', untouched.removedRows.length === 0, JSON.stringify(untouched.removedRows));
+  const coveredProblems = checkCalsTableSpans(parseXml(`<topic id="t"><title>T</title><body>${coveredContent}</body></topic>`));
+  check('C3b row covered: rowFullyCovered for row 2, no spannedEntry', JSON.stringify(coveredProblems.filter((p) => p.kind === 'rowFullyCovered' || p.kind === 'spannedEntry')) === '[{"kind":"rowFullyCovered","row":2}]', JSON.stringify(coveredProblems));
+  const coveredLine = 'row 2 is entirely covered by morerows from above: give row 2 its own entries or lower the morerows';
+  check('C3b row covered: exact English message', formatStructureProblem({ kind: 'rowFullyCovered', row: 2 }, 'topic') === coveredLine);
+  check('C3b row covered: EN/ES through i18n', formatSchemaIssue(structureIssues([{ kind: 'rowFullyCovered', row: 2 }], { schema: 'topic' })[0], i18n.getFixedT('en')) === coveredLine
+    && formatSchemaIssue(structureIssues([{ kind: 'rowFullyCovered', row: 2 }], { schema: 'topic' })[0], i18n.getFixedT('es')).startsWith('la fila 2 queda entera bajo el morerows'));
+  // An empty <row/> fully spanned from above counts too.
+  check('C3b row covered: an empty row under the spans', removeSpannedCalsEntries(tbl('<row><entry morerows="1">A</entry><entry morerows="1">B</entry><entry morerows="1">C</entry></row><row></row>', ''), parseXml).removedRows.length === 0
+    && checkCalsTableSpans(parseXml(`<dmodule>${tbl('<row><entry morerows="1">A</entry><entry morerows="1">B</entry><entry morerows="1">C</entry></row><row></row>', '')}</dmodule>`)).some((p) => p.kind === 'rowFullyCovered' && p.row === 2));
+  // Partial overlap still auto-fixed (regression).
+  check('C3b row covered: partial overlap still fixed', removeSpannedCalsEntries(covered('<entry colname="c2">Gasket</entry><entry colname="c3">1</entry>'), parseXml).removedRows.join() === '2');
+
+  // Through generateRuleTestExamples: one correction round naming row 2.
+  const fixedCovered = covered('<entry colname="c3">1</entry>');
+  const coveredAsked = [];
+  const coveredResult = await generateRuleTestExamples({
+    ruleXml: ext1.Rule, format: 'SCH-DITA', standard: 'DITA 1.3 Xpath3.0', schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00001', title: '', definition: '', proposal: '' },
+    vocabulary: vocabDita, parseXml,
+    ask: async (messages) => {
+      coveredAsked.push(messages);
+      const content = coveredAsked.length === 1 ? coveredContent : fixedCovered;
+      return JSON.stringify({ proposalMismatch: null, examples: [
+        { label: 'quantity given', expected: 'accept', schema: 'topic', content },
+        { label: 'quantity missing', expected: 'reject', schema: 'topic', content: section('') },
+      ] });
+    },
+    fetchSchemaCards: async (_std, names) => ({ cards: {}, document_schemas: ['topic'], element_schemas: Object.fromEntries(names.map((n) => [n, ['topic']])) }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
+  });
+  const correctionText = JSON.stringify(coveredAsked[1] || []);
+  check('C3b row covered: goes to the correction round', coveredAsked.length === 2 && correctionText.includes(coveredLine), correctionText.slice(0, 400));
+  check('C3b row covered: the other example (partial overlap) is not sent back', !correctionText.includes('Example 2'), correctionText.slice(0, 400));
+  check('C3b row covered: first example not adjusted by the app, corrected example runs', JSON.stringify(coveredResult.examples[0].spannedEntriesRemoved) === '[]' && coveredResult.runs[0].validation.runnable, JSON.stringify({ e: coveredResult.examples[0].spannedEntriesRemoved, s: coveredResult.runs[0].validation.structure }));
+  check('C3b row covered: the partial-overlap example is still fixed by the app', JSON.stringify(coveredResult.examples[1].spannedEntriesRemoved) === '[2]');
 
   // 2. Plain text for the markup of an element the rule does not name.
   const proced = structureOf(S42, 'proced');
