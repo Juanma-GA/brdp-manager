@@ -332,6 +332,12 @@ async function runCheck(check, answer, ctx = {}) {
   }
 }
 
+function distinctElementNames(text) {
+  const names = new Set();
+  for (const m of String(text).matchAll(/<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?:\s[^<>]*)?\/?>/gu)) names.add(m[1]);
+  return [...names];
+}
+
 function runTextCheck(check, answer, flags) {
   switch (check.type) {
     case "contains": {
@@ -358,6 +364,14 @@ function runTextCheck(check, answer, flags) {
     case "max_paragraphs": {
       const n = countParagraphs(answer);
       return { status: n <= check.max ? "pass" : "fail", detail: `${n} paragraph(s), max ${check.max}` };
+    }
+    case "max_names": {
+      // C2b: an answer must not dump long lists of schema names. Counts the
+      // DISTINCT element names written as <name> (or </name>, <name/>) in
+      // the answer -- the same name several times counts once.
+      const names = distinctElementNames(answer);
+      const shown = names.slice(0, 20).join(", ") + (names.length > 20 ? ", …" : "");
+      return { status: names.length <= check.max ? "pass" : "fail", detail: `${names.length} distinct <name>(s), max ${check.max}${names.length ? ": " + shown : ""}` };
     }
     case "language": {
       const detected = detectLanguage(answer);
@@ -792,7 +806,7 @@ async function main() {
     for (const testCase of selectedCases) {
       const project = projectByStandard.get(testCase.standard);
       const createdBrdp = brdpByCase.get(testCase.id);
-      const caseResult = { id: testCase.id, description: testCase.description, checks: testCase.checks, runs: [] };
+      const caseResult = { id: testCase.id, type: testCase.type, description: testCase.description, checks: testCase.checks, runs: [] };
       for (let run = 1; run <= args.runs; run++) {
         process.stdout.write(`  ${testCase.id} (run ${run}/${args.runs})... `);
         try {
@@ -904,6 +918,9 @@ function writeReport(results, runs, meta) {
         header,
         cases: results.map((c) => ({
           id: c.id,
+          // C2b: the case type (ask, suggest-proposal, ...) -- lets
+          // scripts/compare-prompt-eval.mjs group prompt sizes by module.
+          type: c.type,
           description: c.description,
           runs: c.runs.map((r) =>
             r.error

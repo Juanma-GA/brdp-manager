@@ -1545,6 +1545,239 @@
           "note": "examples from the decision catch the inverted assert"
         }
       ]
+    },
+    {
+      "id": "ask-open-question-no-disclaimer",
+      "description": "C2b (audit A3): an open question naming an element goes to the LLM; the answer must not end with a scope reminder or disclaimer.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C2B-1",
+        "title": "Use of warnings in procedural steps",
+        "definition": "Decide when a warning shall be placed before a procedural step.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿Para qué sirve <warning> y cuándo conviene usarlo?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": false,
+          "note": "C2b: an open question (purpose/usage), never a structural one -- must go to the LLM, otherwise the case protects nothing"
+        },
+        {
+          "type": "not_ends_with_any",
+          "patterns": [
+            "\\bonly (answer|discuss|address)\\b",
+            "\\bas a reminder\\b",
+            "\\bI (can only|am only able to)\\b",
+            "\\bplease note\\b.{0,60}\\bthis BRDP\\b",
+            "\\bscope of this\\b",
+            "\\bsolo puedo\\b",
+            "\\bs[oó]lo (respondo|contesto)\\b",
+            "\\bfuera del (alcance|[aá]mbito)\\b",
+            "\\brecuerda que\\b.{0,80}\\b(BRDP|alcance)\\b",
+            "\\bno est[aá] relacionad[ao] con (este|esta) BRDP\\b",
+            "\\bel alcance de\\b"
+          ],
+          "flags": "i",
+          "tailChars": 300,
+          "note": "must not end the answer with a scope reminder/disclaimer (English or Spanish)"
+        },
+        {
+          "type": "language",
+          "expect": "es"
+        }
+      ]
+    },
+    {
+      "id": "ask-open-question-partial-list",
+      "description": "C2b (audit A7): an open question about <refs> -- 152 real parents in S1000D 4.2, so its card reaches the LLM cut at MAX_PARENTS=60 with '(partial list: 60 of 152 shown)'. The answer must not copy the marker nor invent how many are missing.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C2B-2",
+        "title": "References block in data modules",
+        "definition": "Decide whether the <refs> block shall be used to list the data modules and publications a data module refers to.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "¿Para qué sirve <refs> y en qué situaciones conviene usarlo?",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": false,
+          "note": "C2b: an open question (purpose/usage), never a structural one -- must go to the LLM, otherwise the case protects nothing"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "\\+\\s*\\d+\\s*(more|m[aá]s)\\b",
+          "flags": "i",
+          "note": "no '+N more' / '+N más' copied from the truncation marker"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "partial list:|lista parcial:|\\d+ of \\d+ shown",
+          "flags": "i",
+          "note": "the marker '(partial list: N of M shown)' must never be copied into the answer"
+        },
+        {
+          "type": "not_contains_any",
+          "patterns": [
+            "\\b(otros|otras|other|another)\\s+\\d+\\b",
+            "\\b\\d+\\s+(more|m[aá]s)\\s+(elements?|elementos?|parents?|padres?)\\b",
+            "\\b(faltan|missing|not shown)\\b.{0,30}\\b\\d+\\b"
+          ],
+          "flags": "i",
+          "note": "must not state how many are missing"
+        },
+        {
+          "type": "manual",
+          "note": "If the answer lists where <refs> can go, it should say the list is partial ('among others') without counting what is missing."
+        }
+      ]
+    },
+    {
+      "id": "ask-open-question-no-dump",
+      "description": "C2b (audit A5/A8): an open question about <para> (43 parents and many children in S1000D 4.2, all in the card) must not dump the lists of names.",
+      "standard": "S1000D 4.2",
+      "type": "ask",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ASK-C2B-3",
+        "title": "Paragraph usage in descriptive data modules",
+        "definition": "Decide how paragraphs shall be structured in descriptive data modules.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "question": "Explica el papel de <para> dentro de la estructura de un módulo de datos y qué conviene tener en cuenta.",
+      "checks": [
+        {
+          "type": "answered_deterministically",
+          "expect": false,
+          "note": "C2b: an open question (purpose/usage), never a structural one -- must go to the LLM, otherwise the case protects nothing"
+        },
+        {
+          "type": "max_paragraphs",
+          "max": 3
+        },
+        {
+          "type": "max_names",
+          "max": 15,
+          "note": "no dump of the parent/child lists: at most 15 distinct <name>s"
+        }
+      ]
+    },
+    {
+      "id": "suggest-proposal-spanish-title-english-refs",
+      "description": "C2b (audit P9): a Spanish-titled BRDP with only English precedent in the corpus must still get a Spanish Proposal, as a template with at least one placeholder and no markdown.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-proposal",
+      "brdp": {
+        "identifier": "BRDP-EVAL-SP-C2B-1",
+        "title": "Intervalo de calibración de las llaves dinamométricas",
+        "definition": "Decidir cada cuánto tiempo deben calibrarse las llaves dinamométricas usadas en sujetadores estructurales y con qué tolerancia.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "seedReferences": [
+        {
+          "identifier": "BRDP-EVAL-SP-C2B-REF-01",
+          "title": "Torque wrench calibration interval",
+          "definition": "Defines how often torque wrenches used on structural fasteners shall be calibrated and to which tolerance.",
+          "proposal": "Torque wrenches shall be calibrated every 90 days to within ±2% of nominal.",
+          "validation": "Validated"
+        },
+        {
+          "identifier": "BRDP-EVAL-SP-C2B-REF-02",
+          "title": "Calibration record retention for torque tools",
+          "definition": "Defines how long torque wrench calibration records shall be retained.",
+          "proposal": "Calibration records shall be retained for 5 years.",
+          "validation": "Validated"
+        }
+      ],
+      "checks": [
+        {
+          "type": "language",
+          "expect": "es"
+        },
+        {
+          "type": "no_markdown"
+        },
+        {
+          "type": "contains",
+          "pattern": "\\[[^\\]]+\\]",
+          "note": "must contain at least one bracketed placeholder"
+        }
+      ]
+    },
+    {
+      "id": "suggest-proposal-concrete-restriction",
+      "description": "C2b (audit P1/P7): a Definition that asks for a decision with values must get the normative sentence with the values left as placeholders, never the decision itself.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-proposal",
+      "brdp": {
+        "identifier": "BRDP-EVAL-SP-C2B-2",
+        "title": "Maximum depth of levelled paragraphs",
+        "definition": "Decide the maximum number of levels of levelled paragraphs allowed in descriptive data modules, and whether the same limit applies to crew data modules.",
+        "proposal": "",
+        "validation": "Pending"
+      },
+      "checks": [
+        {
+          "type": "contains_any",
+          "patterns": [
+            "\\[VALUE:",
+            "\\[LIST:",
+            "\\[SHALL"
+          ],
+          "note": "at least one [VALUE: / [LIST: / [SHALL placeholder"
+        },
+        {
+          "type": "manual",
+          "note": "The normative sentence is complete (subject, modal verb, what is limited) and the decision -- the number of levels and whether crew is included -- stays in the placeholders."
+        }
+      ]
+    },
+    {
+      "id": "rule-dita-table-row-check",
+      "description": "C2b (audit S12): a DITA Proposal about a table column identified by its header text must resolve the column by its header (sch:let) and never by a fixed position.",
+      "standard": "DITA 1.3 Xpath2.0",
+      "type": "suggest-rule",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-C2B-1",
+        "title": "Part number column in parts tables",
+        "definition": "Decide whether every row of a parts table must give a part number.",
+        "proposal": "In every <table> whose header row has a column titled 'Part number', every body row shall have a non-empty <entry> in that column.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false,
+          "note": "a checkable decision must get a rule, never NOT_CHECKABLE"
+        },
+        {
+          "type": "contains",
+          "target": "xml",
+          "pattern": "<sch:let\\b",
+          "note": "the column is resolved by its header text with sch:let"
+        },
+        {
+          "type": "not_contains",
+          "target": "xml",
+          "pattern": "entry\\s*\\[\\s*\\d+\\s*\\]",
+          "note": "never a fixed column index such as entry[2]"
+        }
+      ]
     }
   ]
 }
