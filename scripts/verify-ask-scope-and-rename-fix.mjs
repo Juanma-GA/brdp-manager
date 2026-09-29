@@ -181,7 +181,9 @@ async function main() {
     assert(!sys.includes("not general questions, not questions about other BRDPs"), "the OLD blanket refusal phrasing is gone");
     assert(sys.includes('Answer exactly what is asked: "where can X go / be used" -> its allowed'), "the new focused-answer instruction is present");
     assert(sys.includes("When the facts contain several schema variants, summarize"), "the new variant-summarizing instruction is present");
-    assert(sys.includes("Keep the 3-paragraph limit even when the facts are long."), "the new long-facts paragraph-limit reminder is present");
+    // C2b Entrega 2 (fusion A9 + A10): the long-facts reminder is part of the one 3-paragraph limit.
+    assert(sys.includes("Answer in at most 3 short paragraphs, even when the facts are long"), "the 3-paragraph limit covers long facts");
+    assert(!sys.includes("Keep the 3-paragraph limit"), "the separate long-facts reminder is gone (fused)");
 
     // ==== 4. Determinism: the exact same question, asked three times in
     // a row (selecting a different BRDP in between and coming back, the

@@ -156,13 +156,16 @@ export function formatSchemaFactAttributeList(attrs) {
 // stay attached to whichever per-variant list they actually describe
 // (never claimed for the computed common set, which is exact given the
 // data available).
-export function buildSchemaFactsBlock(standard, schemaFacts) {
+// `coverageNote: false` leaves out the header's last sentence ("If the facts
+// do not cover what is asked…") for a prompt that already says it in its
+// own words (Ask).
+export function buildSchemaFactsBlock(standard, schemaFacts, { coverageNote = true } = {}) {
   if (!schemaFacts || schemaFacts.length === 0) return '';
   let block = `\n\nSCHEMA FACTS — extracted from the official ${standard} schema. These are
 authoritative: for questions about which attributes, values, child
 elements or parent elements are allowed, rely on these facts over your
-own knowledge. If the facts do not cover what is asked, say so plainly
-instead of guessing.`;
+own knowledge.${coverageNote ? ` If the facts do not cover what is asked, say so plainly
+instead of guessing.` : ''}`;
   for (const { name, entry } of schemaFacts) {
     const summary = summarizeSchemaFactEntry(entry);
     const parentsText = formatSchemaFactNameList(entry.parents, entry.parents_truncated, entry.parents_omitted);

@@ -32,8 +32,7 @@ element names; do not mix in other versions of S1000D or DITA.
 
   if (sameBrdp.length > 0) {
     prompt += `SAME BRDP IN OTHER PROJECTS — how other projects decided this exact
-decision point. Use them to understand the usual options; do not copy
-their project-specific values:
+decision point. Use them to understand the usual options:
 ${sameBrdp.map((c) => `[${c.identifier} | ${c.source}] Proposal: ${c.text}`).join('\n\n')}
 
 `;
@@ -118,8 +117,9 @@ example options. Examples:
 - Illustrations [SHALL/SHALL NOT] use color to indicate hazard severity.
 - Titles shall not exceed [VALUE: e.g. 60] characters.
 - Measurements shall be expressed in [UNIT: e.g. metric, imperial] units.
-Example options may come from the reference BRDPs, but never present
-another project's choice as this project's decision.
+Example options may come from the reference BRDPs, but never copy another
+project's specific values or present its choice as this project's
+decision.
 
 Never state or suggest specification chapter, section or paragraph
 numbers, not even as possibilities ("it might be in chapter X"), unless

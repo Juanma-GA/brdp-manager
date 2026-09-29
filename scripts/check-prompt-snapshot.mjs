@@ -239,6 +239,21 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // sentence with the choices left as placeholders. All 7 ask, 3
 // suggestDefinition and 3 suggestProposal cases change; suggestRule and
 // the rule-test prompts are unchanged.
+//
+// C2b Entrega 2, Parte 4 (fusiones), each instruction said once: Ask's
+// 3-paragraph limit absorbs "even when the facts are long" (A9+A10), the
+// comparison scope is one sentence (A4), and "if the facts do not cover
+// what is asked" lives in Ask's own names paragraph, so Ask asks
+// buildSchemaFactsBlock for its header without that last sentence
+// (coverageNote: false -- Suggest Rule and the rule test keep it, their
+// SCHEMA FACTS header is unchanged). Suggest Proposal: "do not copy their
+// project-specific values" merges into the end of DO NOT MAKE THE
+// DECISION (P3+P7). Suggest Rule: "never a context block" only in format
+// rule 1 (now also in 3.0.1's), the TASK line points to it and the
+// CONTEXT BLOCKS note keeps only its explanation (F1/R3b/R6); "never copy
+// their names" only in the Format examples header (R5). All 7 ask, 3
+// suggestProposal and 9 suggestRule cases change; suggestDefinition and
+// the rule-test prompts are unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

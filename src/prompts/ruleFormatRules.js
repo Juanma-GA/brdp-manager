@@ -36,7 +36,7 @@ const BREX_4X_PATH_NAMES = `6. Inside objectPath, write element and attribute na
    Wrong:   <objectPath allowedObjectFlag="0">//&lt;acmeElement&gt;</objectPath>`;
 
 const BREX_42 = `FORMAT — S1000D Issue 4.2 BREX: exactly ONE <structureObjectRule> element.
-1. Output exactly one <structureObjectRule id="{ID}" brSeverityLevel="brsl01"> — never a <contextRules> wrapper, a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
+1. Output exactly one <structureObjectRule id="{ID}" brSeverityLevel="brsl01"> — never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <brDecisionRef brDecisionIdentNumber="{ID}"/> → <objectPath> → <objectUse> → <objectValue> (zero or more). brDecisionRef carries the ID as an ATTRIBUTE, never as text.
 3. Exactly ONE <objectPath>. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
 ${BREX_4X_OBJECT_USE}
@@ -44,7 +44,7 @@ ${BREX_4X_VALUE_LIST}
 ${BREX_4X_PATH_NAMES}`;
 
 const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: exactly ONE <structureObjectRule> element.
-1. Output exactly one <structureObjectRule id="{ID}"> — never a <contextRules> wrapper, a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
+1. Output exactly one <structureObjectRule id="{ID}"> — never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <objectPath> → <objectUse> → <objectValue> (zero or more). There is NO brDecisionRef element and NO brSeverityLevel attribute in S1000D 4.1.
 3. Exactly ONE <objectPath>. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
 ${BREX_4X_OBJECT_USE}
@@ -56,7 +56,7 @@ ${BREX_4X_PATH_NAMES}`;
 // value-list rules of the curated 3.0.1 template omit it unless the node
 // is also mandatory.
 const BREX_301 = `FORMAT — S1000D Issue 3.0.1 BREX: exactly ONE <objrule> element.
-1. Output exactly one <objrule id="{ID}"> — never a dmodule wrapper. {ID} is the BRDP's ID. There is NO brDecisionRef in 3.0.1.
+1. Output exactly one <objrule id="{ID}"> — never a context block (<contextrules>: when the rule is limited to some schemas, the application adds it) or a dmodule wrapper. {ID} is the BRDP's ID. There is NO brDecisionRef in 3.0.1.
 2. Child order: <objpath> → <objuse> → <objval> (one per allowed value, zero or more).
 3. Exactly ONE <objpath>. Its only attribute is objappl: "0" = the selected nodes are prohibited, "1" = mandatory. NO other values (there is no "optional" in 3.0.1).
 4. <objuse> = one sentence stating the decision. Inside it, write attribute names as @name and element names as &lt;name&gt; — never a raw tag, never a bare name. Escape &lt; &gt; &amp;.

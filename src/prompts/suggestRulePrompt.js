@@ -55,8 +55,7 @@ not tied to one document type).`;
   // example uses invented names so it can't be copied into a real rule.
   return `The rule applies ONLY to documents written against the
 schema${schemas.length > 1 ? 's' : ''} ${list}. The application places your rule inside one context block per
-schema itself — write only the rule element described below, never a
-context block. <${use}> may name the schema${schemas.length > 1 ? 's' : ''} it applies to.
+schema itself (see format rule 1). <${use}> may name the schema${schemas.length > 1 ? 's' : ''} it applies to.
 Because the application adds the schema context, write <${path}> exactly as
 you would for any document: no predicate or step that filters by schema or
 document type. Example (invented names, not from this BRDP):
@@ -88,7 +87,7 @@ ${ruleFormatRules(format, standard)}`;
 
   prompt += buildSchemaFactsBlock(standard, schemaFacts);
   // Format examples are deliberately NOT a name source -- their own block
-  // says never to copy their names, so citing them here would contradict it.
+  // says never to copy their names (said once, there).
   const hasFacts = schemaFacts && schemaFacts.length > 0;
   const hasRelatedPrecedents = sameBrdp.length + similar.length > 0;
   const nameSources = [
@@ -101,8 +100,7 @@ ${ruleFormatRules(format, standard)}`;
   prompt += `
 
 NAMES: use only element and attribute names that appear in ${nameSourceText}.
-Never take names from the format examples, and never invent a
-plausible-sounding name.`;
+Never invent a plausible-sounding name.`;
 
   const allPrecedents = [...sameBrdp, ...similar, ...formatExamples];
   if (allPrecedents.some((c) => contextSchemasOfRule(c.text).schemas.length > 0)) {
@@ -111,7 +109,7 @@ plausible-sounding name.`;
 CONTEXT BLOCKS: some rules below sit inside a context block
 (<contextRules rulesContext="…"> / <contextrules context="…">). The block only
 limits them to the schema named in its URL — see each rule's "Applies to"
-line. Never output a context block yourself.`;
+line.`;
   }
 
   if (sameBrdp.length > 0) {

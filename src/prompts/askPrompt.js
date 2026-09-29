@@ -31,7 +31,8 @@ or with its schema, say so briefly and ask the user to rephrase.
 Never add scope reminders or disclaimers to an answer you have given.`;
 
   if (compareBrdp) {
-    prompt += `\nThe BRDP being compared against (shown below) is also in scope.`;
+    prompt += `\nThe BRDP being compared against (shown below) is also in scope: the user
+may ask you to compare it with the current one.`;
   }
 
   prompt += `
@@ -41,7 +42,6 @@ parents; "what can X contain" -> its children; "which attributes" ->
 its attributes. Do not list other facts unless asked.
 When the facts contain several schema variants, summarize: state what
 is common to all of them and mention only the notable differences.
-Keep the 3-paragraph limit even when the facts are long.
 
 If a schema-facts list is marked as a partial list, say so (e.g. "among
 others") — never invent or state how many more there are; that count is
@@ -53,8 +53,8 @@ ones. The complete list is always available to the user in the
 expandable schema card, so an incomplete summary here is not a loss of
 information.
 
-Answer in at most 3 short paragraphs — be direct, no padding, no
-restating the question back to the user.
+Answer in at most 3 short paragraphs, even when the facts are long — be
+direct, no padding, no restating the question back to the user.
 
 Never state or suggest specification chapter, section or paragraph
 numbers, not even as possibilities ("it might be in chapter X"),
@@ -72,14 +72,16 @@ of S1000D or DITA unless the user explicitly asks for a comparison.
 
 When your answer names an element or attribute of the ${standard} schema,
 it must be one that appears in SCHEMA FACTS or is quoted from the BRDP
-context below. If the question is about a concept that no SCHEMA FACTS
-cover (for example a code, an identifier or a date that a document
-records), do not name an element or attribute for it from memory: say
-that you cannot confirm the element or attribute name in the ${standard}
-schema, and suggest looking the concept up in the ${standard}
-specification.`;
+context below. If the SCHEMA FACTS do not cover what is asked (for
+example a code, an identifier or a date that a document records), do not
+guess or name an element or attribute for it from memory: say that you
+cannot confirm the element or attribute name in the ${standard} schema,
+and suggest looking the concept up in the ${standard} specification.`;
 
-  prompt += buildSchemaFactsBlock(standard, schemaFacts);
+  // The paragraph above already says what to do when the facts do not
+  // cover the question, so the block's own closing sentence is left out
+  // here (Suggest Rule and the rule test keep it).
+  prompt += buildSchemaFactsBlock(standard, schemaFacts, { coverageNote: false });
 
   prompt += `
 
@@ -112,7 +114,6 @@ Proposal Status: ${compareBrdp.validation}
 Rule Status: ${RULE_STATUS_LABELS[compareBrdp.ruleState]}
 Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
     }
-    prompt += `\n\nThe user may ask you to compare the current BRDP with the one above; in that case both are in scope.`;
   }
 
   prompt += buildUnknownNamesBlock(standard, vocabCheck);

@@ -242,11 +242,13 @@ check('plain rule -> general, no schemas', eq(contextSchemasOfRule(rule42), { sc
   };
   const general = buildSuggestRulePrompt(brdp, 'S1000D 4.2', 'BREX-4.2', { formatExamples: [ctxPrecedent] }, []);
   check('precedent with context says which schemas it applies to', general.includes('Applies to: every schema for the rule outside the context blocks; only the condcrossreftable, fault, prdcrossreftable schemas for the rules inside them'));
-  check('CONTEXT BLOCKS note present', general.includes('CONTEXT BLOCKS:') && general.includes('Never output a context block yourself.'));
+  check('CONTEXT BLOCKS note present', general.includes('CONTEXT BLOCKS:') && general.includes('limits them to the schema named in its URL'));
+  // C2b Entrega 2 (fusion): "never a context block" is said once, in format rule 1.
+  check('"never a context block" said once (format rule 1)', general.split('never a context block').length === 2 && general.includes('1. Output exactly one <structureObjectRule') && !general.includes('Never output a context block yourself.'));
   check('general rule wording kept', general.includes('The rule applies to every schema (it is a general rule,'));
   const scoped = buildSuggestRulePrompt(brdp, 'S1000D 4.2', 'BREX-4.2', { formatExamples: [] }, [], { schemas: ['proced'] });
   check('chosen schema reaches the prompt', scoped.includes('The rule applies ONLY to documents written against the\nschema proced.'));
-  check('... still only the inner rule', scoped.includes('write only the rule element described below, never a\ncontext block.') && scoped.includes('never a <contextRules> wrapper'));
+  check('... still only the inner rule', scoped.includes('one context block per\nschema itself (see format rule 1).') && scoped.includes('never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it)') && scoped.split('never a context block').length === 2);
   check('... no CONTEXT BLOCKS note without context precedents', !scoped.includes('CONTEXT BLOCKS:'));
   const two = buildSuggestRulePrompt(brdp, 'S1000D 4.2', 'BREX-4.2', { formatExamples: [] }, [], { schemas: ['proced', 'descript'] });
   check('two schemas listed', two.includes('schemas proced, descript.'));
