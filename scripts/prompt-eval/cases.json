@@ -1707,6 +1707,23 @@
           "type": "contains",
           "pattern": "\\[[^\\]]+\\]",
           "note": "must contain at least one bracketed placeholder"
+        },
+        {
+          "type": "not_contains_any",
+          "patterns": [
+            "\\b90\\b",
+            "±\\s*2\\s*%"
+          ],
+          "flags": "i",
+          "note": "no copia los valores de otro proyecto (P3): 90 días / ±2% del precedente BRDP-EVAL-SP-C2B-REF-01"
+        },
+        {
+          "type": "not_contains_any",
+          "patterns": [
+            "\\b5 (years|años)\\b"
+          ],
+          "flags": "i",
+          "note": "no copia los valores de otro proyecto (P3): 5 años del precedente BRDP-EVAL-SP-C2B-REF-02"
         }
       ]
     },
