@@ -259,6 +259,177 @@ def _dita_skeleton(graph: dict[str, dict], root: str) -> dict:
     return {"root": root, "path": path, "insertion": path[-1], "derivation": derivation, "titled": titled}
 
 
+# ─── The identification and status section (rule test on DM metadata) ──────
+# The examples used to be built only inside <content>, so a rule about a data
+# module's metadata (//dmIdent/dmCode/@infoCode, //dmStatus/@issueType,
+# //responsiblePartnerCompany/@enterpriseCode, …) never had anything to look
+# at and the test ended "inconclusive". Every assembled data module now
+# carries a minimal, valid identification and status section.
+#
+# The cards list each element's children but not their minOccurs, so the
+# elements of the minimal section are fixed here (the XSD's required ones,
+# in the XSD's order: 4.x identAndStatusSection/dmAddress/dmStatus, 3.0.1
+# idstatus/dmaddres/status) together with the text of the elements that have
+# some. Everything else comes from the cards and is checked against them for
+# every schema (_metadata_tree): each child must be allowed in its parent,
+# each REQUIRED attribute of the card is added -- its value from
+# METADATA_ATTRIBUTE_VALUES, or the enum's first value -- and no optional
+# attribute is (minimal). A schema whose cards do not fit the template gets no
+# section (None), never an invalid one; backend/tests/test_rule_test_skeletons.py
+# also validates every section against the real XSD.
+#
+# Node: (name, {attribute: value} overrides, text or None, [children]).
+_METADATA_TEMPLATE_4X = (
+    "identAndStatusSection", {}, None, [
+        ("dmAddress", {}, None, [
+            ("dmIdent", {}, None, [
+                ("dmCode", {}, None, []),
+                ("language", {}, None, []),
+                ("issueInfo", {}, None, []),
+            ]),
+            ("dmAddressItems", {}, None, [
+                ("issueDate", {}, None, []),
+                ("dmTitle", {}, None, [("techName", {}, "Example data module", [])]),
+            ]),
+        ]),
+        ("dmStatus", {}, None, [
+            ("security", {}, None, []),
+            ("responsiblePartnerCompany", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("originator", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("applic", {}, None, [("displayText", {}, None, [("simplePara", {}, "All", [])])]),
+            ("brexDmRef", {}, None, [
+                ("dmRef", {}, None, [
+                    ("dmRefIdent", {}, None, [
+                        # The project's own BREX (info code 022), with the
+                        # same neutral values as the data module's code: a
+                        # rule on a code attribute (//@assyCode[…]) sees the
+                        # same kind of value in both dmCodes.
+                        ("dmCode", {"infoCode": "022", "itemLocationCode": "D"}, None, []),
+                    ]),
+                ]),
+            ]),
+            ("qualityAssurance", {}, None, [("unverified", {}, None, [])]),
+        ]),
+    ],
+)
+
+# 3.0.1 writes the data module code as elements with text.
+def _avee_301(values: dict[str, str]) -> tuple:
+    order = ["modelic", "sdc", "chapnum", "section", "subsect", "subject", "discode", "discodev", "incode", "incodev", "itemloc"]
+    return ("avee", {}, None, [(name, {}, values[name], []) for name in order])
+
+
+_METADATA_TEMPLATE_301 = (
+    "idstatus", {}, None, [
+        ("dmaddres", {}, None, [
+            ("dmc", {}, None, [_avee_301({
+                "modelic": "EXAMPLE", "sdc": "A", "chapnum": "00", "section": "0", "subsect": "0",
+                "subject": "00", "discode": "00", "discodev": "A", "incode": "040", "incodev": "A", "itemloc": "A",
+            })]),
+            ("dmtitle", {}, None, [("techname", {}, "Example data module", [])]),
+            ("issno", {}, None, []),
+            ("issdate", {}, None, []),
+            ("language", {"country": "US"}, None, []),
+        ]),
+        ("status", {}, None, [
+            ("security", {}, None, []),
+            ("rpc", {}, "Example company", []),
+            ("orig", {}, "Example company", []),
+            ("applic", {}, None, [("displaytext", {}, None, [("p", {}, "All", [])])]),
+            ("brexref", {}, None, [
+                ("refdm", {}, None, [_avee_301({
+                    # The project's own BREX (info code 022), see 4.x.
+                    "modelic": "EXAMPLE", "sdc": "A", "chapnum": "00", "section": "0", "subsect": "0",
+                    "subject": "00", "discode": "00", "discodev": "A", "incode": "022", "incodev": "A", "itemloc": "D",
+                })]),
+            ]),
+            ("qa", {}, None, [("unverif", {}, None, [])]),
+        ]),
+    ],
+)
+
+# Values of the required attributes that have no enum (keyed by attribute
+# name; the XSD patterns they must follow are checked by the tests).
+METADATA_ATTRIBUTE_VALUES = {
+    # 4.x dmCode of the example data module
+    "modelIdentCode": "EXAMPLE", "systemDiffCode": "A", "systemCode": "00", "subSystemCode": "0",
+    "subSubSystemCode": "0", "assyCode": "00", "disassyCode": "00", "disassyCodeVariant": "A",
+    "infoCode": "040", "infoCodeVariant": "A",
+    # 4.x language, issueInfo
+    "languageIsoCode": "en", "countryIsoCode": "US", "issueNumber": "001", "inWork": "00",
+    # 3.0.1 issno, language
+    "issno": "001", "language": "en",
+    # issueDate / issdate
+    "year": "2026", "month": "01", "day": "01",
+}
+
+METADATA_TEMPLATES = {
+    "identAndStatusSection": _METADATA_TEMPLATE_4X,
+    "idstatus": _METADATA_TEMPLATE_301,
+}
+
+
+def _card_variant(cards: dict, name: str, schema: str) -> dict | None:
+    for variant in cards.get(name, []):
+        if schema in variant.get("schemas", []):
+            return variant
+    return None
+
+
+def _metadata_tree(cards: dict, graph: dict[str, dict], schema: str, node: tuple, parent: str | None) -> dict | None:
+    name, overrides, text, children = node
+    variant = _card_variant(cards, name, schema)
+    if variant is None or name not in graph:
+        return None
+    if parent is not None and name not in graph[parent]["children"]:
+        return None
+    declared = {a["name"]: a for a in variant.get("attributes", [])}
+    attributes = []
+    for attr in variant.get("attributes", []):
+        if not attr.get("required") and attr["name"] not in overrides:
+            continue
+        value = overrides.get(attr["name"], METADATA_ATTRIBUTE_VALUES.get(attr["name"]))
+        if value is None and attr.get("enum"):
+            value = attr["enum"][0]
+        if value is None:
+            return None
+        if attr.get("enum") and value not in attr["enum"]:
+            return None
+        attributes.append([attr["name"], value])
+    if any(a not in declared for a in overrides):
+        return None
+    out_children = []
+    for child in children:
+        built = _metadata_tree(cards, graph, schema, child, name)
+        if built is None:
+            return None
+        out_children.append(built)
+    # Attributes in card order (alphabetical): their order carries no meaning.
+    return {"name": name, "attributes": attributes, "text": text, "children": out_children}
+
+
+@lru_cache(maxsize=256)
+def derive_metadata_skeleton(standard: str, schema: str) -> dict | None:
+    """{"element", "tree"} -- the minimal identification and status section of
+    a data module schema (see above) -- or None: DITA, a document that is not
+    a data module (pm, dml, ddn, comment, …: their status sections are not
+    covered yet), or cards that do not fit the template."""
+    if is_dita_standard(standard):
+        return None
+    graph = schema_graph(standard, schema)
+    data = _cards_for(standard)
+    if graph is None or data is None:
+        return None
+    root = _root_of(graph)
+    if root != "dmodule":
+        return None
+    for element, template in METADATA_TEMPLATES.items():
+        if element in graph[root]["children"]:
+            tree = _metadata_tree(data.get("cards", {}), graph, schema, template, root)
+            return {"element": element, "tree": tree} if tree else None
+    return None
+
+
 def get_element_schemas(standard: str, names: list[str]) -> dict[str, list[str]]:
     """DITA: for each name, the topic types whose graph has it (the client
     picks the type of a general rule's examples from this). {} for any other
@@ -278,6 +449,7 @@ def get_schema_structure(standard: str, schema: str) -> dict:
     skeleton = derive_skeleton(standard, schema)
     if graph is None or skeleton is None:
         return {"standard": standard, "schema": schema, "available": False, "skeleton": None, "elements": {}}
+    skeleton = {**skeleton, "metadata": derive_metadata_skeleton(standard, schema)}
     return {"standard": standard, "schema": schema, "available": True, "skeleton": skeleton, "elements": graph}
 
 

@@ -75,6 +75,24 @@ class SchemaStructureElementOut(BaseModel):
     attributes: list[str]
 
 
+class MetadataNodeOut(BaseModel):
+    """One element of the minimal identification and status section."""
+
+    name: str
+    # [[name, value], ...] -- the element's required attributes.
+    attributes: list[list[str]] = []
+    text: str | None = None
+    children: list["MetadataNodeOut"] = []
+
+
+class MetadataSkeletonOut(BaseModel):
+    """Rule test on DM metadata: the minimal identification and status
+    section every assembled data module carries (rule_test_skeletons.py)."""
+
+    element: str
+    tree: MetadataNodeOut
+
+
 class RuleTestSkeletonOut(BaseModel):
     root: str
     # Element names from the root down to the insertion point, inclusive.
@@ -87,6 +105,9 @@ class RuleTestSkeletonOut(BaseModel):
     # T4b: elements of the path the application gives their required
     # <title> as first child (DITA topics; [] for S1000D and maps).
     titled: list[str] = []
+    # The data module's identification and status section (None for DITA and
+    # for documents that are not data modules).
+    metadata: MetadataSkeletonOut | None = None
 
 
 class SchemaStructureOut(BaseModel):

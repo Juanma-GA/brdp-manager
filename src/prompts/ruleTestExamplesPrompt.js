@@ -12,6 +12,7 @@
 // insertion point), checks it, runs the rule on it (utils/ruleTestEngine.js)
 // and gives the verdict.
 import { buildSchemaFactsBlock } from './shared.js';
+import { metadataXml } from '../utils/ruleTestSkeleton.js';
 
 export const RULE_TEST_USER_MESSAGE = 'Write the test examples for this rule.';
 
@@ -42,6 +43,30 @@ the rule does not apply there.`;
   return text;
 }
 
+// The minimal identification and status section, indented under a line.
+function minimalSection(p) {
+  return metadataXml(p.metadata.tree, 2).xml;
+}
+
+// Rule test on DM metadata: the rule looks at the data module's
+// identification and status section, so the LLM writes that whole section
+// for every example (its "metadata"), starting from the minimal one.
+// `alsoContent`: the rule looks at the content too, so a reject example may
+// break the decision in either place.
+function metadataLine(p, alsoContent = false) {
+  const element = p.metadata.element;
+  const where = alsoContent
+    ? `; a reject example may go against the decision here, in the content, or
+  both:`
+    : ` — the values of the reject example go
+  HERE, never in a reference (<dmRef>) of the content:`;
+  return `  The rule ${alsoContent ? 'also ' : ''}looks at the data module's identification and status section:
+  your "metadata" is the WHOLE <${element}> of the example, written
+  directly inside <${p.root}>. Start from this minimal, valid one and change
+  only what the decision is about${where}
+${minimalSection(p)}`;
+}
+
 function placementLine(p, dita) {
   const allowed = p.allowedChildren.length > 0 ? p.allowedChildren.join(', ') : 'text only';
   const kind = dita ? 'topic type' : 'schema';
@@ -53,8 +78,18 @@ function placementLine(p, dita) {
   <${p.root}> root element with everything inside it.${
       titled.includes(p.root) ? `
   <${p.root}> starts with its required <title>.` : ''
+    }${
+      p.metadata ? `
+  <${p.root}> starts with its identification and status section; start from
+  this minimal, valid one:
+${minimalSection(p)}` : ''
     }
   Allowed directly inside <${p.root}>: ${allowed}.`;
+  }
+  if (p.metadata?.insertion && p.contentInsertion === false) {
+    return `- ${kind} "${p.schema}": the application builds the rest of the document
+  (${p.path.join('/')}); write no "content".
+${metadataLine(p)}`;
   }
   // T4b: the skeleton's own <title> (a DITA topic's, mandatory).
   const titleLine =
@@ -64,7 +99,10 @@ function placementLine(p, dita) {
       : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
   ${p.path.join('/')}.${titleLine}
-  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.`;
+  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${
+    p.metadata?.insertion ? `
+${metadataLine(p, true)}` : ''
+  }`;
 }
 
 // T4b: a rule whose context depends on the title of an element (for example
@@ -209,10 +247,18 @@ Write new examples that do not repeat this mistake.`;
   }
 
   const firstSchema = placements[0]?.schema || 'descript';
+  // Rule test on DM metadata: "metadata" (the whole section) when the rule
+  // looks at it; no "content" when it looks at nothing else.
+  const withMetadata = placements.some((p) => p.insertion && p.metadata?.insertion);
+  const withContent = placements.some((p) => !p.insertion || p.contentInsertion !== false);
+  const fields = [
+    withMetadata ? `"metadata": "<${placements.find((p) => p.metadata?.insertion).metadata.element}>…"` : null,
+    withContent ? '"content": "…"' : null,
+  ].filter(Boolean);
   prompt += `
 
 OUTPUT: strict JSON, no comments:
-{"proposalMismatch": null, "examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", "content": "…"}]}`;
+{"proposalMismatch": null, "examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", ${fields.join(', ')}}]}`;
   return prompt;
 }
 
@@ -225,7 +271,7 @@ export function buildRuleTestCorrectionMessage(failures) {
   );
   return `Some examples are not valid. Fix exactly these problems and
 return the complete JSON again: the same examples in the same order with the same "expected" and "schema" — change only the
-"content" of the examples listed.
+"content" (and "metadata", if it has one) of the examples listed.
 
 ${blocks.join('\n\n')}`;
 }
@@ -266,9 +312,12 @@ export function parseRuleTestResponse(raw) {
       return { ok: false, error: `${where} has "expected" = ${JSON.stringify(ex.expected)} (must be "accept" or "reject").` };
     }
     // T2b: the content of the insertion point ("xml" accepted from an
-    // answer that still uses the old field name).
-    const content = typeof ex.content === 'string' ? ex.content : ex.xml;
-    if (typeof content !== 'string' || !content.trim()) return { ok: false, error: `${where} has no "content".` };
+    // answer that still uses the old field name). Rule test on DM
+    // metadata: "metadata", the whole identification and status section;
+    // an example may then have no content at all.
+    const content = typeof ex.content === 'string' ? ex.content : typeof ex.xml === 'string' ? ex.xml : '';
+    const metadata = typeof ex.metadata === 'string' ? ex.metadata.trim() : '';
+    if (!content.trim() && !metadata) return { ok: false, error: `${where} has no "content".` };
     if (ex.schema !== undefined && ex.schema !== null && typeof ex.schema !== 'string') {
       return { ok: false, error: `${where} has a "schema" that is not text or null.` };
     }
@@ -277,6 +326,7 @@ export function parseRuleTestResponse(raw) {
       expected: ex.expected,
       schema: ex.schema && ex.schema !== 'null' ? ex.schema : null,
       content: content.trim(),
+      ...(metadata ? { metadata } : {}),
     });
   }
   return { ok: true, proposalMismatch, examples };

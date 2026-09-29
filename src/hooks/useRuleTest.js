@@ -60,6 +60,10 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // 'error', cause, explanation, mismatches, error } | null. Indicative
   // only: it never changes the verdict shown or recorded.
   const [review, setReview] = useState(null);
+  // Rule test on DM metadata, Part 3: known once the schema structure is
+  // fetched (never from the rule alone) -- the rule looks at nothing the
+  // examples can contain. Shown like analyzeRule's "not executable".
+  const [lateAnalysis, setLateAnalysis] = useState(null);
   // Only the latest generation may land (Regenerate while one is running).
   const generationRef = useRef(0);
   const setupRef = useRef(null);
@@ -98,6 +102,12 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       previousReview: previousReview?.mismatches ? previousReview : null,
     });
     if (!result) return; // a newer generation started
+    if (result.status === 'not_executable') {
+      setLateAnalysis({ status: 'not_executable', reason: result.reason, unreachable: true });
+      setState({ status: 'idle' });
+      if (!onDemand) report({ result: 'not_executable', reason: result.reason });
+      return;
+    }
     if (result.status !== 'ready') {
       setState({ status: 'error', error: result.error, badResponse: Boolean(result.badResponse) });
       return;
@@ -121,18 +131,22 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     else generate();
   }, []);
 
-  // "Run again" on an edited example's content: rebuilt on its skeleton,
-  // checked and run -- engine only, no LLM, nothing saved.
-  const runAgain = (index, content) =>
+  // "Run again" on an edited example's content (and, for a rule on the
+  // metadata, its identification and status section): rebuilt on its
+  // skeleton, checked and run -- engine only, no LLM, nothing saved.
+  const runAgain = (index, content, metadata) =>
     setState((prev) => {
       if (prev.status !== 'ready') return prev;
-      const example = materializeExample({ ...prev.examples[index], content }, setupRef.current);
+      const edited = { ...prev.examples[index], content };
+      if (metadata !== undefined) edited.metadata = metadata;
+      const example = materializeExample(edited, setupRef.current);
       const examples = prev.examples.map((ex, i) => (i === index ? example : ex));
       const runs = prev.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary }) : r));
       return { ...prev, examples, runs };
     });
 
   const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis) : null;
+  const shownAnalysis = lateAnalysis || analysis;
 
   // T3b "Review with the assistant" (incorrect verdict only): the Proposal,
   // the rule, its deterministic description (in English, whatever the
@@ -169,7 +183,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
 
   return {
     state,
-    analysis,
+    analysis: shownAnalysis,
     description,
     verdict,
     copyablePrompt,

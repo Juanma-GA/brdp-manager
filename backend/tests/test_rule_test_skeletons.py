@@ -3,8 +3,11 @@ cards and every link of every skeleton is a real parent/child pair of that
 schema; GET /api/schema-cards/structure serves them with the schema's
 complete element graph."""
 import uuid
+from pathlib import Path
+from xml.sax.saxutils import escape, quoteattr
 
 import pytest
+from lxml import etree
 
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
@@ -13,11 +16,12 @@ from app.services.rule_test_skeletons import (
     DITA_NESTED_TYPES,
     DITA_SKELETON_EXCLUDED,
     SKELETON_EXCLUDED,
+    derive_metadata_skeleton,
     derive_skeleton,
     get_element_schemas,
     schema_graph,
 )
-from app.services.schema_cards import get_document_schemas
+from app.services.schema_cards import _CARDS_BY_FILE, STANDARD_TO_SCHEMA_CARDS_FILE, get_document_schemas
 
 S1000D = ["S1000D 4.2", "S1000D 4.1", "S1000D 3.0.1"]
 DITA = ["DITA 1.3 Xpath2.0", "DITA 1.3 Xpath3.0"]
@@ -184,3 +188,114 @@ async def test_structure_endpoint_unavailable_and_auth(client):
     assert res.json()["skeleton"] is None
     res = await client.get("/api/schema-cards/structure", params={"standard": "S1000D 4.2", "schema": "proced"})
     assert res.status_code == 401
+
+
+# ─── The identification and status section (rule test on DM metadata) ──────
+XSD_DIRS = {
+    "S1000D 4.2": "4.2",
+    "S1000D 4.1": "4.1",
+    "S1000D 3.0.1": "3.0.1",
+}
+SOURCES = Path(__file__).resolve().parents[2] / "sources" / "SchemasS1000D"
+
+
+def _serialize(node: dict) -> str:
+    """Same serialization as ruleTestSkeleton.js's metadataXml (no
+    indentation here: the XSD check does not care)."""
+    attrs = "".join(f" {name}={quoteattr(value)}" for name, value in node["attributes"])
+    inner = escape(node["text"] or "") + "".join(_serialize(c) for c in node["children"])
+    return f"<{node['name']}{attrs}>{inner}</{node['name']}>" if inner else f"<{node['name']}{attrs}/>"
+
+
+def _nodes(node: dict):
+    yield node
+    for child in node["children"]:
+        yield from _nodes(child)
+
+
+@pytest.mark.parametrize("standard", S1000D)
+def test_every_data_module_schema_has_a_metadata_section_that_fits_its_cards(standard):
+    cards = _CARDS_BY_FILE[STANDARD_TO_SCHEMA_CARDS_FILE[standard]]["cards"]
+    covered = []
+    for schema in get_document_schemas(standard):
+        skeleton = derive_skeleton(standard, schema)
+        metadata = derive_metadata_skeleton(standard, schema)
+        if skeleton["root"] != "dmodule":
+            # pm, dml, ddn, comment, dataUpdateFile, …: not covered yet.
+            assert metadata is None, (standard, schema)
+            continue
+        assert metadata is not None, (standard, schema)
+        covered.append(schema)
+        graph = schema_graph(standard, schema)
+        tree = metadata["tree"]
+        assert tree["name"] == metadata["element"]
+        assert metadata["element"] in graph["dmodule"]["children"]
+        for node in _nodes(tree):
+            variant = next(v for v in cards[node["name"]] if schema in v["schemas"])
+            declared = {a["name"]: a for a in variant["attributes"]}
+            names = [name for name, _ in node["attributes"]]
+            # every required attribute of the card, and only declared ones
+            assert {a for a, d in declared.items() if d.get("required")} <= set(names), (schema, node["name"])
+            for name, value in node["attributes"]:
+                assert name in declared, (schema, node["name"], name)
+                if declared[name].get("enum"):
+                    assert value in declared[name]["enum"], (schema, node["name"], name, value)
+            for child in node["children"]:
+                assert child["name"] in graph[node["name"]]["children"], (schema, node["name"], child["name"])
+    assert "descript" in covered and "proced" in covered
+
+
+@pytest.mark.parametrize("standard", S1000D)
+def test_every_metadata_section_is_valid_against_the_real_xsd(standard):
+    for schema in get_document_schemas(standard):
+        metadata = derive_metadata_skeleton(standard, schema)
+        if metadata is None:
+            continue
+        # The content of the skeleton alone may be incomplete for the XSD (a
+        # <description> needs more than one empty <para>): only the errors
+        # inside the identification and status section count.
+        path = derive_skeleton(standard, schema)["path"]
+        body = "".join(f"<{n}>" for n in path[1:]) + "".join(f"</{n}>" for n in reversed(path[1:]))
+        doc = f"<dmodule>{_serialize(metadata['tree'])}{body}</dmodule>"
+        xsd = etree.XMLSchema(etree.parse(str(SOURCES / XSD_DIRS[standard] / f"{schema}.xsd")))
+        xsd.validate(etree.fromstring(doc))
+        section = f"/dmodule/{metadata['element']}"
+        errors = [e.message for e in xsd.error_log if (e.path or "").startswith(section)]
+        assert errors == [], (standard, schema, errors)
+
+
+def test_known_metadata_sections():
+    tree = derive_metadata_skeleton("S1000D 4.2", "descript")["tree"]
+    assert [c["name"] for c in tree["children"]] == ["dmAddress", "dmStatus"]
+    dm_status = tree["children"][1]
+    assert [c["name"] for c in dm_status["children"]] == [
+        "security", "responsiblePartnerCompany", "originator", "applic", "brexDmRef", "qualityAssurance",
+    ]
+    dm_code = tree["children"][0]["children"][0]["children"][0]
+    assert dm_code["name"] == "dmCode"
+    assert dict(dm_code["attributes"])["infoCode"] == "040"
+    # Minimal: no optional attribute (no @issueType on dmStatus, no
+    # @enterpriseCode on responsiblePartnerCompany).
+    assert dm_status["attributes"] == []
+    assert dm_status["children"][1]["attributes"] == []
+    tree301 = derive_metadata_skeleton("S1000D 3.0.1", "descript")["tree"]
+    assert tree301["name"] == "idstatus"
+    assert [c["name"] for c in tree301["children"][1]["children"]] == ["security", "rpc", "orig", "applic", "brexref", "qa"]
+    assert derive_metadata_skeleton("S1000D 4.2", "pm") is None
+    assert derive_metadata_skeleton("DITA 1.3 Xpath2.0", "topic") is None
+    assert derive_metadata_skeleton("S1000D 5.0", "descript") is None
+
+
+@pytest.mark.asyncio
+async def test_structure_endpoint_serves_the_metadata_section(client):
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "S1000D 4.2", "schema": "descript"}, headers=_headers(user)
+    )
+    metadata = res.json()["skeleton"]["metadata"]
+    assert metadata["element"] == "identAndStatusSection"
+    assert metadata["tree"]["children"][0]["name"] == "dmAddress"
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "DITA 1.3 Xpath2.0", "schema": "task"}, headers=_headers(user)
+    )
+    assert res.json()["skeleton"]["metadata"] is None

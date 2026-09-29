@@ -54,7 +54,15 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     promptPlacements.push({ schema, role, ...placement });
   }
   if (promptPlacements.length === 0) throw new Error(`No schema structure is available for ${standard}.`);
-  return { contextSchemas, schemaFacts, promptPlacements, setup: { standard, schemaLocation, placements } };
+  // Rule test on DM metadata, Part 3: when nothing the examples of the test
+  // schema can contain is on any path of the rule, no example can ever show
+  // it working -- said now, before any LLM call, instead of an
+  // "inconclusive … regenerate" that no regeneration fixes.
+  const rulePlacement = promptPlacements.find((p) => p.role === 'rule');
+  const unreachable = rulePlacement?.unreachable
+    ? { code: 'unreachable_target', params: { names: rulePlacement.unreachable.join(', ') } }
+    : null;
+  return { contextSchemas, schemaFacts, promptPlacements, unreachable, setup: { standard, schemaLocation, placements } };
 }
 
 // T4b: an example meant to be rejected in which the rule selects nothing
@@ -151,6 +159,8 @@ export function runRuleTestExamples(examples, { ruleXml, format, setup, vocabula
 
 // → { status: 'ready', proposalMismatch, examples, runs,
 //     correction, setup, systemPrompt, responses }
+//   | { status: 'not_executable', reason, setup } -- the rule looks at
+//     nothing the examples can contain (no LLM call)
 //   | { status: 'error', error, badResponse?, systemPrompt?, responses? }
 //   | null when isCurrent() turned false (a newer generation started).
 // onPrompt(systemPrompt) is called as soon as the prompt exists (Copy test
@@ -175,6 +185,7 @@ export async function generateRuleTestExamples({
   try {
     const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure });
     if (!isCurrent()) return null;
+    if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup };
     systemPrompt = buildRuleTestExamplesPrompt({
       brdp,
       standard,

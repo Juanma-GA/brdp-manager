@@ -166,6 +166,14 @@
 // context="note[not(@type)]" + test="false()". Changes the two SCH-DITA
 // cases. ASK_TEMPERATURE 1 -> 0.7 is not part of any prompt text, so no Ask
 // case changes.
+//
+// Rule test on DM metadata: 2 NEW ruleTestExamples cases, no existing case
+// changes (a rule that only looks at the content gets the same prompt as
+// before) -- brex-4-2-metadata-infocode (//dmIdent/dmCode/@infoCode, the
+// LLM writes the whole identAndStatusSection starting from the minimal one
+// quoted in the prompt, and no content) and
+// brex-4-2-metadata-and-content-assycode (//@assyCode[…]: the section AND
+// the content are insertion points).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

@@ -24,6 +24,7 @@ import {
 } from '../src/utils/ruleSchemaContext.js';
 import { buildSuggestRulePrompt } from '../src/prompts/suggestRulePrompt.js';
 import { pendingApprovalComment } from '../src/api/generateBREX.js';
+import { readPublicTemplate } from './lib/readXlsx.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0;
@@ -57,9 +58,7 @@ check('DITA never supports schema context', !supportsSchemaContext('DITA 1.3 Xpa
 check('S1000D 5.0 has no schema context', !supportsSchemaContext('S1000D 5.0'));
 // The 4.2 / 4.1 bases are the real rulesContext values of the curated templates.
 for (const [std, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.1', 'brdp-template-4-1.xlsx']]) {
-  const XLSX = (await import('xlsx')).default;
-  const wb = XLSX.read(fs.readFileSync(path.join(root, 'public', file)));
-  const rules = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).map((r) => r.Rule || '');
+  const rules = readPublicTemplate(file).map((r) => r.Rule || '');
   const urls = rules.flatMap((r) => [...r.matchAll(/rulesContext="([^"]+)"/g)].map((m) => m[1]));
   check(`${std}: template has real rulesContext values`, urls.length > 0);
   check(`${std}: every template rulesContext is the flat URL the app writes`, urls.every((u) => u === schemaContextUrl(std, schemaNameFromContext(u), 'flat')), urls.join(' '));

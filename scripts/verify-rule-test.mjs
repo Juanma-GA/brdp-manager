@@ -242,11 +242,12 @@ async function main() {
     // Part 6: whole, indented, inside its block -- on screen and copied.
     const fits = await example(1).locator("pre").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
     assert(fits, "the multi-line example fits its block (no hidden overflow)");
-    const indented = await example(1).locator("pre > div").nth(5).evaluate((el) => getComputedStyle(el).paddingLeft);
-    assert(indented === `${5 * 2 * 7.2}px` || parseFloat(indented) > 50, `deep lines indented on screen (${indented})`);
+    // (the document now starts with its identification and status section)
+    const indented = await example(1).locator("pre > div", { hasText: /^\s*<para>/ }).first().evaluate((el) => getComputedStyle(el).paddingLeft);
+    assert(parseFloat(indented) > 50, `deep lines indented on screen (${indented})`);
     await example(1).getByRole("button", { name: "Copy XML" }).click();
     const copiedXml = await page.evaluate(() => navigator.clipboard.readText());
-    assert(copiedXml.split("\n")[5]?.startsWith("          <para>"), `Copy XML keeps the indentation (${JSON.stringify(copiedXml.split("\n").slice(4, 7))})`);
+    assert(copiedXml.split("\n").some((l) => l.startsWith("          <para>")) && copiedXml.split("\n")[1] === "  <identAndStatusSection>", `Copy XML keeps the indentation (${JSON.stringify(copiedXml.split("\n").slice(0, 3))})`);
     const selectedText = await example(1).locator("pre").evaluate((el) => {
       const range = document.createRange();
       range.selectNodeContents(el);

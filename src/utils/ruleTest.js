@@ -66,8 +66,25 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     schemaLocation: setup.schemaLocation,
     placement: entry.placement,
     content,
+    metadata: example.metadata,
   });
-  return { ...adjusted, schema, xml, skeletonNodePaths, structure: entry.structure, insertion: entry.placement.insertion };
+  // Rule test on DM metadata: the rule looks at the identification and
+  // status section, so the LLM had to write it; an example without it is
+  // not run (its validation says so).
+  const section = entry.placement.metadata;
+  const missingMetadata =
+    section?.insertion && entry.placement.path.length > 0 && !String(example.metadata || '').trim() ? section.element : null;
+  return {
+    ...adjusted,
+    schema,
+    xml,
+    skeletonNodePaths,
+    structure: entry.structure,
+    insertion: entry.placement.insertion,
+    metadataElement: section?.insertion && entry.placement.path.length > 0 ? section.element : null,
+    contentInsertion: entry.placement.contentInsertion !== false,
+    missingMetadata,
+  };
 }
 
 // { wellFormed, error, names, structure, cards, unknownSchema, runnable }
@@ -78,6 +95,9 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
   const empty = { available: false, notFound: [], wrongType: [] };
   if (options.unknownSchema) {
     return { wellFormed: true, error: null, names: empty, structure: [], cards: [], unknownSchema: options.unknownSchema, runnable: false };
+  }
+  if (options.missingMetadata) {
+    return { wellFormed: true, error: null, names: empty, structure: [], cards: [], unknownSchema: null, missingMetadata: options.missingMetadata, runnable: false };
   }
   let doc;
   try {
@@ -195,6 +215,7 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
       : line;
   const out = [];
   if (validation.unknownSchema) out.push(`schema "${validation.unknownSchema}" was not offered; use one of the listed schemas`);
+  if (validation.missingMetadata) out.push(`"metadata" is missing: write the complete <${validation.missingMetadata}> of this example`);
   if (!validation.wellFormed) out.push(`not well-formed XML: ${validation.error}`);
   for (const name of validation.names?.notFound || []) {
     const element = /^<(.+)>$/.exec(name)?.[1];
@@ -220,7 +241,10 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
 // A materialized example (T2b) is validated against its schema's structure.
 export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument } = {}) {
   const unknownSchema = example.unmaterialized ? example.schema || '(none)' : null;
-  const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, { unknownSchema });
+  const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, {
+    unknownSchema,
+    missingMetadata: example.missingMetadata || null,
+  });
   if (!validation.runnable) return { validation, result: null, matches: null };
   const result = runRuleOnFragment(ruleXml, format, example.xml, example.schema || null, { parseXml });
   const expectedStatus = example.expected === 'reject' ? 'rejected' : 'accepted';

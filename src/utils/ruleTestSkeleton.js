@@ -86,7 +86,12 @@ function stepName(segment) {
 
 // One alternative of a path expression → the element its last step names
 // (the owner element for an attribute step), plus its literal absolute
-// prefix ("/dmodule/content//thead" → ["dmodule", "content"]).
+// prefix ("/dmodule/content//thead" → ["dmodule", "content"]). Each
+// alternative is also recorded on its own (out.alternatives: its element
+// steps, its trailing attribute, its absolute prefix), so the placement can
+// tell a rule about the data module's metadata from one about its content.
+// An alternative whose steps cannot be read (a function call, a variable, a
+// prefixed name, "..") is "opaque": nothing is concluded from it.
 function analyzeAlternative(alternative, out) {
   const text = alternative.trim();
   if (!text) return;
@@ -105,6 +110,7 @@ function analyzeAlternative(alternative, out) {
     }
   }
   const segments = splitTopLevel(text, '/');
+  let absolutePrefix = null;
   if (text.startsWith('/') && !text.startsWith('//')) {
     const prefix = [];
     for (const seg of segments.slice(1)) {
@@ -112,17 +118,42 @@ function analyzeAlternative(alternative, out) {
       if (!name) break;
       prefix.push(name);
     }
-    if (prefix.length) out.absolutePrefixes.push(prefix);
+    if (prefix.length) {
+      out.absolutePrefixes.push(prefix);
+      absolutePrefix = prefix;
+    }
   }
+  let checked = null;
   for (let i = segments.length - 1; i >= 0; i -= 1) {
     const seg = segments[i].trim();
     if (!seg || seg === '.' || seg === '*' || /^(?:node|text|comment)\(\)$/.test(seg)) continue;
     if (seg.startsWith('@') || seg.startsWith('attribute::')) continue; // the owner is the previous step
     if (seg.includes('(') || seg.includes(':') && !AXIS_RE.test(seg)) break; // a function call, a prefixed name
     const name = stepName(seg);
-    if (name) out.checked.add(name);
+    if (name) {
+      out.checked.add(name);
+      checked = name;
+    }
     break;
   }
+  const steps = [];
+  let attribute = null;
+  let opaque = false;
+  segments.forEach((raw, i) => {
+    const seg = raw.trim();
+    if (!seg || seg === '.' || seg === '*' || /^(?:node|text|comment)\(\)$/.test(seg)) return;
+    const attr = /^(?:@|attribute::)([A-Za-z_][\w.-]*)$/.exec(seg);
+    if (attr) {
+      if (i === segments.length - 1) attribute = attr[1];
+      else opaque = true;
+      return;
+    }
+    const name = stepName(seg);
+    if (name) steps.push(name);
+    else opaque = true;
+  });
+  if (steps.length === 0 && !attribute) opaque = true;
+  out.alternatives.push({ steps, attribute, checked, absolutePrefix, opaque });
 }
 
 const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
@@ -157,7 +188,7 @@ function isRootContext(alternative) {
 // wholeDocument: a Schematron context that matches the document's root
 // element -- the example has to be a whole document.
 export function ruleTargets(ruleXml) {
-  const out = { checked: new Set(), absolutePrefixes: [] };
+  const out = { checked: new Set(), absolutePrefixes: [], alternatives: [] };
   const contexts = schematronContexts(ruleXml);
   let wholeDocument = false;
   for (const expression of contexts.length ? contexts : extractRuleXPaths(ruleXml || '')) {
@@ -166,7 +197,7 @@ export function ruleTargets(ruleXml) {
       analyzeAlternative(alternative, out);
     }
   }
-  return { checked: [...out.checked], absolutePrefixes: out.absolutePrefixes, wholeDocument };
+  return { checked: [...out.checked], absolutePrefixes: out.absolutePrefixes, alternatives: out.alternatives, wholeDocument };
 }
 
 // ─── Which schemas the examples use ─────────────────────────────────────────
@@ -241,17 +272,131 @@ function reachable(elements, from, target, maxDepth = 8) {
   return false;
 }
 
-// { path, insertion, root, allowedChildren, titled } for one schema's
-// structure (GET /api/schema-cards/structure) and the rule's targets. A
-// whole-document example (the rule checks the root element) has an empty
-// path and no insertion point: the content is the complete root element.
+// All the elements reachable from `starts` (the starts included).
+function reachableSet(elements, starts) {
+  const seen = new Set(starts.filter((n) => elements[n]));
+  let frontier = [...seen];
+  while (frontier.length) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of elements[name]?.children || []) {
+        if (!seen.has(child) && elements[child]) {
+          seen.add(child);
+          next.push(child);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return seen;
+}
+
+function treeNames(node, out = new Set()) {
+  out.add(node.name);
+  for (const child of node.children || []) treeNames(child, out);
+  return out;
+}
+
+// Rule test on DM metadata: which part of the assembled data module each
+// alternative of the rule's paths can select nodes in.
+//   M  elements reachable from the identification and status section
+//   T  elements of the minimal section the application writes
+//   C  elements reachable from the rest of the document (its content)
+// An alternative looks at the METADATA when all its element steps are in M
+// and its last element is in T (so the skeleton's own node is checked: the
+// dmCode of //dmCode/@infoCode) or one of its steps exists only there
+// (dmIdent, dmStatus); an attribute-only alternative (//@issueType), when an
+// element that carries the attribute is. It looks at the CONTENT when all
+// its element steps are in C (an attribute-only one: when an element in C
+// carries the attribute). An absolute path says where it goes by its second
+// step. An alternative that can be neither is unreachable; an opaque one
+// (steps that cannot be read) counts as content, as before.
+// → { metadata, content, contentAlternatives, unreachable } -- unreachable:
+// the names the rule looks at when EVERY alternative is unreachable (the
+// examples can never contain what it checks), else null.
+export function classifyRuleTargets(structure, targets) {
+  const elements = structure.elements;
+  const root = structure.skeleton.path[0];
+  const section = structure.skeleton.metadata || null;
+  // The root is an ancestor of both parts (an absolute path names it).
+  const M = section ? reachableSet(elements, [section.element]).add(root) : new Set();
+  const T = section ? treeNames(section.tree) : new Set();
+  const C = reachableSet(elements, section ? (elements[root]?.children || []).filter((c) => c !== section.element) : [root]).add(root);
+  const owners = (attribute) => Object.keys(elements).filter((n) => elements[n].attributes.includes(attribute));
+  let metadata = false;
+  let content = false;
+  const contentAlternatives = [];
+  const unreachableNames = [];
+  let allUnreachable = true;
+  const alternatives = targets?.alternatives || [];
+  for (const alt of alternatives) {
+    if (alt.opaque) {
+      content = true;
+      contentAlternatives.push(alt);
+      allUnreachable = false;
+      continue;
+    }
+    let inMeta;
+    let inContent;
+    const prefix = alt.absolutePrefix;
+    if (prefix && prefix[0] !== root) {
+      inMeta = false;
+      inContent = false;
+    } else if (alt.steps.length > 0) {
+      const last = alt.steps[alt.steps.length - 1];
+      const metaOnly = alt.steps.some((s) => M.has(s) && !C.has(s));
+      inMeta = Boolean(section) && alt.steps.every((s) => M.has(s)) && (T.has(last) || metaOnly);
+      inContent = alt.steps.every((s) => C.has(s));
+      if (prefix && prefix.length > 1 && section) {
+        inMeta = inMeta && prefix[1] === section.element;
+        inContent = inContent && prefix[1] !== section.element;
+      }
+    } else {
+      const carriers = owners(alt.attribute);
+      inMeta = Boolean(section) && carriers.some((o) => T.has(o) || (M.has(o) && !C.has(o)));
+      inContent = carriers.some((o) => C.has(o));
+    }
+    if (inMeta) metadata = true;
+    if (inContent) {
+      content = true;
+      contentAlternatives.push(alt);
+    }
+    if (inMeta || inContent) {
+      allUnreachable = false;
+      continue;
+    }
+    const unknown = alt.steps.find((s) => !M.has(s) && !C.has(s));
+    unreachableNames.push(
+      unknown ? `<${unknown}>` : alt.steps.length > 0 ? alt.steps.map((s) => `<${s}>`).join('/') : `@${alt.attribute}`
+    );
+  }
+  if (alternatives.length === 0) content = true;
+  const unreachable = alternatives.length > 0 && allUnreachable ? [...new Set(unreachableNames)] : null;
+  // A rule nothing can be said about keeps the content placement.
+  if (!metadata && !content && !unreachable) content = true;
+  return { metadata, content, contentAlternatives, unreachable };
+}
+
+// { path, insertion, root, allowedChildren, titled, metadata,
+//   contentInsertion, unreachable } for one schema's structure (GET
+// /api/schema-cards/structure) and the rule's targets. A whole-document
+// example (the rule checks the root element) has an empty path and no
+// insertion point: the content is the complete root element.
 // titled (T4b): the elements of the path the application writes a <title>
 // into (a DITA topic's mandatory title, skeleton.titled) -- none when the
 // rule itself checks <title>, so a skeleton title never decides a verdict;
 // for a whole document, the root when the LLM has to write that title.
+// metadata (rule test on DM metadata): { element, tree, insertion } for a
+// data module -- the minimal identification and status section, which the
+// application writes (insertion: false) unless the rule looks at it
+// (insertion: true: the LLM writes the whole section, starting from the
+// minimal one); null for other documents. contentInsertion: false when the
+// rule looks only at the metadata (the content is the bare skeleton).
+// unreachable: see classifyRuleTargets.
 export function placeExample(structure, targets) {
   const chain = structure.skeleton.path;
   const elements = structure.elements;
+  const section = structure.skeleton.metadata || null;
   const checked = (targets?.checked || []).filter((name) => elements[name]);
   const skeletonTitled = checked.includes('title') ? [] : structure.skeleton.titled || [];
   if (targets?.wholeDocument || checked.includes(chain[0])) {
@@ -261,21 +406,44 @@ export function placeExample(structure, targets) {
       root: chain[0],
       allowedChildren: [...(elements[chain[0]]?.children || [])],
       titled: (structure.skeleton.titled || []).includes(chain[0]) ? [chain[0]] : [],
+      // The LLM writes the whole document; the prompt still gives it the
+      // minimal identification and status section to start from.
+      metadata: section ? { element: section.element, tree: section.tree, insertion: true } : null,
+      contentInsertion: true,
+      unreachable: null,
     };
   }
+  const classes = classifyRuleTargets(structure, targets);
+  const metadata = section ? { element: section.element, tree: section.tree, insertion: classes.metadata } : null;
+  // What the content placement looks at: the alternatives about the content.
+  const contentChecked = [
+    ...new Set(classes.contentAlternatives.map((a) => a.checked).filter((name) => name && elements[name])),
+  ];
+  const contentPrefixes = classes.contentAlternatives.map((a) => a.absolutePrefix).filter(Boolean);
+  const whole = (insertion, path, contentInsertion) => ({
+    path,
+    insertion,
+    root: chain[0],
+    allowedChildren: [...(elements[insertion]?.children || [])],
+    titled: path.filter((name) => skeletonTitled.includes(name)),
+    metadata,
+    contentInsertion,
+    unreachable: classes.unreachable,
+  });
+  if (!classes.content) return whole(chain[chain.length - 1], chain, false);
 
   // The example that complies must be able to leave out what the rule
   // checks, so the skeleton stops before the first element it checks.
   let limit = chain.length;
   for (let i = 1; i < chain.length; i += 1) {
-    if (checked.includes(chain[i])) {
+    if (contentChecked.includes(chain[i])) {
       limit = i;
       break;
     }
   }
-  // An absolute path that leaves the skeleton (/dmodule/identAndStatusSection/…)
+  // An absolute path that leaves the skeleton (/dmodule/content/…/thead)
   // keeps the insertion point on the part they share.
-  for (const prefix of targets?.absolutePrefixes || []) {
+  for (const prefix of contentPrefixes) {
     if (prefix[0] !== chain[0]) continue;
     let common = 0;
     while (common < prefix.length && common < chain.length && prefix[common] === chain[common]) common += 1;
@@ -284,20 +452,12 @@ export function placeExample(structure, targets) {
 
   let index = limit - 1;
   for (let i = limit - 1; i >= 0; i -= 1) {
-    if (checked.every((name) => reachable(elements, chain[i], name))) {
+    if (contentChecked.every((name) => reachable(elements, chain[i], name))) {
       index = i;
       break;
     }
   }
-  const insertion = chain[index];
-  const path = chain.slice(0, index + 1);
-  return {
-    path,
-    insertion,
-    root: chain[0],
-    allowedChildren: [...(elements[insertion]?.children || [])],
-    titled: path.filter((name) => skeletonTitled.includes(name)),
-  };
+  return whole(chain[index], chain.slice(0, index + 1), true);
 }
 
 // ─── The complete fragment ──────────────────────────────────────────────────
@@ -311,6 +471,44 @@ export const SKELETON_TITLE_TEXT = 'Example topic';
 // so the panel dims it with its tags.
 export const SKELETON_TEXT_SUFFIX = '/text()';
 
+// ─── The identification and status section ─────────────────────────────────
+const escXmlText = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escXmlAttr = (v) => escXmlText(v).replace(/"/g, '&quot;');
+
+// The minimal section's tree (skeleton.metadata.tree, from the backend) as
+// indented XML lines, and the node paths of its elements (and of the text of
+// the elements that have some) for the panel to dim. `parentPath` is the
+// path of the element it goes into ("/dmodule[1]"). Same serialization as
+// backend/tests/test_rule_test_skeletons.py's _serialize, which validates
+// every section against the real XSD.
+export function metadataXml(tree, depth = 0, parentPath = '') {
+  const lines = [];
+  const paths = [];
+  const walk = (node, level, path) => {
+    paths.push(path);
+    const attrs = (node.attributes || []).map(([name, value]) => ` ${name}="${escXmlAttr(value)}"`).join('');
+    const children = node.children || [];
+    if (node.text != null && node.text !== '') paths.push(`${path}${SKELETON_TEXT_SUFFIX}`);
+    if (children.length === 0) {
+      lines.push(
+        node.text != null && node.text !== ''
+          ? `${indentOf(level)}<${node.name}${attrs}>${escXmlText(node.text)}</${node.name}>`
+          : `${indentOf(level)}<${node.name}${attrs}/>`
+      );
+      return;
+    }
+    lines.push(`${indentOf(level)}<${node.name}${attrs}>${node.text ? escXmlText(node.text) : ''}`);
+    const seen = {};
+    for (const child of children) {
+      seen[child.name] = (seen[child.name] || 0) + 1;
+      walk(child, level + 1, `${path}/${child.name}[${seen[child.name]}]`);
+    }
+    lines.push(`${indentOf(level)}</${node.name}>`);
+  };
+  walk(tree, depth, `${parentPath}/${tree.name}[1]`);
+  return { xml: lines.join('\n'), paths };
+}
+
 // { xml, skeletonNodePaths }: the skeleton path around the LLM's content.
 // S1000D: the root carries xsi:noNamespaceSchemaLocation with the schema's
 // URL in the project's form (flat/master), so a rule limited to that schema
@@ -319,13 +517,20 @@ export const SKELETON_TEXT_SUFFIX = '/text()';
 // A whole-document placement (empty path) is the content alone. A titled
 // path element (placement.titled) gets <title>SKELETON_TITLE_TEXT</title>
 // as its first child, part of the skeleton.
-export function assembleExample({ standard, schema, schemaLocation, placement, content }) {
+// A data module (placement.metadata) starts with its identification and
+// status section: the minimal one, part of the skeleton, or -- when the
+// rule looks at it (metadata.insertion) -- the section the LLM wrote
+// (`metadata`), as it wrote it. The content is left empty when the rule
+// looks only at the metadata (placement.contentInsertion === false).
+export function assembleExample({ standard, schema, schemaLocation, placement, content, metadata = null }) {
   const path = placement.path;
-  const body = String(content ?? '').trim();
-  if (path.length === 0) return { xml: body, skeletonNodePaths: [] };
+  const body = placement.contentInsertion === false ? '' : String(content ?? '').trim();
+  if (path.length === 0) return { xml: String(content ?? '').trim(), skeletonNodePaths: [] };
   const withSchemaLocation = supportsSchemaContext(standard);
   const rootAttrs = withSchemaLocation ? [`xmlns:xsi="${XSI_NS}"`] : [];
-  if (/\bxlink:/.test(body)) rootAttrs.push(`xmlns:xlink="${XLINK_NS}"`);
+  const section = placement.metadata || null;
+  const sectionText = section?.insertion ? String(metadata ?? '').trim() : '';
+  if (/\bxlink:/.test(body) || /\bxlink:/.test(sectionText)) rootAttrs.push(`xmlns:xlink="${XLINK_NS}"`);
   if (withSchemaLocation && schema) {
     rootAttrs.push(`xsi:noNamespaceSchemaLocation="${schemaContextUrl(standard, schema, schemaLocation)}"`);
   }
@@ -337,8 +542,20 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
   const titled = new Set(placement.titled || []);
   const title = `<title>${SKELETON_TITLE_TEXT}</title>`;
   const lines = [];
+  const sectionPaths = [];
   path.forEach((name, i) => {
     const open = `${indentOf(i)}<${name}${i === 0 && rootAttrs.length ? ` ${rootAttrs.join(' ')}` : ''}>`;
+    if (i === 0 && section && last > 0) {
+      lines.push(open);
+      if (section.insertion) {
+        if (sectionText) lines.push(`${indentOf(1)}${sectionText}`);
+      } else {
+        const rendered = metadataXml(section.tree, 1, `/${name}[1]`);
+        lines.push(rendered.xml);
+        sectionPaths.push(...rendered.paths);
+      }
+      return;
+    }
     if (i === last) {
       lines.push(`${open}${titled.has(name) ? title : ''}${body}</${name}>`);
     } else {
@@ -358,5 +575,5 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
       skeletonNodePaths.push(`${prefix}/title[1]`, `${prefix}/title[1]${SKELETON_TEXT_SUFFIX}`);
     }
   }
-  return { xml: lines.join('\n'), skeletonNodePaths };
+  return { xml: lines.join('\n'), skeletonNodePaths: [...skeletonNodePaths, ...sectionPaths] };
 }

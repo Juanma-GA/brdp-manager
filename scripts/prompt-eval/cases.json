@@ -1199,6 +1199,50 @@
       ]
     },
     {
+      "id": "rule-test-4-2-infocode-metadata",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Test rule on a rule about the data module's own metadata (Lufthansa BRDP-S1-00052): //dmIdent/dmCode/@infoCode with allowedObjectFlag 2 and values 055 / 930. The examples are built with the identification and status section as the insertion point: 055/930 must be accepted, any other info code rejected -- never 'Inconclusive' because the values ended up in a <dmRef> of the content.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-META",
+        "title": "Information codes used",
+        "definition": "Decide which information codes the project's data modules may use.",
+        "proposal": "Only the information codes 055 and 930 shall be used.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-META\"><objectPath allowedObjectFlag=\"2\">//dmIdent/dmCode/@infoCode</objectPath><objectUse>Only the information codes 055 and 930 are used.</objectUse><objectValue valueForm=\"single\" valueAllowed=\"055\"/><objectValue valueForm=\"single\" valueAllowed=\"930\"/></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (its identification and status section included) passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example -- the values are in the data module's own dmCode, so the verdict is never 'inconclusive'"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<dmIdent>\\s*<dmCode[^>]*infoCode=\"(?!055\"|930\")",
+          "note": "every reject example writes a non-allowed infoCode in the data module's own dmIdent/dmCode (in \"metadata\", never in a dmRef of the content)"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "your \"metadata\" is the WHOLE <identAndStatusSection>",
+          "note": "the prompt offers the minimal identification and status section to start from"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-emphasis-type-values",
       "type": "rule-test",
       "standard": "S1000D 4.2",

@@ -36,7 +36,8 @@ import { analyzeRule } from '../src/utils/ruleTestEngine.js';
 import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkExampleStructure, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
 import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, missesRuleProblem } from '../src/utils/ruleTestRun.js';
-import { ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
+import { metadataXml, ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
+import { formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
 import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
@@ -138,7 +139,13 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('placement: //emphasis in proced → inside <para>', place('proced', EMPH) === 'dmodule/content/procedure/mainProcedure/proceduralStep/para');
   check('placement: //proceduralStep → inside <mainProcedure> (the accept example can leave it out)', place('proced', '<structureObjectRule><objectPath>//proceduralStep</objectPath></structureObjectRule>') === 'dmodule/content/procedure/mainProcedure');
   check('placement: //thead → inside <levelledPara> (a table cannot sit in <para>)', place('descript', '<structureObjectRule><objectPath>/dmodule/content//thead</objectPath></structureObjectRule>') === 'dmodule/content/description/levelledPara');
-  check('placement: /dmodule/identAndStatusSection/… → inside <dmodule>', place('descript', '<structureObjectRule><objectPath>/dmodule/identAndStatusSection/dmAddress/dmIdent/dmCode/@modelIdentCode</objectPath></structureObjectRule>') === 'dmodule');
+  {
+    // Rule test on DM metadata: an absolute path into the identification and
+    // status section makes that section the insertion point (the LLM writes
+    // it whole); the content is left alone.
+    const meta = placeExample(structureOf('S1000D 4.2', 'descript'), ruleTargets('<structureObjectRule><objectPath>/dmodule/identAndStatusSection/dmAddress/dmIdent/dmCode/@modelIdentCode</objectPath></structureObjectRule>'));
+    check('placement: /dmodule/identAndStatusSection/… → the metadata section, no content', meta.metadata?.insertion === true && meta.metadata.element === 'identAndStatusSection' && meta.contentInsertion === false && meta.unreachable === null, JSON.stringify({ ...meta, metadata: meta.metadata && { ...meta.metadata, tree: '…' } }));
+  }
   const p = placeExample(structureOf('S1000D 4.2', 'proced'), ruleTargets(EMPH));
   check('placement: allowed children of <para> listed', p.allowedChildren.includes('emphasis') && !p.allowedChildren.includes('warning'));
 }
@@ -153,7 +160,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('assembly: flat URL', flat.xml.includes('S1000D_4-2/xml_schema_flat/proced.xsd'));
   check('assembly: well-formed and rooted at <dmodule>', parseXml(flat.xml).documentElement.nodeName === 'dmodule');
   check('assembly: the insertion point holds exactly the content (no added whitespace for string(.) checks)', parseXml(flat.xml).getElementsByTagName('para')[0].textContent === 'Remove the panel.');
-  check('assembly: skeleton node paths', flat.skeletonNodePaths.at(-1) === '/dmodule[1]/content[1]/procedure[1]/mainProcedure[1]/proceduralStep[1]/para[1]', JSON.stringify(flat.skeletonNodePaths));
+  check('assembly: skeleton node paths', flat.skeletonNodePaths.includes('/dmodule[1]/content[1]/procedure[1]/mainProcedure[1]/proceduralStep[1]/para[1]'), JSON.stringify(flat.skeletonNodePaths));
   check('assembly: xlink declared only when used', !flat.xml.includes('xmlns:xlink') && assembleExample({ standard: 'S1000D 4.2', schema: 'proced', placement: placeExample(structureOf('S1000D 4.2', 'proced'), ruleTargets(EMPH)), content: '<dmRef xlink:href="x"/>' }).xml.includes('xmlns:xlink'));
 }
 
@@ -274,7 +281,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('display: skeleton tags marked', segs.some((s) => s.skeleton && s.text === '<proceduralStep') && segs.every((s) => !s.text.startsWith('<emphasis') || !s.skeleton));
   check('display: only the attribute highlighted', JSON.stringify(segs.filter((s) => s.highlight).map((s) => s.text)) === JSON.stringify(['emphasisType="em03"']));
   const text = displayText(lines);
-  check('display: copied text keeps its indentation', text.split('\n')[5].startsWith('          <para>') && text.split('\n')[0].startsWith('<dmodule'), text);
+  check('display: copied text keeps its indentation', text.split('\n').some((l) => l.startsWith('          <para>')) && text.split('\n')[0].startsWith('<dmodule') && text.split('\n')[1] === '  <identAndStatusSection>', text);
 }
 {
   // //emphasis flag 0, general, 4.2: works as before, now on a real skeleton
@@ -393,7 +400,8 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const ROOT_LANG = '<sch:pattern><sch:rule context="/*[not(parent::*)]"><sch:assert id="L" test="@xml:lang">Declare xml:lang.</sch:assert></sch:rule></sch:pattern>';
   const SHORTDESC = '<sch:pattern><sch:rule context="shortdesc"><sch:assert id="SD" test="string-length(.) le 80">Short description too long.</sch:assert></sch:rule></sch:pattern>';
 
-  check('T4 targets: Schematron → contexts only', JSON.stringify(ruleTargets(STEP)) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], wholeDocument: false }), JSON.stringify(ruleTargets(STEP)));
+  const stepTargets = ruleTargets(STEP);
+  check('T4 targets: Schematron → contexts only', JSON.stringify({ ...stepTargets, alternatives: undefined }) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], wholeDocument: false }) && stepTargets.alternatives.length === 1, JSON.stringify(stepTargets));
   check('T4 targets: note', ruleTargets(NOTE).checked.join() === 'note');
   check('T4 targets: root context → whole document', ruleTargets(ROOT_LANG).wholeDocument === true);
   check('T4 targets: entities decoded in the context', ruleTargets('<rule context="p[. = &apos;x&apos;]"><assert test="1">x</assert></rule>').checked.join() === 'p');
@@ -1004,6 +1012,171 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const fRun = testRun(EMPH, failing, procSetup);
   const failures = exampleFailures(failing, fRun.materialized, fRun.runs, { ruleXml: EMPH, standard: S42, format: 'BREX-4.2', parseXml });
   check('C3b hint: the correction round carries it', failures.length === 1 && failures[0].problems.some((p) => p.endsWith('If this element is not needed to test the rule, remove it and use plain text.')), JSON.stringify(failures));
+}
+
+
+// ─── Rule test on DM metadata (identAndStatusSection / idstatus) ────────────
+{
+  const S42 = 'S1000D 4.2';
+  const S301 = 'S1000D 3.0.1';
+  const descript = structureOf(S42, 'descript');
+  const minimal = metadataXml(descript.skeleton.metadata.tree).xml;
+  const t42 = readPublicTemplate('brdp-template-4-2.xlsx');
+  const ruleOf = (id) => t42.find((r) => r.ID === id).Rule;
+  // The minimal section with one change (the LLM starts from it).
+  const docCode = /<dmCode ([^>]*)infoCode="040"/;
+  const withInfoCode = (code) => minimal.replace(docCode, `<dmCode $1infoCode="${code}"`);
+
+  check('metadata: every data module skeleton has the minimal section', descript.skeleton.metadata?.element === 'identAndStatusSection' && structureOf(S301, 'descript').skeleton.metadata?.element === 'idstatus');
+  check('metadata: not for other documents (pm)', structureOf(S42, 'pm').skeleton.metadata === null);
+  check('metadata: minimal section, in XSD order', /<dmIdent>\s*<dmCode [^>]*\/>\s*<language [^>]*\/>\s*<issueInfo [^>]*\/>/.test(minimal) && /<dmStatus>\s*<security [^>]*\/>\s*<responsiblePartnerCompany>/.test(minimal), minimal);
+
+  // A content-only rule: unchanged placement, the minimal section is part of
+  // the dimmed skeleton, the prompt says nothing about metadata.
+  const STEP = '<structureObjectRule><objectPath allowedObjectFlag="0">//proceduralStep[count(proceduralStep) = 1]</objectPath><objectUse>No lone sub-step.</objectUse></structureObjectRule>';
+  const stepPlace = placeExample(structureOf(S42, 'proced'), ruleTargets(STEP));
+  check('metadata: content-only rule keeps its placement', stepPlace.path.join('/') === 'dmodule/content/procedure/mainProcedure' && stepPlace.metadata.insertion === false && stepPlace.contentInsertion === true && stepPlace.unreachable === null);
+  const stepSetup = setupFor(S42, STEP, ['proced']);
+  const stepEx = materializeExample({ label: 'x', expected: 'accept', schema: 'proced', content: '<proceduralStep><para>Remove the panel.</para></proceduralStep>' }, stepSetup, parseXml);
+  check('metadata: content-only rule → minimal section in the document, dimmed', stepEx.xml.includes('<identAndStatusSection>') && stepEx.skeletonNodePaths.includes('/dmodule[1]/identAndStatusSection[1]/dmStatus[1]/security[1]') && stepEx.skeletonNodePaths.includes('/dmodule[1]/identAndStatusSection[1]/dmAddress[1]/dmAddressItems[1]/dmTitle[1]/techName[1]/text()'));
+  const stepPrompt = buildRuleTestExamplesPrompt({ brdp, standard: S42, format: 'BREX-4.2', ruleXml: STEP, placements: [{ schema: 'proced', role: 'rule', ...stepPlace }] });
+  check('metadata: content-only prompt says nothing about the section', !stepPrompt.includes('identification and status') && !stepPrompt.includes('"metadata"'));
+  const stepLines = xmlDisplayLines(stepEx.xml, [], parseXml, stepEx.skeletonNodePaths);
+  check('metadata: the section is shown dimmed', stepLines.flatMap((l) => l.segments).filter((sg) => sg.text.startsWith('<dmStatus') || sg.text === 'Example company').every((sg) => sg.skeleton));
+
+  // S1-00052: //dmIdent/dmCode/@infoCode, flag 2 with values 055 / 930.
+  const R52 = '<structureObjectRule id="BRDP-S1-00052"><objectPath allowedObjectFlag="2">//dmIdent/dmCode/@infoCode</objectPath><objectUse>Only info codes 055 and 930 are used.</objectUse><objectValue valueForm="single" valueAllowed="055"/><objectValue valueForm="single" valueAllowed="930"/></structureObjectRule>';
+  const p52 = placeExample(descript, ruleTargets(R52));
+  check('S1-00052: the section is the insertion point, no content', p52.metadata.insertion === true && p52.contentInsertion === false, JSON.stringify({ ...p52, metadata: '…' }));
+  const set52 = setupFor(S42, R52, ['descript']);
+  const ex52 = [
+    { label: '055', expected: 'accept', schema: 'descript', content: '', metadata: withInfoCode('055') },
+    { label: '930', expected: 'accept', schema: 'descript', content: '', metadata: withInfoCode('930') },
+    { label: '000', expected: 'reject', schema: 'descript', content: '', metadata: withInfoCode('000') },
+    { label: '002', expected: 'reject', schema: 'descript', content: '', metadata: withInfoCode('002') },
+  ];
+  const r52 = testRun(R52, ex52, set52);
+  check('S1-00052: every example valid against the schema', r52.runs.every((r) => r.validation.runnable), JSON.stringify(r52.runs.map((r) => r.validation.structure)));
+  check('S1-00052: 055/930 accepted, 000/002 rejected', r52.runs.map((r) => r.result.status).join() === 'accepted,accepted,rejected,rejected', JSON.stringify(r52.runs.map((r) => r.result.status)));
+  check('S1-00052: the data module\'s own @infoCode selected', r52.runs[2].result.selectedNodePaths.includes('/dmodule[1]/identAndStatusSection[1]/dmAddress[1]/dmIdent[1]/dmCode[1]/@infoCode'), JSON.stringify(r52.runs[2].result.selectedNodePaths));
+  check('S1-00052: verdict correct, never inconclusive', r52.verdict.kind === 'correct', JSON.stringify(r52.verdict));
+  check('S1-00052: the LLM\'s section is content, not skeleton', !r52.materialized[0].skeletonNodePaths.some((p) => p.includes('identAndStatusSection')));
+  const noMeta = testRun(R52, [{ label: 'forgot', expected: 'reject', schema: 'descript', content: 'x' }], set52);
+  check('S1-00052: an example without its section is not run', noMeta.runs[0].validation.runnable === false && noMeta.runs[0].validation.missingMetadata === 'identAndStatusSection');
+  check('S1-00052: …and the correction round says so', exampleProblems(noMeta.runs[0].validation, { standard: S42, schema: 'descript' }).includes('"metadata" is missing: write the complete <identAndStatusSection> of this example'));
+  check('S1-00052: missing section in EN/ES', i18n.getFixedT('es')('records.ruleTest.missingMetadata', { element: 'identAndStatusSection' }) === 'el ejemplo no tiene <identAndStatusSection>: la regla lo mira, así que el ejemplo debe incluirlo');
+  const bad52 = testRun(R52, [{ label: 'bad', expected: 'accept', schema: 'descript', content: '', metadata: withInfoCode('055').replace('<dmStatus>', '<dmStatus><content/>') }], set52);
+  check('S1-00052: the written section is validated against the schema', bad52.runs[0].validation.structure.some((p) => p.kind === 'notAllowed' && p.parent === 'dmStatus'), JSON.stringify(bad52.runs[0].validation.structure));
+
+  // Through generateRuleTestExamples: prompt, "metadata" field, no
+  // correction round, verdict correct.
+  const asked52 = [];
+  const g52 = await generateRuleTestExamples({
+    ruleXml: R52, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-S1-00052', title: 'Info codes', definition: 'Which info codes are used.', proposal: 'Only info codes 055 and 930.' },
+    vocabulary, parseXml,
+    ask: async (messages, systemPrompt) => {
+      asked52.push(systemPrompt);
+      return JSON.stringify({ proposalMismatch: null, examples: ex52.map(({ label, expected, schema, metadata }) => ({ label, expected, schema, metadata })) });
+    },
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['descript', 'proced'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S42, schema) }),
+  });
+  check('S1-00052: one LLM call, no correction round', asked52.length === 1 && g52.status === 'ready' && g52.correction === null, JSON.stringify({ ...g52, systemPrompt: undefined, setup: undefined }));
+  check('S1-00052: prompt offers the minimal section to start from', asked52[0].includes('your "metadata" is the WHOLE <identAndStatusSection>') && asked52[0].includes('infoCode="040"') && asked52[0].includes('write no "content"'));
+  check('S1-00052: prompt says the values never go in a dmRef of the content', asked52[0].includes('never in a reference (<dmRef>) of the content'));
+  check('S1-00052: output format asks for "metadata" and no "content"', asked52[0].includes('"metadata": "<identAndStatusSection>…"}') && !asked52[0].includes('"content": "…"'));
+  check('S1-00052: verdict through the pipeline', ruleTestVerdict(g52.examples, g52.runs, analyzeRule(R52, 'BREX-4.2', { parseXml })).kind === 'correct');
+  const parsedMeta = parseRuleTestResponse(JSON.stringify({ examples: [{ label: 'a', expected: 'accept', metadata: '<identAndStatusSection/>' }] }));
+  check('parse: an example with only "metadata" is accepted', parsedMeta.ok && parsedMeta.examples[0].metadata === '<identAndStatusSection/>' && parsedMeta.examples[0].content === '');
+  check('parse: an example with neither is refused', !parseRuleTestResponse(JSON.stringify({ examples: [{ label: 'a', expected: 'accept' }] })).ok);
+
+  // S1-00053 (real template rule): //@issueType[.='revised'], flag 0 --
+  // the value is written in dmStatus.
+  const R53 = ruleOf('BRDP-S1-00053');
+  const p53 = placeExample(descript, ruleTargets(R53));
+  check('S1-00053: metadata only', p53.metadata.insertion === true && p53.contentInsertion === false);
+  const r53 = testRun(R53, [
+    { label: 'changed', expected: 'accept', schema: 'descript', content: '', metadata: minimal.replace('<dmStatus>', '<dmStatus issueType="changed">') },
+    { label: 'revised', expected: 'reject', schema: 'descript', content: '', metadata: minimal.replace('<dmStatus>', '<dmStatus issueType="revised">') },
+  ], setupFor(S42, R53, ['descript']));
+  check('S1-00053: revised in dmStatus rejected, changed accepted', r53.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r53.verdict.kind === 'correct', JSON.stringify(r53.runs.map((r) => r.validation.structure)));
+  check('S1-00053: dmStatus/@issueType selected', r53.runs[1].result.selectedNodePaths.includes('/dmodule[1]/identAndStatusSection[1]/dmStatus[1]/@issueType'));
+
+  // S1-00070 (real template rule): //responsiblePartnerCompany/@enterpriseCode
+  // (and enterpriseName) with values -- tested for real.
+  const R70 = ruleOf('BRDP-S1-00070');
+  const p70 = placeExample(descript, ruleTargets(R70));
+  check('S1-00070: the section is an insertion point', p70.metadata.insertion === true && p70.unreachable === null);
+  const rpc = (code, name) => minimal.replace('<responsiblePartnerCompany>\n      <enterpriseName>Example company</enterpriseName>', `<responsiblePartnerCompany enterpriseCode="${code}">\n      <enterpriseName>${name}</enterpriseName>`);
+  const r70 = testRun(R70, [
+    { label: 'LHT', expected: 'accept', schema: 'descript', content: '', metadata: rpc('C1008', 'LUFTHANSA TECHNIK AG') },
+    { label: 'other', expected: 'reject', schema: 'descript', content: '', metadata: rpc('K0001', 'ACME AERO') },
+  ], setupFor(S42, R70, ['descript']));
+  check('S1-00070: the section was rewritten (not the minimal one)', r70.materialized[0].xml.includes('enterpriseCode="C1008"'));
+  check('S1-00070: accepted / rejected on the real values', r70.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r70.verdict.kind === 'correct', JSON.stringify(r70.runs.map((r) => [r.validation, r.result?.status])));
+
+  // S1-00316: //dmStatus/applicRef | //pmStatus/applicRef, flag 0.
+  const R316 = '<structureObjectRule id="BRDP-S1-00316"><objectPath allowedObjectFlag="0">//dmStatus/applicRef | //pmStatus/applicRef</objectPath><objectUse>Applicability is written in the status, never referenced.</objectUse></structureObjectRule>';
+  const p316 = placeExample(descript, ruleTargets(R316));
+  check('S1-00316: metadata (the pmStatus alternative just does not apply)', p316.metadata.insertion === true && p316.contentInsertion === false && p316.unreachable === null);
+  const r316 = testRun(R316, [
+    { label: 'applic', expected: 'accept', schema: 'descript', content: '', metadata: minimal },
+    { label: 'applicRef', expected: 'reject', schema: 'descript', content: '', metadata: minimal.replace(/<applic>[\s\S]*?<\/applic>/, '<applicRef applicIdentValue="app-001"/>') },
+  ], setupFor(S42, R316, ['descript']));
+  check('S1-00316: applicRef in dmStatus rejected, applic accepted', r316.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r316.verdict.kind === 'correct', JSON.stringify(r316.runs.map((r) => r.validation.structure)));
+
+  // S1-00338: //@assyCode[string-length(.) != 2] -- still through a dmRef
+  // in the content, and now also on the data module's own dmCode.
+  const R338 = '<structureObjectRule id="BRDP-S1-00338"><objectPath allowedObjectFlag="0">//@assyCode[string-length(.) != 2]</objectPath><objectUse>The assembly code has two characters.</objectUse></structureObjectRule>';
+  const p338 = placeExample(descript, ruleTargets(R338));
+  check('S1-00338: two insertion points (section and content)', p338.metadata.insertion === true && p338.contentInsertion === true && p338.path.at(-1) === 'para', JSON.stringify({ ...p338, metadata: '…' }));
+  const dmRef = (assy) => `See <dmRef><dmRefIdent><dmCode modelIdentCode="EXAMPLE" systemDiffCode="A" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="${assy}" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/></dmRefIdent></dmRef>.`;
+  const r338 = testRun(R338, [
+    { label: 'two characters', expected: 'accept', schema: 'descript', content: dmRef('01'), metadata: minimal },
+    { label: 'four in the reference', expected: 'reject', schema: 'descript', content: dmRef('0301'), metadata: minimal },
+    { label: 'three in the own code', expected: 'reject', schema: 'descript', content: dmRef('01'), metadata: minimal.replace(/<dmCode assyCode="00"/, '<dmCode assyCode="001"') },
+  ], setupFor(S42, R338, ['descript']));
+  check('S1-00338: dmRef and own dmCode both judged', r338.runs.map((r) => r.result?.status).join() === 'accepted,rejected,rejected' && r338.verdict.kind === 'correct', JSON.stringify(r338.runs.map((r) => [r.validation.structure, r.result?.status])));
+  check('S1-00338: the own dmCode is the one rejected in example 3', r338.runs[2].result.violations[0].nodePaths.includes('/dmodule[1]/identAndStatusSection[1]/dmAddress[1]/dmIdent[1]/dmCode[1]/@assyCode'), JSON.stringify(r338.runs[2].result.violations));
+  const prompt338 = buildRuleTestExamplesPrompt({ brdp, standard: S42, format: 'BREX-4.2', ruleXml: R338, placements: [{ schema: 'descript', role: 'rule', ...p338 }] });
+  check('S1-00338: prompt asks for both "metadata" and "content"', prompt338.includes("The rule also looks at the data module's identification and status section:") && prompt338.includes('a reject example may go against the decision here, in the content, or\n  both:') && !prompt338.includes('never in a reference') && prompt338.includes('"metadata": "<identAndStatusSection>…", "content": "…"'));
+  const R338tpl = ruleOf('BRDP-S1-00338');
+  check('S1-00338 (template form): also two insertion points', placeExample(descript, ruleTargets(R338tpl)).metadata.insertion === true && placeExample(descript, ruleTargets(R338tpl)).contentInsertion === true);
+
+  // 3.0.1: a rule on idstatus, same behaviour.
+  const d301 = structureOf(S301, 'descript');
+  const min301 = metadataXml(d301.skeleton.metadata.tree).xml;
+  const R301 = '<objrule id="BRDP-301-ISS"><objpath>//dmaddres/issno/@type</objpath><objuse>Only new and changed issues.</objuse><objval valtype="single" val1="new"/><objval valtype="single" val1="changed"/></objrule>';
+  const p301 = placeExample(d301, ruleTargets(R301));
+  check('3.0.1: idstatus is the insertion point', p301.metadata.element === 'idstatus' && p301.metadata.insertion === true && p301.contentInsertion === false);
+  const r301 = testRun(R301, [
+    { label: 'new', expected: 'accept', schema: 'descript', content: '', metadata: min301.replace('<issno ', '<issno type="new" ') },
+    { label: 'revised', expected: 'reject', schema: 'descript', content: '', metadata: min301.replace('<issno ', '<issno type="revised" ') },
+  ], setupFor(S301, R301, ['descript']), { format: 'BREX-3.0.1', vocab: vocabulary301 });
+  check('3.0.1: verdict correct on idstatus', r301.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r301.verdict.kind === 'correct', JSON.stringify(r301.runs.map((r) => [r.validation.structure, r.validation.names, r.result?.status])));
+
+  // A rule that looks at nothing an example can contain: not executable,
+  // before any LLM call, with the reason in EN / ES.
+  const unreachableRun = async (ruleXml) => {
+    let calls = 0;
+    const res = await generateRuleTestExamples({
+      ruleXml, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat', brdp, vocabulary, parseXml,
+      ask: async () => { calls += 1; return '{}'; },
+      fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['descript', 'proced'] }),
+      fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S42, schema) }),
+    });
+    return { res, calls };
+  };
+  const scopedPm = wrapRuleInSchemaContexts('<structureObjectRule><objectPath allowedObjectFlag="0">//pmStatus/applicRef</objectPath><objectUse>x</objectUse></structureObjectRule>', 'S1000D 4.2', ['descript']);
+  const u1 = await unreachableRun(scopedPm);
+  check('unreachable: pmStatus in a rule limited to descript → not executable, no LLM call', u1.calls === 0 && u1.res.status === 'not_executable' && u1.res.reason.code === 'unreachable_target' && u1.res.reason.params.names === '<pmStatus>', JSON.stringify(u1.res));
+  check('unreachable: reason in EN', formatRuleTestReason(u1.res.reason, i18n.getFixedT('en')) === 'the rule looks at <pmStatus>, which the examples cannot contain.');
+  check('unreachable: panel line in ES', i18n.getFixedT('es')('records.ruleTest.analysisUnreachable', { reason: formatRuleTestReason(u1.res.reason, i18n.getFixedT('es')) }) === 'No ejecutable: la regla mira <pmStatus>, que los ejemplos no pueden contener.');
+  const u2 = await unreachableRun('<structureObjectRule><objectPath allowedObjectFlag="0">//dmStatuss/@issueType</objectPath><objectUse>x</objectUse></structureObjectRule>');
+  check('unreachable: a name that exists nowhere', u2.calls === 0 && u2.res.reason.params.names === '<dmStatuss>', JSON.stringify(u2.res));
+  const u3 = await unreachableRun(R316);
+  check('unreachable: one reachable alternative is enough', u3.res.status !== 'not_executable');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

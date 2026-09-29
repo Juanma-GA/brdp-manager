@@ -91,6 +91,7 @@ function ValidationProblems({ validation, standard, schema }) {
   const { t } = useTranslation();
   const problems = [];
   if (validation.unknownSchema) problems.push(t('records.ruleTest.unknownSchema', { schema: validation.unknownSchema }));
+  if (validation.missingMetadata) problems.push(t('records.ruleTest.missingMetadata', { element: validation.missingMetadata }));
   if (!validation.wellFormed) problems.push(t('records.ruleTest.malformed', { error: validation.error }));
   for (const issue of [...nameIssues(validation.names, 'example', { standard }), ...structureIssues(validation.structure, { schema })]) {
     problems.push(formatSchemaIssue(issue, t));
@@ -135,6 +136,9 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(example.content);
+  // Rule test on DM metadata: the identification and status section the
+  // LLM wrote, editable like the content.
+  const [metadataDraft, setMetadataDraft] = useState(example.metadata || '');
   const [copied, setCopied] = useState(false);
   const result = run.result;
   const tone = !result || result.status === 'not_executable' ? 'warn' : result.status === 'accepted' ? 'ok' : 'bad';
@@ -180,22 +184,39 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
 
       {editing ? (
         <>
-          <textarea
-            className={styles.ruleTestEditor}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            spellCheck={false}
-            rows={Math.min(14, Math.max(4, draft.split('\n').length + 1))}
-          />
-          <p className={styles.hint}>
-            {example.insertion
-              ? t('records.ruleTest.editContentHint', { insertion: example.insertion })
-              : t('records.ruleTest.editWholeDocumentHint')}
-          </p>
+          {example.metadataElement && (
+            <>
+              <textarea
+                className={styles.ruleTestEditor}
+                value={metadataDraft}
+                onChange={(e) => setMetadataDraft(e.target.value)}
+                spellCheck={false}
+                rows={Math.min(14, Math.max(4, metadataDraft.split('\n').length + 1))}
+                data-testid="rule-test-metadata-editor"
+              />
+              <p className={styles.hint}>{t('records.ruleTest.editMetadataHint', { element: example.metadataElement })}</p>
+            </>
+          )}
+          {example.contentInsertion !== false && (
+            <>
+              <textarea
+                className={styles.ruleTestEditor}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                spellCheck={false}
+                rows={Math.min(14, Math.max(4, draft.split('\n').length + 1))}
+              />
+              <p className={styles.hint}>
+                {example.insertion
+                  ? t('records.ruleTest.editContentHint', { insertion: example.insertion })
+                  : t('records.ruleTest.editWholeDocumentHint')}
+              </p>
+            </>
+          )}
           <div className={styles.suggestionActions}>
             <button
               onClick={() => {
-                onRunAgain(draft);
+                onRunAgain(draft, example.metadataElement ? metadataDraft : undefined);
                 setEditing(false);
               }}
             >
@@ -204,6 +225,7 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
             <button
               onClick={() => {
                 setDraft(example.content);
+                setMetadataDraft(example.metadata || '');
                 setEditing(false);
               }}
             >
@@ -220,6 +242,7 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
               className={styles.linkButton}
               onClick={() => {
                 setDraft(example.content);
+                setMetadataDraft(example.metadata || '');
                 setEditing(true);
               }}
             >
@@ -399,6 +422,9 @@ export default function RuleTestPanel({
   // C3, Part 1d: XML that is not a rule of its format has nothing to
   // illustrate either -- no "Show illustrative examples".
   const notARule = analysis.reason?.code === 'rule_format';
+  // Rule test on DM metadata, Part 3: nothing to illustrate either -- the
+  // examples cannot contain what the rule looks at.
+  const unreachable = Boolean(analysis.unreachable);
 
   return (
     <section className={styles.ruleTestPanel} aria-label={t('records.ruleTest.title')} data-testid="rule-test-panel">
@@ -411,7 +437,15 @@ export default function RuleTestPanel({
 
       {analysis.status !== 'executable' && (
         <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneWarn}`} data-testid="rule-test-analysis">
-          {t(notARule ? 'records.ruleTest.analysisNotARule' : ruleNotExecutable ? 'records.ruleTest.analysisNotExecutable' : 'records.ruleTest.analysisPartial', {
+          {t(
+            unreachable
+              ? 'records.ruleTest.analysisUnreachable'
+              : notARule
+                ? 'records.ruleTest.analysisNotARule'
+                : ruleNotExecutable
+                  ? 'records.ruleTest.analysisNotExecutable'
+                  : 'records.ruleTest.analysisPartial',
+            {
             reason: formatRuleTestReason(analysis.reason, t),
           })}
         </p>
@@ -425,7 +459,7 @@ export default function RuleTestPanel({
 
       <RuleDescription description={description} />
 
-      {state.status === 'idle' && !notARule && (
+      {state.status === 'idle' && !notARule && !unreachable && (
         <div className={styles.suggestionActions}>
           <button type="button" onClick={() => generate()} data-testid="rule-test-show-examples">
             {t('records.ruleTest.showIllustrativeExamples')}
@@ -476,14 +510,14 @@ export default function RuleTestPanel({
             <ExampleCard
               // An edit replaces the example's content: remount the card so
               // its draft starts from the new text.
-              key={`${i}:${ex.content}`}
+              key={`${i}:${ex.content}:${ex.metadata || ''}`}
               example={ex}
               run={state.runs[i]}
               index={i}
               standard={standard}
               dita={format === 'SCH-DITA'}
               showResult={showResults}
-              onRunAgain={(content) => runAgain(i, content)}
+              onRunAgain={(content, metadata) => runAgain(i, content, metadata)}
             />
           ))}
         </>

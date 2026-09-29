@@ -201,8 +201,11 @@ async function runCheck(check, answer, ctx = {}) {
   // "explanation" = the review's explanation (rule-review).
   // T4b: "reject_examples" = the final content of the rule-test examples
   // meant to be rejected (after the correction round), one per line.
+  // "prompt" = the system prompt the case sent (rule test on DM metadata).
   const target =
-    check.target === "description"
+    check.target === "prompt"
+      ? ctx.systemPrompt ?? ""
+      : check.target === "description"
       ? ctx.description ?? ""
       : check.target === "explanation"
       ? ctx.review?.explanation ?? ""
@@ -300,7 +303,9 @@ async function runCheck(check, answer, ctx = {}) {
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       const re = new RegExp(check.pattern, flags);
       const rejects = r.examples.filter((ex) => ex.expected === "reject");
-      const bad = rejects.filter((ex) => !re.test(ex.content));
+      // "target": "metadata" -- the identification and status section the
+      // LLM wrote (rule test on DM metadata); the content otherwise.
+      const bad = rejects.filter((ex) => !re.test(check.target === "metadata" ? ex.metadata || "" : ex.content));
       if (rejects.length === 0) return { status: "fail", detail: "no reject example" };
       return { status: bad.length ? "fail" : "pass", detail: bad.length ? `without /${check.pattern}/: ${bad.map((ex) => ex.label).join(", ")}` : `all ${rejects.length} reject example(s) match /${check.pattern}/` };
     }
@@ -727,12 +732,13 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
         expected: ex.expected,
         schema: ex.schema,
         content: ex.content,
+        metadata: ex.metadata ?? null,
         xml: ex.xml,
         runnable: result.runs[i].validation.runnable,
         result: result.runs[i].result?.status ?? null,
       })),
     },
-    checkContext: { ruleTest: result, analysis, description, ruleSchemas: schemas, standard: testCase.standard },
+    checkContext: { ruleTest: result, analysis, description, ruleSchemas: schemas, standard: testCase.standard, systemPrompt: result.systemPrompt },
   };
 }
 

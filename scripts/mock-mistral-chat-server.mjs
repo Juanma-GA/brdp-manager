@@ -131,6 +131,47 @@ function isRuleTest(text) {
 //                attribute's ABSENCE -- the real disagreement of the T3
 //                report; a regeneration carrying "PREVIOUS EXAMPLES WERE
 //                WRONG" writes correct examples
+// Rule test on DM metadata: when the prompt asks for the whole
+// identification and status section ('your "metadata" is the WHOLE
+// <identAndStatusSection>'), the examples start from the minimal section
+// the prompt quotes and change what the rule looks at (@infoCode,
+// @issueType, the responsible partner company, applic / applicRef,
+// @assyCode -- the Lufthansa S1-00052/53/70/316/338 cases).
+function metadataReply(systemPrompt, rule, answer) {
+  const element = (systemPrompt.match(/your "metadata" is the WHOLE <([\w-]+)>/) || [])[1];
+  if (!element) return null;
+  const schema = (systemPrompt.match(/- schema "([\w-]+)": (?:the application builds the rest|your content goes directly inside)/) || [])[1];
+  const lines = systemPrompt.split("\n");
+  const start = lines.findIndex((l) => l.startsWith(`    <${element}>`)) - 1;
+  const minimal = [];
+  for (let i = start + 1; i < lines.length && lines[i].startsWith("    "); i += 1) minimal.push(lines[i].slice(4));
+  const base = minimal.join("\n");
+  const ex = (label, expected, metadata, content) => ({ label, expected, schema, metadata, ...(content !== undefined ? { content } : {}) });
+  const ownCode = (attr, value) => base.replace(new RegExp(`(<dmIdent>\\s*<dmCode [^>]*?)${attr}="[^"]*"`), `$1${attr}="${value}"`);
+  if (/@infoCode/.test(rule)) {
+    return answer([ex("Info code 055", "accept", ownCode("infoCode", "055")), ex("Info code 930", "accept", ownCode("infoCode", "930")), ex("Info code 040", "reject", ownCode("infoCode", "040"))]);
+  }
+  if (/issueType/.test(rule)) {
+    return answer([ex("Changed data module", "accept", base.replace("<dmStatus>", '<dmStatus issueType="changed">')), ex("Revised data module", "reject", base.replace("<dmStatus>", '<dmStatus issueType="revised">'))]);
+  }
+  if (/responsiblePartnerCompany/.test(rule)) {
+    const rpc = (code, name) => base.replace(/<responsiblePartnerCompany>\s*<enterpriseName>[^<]*<\/enterpriseName>/, `<responsiblePartnerCompany enterpriseCode="${code}">\n      <enterpriseName>${name}</enterpriseName>`);
+    return answer([ex("Lufthansa Technik as partner", "accept", rpc("C1008", "LUFTHANSA TECHNIK AG"), ""), ex("Another partner", "reject", rpc("K0001", "ACME AERO"), "")]);
+  }
+  if (/applicRef/.test(rule)) {
+    return answer([ex("Applicability written in the status", "accept", base), ex("Applicability referenced", "reject", base.replace(/<applic>[\s\S]*?<\/applic>/, '<applicRef applicIdentValue="app-001"/>'))]);
+  }
+  if (/issno/.test(rule)) {
+    // 3.0.1 idstatus: the issue type of the data module.
+    return answer([ex("New issue", "accept", base.replace("<issno ", '<issno type="new" ')), ex("Revised issue", "reject", base.replace("<issno ", '<issno type="revised" '))]);
+  }
+  if (/@assyCode/.test(rule)) {
+    const dmRef = (assy) => `See <dmRef><dmRefIdent><dmCode modelIdentCode="EXAMPLE" systemDiffCode="A" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="${assy}" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/></dmRefIdent></dmRef>.`;
+    return answer([ex("Two-character codes", "accept", base, dmRef("01")), ex("Four characters in a reference", "reject", base, dmRef("0301")), ex("Three characters in the own code", "reject", ownCode("assyCode", "001"), dmRef("01"))]);
+  }
+  return null;
+}
+
 function ruleTestReply(systemPrompt, messages) {
   const rule = (systemPrompt.match(/\nThe rule under test \([^)]*\)[^\n]*\n[^\n]*\n([\s\S]*?)\n\nWHAT TO WRITE/) || [])[1] || "";
   const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
@@ -146,6 +187,8 @@ function ruleTestReply(systemPrompt, messages) {
     ? "This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."
     : null;
   const answer = (examples) => JSON.stringify({ proposalMismatch: mismatch, examples });
+  const metadata = metadataReply(systemPrompt, rule, answer);
+  if (metadata) return metadata;
   // T4, DITA Schematron: the topic type the prompt offers; the examples
   // follow the rule's context (step, the document root, or note).
   const ditaType = (systemPrompt.match(/Every example is a DITA ([\w-]+) \("schema"/) || [])[1];

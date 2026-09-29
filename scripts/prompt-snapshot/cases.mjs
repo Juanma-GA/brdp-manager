@@ -326,6 +326,10 @@ const ruleProcedContext = `<contextRules rulesContext="http://www.s1000d.org/S10
 const rule301Mandatory = '<objrule id="R-1">\n  <objpath objappl="1">/dmodule/content//tgroup/tbody</objpath>\n  <objuse>Every tgroup needs a tbody.</objuse>\n</objrule>';
 const ruleStepTitle =
   '<structureObjectRule>\n  <objectPath allowedObjectFlag="0">//proceduralStep[not(title)]</objectPath>\n  <objectUse>Every procedural step needs a title.</objectUse>\n</structureObjectRule>';
+const ruleInfoCode =
+  '<structureObjectRule id="BRDP-S1-00052"><objectPath allowedObjectFlag="2">//dmIdent/dmCode/@infoCode</objectPath><objectUse>Only the information codes 055 and 930 are used.</objectUse><objectValue valueForm="single" valueAllowed="055"/><objectValue valueForm="single" valueAllowed="930"/></structureObjectRule>';
+const ruleAssyCode =
+  '<structureObjectRule id="BRDP-S1-00338"><objectPath allowedObjectFlag="0">//@assyCode[string-length(.) != 2]</objectPath><objectUse>The assembly code has two characters.</objectUse></structureObjectRule>';
 export const ruleTestExamplesCases = [
   {
     name: 'brex-4-2-general-flag0-with-facts',
@@ -374,6 +378,37 @@ export const ruleTestExamplesCases = [
         format: 'BREX-3.0.1',
         ruleXml: rule301Mandatory,
         placements: placementsFor('S1000D 3.0.1', rule301Mandatory, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Rule test on DM metadata: the rule looks only at the data module's own
+    // dmCode (Lufthansa S1-00052), so the LLM writes the whole
+    // identification and status section, starting from the minimal one, and
+    // no content.
+    name: 'brex-4-2-metadata-infocode',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Information codes used', proposal: 'Only the information codes 055 and 930 shall be used.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleInfoCode,
+        placements: placementsFor('S1000D 4.2', ruleInfoCode, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Rule test on DM metadata: //@assyCode[…] (Lufthansa S1-00338) looks
+    // at the data module's own dmCode AND at dmRefs in the content -- two
+    // insertion points.
+    name: 'brex-4-2-metadata-and-content-assycode',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Number of characters in assembly code', proposal: 'Two characters to be used.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleAssyCode,
+        placements: placementsFor('S1000D 4.2', ruleAssyCode, [['descript', 'rule']]),
       },
     ],
   },
