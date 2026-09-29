@@ -211,7 +211,7 @@ Write new examples that do not repeat this mistake.`;
   const firstSchema = placements[0]?.schema || 'descript';
   prompt += `
 
-OUTPUT: strict JSON only — no markdown, no comments, nothing before or after:
+OUTPUT: strict JSON, no comments:
 {"proposalMismatch": null, "examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", "content": "…"}]}`;
   return prompt;
 }

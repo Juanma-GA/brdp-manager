@@ -158,9 +158,8 @@ itself (deadlines, work processes, tool calibration, anything outside the
 document), answer exactly "${NOT_CHECKABLE_PREFIX} <brief reason>" and
 nothing else.
 
-OUTPUT: only the XML fragment — no markdown, no explanation, no XML
-declaration. Write any human-readable text inside the rule in the same
-language as the Proposal.
+OUTPUT: only the XML fragment — no explanation. Write any human-readable
+text inside the rule in the same language as the Proposal.
 
 BRDP:
 ID: ${brdp.identifier}

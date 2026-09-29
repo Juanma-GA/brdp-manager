@@ -46,7 +46,7 @@ HOW TO DECIDE:
 - "unclear": you cannot tell from the Proposal.
 Judge against the Proposal, not against the example's label.
 
-OUTPUT: strict JSON only — no markdown, nothing before or after:
+OUTPUT: strict JSON:
 {"cause": "example" | "rule" | "unclear", "explanation": "…"}
 "explanation": two or three sentences in the same language as the Proposal,
 for a technical publications author.`;

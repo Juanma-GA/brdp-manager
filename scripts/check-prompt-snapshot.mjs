@@ -254,6 +254,19 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // their names" only in the Format examples header (R5). All 7 ask, 3
 // suggestProposal and 9 suggestRule cases change; suggestDefinition and
 // the rule-test prompts are unchanged.
+//
+// C2b Entrega 2, Parte 5 (recortes): Ask's role names only the project's
+// standard (A1: "an S1000D and DITA … expert" clashed with "do not mix
+// other versions"), and "answer exactly what is asked" + "more than 15
+// names: group" become one sentence that keeps the question -> relation
+// correspondence (A5+A8: contain -> children, where / inside -> parents;
+// never dump long lists, the full lists are in the card). Only what the
+// parsers already strip is cut from the output lines: Suggest Rule keeps
+// "no explanation" and the language line (R10), the rule-test examples
+// keep "strict JSON, no comments" (T16), the review keeps "strict JSON"
+// and its language line (V5). All 7 ask, 9 suggestRule, 9
+// ruleTestExamples and 2 ruleTestReview cases change; suggestDefinition
+// and suggestProposal are unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

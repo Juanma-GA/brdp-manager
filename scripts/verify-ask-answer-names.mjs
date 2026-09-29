@@ -106,7 +106,8 @@ async function main() {
       "prompt: the reinforced do-NOT-exist paragraph"
     );
     assert(
-      sys.includes("say\nthat you cannot confirm the element or attribute name in the S1000D 3.0.1\nschema, and suggest looking the concept up in the S1000D 3.0.1\nspecification."),
+      // C2b Entrega 2 (A14 + A15 fused): compared with whitespace collapsed.
+      sys.replace(/\s+/g, " ").includes("If the SCHEMA FACTS do not cover what is asked (for example a code, an identifier or a date that a document records), do not guess or name an element or attribute for it from memory: say that you cannot confirm the element or attribute name in the S1000D 3.0.1 schema, and suggest looking the concept up in the S1000D 3.0.1 specification."),
       "prompt: the no-facts concept instruction"
     );
     assert(!sys.includes("SCHEMA FACTS — extracted from"), "prompt: no schema facts for the NCAGE question (the real situation)");

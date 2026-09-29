@@ -179,7 +179,10 @@ async function main() {
     assert(sys.includes("Never add scope reminders or disclaimers to an answer you have given."), "the new no-trailing-disclaimer instruction is present");
     assert(!sys.includes("If the question is not about this specific BRDP, say so plainly and ask"), "the OLD, narrower scope wording is gone");
     assert(!sys.includes("not general questions, not questions about other BRDPs"), "the OLD blanket refusal phrasing is gone");
-    assert(sys.includes('Answer exactly what is asked: "where can X go / be used" -> its allowed'), "the new focused-answer instruction is present");
+    // C2b Entrega 2 (Parte 5): A5 + A8 become one sentence that keeps the
+    // question -> relation correspondence.
+    assert(sys.includes("Answer only what is asked: what an element can contain -> its children;\nwhere it can go / what it can be inside -> its parents."), "the focused-answer instruction keeps contain -> children, where/inside -> parents");
+    assert(!sys.includes("more than 15 names"), "the separate long-list instruction is gone (merged)");
     assert(sys.includes("When the facts contain several schema variants, summarize"), "the new variant-summarizing instruction is present");
     // C2b Entrega 2 (fusion A9 + A10): the long-facts reminder is part of the one 3-paragraph limit.
     assert(sys.includes("Answer in at most 3 short paragraphs, even when the facts are long"), "the 3-paragraph limit covers long facts");
