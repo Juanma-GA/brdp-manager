@@ -230,11 +230,22 @@ function byPreference(schemas, documentSchemas = []) {
   return [...schemas].sort((a, b) => rank(a) - rank(b) || listed(a) - listed(b) || a.localeCompare(b));
 }
 
-// { testSchema, otherSchema }: the schema the rule's examples use, and, for a
-// rule limited to some schemas, the schema of the "does not apply here"
-// example (one that has the checked elements too, so the example can show
-// them). `cards` is GET /api/schema-cards's answer for the checked names and
-// absolute roots ({} when unavailable).
+// { testSchema, otherSchema, groups }: the schema the rule's examples use,
+// and, for a rule limited to some schemas, the schema of the "does not apply
+// here" example (one that has the checked elements too, so the example can
+// show them). `cards` is GET /api/schema-cards's answer for the checked
+// names, the alternatives' steps and the absolute roots ({} when
+// unavailable).
+// groups: one schema per part of the rule, or null. A general rule whose
+// alternatives look at elements that live in different schemas (S1-00120:
+// //proceduralStep[…] | //levelledPara[…]) used to be tested on the only
+// schema that has them all ("sb"), where examples are almost impossible to
+// write. When no schema has them all, or the first that does is not the
+// preferred schema of any alternative, the alternatives are grouped by
+// their own preferred schema (the first, by preference, that has all their
+// element steps): [{ schema, alternatives, checked }], at least two groups
+// -- each tested with its own examples; the whole rule still runs on every
+// example. Otherwise null, and the single schema as before.
 export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, targets }) {
   const known = (name) => Boolean(cards[name]) || Boolean(elementSchemas?.[name]?.length);
   const required = [...new Set([...(targets?.checked || []), ...(targets?.absolutePrefixes || []).map((p) => p[0])])]
@@ -245,10 +256,43 @@ export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], c
     const taken = new Set(contextSchemas);
     const others = fitting.filter((s) => !taken.has(s));
     const fallback = order(documentSchemas.filter((s) => !taken.has(s)));
-    return { testSchema: contextSchemas[0], otherSchema: others[0] || fallback[0] || null };
+    return { testSchema: contextSchemas[0], otherSchema: others[0] || fallback[0] || null, groups: null };
   }
   const fallback = order(documentSchemas);
-  return { testSchema: fitting[0] || fallback[0] || null, otherSchema: null };
+  const groups = schemaGroups(targets, fitting[0] || null, { known, order, cards, documentSchemas, elementSchemas });
+  if (groups) return { testSchema: groups[0].schema, otherSchema: null, groups };
+  return { testSchema: fitting[0] || fallback[0] || null, otherSchema: null, groups: null };
+}
+
+function schemaGroups(targets, common, { known, order, cards, documentSchemas, elementSchemas }) {
+  const bySchema = new Map();
+  for (const alt of targets?.alternatives || []) {
+    if (alt.opaque) continue;
+    const names = [...new Set([...alt.steps, ...(alt.absolutePrefix ? [alt.absolutePrefix[0]] : [])])].filter(known);
+    if (names.length === 0) continue;
+    const preferred = order(schemasHavingAll(names, cards, documentSchemas, elementSchemas))[0];
+    if (!preferred) continue;
+    if (!bySchema.has(preferred)) bySchema.set(preferred, []);
+    bySchema.get(preferred).push(alt);
+  }
+  if (bySchema.size < 2) return null;
+  if (common && bySchema.has(common)) return null;
+  return order([...bySchema.keys()]).map((schema) => {
+    const alternatives = bySchema.get(schema);
+    return { schema, alternatives, checked: [...new Set(alternatives.map((a) => a.checked).filter(Boolean))] };
+  });
+}
+
+// The rule's targets restricted to one group's alternatives: what the
+// examples of that group's schema are placed for.
+export function targetsForGroup(targets, group) {
+  const alternatives = group.alternatives;
+  return {
+    ...targets,
+    checked: [...new Set(alternatives.map((a) => a.checked).filter(Boolean))],
+    absolutePrefixes: alternatives.map((a) => a.absolutePrefix).filter(Boolean),
+    alternatives,
+  };
 }
 
 // ─── Where the content goes ─────────────────────────────────────────────────

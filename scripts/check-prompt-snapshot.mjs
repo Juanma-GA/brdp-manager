@@ -281,6 +281,11 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // name; if you refer to it, call it the schema card." -- a real answer said
 // "(ver diferencias en SCHEMA FACTS)". Only the 3 ask cases that carry schema
 // facts change; every other module is unchanged.
+//
+// Test rule, one schema per part of the rule: NEW case
+// ruleTestExamples/brex-4-2-levels-split-by-schema (Lufthansa S1-00120,
+// levelledPara → descript, proceduralStep → proced): the examples are split
+// by schema. Every existing (single-group) prompt is unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

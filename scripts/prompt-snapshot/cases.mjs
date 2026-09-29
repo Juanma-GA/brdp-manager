@@ -24,7 +24,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { placeExample, ruleMatchExpressions, ruleTargets } from '../../src/utils/ruleTestSkeleton.js';
+import { chooseTestSchemas, placeExample, ruleMatchExpressions, ruleTargets, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
 import { describeRule } from '../../src/utils/ruleTestEngine.js';
@@ -42,6 +42,20 @@ const realStructures = JSON.parse(readFileSync(path.join(__dirname, '..', 'rule-
 function placementsFor(standard, ruleXml, roles) {
   const targets = ruleTargets(ruleXml);
   return roles.map(([schema, role]) => ({ schema, role, ...placeExample(realStructures[`${standard}|${schema}`], targets) }));
+}
+// One schema per part of the rule (S1-00120): the groups chooseTestSchemas
+// makes, placed like prepareRuleTestSetup does. The cards say where each
+// element lives (the real 4.2 cards: levelledPara and proceduralStep are
+// together only in sb).
+function groupPlacementsFor(standard, ruleXml, cards, documentSchemas) {
+  const targets = ruleTargets(ruleXml);
+  const { groups } = chooseTestSchemas({ documentSchemas, cards, targets });
+  return groups.map((g) => ({
+    schema: g.schema,
+    role: 'rule',
+    ...placeExample(realStructures[`${standard}|${g.schema}`], targetsForGroup(targets, g)),
+    group: g.checked,
+  }));
 }
 const paraEntry = realCards['S1000D 4.2'].para;
 const tableEntry = realCards['S1000D 4.2'].table;
@@ -330,6 +344,8 @@ const ruleInfoCode =
   '<structureObjectRule id="BRDP-S1-00052"><objectPath allowedObjectFlag="2">//dmIdent/dmCode/@infoCode</objectPath><objectUse>Only the information codes 055 and 930 are used.</objectUse><objectValue valueForm="single" valueAllowed="055"/><objectValue valueForm="single" valueAllowed="930"/></structureObjectRule>';
 const ruleAssyCode =
   '<structureObjectRule id="BRDP-S1-00338"><objectPath allowedObjectFlag="0">//@assyCode[string-length(.) != 2]</objectPath><objectUse>The assembly code has two characters.</objectUse></structureObjectRule>';
+const ruleLevels =
+  '<structureObjectRule id="BRDP-S1-00120"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor-or-self::proceduralStep) &gt; 5] | //levelledPara[count(ancestor-or-self::levelledPara) &gt; 5]</objectPath><objectUse>No more than five levels.</objectUse></structureObjectRule>\n<structureObjectRule id="BRDP-S1-00120-b"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor-or-self::proceduralStep) = 5]/title | //levelledPara[count(ancestor-or-self::levelledPara) = 5]/title</objectPath><objectUse>The fifth level has no title.</objectUse></structureObjectRule>';
 export const ruleTestExamplesCases = [
   {
     name: 'brex-4-2-general-flag0-with-facts',
@@ -409,6 +425,29 @@ export const ruleTestExamplesCases = [
         format: 'BREX-4.2',
         ruleXml: ruleAssyCode,
         placements: placementsFor('S1000D 4.2', ruleAssyCode, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // A general rule whose parts look at elements of different schemas
+    // (Lufthansa S1-00120): one schema per part, examples split by schema.
+    name: 'brex-4-2-levels-split-by-schema',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Levels of steps and paragraphs', proposal: 'At most five levels of procedural steps and of paragraphs; the fifth level has no title.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleLevels,
+        placements: groupPlacementsFor(
+          'S1000D 4.2',
+          ruleLevels,
+          {
+            proceduralStep: { variants: [{ schemas: ['proced', 'sb'] }] },
+            levelledPara: { variants: [{ schemas: ['descript', 'sb'] }] },
+            title: { variants: [{ schemas: ['descript', 'proced', 'sb'] }] },
+          },
+          ['descript', 'proced', 'sb']
+        ),
       },
     ],
   },

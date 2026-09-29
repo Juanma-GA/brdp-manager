@@ -24,6 +24,20 @@ const NO_TEXT_ELEMENTS = '<dmRef>, <dmRefIdent>, <dmCode>, <internalRef>, <pmRef
 function schemaInstructions(contextSchemas, placements, dita) {
   const rulePlacement = placements.find((p) => p.role === 'rule');
   const other = placements.find((p) => p.role === 'other');
+  const groups = placements.filter((p) => p.role === 'rule' && p.group);
+  if (groups.length > 1) {
+    // One schema per part of the rule (chooseTestSchemas' groups): the parts
+    // look at elements that live in different schemas (topic types in DITA).
+    const kind = dita ? 'topic type' : 'schema';
+    const lines = groups.map(
+      (p) => `- "${p.schema}": for ${p.group.map((n) => `<${n}>`).join(', ')}`
+    );
+    return `The rule's parts look at elements that live in different ${kind}s, so the
+examples are split by ${kind}. For EACH of these ${kind}s write at least one
+example that follows the decision and one that goes against it, each with
+its "schema", and write in each only about the elements of its ${kind}:
+${lines.join('\n')}`;
+  }
   if (dita) {
     return `Every example is a DITA ${rulePlacement.schema} ("schema": "${rulePlacement.schema}").`;
   }

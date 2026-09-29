@@ -279,7 +279,13 @@ export function rejectedByBrexReference(result) {
 //                                          analyzeRule, known before any
 //                                          example) or the engine could not
 //                                          judge an example
-//   { kind: 'no_runnable' }             -- every example failed validation
+//   { kind: 'no_runnable', bySchema }   -- every example failed validation;
+//                                          bySchema: [{ schema, count,
+//                                          validation }] -- per schema, how
+//                                          many examples and the first one's
+//                                          validation, so the panel names the
+//                                          schema and the reason (never only
+//                                          "regenerate")
 //   { kind: 'inconclusive', why: 'nothing_selected' | 'missing_expectation' }
 //   { kind: 'incorrect', permissive, strict } -- which way the rule was wrong
 //   { kind: 'correct' }
@@ -288,7 +294,16 @@ export function ruleTestVerdict(examples, runs, analysis = null) {
   const ran = runs.filter((r) => r.result);
   const notExecutable = ran.find((r) => r.result.status === 'not_executable');
   if (notExecutable) return { kind: 'not_executable', reason: notExecutable.result.notExecutableReason };
-  if (ran.length === 0) return { kind: 'no_runnable' };
+  if (ran.length === 0) {
+    const bySchema = [];
+    runs.forEach((r, i) => {
+      const schema = examples[i]?.schema || null;
+      const entry = bySchema.find((b) => b.schema === schema);
+      if (entry) entry.count += 1;
+      else bySchema.push({ schema, count: 1, validation: r.validation });
+    });
+    return { kind: 'no_runnable', bySchema };
+  }
   if (ran.every((r) => r.result.selectedNodePaths.length === 0)) return { kind: 'inconclusive', why: 'nothing_selected' };
   const ranExpectations = new Set(runs.map((r, i) => (r.result ? examples[i].expected : null)).filter(Boolean));
   const mismatches = runs.map((r, i) => (r.matches === false ? examples[i].expected : null)).filter(Boolean);

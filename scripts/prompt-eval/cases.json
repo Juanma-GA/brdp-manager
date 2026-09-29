@@ -1281,6 +1281,50 @@
       ]
     },
     {
+      "id": "rule-test-4-2-levels-split-by-schema",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Test rule on Lufthansa BRDP-S1-00120: at most five levels of <proceduralStep> and of <levelledPara>, and no title on the fifth. The only schema with both elements is sb, where examples are almost impossible to write; the application splits the examples by schema instead (levelledPara in descript, proceduralStep in proced), each with an accept and a reject example, and runs the whole rule on every example.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-LEVELS",
+        "title": "Levels of steps and paragraphs",
+        "definition": "Decide how many levels procedural steps and paragraphs may have, and whether the deepest level has a title.",
+        "proposal": "Procedural steps and paragraphs shall have at most five levels, and the fifth level shall have no title.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-LEVELS\"><objectPath allowedObjectFlag=\"0\">//proceduralStep[count(ancestor-or-self::proceduralStep) &gt; 5] | //levelledPara[count(ancestor-or-self::levelledPara) &gt; 5]</objectPath><objectUse>No more than five levels of procedural steps or paragraphs.</objectUse></structureObjectRule>\n<structureObjectRule id=\"BRDP-EVAL-RT-LEVELS-b\"><objectPath allowedObjectFlag=\"0\">//proceduralStep[count(ancestor-or-self::proceduralStep) = 5]/title | //levelledPara[count(ancestor-or-self::levelledPara) = 5]/title</objectPath><objectUse>The fifth level of procedural steps or paragraphs has no title.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example is valid in its own schema (descript or proced) after the one correction round -- never levelledPara inside sbSummary"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example: five levels accepted, six levels or a title on level 5 rejected"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "examples are split by schema",
+          "note": "the prompt splits the examples by schema"
+        },
+        {
+          "type": "not_contains",
+          "target": "prompt",
+          "pattern": "- schema \"sb\"",
+          "note": "the sb schema is never offered"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-emphasis-type-values",
       "type": "rule-test",
       "standard": "S1000D 4.2",

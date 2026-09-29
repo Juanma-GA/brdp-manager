@@ -1293,5 +1293,108 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('3.0.1: //discodev "AB" accepted, "A" rejected', r301.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r301.verdict.kind === 'correct', JSON.stringify(r301.runs.map((r) => [r.validation.structure, r.validation.names, r.result?.status])));
 }
 
+// ─── One schema per part of the rule (S1-00120) ─────────────────────────────
+{
+  const S42 = 'S1000D 4.2';
+  // The real 4.2 cards (as GET /api/schema-cards serves them) and the real
+  // document schemas.
+  const cards42 = JSON.parse(fs.readFileSync(new URL('../backend/schema_cards/schema-cards-4-2.json', import.meta.url))).cards;
+  const docs42 = [...new Set(Object.values(cards42).flatMap((vs) => vs.flatMap((v) => v.schemas)))]
+    .filter((sc) => !['dc', 'rdf', 'xlink', 'xcf'].includes(sc))
+    .sort();
+  const fetchCards = async (_std, names) => ({
+    cards: Object.fromEntries(names.filter((n) => cards42[n]).map((n) => [n, { variants: cards42[n] }])),
+    document_schemas: docs42,
+  });
+  const fetched = [];
+  const fetchStructure = async (_std, schema) => {
+    fetched.push(schema);
+    const st = structureOf(S42, schema);
+    return st ? { available: true, ...st } : { available: false };
+  };
+  const R120 = `<structureObjectRule id="BRDP-S1-00120"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor-or-self::proceduralStep) &gt; 5] | //levelledPara[count(ancestor-or-self::levelledPara) &gt; 5]</objectPath><objectUse>No more than five levels of steps or paragraphs.</objectUse></structureObjectRule>
+<structureObjectRule id="BRDP-S1-00120-b"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor-or-self::proceduralStep) = 5]/title | //levelledPara[count(ancestor-or-self::levelledPara) = 5]/title</objectPath><objectUse>The fifth level has no title.</objectUse></structureObjectRule>`;
+  const inSb = docs42.filter((sc) => ['proceduralStep', 'levelledPara'].every((n) => cards42[n].some((v) => v.schemas.includes(sc))));
+  check('S1-00120: the only schema with both elements is sb', JSON.stringify(inSb) === '["sb"]', JSON.stringify(inSb));
+  const names = ['proceduralStep', 'levelledPara', 'title'];
+  const choice = chooseTestSchemas({ documentSchemas: docs42, cards: (await fetchCards(S42, names)).cards, targets: ruleTargets(R120) });
+  check('S1-00120: grouped by schema: descript (levelledPara), proced (proceduralStep)', JSON.stringify(choice.groups?.map((g) => [g.schema, g.checked])) === '[["descript",["levelledPara","title"]],["proced",["proceduralStep","title"]]]', JSON.stringify(choice));
+  check('S1-00120: never sb', choice.testSchema !== 'sb' && !choice.groups.some((g) => g.schema === 'sb'));
+  const prep = await prepareRuleTestSetup({ ruleXml: R120, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+  const pp = prep.promptPlacements;
+  check('S1-00120: two rule placements, one per group', pp.length === 2 && pp.every((x) => x.role === 'rule') && JSON.stringify(pp.map((x) => [x.schema, x.insertion, x.group])) === '[["descript","description",["levelledPara","title"]],["proced","mainProcedure",["proceduralStep","title"]]]', JSON.stringify(pp.map((x) => [x.schema, x.insertion, x.group])));
+  check('S1-00120: sb structure never fetched', !fetched.includes('sb'));
+  check('S1-00120: reachable (not "not executable")', prep.unreachable === null);
+  const prompt120 = buildRuleTestExamplesPrompt({ brdp: { identifier: 'BRDP-S1-00120', title: 'Levels', definition: 'How many levels.', proposal: 'At most five levels of steps and paragraphs; the fifth level has no title.' }, standard: S42, format: 'BREX-4.2', ruleXml: R120, placements: pp });
+  check('S1-00120: prompt splits the examples by schema', prompt120.includes('the\nexamples are split by schema. For EACH of these schemas write at least one\nexample that follows the decision and one that goes against it') && prompt120.includes('- "descript": for <levelledPara>, <title>') && prompt120.includes('- "proced": for <proceduralStep>, <title>'), prompt120);
+  check('S1-00120: prompt places each schema', prompt120.includes('- schema "descript": your content goes directly inside <description>') && prompt120.includes('- schema "proced": your content goes directly inside <mainProcedure>'));
+  check('S1-00120: no single-schema sentence', !prompt120.includes('The rule is general: every example uses'));
+
+  const nest = (el, depth, titleAt = null) => {
+    let inner = '';
+    for (let level = depth; level >= 1; level -= 1) {
+      const title = level === titleAt ? `<title>Level ${level}</title>` : '';
+      inner = `<${el}>${title}<para>Level ${level} text.</para>${inner}</${el}>`;
+    }
+    return inner;
+  };
+  const ex120 = [
+    { label: '5 paragraph levels', expected: 'accept', schema: 'descript', content: nest('levelledPara', 5) },
+    { label: '6 paragraph levels', expected: 'reject', schema: 'descript', content: nest('levelledPara', 6) },
+    { label: 'title on paragraph level 5', expected: 'reject', schema: 'descript', content: nest('levelledPara', 5, 5) },
+    { label: '5 step levels', expected: 'accept', schema: 'proced', content: nest('proceduralStep', 5) },
+    { label: '6 step levels', expected: 'reject', schema: 'proced', content: nest('proceduralStep', 6) },
+    { label: 'title on step level 5', expected: 'reject', schema: 'proced', content: nest('proceduralStep', 5, 5) },
+  ];
+  const r120 = testRun(R120, ex120, prep.setup);
+  check('S1-00120: every example valid in its schema', r120.runs.every((r) => r.validation.runnable), JSON.stringify(r120.runs.map((r) => r.validation.structure)));
+  check('S1-00120: accept / reject / reject per schema', r120.runs.map((r) => r.result?.status).join() === 'accepted,rejected,rejected,accepted,rejected,rejected', JSON.stringify(r120.runs.map((r) => r.result?.status)));
+  check('S1-00120: verdict correct', r120.verdict.kind === 'correct', JSON.stringify(r120.verdict));
+  // Through generateRuleTestExamples (the panel and the eval harness).
+  let asked = null;
+  const g120 = await generateRuleTestExamples({
+    ruleXml: R120, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-S1-00120', title: 'Levels', definition: 'How many levels.', proposal: 'At most five levels.' },
+    vocabulary, parseXml,
+    ask: async (_m, sys) => { asked = sys; return JSON.stringify({ proposalMismatch: null, examples: ex120 }); },
+    fetchSchemaCards: fetchCards, fetchStructure,
+  });
+  check('S1-00120: pipeline, one LLM call, verdict correct', g120.status === 'ready' && g120.correction === null && ruleTestVerdict(g120.examples, g120.runs, analyzeRule(R120, 'BREX-4.2', { parseXml })).kind === 'correct' && asked.includes('- "proced": for <proceduralStep>'), JSON.stringify(g120.runs.map((r) => r.result?.status)));
+
+  // Unchanged cases: one element, a context rule, a metadata rule.
+  const single = '<structureObjectRule><objectPath allowedObjectFlag="0">//proceduralStep[count(proceduralStep) = 1]</objectPath><objectUse>No lone sub-step.</objectUse></structureObjectRule>';
+  const cSingle = chooseTestSchemas({ documentSchemas: docs42, cards: (await fetchCards(S42, ['proceduralStep'])).cards, targets: ruleTargets(single) });
+  check('one element: no groups, proced', cSingle.groups === null && cSingle.testSchema === 'proced');
+  const pSingle = await prepareRuleTestSetup({ ruleXml: single, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+  check('one element: one rule placement without group', pSingle.promptPlacements.length === 1 && pSingle.promptPlacements[0].group === undefined);
+  const scoped120 = wrapRuleInSchemaContexts(R120, 'BREX-4.2', S42, ['proced']);
+  const cScoped = chooseTestSchemas({ contextSchemas: ['proced'], documentSchemas: docs42, cards: (await fetchCards(S42, names)).cards, targets: ruleTargets(scoped120) });
+  check('context rule: schema fixed, no groups', cScoped.groups === null && cScoped.testSchema === 'proced', JSON.stringify(cScoped));
+  const R52 = '<structureObjectRule id="BRDP-S1-00052"><objectPath allowedObjectFlag="2">//dmIdent/dmCode/@infoCode</objectPath><objectUse>x</objectUse><objectValue valueForm="single" valueAllowed="055"/></structureObjectRule>';
+  const c52 = chooseTestSchemas({ documentSchemas: docs42, cards: (await fetchCards(S42, ['dmIdent', 'dmCode'])).cards, targets: ruleTargets(R52) });
+  check('metadata rule S1-00052: no groups, descript', c52.groups === null && c52.testSchema === 'descript');
+  const R316 = '<structureObjectRule><objectPath allowedObjectFlag="0">//dmStatus/applicRef | //pmStatus/applicRef</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const c316 = chooseTestSchemas({ documentSchemas: docs42, cards: (await fetchCards(S42, ['dmStatus', 'pmStatus', 'applicRef'])).cards, targets: ruleTargets(R316) });
+  check('S1-00316 (pmStatus alternative): no groups, descript', c316.groups === null && c316.testSchema === 'descript', JSON.stringify(c316));
+  const mixed = '<structureObjectRule><objectPath allowedObjectFlag="0">//dmRef | //proceduralStep</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const cMixed = chooseTestSchemas({ documentSchemas: docs42, cards: (await fetchCards(S42, ['dmRef', 'proceduralStep'])).cards, targets: ruleTargets(mixed) });
+  check('a schema with all that is preferred for one part: no groups (proced)', cMixed.groups === null && cMixed.testSchema === 'proced', JSON.stringify(cMixed));
+
+  // Part 2: every example invalid → the schema and the reason are named.
+  const sbSetup = { standard: S42, schemaLocation: 'flat', placements: { sb: { structure: structureOf(S42, 'sb'), placement: placeExample(structureOf(S42, 'sb'), ruleTargets(R120)) } } };
+  const sbPlace = sbSetup.placements.sb.placement;
+  const bad = ['a', 'b', 'c', 'd'].map((l, i) => ({ label: l, expected: i % 2 ? 'reject' : 'accept', schema: 'sb', content: '<sbSummary><levelledPara><para>x</para></levelledPara></sbSummary>' }));
+  const rBad = testRun(R120, bad, sbSetup);
+  check('no runnable: sb placement is where the old choice put it', sbPlace.insertion !== null, JSON.stringify(sbPlace.path));
+  check('no runnable: verdict names the schema and counts its examples', rBad.verdict.kind === 'no_runnable' && rBad.verdict.bySchema.length === 1 && rBad.verdict.bySchema[0].schema === 'sb' && rBad.verdict.bySchema[0].count === 4, JSON.stringify(rBad.verdict.bySchema?.map((b) => [b.schema, b.count])));
+  const firstProblem = formatSchemaIssue(structureIssues(rBad.verdict.bySchema[0].validation.structure, { schema: 'sb' })[0], i18n.getFixedT('en'));
+  check('no runnable: the first reason is a real structure problem', /is not allowed inside <sbSummary>|does not exist/.test(firstProblem), firstProblem);
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  check('no runnable: text EN', en('records.ruleTest.verdicts.noRunnableSchema', { schema: 'sb', count: 4, problem: '<levelledPara> is not allowed inside <sbSummary>', more: en('records.ruleTest.verdicts.noRunnableMore', { count: 2 }) }) === 'The 4 examples of the sb schema are not valid there: <levelledPara> is not allowed inside <sbSummary> (and 2 more problems).');
+  check('no runnable: text ES', es('records.ruleTest.verdicts.noRunnableSchema', { schema: 'sb', count: 1, problem: 'x', more: '' }) === 'El ejemplo del esquema sb no es válido en él: x.');
+  check('no runnable: record unchanged', JSON.stringify((await import("../src/utils/ruleTestReasons.js")).verdictToTestRecord(rBad.verdict)) === '{"result":"inconclusive","reason":{"code":"test_no_runnable","params":{}}}');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -127,6 +127,12 @@ function isRuleTest(text) {
 //                repeats a cell a morerows above already covers (the real
 //                titled-context run at 297df74); the app removes it itself
 //                (with NOCOLSPECS too: the tables have no <colspec>)
+//   ALLINVALID   every example (first answer and correction) has
+//                <levelledPara> inside <sbSummary>, invalid in its schema:
+//                the "none of the examples could be run" verdict
+// A rule split by schema ("the examples are split by schema"): nested
+// levels of <levelledPara> / <proceduralStep> (Lufthansa S1-00120), one set
+// per schema offered.
 //   MISSINGATTR  (@emphasisType rule) the reject example relies on the
 //                attribute's ABSENCE -- the real disagreement of the T3
 //                report; a regeneration carrying "PREVIOUS EXAMPLES WERE
@@ -198,6 +204,34 @@ function ruleTestReply(systemPrompt, messages) {
     ? "This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."
     : null;
   const answer = (examples) => JSON.stringify({ proposalMismatch: mismatch, examples });
+  if (/ALLINVALID/.test(proposal)) {
+    const bad = "<sbSummary><levelledPara><para>Remove the panel.</para></levelledPara></sbSummary>";
+    return answer([
+      { label: "Invalid accept", expected: "accept", schema: ruleSchema, content: bad },
+      { label: "Invalid reject", expected: "reject", schema: ruleSchema, content: bad },
+    ]);
+  }
+  if (/examples are split by schema/.test(systemPrompt) && /ancestor-or-self::(levelledPara|proceduralStep)/.test(rule)) {
+    const nest = (el, depth, titleAt = null) => {
+      let inner = "";
+      for (let level = depth; level >= 1; level -= 1) {
+        inner = `<${el}>${level === titleAt ? `<title>Level ${level}</title>` : ""}<para>Level ${level} text.</para>${inner}</${el}>`;
+      }
+      return inner;
+    };
+    const split = [...systemPrompt.matchAll(/^- "([\w-]+)": for (.*)$/gm)].map((m) => [m[1], m[2]]);
+    const examples = [];
+    for (const [schema, names] of split) {
+      const el = /proceduralStep/.test(names) ? "proceduralStep" : "levelledPara";
+      const what = el === "proceduralStep" ? "step" : "paragraph";
+      examples.push(
+        { label: `Five ${what} levels`, expected: "accept", schema, content: nest(el, 5) },
+        { label: `Six ${what} levels`, expected: "reject", schema, content: nest(el, 6) },
+        { label: `Title on ${what} level 5`, expected: "reject", schema, content: nest(el, 5, 5) }
+      );
+    }
+    return answer(examples);
+  }
   const metadata = metadataReply(systemPrompt, rule, answer);
   if (metadata) return metadata;
   // T4, DITA Schematron: the topic type the prompt offers; the examples

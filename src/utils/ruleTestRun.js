@@ -15,7 +15,7 @@ import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { describeRule, parseXmlDocument } from './ruleTestEngine.js';
 import { stripLiterals } from './ruleTestCommon.js';
-import { chooseTestSchemas, placeExample, ruleLooksAtBrexReference, ruleMatchExpressions, ruleTargets } from './ruleTestSkeleton.js';
+import { chooseTestSchemas, placeExample, ruleLooksAtBrexReference, ruleMatchExpressions, ruleTargets, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 
 // Same cap as the schema facts of Ask / Suggest Rule.
@@ -26,7 +26,15 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   const contextSchemas = contextSchemasOfRule(ruleXml).schemas;
   const targets = ruleTargets(ruleXml);
   const factNames = extractRuleNames(ruleXml).elements.slice(0, MAX_SCHEMA_FACTS);
-  const lookup = [...new Set([...factNames, ...targets.checked, ...targets.absolutePrefixes.map((p) => p[0])])];
+  const lookup = [
+    ...new Set([
+      ...factNames,
+      ...targets.checked,
+      ...targets.absolutePrefixes.map((p) => p[0]),
+      // every element step, so the schema groups know where each part lives
+      ...targets.alternatives.flatMap((a) => (a.opaque ? [] : a.steps)),
+    ]),
+  ];
   // Schema facts improve the examples but are never required; the schema
   // choice falls back to the standard's preference order without them.
   let cards = {};
@@ -42,26 +50,35 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     // no facts
   }
   const schemaFacts = factNames.filter((n) => cards[n]).map((name) => ({ name, entry: cards[name] }));
-  const { testSchema, otherSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, targets });
+  const { testSchema, otherSchema, groups } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, targets });
   const placements = {};
   const promptPlacements = [];
-  for (const [schema, role] of [[testSchema, 'rule'], [otherSchema, 'other']]) {
+  // One schema per part of the rule (groups), or the test schema and, for
+  // a context-scoped rule, the "does not apply" one.
+  const wanted = groups
+    ? groups.map((g) => ({ schema: g.schema, role: 'rule', targets: targetsForGroup(targets, g), group: g.checked }))
+    : [
+        { schema: testSchema, role: 'rule', targets },
+        { schema: otherSchema, role: 'other', targets },
+      ];
+  for (const { schema, role, targets: schemaTargets, group } of wanted) {
     if (!schema) continue;
     const structure = await fetchStructure(standard, schema);
     if (!structure.available) continue;
-    const placement = placeExample(structure, targets);
+    const placement = placeExample(structure, schemaTargets);
     placements[schema] = { structure, placement };
-    promptPlacements.push({ schema, role, ...placement });
+    promptPlacements.push({ schema, role, ...placement, ...(group ? { group } : {}) });
   }
   if (promptPlacements.length === 0) throw new Error(`No schema structure is available for ${standard}.`);
   // Rule test on DM metadata, Part 3: when nothing the examples of the test
-  // schema can contain is on any path of the rule, no example can ever show
-  // it working -- said now, before any LLM call, instead of an
+  // schema(s) can contain is on any path of the rule, no example can ever
+  // show it working -- said now, before any LLM call, instead of an
   // "inconclusive … regenerate" that no regeneration fixes.
-  const rulePlacement = promptPlacements.find((p) => p.role === 'rule');
-  const unreachable = rulePlacement?.unreachable
-    ? { code: 'unreachable_target', params: { names: rulePlacement.unreachable.join(', ') } }
-    : null;
+  const rulePlacements = promptPlacements.filter((p) => p.role === 'rule');
+  const unreachable =
+    rulePlacements.length > 0 && rulePlacements.every((p) => p.unreachable)
+      ? { code: 'unreachable_target', params: { names: [...new Set(rulePlacements.flatMap((p) => p.unreachable))].join(', ') } }
+      : null;
   return { contextSchemas, schemaFacts, promptPlacements, unreachable, setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) } };
 }
 

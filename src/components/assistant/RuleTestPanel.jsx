@@ -30,7 +30,7 @@ export function TestRuleButton({ aiProvider, open, onToggle }) {
   );
 }
 
-function verdictView(t, verdict) {
+function verdictView(t, verdict, standard) {
   switch (verdict.kind) {
     case 'correct':
       return { tone: 'ok', text: t('records.ruleTest.verdicts.correct') };
@@ -51,8 +51,23 @@ function verdictView(t, verdict) {
       };
     case 'not_executable':
       return { tone: 'warn', text: t('records.ruleTest.verdicts.notExecutable', { reason: formatRuleTestReason(verdict.reason, t) }) };
-    default:
-      return { tone: 'warn', text: t('records.ruleTest.verdicts.noRunnable') };
+    default: {
+      // Every example was invalid: name the schema and the reason (the first
+      // problem of its first example), never only "regenerate".
+      const parts = (verdict.bySchema || []).map(({ schema, count, validation }) => {
+        const problems = validationProblemTexts(t, validation, standard, schema);
+        return t('records.ruleTest.verdicts.noRunnableSchema', {
+          schema: schema || '—',
+          count,
+          problem: problems[0] || '',
+          more: problems.length > 1 ? t('records.ruleTest.verdicts.noRunnableMore', { count: problems.length - 1 }) : '',
+        });
+      });
+      return {
+        tone: 'warn',
+        text: [t('records.ruleTest.verdicts.noRunnable'), ...parts, t('records.ruleTest.verdicts.noRunnableHint')].join(' '),
+      };
+    }
   }
 }
 
@@ -87,8 +102,8 @@ function HighlightedXml({ lines, xml }) {
   );
 }
 
-function ValidationProblems({ validation, standard, schema }) {
-  const { t } = useTranslation();
+// Every problem of an example's validation, as text in the UI language.
+function validationProblemTexts(t, validation, standard, schema) {
   const problems = [];
   if (validation.unknownSchema) problems.push(t('records.ruleTest.unknownSchema', { schema: validation.unknownSchema }));
   if (validation.missingMetadata) problems.push(t('records.ruleTest.missingMetadata', { element: validation.missingMetadata }));
@@ -96,6 +111,12 @@ function ValidationProblems({ validation, standard, schema }) {
   for (const issue of [...nameIssues(validation.names, 'example', { standard }), ...structureIssues(validation.structure, { schema })]) {
     problems.push(formatSchemaIssue(issue, t));
   }
+  return problems;
+}
+
+function ValidationProblems({ validation, standard, schema }) {
+  const { t } = useTranslation();
+  const problems = validationProblemTexts(t, validation, standard, schema);
   return (
     <div className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`}>
       ⚠ {t('records.ruleTest.notRun')}
@@ -426,7 +447,7 @@ export default function RuleTestPanel({
     }
   };
 
-  const view = verdict ? verdictView(t, verdict) : null;
+  const view = verdict ? verdictView(t, verdict, standard) : null;
   const showResults = verdict && verdict.kind !== 'not_executable';
   const ruleNotExecutable = analysis.status === 'not_executable';
   // C3, Part 1d: XML that is not a rule of its format has nothing to
