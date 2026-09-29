@@ -17,12 +17,13 @@ export function buildSuggestProposalPrompt(brdp, standard, sameBrdp, similar, th
   let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
 Decision Points), assisting in BRDP Manager.
 
-Your task: write the Proposal for the BRDP below. A Proposal states the
-decision THIS project takes for the decision point described in the
-Definition — the concrete answer, in concise normative terms (e.g.
-"... shall not be used", "... shall be limited to ..."). Do not restate
-the Definition and do not describe XML implementation details (that is
-the Rule).
+Your task: write the Proposal for the BRDP below. A Proposal is the
+normative sentence of the decision THIS project takes for the decision
+point described in the Definition (e.g. "... shall not be used",
+"... shall be limited to ..."). You write it with the choices left to
+the user as placeholders (see DO NOT MAKE THE DECISION below). Do not
+restate the Definition and do not describe XML implementation details
+(that is the Rule).
 
 Use this project's standard only: ${standard}. Use its terminology and
 element names; do not mix in other versions of S1000D or DITA.
@@ -122,7 +123,7 @@ another project's choice as this project's decision.
 
 Never state or suggest specification chapter, section or paragraph
 numbers, not even as possibilities ("it might be in chapter X"), unless
-the exact number appears in the BRDP content above. If you would
+the exact number appears in the BRDP content below. If you would
 otherwise need to point to a location in the ${standard} specification,
 name the concept or element to look up instead.
 

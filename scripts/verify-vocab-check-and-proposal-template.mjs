@@ -291,7 +291,7 @@ async function main() {
     // New chapter-citation instruction, replacing the old "not sure of" wording.
     assert(
       sysDef.includes(
-        'Never state or suggest specification chapter, section or paragraph\nnumbers, not even as possibilities ("it might be in chapter X"), unless\nthe exact number appears in the BRDP content above.'
+        'Never state or suggest specification chapter, section or paragraph\nnumbers, not even as possibilities ("it might be in chapter X"), unless\nthe exact number appears in the BRDP content below.'
       ),
       "Suggest Definition prompt carries the new chapter-citation instruction verbatim"
     );
@@ -330,7 +330,7 @@ async function main() {
     assert(!sysProp.includes("The BRDP mentions names that may not exist"), "no unknown-names block on a clean BRDP");
     assert(
       sysProp.includes(
-        'Never state or suggest specification chapter, section or paragraph\nnumbers, not even as possibilities ("it might be in chapter X"), unless\nthe exact number appears in the BRDP content above.'
+        'Never state or suggest specification chapter, section or paragraph\nnumbers, not even as possibilities ("it might be in chapter X"), unless\nthe exact number appears in the BRDP content below.'
       ),
       "Suggest Proposal prompt carries the new chapter-citation instruction verbatim"
     );
@@ -357,7 +357,7 @@ async function main() {
     const sysAskS1000D = reqAskS1000D.messages.find((m) => m.role === "system").content;
     assert(
       sysAskS1000D.includes(
-        'Never state or suggest specification chapter, section or paragraph\nnumbers, not even as possibilities ("it might be in chapter X"),\nunless the exact number appears in the BRDP content above. If the user\nasks where something is defined, say that you cannot give the exact\nlocation, and name the concept or element to look up in the S1000D 4.2\nspecification instead.'
+        'Never state or suggest specification chapter, section or paragraph\nnumbers, not even as possibilities ("it might be in chapter X"),\nunless the exact number appears in the BRDP content below. If the user\nasks where something is defined, say that you cannot give the exact\nlocation, and name the concept or element to look up in the S1000D 4.2\nspecification instead.'
       ),
       "Ask prompt carries the new chapter-citation instruction verbatim, with the real standard interpolated"
     );

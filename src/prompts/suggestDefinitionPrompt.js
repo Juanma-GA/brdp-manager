@@ -57,7 +57,7 @@ knowledge of ${standard} alone.
 
   prompt += `Never state or suggest specification chapter, section or paragraph
 numbers, not even as possibilities ("it might be in chapter X"), unless
-the exact number appears in the BRDP content above. If you would
+the exact number appears in the BRDP content below. If you would
 otherwise need to point to a location in the ${standard} specification,
 name the concept or element to look up instead.
 

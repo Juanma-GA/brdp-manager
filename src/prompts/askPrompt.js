@@ -58,7 +58,7 @@ restating the question back to the user.
 
 Never state or suggest specification chapter, section or paragraph
 numbers, not even as possibilities ("it might be in chapter X"),
-unless the exact number appears in the BRDP content above. If the user
+unless the exact number appears in the BRDP content below. If the user
 asks where something is defined, say that you cannot give the exact
 location, and name the concept or element to look up in the ${standard}
 specification instead.

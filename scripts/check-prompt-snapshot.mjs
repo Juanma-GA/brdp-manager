@@ -230,6 +230,15 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // dependent-context: a context that depends on an element's title gets the
 // "THE RULE DEPENDS ON A TITLE" block (a titled <section> around the
 // checked table). Every S1000D prompt is unchanged.
+//
+// C2b Entrega 2, Parte 3 (correcciones): the chapter rule says "in the
+// BRDP content below" in Ask, Suggest Definition and Suggest Proposal (the
+// BRDP block always comes after it -- checked in each built prompt), and
+// Suggest Proposal's opening no longer asks for "the concrete answer"
+// (it contradicted DO NOT MAKE THE DECISION): a Proposal is the normative
+// sentence with the choices left as placeholders. All 7 ask, 3
+// suggestDefinition and 3 suggestProposal cases change; suggestRule and
+// the rule-test prompts are unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 
