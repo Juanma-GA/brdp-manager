@@ -664,6 +664,9 @@ function ResetDataSection({ projectId, canEdit, onDataChanged }) {
   );
 }
 
+// How long "Saved" stays next to the button after a successful save.
+const SAVED_INDICATOR_MS = 4000;
+
 export default function ProjectConfigPage() {
   const { t } = useTranslation();
   const { projectId } = useParams();
@@ -671,6 +674,7 @@ export default function ProjectConfigPage() {
   const [values, setValues] = useState(project.project_config || {});
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   // canEdit is purely cosmetic (disables the form) -- the backend's
   // require_project_role('editor') on PUT is the real gate regardless of
@@ -689,22 +693,41 @@ export default function ProjectConfigPage() {
     setValues(project.project_config || {});
   }, [project]);
 
+  // "Saved" stays a few seconds after a successful save, then goes away.
+  useEffect(() => {
+    if (!saved) return undefined;
+    const timer = setTimeout(() => setSaved(false), SAVED_INDICATOR_MS);
+    return () => clearTimeout(timer);
+  }, [saved]);
+
   const handleChange = (key, value) => {
     setValues((v) => ({ ...v, [key]: value }));
     setSaved(false);
   };
 
+  // A failed save (or a failed reload of what was saved) is shown next to
+  // the button, never swallowed (HR7).
   const handleSave = async (e) => {
     e.preventDefault();
     setIsSaving(true);
+    setSaved(false);
+    setSaveError(null);
     try {
       await authFetchJson(`/api/projects/${projectId}/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_config: values }),
       });
-      setSaved(true);
-      refreshProject();
+    } catch (err) {
+      setSaveError(t('config.saveError', { error: err.message }));
+      setIsSaving(false);
+      return;
+    }
+    setSaved(true);
+    try {
+      await refreshProject();
+    } catch (err) {
+      setSaveError(t('config.reloadError', { error: err.message }));
     } finally {
       setIsSaving(false);
     }
@@ -762,7 +785,16 @@ export default function ProjectConfigPage() {
             {isSaving ? '…' : t('config.save')}
           </button>
         )}
-        {saved && <span className={styles.savedIndicator}>{t('config.saved')}</span>}
+        {saved && (
+          <span className={styles.savedIndicator} role="status" data-testid="config-saved">
+            {t('config.saved')}
+          </span>
+        )}
+        {saveError && (
+          <span className={styles.saveError} role="alert" data-testid="config-save-error">
+            {saveError}
+          </span>
+        )}
         {!canEdit && <p className={styles.readOnlyNote}>{t('config.readOnly')}</p>}
       </form>
 

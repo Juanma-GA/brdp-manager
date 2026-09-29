@@ -2,8 +2,17 @@
 // Compares two runs of scripts/run-prompt-eval.mjs (C2b, Part 2).
 //
 // Usage:
+//   node scripts/compare-prompt-eval.mjs                     (C3) the latest saved run
+//                                                            vs the previous run of
+//                                                            another commit
+//   node scripts/compare-prompt-eval.mjs --against <commit>  the latest saved run vs the
+//                                                            latest run of <commit>
 //   node scripts/compare-prompt-eval.mjs <reference-dir> <new-dir> [--cases <cases.json>]
 //   e.g. node scripts/compare-prompt-eval.mjs scripts/prompt-eval/baseline-a89f562 scripts/prompt-eval/report
+//
+// Saved runs live in scripts/prompt-eval/runs/ (scripts/run-prompt-eval.mjs
+// saves every run there; see scripts/prompt-eval/runs.mjs for how the
+// reference is chosen and how baseline-<commit>/ directories are imported).
 //
 // Each directory holds the `responses.json` the harness writes (report.md is
 // not needed: the per-run results are all in responses.json).
@@ -37,11 +46,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { importBaselines, latestRun, latestRunOfCommit, listRuns, previousRunOfOtherCommit, PROMPT_EVAL_DIR, RUNS_DIR } from "./prompt-eval/runs.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CASES = path.join(__dirname, "prompt-eval", "cases.json");
 const EPSILON = 1e-9;
-const USAGE = "Usage: node scripts/compare-prompt-eval.mjs <reference-dir> <new-dir> [--cases <cases.json>]";
+const USAGE = [
+  "Usage: node scripts/compare-prompt-eval.mjs [--against <commit>] [--cases <cases.json>]",
+  "       node scripts/compare-prompt-eval.mjs <reference-dir> <new-dir> [--cases <cases.json>]",
+].join("\n");
 
 export function loadReport(dir) {
   const file = fs.existsSync(dir) && fs.statSync(dir).isDirectory() ? path.join(dir, "responses.json") : dir;
@@ -260,35 +273,77 @@ export function formatComparison(result, { beforeName = "before", afterName = "a
   return lines.join("\n") + "\n";
 }
 
-function main(argv) {
+// The two saved runs to compare when no directories are given:
+// { before, after } or { error }.
+export function pickSavedRuns({ against = null, runsDir = RUNS_DIR, promptEvalDir = PROMPT_EVAL_DIR } = {}) {
+  importBaselines({ promptEvalDir, runsDir });
+  const runs = listRuns({ runsDir });
+  const after = latestRun(runs);
+  if (!after) return { error: `No saved runs in ${runsDir} yet (scripts/run-prompt-eval.mjs saves one per run).` };
+  const before = against ? latestRunOfCommit(runs.filter((r) => r.name !== after.name), against) : previousRunOfOtherCommit(runs, after);
+  if (!before) {
+    return {
+      error: against
+        ? `No saved run of commit ${against} to compare ${after.name} with.`
+        : `No earlier run of another commit to compare ${after.name} with (it becomes the reference).`,
+    };
+  }
+  return { before, after };
+}
+
+// Compares two run directories: { text, regressions } or throws.
+export function compareRunDirs(beforeDir, afterDir, { casesFile = DEFAULT_CASES, beforeName = beforeDir, afterName = afterDir } = {}) {
+  const before = loadReport(beforeDir);
+  const after = loadReport(afterDir);
+  const result = compareReports(before, after, { caseTypes: loadCaseTypes(casesFile) });
+  return {
+    text: formatComparison(result, { beforeName, afterName, beforeHeader: before.header, afterHeader: after.header }),
+    regressions: result.regressions.length,
+  };
+}
+
+function main(argv, { runsDir = RUNS_DIR, promptEvalDir = PROMPT_EVAL_DIR } = {}) {
   const positional = [];
   let casesFile = DEFAULT_CASES;
+  let against = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--cases") casesFile = path.resolve(argv[++i]);
+    else if (argv[i] === "--against") against = argv[++i];
     else if (argv[i] === "--help" || argv[i] === "-h") {
       console.log(USAGE);
       return 0;
     } else positional.push(argv[i]);
   }
-  if (positional.length !== 2) {
+  let beforeDir;
+  let afterDir;
+  let beforeName;
+  let afterName;
+  if (positional.length === 0) {
+    const picked = pickSavedRuns({ against, runsDir, promptEvalDir });
+    if (picked.error) {
+      console.error(picked.error);
+      return 2;
+    }
+    ({ dir: beforeDir, name: beforeName } = picked.before);
+    ({ dir: afterDir, name: afterName } = picked.after);
+  } else if (positional.length === 2 && !against) {
+    [beforeDir, afterDir] = positional;
+  } else {
     console.error(USAGE);
     return 2;
   }
-  const [beforeDir, afterDir] = positional;
-  let before, after;
+  let compared;
   try {
-    before = loadReport(beforeDir);
-    after = loadReport(afterDir);
+    compared = compareRunDirs(beforeDir, afterDir, { casesFile, beforeName, afterName });
   } catch (err) {
     console.error(err.message);
     return 2;
   }
-  const result = compareReports(before, after, { caseTypes: loadCaseTypes(casesFile) });
-  process.stdout.write(
-    formatComparison(result, { beforeName: beforeDir, afterName: afterDir, beforeHeader: before.header, afterHeader: after.header })
-  );
-  return result.regressions.length ? 1 : 0;
+  process.stdout.write(compared.text);
+  return compared.regressions ? 1 : 0;
 }
+
+export { main };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   process.exitCode = main(process.argv.slice(2));

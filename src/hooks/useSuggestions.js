@@ -67,7 +67,13 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
   // only load lazily when their own panel opens) -- needed as soon as a
   // row is selected, to decide whether to disable the button at all, not
   // just when a picker is open.
+  // C3, Part 2: null when the catalog could not be loaded -- the check is
+  // then unavailable (never "no catalog BRDPs", which would silently
+  // enable Suggest Definition on an official BRDP) and catalogLoadError
+  // says so in the panel (HR7). The backend still refuses Suggest
+  // Definition on a catalog BRDP with 400.
   const [catalogIdentifierSet, setCatalogIdentifierSet] = useState(new Set());
+  const [catalogLoadError, setCatalogLoadError] = useState(null);
 
   // Suggest: one pending/loaded suggestion PER BRDP, kept until Accept or
   // Discard (docs request -- the suggestion belongs to the BRDP it was
@@ -110,9 +116,13 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     // Global reference data (not project-scoped), same source/pattern as
     // the other catalog pickers -- fetched eagerly here since it's needed
     // as soon as a row is selected.
+    setCatalogLoadError(null);
     authFetchJson(`/api/brdp-catalog?standard=${encodeURIComponent(standard)}`)
       .then((entries) => setCatalogIdentifierSet(new Set(entries.map((e) => e.identifier))))
-      .catch(() => setCatalogIdentifierSet(new Set()));
+      .catch((err) => {
+        setCatalogIdentifierSet(null);
+        setCatalogLoadError(err.message || String(err));
+      });
     // Per-BRDP suggestions are explicitly scoped to this project (docs
     // request: "al cambiar de proyecto, vaciar el mapa") -- an in-flight
     // request from the PREVIOUS project would otherwise land with a
@@ -582,6 +592,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
 
   return {
     catalogIdentifierSet,
+    catalogLoadError,
     suggestionsByBrdpId,
     selectedSuggestion,
     toggleReferenceExpanded,

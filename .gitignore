@@ -45,3 +45,6 @@ public/fav_original/
 # and per-run pass/fail tables), never something to commit. cases.json
 # itself (the fixed test cases) IS committed.
 scripts/prompt-eval/report/
+# Every saved run (C3): scripts/prompt-eval/runs/<commit>-<time>/ -- same
+# reason, real LLM answers.
+scripts/prompt-eval/runs/

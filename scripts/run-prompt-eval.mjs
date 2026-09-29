@@ -32,6 +32,9 @@
 //   6. Writes a per-case hit-rate table (e.g. "2/3") to stdout and to
 //      scripts/prompt-eval/report/report.md, plus every full raw response
 //      to scripts/prompt-eval/report/responses.json for manual reading.
+//   6. (C3) Copies both files to scripts/prompt-eval/runs/<commit>-<time>/
+//      and compares the run with the previous run of another commit
+//      (scripts/compare-prompt-eval.mjs), printing the result.
 //      That report/ directory is gitignored -- eval output is a run
 //      artifact, never something to commit.
 //
@@ -70,6 +73,8 @@ import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
 import { validateXML } from "xmllint-wasm";
 import { distinctSchemaNames, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
+import { compareRunDirs } from "./compare-prompt-eval.mjs";
+import { importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
@@ -851,7 +856,38 @@ async function main() {
     }
   }
 
-  writeReport(results, args.runs, { aiProvider, gitInfo, generatedAt: new Date().toISOString() });
+  const generatedAt = new Date().toISOString();
+  // A run of only some cases (--only / --cases) is saved too, marked
+  // partial, so it never becomes the reference of a later full pass.
+  const partial = Boolean(args.only || args.casesPath);
+  writeReport(results, args.runs, { aiProvider, gitInfo, generatedAt, partial });
+  saveAndCompare({ gitInfo, generatedAt });
+}
+
+// C3, Part 2: every run is saved to scripts/prompt-eval/runs/<commit>-<time>/
+// (gitignored), and compared right away with the previous run of another
+// commit, if there is one (scripts/prompt-eval/runs.mjs picks it). The
+// comparison is only printed: the run's own exit code does not depend on it.
+function saveAndCompare({ gitInfo, generatedAt }) {
+  importBaselines();
+  const saved = saveRun({ reportDir: REPORT_DIR, commit: gitInfo.commit, generatedAt });
+  console.log(`Run saved to ${path.relative(REPO_ROOT, saved)}`);
+  const runs = listRuns();
+  const current = runs.find((r) => r.dir === saved);
+  const previous = previousRunOfOtherCommit(runs, current);
+  if (!previous) {
+    console.log("No earlier run of another commit to compare with: this run is the reference for the next one.");
+    return;
+  }
+  console.log("");
+  console.log(`## Comparison with the previous run of another commit (${previous.name})`);
+  console.log("");
+  try {
+    const { text } = compareRunDirs(previous.dir, saved, { casesFile: CASES_PATH, beforeName: previous.name, afterName: current.name });
+    console.log(text);
+  } catch (err) {
+    console.error(`WARNING: could not compare with ${previous.name}: ${err.message}`);
+  }
 }
 
 // Header shared by report.md and responses.json (Part 2 of this round):
@@ -869,6 +905,8 @@ function buildReportHeader(meta, runs) {
     temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE },
     runs,
     generatedAt: meta.generatedAt,
+    // C3: only some cases were run (--only / --cases).
+    partial: Boolean(meta.partial),
   };
 }
 

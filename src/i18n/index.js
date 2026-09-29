@@ -136,6 +136,8 @@ const resources = {
         },
         save: 'Save Configuration',
         saved: 'Saved',
+        saveError: 'Could not save: {{error}}',
+        reloadError: 'Saved, but the saved configuration could not be reloaded: {{error}}',
         readOnly: "Read-only — your role on this project doesn't allow editing.",
         dataManagement: {
           title: 'Data Management',
@@ -489,6 +491,7 @@ const resources = {
             rule: 'Rule',
           },
           suggestDefinitionCatalogDisabled: 'Official definition from the standard catalog',
+          catalogLoadFailed: 'The catalog could not be loaded; the identifier check is not available ({{error}}).',
           suggestProposalNeedsDefinition: 'Add or accept a Definition first',
           suggestRuleNoFormat: 'Suggest Rule is not available for {{standard}}',
           suggestRuleNeedsProposal: 'Write or accept a Proposal first',
@@ -893,6 +896,8 @@ const resources = {
         },
         save: 'Guardar configuración',
         saved: 'Guardado',
+        saveError: 'No se pudo guardar: {{error}}',
+        reloadError: 'Guardado, pero no se pudo recargar la configuración guardada: {{error}}',
         readOnly: 'Solo lectura — tu rol en este proyecto no permite editar.',
         dataManagement: {
           title: 'Gestión de datos',
@@ -1240,6 +1245,7 @@ const resources = {
             rule: 'Regla',
           },
           suggestDefinitionCatalogDisabled: 'Definición oficial del catálogo del standard',
+          catalogLoadFailed: 'No se pudo cargar el catálogo; la comprobación de identificadores no está disponible ({{error}}).',
           suggestProposalNeedsDefinition: 'Añade o acepta primero una Definition',
           suggestRuleNoFormat: 'Suggest Rule no está disponible para {{standard}}',
           suggestRuleNeedsProposal: 'Escribe o acepta primero una Proposal',

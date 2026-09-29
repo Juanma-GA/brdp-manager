@@ -1666,6 +1666,11 @@ export default function RecordsPage() {
                   )
                 )}
 
+                {suggestions.catalogLoadError && (
+                  <p className={styles.vocabWarning} role="alert" data-testid="catalog-load-warning">
+                    ⚠ {t('records.assistant.catalogLoadFailed', { error: suggestions.catalogLoadError })}
+                  </p>
+                )}
                 <div className={styles.suggestionActions}>
                   {SUGGEST_KINDS.map((kind) => {
                     // docs request (Suggest Definition corpus round), point
@@ -1674,7 +1679,9 @@ export default function RecordsPage() {
                     // catalog table (suggestions.catalogIdentifierSet), never by
                     // identifier prefix. Only Suggest Definition is gated
                     // by this; Suggest Proposal/Rule are unaffected.
-                    const catalogDisabled = kind === 'definition' && suggestions.catalogIdentifierSet.has(selected.identifier);
+                    // (null = the catalog could not be loaded: the check is
+                    // unavailable and said so below, never "not a catalog BRDP".)
+                    const catalogDisabled = kind === 'definition' && Boolean(suggestions.catalogIdentifierSet?.has(selected.identifier));
                     // docs request (Suggest Proposal corpus round): Proposal
                     // is built ON TOP OF the Definition (the prompt cites it
                     // as fixed context) -- an empty Definition means there is
