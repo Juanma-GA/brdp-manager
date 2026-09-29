@@ -819,6 +819,26 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   // An empty <row/> fully spanned from above counts too.
   check('C3b row covered: an empty row under the spans', removeSpannedCalsEntries(tbl('<row><entry morerows="1">A</entry><entry morerows="1">B</entry><entry morerows="1">C</entry></row><row></row>', ''), parseXml).removedRows.length === 0
     && checkCalsTableSpans(parseXml(`<dmodule>${tbl('<row><entry morerows="1">A</entry><entry morerows="1">B</entry><entry morerows="1">C</entry></row><row></row>', '')}</dmodule>`)).some((p) => p.kind === 'rowFullyCovered' && p.row === 2));
+  // An empty <row/> with nothing spanning into it is invalid CALS too.
+  for (const empty of ['<row/>', '<row></row>']) {
+    const emptyTbl = tbl(`<row><entry colname="c1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row>${empty}`);
+    const emptyProblems = checkCalsTableSpans(parseXml(`<dmodule>${emptyTbl}</dmodule>`));
+    check(`C3b empty row: ${empty} → emptyRow for row 2`, JSON.stringify(emptyProblems) === '[{"kind":"emptyRow","row":2}]', JSON.stringify(emptyProblems));
+    check(`C3b empty row: ${empty} left untouched by the app`, removeSpannedCalsEntries(emptyTbl, parseXml).content === emptyTbl);
+  }
+  // Partly spanned from above but no entry of its own: still empty.
+  check('C3b empty row: partly spanned empty row → emptyRow', JSON.stringify(checkCalsTableSpans(parseXml(`<dmodule>${tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row/>')}</dmodule>`))) === '[{"kind":"emptyRow","row":2}]');
+  check('C3b empty row: exact English message', formatStructureProblem({ kind: 'emptyRow', row: 2 }, 'descript') === 'row 2 has no entry');
+  check('C3b empty row: EN/ES through i18n', formatSchemaIssue(structureIssues([{ kind: 'emptyRow', row: 2 }], { schema: 'descript' })[0], i18n.getFixedT('en')) === 'row 2 has no entry'
+    && formatSchemaIssue(structureIssues([{ kind: 'emptyRow', row: 2 }], { schema: 'descript' })[0], i18n.getFixedT('es')) === 'la fila 2 no tiene ninguna celda');
+  {
+    const emptyContent = `<para>Values:</para>${tbl('<row><entry colname="c1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row/>')}`;
+    const emptyExamples = [{ label: 'empty row', expected: 'accept', schema: 'descript', content: emptyContent }];
+    const emptyRun = testRun(TBL, emptyExamples, setup);
+    check('C3b empty row: example not runnable', !emptyRun.runs[0].validation.runnable && emptyRun.runs[0].validation.structure.some((p) => p.kind === 'emptyRow'), JSON.stringify(emptyRun.runs[0].validation.structure));
+    const emptyFailures = exampleFailures(emptyExamples, emptyRun.materialized, emptyRun.runs, { ruleXml: TBL, standard: S42, format: 'BREX-4.2', parseXml });
+    check('C3b empty row: goes to the correction round with its message', emptyFailures.length === 1 && emptyFailures[0].problems.includes('row 2 has no entry'), JSON.stringify(emptyFailures));
+  }
   // Partial overlap still auto-fixed (regression).
   check('C3b row covered: partial overlap still fixed', removeSpannedCalsEntries(covered('<entry colname="c2">Gasket</entry><entry colname="c3">1</entry>'), parseXml).removedRows.join() === '2');
 

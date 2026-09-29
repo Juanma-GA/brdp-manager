@@ -995,6 +995,9 @@ export function checkExampleStructure(doc, structure) {
 //                                             removing them would leave an
 //                                             empty <row>, so this replaces
 //                                             the row's spannedEntry problems
+//   { kind: 'emptyRow', row }               -- row N has no <entry> and
+//                                             is not fully covered from
+//                                             above (CALS needs at least one)
 // `row` is 1-based within its thead/tbody/tfoot; `column` is the colspec's
 // colname, or c1, c2… by position when the table has no colspecs.
 // Columns come from @colname / @namest–@nameend when the entry has them
@@ -1075,6 +1078,8 @@ function calsSpanProblems(doc) {
           const fullyCovered = entries.length > 0 ? spannedCount === entries.length : cols > 0 && spanned[r].size >= cols;
           if (fullyCovered) {
             problems.push({ kind: 'rowFullyCovered', row: r + 1 }, ...rowProblems.filter((p) => p.kind !== 'spannedEntry'));
+          } else if (entries.length === 0) {
+            problems.push({ kind: 'emptyRow', row: r + 1 });
           } else {
             problems.push(...rowProblems);
           }
@@ -1167,6 +1172,8 @@ export function formatStructureProblem(problem, schema) {
       return `row ${problem.row}: column ${problem.column} is already spanned by the entry above (morerows); remove this entry`;
     case 'morerowsPastEnd':
       return `row ${problem.row}: morerows spans past the last row (column ${problem.column})`;
+    case 'emptyRow':
+      return `row ${problem.row} has no entry`;
     case 'rowFullyCovered':
       return `row ${problem.row} is entirely covered by morerows from above: give row ${problem.row} its own entries or lower the morerows`;
     case 'unknownElement':
@@ -1403,6 +1410,7 @@ export const SCHEMA_ISSUE_KEYS = {
     spannedEntry: 'records.ruleTest.structure.spannedEntry',
     morerowsPastEnd: 'records.ruleTest.structure.morerowsPastEnd',
     rowFullyCovered: 'records.ruleTest.structure.rowFullyCovered',
+    emptyRow: 'records.ruleTest.structure.emptyRow',
   },
 };
 
