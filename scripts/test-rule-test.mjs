@@ -37,7 +37,7 @@ import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkEx
 import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, missesRuleProblem } from '../src/utils/ruleTestRun.js';
 import { ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
-import XLSX from 'xlsx';
+import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
 
@@ -543,8 +543,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   // The real template rule BRDP-EXT-00001 (DITA XPath 3.0): the title goes
   // on the table in the first answer, in a titled <section> after the
   // correction round.
-  const wb = XLSX.read(fs.readFileSync(new URL('../public/brdp-template-dita-xpath3.xlsx', import.meta.url)));
-  const ext1 = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).find((r) => r.ID === 'BRDP-EXT-00001');
+  const ext1 = readPublicTemplate('brdp-template-dita-xpath3.xlsx').find((r) => r.ID === 'BRDP-EXT-00001');
   const DITA3 = 'DITA 1.3 Xpath3.0';
   check('T4b EXT-00001: target is the row', ruleTargets(ext1.Rule).checked.join() === 'row', JSON.stringify(ruleTargets(ext1.Rule)));
   const table = (title, cant) =>
@@ -777,8 +776,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
 
   // The real titled-context case (297df74, run 1, examples 3 and 4): valid
   // examples whose only problem is a spanned cell → no correction round.
-  const wb = XLSX.read(fs.readFileSync(new URL('../public/brdp-template-dita-xpath3.xlsx', import.meta.url)));
-  const ext1 = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).find((r) => r.ID === 'BRDP-EXT-00001');
+  const ext1 = readPublicTemplate('brdp-template-dita-xpath3.xlsx').find((r) => r.ID === 'BRDP-EXT-00001');
   const DITA = 'DITA 1.3 Xpath2.0';
   const vocabDita = vocabOf('schema-vocabulary-dita.json');
   const section = (cant) =>

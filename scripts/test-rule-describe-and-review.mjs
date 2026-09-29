@@ -6,9 +6,8 @@
 // describeRule is run over EVERY Verified rule of the BREX templates (4.2,
 // 4.1, 3.0.1): each must get a description, and every line must format in
 // English and Spanish with no raw i18n key and no "{{" left.
-import fs from 'node:fs';
 import { DOMParser } from '@xmldom/xmldom';
-import XLSX from 'xlsx';
+import { readPublicTemplate } from './lib/readXlsx.mjs';
 import i18n from '../src/i18n/index.js';
 import { describeRule } from '../src/utils/ruleTestEngine.js';
 import { formatRuleDescription, ruleDescriptionText } from '../src/utils/ruleTestReasons.js';
@@ -113,8 +112,7 @@ const ETYPE =
 const TEMPLATE_FILES = { 'BREX-4.2': '4-2', 'BREX-4.1': '4-1', 'BREX-3.0.1': '3-0-1' };
 let templateCount = 0;
 for (const [format, suffix] of Object.entries(TEMPLATE_FILES)) {
-  const wb = XLSX.read(fs.readFileSync(new URL(`../public/brdp-template-${suffix}.xlsx`, import.meta.url)));
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).filter((r) => r['Rule Status'] === 'Verified' && r.Rule);
+  const rows = readPublicTemplate(`brdp-template-${suffix}.xlsx`).filter((r) => r['Rule Status'] === 'Verified' && r.Rule);
   for (const row of rows) {
     templateCount += 1;
     const d = describe(row.Rule, format);

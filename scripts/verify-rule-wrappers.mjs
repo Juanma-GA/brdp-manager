@@ -27,7 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
-import * as XLSX from "xlsx";
+import { readXlsxRows } from "./lib/readXlsx.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -75,7 +75,18 @@ async function main() {
   if (!login.ok) throw new Error(`login failed for ${EMAIL} (HTTP ${login.status})`);
   const token = (await login.json()).access_token;
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  const api = (p, init = {}) => fetch(`${API}${p}`, { headers: auth, ...init });
+  // One retry when Node reuses a keep-alive connection uvicorn has already
+  // closed after a few idle seconds (the steps before some calls take
+  // longer than that): "fetch failed (other side closed)". The request
+  // never reached the server, so repeating it is safe.
+  const api = async (p, init = {}) => {
+    try {
+      return await fetch(`${API}${p}`, { headers: auth, ...init });
+    } catch (err) {
+      if (err.cause?.code !== "UND_ERR_SOCKET") throw err;
+      return fetch(`${API}${p}`, { headers: auth, ...init });
+    }
+  };
   const suffix = Math.random().toString(36).slice(2, 8);
   const projects = [];
   const makeProject = async (name, standard) => {
@@ -188,9 +199,11 @@ async function main() {
     assert((await page.locator("body").innerText()).includes("RULE"), "Records: the Rule entry is in the History panel");
     await page.screenshot({ path: path.join(os.tmpdir(), "rule-wrappers-history.png"), fullPage: true });
 
+    // The template as it was before the cleanup commit (5fde400), with the
+    // wrapped cells of S1-00507 and S1-00070.
     console.log("\nExcel import of the template as it was");
-    const old = execFileSync("git", ["show", "HEAD:public/brdp-template-4-2.xlsx"], { cwd: ROOT, maxBuffer: 20 * 1024 * 1024 });
-    const rows = XLSX.utils.sheet_to_json(XLSX.read(old).Sheets.BRDPs, { defval: "" });
+    const old = execFileSync("git", ["show", "5fde400^:public/brdp-template-4-2.xlsx"], { cwd: ROOT, maxBuffer: 20 * 1024 * 1024 });
+    const rows = readXlsxRows(old);
     const wrappedCell = rows.find((r) => r.ID === "BRDP-S1-00507").Rule;
     if (wrappedCell.startsWith("<rules>")) {
       const pImport = await makeProject("Wrappers import", "S1000D 4.2");
@@ -232,6 +245,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`\nERROR: ${err.message}`);
+  console.error(`\nERROR: ${err.message}${err.cause ? ` (${err.cause.message || err.cause})` : ""}`);
   process.exit(1);
 });

@@ -13,9 +13,8 @@
 //      the not-executable reasons, phases, several patterns.
 //   3. analyzeRule (static reasons, XPath 3.x warnings in an XPath 2.0
 //      project) and describeRule (codes and their EN/ES text).
-import fs from 'node:fs';
 import { DOMParser } from '@xmldom/xmldom';
-import XLSX from 'xlsx';
+import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { analyzeRule, describeRule, runRuleOnFragment } from '../src/utils/ruleTestEngine.js';
 import i18n from '../src/i18n/index.js';
 import { ENGINE_REASON_CODES, formatRuleDescription, formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
@@ -158,8 +157,7 @@ const notExecutableInTemplates = [];
 const neverRejects = [];
 const templateRules = {};
 for (const [suffix, cases] of Object.entries(TEMPLATE_CASES)) {
-  const wb = XLSX.read(fs.readFileSync(new URL(`../public/brdp-template-${suffix}.xlsx`, import.meta.url)));
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).filter((r) => r['Rule Status'] === 'Verified' && r.Rule);
+  const rows = readPublicTemplate(`brdp-template-${suffix}.xlsx`).filter((r) => r['Rule Status'] === 'Verified' && r.Rule);
   templateRules[suffix] = rows;
   check(`${suffix} template: 10 Verified rules`, rows.length === 10, `got ${rows.length}`);
   check(`${suffix} template: every rule has a case`, rows.every((r) => cases[r.ID]), rows.filter((r) => !cases[r.ID]).map((r) => r.ID).join(', '));

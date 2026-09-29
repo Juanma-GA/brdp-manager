@@ -198,10 +198,11 @@ const resources = {
           countAvailable_one: '{{count}} BRDP record available for export in this project',
           countAvailable_other: '{{count}} BRDP records available for export in this project',
           exportCellTooLarge_one:
-            '{{count}} BRDP has content over Excel\'s 32,767-character cell limit and cannot be exported: {{ids}}. Shorten its Rule, Title, Definition, or Proposal and try again.',
+            '{{count}} BRDP has content over Excel\'s 32,767-character cell limit and cannot be exported: {{ids}}. Shorten that field and try again.',
           exportCellTooLarge_other:
-            '{{count}} BRDPs have content over Excel\'s 32,767-character cell limit and cannot be exported: {{ids}}. Shorten their Rule, Title, Definition, or Proposal and try again.',
+            '{{count}} BRDPs have content over Excel\'s 32,767-character cell limit and cannot be exported: {{ids}}. Shorten those fields and try again.',
           exportFailed: 'Export failed: {{message}}',
+          templateFailed: 'Could not download the template: {{message}}',
         },
         resetData: {
           title: 'Reset Data',
@@ -968,10 +969,11 @@ const resources = {
           countAvailable_one: '{{count}} BRDP disponible para exportar en este proyecto',
           countAvailable_other: '{{count}} BRDPs disponibles para exportar en este proyecto',
           exportCellTooLarge_one:
-            '{{count}} BRDP tiene contenido que supera el límite de 32.767 caracteres por celda de Excel y no se puede exportar: {{ids}}. Acorta su Rule, Title, Definition o Proposal e inténtalo de nuevo.',
+            '{{count}} BRDP tiene contenido que supera el límite de 32.767 caracteres por celda de Excel y no se puede exportar: {{ids}}. Acorta ese campo e inténtalo de nuevo.',
           exportCellTooLarge_other:
-            '{{count}} BRDPs tienen contenido que supera el límite de 32.767 caracteres por celda de Excel y no se pueden exportar: {{ids}}. Acorta su Rule, Title, Definition o Proposal e inténtalo de nuevo.',
+            '{{count}} BRDPs tienen contenido que supera el límite de 32.767 caracteres por celda de Excel y no se pueden exportar: {{ids}}. Acorta esos campos e inténtalo de nuevo.',
           exportFailed: 'Error al exportar: {{message}}',
+          templateFailed: 'No se pudo descargar la plantilla: {{message}}',
         },
         resetData: {
           title: 'Restablecer datos',

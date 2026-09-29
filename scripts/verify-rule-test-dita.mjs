@@ -24,14 +24,12 @@
 // 5173. Cleans up the projects it creates. Screenshots go to /tmp.
 //
 //     node scripts/verify-rule-test-dita.mjs
-import fs from "node:fs";
-import XLSX from "xlsx";
+import { readPublicTemplate } from "./lib/readXlsx.mjs";
 import { chromium } from "playwright-core";
 
 // T4b: two real rules of the curated DITA templates.
 const templateRule = (file, id) => {
-  const wb = XLSX.read(fs.readFileSync(new URL(`../public/${file}`, import.meta.url)));
-  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).find((r) => r.ID === id);
+  return readPublicTemplate(file).find((r) => r.ID === id);
 };
 const EXT1_XPATH3 = templateRule("brdp-template-dita-xpath3.xlsx", "BRDP-EXT-00001");
 const EXT9_XPATH2 = templateRule("brdp-template-dita-xpath2.xlsx", "BRDP-EXT-00009");

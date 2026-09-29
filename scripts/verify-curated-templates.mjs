@@ -18,7 +18,7 @@ import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import * as XLSX from "xlsx";
+import { readXlsxRows } from "./lib/readXlsx.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -103,8 +103,7 @@ async function main() {
       // Direct content check, not just byte size: 10 rows, every Rule cell
       // populated (not the generic template's empty Rule), Rule Status
       // Verified throughout.
-      const wb = XLSX.read(buf, { type: "buffer" });
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      const rows = readXlsxRows(buf);
       assert(rows.length === 10, `${standard}: downloaded file has 10 real rows (got ${rows.length})`);
       const emptyRuleRows = rows.filter((r) => !r["Rule"] || String(r["Rule"]).trim() === "");
       assert(emptyRuleRows.length === 0, `${standard}: every row's Rule column is populated, none empty (got ${emptyRuleRows.length} empty)`);

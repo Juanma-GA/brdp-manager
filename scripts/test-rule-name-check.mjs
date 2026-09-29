@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import * as XLSX from 'xlsx';
+import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { extractRuleXPaths, extractXPathNames, extractRuleNames, checkRuleNames } from '../src/validation/schemaValidation.js';
 import { hasUnfilledMarkers } from '../src/utils/proposalMarkers.js';
 import { parseSuggestRuleResponse } from '../src/prompts/suggestRulePrompt.js';
@@ -44,8 +44,7 @@ function loadVocab(file) {
   return { elements: new Set(json.elements), attributes: new Set(json.attributes) };
 }
 function loadTemplate(file) {
-  const wb = XLSX.read(readFileSync(join(ROOT, 'public', file)));
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+  const rows = readPublicTemplate(file);
   return new Map(rows.filter((r) => r.Rule).map((r) => [r.ID, r.Rule]));
 }
 

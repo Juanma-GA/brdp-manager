@@ -102,9 +102,9 @@ Todo lo que sigue solo lo alcanza `generateSuggestedRule.js` (sección 1):
 | `src/components/GenerateModal.jsx` (+ CSS) | nadie | v1 (v2: `GeneratePage.jsx`) | ninguna | borrar en el barrido final |
 | `src/api/validateBREX.js` | solo `GenerateModal.jsx`. `GeneratePage.jsx` llama a `/api/validate-brex` directamente. | v1 | ninguna | borrar en el barrido final |
 | `src/components/BREXdocModal/BREXdocModal.jsx` (+ CSS) | nadie (ya anotado en CLAUDE.md) | v1 (v2: `GenerateBREXdocPage.jsx`) | ninguna | borrar en el barrido final |
-| `src/components/AboutSection.jsx`, `DataManagementSection.jsx`, `ProjectConfigSection.jsx`, `ResetDataSection.jsx` (+ CSS) | nadie | v1 (pantalla de Settings) | ninguna. En v2 la gestión de datos vive en `ProjectConfigPage.jsx`. | borrar en el barrido final |
+| `src/components/AboutSection.jsx`, `ProjectConfigSection.jsx`, `ResetDataSection.jsx` (+ CSS) | nadie | v1 (pantalla de Settings) | ninguna. En v2 la gestión de datos vive en `ProjectConfigPage.jsx`. `DataManagementSection.jsx` (+ CSS) ya se borró al pasar el Excel al backend. | borrar en el barrido final |
 | `src/data/brdpSchema.js` (`BRDP_FIELDS`) | nadie | v1 | ninguna | borrar en el barrido final |
-| `src/data/mockBRDPs.js` | vivo: `excelUtils.js` → `generateTemplate()`, plantilla genérica de S1000D 5.0/6.0. También lo usan `BRDPContext`, `useBRDPs` y `ResetDataSection` (v1). | v1 + v2 | otra: plantilla de respaldo | mantener |
+| `src/data/mockBRDPs.js` | solo v1: `BRDPContext`, `useBRDPs` y `ResetDataSection`. La plantilla genérica de S1000D 5.0/6.0 la genera ahora el backend (`GET /api/brdp-template.xlsx`, filas copiadas a `backend/app/services/generic_template_rows.json`). | v1 | ninguna | borrar en el barrido final |
 | `src/services/api.js` | solo código v1 (`BRDPContext`, `useAPIKey`, `useBRDPs`, `useLocalNotes`, `useProjectConfig`). Llama a `/api/brdps`, `/api/config`, `/api/settings` y `/api/notes` de Express. | v1 | ninguna | borrar en el barrido final. `src/services/apiClient.js` (v2, `authFetch`) está vivo. |
 | `src/db/database.js`, `src/db/schema.sql` | solo `server.js` | v1 (SQLite) | ninguna | borrar junto con `server.js` en el barrido final (sección 6, decidido en C3) |
 

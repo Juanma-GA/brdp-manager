@@ -17,8 +17,7 @@
 // out; a template with none says so). Exit code 0 always: the lint reports,
 // it never fixes a template.
 // Run: node scripts/lint-curated-templates.mjs
-import fs from 'node:fs';
-import XLSX from 'xlsx';
+import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../src/i18n/index.js';
 import { CURATED_TEMPLATE_BY_STANDARD } from '../src/utils/excelUtils.js';
@@ -119,8 +118,7 @@ function lintRule(ruleXml, format) {
 let total = 0;
 for (const [standard, file] of Object.entries(CURATED_TEMPLATE_BY_STANDARD)) {
   const format = STANDARD_TO_RULE_FORMAT[standard];
-  const wb = XLSX.read(fs.readFileSync(new URL(`../public${file}`, import.meta.url)));
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).filter((r) => String(r.Rule || '').trim());
+  const rows = readPublicTemplate(file).filter((r) => String(r.Rule || '').trim());
   const lines = [];
   for (const row of rows) {
     for (const f of lintRule(String(row.Rule), format)) lines.push(`| ${row.ID} | ${f.kind} | ${escCell(f.detail)} |`);

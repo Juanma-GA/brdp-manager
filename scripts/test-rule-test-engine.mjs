@@ -14,9 +14,8 @@
 //    and one that complies, or the expected not-executable reason. A rule
 //    missing from the table below fails the run, so a template change can't
 //    silently skip the check.
-import fs from 'node:fs';
 import { DOMParser } from '@xmldom/xmldom';
-import XLSX from 'xlsx';
+import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { runRuleOnFragment } from '../src/utils/ruleTestEngine.js';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { brexToSchematron } from '../src/api/brexToSchematron.js';
@@ -375,8 +374,7 @@ const TEMPLATE_FILES = { 'BREX-4.2': '4-2', 'BREX-4.1': '4-1', 'BREX-3.0.1': '3-
 const notExecutableInTemplates = [];
 const neverRejects = [];
 for (const [format, suffix] of Object.entries(TEMPLATE_FILES)) {
-  const wb = XLSX.read(fs.readFileSync(new URL(`../public/brdp-template-${suffix}.xlsx`, import.meta.url)));
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).filter((r) => r['Rule Status'] === 'Verified' && r.Rule);
+  const rows = readPublicTemplate(`brdp-template-${suffix}.xlsx`).filter((r) => r['Rule Status'] === 'Verified' && r.Rule);
   const cases = TEMPLATE_CASES[format];
   check(`${format} template: 10 Verified rules`, rows.length === 10, `got ${rows.length}`);
   check(`${format} template: every rule has a case`, rows.every((r) => cases[r.ID]), rows.filter((r) => !cases[r.ID]).map((r) => r.ID).join(', '));

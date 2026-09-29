@@ -26,7 +26,6 @@
 // scripts/verify-on-demand-embeddings.mjs`. Pass KEEP=1 to skip deleting
 // the two test projects afterward (for manual/DB inspection).
 import { chromium } from "playwright-core";
-import XLSX from "xlsx";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -58,12 +57,17 @@ async function apiLogin() {
   return (await res.json()).access_token;
 }
 
-function buildImportXlsx(rows) {
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "BRDPs");
+// The import file is written by the backend's own export endpoint (the
+// same 7 columns the import reads) -- no SheetJS in the project any more.
+async function buildImportXlsx(projectId, auth, rows) {
+  const res = await fetch(`${API}/api/projects/${projectId}/export.xlsx`, {
+    method: "POST",
+    headers: auth,
+    body: JSON.stringify({ rows }),
+  });
+  if (!res.ok) throw new Error(`export.xlsx failed: HTTP ${res.status} ${await res.text()}`);
   const tmpPath = path.join(os.tmpdir(), `on-demand-embeddings-import-${Date.now()}.xlsx`);
-  XLSX.writeFile(wb, tmpPath);
+  fs.writeFileSync(tmpPath, Buffer.from(await res.arrayBuffer()));
   return tmpPath;
 }
 
@@ -105,15 +109,15 @@ async function main() {
 
     // ---- 1. Real import of 5 Validated rows: zero Mistral calls ----
     const importRows = Array.from({ length: 5 }, (_, i) => ({
-      ID: `BRDP-EMB-A-${i}`,
-      Title: `Title ${i}`,
-      Definition: `Definition text ${i}`,
-      Proposal: `Proposal text ${i}`,
-      "Proposal Status": "Validated",
-      "Rule Status": "To Do",
-      Rule: "",
+      id: `BRDP-EMB-A-${i}`,
+      title: `Title ${i}`,
+      definition: `Definition text ${i}`,
+      proposal: `Proposal text ${i}`,
+      proposalStatus: "Validated",
+      ruleStatus: "To Do",
+      rule: "",
     }));
-    const xlsxPath = buildImportXlsx(importRows);
+    const xlsxPath = await buildImportXlsx(projA.id, auth, importRows);
 
     await page.goto(`${BASE_URL}/projects/${projA.id}/config`);
     await page.waitForSelector("text=Import BRDPs from Excel", { timeout: 10000 });

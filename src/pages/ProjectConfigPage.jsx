@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { authFetchJson } from '../services/apiClient';
-import { generateTemplate, importFromExcel, exportToExcel, CURATED_TEMPLATE_BY_STANDARD } from '../utils/excelUtils';
+import { authFetch, authFetchJson } from '../services/apiClient';
+import { CURATED_TEMPLATE_BY_STANDARD } from '../utils/excelUtils';
 import { ruleStateOf } from '../utils/ruleState';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import { SCHEMA_LOCATIONS, schemaLocationOf, supportsSchemaContext } from '../utils/ruleSchemaContext.js';
@@ -16,9 +16,9 @@ import Button, { useButtonSuccessFlash } from '../components/Button';
 import styles from './ProjectConfigPage.module.css';
 
 // Plain English labels, NOT run through i18n -- Export to Excel has never
-// been translated (generateTemplate()/importFromExcel() in excelUtils.js,
-// its "engine", only ever emit literal English column headers/values), so
-// this round doesn't introduce i18n here either. Mirrors RecordsPage's
+// been translated (the server's excel_io.py, its "engine", only ever writes
+// literal English column headers/values), so this doesn't introduce i18n
+// here either. Mirrors RecordsPage's
 // i18n'd records.rule.states.* strings in their default (English) form.
 const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified' };
 
@@ -73,21 +73,35 @@ function brdpToExportRow(brdp, ruleApproval) {
   };
 }
 
-// Excel's own hard per-cell text limit -- confirmed real: XLSX.write()
-// (called inside exportToExcel()) throws an uncaught exception deep
-// inside SheetJS for any cell over this, silently failing the WHOLE
-// export with no user-facing message at all (found while stress-testing
-// the freeze fix below, not the originally reported bug -- confirmed
-// with the user this round: catch it and tell them exactly which
-// BRDP(s) are affected, never download a partial/corrupt file).
-const EXCEL_CELL_CHAR_LIMIT = 32767;
+// Saves a downloaded file under `filename` (the browser's own download).
+function saveBlob(blob, filename) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
 
-// Checked client-side BEFORE calling exportToExcel() -- the raw SheetJS
-// exception carries no row/column information at all, so this is the
-// only way to name the actual offending BRDP(s) in the error message.
-function findOversizedExportRows(rows) {
-  const fields = ['id', 'title', 'definition', 'proposal', 'proposalStatus', 'ruleStatus', 'rule'];
-  return rows.filter((row) => fields.some((f) => (row[f] || '').length > EXCEL_CELL_CHAR_LIMIT)).map((row) => row.id);
+// The `detail` of a failed backend response: a string, or the object the
+// export sends for cells over Excel's limit. Falls back to the status text.
+async function responseDetail(res) {
+  try {
+    const body = await res.json();
+    return body.detail ?? res.statusText;
+  } catch {
+    return res.statusText;
+  }
+}
+
+// A `detail` as one line of text (FastAPI's own validation errors are a
+// list of objects).
+function detailText(detail) {
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail.message === 'string') return detail.message;
+  return JSON.stringify(detail);
 }
 
 function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDataChanged }) {
@@ -102,9 +116,10 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const [conflictResolution, setConflictResolution] = useState('keep');
   const [importErrors, setImportErrors] = useState([]);
   const [exportError, setExportError] = useState(null);
-  // Only for the (fast, synchronous) analyze call and the Export button's
-  // own synchronous XLSX build -- Apply itself is a background job now
-  // (docs request), tracked via the job below, never this flag.
+  const [templateError, setTemplateError] = useState(null);
+  // Only for the parse + analyze calls and the Export request -- Apply
+  // itself is a background job now (docs request), tracked via the job
+  // below, never this flag.
   const [busy, setBusy] = useState(false);
   const [brdpCount, setBrdpCount] = useState(null);
   // True only while the POST /apply request itself is in flight (a real,
@@ -162,34 +177,22 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   }, [job?.status]);
 
   // Real, curated template per standard (10 real BRDPs, Rule Status Verified,
-  // Rule already filled in -- CURATED_TEMPLATE_BY_STANDARD's own comment)
-  // when one exists for this project's standard; S1000D 5.0/6.0 (no
-  // generation engine yet) and any future standard without a curated file
-  // fall back to the generic generateTemplate() mock, exactly as before
-  // this feature existed.
+  // Rule already filled in -- CURATED_TEMPLATE_BY_STANDARD's own comment),
+  // served as it is from public/, when one exists for this project's
+  // standard; S1000D 5.0/6.0 (no generation engine yet) and any future
+  // standard without a curated file get the generic template the server
+  // builds (GET /api/brdp-template.xlsx, excel_io.py). A failed download
+  // is shown next to the button (HR7), never swallowed.
   const handleDownloadTemplate = async () => {
+    setTemplateError(null);
     const curatedPath = CURATED_TEMPLATE_BY_STANDARD[standard];
-    let blob;
-    let filename;
-    if (curatedPath) {
-      const res = await fetch(curatedPath);
-      if (!res.ok) throw new Error(`Could not load template ${curatedPath}`);
-      blob = await res.blob();
-      filename = curatedPath.slice(1); // drop the leading "/"
-    } else {
-      blob = new Blob([generateTemplate()], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      filename = 'brdp-template.xlsx';
+    try {
+      const res = curatedPath ? await fetch(curatedPath) : await authFetch('/api/brdp-template.xlsx');
+      if (!res.ok) throw new Error(detailText(await responseDetail(res)));
+      saveBlob(await res.blob(), curatedPath ? curatedPath.slice(1) : 'brdp-template.xlsx');
+    } catch (err) {
+      setTemplateError(t('config.dataManagement.templateFailed', { message: err.message }));
     }
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
   };
 
   const resetImportState = () => {
@@ -201,23 +204,33 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
 
   // Phase 1 (docs request): runs automatically as soon as a file parses
   // cleanly -- no writes to Postgres happen here at all, it only builds
-  // the summary the user reviews before Apply.
+  // the summary the user reviews before Apply. The file itself is read on
+  // the server (POST .../import/parse, excel_io.py): a file that cannot be
+  // read safely (not .xlsx, corrupt, too large) comes back as a 422 with
+  // the reason, shown here, and nothing goes further.
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     resetImportState();
-    const { rows, errors } = await importFromExcel(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
-    if (errors.length > 0) {
-      setImportErrors(errors);
-      return;
-    }
-    if (rows.length === 0) {
-      setImportErrors([t('config.dataManagement.noValidRows')]);
-      return;
-    }
     setBusy(true);
     try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await authFetch(`/api/projects/${projectId}/brdps/import/parse`, { method: 'POST', body: form });
+      if (!res.ok) {
+        setImportErrors([detailText(await responseDetail(res))]);
+        return;
+      }
+      const { rows, errors } = await res.json();
+      if (errors.length > 0) {
+        setImportErrors(errors);
+        return;
+      }
+      if (rows.length === 0) {
+        setImportErrors([t('config.dataManagement.noValidRows')]);
+        return;
+      }
       const result = await authFetchJson(`/api/projects/${projectId}/brdps/import/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -287,19 +300,6 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const handleExport = async () => {
     setBusy(true);
     setExportError(null);
-    // Real yield to the browser before any work starts (docs request,
-    // confirmed with real timing: exportToExcel() below is synchronous
-    // XLSX generation -- for a project with many BRDPs and long Rule
-    // content, that call alone can block the main thread for multiple
-    // seconds). Without this, the two awaited fetches that follow
-    // *usually* yield enough for React to paint "Exporting..." first --
-    // but that's incidental to how fast the network happens to respond,
-    // not guaranteed by the code, and a fast/cached response can win the
-    // race against the browser's next paint. Double rAF (not a single
-    // one) waits until the frame AFTER the one currently being prepared,
-    // so a real paint has already happened, not just been scheduled, by
-    // the time exportToExcel() runs.
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     try {
       const brdps = await authFetchJson(`/api/projects/${projectId}/brdps`);
       // S1000D 5.0/6.0 have no rule format at all (no generation engine
@@ -317,22 +317,29 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       }
       const reportRows = brdps.map((b) => brdpToExportRow(b, approvalsByBrdpId[b.id] ?? null));
 
-      // Confirmed with the user: catch this and name the affected BRDP(s)
-      // rather than let SheetJS throw uncaught and silently fail the
-      // whole export with no message at all.
-      const oversized = findOversizedExportRows(reportRows);
-      if (oversized.length > 0) {
-        setExportError(
-          t('config.dataManagement.exportCellTooLarge', { count: oversized.length, ids: oversized.join(', ') })
-        );
+      // The server writes the file (POST .../export.xlsx, excel_io.py). A
+      // cell over Excel's 32,767-character limit refuses the whole export
+      // with a 422 naming each BRDP and field -- shown here, nothing cut,
+      // never a partial file.
+      const res = await authFetch(`/api/projects/${projectId}/export.xlsx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: reportRows }),
+      });
+      if (!res.ok) {
+        const detail = await responseDetail(res);
+        if (detail?.code === 'cell_too_large') {
+          const ids = [...new Set(detail.cells.map((c) => c.id))];
+          const listed = detail.cells.map((c) => `${c.id} (${c.field})`).join(', ');
+          setExportError(t('config.dataManagement.exportCellTooLarge', { count: ids.length, ids: listed }));
+        } else {
+          setExportError(t('config.dataManagement.exportFailed', { message: detailText(detail) }));
+        }
         return;
       }
-
-      try {
-        exportToExcel(reportRows);
-      } catch (err) {
-        setExportError(t('config.dataManagement.exportFailed', { message: err.message }));
-      }
+      saveBlob(await res.blob(), 'brdps-export.xlsx');
+    } catch (err) {
+      setExportError(t('config.dataManagement.exportFailed', { message: err.message }));
     } finally {
       setBusy(false);
     }
@@ -352,17 +359,19 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       <div className={styles.subsection}>
         <h3 className={styles.subsectionHeading}>{t('config.dataManagement.downloadTemplateTitle')}</h3>
         <Button onClick={handleDownloadTemplate}>{t('config.dataManagement.downloadTemplateButton')}</Button>
+        {templateError && (
+          <ul className={styles.errorList}>
+            <li>{templateError}</li>
+          </ul>
+        )}
       </div>
 
       <div className={styles.subsection}>
         <h3 className={styles.subsectionHeading}>{t('config.dataManagement.exportTitle')}</h3>
         <Button onClick={handleExport} disabled={busy}>
-          {/* Static text alone isn't enough for a large project (docs
-              request, confirmed with real timing: the synchronous XLSX
-              build can block the main thread for multiple seconds with
-              many BRDPs / long Rule content) -- an animated spinner stays
-              an unmistakable "still working" signal even while nothing
-              else on the page can update. */}
+          {/* A large project's export takes a few seconds (fetching every
+              BRDP and rule, then the server writing the file) -- the
+              spinner keeps the "still working" signal visible. */}
           {busy && <span className={styles.spinner} aria-hidden="true" />}
           {busy ? t('config.dataManagement.exporting') : t('config.dataManagement.exportButton')}
         </Button>
@@ -435,7 +444,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".xlsx,.xls"
+                      accept=".xlsx"
                       onChange={handleFileSelect}
                       hidden
                       disabled={busy}

@@ -28,7 +28,6 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.3",
     "win-ca": "^3.5.1",
-    "xlsx": "^0.18.5",
     "xmllint-wasm": "^5.2.0"
   },
   "devDependencies": {
