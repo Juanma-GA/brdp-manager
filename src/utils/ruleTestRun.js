@@ -15,7 +15,7 @@ import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { describeRule, parseXmlDocument } from './ruleTestEngine.js';
 import { stripLiterals } from './ruleTestCommon.js';
-import { chooseTestSchemas, placeExample, ruleMatchExpressions, ruleTargets } from './ruleTestSkeleton.js';
+import { chooseTestSchemas, placeExample, ruleLooksAtBrexReference, ruleMatchExpressions, ruleTargets } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 
 // Same cap as the schema facts of Ask / Suggest Rule.
@@ -62,7 +62,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   const unreachable = rulePlacement?.unreachable
     ? { code: 'unreachable_target', params: { names: rulePlacement.unreachable.join(', ') } }
     : null;
-  return { contextSchemas, schemaFacts, promptPlacements, unreachable, setup: { standard, schemaLocation, placements } };
+  return { contextSchemas, schemaFacts, promptPlacements, unreachable, setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) } };
 }
 
 // T4b: an example meant to be rejected in which the rule selects nothing

@@ -28,7 +28,7 @@ import {
   formatStructureProblem,
   removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
-import { SKELETON_TEXT_SUFFIX, assembleExample } from './ruleTestSkeleton.js';
+import { SKELETON_TEXT_SUFFIX, assembleExample, normalizeBrexReferenceCode } from './ruleTestSkeleton.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
 // names (xsi:…, xlink:…) and namespace declarations are not schema
@@ -60,18 +60,27 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   const adjusted = { ...example, content, colspecsAdded: withColspecs.added, spannedEntriesRemoved: removedRows };
   const entry = schema ? setup.placements[schema] : null;
   if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
+  // Rule test on DM metadata: the rule looks at the identification and
+  // status section, so the LLM had to write it; an example without it is
+  // not run (its validation says so). Its brexDmRef follows the DM's own
+  // code (ruleTestSkeleton.js, normalizeBrexReferenceCode) unless the rule
+  // looks at the brexDmRef itself.
+  const section = entry.placement.metadata;
+  let metadata = example.metadata;
+  if (section?.insertion && !setup.keepBrexReference && metadata != null) {
+    const normalized = normalizeBrexReferenceCode(metadata, section.element);
+    metadata = normalized.text;
+    adjusted.metadata = metadata;
+    adjusted.brexReferenceNormalized = normalized.changed;
+  }
   const { xml, skeletonNodePaths } = assembleExample({
     standard: setup.standard,
     schema,
     schemaLocation: setup.schemaLocation,
     placement: entry.placement,
     content,
-    metadata: example.metadata,
+    metadata,
   });
-  // Rule test on DM metadata: the rule looks at the identification and
-  // status section, so the LLM had to write it; an example without it is
-  // not run (its validation says so).
-  const section = entry.placement.metadata;
   const missingMetadata =
     section?.insertion && entry.placement.path.length > 0 && !String(example.metadata || '').trim() ? section.element : null;
   return {
@@ -249,7 +258,20 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
   const result = runRuleOnFragment(ruleXml, format, example.xml, example.schema || null, { parseXml });
   const expectedStatus = example.expected === 'reject' ? 'rejected' : 'accepted';
   const matches = result.status === 'not_executable' ? null : result.status === expectedStatus;
-  return { validation, result, matches };
+  return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result) };
+}
+
+// Rule test on DM metadata: a rejection whose every offending node is in
+// the brexDmRef (brexref in 3.0.1) comes from the project's own BREX -- its
+// code is the DM's with infoCode 022 and itemLocationCode D
+// (normalizeBrexReferenceCode), so the rule would reject the real BREX too.
+// The panel says so; the verdict is not changed. A rejection that also
+// points at the DM's own nodes is not attributed to the BREX.
+const BREX_REFERENCE_PATH_RE = /\/(?:brexDmRef|brexref)\[\d+\]\//;
+export function rejectedByBrexReference(result) {
+  if (result?.status !== 'rejected') return false;
+  const paths = (result.violations || []).flatMap((v) => v.nodePaths || []);
+  return paths.length > 0 && paths.every((p) => BREX_REFERENCE_PATH_RE.test(p));
 }
 
 // The global verdict from the examples and their runs:

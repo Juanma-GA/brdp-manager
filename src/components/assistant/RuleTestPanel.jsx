@@ -177,6 +177,11 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
       </div>
       {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
       {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}
+      {example.brexReferenceNormalized && (
+        <p className={styles.ruleTestNote} data-testid="rule-test-brex-normalized">
+          {t('records.ruleTest.brexReferenceNormalized')}
+        </p>
+      )}
       {!run.validation.runnable && <ValidationProblems validation={run.validation} standard={standard} schema={example.schema} />}
       {showResult && result?.outOfScopeSchemas?.length > 0 && result.status === 'accepted' && example.schema && (
         <p className={styles.ruleTestNote}>{t('records.ruleTest.notApplicable', { schema: example.schema })}</p>
@@ -264,6 +269,11 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
               {t('records.ruleTest.ruleMessage', { message: v.message })}
             </p>
           ))}
+      {showResult && run.rejectedByBrexReference && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-brex-rejection">
+          {t('records.ruleTest.rejectedByBrexReference')}
+        </p>
+      )}
       {showResult &&
         (result?.warnings || [])
           .filter((w) => w.message)

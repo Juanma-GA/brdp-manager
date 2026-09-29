@@ -517,6 +517,117 @@ export function metadataXml(tree, depth = 0, parentPath = '') {
 // A whole-document placement (empty path) is the content alone. A titled
 // path element (placement.titled) gets <title>SKELETON_TITLE_TEXT</title>
 // as its first child, part of the skeleton.
+// ─── The brexDmRef follows the data module's own code ───────────────────────
+
+// The brexDmRef of the section stands for the project's own BREX, which
+// follows the same decisions as every data module of the project -- so,
+// when the LLM writes the section (metadata.insertion), its data module
+// code is made the DM's own code with the BREX's info code (022) and item
+// location (D). Without this a rule on any code attribute (S1-00342,
+// //@disassyCodeVariant[string-length(.) != 2]) also sees the brexDmRef's
+// code, and there is no default value that suits every rule: the example
+// meant to comply was rejected for the BREX's disassyCodeVariant="A".
+// 3.0.1: the <avee> of brexref/refdm is rebuilt from the <avee> of dmc.
+// Text only (the rest of the section stays exactly as written); returns
+// { text, changed }. Nothing is changed when either code is missing (its
+// validation says so), and the caller skips it for a rule that looks at the
+// brexDmRef itself (ruleLooksAtBrexReference): then what the LLM wrote
+// there is the point of the example. The minimal section of the skeleton
+// (backend) needs nothing: its two codes already share every value.
+// infoCode="022" is kept even when the rule's list excludes it -- the real
+// BREX has that code; ruleTest.js's rejectedByBrexReference then says the
+// rejection comes from the brexDmRef, i.e. the rule would reject the
+// project's BREX too.
+const BREX_REFERENCE_CODE = {
+  identAndStatusSection: { own: ['dmIdent'], brex: 'brexDmRef', code: 'dmCode', overrides: { infoCode: '022', itemLocationCode: 'D' } },
+  idstatus: { own: ['dmaddres', 'dmc'], brex: 'brexref', code: 'avee', overrides: { incode: '022', itemloc: 'D' } },
+};
+const BREX_REFERENCE_NAMES = new Set(['brexDmRef', 'brexref']);
+const SECTION_TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
+const ATTRIBUTE_RE = /([^\s=/>]+)\s*=\s*("[^"]*"|'[^']*')/g;
+
+export function ruleLooksAtBrexReference(ruleXml) {
+  return ruleMatchExpressions(ruleXml).some((e) => /(^|[^\w.-])(brexDmRef|brexref)(?![\w.-])/.test(e));
+}
+
+// The first element named `code` -- inside `brex` when given, else inside
+// every one of `inside` and outside any brexDmRef/brexref: { start, openEnd,
+// end, attrs, selfClosing } (offsets in the text), or null.
+function findCodeElement(text, code, { inside = [], brex }) {
+  const stack = [];
+  let found = null;
+  for (const m of text.matchAll(SECTION_TAG_RE)) {
+    if (m[2] === undefined) continue;
+    const name = m[2];
+    if (m[1]) {
+      const at = stack.lastIndexOf(name);
+      if (at >= 0) {
+        if (found && found.depth === at && found.end === null) found.end = m.index + m[0].length;
+        stack.length = at;
+      }
+      continue;
+    }
+    const wanted =
+      !found && name === code && (brex ? stack.includes(brex) : !stack.some((n) => BREX_REFERENCE_NAMES.has(n)) && inside.every((n) => stack.includes(n)));
+    if (wanted) {
+      found = { start: m.index, openEnd: m.index + m[0].length, end: m[4] ? m.index + m[0].length : null, depth: stack.length, attrs: m[3], selfClosing: !!m[4] };
+    }
+    if (!m[4]) stack.push(name);
+  }
+  return found && found.end !== null ? found : null;
+}
+
+const attributeList = (text) => [...String(text || '').matchAll(ATTRIBUTE_RE)].map((m) => [m[1], m[2]]);
+
+// The children of an <avee> as [[name, text]] (text as written).
+const aveeChildren = (inner) => [...inner.matchAll(/<([A-Za-z_][\w.-]*)\s*>([^<]*)<\/\1\s*>/g)].map((m) => [m[1], m[2]]);
+
+const lineIndent = (text, index) => {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  const before = text.slice(lineStart, index);
+  return /^\s*$/.test(before) ? before : null;
+};
+
+export function normalizeBrexReferenceCode(sectionText, sectionElement) {
+  const text = String(sectionText ?? '');
+  const spec = BREX_REFERENCE_CODE[sectionElement];
+  if (!spec || !text.trim()) return { text, changed: false };
+  const own = findCodeElement(text, spec.code, { inside: spec.own });
+  const brex = findCodeElement(text, spec.code, { brex: spec.brex });
+  if (!own || !brex) return { text, changed: false };
+  if (spec.code === 'dmCode') {
+    const ownAttrs = attributeList(own.attrs);
+    const wanted = ownAttrs.map(([name, quoted]) => [name, name in spec.overrides ? `"${spec.overrides[name]}"` : quoted]);
+    for (const [name, value] of Object.entries(spec.overrides)) {
+      if (!wanted.some(([n]) => n === name)) wanted.push([name, `"${value}"`]);
+    }
+    const unquote = (q) => q.slice(1, -1);
+    const current = new Map(attributeList(brex.attrs).map(([n, q]) => [n, unquote(q)]));
+    const same = current.size === wanted.length && wanted.every(([n, q]) => current.get(n) === unquote(q));
+    if (same) return { text, changed: false };
+    const tag = `<${spec.code} ${wanted.map(([n, q]) => `${n}=${q}`).join(' ')}${brex.selfClosing ? '/' : ''}>`;
+    return { text: text.slice(0, brex.start) + tag + text.slice(brex.openEnd), changed: true };
+  }
+  // 3.0.1 <avee>: every child of the DM's own, the overrides as text.
+  const ownInner = text.slice(own.openEnd, own.end - `</${spec.code}>`.length);
+  const brexCloseStart = text.lastIndexOf('</', brex.end - 1);
+  const brexInner = text.slice(brex.openEnd, brexCloseStart);
+  const wanted = aveeChildren(ownInner).map(([n, v]) => [n, n in spec.overrides ? spec.overrides[n] : v]);
+  if (wanted.length === 0) return { text, changed: false };
+  const current = aveeChildren(brexInner);
+  const same = current.length === wanted.length && wanted.every(([n, v], i) => current[i][0] === n && current[i][1] === v);
+  if (same) return { text, changed: false };
+  // Laid out like the <avee> it replaces: one child per line when it had
+  // them, indented one level more than the <avee> itself; else in a row.
+  const brexIndent = lineIndent(text, brex.start);
+  const multiline = /\n/.test(brexInner) && brexIndent !== null;
+  const childIndent = multiline ? `${brexIndent}  ` : '';
+  const children = wanted.map(([n, v]) => `${childIndent}<${n}>${v}</${n}>`);
+  const inner = multiline ? `\n${children.join('\n')}\n${brexIndent}` : children.join('');
+  const openTag = brex.selfClosing ? `<${spec.code}>` : text.slice(brex.start, brex.openEnd);
+  return { text: text.slice(0, brex.start) + openTag + inner + `</${spec.code}>` + text.slice(brex.end), changed: true };
+}
+
 // A data module (placement.metadata) starts with its identification and
 // status section: the minimal one, part of the skeleton, or -- when the
 // rule looks at it (metadata.insertion) -- the section the LLM wrote

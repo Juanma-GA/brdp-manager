@@ -35,8 +35,8 @@ import {
 import { analyzeRule } from '../src/utils/ruleTestEngine.js';
 import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkExampleStructure, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
 import i18n from '../src/i18n/index.js';
-import { exampleFailures, generateRuleTestExamples, missesRuleProblem } from '../src/utils/ruleTestRun.js';
-import { metadataXml, ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
+import { exampleFailures, generateRuleTestExamples, missesRuleProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
+import { metadataXml, normalizeBrexReferenceCode, ruleLooksAtBrexReference, ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
 import { formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
 import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
@@ -75,7 +75,7 @@ function setupFor(standard, ruleXml, schemas, schemaLocation = 'flat') {
     const structure = structureOf(standard, schema);
     placements[schema] = { structure, placement: placeExample(structure, targets) };
   }
-  return { standard, schemaLocation, placements };
+  return { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) };
 }
 function testRun(ruleXml, examples, setup, { format = 'BREX-4.2', vocab = vocabulary } = {}) {
   const materialized = examples.map((ex) => materializeExample(ex, setup, parseXml));
@@ -1177,6 +1177,120 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('unreachable: a name that exists nowhere', u2.calls === 0 && u2.res.reason.params.names === '<dmStatuss>', JSON.stringify(u2.res));
   const u3 = await unreachableRun(R316);
   check('unreachable: one reachable alternative is enough', u3.res.status !== 'not_executable');
+}
+
+// ─── The brexDmRef follows the data module's own code ──────────────────────
+{
+  const S42 = 'S1000D 4.2';
+  const S301 = 'S1000D 3.0.1';
+  const descript = structureOf(S42, 'descript');
+  const minimal = metadataXml(descript.skeleton.metadata.tree).xml;
+  const OWN = '/dmodule[1]/identAndStatusSection[1]/dmAddress[1]/dmIdent[1]/dmCode[1]';
+  const BREX = '/dmodule[1]/identAndStatusSection[1]/dmStatus[1]/brexDmRef[1]/dmRef[1]/dmRefIdent[1]/dmCode[1]';
+  // The minimal section with one attribute of the DM's OWN dmCode changed
+  // (the brexDmRef's keeps the minimal value, as the LLM tends to write it).
+  const ownCode = (attr, value) => minimal.replace(new RegExp(`(<dmIdent>\\s*<dmCode [^>]*?\\b${attr}=")[^"]*"`), `$1${value}"`);
+  const brexTag = (xml) => xml.match(/<brexDmRef>[\s\S]*?(<dmCode [^>]*>)/)[1];
+  const ownTag = (xml) => xml.match(/<dmIdent>\s*(<dmCode [^>]*>)/)[1];
+  const attrsOf = (tag) => Object.fromEntries([...tag.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+
+  check('brex: the minimal section already has both codes equal (nothing to change)', normalizeBrexReferenceCode(minimal, 'identAndStatusSection').changed === false && normalizeBrexReferenceCode(minimal, 'identAndStatusSection').text === minimal);
+  const n = normalizeBrexReferenceCode(ownCode('disassyCodeVariant', 'AB'), 'identAndStatusSection');
+  const want = { ...attrsOf(ownTag(n.text)), infoCode: '022', itemLocationCode: 'D' };
+  check('brex: every code attribute copied, infoCode 022 and itemLocationCode D kept', n.changed && JSON.stringify(attrsOf(brexTag(n.text))) === JSON.stringify(want) && attrsOf(brexTag(n.text)).disassyCodeVariant === 'AB', brexTag(n.text));
+  check('brex: the rest of the section is untouched', n.text.replace(brexTag(n.text), '') === ownCode('disassyCodeVariant', 'AB').replace(brexTag(ownCode('disassyCodeVariant', 'AB')), ''));
+  const learn = normalizeBrexReferenceCode(minimal.replace(/(<dmIdent>\s*<dmCode )/, '$1learnCode="H10" learnEventCode="A" '), 'identAndStatusSection');
+  check('brex: optional code attributes of the own code (learnCode) copied too', attrsOf(brexTag(learn.text)).learnCode === 'H10' && attrsOf(brexTag(learn.text)).learnEventCode === 'A', brexTag(learn.text));
+  const noBrex = minimal.replace(/<brexDmRef>[\s\S]*?<\/brexDmRef>/, '');
+  check('brex: no brexDmRef written → nothing changed', normalizeBrexReferenceCode(noBrex, 'identAndStatusSection').text === noBrex);
+  check('brex: not a section it knows → nothing changed', normalizeBrexReferenceCode('<x/>', 'pmStatus').changed === false);
+  check('brex: a rule on brexDmRef is detected', ruleLooksAtBrexReference('<structureObjectRule><objectPath allowedObjectFlag="0">//brexDmRef//dmCode/@disassyCodeVariant</objectPath></structureObjectRule>') && ruleLooksAtBrexReference('<objrule><objpath objappl="0">//brexref/refdm</objpath></objrule>') && !ruleLooksAtBrexReference('<structureObjectRule><objectPath allowedObjectFlag="0">//@disassyCodeVariant</objectPath></structureObjectRule>'));
+
+  // S1-00342: //@disassyCodeVariant[string-length(.) != 2].
+  const R342 = '<structureObjectRule id="BRDP-S1-00342"><objectPath allowedObjectFlag="0">//@disassyCodeVariant[string-length(.) != 2]</objectPath><objectUse>The disassembly code variant has two characters.</objectUse></structureObjectRule>';
+  const p342 = placeExample(descript, ruleTargets(R342));
+  check('S1-00342: the section (and the content) are insertion points', p342.metadata.insertion === true);
+  const ex342 = [
+    { label: 'AB', expected: 'accept', schema: 'descript', content: '', metadata: ownCode('disassyCodeVariant', 'AB') },
+    { label: 'A', expected: 'reject', schema: 'descript', content: '', metadata: ownCode('disassyCodeVariant', 'A') },
+  ];
+  const r342 = testRun(R342, ex342, setupFor(S42, R342, ['descript']));
+  check('S1-00342: "AB" accepted, "A" rejected, verdict correct', r342.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r342.verdict.kind === 'correct', JSON.stringify(r342.runs.map((r) => [r.validation.structure, r.result?.violations])));
+  check('S1-00342: the brexDmRef got "AB" too, and the example says it was adjusted', attrsOf(brexTag(r342.materialized[0].xml)).disassyCodeVariant === 'AB' && r342.materialized[0].brexReferenceNormalized === true);
+  check('S1-00342: the stored metadata is the adjusted one ("Edit" shows it)', attrsOf(brexTag(r342.materialized[0].metadata)).disassyCodeVariant === 'AB');
+  check('S1-00342: the "A" example was already equal → not marked adjusted', r342.materialized[1].brexReferenceNormalized === false);
+  const before = testRun(R342, ex342, { ...setupFor(S42, R342, ['descript']), keepBrexReference: true });
+  check('S1-00342: without the normalization "AB" was rejected by the brexDmRef (the reported bug)', before.runs[0].result.status === 'rejected' && before.runs[0].rejectedByBrexReference === true, JSON.stringify(before.runs[0].result.violations));
+  check('S1-00342: no brex note when the own code is rejected too', r342.runs[1].rejectedByBrexReference === false && r342.runs[1].result.violations.some((v) => v.nodePaths.some((p) => p.startsWith(OWN))));
+
+  // S1-00338: unchanged.
+  const R338 = '<structureObjectRule id="BRDP-S1-00338"><objectPath allowedObjectFlag="0">//@assyCode[string-length(.) != 2]</objectPath><objectUse>The assembly code has two characters.</objectUse></structureObjectRule>';
+  const r338 = testRun(R338, [
+    { label: '01', expected: 'accept', schema: 'descript', content: 'See the panel.', metadata: ownCode('assyCode', '01') },
+    { label: '001', expected: 'reject', schema: 'descript', content: 'See the panel.', metadata: ownCode('assyCode', '001') },
+  ], setupFor(S42, R338, ['descript']));
+  check('S1-00338: unchanged (01 accepted, 001 rejected on the own code)', r338.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r338.verdict.kind === 'correct' && r338.runs[1].result.violations[0].nodePaths.includes(`${OWN}/@assyCode`));
+
+  // Anchored rule: unchanged.
+  const RANCH = '<structureObjectRule id="ANCH"><objectPath allowedObjectFlag="0">//dmIdent/dmCode/@disassyCodeVariant[string-length(.) != 2]</objectPath><objectUse>Two characters.</objectUse></structureObjectRule>';
+  const rAnch = testRun(RANCH, [
+    { label: 'AB', expected: 'accept', schema: 'descript', content: '', metadata: ownCode('disassyCodeVariant', 'AB') },
+    { label: 'A', expected: 'reject', schema: 'descript', content: '', metadata: ownCode('disassyCodeVariant', 'A') },
+  ], setupFor(S42, RANCH, ['descript']));
+  check('anchored //dmIdent/dmCode/@disassyCodeVariant: unchanged, correct', rAnch.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && rAnch.verdict.kind === 'correct' && !rAnch.runs.some((r) => r.rejectedByBrexReference));
+
+  // //dmCode/@infoCode with a list without 022: the brexDmRef keeps 022,
+  // and the rejection is attributed to it.
+  const RINFO = '<structureObjectRule id="INFO"><objectPath allowedObjectFlag="2">//dmCode/@infoCode</objectPath><objectUse>Only 055 and 930.</objectUse><objectValue valueForm="single" valueAllowed="055"/><objectValue valueForm="single" valueAllowed="930"/></structureObjectRule>';
+  const rInfo = testRun(RINFO, [
+    { label: '055', expected: 'accept', schema: 'descript', content: '', metadata: ownCode('infoCode', '055') },
+  ], setupFor(S42, RINFO, ['descript']));
+  check('infoCode list without 022: the brexDmRef keeps infoCode="022"', attrsOf(brexTag(rInfo.materialized[0].xml)).infoCode === '022');
+  check('infoCode list without 022: rejected, and the rejection is attributed to the brexDmRef', rInfo.runs[0].result.status === 'rejected' && rInfo.runs[0].rejectedByBrexReference === true && rInfo.runs[0].result.violations.every((v) => v.nodePaths.every((p) => p.startsWith(BREX))), JSON.stringify(rInfo.runs[0].result.violations));
+  check('brex rejection note in EN', i18n.getFixedT('en')('records.ruleTest.rejectedByBrexReference') === "The rejection comes from the brexDmRef's data module code (the project's BREX): the rule would reject the real BREX too.");
+  check('brex rejection note in ES', i18n.getFixedT('es')('records.ruleTest.rejectedByBrexReference') === 'El rechazo viene del dmCode del brexDmRef (el BREX del proyecto): la regla también rechazaría el BREX real.');
+  check('brex adjusted note in EN/ES', /^Adjusted by the app: the brexDmRef/.test(i18n.getFixedT('en')('records.ruleTest.brexReferenceNormalized')) && /^Ajustado por la app: el código del brexDmRef/.test(i18n.getFixedT('es')('records.ruleTest.brexReferenceNormalized')));
+
+  // A rule that looks at brexDmRef explicitly: what the LLM wrote there stays.
+  const RBREX = '<structureObjectRule id="BREXREF"><objectPath allowedObjectFlag="0">//brexDmRef//dmCode/@disassyCodeVariant[string-length(.) != 2]</objectPath><objectUse>Two characters in the BREX reference.</objectUse></structureObjectRule>';
+  const brexOnly = (value) => minimal.replace(/(<brexDmRef>[\s\S]*?<dmCode [^>]*?\bdisassyCodeVariant=")[^"]*"/, `$1${value}"`);
+  const setBrex = setupFor(S42, RBREX, ['descript']);
+  const rBrex = testRun(RBREX, [
+    { label: 'AB in the BREX ref', expected: 'accept', schema: 'descript', content: '', metadata: brexOnly('AB') },
+    { label: 'A in the BREX ref', expected: 'reject', schema: 'descript', content: '', metadata: ownCode('disassyCodeVariant', 'AB') },
+  ], setBrex);
+  check('rule on brexDmRef: setup keeps it', setBrex.keepBrexReference === true);
+  check('rule on brexDmRef: the LLM\'s brexDmRef is kept as written', rBrex.materialized[0].metadata === brexOnly('AB') && rBrex.materialized[0].brexReferenceNormalized === undefined && attrsOf(brexTag(rBrex.materialized[1].xml)).disassyCodeVariant === 'A');
+  check('rule on brexDmRef: verdict correct', rBrex.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && rBrex.verdict.kind === 'correct');
+  const prepared = await prepareRuleTestSetup({
+    ruleXml: RBREX, standard: S42, schemaLocation: 'flat',
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['descript'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S42, schema) }),
+  });
+  check('prepareRuleTestSetup: keepBrexReference from the rule', prepared.setup.keepBrexReference === true);
+
+  // A content-only rule: the minimal section is the skeleton, never touched.
+  const STEP = '<structureObjectRule><objectPath allowedObjectFlag="0">//proceduralStep[count(proceduralStep) = 1]</objectPath><objectUse>No lone sub-step.</objectUse></structureObjectRule>';
+  const stepEx = materializeExample({ label: 'x', expected: 'accept', schema: 'proced', content: '<proceduralStep><para>Remove the panel.</para></proceduralStep>', metadata: ownCode('disassyCodeVariant', 'AB') }, setupFor(S42, STEP, ['proced']), parseXml);
+  check('content-only rule: no normalization, the section is the minimal skeleton', stepEx.brexReferenceNormalized === undefined && !stepEx.xml.includes('"AB"'));
+
+  // 3.0.1: the <avee> of brexref/refdm rebuilt from the <avee> of dmc.
+  const d301 = structureOf(S301, 'descript');
+  const min301 = metadataXml(d301.skeleton.metadata.tree).xml;
+  check('3.0.1: the minimal section already has both codes equal', normalizeBrexReferenceCode(min301, 'idstatus').changed === false);
+  const own301 = (child, value) => min301.replace(new RegExp(`(<dmc>[\\s\\S]*?<${child}>)[^<]*`), `$1${value}`);
+  const brexAvee = (xml) => xml.match(/<refdm>\s*<avee>([\s\S]*?)<\/avee>/)[1];
+  const ownAvee = (xml) => xml.match(/<dmc>\s*<avee>([\s\S]*?)<\/avee>/)[1];
+  const n301 = normalizeBrexReferenceCode(own301('discodev', 'AB'), 'idstatus');
+  const childrenOf = (inner) => [...inner.matchAll(/<(\w+)>([^<]*)<\/\1>/g)].map((m) => `${m[1]}=${m[2]}`);
+  check('3.0.1: avee of the brexref from the dmc, incode 022 / itemloc D', n301.changed && JSON.stringify(childrenOf(brexAvee(n301.text))) === JSON.stringify(childrenOf(ownAvee(n301.text)).map((c) => (c.startsWith('incode=') ? 'incode=022' : c.startsWith('itemloc=') ? 'itemloc=D' : c))) && brexAvee(n301.text).includes('<discodev>AB</discodev>'), brexAvee(n301.text));
+  check('3.0.1: laid out like before (one child per line, well-formed)', brexAvee(n301.text).split('\n').length === brexAvee(min301).split('\n').length && parseXml(n301.text).documentElement.nodeName === 'idstatus', n301.text);
+  const R301 = '<objrule id="DISCODEV"><objpath objappl="0">//discodev[string-length(.) != 2]</objpath><objuse>Two characters.</objuse></objrule>';
+  const r301 = testRun(R301, [
+    { label: 'AB', expected: 'accept', schema: 'descript', content: '', metadata: own301('discodev', 'AB') },
+    { label: 'A', expected: 'reject', schema: 'descript', content: '', metadata: own301('discodev', 'A') },
+  ], setupFor(S301, R301, ['descript']), { format: 'BREX-3.0.1', vocab: vocabulary301 });
+  check('3.0.1: //discodev "AB" accepted, "A" rejected', r301.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r301.verdict.kind === 'correct', JSON.stringify(r301.runs.map((r) => [r.validation.structure, r.validation.names, r.result?.status])));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

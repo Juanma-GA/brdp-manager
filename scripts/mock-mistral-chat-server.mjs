@@ -165,6 +165,17 @@ function metadataReply(systemPrompt, rule, answer) {
     // 3.0.1 idstatus: the issue type of the data module.
     return answer([ex("New issue", "accept", base.replace("<issno ", '<issno type="new" ')), ex("Revised issue", "reject", base.replace("<issno ", '<issno type="revised" '))]);
   }
+  if (/brexDmRef/.test(rule) && /@disassyCodeVariant/.test(rule)) {
+    // A rule on the brexDmRef itself: the value is written there.
+    const brexCode = (value) => base.replace(/(<brexDmRef>[\s\S]*?<dmCode [^>]*?disassyCodeVariant=")[^"]*"/, `$1${value}"`);
+    return answer([ex("Two characters in the BREX reference", "accept", brexCode("AB"), "Remove the panel."), ex("One character in the BREX reference", "reject", base, "Remove the panel.")]);
+  }
+  if (/@disassyCodeVariant/.test(rule)) {
+    // S1-00342: like a real LLM, only the data module's own code changes --
+    // the brexDmRef keeps the minimal section's "A" (the application makes
+    // it follow the own code).
+    return answer([ex("Two-character variant", "accept", ownCode("disassyCodeVariant", "AB"), "Remove the panel."), ex("One-character variant", "reject", base, "Remove the panel.")]);
+  }
   if (/@assyCode/.test(rule)) {
     const dmRef = (assy) => `See <dmRef><dmRefIdent><dmCode modelIdentCode="EXAMPLE" systemDiffCode="A" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="${assy}" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/></dmRefIdent></dmRef>.`;
     return answer([ex("Two-character codes", "accept", base, dmRef("01")), ex("Four characters in a reference", "reject", base, dmRef("0301")), ex("Three characters in the own code", "reject", ownCode("assyCode", "001"), dmRef("01"))]);

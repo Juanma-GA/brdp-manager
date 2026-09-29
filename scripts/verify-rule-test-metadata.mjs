@@ -2,7 +2,10 @@
 // module's identification and status section (the Lufthansa S1000D 4.2
 // cases S1-00052 //dmIdent/dmCode/@infoCode, S1-00070
 // //responsiblePartnerCompany/@enterpriseCode (real template rule) and
-// S1-00316 //dmStatus/applicRef | //pmStatus/applicRef), a 3.0.1 rule on
+// S1-00316 //dmStatus/applicRef | //pmStatus/applicRef, S1-00342
+// //@disassyCodeVariant with the brexDmRef following the DM's own code, a
+// //dmCode/@infoCode list without 022 (rejection attributed to the
+// brexDmRef) and a rule on the brexDmRef itself), a 3.0.1 rule on
 // idstatus, a content-only rule (unchanged, the minimal section dimmed as
 // skeleton) and a rule that looks at nothing an example can contain ("Not
 // executable", no LLM call), against the real app (Vite + FastAPI +
@@ -46,6 +49,20 @@ const R70 = readPublicTemplate("brdp-template-4-2.xlsx").find((r) => r.ID === "B
 const R316 = `<structureObjectRule id="BRDP-S1-00316">
   <objectPath allowedObjectFlag="0">//dmStatus/applicRef | //pmStatus/applicRef</objectPath>
   <objectUse>Applicability is written in the status, never referenced.</objectUse>
+</structureObjectRule>`;
+const R342 = `<structureObjectRule id="BRDP-S1-00342">
+  <objectPath allowedObjectFlag="0">//@disassyCodeVariant[string-length(.) != 2]</objectPath>
+  <objectUse>The disassembly code variant has two characters.</objectUse>
+</structureObjectRule>`;
+const R_INFO_ANY = `<structureObjectRule id="BRDP-MD-INFO">
+  <objectPath allowedObjectFlag="2">//dmCode/@infoCode</objectPath>
+  <objectUse>Only the information codes 055 and 930 are used.</objectUse>
+  <objectValue valueForm="single" valueAllowed="055"/>
+  <objectValue valueForm="single" valueAllowed="930"/>
+</structureObjectRule>`;
+const R_BREXREF = `<structureObjectRule id="BRDP-MD-BREXREF">
+  <objectPath allowedObjectFlag="0">//brexDmRef//dmCode/@disassyCodeVariant[string-length(.) != 2]</objectPath>
+  <objectUse>The BREX reference has a two-character disassembly code variant.</objectUse>
 </structureObjectRule>`;
 const R_EMPH = `<structureObjectRule id="BRDP-MD-EMPH">
   <objectPath allowedObjectFlag="0">//emphasis</objectPath>
@@ -122,6 +139,12 @@ async function main() {
   await putDraft(p42, b316, "BREX-4.2", R316);
   await putDraft(p42, bEmph, "BREX-4.2", R_EMPH);
   await putDraft(p42, bPm, "BREX-4.2", R_UNREACHABLE);
+  const b342 = await makeBrdp(p42, { identifier: "BRDP-S1-00342", title: "Disassembly code variant", proposal: "The disassembly code variant shall always have two characters." });
+  const bInfo = await makeBrdp(p42, { identifier: "BRDP-MD-INFO", title: "Information codes of any code", proposal: "Only the information codes 055 and 930 shall be used." });
+  const bBrexRef = await makeBrdp(p42, { identifier: "BRDP-MD-BREXREF", title: "BREX reference", proposal: "The BREX reference shall have a two-character disassembly code variant." });
+  await putDraft(p42, b342, "BREX-4.2", R342);
+  await putDraft(p42, bInfo, "BREX-4.2", R_INFO_ANY);
+  await putDraft(p42, bBrexRef, "BREX-4.2", R_BREXREF);
   const p301 = await makeProject("Rule test metadata 3.0.1", "S1000D 3.0.1");
   const b301 = await makeBrdp(p301, { identifier: "BRDP-MD-301", title: "Issue types", proposal: "Only new and changed issues shall be delivered." });
   await putDraft(p301, b301, "BREX-3.0.1", R301);
@@ -190,6 +213,47 @@ async function main() {
     assert((await example(1).textContent()).includes("Rule's message: BRDP-S1-00070."), "S1-00070: the other partner rejected with the rule's message");
     const mark70 = (await example(1).locator("mark").allTextContents()).join(" ");
     assert(mark70.includes('enterpriseCode="K0001"'), `S1-00070: the partner's @enterpriseCode highlighted (${mark70})`);
+
+    // 2b. S1-00342: the brexDmRef follows the data module's own code.
+    await select("BRDP-S1-00342");
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await verdict().waitFor({ timeout: 15000 });
+    assert((await verdict().textContent()).startsWith("Correct"), `S1-00342: verdict correct (${await verdict().textContent()})`);
+    const x342 = await example(0).locator("pre").textContent();
+    const brex342 = x342.match(/<brexDmRef>[\s\S]*?(<dmCode [^>]*>)/)[1];
+    assert(brex342.includes('disassyCodeVariant="AB"') && brex342.includes('infoCode="022"') && brex342.includes('itemLocationCode="D"'), `S1-00342: the brexDmRef's dmCode follows the own one (${brex342})`);
+    assert((await example(0).getByTestId("rule-test-result").textContent()).includes("accepted ✓"), "S1-00342: \"AB\" accepted");
+    assert((await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "S1-00342: \"A\" rejected");
+    assert((await example(0).getByTestId("rule-test-brex-normalized").count()) === 1, "S1-00342: the example says the app adjusted the brexDmRef");
+    assert((await page.getByTestId("rule-test-brex-rejection").count()) === 0, "S1-00342: no 'rejection from the brexDmRef' note");
+    await panel().screenshot({ path: "/tmp/rule-test-metadata-brex-follows.png" });
+
+    // 2c. //dmCode/@infoCode (any dmCode) with a list without 022: the
+    // brexDmRef keeps 022 and the rejection is attributed to it.
+    await select("BRDP-MD-INFO");
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await verdict().waitFor({ timeout: 15000 });
+    const brexInfo = (await example(0).locator("pre").textContent()).match(/<brexDmRef>[\s\S]*?(<dmCode [^>]*>)/)[1];
+    assert(brexInfo.includes('infoCode="022"'), "infoCode list without 022: the brexDmRef keeps infoCode=\"022\"");
+    const noteEn = await example(0).getByTestId("rule-test-brex-rejection").textContent();
+    assert(noteEn === "The rejection comes from the brexDmRef's data module code (the project's BREX): the rule would reject the real BREX too.", `infoCode list without 022: note in EN (${noteEn})`);
+    assert((await example(2).getByTestId("rule-test-brex-rejection").count()) === 0, "infoCode list without 022: no note where the own code is rejected too");
+    await panel().screenshot({ path: "/tmp/rule-test-metadata-brex-rejection.png" });
+    await page.locator("header select, nav select").first().selectOption("es");
+    await page.waitForTimeout(400);
+    const noteEs = await example(0).getByTestId("rule-test-brex-rejection").textContent();
+    assert(noteEs === "El rechazo viene del dmCode del brexDmRef (el BREX del proyecto): la regla también rechazaría el BREX real.", `infoCode list without 022: note in ES (${noteEs})`);
+    await page.locator("header select, nav select").first().selectOption("en");
+    await page.waitForTimeout(300);
+
+    // 2d. A rule on the brexDmRef itself: what the LLM wrote there stays.
+    await select("BRDP-MD-BREXREF");
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await verdict().waitFor({ timeout: 15000 });
+    assert((await verdict().textContent()).startsWith("Correct"), `rule on brexDmRef: verdict correct (${await verdict().textContent()})`);
+    const xRef = await example(0).locator("pre").textContent();
+    assert(/<brexDmRef>[\s\S]*?<dmCode [^>]*disassyCodeVariant="AB"/.test(xRef) && /<dmIdent>\s*<dmCode [^>]*disassyCodeVariant="A"/.test(xRef), "rule on brexDmRef: the brexDmRef kept as written, the own code untouched");
+    assert((await page.getByTestId("rule-test-brex-normalized").count()) === 0, "rule on brexDmRef: nothing adjusted");
 
     // 3. S1-00316: applicRef in dmStatus rejected, applic accepted.
     await select("BRDP-S1-00316");

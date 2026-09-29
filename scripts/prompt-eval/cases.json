@@ -1243,6 +1243,44 @@
       ]
     },
     {
+      "id": "rule-test-4-2-disassycodevariant-metadata",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Test rule on Lufthansa BRDP-S1-00342, //@disassyCodeVariant[string-length(.) != 2] (allowedObjectFlag 0). The rule also sees the brexDmRef's dmCode: the application makes it follow the data module's own code (infoCode 022, itemLocationCode D), so an example meant to comply with disassyCodeVariant=\"AB\" in its own dmCode is accepted, never rejected because of the brexDmRef's default \"A\".",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DCV",
+        "title": "Disassembly code variant",
+        "definition": "Decide how many characters the disassembly code variant of the data module code has.",
+        "proposal": "The disassembly code variant shall always have two characters.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-DCV\"><objectPath allowedObjectFlag=\"0\">//@disassyCodeVariant[string-length(.) != 2]</objectPath><objectUse>The disassembly code variant has two characters.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (its identification and status section included) passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example: the brexDmRef follows the data module's own code, so a two-character variant is accepted"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "your \"metadata\" is the WHOLE <identAndStatusSection>",
+          "note": "the prompt offers the minimal identification and status section to start from"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-emphasis-type-values",
       "type": "rule-test",
       "standard": "S1000D 4.2",
