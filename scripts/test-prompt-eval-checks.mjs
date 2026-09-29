@@ -1,17 +1,16 @@
-// Tests for the prompt-eval checks added before the reference pass (C2b):
-// ignorePlaceholders, max_names in any markup form, and no_parent_as_child.
-// Helpers live in scripts/prompt-eval/checks.mjs (run-prompt-eval.mjs logs in
-// on import, so it can't be imported here).
+// Tests for the prompt-eval checks (C2b, C3): ignorePlaceholders, max_names
+// in any markup form, and no_parent_as_child. Helpers live in
+// scripts/prompt-eval/checks.mjs (run-prompt-eval.mjs logs in on import, so
+// it can't be imported here).
 //
 // Run:  node scripts/test-prompt-eval-checks.mjs
-//       node scripts/test-prompt-eval-checks.mjs --responses <026ec83 pass> --reference <e54b1f2 pass>
-// (each a directory or a responses.json)
-// Without --responses the saved answers are the reconstructions in
-// scripts/prompt-eval/check-fixtures/; with it, the same expectations run on
-// a real pass (the 026ec83 3-run pass: no-dump run 1 fails on proceduralStep,
-// run 3 on levelledPara/listItem/sbMaterialInfo, run 2 passes; the P3 checks
-// pass in all three suggest-proposal-spanish-title-english-refs runs).
-
+//
+// no_parent_as_child is validated against 9 REAL Mistral answers to
+// ask-open-question-no-dump (S1000D 4.2, <para>), with the offenders reviewed
+// by hand: scripts/prompt-eval/fixtures/no-parent-as-child-fixtures.json.
+// Each answer must give EXACTLY its expectedOffenders; an empty list must
+// pass. (C3 replaced the reconstructed answers and the --responses /
+// --reference modes of C2b.)
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,6 +85,7 @@ check("<x> outside the vocabulary still counts", JSON.stringify(names("<pokemon>
 
 console.log("no_parent_as_child (S1000D 4.2 <para>)");
 const offenders = (t) => parentsPresentedAsChildren(t, "para", cards42, vocab42).offenders;
+const schemaNameCount = (t) => distinctSchemaNames(t, vocab42).filter((n) => n.startsWith("<")).length;
 check("'dentro de <para> … *proceduralStep*' fails", JSON.stringify(offenders("Dentro de un `<para>` puedes usar *emphasis* o *proceduralStep*.")) === '["proceduralStep"]');
 check("'<para> puede contener …' fails for parents", JSON.stringify(offenders("Un `<para>` puede contener *emphasis*, *levelledPara* y *listItem*.")) === '["levelledPara","listItem"]');
 check("EN 'can contain'", JSON.stringify(offenders("A <para> can contain <emphasis> and <sbMaterialInfo>.")) === '["sbMaterialInfo"]');
@@ -118,50 +118,50 @@ for (const id of ["ask-open-question-no-disclaimer", "ask-open-question-partial-
   check(`${id}: not_contains SCHEMA FACTS is the last check`, last.type === "not_contains" && last.pattern === "SCHEMA FACTS");
 }
 
-// ---- Saved answers (reconstructed, or a real pass with --responses) ------
+console.log("no_parent_as_child: wording added in C3");
+check("'También admite …' after a sentence about <para>", JSON.stringify(offenders("`<para>` puede contener *emphasis*. También admite *sbMaterialInfo* en contextos técnicos.")) === '["sbMaterialInfo"]');
+check("'Además incluye …'", JSON.stringify(offenders("El `<para>` agrupa texto. Además incluye *listItem*.")) === '["listItem"]');
+check("'Además, puede contener …'", JSON.stringify(offenders("El `<para>` agrupa texto. Además, puede contener *levelledPara*.")) === '["levelledPara"]');
+check("an abbreviation never cuts the sentence ('(ej. *dmRef*). También admite …')", JSON.stringify(offenders("`<para>` puede contener *emphasis* (ej. *dmRef*, *symbol*). También admite *sbMaterialInfo*.")) === '["sbMaterialInfo"]');
+check("'p. ej.' and 'e.g.' too", JSON.stringify(offenders("A <para> can contain inline markup (e.g. <dmRef>). It also contains <listItem>.")) === '["listItem"]');
+check("'<para> debe:' + '- Contener …' judges that item", JSON.stringify(offenders("En la práctica, <para> debe:\n- Contener texto o elementos como *dmRef* y *proceduralStep*.\n- Evitar párrafos largos.")) === '["proceduralStep"]');
+check("'<para> debe:' items that do not say 'contain' are not judged", offenders("En la práctica, <para> debe:\n- Ir dentro de *levelledPara* o *proceduralStep*.\n- Contener texto plano.").length === 0);
+check("'<para> must:' + '- Contain …'", JSON.stringify(offenders("In practice, <para> must:\n- Contain text and <levelledPara>.")) === '["levelledPara"]');
+check("'Contenido permitido:' after <para> is named: every item is its content", JSON.stringify(offenders("El `<para>` es el párrafo.\n\n**Contenido permitido**:\n- **Hijos comunes**: *emphasis*, *dmRef*.\n- **Hijos adicionales**: *listItem*.")) === '["listItem"]');
+check("'Allowed content:' in English", JSON.stringify(offenders("<para> is the paragraph.\n\nAllowed content:\n- <emphasis>\n- <sbMaterialInfo>")) === '["sbMaterialInfo"]');
+check("'Contenido permitido:' with real children only passes", offenders("El `<para>` es el párrafo.\n\n**Contenido permitido**:\n- **Atributos**: `@id`.\n- **Hijos comunes**: `emphasis`, `dmRef`, `randomList`.").length === 0);
+check("'Contenido permitido:' when the answer is not about <para> is not judged", offenders("El *levelledPara* agrupa párrafos.\n\nContenido permitido:\n- *proceduralStep*").length === 0);
 
-function loadSaved(file) {
-  if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, "responses.json");
-  return { file, saved: JSON.parse(fs.readFileSync(file, "utf8")) };
+console.log("no_parent_as_child: 9 real answers (fixtures, reviewed by hand)");
+const fixtures = JSON.parse(fs.readFileSync(path.join(__dirname, "prompt-eval", "fixtures", "no-parent-as-child-fixtures.json"), "utf8"));
+check("fixtures are about S1000D 4.2 <para>", fixtures.element === "para" && fixtures.standard === "S1000D 4.2");
+check("9 answers", fixtures.answers.length === 9, String(fixtures.answers.length));
+// One correction to the hand review, kept here and not in the fixture file:
+// 026ec83 run 3 says "También admite elementos de soporte como
+// *sbMaterialInfo* o *sbSupportEquipsList*" -- in S1000D 4.2 both are only
+// PARENTS of <para> (backend/schema_cards/schema-cards-4-2.json: in
+// parents.para, in no variant's children), in the same sentence and with the
+// same wording, so the answer presents both the wrong way round. The review
+// lists sbMaterialInfo only; to be confirmed by Juanma.
+const FIXTURE_CORRECTIONS = { "026ec83#3": { add: ["sbSupportEquipsList"] } };
+check("the correction is backed by the schema cards", ["sbSupportEquipsList", "sbMaterialInfo"].every((n) => cards42.parents.para.includes(n) && !cards42.cards.para.some((v) => (v.children || []).includes(n))));
+for (const a of fixtures.answers) {
+  const key = `${a.commit}#${a.run}`;
+  const expected = [...a.expectedOffenders, ...(FIXTURE_CORRECTIONS[key]?.add || [])].sort();
+  const r = parentsPresentedAsChildren(a.answer, fixtures.element, loadSchemaCards(fixtures.standard), vocab42);
+  const got = [...r.offenders].sort();
+  const namesAnything = schemaNameCount(a.answer) > 0;
+  check(
+    `${key}: exactly ${JSON.stringify(expected)}${FIXTURE_CORRECTIONS[key] ? " (with the correction)" : ""}`,
+    JSON.stringify(got) === JSON.stringify(expected),
+    `got ${JSON.stringify(got)}; sentences analysed: ${r.units.map((u) => u.slice(0, 80)).join(" | ")}`
+  );
+  if (!namesAnything) check(`${key}: no element names -> nothing to analyse, passes`, r.offenders.length === 0);
 }
-const argIndex = process.argv.indexOf("--responses");
-let responsesPath = path.join(__dirname, "prompt-eval", "check-fixtures", "responses-reconstructed.json");
-if (argIndex !== -1) {
-  responsesPath = path.resolve(process.argv[argIndex + 1] || "");
-  if (fs.existsSync(responsesPath) && fs.statSync(responsesPath).isDirectory()) responsesPath = path.join(responsesPath, "responses.json");
-}
-const saved = JSON.parse(fs.readFileSync(responsesPath, "utf8"));
-const answersOf = (id) => (saved.cases.find((c) => c.id === id)?.runs || []).map((r) => r.answer ?? "");
-console.log(`Saved answers: ${path.relative(process.cwd(), responsesPath)}${saved._readme ? " (RECONSTRUCTED)" : ""}`);
-
-const dump = answersOf("ask-open-question-no-dump");
-check("three no-dump answers", dump.length === 3, `got ${dump.length}`);
-const dumpOffenders = dump.map(offenders);
-dumpOffenders.forEach((o, i) => console.log(`       run ${i + 1}: offenders ${JSON.stringify(o)}; names ${names(dump[i]).length}: ${names(dump[i]).join(", ")}`));
-check("run 1 fails on proceduralStep", dumpOffenders[0]?.includes("proceduralStep"), JSON.stringify(dumpOffenders[0]));
-check("run 2 passes", dumpOffenders[1]?.length === 0, JSON.stringify(dumpOffenders[1]));
-check("run 3 fails on levelledPara, listItem and sbMaterialInfo", ["levelledPara", "listItem", "sbMaterialInfo"].every((n) => dumpOffenders[2]?.includes(n)), JSON.stringify(dumpOffenders[2]));
-check("max_names counts the names in italics (some run with 10 or more)", dump.some((a) => names(a).length >= 10), dump.map((a) => names(a).length).join("/"));
-
-const p3Answers = answersOf("suggest-proposal-spanish-title-english-refs");
-check("three suggest-proposal answers", p3Answers.length === 3, `got ${p3Answers.length}`);
-p3Answers.forEach((a, i) => check(`P3 checks pass on run ${i + 1}`, p3(a), stripPlaceholders(a).slice(0, 200)));
-
-// Reference pass (e54b1f2 or later): its expected verdicts are not fixed, so
-// this only checks that the detection finds the sentences to analyse in
-// every run, and prints what it decided for each one.
-const refIndex = process.argv.indexOf("--reference");
-const ref = loadSaved(refIndex === -1
-  ? path.join(__dirname, "prompt-eval", "check-fixtures", "responses-reconstructed-e54b1f2.json")
-  : path.resolve(process.argv[refIndex + 1] || ""));
-const refRuns = (ref.saved.cases.find((c) => c.id === "ask-open-question-no-dump")?.runs || []).map((r) => r.answer ?? "");
-console.log(`Reference answers: ${path.relative(process.cwd(), ref.file)}${ref.saved._readme ? " (RECONSTRUCTED)" : ""}`);
-check("reference: at least one no-dump answer", refRuns.length > 0);
-refRuns.forEach((a, i) => {
-  const r = parentsPresentedAsChildren(a, "para", cards42, vocab42);
-  console.log(`       run ${i + 1}: ${r.units.length} sentence(s) analysed; offenders ${JSON.stringify(r.offenders)}; names ${names(a).length}`);
-  check(`reference run ${i + 1}: finds sentences to analyse`, r.units.length > 0);
-});
+const dumpNames = fixtures.answers.map((a) => names(a.answer).length);
+console.log(`       max_names on the 9 answers: ${dumpNames.join("/")}`);
+check("max_names counts the names in italics (some real answer with 10 or more)", dumpNames.some((n) => n >= 10), dumpNames.join("/"));
+check("an answer with no element names passes (nothing to analyse)", offenders("Es un párrafo; úsalo con moderación.").length === 0);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

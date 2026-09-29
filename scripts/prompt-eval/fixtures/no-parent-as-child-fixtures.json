@@ -1,0 +1,67 @@
+{
+  "description": "Real Mistral answers to ask-open-question-no-dump (S1000D 4.2, <para>) for validating no_parent_as_child. expectedOffenders = names presented as children of <para> that are only parents (reviewed by hand). An empty list means the answer must pass.",
+  "element": "para",
+  "standard": "S1000D 4.2",
+  "answers": [
+    {
+      "commit": "026ec83",
+      "run": 1,
+      "expectedOffenders": [
+        "proceduralStep"
+      ],
+      "answer": "El elemento **<para>** en S1000D 4.2 representa un párrafo dentro de la estructura de un módulo de datos (DM). Su papel es contener texto descriptivo, procedural o de soporte, organizando la información en bloques coherentes.\n\nDentro de un DM, **<para>** puede aparecer en múltiples contextos (como *descript*, *proced*, *fault*, *sb*, etc.), siempre como hijo de elementos que permiten contenido textual (ej: *description*, *levelledPara*, *sbTopicContent*, entre otros listados en los hechos del esquema). Puede incluir elementos en línea (como *emphasis*, *dmRef*, *symbol*) y bloques específicos (ej: *definitionList*, *sequentialList*, *proceduralStep*), según el esquema del DM.\n\nAl usarlo, conviene considerar:\n- Su **atributos comunes** (ej: *@securityClassification*, *@changeMark*) para gestionar metadatos y control de cambios.\n- Las **diferencias por esquema**: por ejemplo, en *descript* admite *caption* o *pmRef*, mientras que en *proced* no incluye *caption* pero sí *pmRef*.\n- Evitar anidarlo directamente en elementos que no lo permitan (su lista de padres válidos está definida en los hechos del esquema)."
+    },
+    {
+      "commit": "026ec83",
+      "run": 2,
+      "expectedOffenders": [],
+      "answer": "El elemento `<para>` es un contenedor de texto estructurado dentro de un módulo de datos S1000D 4.2. Sirve para agrupar contenido textual (párrafos, listas, referencias, etc.) y puede aparecer en múltiples esquemas del estándar, siempre como hijo de elementos que permiten contenido descriptivo o procedural (ej: `description`, `proceduralStep`, `commonInfo`, etc.).\n\nDebe usarse para organizar información coherente y autónoma, como instrucciones, descripciones técnicas o notas. **Conviene tener en cuenta**:\n- Sus **atributos comunes** (ej: `@id`, `@securityClassification`, `@changeMark`) permiten gestionar metadatos como control de cambios o clasificación.\n- Sus **hijos comunes** (ej: `definitionList`, `sequentialList`, `dmRef`, `emphasis`) permiten enriquecer el contenido con listas, referencias cruzadas o formato semántico.\n- En esquemas específicos (ej: `descript`, `pm`, `fault`), puede incluir elementos adicionales como `caption`, `pmRef` o `verbatimText`, adaptándose al contexto del módulo.\n\nPara módulos **descriptivos** (como los citados en el BRDP), `<para>` es clave para estructurar el contenido en bloques lógicos, asegurando claridad y reutilización."
+    },
+    {
+      "commit": "026ec83",
+      "run": 3,
+      "expectedOffenders": [
+        "levelledPara",
+        "listItem",
+        "sbMaterialInfo"
+      ],
+      "answer": "<para> es un elemento contenedor de texto y contenido en línea dentro de los módulos de datos S1000D 4.2. Su papel es estructurar bloques de información coherente, como descripciones, pasos procedimentales, notas o explicaciones, permitiendo anidar elementos en línea (como referencias, símbolos o listas) y bloques específicos (como *description*, *proceduralStep* o *warning*).\n\nEn módulos descriptivos (esquema *descript*), <para> puede contener elementos como *levelledPara*, *listItem* o *definitionList*, además de los comunes a todos los esquemas (ej. *dmRef*, *acronym*, *symbol*). También admite elementos de soporte como *sbMaterialInfo* o *sbSupportEquipsList* en contextos técnicos.\n\nAl usarlo, considera:\n- Su flexibilidad para anidar contenido variado, pero siempre respetando las restricciones de su esquema padre (ej. *descript* vs *proced*).\n- Que los atributos comunes (como @securityClassification o @changeMark) permiten gestionar metadatos de control.\n- Que su estructura debe alinearse con las directrices del BRDP para mantener coherencia en la documentación técnica."
+    },
+    {
+      "commit": "e54b1f2",
+      "run": 1,
+      "expectedOffenders": [],
+      "answer": "<para> es el elemento base para el contenido textual en S1000D 4.2, usado dentro de múltiples esquemas (descript, proced, fault, etc.) para representar párrafos.\n\nEn módulos de datos descriptivos, <para> puede contener texto plano, elementos en línea (como *emphasis*, *dmRef* o *symbol*) y, dependiendo del esquema, elementos adicionales como *caption* o *footnote*. Además, puede anidarse dentro de otros elementos estructurales como *description*, *levelledPara* o *sbTopicContent*.\n\nPara su uso, considera que sus atributos comunes (ej. @securityClassification, @changeMark) y su contenido varían ligeramente según el esquema del módulo. Por ejemplo, en *descript* permite más elementos hijos (como *accessPointRef* o *zoneRef*) que en *fault*. Siempre verifica el esquema específico del módulo para confirmar qué hijos o atributos están permitidos."
+    },
+    {
+      "commit": "e54b1f2",
+      "run": 2,
+      "expectedOffenders": [],
+      "answer": "<para> es un elemento contenedor de texto y otros elementos en línea o bloques de contenido dentro de un módulo de datos S1000D 4.2. Su papel es estructurar información descriptiva, procedimental, de advertencia, etc., permitiendo anidar elementos como listas, definiciones, referencias, símbolos o pasos procedimentales, según el tipo de módulo (descriptivo, procedimental, de fallos, etc.).\n\nSe debe tener en cuenta que sus hijos y atributos varían ligeramente según el esquema del módulo donde se use. Por ejemplo, en esquemas como *descript* o *dml* admite elementos adicionales como *caption* o *pmRef*, mientras que en *fault* no incluye *caption* pero sí *pmRef* y *verbatimText*. Los atributos comunes (como @id, @securityClassification o @changeMark) son aplicables en todos los esquemas.\n\nPara decidir su estructura en módulos descriptivos, conviene alinear su uso con el BRDP actual, que busca estandarizar cómo se organizan los párrafos en estos módulos."
+    },
+    {
+      "commit": "e54b1f2",
+      "run": 3,
+      "expectedOffenders": [],
+      "answer": "<para> es el elemento contenedor de texto y contenido en línea dentro de un módulo de datos S1000D 4.2. Su papel es agrupar bloques de información coherente, como descripciones, pasos procedimentales o notas, y puede anidarse dentro de otros elementos estructurales (como *description*, *proceduralStep*, *levelledPara*, etc.), según el tipo de módulo (descriptivo, procedimental, etc.).\n\nPara su uso en módulos **descriptivos** (ej. *descript*), el BRDP actual establece que debe decidirse cómo estructurar los párrafos, pero aún no define reglas concretas. Sin embargo, en la práctica, <para> debe:\n- Contener texto plano o elementos en línea (como *acronym*, *dmRef*, *symbol*, etc.).\n- Evitar anidamientos innecesarios (ej. <para> dentro de otro <para>).\n\nConsulta el BRDP **BRDP-EVAL-ASK-C2B-3** para las directrices específicas una vez se definan."
+    },
+    {
+      "commit": "6355e1e",
+      "run": 1,
+      "expectedOffenders": [],
+      "answer": "El elemento **<para>** en S1000D 4.2 representa un párrafo y puede contener texto estructurado junto con elementos en línea (como *acronym*, *dmRef*, *emphasis*, etc.) y otros elementos específicos según el esquema (ej. *footnote*, *pmRef*, *verbatimText* en algunos casos).\n\nDentro de un módulo de datos (DM), **<para>** se usa como contenedor de contenido textual en múltiples contextos, como descripciones, pasos procedimentales, notas o información técnica. Puede estar anidado en elementos como *description*, *proceduralStep*, *levelledPara*, *sbTopicContent*, entre otros (según el esquema del DM).\n\n**Consideraciones clave**:\n- Su estructura varía ligeramente según el esquema del DM (ej. en *descript* permite *caption*, mientras que en *fault* no).\n- Debe usarse para organizar el contenido de manera clara y coherente, evitando anidaciones innecesarias.\n- Los atributos comunes (como *@id*, *@securityClassification*) permiten gestionar metadatos y control de cambios."
+    },
+    {
+      "commit": "6355e1e",
+      "run": 2,
+      "expectedOffenders": [],
+      "answer": "El elemento **<para>** en S1000D 4.2 es un contenedor de contenido textual y otros elementos en línea, utilizado para estructurar párrafos dentro de módulos de datos (DMs). Puede aparecer en casi cualquier contexto de contenido descriptivo, procedimental o de soporte (como **description**, **levelledPara**, **proceduralStep**, etc.), ya que está permitido como hijo en la mayoría de los elementos de contenido.\n\n**Contenido permitido**:\n- **Atributos comunes**: como `@id`, `@securityClassification`, `@changeMark`, entre otros (según el contexto del DM).\n- **Hijos comunes**: elementos en línea como `emphasis`, `dmRef`, `internalRef`, `symbol`, `acronym`, listas (`sequentialList`, `randomList`), `definitionList`, etc.\n- **Hijos adicionales**: varían según el esquema del DM. Por ejemplo, en esquemas como **descript** o **sb**, puede incluir `caption`, `pmRef`, `footnoteRef`, `zoneRef`, etc. (ver diferencias en SCHEMA FACTS).\n\n**Consideraciones clave**:\n- Su uso debe alinearse con la **regla de negocio (BRDP)** definida para el proyecto (en este caso, pendiente: *BRDP-EVAL-ASK-C2B-3*).\n- En módulos **descriptivos** (ej. DMs de tipo *descript*), se recomienda estructurar `<para>` para separar ideas lógicas, evitando párrafos excesivamente largos.\n- Los atributos como `@changeMark` o `@securityClassification` deben aplicarse según las políticas de control de cambios y clasificación del proyecto."
+    },
+    {
+      "commit": "6355e1e",
+      "run": 3,
+      "expectedOffenders": [],
+      "answer": "El elemento **<para>** en S1000D 4.2 es un contenedor genérico para texto en párrafos dentro de módulos de datos (DM). Su papel es estructurar contenido descriptivo, procedimental o de soporte en bloques coherentes, permitiendo la inclusión de texto plano junto con elementos en línea (como referencias, términos o datos significativos) y, según el esquema específico, elementos adicionales como notas al pie, referencias a ilustraciones o listas.\n\nAl usarlo en módulos **descriptivos** (ej. schema *descript*), hay que considerar:\n- **Contenido permitido**: Puede contener elementos comunes a todos los esquemas (como *dmRef*, *acronym*, *changeInline*) y, en este caso, también *caption*, *footnoteRef*, *pmRef*, entre otros ( lista parcial).\n- **Contexto jerárquico**: Suele anidarse dentro de elementos como *description*, *sbTopicContent* o *levelledPara*, según la estructura del DM.\n\nPara cumplir con **BRDP-EVAL-ASK-C2B-3** (que evalúa cómo estructurar párrafos en DM descriptivos), se debe garantizar que los `<para>` reflejen una organización clara y coherente con el propósito del módulo, evitando anidamientos innecesarios y priorizando la reutilización de contenido mediante referencias (ej. *dmRef*)."
+    }
+  ]
+}

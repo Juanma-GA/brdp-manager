@@ -117,27 +117,38 @@ export function elementRelations(cards, element) {
 
 // Splits the answer into units: sentences within a line, and a line ending
 // with ":" keeps the list lines under it (a "- <x>" bullet list of children
-// stays with the sentence that introduces it).
+// stays with the sentence that introduces it) -- such a unit also carries its
+// `header` (the line with ":") and its `items` (the bullet lines).
+// Abbreviations ("ej.", "p. ej.", "e.g.", "i.e.", "etc.", "vs.") never end a
+// sentence: a real answer wrote "(ej. *dmRef*, *acronym*). También admite …",
+// and cutting at "ej." lost the subject of "También admite".
+const ABBREVIATION_RE = /\b(p\.\s?ej|ej|e\.g|i\.e|etc|vs|cf|aprox|approx)\./giu;
+const ABBREVIATION_DOT = "\u2024";
 function answerUnits(text) {
   const lines = String(text ?? "").split(/\r?\n/);
   const units = [];
   let current = null;
-  for (const line of lines) {
+  const unit = (t, header = null, items = null) => ({ text: t.replaceAll(ABBREVIATION_DOT, "."), header: header?.replaceAll(ABBREVIATION_DOT, ".") ?? null, items: items?.map((i) => i.replaceAll(ABBREVIATION_DOT, ".")) ?? null });
+  const flush = () => {
+    if (current !== null) units.push(unit([current.header, ...current.items].join("\n"), current.header, current.items.length ? current.items : null));
+    current = null;
+  };
+  for (const raw of lines) {
+    const line = raw.replace(ABBREVIATION_RE, (m) => m.replaceAll(".", ABBREVIATION_DOT));
     const isItem = /^\s*(?:[-*+•]|\d+[.)])\s+/.test(line);
     if (current !== null && isItem) {
-      current += "\n" + line;
+      current.items.push(line);
       continue;
     }
-    if (current !== null) units.push(current);
-    current = null;
+    flush();
     if (!line.trim()) continue;
     const sentences = line.split(/(?<=[.;!?])\s+(?=[\p{Lu}¿¡*_`<(])/u);
     const last = sentences.pop();
-    units.push(...sentences);
-    if (/:\s*$/.test(last)) current = last;
-    else units.push(last);
+    units.push(...sentences.map((t) => unit(t)));
+    if (/:\s*(?:\*\*|__)?\s*$/.test(last) || /:\s*$/.test(last)) current = { header: last, items: [] };
+    else units.push(unit(last));
   }
-  if (current !== null) units.push(current);
+  flush();
   return units;
 }
 
@@ -157,7 +168,7 @@ const BEFORE_RE = new RegExp(
 const CONTAIN_SRC = String.raw`(?:puede[n]?\s+(?:contener|incluir|llevar|albergar|admitir|tener|anidar)|permit(?:e|en|ir|iendo)\s+(?:anidar|incluir|contener|usar|utilizar|insertar|meter)|admit(?:e|en|iendo)|contien(?:e|en)|conteniendo|inclu(?:ye|yen|yendo)|alberga[n]?|lleva[n]?|anid(?:a|an|ar|ando)|(?:tiene[n]?\s+(?:como\s+)?|sus\s+|cuyos\s+|con\s+)?(?:elementos\s+)?hijos(?:\s+(?:directos|posibles|permitidos))?|(?:can|may)\s+(?:contain|include|hold|have|nest)|contain(?:s|ing)?|includ(?:es|ing)|holds|allow(?:s|ing)?(?:\s+(?:you\s+)?to)?\s+(?:nest(?:ing)?|include|including|contain)|nest(?:s|ing)?|its\s+(?:child\s+elements|children)|children\s+(?:are|include))`;
 const AFTER_RE = new RegExp(String.raw`^[^.;\n]{0,160}?\b` + CONTAIN_SRC + String.raw`\b`, "iu");
 const IMPLIED_RE = new RegExp(
-  String.raw`^\s*(?:[-*+•]\s+)?(?:(?:además|también|asimismo|also|in\s+addition|additionally)\s*,?\s*)?(?:(?:este\s+elemento|this\s+element|it)\s+)?` + CONTAIN_SRC + String.raw`\b`,
+  String.raw`^\s*(?:[-*+•]\s+)?(?:(?:además|también|asimismo|also|in\s+addition|additionally)\s*,?\s*)?(?:(?:este\s+elemento|this\s+element|it)\s+)?(?:(?:además|también|asimismo|also)\s+)?` + CONTAIN_SRC + String.raw`\b`,
   "iu"
 );
 // A phrase that turns the relation the other way round ("se usa dentro de",
@@ -165,6 +176,24 @@ const IMPLIED_RE = new RegExp(
 // containers, not its contents, so they are never judged as children.
 const REVERSE_RE = /\b(?:dentro\s+de|en\s+el\s+interior\s+de|forma\s+parte\s+de|se\s+(?:usa|utiliza|emplea|coloca|sitúa|situa)\s+(?:en|dentro)|aparece\s+en|puede[n]?\s+ir\s+en|va[n]?\s+en|hijos?\s+de|contenid[oa]s?\s+en|padres?|inside|within|used\s+in|appears\s+in|goes\s+in|placed\s+in|part\s+of|child\s+of|contained\s+in|parents?)\b/iu;
 const NEGATION_RE = /\b(?:no|not|never|nunca|cannot|can't|ni|sin|without)\b/iu;
+// A list header that introduces what goes INSIDE the element: "Contenido
+// permitido:", "Hijos:", "Children:", "Allowed content:" (markdown emphasis
+// allowed around it). Its items are the element's contents -- when the
+// element is what the answer is about (named in the header or earlier).
+const CONTENT_HEADER_RE = /(?:^|[\s*_`>(-])(?:contenido(?:\s+(?:permitido|admitido|posible))?|hijos(?:\s+(?:permitidos|posibles|directos|comunes))?|elementos\s+hijos|puede\s+contener|children|child\s+elements|allowed\s+content|content(?:\s+model)?|can\s+contain)\s*(?:[*_`]+\s*)?:\s*(?:[*_`]+\s*)?$/iu;
+// "<para> debe:" / "<para> must:" -- then only the items that start with a
+// containment verb ("- Contener …", "- Contain …") are about its contents.
+const MODAL_HEADER_RE = /^\s*(?:[*_`]+\s*)?(?:debe[n]?|deber[ií]a[n]?|puede[n]?|must|should|can|may)\s*(?:[*_`]+\s*)?:\s*(?:[*_`]+\s*)?$/iu;
+const ITEM_CONTAIN_RE = new RegExp(
+  String.raw`^\s*(?:[-*+•]|\d+[.)])\s+(?:[*_\x60]*[^:\n]{0,40}?[*_\x60]*:\s*)?(?:contener|incluir|admitir|llevar|albergar|anidar|contain|include|hold|nest|` + CONTAIN_SRC + String.raw`)\b`,
+  "iu"
+);
+// The part of a list item after its "**Label**:" lead-in, if any.
+function itemBody(item) {
+  const label = /^\s*(?:[-*+•]|\d+[.)])\s+[*_`]*[^:\n]{0,40}?[*_`]*:\s*/u.exec(item);
+  const bullet = /^\s*(?:[-*+•]|\d+[.)])\s+/u.exec(item);
+  return { offset: (label || bullet)[0].length };
+}
 
 // Names the answer presents as CHILDREN of `element` ("dentro de <para> …",
 // "<para> puede contener …", "<para> …, permitiendo anidar …", "children of
@@ -187,9 +216,40 @@ export function parentsPresentedAsChildren(answer, element, cards, vocabulary) {
   const offenders = new Map();
   const matchedUnits = [];
   let previousNamedElement = false;
-  for (const unit of answerUnits(answer)) {
+  let elementNamedSoFar = false;
+  // Names in `text` from `start` (up to a phrase that turns the relation
+  // round), without a negation before them, that are only parents.
+  const judge = (text, start, mentions) => {
+    const reverse = REVERSE_RE.exec(text.slice(start));
+    const stop = reverse ? start + reverse.index : text.length;
+    for (const m of mentions) {
+      if (m.index < start || m.index >= stop || m.kind !== "element" || m.name === element) continue;
+      if (NEGATION_RE.test(text.slice(start, m.index))) continue;
+      if (rel.parents.has(m.name) && !rel.children.has(m.name)) offenders.set(m.name, true);
+    }
+  };
+  for (const { text: unit, header, items } of answerUnits(answer)) {
     const mentions = schemaNameMentions(unit, vocabulary);
-    const namesElement = mentions.some((m) => m.kind === "element" && m.name === element);
+    const namesElementHere = mentions.some((m) => m.kind === "element" && m.name === element);
+    // A list: "<para> debe:" + "- Contener …", or "Contenido permitido:" +
+    // items about the element the answer is discussing.
+    if (items) {
+      const headerMentions = schemaNameMentions(header, vocabulary);
+      const own = headerMentions.find((m) => m.kind === "element" && m.name === element);
+      const modal = own && MODAL_HEADER_RE.test(header.slice(own.index + own.length));
+      const content = CONTENT_HEADER_RE.test(header) && (own || elementNamedSoFar || previousNamedElement);
+      if (modal || content) {
+        matchedUnits.push(unit);
+        for (const item of items) {
+          if (modal && !ITEM_CONTAIN_RE.test(item)) continue;
+          judge(item, itemBody(item).offset, schemaNameMentions(item, vocabulary));
+        }
+        previousNamedElement = namesElementHere;
+        elementNamedSoFar ||= namesElementHere;
+        continue;
+      }
+    }
+    const namesElement = namesElementHere;
     let start = null;
     for (const m of mentions) {
       if (m.kind !== "element" || m.name !== element) continue;
@@ -214,15 +274,10 @@ export function parentsPresentedAsChildren(answer, element, cards, vocabulary) {
       if (implied) start = implied.index + implied[0].length;
     }
     previousNamedElement = namesElement;
+    elementNamedSoFar ||= namesElement;
     if (start === null) continue;
     matchedUnits.push(unit);
-    const reverse = REVERSE_RE.exec(unit.slice(start));
-    const stop = reverse ? start + reverse.index : unit.length;
-    for (const m of mentions) {
-      if (m.index < start || m.index >= stop || m.kind !== "element" || m.name === element) continue;
-      if (NEGATION_RE.test(unit.slice(start, m.index))) continue;
-      if (rel.parents.has(m.name) && !rel.children.has(m.name)) offenders.set(m.name, true);
-    }
+    judge(unit, start, mentions);
   }
   return { available: true, offenders: [...offenders.keys()], units: matchedUnits };
 }
