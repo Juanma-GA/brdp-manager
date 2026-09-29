@@ -107,6 +107,19 @@ function ValidationProblems({ validation, standard, schema }) {
   );
 }
 
+// C3b: the cells the application removed from the example (an <entry> in a
+// column a morerows above already covers) -- said, never done silently.
+function SpannedEntriesNote({ rows }) {
+  const { t } = useTranslation();
+  const distinct = [...new Set(rows)].sort((a, b) => a - b);
+  const key = distinct.length === 1 ? 'spannedEntriesRemovedRow' : 'spannedEntriesRemovedRows';
+  return (
+    <p className={styles.ruleTestNote} data-testid="rule-test-app-adjusted">
+      {t(`records.ruleTest.${key}`, { count: rows.length, rows: distinct.join(', ') })}
+    </p>
+  );
+}
+
 function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
@@ -147,6 +160,7 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
           </span>
         )}
       </div>
+      {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}
       {!run.validation.runnable && <ValidationProblems validation={run.validation} standard={standard} schema={example.schema} />}
       {showResult && result?.outOfScopeSchemas?.length > 0 && result.status === 'accepted' && example.schema && (
         <p className={styles.ruleTestNote}>{t('records.ruleTest.notApplicable', { schema: example.schema })}</p>

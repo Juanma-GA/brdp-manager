@@ -123,6 +123,9 @@ function isRuleTest(text) {
 //                (the first real run); the correction round fixes it
 //   STUBBORN     same, but the correction keeps it broken
 //   MISMATCH     "proposalMismatch" filled in
+//   SPANNEDCELLS (C3b, //thead rule) both examples carry a table whose row 2
+//                repeats a cell a morerows above already covers (the real
+//                titled-context run at 297df74); the app removes it itself
 //   MISSINGATTR  (@emphasisType rule) the reject example relies on the
 //                attribute's ABSENCE -- the real disagreement of the T3
 //                report; a regeneration carrying "PREVIOUS EXAMPLES WERE
@@ -179,6 +182,14 @@ function ruleTestReply(systemPrompt, messages) {
       broken
         ? { label: "Note without a type", expected: "reject", schema: ditaType, content: "<note><cmd>Isolate the bilge pump.</cmd></note>" }
         : { label: "Note without a type", expected: "reject", schema: ditaType, content: "<note><p>Isolate the bilge pump before removal.</p></note>" },
+    ]);
+  }
+  if (/SPANNEDCELLS/.test(proposal)) {
+    const table = (head) =>
+      `<table><title>Torque values</title><tgroup cols="3"><colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/>${head ? '<thead><row><entry colname="c1">Panel</entry><entry colname="c2">Bolt</entry><entry colname="c3">Torque</entry></row></thead>' : ""}<tbody><row><entry colname="c1" morerows="1">Access panel</entry><entry colname="c2">M6</entry><entry colname="c3">10 N.m</entry></row><row><entry colname="c1">Access panel</entry><entry colname="c2">M8</entry><entry colname="c3">25 N.m</entry></row></tbody></tgroup></table>`;
+    return answer([
+      { label: "Torque table without headings", expected: "accept", schema: ruleSchema, content: table(false) },
+      { label: "Torque table with headings", expected: "reject", schema: ruleSchema, content: table(true) },
     ]);
   }
   // C3, Part 1a: the real <quantity> case. The first answer is the real

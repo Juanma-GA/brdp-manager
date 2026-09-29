@@ -24,6 +24,7 @@ import {
   checkExampleStructure,
   extractDocumentNames,
   formatStructureProblem,
+  removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
 import { SKELETON_TEXT_SUFFIX, assembleExample } from './ruleTestSkeleton.js';
 
@@ -38,19 +39,29 @@ import { SKELETON_TEXT_SUFFIX, assembleExample } from './ruleTestSkeleton.js';
 // placement } } }. A schema the application did not offer gets no xml; its
 // validation says so. With a single offered schema, a missing schema is that
 // one.
-export function materializeExample(example, setup) {
+//
+// C3b: before anything else, the application removes the table cells that
+// sit in a column a morerows above already covers (always an error, always
+// the same fix -- see removeSpannedCalsEntries). The example then carries
+// the fixed content and `spannedEntriesRemoved` (the rows, one per removed
+// cell) for the panel's "Adjusted by the app" note. Every path goes through
+// here: the LLM's first answer, the correction round, "Run again" on an
+// edited example and the prompt eval.
+export function materializeExample(example, setup, parseXml = parseXmlDocument) {
   const offered = Object.keys(setup.placements || {});
   const schema = example.schema || (offered.length === 1 ? offered[0] : null);
+  const { content, removedRows } = removeSpannedCalsEntries(example.content, parseXml);
+  const adjusted = { ...example, content, spannedEntriesRemoved: removedRows };
   const entry = schema ? setup.placements[schema] : null;
-  if (!entry) return { ...example, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
+  if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
   const { xml, skeletonNodePaths } = assembleExample({
     standard: setup.standard,
     schema,
     schemaLocation: setup.schemaLocation,
     placement: entry.placement,
-    content: example.content,
+    content,
   });
-  return { ...example, schema, xml, skeletonNodePaths, structure: entry.structure, insertion: entry.placement.insertion };
+  return { ...adjusted, schema, xml, skeletonNodePaths, structure: entry.structure, insertion: entry.placement.insertion };
 }
 
 // { wellFormed, error, names, structure, cards, unknownSchema, runnable }
@@ -157,17 +168,42 @@ export function formatElementCard(card, schema) {
   return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}; attributes: ${cardNameList(card.attributes, '@')}`;
 }
 
+// C3b: an example often fails on the markup of an element the rule does
+// not even look at (a real run: <quantity> and <dmCode> written wrong in
+// "Procedure without emphasis", for a rule about <emphasis>). The problem
+// about such an element then also offers the simplest fix.
+export const PLAIN_TEXT_HINT = 'If this element is not needed to test the rule, remove it and use plain text.';
+
 // The validation problems of one example, in English (the correction
 // request to the LLM), followed by the cards of the elements involved.
-export function exampleProblems(validation, { standard, schema } = {}) {
+// `ruleNames` ({ elements, attributes } of the rule, extractRuleNames), when
+// given, adds PLAIN_TEXT_HINT to each problem about the markup of an element
+// the rule does not name.
+export function exampleProblems(validation, { standard, schema, ruleNames = null } = {}) {
+  const ruleElements = new Set(ruleNames?.elements || []);
+  const ruleAttributes = new Set(ruleNames?.attributes || []);
+  const offer = (line, element, alsoAttribute = false) =>
+    ruleNames && element && !ruleElements.has(element) && !(alsoAttribute && ruleAttributes.has(element))
+      ? `${line}. ${PLAIN_TEXT_HINT}`
+      : line;
   const out = [];
   if (validation.unknownSchema) out.push(`schema "${validation.unknownSchema}" was not offered; use one of the listed schemas`);
   if (!validation.wellFormed) out.push(`not well-formed XML: ${validation.error}`);
-  for (const name of validation.names?.notFound || []) out.push(`${name} does not exist in ${standard}`);
-  for (const w of validation.names?.wrongType || []) {
-    out.push(w.usedAs === 'element' ? `<${w.name}> is not an element (it is the attribute @${w.name})` : `@${w.name} is not an attribute (it is the element <${w.name}>)`);
+  for (const name of validation.names?.notFound || []) {
+    const element = /^<(.+)>$/.exec(name)?.[1];
+    out.push(offer(`${name} does not exist in ${standard}`, element));
   }
-  for (const p of validation.structure || []) out.push(formatStructureProblem(p, schema));
+  for (const w of validation.names?.wrongType || []) {
+    out.push(
+      w.usedAs === 'element'
+        ? offer(`<${w.name}> is not an element (it is the attribute @${w.name})`, w.name, true)
+        : `@${w.name} is not an attribute (it is the element <${w.name}>)`
+    );
+  }
+  for (const p of validation.structure || []) {
+    const element = ['unknownElement', 'notAllowed', 'unknownAttribute'].includes(p.kind) ? p.element : null;
+    out.push(offer(formatStructureProblem(p, schema), element));
+  }
   for (const card of validation.cards || []) out.push(formatElementCard(card, schema));
   return out;
 }

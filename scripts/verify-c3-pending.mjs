@@ -1,8 +1,8 @@
 // Live verification for Consolidation C3, Part 2 (pending items):
-//  - Project Configuration: after saving, "Saved" appears next to the button
-//    and stays a few seconds (it never showed before: refreshProject() put
-//    ProjectLayout back into its loading state and unmounted the page);
-//    a failed save shows its error there too (HR7).
+//  - Project Configuration (C3b): the save button itself confirms -- disabled
+//    with "Saving…" while it saves, green with a ✓ for about a second after
+//    it saved (no "Saved" text any more); a failed save shows its error next
+//    to the button until the next attempt (HR7), never a colour flash.
 //  - BRDP Records: a failure of the catalog endpoint shows a visible warning
 //    and leaves the catalog-identifier check unavailable (never "empty":
 //    Suggest Definition is not reported as blocked by the catalog).
@@ -56,38 +56,88 @@ async function main() {
     await page.waitForSelector("table", { timeout: 10000 });
     await page.locator("header select, nav select").first().selectOption("en");
 
-    // ---- Project Configuration: "Saved" ----
+    // ---- Project Configuration: confirmation on the button (C3b) ----
     await page.goto(`${BASE_URL}/projects/${project.id}/config`);
     await page.waitForSelector("#cfg-modelIdentCode", { timeout: 10000 });
+    const button = page.getByTestId("config-save");
+    // Read the colour with the mouse away (no :hover) and after the button's
+    // 0.2 s background transition.
+    const bg = async () => {
+      await page.mouse.move(5, 5);
+      await page.waitForTimeout(300);
+      return button.evaluate((el) => getComputedStyle(el).backgroundColor);
+    };
+    const normalBg = await bg();
+    assert(normalBg === "rgb(37, 99, 235)", `the save button is the shared primary Button (${normalBg})`);
+    // Hold the PUT a moment so the saving state can be seen.
+    let releasePut;
+    const putHeld = new Promise((resolve) => (releasePut = resolve));
+    await page.route(`**/api/projects/${project.id}/config`, async (route) => {
+      if (route.request().method() === "PUT") await putHeld;
+      await route.continue();
+    });
     await page.fill("#cfg-modelIdentCode", "C3TEST");
+    await button.click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="config-save"]')?.getAttribute("data-state") === "busy");
+    assert((await button.textContent()) === "Saving…" && (await button.isDisabled()), `while saving: disabled, "Saving…" (${await button.textContent()})`);
+    releasePut();
+    await page.waitForFunction(() => document.querySelector('[data-testid="config-save"]')?.getAttribute("data-state") === "success", null, { timeout: 5000 });
     const t0 = Date.now();
-    await page.getByRole("button", { name: "Save Configuration" }).click();
-    const saved = page.getByTestId("config-saved");
-    await saved.waitFor({ timeout: 5000 });
-    assert((await saved.textContent()) === "Saved", '"Saved" appears next to the button');
+    const green = await bg();
+    assert(green === "rgb(22, 163, 74)", `after saving: the button turns green (${green})`);
+    assert((await button.textContent()) === "✓Save Configuration", `after saving: ✓ on the button (${await button.textContent()})`);
+    assert((await page.getByRole("button", { name: "Save Configuration" }).count()) === 1, "the ✓ is not part of the button's name");
+    await page.locator("form").first().screenshot({ path: "/tmp/config-save-success.png" });
+    await page.waitForFunction(() => !document.querySelector('[data-testid="config-save"]')?.hasAttribute("data-state"), null, { timeout: 5000 });
+    const back = (Date.now() - t0) / 1000;
+    assert(back <= 2, `…and goes back to normal after about a second (${back.toFixed(1)} s)`);
+    const backBg = await bg();
+    assert(backBg === normalBg && (await button.textContent()) === "Save Configuration", `back to its normal colour and label (${backBg})`);
+    assert((await page.getByTestId("config-saved").count()) === 0 && !(await page.locator("form").first().textContent()).includes("Saved"), 'no "Saved" text next to the button any more');
     assert((await page.inputValue("#cfg-modelIdentCode")) === "C3TEST", "the page was not reloaded away: the field keeps the saved value");
-    await page.waitForTimeout(1500);
-    assert(await saved.isVisible(), '"Saved" is still there 1.5 s later');
-    await page.screenshot({ path: "/tmp/config-saved.png", clip: { x: 0, y: 0, width: 1440, height: 520 } });
-    await saved.waitFor({ state: "detached", timeout: 8000 });
-    const gone = (Date.now() - t0) / 1000;
-    assert(gone >= 3 && gone <= 7, `"Saved" goes away after a few seconds (${gone.toFixed(1)} s)`);
     const stored = await api(`/api/projects/${project.id}/config`).then((r) => r.json());
     assert(stored.project_config?.modelIdentCode === "C3TEST", "the value was really saved");
+    await page.unroute(`**/api/projects/${project.id}/config`);
 
-    // A failed save: the error is shown, never "Saved".
+    // A failed save: the error stays next to the button, never a colour flash.
     await page.route(`**/api/projects/${project.id}/config`, (route) =>
       route.request().method() === "PUT" ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "database unavailable" }) }) : route.continue()
     );
     await page.fill("#cfg-modelIdentCode", "C3FAIL");
-    await page.getByRole("button", { name: "Save Configuration" }).click();
+    await button.click();
     const error = page.getByTestId("config-save-error");
     await error.waitFor({ timeout: 5000 });
     const errorText = await error.textContent();
     assert(errorText.startsWith("Could not save:") && errorText.includes("database unavailable"), `save error shown (${errorText})`);
-    assert((await page.getByTestId("config-saved").count()) === 0, 'no "Saved" after a failed save');
-    await page.screenshot({ path: "/tmp/config-save-error.png", clip: { x: 0, y: 0, width: 1440, height: 520 } });
+    const afterError = await bg();
+    assert((await button.getAttribute("data-state")) === null && afterError === normalBg, `a failed save never turns the button green (${afterError})`);
+    await page.waitForTimeout(2500);
+    assert(await error.isVisible(), "the error is still there 2.5 s later");
+    await page.fill("#cfg-modelIdentCode", "C3FAIL2");
+    assert(await error.isVisible(), "…and still there after editing a field (until the next attempt)");
+    await page.locator("form").first().screenshot({ path: "/tmp/config-save-error.png" });
     await page.unroute(`**/api/projects/${project.id}/config`);
+    await page.fill("#cfg-modelIdentCode", "C3OK");
+    await button.click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="config-save"]')?.getAttribute("data-state") === "success", null, { timeout: 5000 });
+    assert((await error.count()) === 0, "the next attempt clears the error (and succeeds)");
+    // Spanish label while saving.
+    await page.locator("header select, nav select").first().selectOption("es");
+    await page.waitForTimeout(300);
+    let releaseEs;
+    const esHeld = new Promise((resolve) => (releaseEs = resolve));
+    await page.route(`**/api/projects/${project.id}/config`, async (route) => {
+      if (route.request().method() === "PUT") await esHeld;
+      await route.continue();
+    });
+    await page.getByTestId("config-save").click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="config-save"]')?.getAttribute("data-state") === "busy");
+    assert((await button.textContent()) === "Guardando…", `Spanish: "Guardando…" (${await button.textContent()})`);
+    releaseEs();
+    await page.waitForFunction(() => document.querySelector('[data-testid="config-save"]')?.getAttribute("data-state") === "success", null, { timeout: 5000 });
+    assert((await button.textContent()) === "✓Guardar configuración", `Spanish: ✓ on the button (${await button.textContent()})`);
+    await page.unroute(`**/api/projects/${project.id}/config`);
+    await page.locator("header select, nav select").first().selectOption("en");
 
     // ---- BRDP Records: catalog endpoint failure ----
     await page.goto(`${BASE_URL}/projects/${project.id}/records`);

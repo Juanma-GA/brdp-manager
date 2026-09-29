@@ -1673,8 +1673,8 @@
         },
         {
           "type": "max_names",
-          "max": 15,
-          "note": "no dump of the parent/child lists: at most 15 distinct <name>s"
+          "max": 20,
+          "note": "no dump of the parent/child lists: at most 20 distinct <name>s"
         },
         {
           "type": "no_parent_as_child",

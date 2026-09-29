@@ -40,6 +40,7 @@ function assert(condition, message) {
 const RULE_QTY = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd"><structureObjectRuleGroup><structureObjectRule id="BRDP-C3-QTY"><objectPath allowedObjectFlag="2">//quantityValue/@quantityUnitOfMeasure</objectPath><objectUse>The unit of measure of a torque value shall be N.m.</objectUse><objectValue valueForm="single" valueAllowed="N.m"/></structureObjectRule></structureObjectRuleGroup></contextRules>`;
 const RULE_OK = `<structureObjectRule id="BRDP-C3-OLD"><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>`;
 const OLD_RULE = "//&lt;emphasis&gt;";
+const RULE_THEAD = `<structureObjectRule id="BRDP-C3-SPAN"><objectPath allowedObjectFlag="0">//thead</objectPath><objectUse>Tables shall have no column headings.</objectUse></structureObjectRule>`;
 
 // Write rule_xml straight into Postgres (the save endpoint refuses it now).
 function writeRuleXmlDirectly(brdpId, format, ruleXml) {
@@ -85,8 +86,11 @@ async function main() {
     proposal: "In procedural data modules, torque values shall be marked up with <quantity> and their unit of measure shall be N.m.",
   });
   const old = await makeBrdp({ identifier: "BRDP-C3-OLD", title: "Old pasted rule", proposal: "The element <emphasis> shall not be used." });
+  // C3b: examples whose table repeats a cell under a morerows.
+  const spanned = await makeBrdp({ identifier: "BRDP-C3-SPAN", title: "Table headings", proposal: "Tables shall have no column headings. SPANNEDCELLS" });
   await putDraft(qty, RULE_QTY);
   await putDraft(old, RULE_OK);
+  await putDraft(spanned, RULE_THEAD);
   // The old rule, as it was stored before the format check existed.
   const refused = await api(`/api/projects/${project.id}/brdps/${old.id}/approvals/BREX-4.2`, {
     method: "PUT",
@@ -132,6 +136,11 @@ async function main() {
     assert(correction.includes("- @quantityValue is not an attribute (it is the element <quantityValue>)"), "correction: @quantityValue is really an element");
     assert(correction.includes("- @unitOfMeasure does not exist on <quantity>"), "correction: @unitOfMeasure does not exist on <quantity>");
     assert(
+      correction.includes("- @unitOfMeasure does not exist on <quantity>. If this element is not needed to test the rule, remove it and use plain text."),
+      "C3b: <quantity> is not in the rule → the plain-text option is offered"
+    );
+    assert(!correction.includes("(it is the element <quantityValue>). If this element"), "C3b: no plain-text option for a problem about an attribute");
+    assert(
       correction.includes("- card of <quantity> in the proced schema: allowed children: quantityGroup; attributes: @changeMark, @changeType, @quantityType, @quantityTypeSpecifics, @reasonForUpdateRefIds"),
       "correction: card of <quantity> (allowed children quantityGroup, its attributes)"
     );
@@ -141,6 +150,34 @@ async function main() {
     const accepted = await page.getByTestId("rule-test-example-0").textContent();
     assert(accepted.includes("<quantityGroup>") && accepted.includes('quantityUnitOfMeasure="N.m"'), "the fixed accept example follows the card (quantity > quantityGroup > quantityValue)");
     await panel().screenshot({ path: "/tmp/rule-test-c3-quantity-cards.png" });
+    await page.getByRole("button", { name: "Close" }).click();
+
+    // C3b. Overlapping cells: removed by the app, said in the panel, no
+    // correction round.
+    await select("BRDP-C3-SPAN");
+    await fetch(`${MOCK}/reset`, { method: "POST" });
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await verdict().waitFor({ timeout: 15000 });
+    const spanReq = await lastRequest();
+    assert(spanReq.messages.filter((m) => m.role !== "system").length === 1, "C3b: no correction round (one LLM call)");
+    assert((await page.getByTestId("rule-test-correction").count()) === 0, "C3b: no correction note");
+    for (const i of [0, 1]) {
+      const ex = page.getByTestId(`rule-test-example-${i}`);
+      const note = ex.getByTestId("rule-test-app-adjusted");
+      assert((await note.textContent()) === "Adjusted by the app: removed 1 overlapping cell in row 2.", `C3b: example ${i + 1} says what the app removed (${await note.textContent()})`);
+      const text = await ex.textContent();
+      assert((text.match(/Access panel/g) || []).length === 1, `C3b: example ${i + 1} shows the fixed table (the spanned cell is gone)`);
+    }
+    assert((await verdict().textContent()).startsWith("Correct"), `C3b: verdict correct (${await verdict().textContent()})`);
+    await panel().screenshot({ path: "/tmp/rule-test-c3b-spanned-cells.png" });
+    await page.locator("header select, nav select").first().selectOption("es");
+    await page.waitForTimeout(300);
+    const esNote = await page.getByTestId("rule-test-example-0").getByTestId("rule-test-app-adjusted").textContent();
+    assert(esNote === "Ajustado por la app: se quitó 1 celda solapada en la fila 2.", `C3b: Spanish note (${esNote})`);
+    await page.locator("header select, nav select").first().selectOption("en");
+    await page.waitForTimeout(300);
+    const spanApproval = await api(`/api/projects/${project.id}/brdps/${spanned.id}/approvals/BREX-4.2`).then((r) => r.json());
+    assert(spanApproval.last_test_result === "passed", `C3b: the registered result is the fixed examples' (${spanApproval.last_test_result})`);
     await page.getByRole("button", { name: "Close" }).click();
 
     // 1d. The old non-rule: not executable with the format reason, no LLM call.

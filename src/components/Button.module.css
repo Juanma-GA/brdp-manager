@@ -37,3 +37,16 @@
 .primary:hover:not(:disabled) {
   background: #1d4ed8;
 }
+
+/* Success confirmation (C3b): green with a ✓ for a moment after the action
+   succeeded -- same green as the app's "ok" badges. Compound selector so it
+   wins over any variant regardless of order in this file. */
+.button.success,
+.button.success:hover:not(:disabled) {
+  background: #16a34a;
+  color: #fff;
+}
+
+.check {
+  margin-right: 6px;
+}

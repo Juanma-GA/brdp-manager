@@ -22,6 +22,7 @@
 //   6. Messages: every finding as { source, code, params }, one i18n key
 //      table and one formatter -- the texts each panel showed before.
 import fontoxpath from 'fontoxpath';
+import { wrapRuleXmlFragment } from '../utils/ruleXmlFragment.js';
 
 // ═══ 1-3. BRDP text: vocabulary, free-text extraction, contrast ════════════
 
@@ -997,6 +998,11 @@ export function checkExampleStructure(doc, structure) {
 // its free columns, the entries sitting in spanned columns are the extra
 // ones. Never throws: an unknown colname is treated as positional.
 export function checkCalsTableSpans(doc) {
+  return calsSpanProblems(doc).map(({ entry, ...problem }) => problem);
+}
+
+// Same walk, keeping the offending <entry> of each spannedEntry problem.
+function calsSpanProblems(doc) {
   const problems = [];
   const childrenNamed = (el, name) => Array.from(el.childNodes || []).filter((n) => n.nodeType === 1 && n.nodeName === name);
   const intAttr = (el, name) => {
@@ -1045,7 +1051,7 @@ export function checkCalsTableSpans(doc) {
             cursor = span.end + 1;
             for (let c = span.start; c <= span.end; c += 1) {
               if (spanned[r].has(c)) {
-                problems.push({ kind: 'spannedEntry', row: r + 1, column: label(c) });
+                problems.push({ kind: 'spannedEntry', row: r + 1, column: label(c), entry });
                 break;
               }
             }
@@ -1063,6 +1069,74 @@ export function checkCalsTableSpans(doc) {
     }
   }
   return problems;
+}
+
+// C3b: an <entry> in a column a morerows above already covers is always an
+// error, and the fix is always the same -- remove that entry. The
+// application does it itself, on the LLM's content, before any correction
+// round (a real run, titled-context at 297df74, sent two such tables back
+// to the LLM and got them back unchanged). `content` is the example's
+// content (one or several root elements); the entries are removed from the
+// TEXT, so the rest stays exactly as written. Repeats until no entry sits
+// in a spanned column (removing one can shift the next row's reading),
+// then returns { content, removedRows: [row numbers, in order] }. Content
+// that does not parse is returned unchanged -- its validation reports it.
+// morerows running past the last row is not touched: that one has no
+// single right fix and still goes to the LLM.
+const TAG_TOKEN_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
+
+// [start, end) of the Nth <entry> element (0-based, document order) in text.
+function entrySpans(text) {
+  const spans = [];
+  const open = [];
+  for (const m of text.matchAll(TAG_TOKEN_RE)) {
+    if (m[2] === undefined || m[2] !== 'entry') continue;
+    if (m[1]) {
+      const index = open.pop();
+      if (index !== undefined) spans[index].end = m.index + m[0].length;
+    } else if (m[4]) {
+      spans.push({ start: m.index, end: m.index + m[0].length });
+    } else {
+      open.push(spans.length);
+      spans.push({ start: m.index, end: null });
+    }
+  }
+  return spans;
+}
+
+export function removeSpannedCalsEntries(content, parseXml) {
+  let text = String(content ?? '');
+  const removedRows = [];
+  for (let pass = 0; pass < 10; pass += 1) {
+    let doc;
+    try {
+      doc = parseXml(wrapRuleXmlFragment(text));
+      if (!doc?.documentElement) break;
+    } catch {
+      break;
+    }
+    const offending = calsSpanProblems(doc).filter((p) => p.kind === 'spannedEntry');
+    if (offending.length === 0) break;
+    const allEntries = Array.from(doc.getElementsByTagName('entry'));
+    const spans = entrySpans(text);
+    if (spans.length !== allEntries.length) break; // text and DOM disagree: leave it
+    const cuts = [];
+    for (const p of offending) {
+      const span = spans[allEntries.indexOf(p.entry)];
+      if (!span || span.end === null) continue;
+      let start = span.start;
+      // Take the entry's own indentation (and line) with it.
+      while (start > 0 && (text[start - 1] === ' ' || text[start - 1] === '\t')) start -= 1;
+      if (start > 0 && text[start - 1] === '\n') start -= 1;
+      cuts.push({ start, end: span.end });
+      removedRows.push(p.row);
+    }
+    if (cuts.length === 0) break;
+    // An entry inside another removed entry goes with it.
+    const outer = cuts.filter((c) => !cuts.some((o) => o !== c && o.start <= c.start && c.end <= o.end));
+    for (const cut of outer.sort((a, b) => b.start - a.start)) text = text.slice(0, cut.start) + text.slice(cut.end);
+  }
+  return { content: text, removedRows };
 }
 
 // English, for the correction request sent back to the LLM (the panel

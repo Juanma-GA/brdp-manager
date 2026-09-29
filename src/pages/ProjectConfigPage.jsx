@@ -12,7 +12,7 @@ import {
   useDismissedImportJobId,
   useInvalidateImportJob,
 } from '../hooks/useImportJob';
-import Button from '../components/Button';
+import Button, { useButtonSuccessFlash } from '../components/Button';
 import styles from './ProjectConfigPage.module.css';
 
 // Plain English labels, NOT run through i18n -- Export to Excel has never
@@ -664,16 +664,15 @@ function ResetDataSection({ projectId, canEdit, onDataChanged }) {
   );
 }
 
-// How long "Saved" stays next to the button after a successful save.
-const SAVED_INDICATOR_MS = 4000;
-
 export default function ProjectConfigPage() {
   const { t } = useTranslation();
   const { projectId } = useParams();
   const { project, refreshProject } = useOutletContext();
   const [values, setValues] = useState(project.project_config || {});
   const [isSaving, setIsSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  // C3b: success is confirmed on the button itself (green with a ✓ for a
+  // moment); a failure stays next to it until the next attempt (HR7).
+  const [saved, flashSaved] = useButtonSuccessFlash();
   const [saveError, setSaveError] = useState(null);
 
   // canEdit is purely cosmetic (disables the form) -- the backend's
@@ -693,16 +692,8 @@ export default function ProjectConfigPage() {
     setValues(project.project_config || {});
   }, [project]);
 
-  // "Saved" stays a few seconds after a successful save, then goes away.
-  useEffect(() => {
-    if (!saved) return undefined;
-    const timer = setTimeout(() => setSaved(false), SAVED_INDICATOR_MS);
-    return () => clearTimeout(timer);
-  }, [saved]);
-
   const handleChange = (key, value) => {
     setValues((v) => ({ ...v, [key]: value }));
-    setSaved(false);
   };
 
   // A failed save (or a failed reload of what was saved) is shown next to
@@ -710,7 +701,6 @@ export default function ProjectConfigPage() {
   const handleSave = async (e) => {
     e.preventDefault();
     setIsSaving(true);
-    setSaved(false);
     setSaveError(null);
     try {
       await authFetchJson(`/api/projects/${projectId}/config`, {
@@ -723,13 +713,15 @@ export default function ProjectConfigPage() {
       setIsSaving(false);
       return;
     }
-    setSaved(true);
     try {
       await refreshProject();
     } catch (err) {
       setSaveError(t('config.reloadError', { error: err.message }));
     } finally {
+      // The save itself succeeded: the button confirms it once it is no
+      // longer busy, so the whole second of green is visible.
       setIsSaving(false);
+      flashSaved();
     }
   };
 
@@ -781,14 +773,9 @@ export default function ProjectConfigPage() {
         </div>
 
         {canEdit && (
-          <button type="submit" className={styles.saveBtn} disabled={isSaving}>
-            {isSaving ? '…' : t('config.save')}
-          </button>
-        )}
-        {saved && (
-          <span className={styles.savedIndicator} role="status" data-testid="config-saved">
-            {t('config.saved')}
-          </span>
+          <Button type="submit" busy={isSaving} busyLabel={t('config.saving')} success={saved} data-testid="config-save">
+            {t('config.save')}
+          </Button>
         )}
         {saveError && (
           <span className={styles.saveError} role="alert" data-testid="config-save-error">

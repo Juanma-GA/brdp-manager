@@ -33,7 +33,7 @@ import {
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
 import { analyzeRule } from '../src/utils/ruleTestEngine.js';
-import { checkExampleStructure, formatStructureProblem } from '../src/validation/schemaValidation.js';
+import { checkExampleStructure, extractRuleNames, formatStructureProblem, removeSpannedCalsEntries } from '../src/validation/schemaValidation.js';
 import { exampleFailures, generateRuleTestExamples, missesRuleProblem } from '../src/utils/ruleTestRun.js';
 import { ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
 import XLSX from 'xlsx';
@@ -76,7 +76,7 @@ function setupFor(standard, ruleXml, schemas, schemaLocation = 'flat') {
   return { standard, schemaLocation, placements };
 }
 function testRun(ruleXml, examples, setup, { format = 'BREX-4.2', vocab = vocabulary } = {}) {
-  const materialized = examples.map((ex) => materializeExample(ex, setup));
+  const materialized = examples.map((ex) => materializeExample(ex, setup, parseXml));
   const runs = materialized.map((ex) => runExample(ruleXml, format, ex, { vocabulary: vocab, parseXml }));
   return { materialized, runs, verdict: ruleTestVerdict(materialized, runs, analyzeRule(ruleXml, format, { parseXml })) };
 }
@@ -726,6 +726,101 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('C3 1d: wrapper <rules> → rule_format_wrapper', analyzeRule(`<rules>${EMPH}</rules>`, 'BREX-4.2', { parseXml }).reason?.params.problem === 'rule_format_wrapper');
   check('C3 1d: a real rule is still executable', analyzeRule(EMPH, 'BREX-4.2', { parseXml }).status === 'executable');
   check('C3 1d: malformed XML keeps its own reason', analyzeRule('<structureObjectRule>', 'BREX-4.2', { parseXml }).reason?.code === 'rule_not_well_formed');
+}
+
+// ─── C3b: overlapping cells fixed by the app; plain text in the correction ─
+{
+  const S42 = 'S1000D 4.2';
+  const descript = structureOf(S42, 'descript');
+  const specs = '<colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/>';
+  const tbl = (rows, head = specs) => `<table><tgroup cols="3">${head}<tbody>${rows}</tbody></tgroup></table>`;
+
+  // By @colname: row 2's c1 cell sits under row 1's morerows.
+  const byName = tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row><entry colname="c1">X</entry><entry colname="c2">D</entry><entry colname="c3">E</entry></row>');
+  const fixedName = removeSpannedCalsEntries(byName, parseXml);
+  check('C3b: by @colname → the spanned cell is removed', fixedName.content === tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row><entry colname="c2">D</entry><entry colname="c3">E</entry></row>'), fixedName.content);
+  check('C3b: reports row 2', JSON.stringify(fixedName.removedRows) === '[2]', JSON.stringify(fixedName.removedRows));
+  // By position (no colname): the extra first cell of row 2.
+  const byPos = tbl('<row><entry morerows="1">A</entry><entry>B</entry><entry>C</entry></row><row><entry>X</entry><entry>D</entry><entry>E</entry></row>', '');
+  const fixedPos = removeSpannedCalsEntries(byPos, parseXml);
+  check('C3b: by position → the extra cell goes', fixedPos.content === tbl('<row><entry morerows="1">A</entry><entry>B</entry><entry>C</entry></row><row><entry>D</entry><entry>E</entry></row>', ''), fixedPos.content);
+  // A morerows="2" in the middle column with two extra cells below.
+  const two = tbl('<row><entry>A</entry><entry morerows="2">B</entry><entry>C</entry></row><row><entry>D</entry><entry>Y</entry><entry>E</entry></row><row><entry>F</entry><entry>Z</entry><entry>H</entry></row>', '');
+  const fixedTwo = removeSpannedCalsEntries(two, parseXml);
+  check('C3b: two rows, one cell each → rows [2, 3]', JSON.stringify(fixedTwo.removedRows) === '[2,3]' && !fixedTwo.content.includes('>Y<') && !fixedTwo.content.includes('>Z<'), JSON.stringify(fixedTwo));
+  // Indented content: the removed cell's own line goes with it.
+  const indented = `<table>\n  <tgroup cols="2">\n    <tbody>\n      <row>\n        <entry morerows="1">A</entry>\n        <entry>B</entry>\n      </row>\n      <row>\n        <entry>X</entry>\n        <entry>C</entry>\n      </row>\n    </tbody>\n  </tgroup>\n</table>`;
+  const fixedIndented = removeSpannedCalsEntries(indented, parseXml);
+  check('C3b: indented → no blank line left', fixedIndented.content === indented.replace('\n        <entry>X</entry>', ''), fixedIndented.content);
+  // Nothing to fix / not the app's to fix / not parseable.
+  const correct = tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row><entry colname="c2">D</entry><entry colname="c3">E</entry></row>');
+  check('C3b: a correct table is left byte for byte', removeSpannedCalsEntries(correct, parseXml).content === correct && removeSpannedCalsEntries(correct, parseXml).removedRows.length === 0);
+  const past = tbl('<row><entry morerows="3">A</entry><entry>B</entry><entry>C</entry></row><row><entry>D</entry><entry>E</entry></row>', '');
+  check('C3b: morerows past the end is left to the LLM', removeSpannedCalsEntries(past, parseXml).content === past);
+  check('C3b: malformed content returned unchanged', removeSpannedCalsEntries('<table><tgroup>', parseXml).content === '<table><tgroup>');
+  const prefixed = `<para>See <dmRef xlink:href="x"/></para>${byName}`;
+  check('C3b: a prefixed attribute elsewhere does not stop the fix', removeSpannedCalsEntries(prefixed, parseXml).removedRows.length === 1);
+  const nested = tbl('<row><entry morerows="1">A</entry><entry>B</entry></row><row><entry>X<table><tgroup cols="1"><tbody><row><entry>in</entry></row></tbody></tgroup></table></entry><entry>C</entry></row>', '').replace('cols="3"', 'cols="2"');
+  const fixedNested = removeSpannedCalsEntries(nested, parseXml);
+  check('C3b: a removed cell takes its nested table with it', fixedNested.removedRows.join() === '2' && !fixedNested.content.includes('>in<') && fixedNested.content.includes('<entry>C</entry>'), JSON.stringify(fixedNested));
+
+  // Through materializeExample: the example carries the fix and the rows.
+  const TBL = '<structureObjectRule><objectPath allowedObjectFlag="0">//thead</objectPath><objectUse>No table headings.</objectUse></structureObjectRule>';
+  const setup = setupFor(S42, TBL, ['descript']);
+  const run = testRun(TBL, [{ label: 'table', expected: 'accept', schema: 'descript', content: `<para>Values:</para>${byName}` }], setup);
+  check('C3b: materialized example is fixed and says so', JSON.stringify(run.materialized[0].spannedEntriesRemoved) === '[2]' && !run.materialized[0].content.includes('>X<'), JSON.stringify(run.materialized[0].spannedEntriesRemoved));
+  check('C3b: fixed example is valid (no spannedEntry problem)', run.runs[0].validation.runnable && run.runs[0].validation.structure.length === 0, JSON.stringify(run.runs[0].validation.structure));
+  check('C3b: fixed example rejects nothing (no thead)', run.runs[0].result?.status === 'accepted', JSON.stringify(run.runs[0].result?.status));
+  check('C3b: a clean example says nothing', JSON.stringify(testRun(TBL, [{ label: 'p', expected: 'accept', schema: 'descript', content: '<para>x</para>' }], setup).materialized[0].spannedEntriesRemoved) === '[]');
+  check('C3b: descript structure is the real one', Boolean(descript.elements.table));
+
+  // The real titled-context case (297df74, run 1, examples 3 and 4): valid
+  // examples whose only problem is a spanned cell → no correction round.
+  const wb = XLSX.read(fs.readFileSync(new URL('../public/brdp-template-dita-xpath3.xlsx', import.meta.url)));
+  const ext1 = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]).find((r) => r.ID === 'BRDP-EXT-00001');
+  const DITA = 'DITA 1.3 Xpath2.0';
+  const vocabDita = vocabOf('schema-vocabulary-dita.json');
+  const section = (cant) =>
+    `<section><title>LISTA DE MATERIAL OBLIGATORIO</title><table><tgroup cols="3"><colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/><thead><row><entry colname="c1">Part</entry><entry colname="c2">Descripción</entry><entry colname="c3">Cant.</entry></row></thead><tbody><row><entry colname="c1" morerows="1">P-100</entry><entry colname="c2">Seal</entry>${cant ? `<entry colname="c3">${cant}</entry>` : ''}</row><row><entry colname="c1">P-100</entry><entry colname="c2">Gasket</entry>${cant ? `<entry colname="c3">${cant}</entry>` : ''}</row></tbody></tgroup></table></section>`;
+  const answer = JSON.stringify({ proposalMismatch: null, examples: [
+    { label: 'quantity given', expected: 'accept', schema: 'topic', content: section('2') },
+    { label: 'quantity missing', expected: 'reject', schema: 'topic', content: section('') },
+  ] });
+  const asked = [];
+  const result = await generateRuleTestExamples({
+    ruleXml: ext1.Rule, format: 'SCH-DITA', standard: 'DITA 1.3 Xpath3.0', schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00001', title: '', definition: '', proposal: '' },
+    vocabulary: vocabDita, parseXml,
+    ask: async (messages) => { asked.push(messages); return answer; },
+    fetchSchemaCards: async (_std, names) => ({ cards: {}, document_schemas: ['topic'], element_schemas: Object.fromEntries(names.map((n) => [n, ['topic']])) }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
+  });
+  check('C3b titled-context: no correction round for spanned cells', asked.length === 1 && result.correction === null, JSON.stringify({ asked: asked.length, c: result.correction }));
+  check('C3b titled-context: both examples adjusted in row 2', result.examples.every((e) => JSON.stringify(e.spannedEntriesRemoved) === '[2]'), JSON.stringify(result.examples.map((e) => e.spannedEntriesRemoved)));
+  check('C3b titled-context: examples run with the fixed tables', result.runs.every((r) => r.validation.runnable), JSON.stringify(result.runs.map((r) => r.validation.structure)));
+
+  // 2. Plain text for the markup of an element the rule does not name.
+  const proced = structureOf(S42, 'proced');
+  const wrap = (inner) => `<dmodule><content><procedure><mainProcedure><proceduralStep><para>${inner}</para></proceduralStep></mainProcedure></procedure></content></dmodule>`;
+  const bad = validateExample(wrap('Torque to <quantity><quantityValue>25</quantityValue></quantity> and see <dmCode foo="1"/>.'), vocabulary, parseXml, proced);
+  const emphNames = extractRuleNames(EMPH);
+  const withHint = exampleProblems(bad, { standard: S42, schema: 'proced', ruleNames: emphNames });
+  check('C3b hint: element the rule does not name → plain-text hint', withHint.includes('<quantityValue> is not allowed inside <quantity>. If this element is not needed to test the rule, remove it and use plain text.'), withHint.join('\n'));
+  check('C3b hint: unknown attribute on an element the rule does not name', withHint.includes('@foo does not exist on <dmCode>. If this element is not needed to test the rule, remove it and use plain text.'), withHint.join('\n'));
+  check('C3b hint: cards carry no hint', withHint.filter((l) => l.startsWith('card of')).every((l) => !l.includes('plain text')));
+  const qvRule = '<structureObjectRule><objectPath allowedObjectFlag="2">//quantityValue/@quantityUnitOfMeasure</objectPath><objectUse>x</objectUse><objectValue valueForm="single" valueAllowed="N.m"/></structureObjectRule>';
+  const qvHint = exampleProblems(bad, { standard: S42, schema: 'proced', ruleNames: extractRuleNames(qvRule) });
+  check('C3b hint: element the rule names → no hint', qvHint.includes('<quantityValue> is not allowed inside <quantity>'), qvHint.join('\n'));
+  check('C3b hint: other elements still get it', qvHint.includes('@foo does not exist on <dmCode>. If this element is not needed to test the rule, remove it and use plain text.'));
+  check('C3b hint: without ruleNames nothing changes', !exampleProblems(bad, { standard: S42, schema: 'proced' }).some((l) => l.includes('plain text')));
+  const unknown = validateExample(wrap('A <pokemon>x</pokemon> here.'), vocabulary, parseXml, proced);
+  check('C3b hint: unknown element name gets it', exampleProblems(unknown, { standard: S42, schema: 'proced', ruleNames: emphNames }).includes('<pokemon> does not exist in S1000D 4.2. If this element is not needed to test the rule, remove it and use plain text.'));
+  // Through exampleFailures (the correction round's input).
+  const procSetup = setupFor(S42, EMPH, ['proced']);
+  const failing = [{ label: 'Procedure without emphasis', expected: 'accept', schema: 'proced', content: 'Torque to <quantity quantityValue="25"/>.' }];
+  const fRun = testRun(EMPH, failing, procSetup);
+  const failures = exampleFailures(failing, fRun.materialized, fRun.runs, { ruleXml: EMPH, standard: S42, format: 'BREX-4.2', parseXml });
+  check('C3b hint: the correction round carries it', failures.length === 1 && failures[0].problems.some((p) => p.endsWith('If this element is not needed to test the rule, remove it and use plain text.')), JSON.stringify(failures));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

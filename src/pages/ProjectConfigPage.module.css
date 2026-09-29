@@ -75,22 +75,6 @@
   margin-top: 4px;
 }
 
-.saveBtn {
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: none;
-  background: #2e74b5;
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.savedIndicator {
-  margin-left: 10px;
-  color: #16a34a;
-  font-size: 12.5px;
-}
-
 .saveError {
   margin-left: 10px;
   color: #b91c1c;

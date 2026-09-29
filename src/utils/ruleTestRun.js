@@ -131,11 +131,12 @@ export function acceptWithoutNodeProblem(ruleXml) {
 // The examples the correction round must fix: [{ index, label, problems }].
 export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, parseXml = parseXmlDocument }) {
   const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
+  const ruleNames = extractRuleNames(ruleXml);
   return runs
     .map((r, index) => {
       const problems = r.validation.runnable
         ? [missesRuleProblem(examples[index], r, ruleXml), withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null].filter(Boolean)
-        : exampleProblems(r.validation, { standard, schema: materialized[index].schema });
+        : exampleProblems(r.validation, { standard, schema: materialized[index].schema, ruleNames });
       return { index, label: examples[index].label, problems };
     })
     .filter((f) => f.problems.length > 0);
@@ -143,7 +144,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
 
 // Materialize, validate and run every example.
 export function runRuleTestExamples(examples, { ruleXml, format, setup, vocabulary, parseXml = parseXmlDocument }) {
-  const materialized = examples.map((ex) => materializeExample(ex, setup));
+  const materialized = examples.map((ex) => materializeExample(ex, setup, parseXml));
   const runs = materialized.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml }));
   return { materialized, runs };
 }
