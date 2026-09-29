@@ -1085,6 +1085,9 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('S1-00052: one LLM call, no correction round', asked52.length === 1 && g52.status === 'ready' && g52.correction === null, JSON.stringify({ ...g52, systemPrompt: undefined, setup: undefined }));
   check('S1-00052: prompt offers the minimal section to start from', asked52[0].includes('your "metadata" is the WHOLE <identAndStatusSection>') && asked52[0].includes('infoCode="040"') && asked52[0].includes('write no "content"'));
   check('S1-00052: prompt says the values never go in a dmRef of the content', asked52[0].includes('never in a reference (<dmRef>) of the content'));
+  // Templates round, minor items: metadata only → no "short piece of a
+  // manual… 10 lines of content", which would contradict "write no content".
+  check('S1-00052: metadata-only prompt never asks for a piece of a manual', !asked52[0].includes('A short piece of') && !asked52[0].includes('at most 10') && asked52[0].includes('Only the identification and status section, starting from the minimal one'));
   check('S1-00052: output format asks for "metadata" and no "content"', asked52[0].includes('"metadata": "<identAndStatusSection>…"}') && !asked52[0].includes('"content": "…"'));
   check('S1-00052: verdict through the pipeline', ruleTestVerdict(g52.examples, g52.runs, analyzeRule(R52, 'BREX-4.2', { parseXml })).kind === 'correct');
   const parsedMeta = parseRuleTestResponse(JSON.stringify({ examples: [{ label: 'a', expected: 'accept', metadata: '<identAndStatusSection/>' }] }));
@@ -1152,6 +1155,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('S1-00338: the own dmCode is the one rejected in example 3', r338.runs[2].result.violations[0].nodePaths.includes('/dmodule[1]/identAndStatusSection[1]/dmAddress[1]/dmIdent[1]/dmCode[1]/@assyCode'), JSON.stringify(r338.runs[2].result.violations));
   const prompt338 = buildRuleTestExamplesPrompt({ brdp, standard: S42, format: 'BREX-4.2', ruleXml: R338, placements: [{ schema: 'descript', role: 'rule', ...p338 }] });
   check('S1-00338: prompt asks for both "metadata" and "content"', prompt338.includes("The rule also looks at the data module's identification and status section:") && prompt338.includes('a reject example may go against the decision here, in the content, or\n  both:') && !prompt338.includes('never in a reference') && prompt338.includes('"metadata": "<identAndStatusSection>…", "content": "…"'));
+  check('S1-00338: metadata AND content → the "short piece of a manual" line stays', prompt338.includes('A short piece of an aircraft maintenance manual'));
   const R338tpl = ruleOf('BRDP-S1-00338');
   check('S1-00338 (template form): also two insertion points', placeExample(descript, ruleTargets(R338tpl)).metadata.insertion === true && placeExample(descript, ruleTargets(R338tpl)).contentInsertion === true);
 

@@ -78,7 +78,7 @@ for (const [standard, [xlsx, vocab]] of Object.entries(TEMPLATES)) {
 {
   const r = rules['S1000D 4.2'].get('BRDP-S1-00338');
   const n = extractRuleNames(r);
-  assert(n.elements.length === 0 && same(n.attributes, ['assyCode']), `4.2 //@assyCode[matches(., '^\\d{2}$')]: only @assyCode -- no "matches", nothing from the regex literal (got ${JSON.stringify(n)})`);
+  assert(n.elements.length === 0 && same(n.attributes, ['assyCode']), `4.2 //@assyCode[not(matches(., '^\\d{2}$'))]: only @assyCode -- no "not" -- no "matches", nothing from the regex literal (got ${JSON.stringify(n)})`);
 }
 {
   const n = extractRuleNames(rules['S1000D 4.2'].get('BRDP-S1-00133'));

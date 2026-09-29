@@ -1,15 +1,20 @@
 // Ad hoc Playwright end-to-end verification (real Chromium, real Vite dev
-// server, real backend, real Postgres) of the "reimport with no real
-// changes must not recompute embeddings" fix.
+// server, real backend, real Postgres) that reimporting a file with no real
+// changes is a no-op -- no field writes, no history, and nothing new to
+// embed.
+//
+// Since on-demand embeddings the import NEVER calls Mistral: embeddings are
+// computed only by the "Compute embeddings" job. So the flow is:
+//   1. First import via the real UI → 36 BRDPs created, ZERO calls to the
+//      mock Mistral embeddings server, 36 BRDPs pending embedding.
+//   2. Compute embeddings (the real job, via the API) → the mock is called
+//      in batches (36 rows = 2 requests of 32 + 4), 0 pending after.
+//   3. Reimport the EXACT same file → analyze and Apply show all 36 rows as
+//      "unchanged", ZERO more embedding calls, and still 0 pending (an
+//      unchanged row keeps its embedding: its text hash did not change).
 //
 // Uses the real Navantia S80 file (nav_dtm_xpath2_import_v3.xlsx, 36 rows,
-// ALL Proposal Status = Validated -- confirmed in an earlier round) as a
-// real multi-Validated-row project. Imports it once via the real UI (N
-// real embedding calls against the mock Mistral server), then reimports
-// the EXACT same file a second time and confirms:
-//   1. The mock server's call counter does NOT increase at all.
-//   2. The Apply result shows all 36 rows as "unchanged", 0 "updated".
-//   3. The real "Import complete" panel visibly shows the unchanged count.
+// all Proposal Status = Validated).
 //
 // Usage: node scripts/verify-reimport-unchanged-skips-embeddings.mjs <path-to-xlsx>
 import { chromium } from "playwright-core";
@@ -31,6 +36,25 @@ function assert(cond, msg) {
 async function mockCallCount() {
   const resp = await fetch(`${MOCK_MISTRAL}/calls`);
   return (await resp.json()).count;
+}
+
+const EMBED_BATCH_SIZE = 32; // backend/app/services/embedding_jobs.py
+
+async function pending(projectId, auth) {
+  const resp = await fetch(`${API}/api/projects/${projectId}/embeddings/pending`, { headers: auth });
+  return resp.json();
+}
+
+async function computeEmbeddings(projectId, auth) {
+  const resp = await fetch(`${API}/api/projects/${projectId}/embeddings/compute`, { method: "POST", headers: auth });
+  if (resp.status !== 202) throw new Error(`compute embeddings: HTTP ${resp.status} ${await resp.text()}`);
+  const { job_id } = await resp.json();
+  for (let i = 0; i < 120; i++) {
+    const job = await (await fetch(`${API}/api/projects/${projectId}/embeddings/status/${job_id}`, { headers: auth })).json();
+    if (job.status !== "running") return job;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error("embedding job never finished");
 }
 
 async function apiLogin() {
@@ -85,13 +109,11 @@ async function main() {
     projectId = page.url().match(/\/projects\/([^/]+)\/config/)[1];
     console.log(`Project id: ${projectId}`);
 
-    // ---- 1. First import: real embedding calls expected ----
+    // ---- 1. First import: no embedding calls at all ----
     await page.waitForSelector("text=Import BRDPs from Excel", { timeout: 10000 });
     await page.locator('input[type="file"]').setInputFiles(absXlsxPath);
     await page.waitForSelector('button:has-text("Apply import")', { timeout: 15000 });
     await page.click('button:has-text("Apply import")');
-    const proceedBtn = page.locator('button:has-text("Proceed")');
-    if (await proceedBtn.count()) await proceedBtn.click();
     await page.waitForSelector("text=Import complete", { timeout: 60000 });
     const firstResultText = await page
       .locator("ul")
@@ -100,10 +122,17 @@ async function main() {
       .innerText();
     console.log("First import result:", firstResultText.replace(/\n/g, " | "));
     assert(/36 BRDPs created/i.test(firstResultText), "first import created all 36 BRDPs");
+    assert((await mockCallCount()) === 0, "the import itself made ZERO embedding calls (embeddings are on demand)");
+    const pendingAfterImport = await pending(projectId, auth);
+    assert(pendingAfterImport.project_pending === 36, `all 36 Validated BRDPs are pending embedding (got ${pendingAfterImport.project_pending})`);
 
-    const callsAfterFirst = await mockCallCount();
-    console.log("Mock Mistral calls after first import:", callsAfterFirst);
-    assert(callsAfterFirst === 36, `first import triggered exactly 36 real embedding calls (got ${callsAfterFirst})`);
+    // ---- 2. Compute embeddings: the real job, in batches ----
+    const job = await computeEmbeddings(projectId, auth);
+    assert(job.status === "completed", `embedding job completed (got ${job.status}${job.error ? ": " + job.error : ""})`);
+    const callsAfterCompute = await mockCallCount();
+    const expectedBatches = Math.ceil(36 / EMBED_BATCH_SIZE);
+    assert(callsAfterCompute === expectedBatches, `the job embedded 36 rows in ${expectedBatches} batched requests (got ${callsAfterCompute})`);
+    assert((await pending(projectId, auth)).project_pending === 0, "nothing pending after the job");
 
     await page.click('button:has-text("Close")');
 
@@ -117,8 +146,6 @@ async function main() {
     assert(/36 rows unchanged/i.test(summaryText), `analyze phase's own summary already shows all 36 as unchanged (got "${summaryText}")`);
 
     await page.click('button:has-text("Apply import")');
-    const proceedBtn2 = page.locator('button:has-text("Proceed")');
-    if (await proceedBtn2.count()) await proceedBtn2.click();
     await page.waitForSelector("text=Import complete", { timeout: 60000 });
     // waitForSelector above can resolve while the PREVIOUS "Import
     // complete" panel (from the first import) is still on screen for one
@@ -144,9 +171,10 @@ async function main() {
     const callsAfterSecond = await mockCallCount();
     console.log("Mock Mistral calls after reimport:", callsAfterSecond);
     assert(
-      callsAfterSecond === callsAfterFirst,
-      `reimporting the exact same file triggered ZERO additional embedding calls (before=${callsAfterFirst}, after=${callsAfterSecond})`
+      callsAfterSecond === callsAfterCompute,
+      `reimporting the exact same file triggered ZERO embedding calls (before=${callsAfterCompute}, after=${callsAfterSecond})`
     );
+    assert((await pending(projectId, auth)).project_pending === 0, "unchanged rows keep their embedding: still 0 pending after the reimport");
 
     console.log("\nAll reimport-unchanged checks passed.");
   } finally {

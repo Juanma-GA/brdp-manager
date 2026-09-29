@@ -183,6 +183,12 @@ export function buildRuleTestExamplesPrompt({
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
   const dita = format === 'SCH-DITA';
+  // Rule test on DM metadata: "metadata" (the whole section) when the rule
+  // looks at it; no "content" when it looks at nothing else -- and then no
+  // "short piece of a manual" either, which would contradict it.
+  const withMetadata = placements.some((p) => p.insertion && p.metadata?.insertion);
+  const withContent = placements.some((p) => !p.insertion || p.contentInsertion !== false);
+  const metadataOnly = withMetadata && !withContent;
   const hasFacts = schemaFacts && schemaFacts.length > 0;
   const namesLine = hasFacts
     ? `use only element and attribute names that appear in
@@ -225,9 +231,14 @@ ${schemaInstructions(contextSchemas, placements, dita)}
 ${buildingInstructions(standard, placements, dita)}
 
 EACH EXAMPLE:
-- A short piece of ${dita ? 'a ship or aircraft maintenance manual' : 'an aircraft maintenance manual'}: maintenance steps,
+${
+    metadataOnly
+      ? `- Only the identification and status section, starting from the minimal one
+  above: change what the decision is about and keep the rest as it is.`
+      : `- A short piece of ${dita ? 'a ship or aircraft maintenance manual' : 'an aircraft maintenance manual'}: maintenance steps,
   removal of components, torque values and the like. In English, at most 10
-  lines of content.
+  lines of content.`
+  }
 - Real ${standard} markup: ${namesLine}. Every
   element only inside a parent that allows it, every attribute only on an
   element that has it.${
@@ -261,10 +272,6 @@ Write new examples that do not repeat this mistake.`;
   }
 
   const firstSchema = placements[0]?.schema || 'descript';
-  // Rule test on DM metadata: "metadata" (the whole section) when the rule
-  // looks at it; no "content" when it looks at nothing else.
-  const withMetadata = placements.some((p) => p.insertion && p.metadata?.insertion);
-  const withContent = placements.some((p) => !p.insertion || p.contentInsertion !== false);
   const fields = [
     withMetadata ? `"metadata": "<${placements.find((p) => p.metadata?.insertion).metadata.element}>…"` : null,
     withContent ? '"content": "…"' : null,

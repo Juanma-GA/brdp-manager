@@ -286,6 +286,12 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // ruleTestExamples/brex-4-2-levels-split-by-schema (Lufthansa S1-00120,
 // levelledPara → descript, proceduralStep → proced): the examples are split
 // by schema. Every existing (single-group) prompt is unchanged.
+//
+// Templates round, minor items: a rule test that looks only at the DM metadata
+// (contentInsertion false, "write no content") no longer says "A short piece
+// of an aircraft maintenance manual… at most 10 lines of content", which
+// contradicted it; it says to change only what the decision is about in the
+// minimal section. Only ruleTestExamples/brex-4-2-metadata-infocode changes.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

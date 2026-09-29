@@ -2197,6 +2197,40 @@
       ]
     },
     {
+      "id": "rule-test-template-4-2-assycode",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Curated template rule rewritten by the stored-rules lint round: allowedObjectFlag=\"1\" on //@assyCode[matches(...)] only required ONE good code; now flag 0 on the opposite predicate, so any assyCode that is not two digits is rejected, in the DM's own code or in a reference.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00338"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "assyCode",
+          "note": "the description covers @assyCode"
+        }
+      ]
+    },
+    {
       "id": "rule-test-template-4-2-single-substep",
       "type": "rule-test",
       "standard": "S1000D 4.2",
