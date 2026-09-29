@@ -76,6 +76,20 @@ function readSheet(file) {
 }
 
 // The own minimal case: everything SheetJS 0.20.3 altered.
+// Text that looks like a formula ("=", "+", "-", "@" at the start):
+// openpyxl used to write "=…" as a formula, which came back empty on
+// reimport and would run when the export is opened in Excel. Only the
+// free-text fields (the statuses must be real values to import).
+const FORMULA_ROW = {
+  id: "BRDP-XL-00002",
+  title: "=1+1",
+  definition: '=HYPERLINK("http://x","y")',
+  proposal: "+x -y @z",
+  proposalStatus: "Validated",
+  ruleStatus: "To Do",
+  rule: "",
+};
+
 const ENTITY_ROW = {
   id: "BRDP-XL-00001",
   title: 'Entities "double" and \'single\' quotes',
@@ -220,6 +234,40 @@ async function main() {
       await page.waitForTimeout(500);
       assert(!downloaded, "no file downloaded");
       await page.screenshot({ path: path.join(os.tmpdir(), "xlsx-export-cell-too-large.png") });
+    }
+
+    // 0b. Text that looks like a formula: stays text end to end.
+    console.log("\nOwn case: text that looks like a formula (S1000D 4.2)");
+    {
+      const project = await newProject("S1000D 4.2");
+      const input = path.join(tmp, "formula-input.xlsx");
+      const res = await api(`/api/projects/${project.id}/export.xlsx`, { method: "POST", body: JSON.stringify({ rows: [FORMULA_ROW] }) });
+      assert(res.ok, `input file written (HTTP ${res.status})`);
+      fs.writeFileSync(input, Buffer.from(await res.arrayBuffer()));
+      const [written] = readSheet(input).rows;
+      assert(written.Title === "=1+1" && written.Definition === FORMULA_ROW.definition, "the written file keeps the text (not an empty formula)", JSON.stringify(written));
+      await openConfig(project);
+      const analysis = await analyse(input);
+      assert(analysis.includes("1 row ready to import"), "import: 1 row ready", analysis.match(/\d+ rows? [a-z ]+/g)?.join(" | "));
+      await apply();
+      const [brdp] = await api(`/api/projects/${project.id}/brdps`).then((r) => r.json());
+      assert(
+        brdp.title === FORMULA_ROW.title && brdp.definition === FORMULA_ROW.definition && brdp.proposal === FORMULA_ROW.proposal,
+        'stored as text: "=1+1", "=HYPERLINK(…)", "+x -y @z"',
+        JSON.stringify({ title: brdp.title, definition: brdp.definition, proposal: brdp.proposal })
+      );
+      const exportPath = path.join(tmp, "formula-export.xlsx");
+      await openConfig(project);
+      await download("Export to Excel", exportPath);
+      const [row] = readSheet(exportPath).rows;
+      assert(
+        row.Title === FORMULA_ROW.title && row.Definition === FORMULA_ROW.definition && row.Proposal === FORMULA_ROW.proposal,
+        "export: the same text in every cell",
+        JSON.stringify(row)
+      );
+      await openConfig(project);
+      const again = await analyse(exportPath);
+      assert(again.includes("1 row unchanged"), "re-import: unchanged", again.match(/\d+ rows? [a-z ()]+/g)?.join(" | "));
     }
 
     for (const [standard, [file, format]] of Object.entries(CURATED)) {

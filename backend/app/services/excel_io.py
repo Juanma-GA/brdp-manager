@@ -225,9 +225,16 @@ def _workbook_bytes(rows: list[dict]) -> bytes:
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = SHEET_NAME
-    sheet.append([header for header, _key, _width in EXPORT_COLUMNS])
-    for row in rows:
-        sheet.append([_excel_text(str(row.get(key) or "")) for _header, key, _width in EXPORT_COLUMNS])
+    values = [[header for header, _key, _width in EXPORT_COLUMNS]]
+    values += [[_excel_text(str(row.get(key) or "")) for _header, key, _width in EXPORT_COLUMNS] for row in rows]
+    for row_number, row_values in enumerate(values, start=1):
+        for column, value in enumerate(row_values, start=1):
+            cell = sheet.cell(row=row_number, column=column, value=value)
+            # Always text: openpyxl turns any string starting with "=" into a
+            # formula (read back with data_only=True it is empty -- data lost,
+            # HR6 -- and Excel would evaluate it when the export is opened).
+            # SheetJS wrote every cell as text; so does this.
+            cell.data_type = "s"
     for position, (_header, _key, width) in enumerate(EXPORT_COLUMNS, start=1):
         sheet.column_dimensions[openpyxl.utils.get_column_letter(position)].width = width
     out = io.BytesIO()

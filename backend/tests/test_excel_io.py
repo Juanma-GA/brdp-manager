@@ -234,6 +234,39 @@ def test_size_rows_and_uncompressed_limits(monkeypatch):
 # ─── Writing ──────────────────────────────────────────────────────────────
 
 
+def test_text_that_looks_like_a_formula_stays_text():
+    # openpyxl turns a string starting with "=" into a formula: read back
+    # with data_only=True it came back empty (data lost), and Excel would
+    # evaluate it when the export is opened. Every exported cell is text.
+    row = _export_row(
+        "BRDP-XL-FORMULA",
+        title="=1+1",
+        definition='=HYPERLINK("http://x","y")',
+        proposal="+x",
+        proposalStatus="-y",
+        ruleStatus="@z",
+        rule="=SUM(1,2)",
+    )
+    data = build_export_workbook([row])
+    sheet = openpyxl.load_workbook(io.BytesIO(data)).active
+    assert [(c.value, c.data_type) for c in sheet[2]] == [
+        ("BRDP-XL-FORMULA", "s"),
+        ("=1+1", "s"),
+        ('=HYPERLINK("http://x","y")', "s"),
+        ("+x", "s"),
+        ("-y", "s"),
+        ("@z", "s"),
+        ("=SUM(1,2)", "s"),
+    ]
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert "<f>" not in archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    parsed = parse_import_file(data, "brdps-export.xlsx")["rows"][0]
+    assert {k: v for k, v in parsed.items() if k != "row_number"} == _import_row_values(row)
+    # The generic template goes through the same writer.
+    template = openpyxl.load_workbook(io.BytesIO(build_generic_template())).active
+    assert all(c.data_type in ("s", "inlineStr") for r in template.iter_rows() for c in r if c.value is not None)
+
+
 def test_export_layout():
     workbook = openpyxl.load_workbook(io.BytesIO(build_export_workbook([_export_row()])))
     assert workbook.sheetnames == ["BRDPs"]
