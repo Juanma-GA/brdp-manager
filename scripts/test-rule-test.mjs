@@ -401,7 +401,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const SHORTDESC = '<sch:pattern><sch:rule context="shortdesc"><sch:assert id="SD" test="string-length(.) le 80">Short description too long.</sch:assert></sch:rule></sch:pattern>';
 
   const stepTargets = ruleTargets(STEP);
-  check('T4 targets: Schematron → contexts only', JSON.stringify({ ...stepTargets, alternatives: undefined }) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], wholeDocument: false }) && stepTargets.alternatives.length === 1, JSON.stringify(stepTargets));
+  check('T4 targets: Schematron → contexts only', JSON.stringify({ ...stepTargets, alternatives: undefined }) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], predicateNames: [], wholeDocument: false }) && stepTargets.alternatives.length === 1, JSON.stringify(stepTargets));
   check('T4 targets: note', ruleTargets(NOTE).checked.join() === 'note');
   check('T4 targets: root context → whole document', ruleTargets(ROOT_LANG).wholeDocument === true);
   check('T4 targets: entities decoded in the context', ruleTargets('<rule context="p[. = &apos;x&apos;]"><assert test="1">x</assert></rule>').checked.join() === 'p');
@@ -1103,9 +1103,20 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('S1-00053: revised in dmStatus rejected, changed accepted', r53.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && r53.verdict.kind === 'correct', JSON.stringify(r53.runs.map((r) => r.validation.structure)));
   check('S1-00053: dmStatus/@issueType selected', r53.runs[1].result.selectedNodePaths.includes('/dmodule[1]/identAndStatusSection[1]/dmStatus[1]/@issueType'));
 
-  // S1-00070 (real template rule): //responsiblePartnerCompany/@enterpriseCode
-  // (and enterpriseName) with values -- tested for real.
-  const R70 = ruleOf('BRDP-S1-00070');
+  // S1-00070 (the template rule until the templates round, which replaced
+  // the row: Lufthansa's own CAGE code is no example for other projects):
+  // //responsiblePartnerCompany/@enterpriseCode (and enterpriseName) with
+  // values -- still a good metadata case, kept here as it was written.
+  const R70 = `<structureObjectRule>
+            <objectPath allowedObjectFlag="1">//responsiblePartnerCompany/@enterpriseCode</objectPath>
+            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseCode must be C1008 (Lufthansa Technik AG's CAGE code). </objectUse>
+            <objectValue valueForm="single" valueAllowed="C1008">CAGE code for LUFTHANSA TECHNIK AG is C1008</objectValue>
+          </structureObjectRule>
+<structureObjectRule>
+            <objectPath allowedObjectFlag="1">//responsiblePartnerCompany/enterpriseName</objectPath>
+            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseName must be 'LUFTHANSA TECHNIK AG'. </objectUse>
+            <objectValue valueForm="single" valueAllowed="LUFTHANSA TECHNIK AG">Enterprise Name is LUFTHANSA TECHNIK AG</objectValue>
+          </structureObjectRule>`;
   const p70 = placeExample(descript, ruleTargets(R70));
   check('S1-00070: the section is an insertion point', p70.metadata.insertion === true && p70.unreachable === null);
   const rpc = (code, name) => minimal.replace('<responsiblePartnerCompany>\n      <enterpriseName>Example company</enterpriseName>', `<responsiblePartnerCompany enterpriseCode="${code}">\n      <enterpriseName>${name}</enterpriseName>`);
@@ -1394,6 +1405,96 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('no runnable: text EN', en('records.ruleTest.verdicts.noRunnableSchema', { schema: 'sb', count: 4, problem: '<levelledPara> is not allowed inside <sbSummary>', more: en('records.ruleTest.verdicts.noRunnableMore', { count: 2 }) }) === 'The 4 examples of the sb schema are not valid there: <levelledPara> is not allowed inside <sbSummary> (and 2 more problems).');
   check('no runnable: text ES', es('records.ruleTest.verdicts.noRunnableSchema', { schema: 'sb', count: 1, problem: 'x', more: '' }) === 'El ejemplo del esquema sb no es válido en él: x.');
   check('no runnable: record unchanged', JSON.stringify((await import("../src/utils/ruleTestReasons.js")).verdictToTestRecord(rBad.verdict)) === '{"result":"inconclusive","reason":{"code":"test_no_runnable","params":{}}}');
+}
+
+// ─── Templates round: the curated rules that were rewritten or replaced ────
+// Real rules of public/brdp-template-4-1.xlsx and -4-2.xlsx, run through
+// the same placement, assembly, validation and engine as the panel.
+{
+  const S41 = 'S1000D 4.1';
+  const S42 = 'S1000D 4.2';
+  const vocab41 = vocabOf('schema-vocabulary-4-1.json');
+  const t41 = readPublicTemplate('brdp-template-4-1.xlsx');
+  const t42 = readPublicTemplate('brdp-template-4-2.xlsx');
+  const rule41 = (id) => t41.find((r) => r.ID === id)?.Rule;
+  const rule42 = (id) => t42.find((r) => r.ID === id)?.Rule;
+  check('templates: replaced 4.1 rows are gone', !rule41('BRDP-EXT-00027') && !rule41('BRDP-EXT-00044'));
+  check('templates: replaced 4.2 row is gone', !rule42('BRDP-S1-00070') && Boolean(rule42('BRDP-S1-00187')));
+  const run41 = (rule, examples, schemas) => testRun(rule, examples, setupFor(S41, rule, schemas), { format: 'BREX-4.1', vocab: vocab41 });
+  const statuses = (r) => r.runs.map((x) => x.result?.status || `invalid:${JSON.stringify(x.validation)}`).join();
+
+  // Predicates now say where the example goes: a path that selects content
+  // with a predicate on dmStatus needs the section written too.
+  const R14 = rule41('BRDP-EXT-00014');
+  const d41 = structureOf(S41, 'descript');
+  const p14 = placeExample(d41, ruleTargets(R14));
+  check('EXT-00014: predicate on dmStatus → the LLM writes the section and the content', p14.metadata.insertion === true && p14.contentInsertion === true && p14.unreachable === null, JSON.stringify({ m: p14.metadata.insertion, c: p14.contentInsertion }));
+  const min41 = metadataXml(d41.skeleton.metadata.tree).xml;
+  const issueType = (v) => min41.replace('<dmStatus>', `<dmStatus issueType="${v}">`);
+  const r14 = run41(R14, [
+    { label: 'changed', expected: 'accept', schema: 'descript', content: 'Torque the bolt <changeInline changeMark="1">to 25 N.m</changeInline>.', metadata: issueType('changed') },
+    { label: 'new', expected: 'reject', schema: 'descript', content: 'Torque the bolt <changeInline changeMark="1">to 25 N.m</changeInline>.', metadata: issueType('new') },
+  ], ['descript']);
+  check('EXT-00014: change mark in a changed DM accepted, in a new one rejected', statuses(r14) === 'accepted,rejected' && r14.verdict.kind === 'correct', statuses(r14));
+
+  const R36 = rule41('BRDP-EXT-00036');
+  const p36 = placeExample(d41, ruleTargets(R36));
+  check('EXT-00036: metadata only', p36.metadata.insertion === true && p36.contentInsertion === false);
+  const issue = (no, type) => issueType(type).replace(/issueNumber="\d+"/, `issueNumber="${no}"`);
+  const r36 = run41(R36, [
+    { label: '001 new', expected: 'accept', schema: 'descript', content: '', metadata: issue('001', 'new') },
+    { label: '001 changed', expected: 'reject', schema: 'descript', content: '', metadata: issue('001', 'changed') },
+    { label: '002 changed', expected: 'accept', schema: 'descript', content: '', metadata: issue('002', 'changed') },
+  ], ['descript']);
+  check('EXT-00036: issue 001 must be new', statuses(r36) === 'accepted,rejected,accepted' && r36.verdict.kind === 'correct', statuses(r36));
+
+  const R40 = rule41('BRDP-EXT-00040');
+  const r40 = run41(R40, [
+    { label: 'words', expected: 'accept', schema: 'descript', content: 'Set the valve <changeInline changeMark="1">to the open position</changeInline>.' },
+    { label: 'element', expected: 'reject', schema: 'descript', content: '<changeInline changeMark="1"><emphasis>Warning lights</emphasis></changeInline> come on.' },
+  ], ['descript']);
+  check('EXT-00040: changeInline around a whole element rejected, around words accepted', statuses(r40) === 'accepted,rejected' && r40.verdict.kind === 'correct', statuses(r40));
+
+  const R41 = rule41('BRDP-EXT-00041');
+  const r41 = run41(R41, [
+    { label: 'live target', expected: 'accept', schema: 'descript', content: 'See <internalRef internalRefId="par-0002"/> and <changeInline changeType="delete" id="chg-0001">old text</changeInline>.' },
+    { label: 'deleted target', expected: 'reject', schema: 'descript', content: 'See <internalRef internalRefId="chg-0001"/> and <changeInline changeType="delete" id="chg-0001">old text</changeInline>.' },
+  ], ['descript']);
+  check('EXT-00041: reference to deleted information rejected', statuses(r41) === 'accepted,rejected' && r41.verdict.kind === 'correct', statuses(r41));
+
+  // EXT-00019: the 4.x data update file has its own minimal section now;
+  // the predicate on updateCode makes the LLM write it, the one on the CIR
+  // elements the content.
+  const R19 = rule41('BRDP-EXT-00019');
+  const u41 = structureOf(S41, 'update');
+  check('update: the data update file has an identification and status section', u41.skeleton.metadata?.element === 'updateIdentAndStatusSection');
+  const p19 = placeExample(u41, ruleTargets(R19));
+  check('EXT-00019: section and content both in the LLM\'s hands', p19.metadata.insertion === true && p19.contentInsertion === true && p19.insertion === 'update', JSON.stringify({ m: p19.metadata.insertion, c: p19.contentInsertion, i: p19.insertion }));
+  const minU = metadataXml(u41.skeleton.metadata.tree).xml;
+  const tool = (code) => minU.replace(/(<updateCode [^>]*)infoCode="040"/, `$1infoCode="${code}"`);
+  check('EXT-00019: the minimal section carries updateCode/@infoCode 040', tool('00N') !== minU);
+  const r19 = run41(R19, [
+    { label: 'tools', expected: 'accept', schema: 'update', content: '<insertObjectGroup><insertObject><toolSpec/></insertObject></insertObjectGroup>', metadata: tool('00N') },
+    { label: 'part in tool CIR', expected: 'reject', schema: 'update', content: '<insertObjectGroup><insertObject><partSpec/></insertObject></insertObjectGroup>', metadata: tool('00N') },
+    { label: 'part in parts CIR', expected: 'accept', schema: 'update', content: '<insertObjectGroup><insertObject><partSpec/></insertObject></insertObjectGroup>', metadata: tool('00E') },
+  ], ['update']);
+  check('EXT-00019: a part in the tool CIR rejected, in another CIR accepted', statuses(r19) === 'accepted,rejected,accepted' && r19.verdict.kind === 'correct', statuses(r19));
+
+  // 4.2
+  const R187 = rule42('BRDP-S1-00187');
+  const r187 = testRun(R187, [
+    { label: 'two substeps', expected: 'accept', schema: 'proced', content: '<proceduralStep><para>Remove the panel.</para><proceduralStep><para>Remove the screws.</para></proceduralStep><proceduralStep><para>Lift the panel.</para></proceduralStep></proceduralStep>' },
+    { label: 'one substep', expected: 'reject', schema: 'proced', content: '<proceduralStep><para>Remove the panel.</para><proceduralStep><para>Remove the screws.</para></proceduralStep></proceduralStep>' },
+  ], setupFor(S42, R187, ['proced']));
+  check('S1-00187: a single substep rejected, two accepted', statuses(r187) === 'accepted,rejected' && r187.verdict.kind === 'correct', statuses(r187));
+  const R507 = rule42('BRDP-S1-00507');
+  const list = (attr) => `<randomList${attr}><listItem><para>Item</para></listItem></randomList>`;
+  const r507 = testRun(R507, [
+    { label: 'default', expected: 'accept', schema: 'descript', content: list('') },
+    { label: 'pf02', expected: 'accept', schema: 'descript', content: list(' listItemPrefix="pf02"') },
+    { label: 'pf07', expected: 'reject', schema: 'descript', content: list(' listItemPrefix="pf07"') },
+  ], setupFor(S42, R507, ['descript']));
+  check('S1-00507: listItemPrefix other than pf02 rejected, absent or pf02 accepted', statuses(r507) === 'accepted,accepted,rejected' && r507.verdict.kind === 'correct', statuses(r507));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

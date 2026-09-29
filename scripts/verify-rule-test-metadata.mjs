@@ -45,7 +45,19 @@ const R52 = `<structureObjectRule id="BRDP-S1-00052">
   <objectValue valueForm="single" valueAllowed="055"/>
   <objectValue valueForm="single" valueAllowed="930"/>
 </structureObjectRule>`;
-const R70 = readPublicTemplate("brdp-template-4-2.xlsx").find((r) => r.ID === "BRDP-S1-00070").Rule;
+// S1-00070 as the 4.2 template shipped it until the templates round (the row
+// was replaced: Lufthansa's own CAGE code is no example for other projects);
+// still a good case of a rule on the section and the content.
+const R70 = `<structureObjectRule>
+            <objectPath allowedObjectFlag="1">//responsiblePartnerCompany/@enterpriseCode</objectPath>
+            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseCode must be C1008 (Lufthansa Technik AG's CAGE code). </objectUse>
+            <objectValue valueForm="single" valueAllowed="C1008">CAGE code for LUFTHANSA TECHNIK AG is C1008</objectValue>
+          </structureObjectRule>
+<structureObjectRule>
+            <objectPath allowedObjectFlag="1">//responsiblePartnerCompany/enterpriseName</objectPath>
+            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseName must be 'LUFTHANSA TECHNIK AG'. </objectUse>
+            <objectValue valueForm="single" valueAllowed="LUFTHANSA TECHNIK AG">Enterprise Name is LUFTHANSA TECHNIK AG</objectValue>
+          </structureObjectRule>`;
 const R316 = `<structureObjectRule id="BRDP-S1-00316">
   <objectPath allowedObjectFlag="0">//dmStatus/applicRef | //pmStatus/applicRef</objectPath>
   <objectUse>Applicability is written in the status, never referenced.</objectUse>
@@ -148,7 +160,17 @@ async function main() {
   const p301 = await makeProject("Rule test metadata 3.0.1", "S1000D 3.0.1");
   const b301 = await makeBrdp(p301, { identifier: "BRDP-MD-301", title: "Issue types", proposal: "Only new and changed issues shall be delivered." });
   await putDraft(p301, b301, "BREX-3.0.1", R301);
-  for (const p of [p42, p301]) await embed(p);
+  // Templates round: the curated 4.1 rules that need the section -- the data
+  // update file's (EXT-00019, tool CIR) and a content path whose predicate
+  // reads dmStatus (EXT-00014) -- with their real template rows.
+  const t41 = readPublicTemplate("brdp-template-4-1.xlsx");
+  const row41 = (id) => t41.find((r) => r.ID === id);
+  const p41 = await makeProject("Rule test metadata 4.1", "S1000D 4.1");
+  const b19 = await makeBrdp(p41, { identifier: "BRDP-EXT-00019", title: row41("BRDP-EXT-00019").Title, proposal: row41("BRDP-EXT-00019").Proposal });
+  const b14 = await makeBrdp(p41, { identifier: "BRDP-EXT-00014", title: row41("BRDP-EXT-00014").Title, proposal: row41("BRDP-EXT-00014").Proposal });
+  await putDraft(p41, b19, "BREX-4.1", row41("BRDP-EXT-00019").Rule);
+  await putDraft(p41, b14, "BREX-4.1", row41("BRDP-EXT-00014").Rule);
+  for (const p of [p42, p301, p41]) await embed(p);
 
   // ---- UI ----
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
@@ -203,7 +225,7 @@ async function main() {
     await panel().screenshot({ path: "/tmp/rule-test-metadata-infocode.png" });
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "S1-00052: recorded as passed");
 
-    // 2. S1-00070 (real template rule): tested for real.
+    // 2. S1-00070 (the former template rule): tested for real.
     await select("BRDP-S1-00070");
     await page.getByRole("button", { name: "Test rule" }).click();
     await verdict().waitFor({ timeout: 15000 });
@@ -303,6 +325,25 @@ async function main() {
     assert(sys301.includes('your "metadata" is the WHOLE <idstatus>'), "3.0.1: idstatus is the insertion point");
     assert((await verdict().textContent()).startsWith("Correct"), `3.0.1: verdict correct (${await verdict().textContent()})`);
     assert((await example(1).locator("pre").textContent()).includes('type="revised"'), "3.0.1: the revised issue in idstatus");
+
+    // 7. Templates round: 4.1 curated rules.
+    await openProject(p41);
+    await select("BRDP-EXT-00019");
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await verdict().waitFor({ timeout: 15000 });
+    const sys19 = systemOf(await lastRequest());
+    assert(sys19.includes("<updateIdentAndStatusSection>") && sys19.includes('schema "update"'), "EXT-00019: the prompt offers the data update file's minimal section");
+    assert((await verdict().textContent()).startsWith("Correct"), `EXT-00019: verdict correct (${await verdict().textContent()})`);
+    assert((await example(1).locator("pre").textContent()).includes('infoCode="00N"') && (await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "EXT-00019: a part in the tool CIR rejected");
+    assert((await example(2).getByTestId("rule-test-result").textContent()).includes("accepted ✓"), "EXT-00019: a part in another CIR accepted");
+    await panel().screenshot({ path: "/tmp/rule-test-template-tool-cir.png" });
+    await select("BRDP-EXT-00014");
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await verdict().waitFor({ timeout: 15000 });
+    const sys14 = systemOf(await lastRequest());
+    assert(sys14.includes("The rule also looks at the data module's identification and status section:"), "EXT-00014: section and content both offered (predicate on dmStatus)");
+    assert((await verdict().textContent()).startsWith("Correct"), `EXT-00014: verdict correct (${await verdict().textContent()})`);
+    assert((await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "EXT-00014: change mark in a new issue rejected");
   } finally {
     await browser.close();
     for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" });

@@ -273,11 +273,17 @@ const TEMPLATE_CASES = {
       bad: '<randomList><listItem><para>a</para><randomList><listItem><para>b</para></listItem></randomList></listItem></randomList>',
       good: '<randomList><listItem><para>a</para></listItem></randomList>',
       partial: NON_CONTEXT,
+      // Templates round: second rule, listItemPrefix must be pf02 (a
+      // randomList without the attribute uses the default, pf02).
+      alsoBad: ['<randomList listItemPrefix="pf07"><listItem><para>a</para></listItem></randomList>'],
+      alsoGood: ['<randomList listItemPrefix="pf02"><listItem><para>a</para></listItem></randomList>'],
     },
     'BRDP-S1-00053': { bad: '<dmStatus issueType="revised"/>', good: '<dmStatus issueType="changed"/>' },
-    'BRDP-S1-00070': {
-      bad: DM('<responsiblePartnerCompany enterpriseCode="K0001"><enterpriseName>LUFTHANSA TECHNIK AG</enterpriseName></responsiblePartnerCompany>'),
-      good: DM('<responsiblePartnerCompany enterpriseCode="C1008"><enterpriseName>LUFTHANSA TECHNIK AG</enterpriseName></responsiblePartnerCompany>'),
+    // Templates round: replaces BRDP-S1-00070 (Lufthansa's own CAGE code).
+    'BRDP-S1-00187': {
+      schema: 'proced',
+      bad: '<mainProcedure><proceduralStep><para>a</para><proceduralStep><para>only one</para></proceduralStep></proceduralStep></mainProcedure>',
+      good: '<mainProcedure><proceduralStep><para>a</para><proceduralStep><para>b</para></proceduralStep><proceduralStep><para>c</para></proceduralStep></proceduralStep><proceduralStep><para>d</para></proceduralStep></mainProcedure>',
     },
     'BRDP-S1-00219': {
       schema: 'ipd',
@@ -298,14 +304,35 @@ const TEMPLATE_CASES = {
     },
   },
   'BREX-4.1': {
-    'BRDP-EXT-00027': { never: '<dmodule><content/></dmodule>' },
+    // Templates round: replaces BRDP-EXT-00027 (the root must be dmodule --
+    // nothing to reject in a data module).
+    'BRDP-EXT-00036': {
+      bad: '<dmodule><identAndStatusSection><dmAddress><dmIdent><issueInfo issueNumber="001" inWork="00"/></dmIdent></dmAddress><dmStatus issueType="changed"/></identAndStatusSection></dmodule>',
+      good: '<dmodule><identAndStatusSection><dmAddress><dmIdent><issueInfo issueNumber="001" inWork="00"/></dmIdent></dmAddress><dmStatus issueType="new"/></identAndStatusSection></dmodule>',
+      alsoGood: ['<dmodule><identAndStatusSection><dmAddress><dmIdent><issueInfo issueNumber="002" inWork="00"/></dmIdent></dmAddress><dmStatus issueType="changed"/></identAndStatusSection></dmodule>'],
+    },
     'BRDP-EXT-00037': {
       bad: '<dmodule><identAndStatusSection><dmAddress><dmIdent><issueInfo issueNumber="001" inWork="00"/></dmIdent></dmAddress><dmStatus><reasonForUpdate/></dmStatus></identAndStatusSection></dmodule>',
       good: '<dmodule><identAndStatusSection><dmAddress><dmIdent><issueInfo issueNumber="001" inWork="00"/></dmIdent></dmAddress><dmStatus/></identAndStatusSection></dmodule>',
     },
-    'BRDP-EXT-00040': { never: '<para><changeInline>x</changeInline></para>' },
-    'BRDP-EXT-00041': { never: '<para><internalRef internalRefId="fig-0001"/></para>' },
-    'BRDP-EXT-00044': { never: '<para changeMark="1">x</para>' },
+    // Templates round: rewritten from flag 2 without values (nothing could
+    // break them) to rules that reject what their objectUse says.
+    'BRDP-EXT-00040': {
+      bad: '<para><changeInline changeMark="1"><emphasis>All</emphasis></changeInline> of it</para>',
+      good: '<para>Text <changeInline changeMark="1">new words</changeInline>.</para>',
+      alsoBad: ['<para><changeInline changeMark="1"> <emphasis>a</emphasis> <emphasis>b</emphasis> </changeInline></para>'],
+    },
+    'BRDP-EXT-00041': {
+      bad: '<content><para id="par-0001" changeType="delete">Old</para><para><internalRef internalRefId="par-0001"/></para></content>',
+      good: '<content><para id="par-0001" changeType="delete">Old</para><para><internalRef internalRefId="par-0002"/></para><para id="par-0002">New</para></content>',
+    },
+    // Replaces BRDP-EXT-00044 ("editorial changes must not be marked": the
+    // meaning of updateReasonType urt01–urt99 is not in the schema or sources/).
+    'BRDP-EXT-00014': {
+      bad: '<dmodule><identAndStatusSection><dmStatus issueType="new"/></identAndStatusSection><content><para changeMark="1">x</para></content></dmodule>',
+      good: '<dmodule><identAndStatusSection><dmStatus issueType="changed"/></identAndStatusSection><content><para changeMark="1">x</para></content></dmodule>',
+      alsoGood: ['<dmodule><identAndStatusSection><dmStatus issueType="new"/></identAndStatusSection><content><para>x</para></content></dmodule>'],
+    },
     'BRDP-EXT-00007': {
       schema: 'dml',
       bad: '<dml><dmlIdent><dmlCode dmlType="s"/></dmlIdent><dmlContent><dmlEntry><answer/></dmlEntry></dmlContent></dml>',
@@ -316,10 +343,12 @@ const TEMPLATE_CASES = {
       bad: '<pm><identAndStatusSection><pmStatus issueType="new"/></identAndStatusSection><content><pmEntry changeMark="1"/></content></pm>',
       good: '<pm><identAndStatusSection><pmStatus issueType="changed"/></identAndStatusSection><content><pmEntry changeMark="1"/></content></pm>',
     },
+    // Templates round: was a boolean expression (and/or); now a path.
     'BRDP-EXT-00019': {
       schema: 'update',
-      notExecutable: "The rule's path does not select nodes (it returns a boolean), so there is nothing to judge.",
-      fragment: '<dataUpdateFile><updateCode infoCode="00N"/><partSpec/></dataUpdateFile>',
+      bad: '<dataUpdateFile><updateIdentAndStatusSection><updateAddress><updateIdent><updateCode infoCode="00N"/></updateIdent></updateAddress></updateIdentAndStatusSection><content><update><insertObjectGroup><insertObject><partSpec/></insertObject></insertObjectGroup></update></content></dataUpdateFile>',
+      good: '<dataUpdateFile><updateIdentAndStatusSection><updateAddress><updateIdent><updateCode infoCode="00N"/></updateIdent></updateAddress></updateIdentAndStatusSection><content><update><insertObjectGroup><insertObject><toolSpec/></insertObject></insertObjectGroup></update></content></dataUpdateFile>',
+      alsoGood: ['<dataUpdateFile><updateIdentAndStatusSection><updateAddress><updateIdent><updateCode infoCode="00E"/></updateIdent></updateAddress></updateIdentAndStatusSection><content><update><insertObjectGroup><insertObject><partSpec/></insertObject></insertObjectGroup></update></content></dataUpdateFile>'],
     },
     'BRDP-EXT-00001': {
       schema: 'dml',
@@ -398,6 +427,8 @@ for (const [format, suffix] of Object.entries(TEMPLATE_FILES)) {
     const bad = expect(`${name}, breaking fragment`, run(row.Rule, format, c.bad, schema), 'rejected', extra);
     check(`${name}: breaking fragment has node paths`, bad.violations.every((v) => v.nodePaths.length > 0), JSON.stringify(bad.violations));
     expect(`${name}, complying fragment`, run(row.Rule, format, c.good, c.goodSchema || schema), 'accepted', extra);
+    (c.alsoBad || []).forEach((f, i) => expect(`${name}, breaking fragment ${i + 2}`, run(row.Rule, format, f, schema), 'rejected', extra));
+    (c.alsoGood || []).forEach((f, i) => expect(`${name}, complying fragment ${i + 2}`, run(row.Rule, format, f, schema), 'accepted', extra));
     if (c.partial) notExecutableInTemplates.push(`${format} ${row.ID} (part): ${c.partial}`);
   }
 }

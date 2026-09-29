@@ -10,6 +10,13 @@
 //     Schematron message) says "must not" / "shall not" / "no debe" … but
 //     its semantics allow the node;
 //   - not executable (whole rule) or partially executable, with the reason.
+//     Reasons that are known and accepted -- the rule is right, the test
+//     simply cannot run it here: another file (doc-available(), doc(),
+//     document(): the DITA templates read the ditamap), a value replaced
+//     outside the app (@@URI-CARPETA-DOSIER@@, filled in by an external
+//     script) and a nonContextRule (a BREX rule with no XPath by design) --
+//     go to a separate "Known, not testable here" section and are not
+//     counted as findings.
 //   - not a rule of the format (C2, Part 0): what Paste rule, the manual
 //     editor and PUT …/approvals/{format} would now refuse -- loose text, a
 //     wrapper such as <rules>, or an element of another format.
@@ -78,6 +85,13 @@ function namespaceDecls(xml) {
 const escCell = (s) => String(s).replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 const clip = (s, n = 140) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
+const KNOWN_REASON_CODES = new Set(['external_document', 'external_placeholder', 'non_context_rule']);
+function isKnownReason(reason) {
+  if (!reason) return false;
+  if (reason.code === 'parts') return (reason.params?.parts || []).every((p) => isKnownReason(p.reason));
+  return KNOWN_REASON_CODES.has(reason.code);
+}
+
 function lintRule(ruleXml, format) {
   const findings = [];
   // C2, Part 0: the same check Paste rule, the manual editor and
@@ -88,9 +102,9 @@ function lintRule(ruleXml, format) {
   }
   const analysis = analyzeRule(ruleXml, format, { parseXml });
   if (analysis.status === 'not_executable') {
-    findings.push({ kind: 'not executable', detail: formatRuleTestReason(analysis.reason, t) });
+    findings.push({ kind: 'not executable', detail: formatRuleTestReason(analysis.reason, t), known: isKnownReason(analysis.reason) });
   } else if (analysis.status === 'partial') {
-    findings.push({ kind: 'partially executable', detail: formatRuleTestReason(analysis.reason, t) });
+    findings.push({ kind: 'partially executable', detail: formatRuleTestReason(analysis.reason, t), known: isKnownReason(analysis.reason) });
   }
   const description = describeRule(ruleXml, format, { parseXml });
   if (description.available && description.cannotReject) {
@@ -116,16 +130,24 @@ function lintRule(ruleXml, format) {
 }
 
 let total = 0;
+const known = [];
 for (const [standard, file] of Object.entries(CURATED_TEMPLATE_BY_STANDARD)) {
   const format = STANDARD_TO_RULE_FORMAT[standard];
   const rows = readPublicTemplate(file).filter((r) => String(r.Rule || '').trim());
   const lines = [];
   for (const row of rows) {
-    for (const f of lintRule(String(row.Rule), format)) lines.push(`| ${row.ID} | ${f.kind} | ${escCell(f.detail)} |`);
+    for (const f of lintRule(String(row.Rule), format)) {
+      const line = `| ${row.ID} | ${f.kind} | ${escCell(f.detail)} |`;
+      if (f.known) known.push(`| ${file.slice(1)} |${line.slice(1)}`);
+      else lines.push(line);
+    }
   }
   total += lines.length;
   console.log(`\n### ${file.slice(1)} — ${standard} (${format}), ${rows.length} rules\n`);
   if (lines.length === 0) console.log('No findings.');
   else console.log(['| Rule | Finding | Detail |', '|---|---|---|', ...lines].join('\n'));
 }
+console.log('\n### Known, not testable here (not counted)\n');
+if (known.length === 0) console.log('None.');
+else console.log(['| Template | Rule | Finding | Detail |', '|---|---|---|---|', ...known].join('\n'));
 console.log(`\n${total} finding(s).`);

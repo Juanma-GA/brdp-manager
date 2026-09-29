@@ -75,6 +75,7 @@ import { validateXML } from "xmllint-wasm";
 import { distinctSchemaNames, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
 import { importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
+import { readPublicTemplate } from "./lib/readXlsx.mjs";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
@@ -780,6 +781,16 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const casesFile = args.casesPath ? path.resolve(args.casesPath) : CASES_PATH;
   const { cases } = JSON.parse(fs.readFileSync(casesFile, "utf8"));
+  // Templates round: a case can take its BRDP and rule from a row of a
+  // curated template ("templateRow": {"file", "id"}), so the case always
+  // tests the rule the template really ships, never a copy of it.
+  for (const c of cases) {
+    if (!c.templateRow) continue;
+    const row = readPublicTemplate(c.templateRow.file).find((r) => r.ID === c.templateRow.id);
+    if (!row) throw new Error(`${c.id}: ${c.templateRow.id} not found in ${c.templateRow.file}`);
+    c.brdp = { identifier: row.ID, title: row.Title, definition: row.Definition, proposal: row.Proposal, validation: row["Proposal Status"] || "Validated" };
+    c.rule = row.Rule;
+  }
   const selectedCases = args.only ? cases.filter((c) => c.id === args.only) : cases;
   if (selectedCases.length === 0) throw new Error(`No cases matched --only ${args.only}`);
 

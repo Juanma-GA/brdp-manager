@@ -27,7 +27,7 @@
 // context anchored at the document root (/*, /topic) makes the example the
 // whole document: the LLM writes the complete root element.
 import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js';
-import { extractRuleXPaths } from '../validation/schemaValidation.js';
+import { extractRuleXPaths, extractXPathNames } from '../validation/schemaValidation.js';
 
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -53,6 +53,40 @@ function stripPredicates(expression) {
     else if (depth === 0) out += ch;
   }
   return out;
+}
+
+// The text inside the predicates ([…], nested ones included), one
+// fragment per top-level predicate, joined so the name extractor never glues
+// two of them together. String literals are kept (the extractor skips them).
+function predicateText(expression) {
+  const parts = [];
+  let current = '';
+  let depth = 0;
+  let quote = '';
+  for (const ch of expression) {
+    if (quote) {
+      if (depth > 0) current += ch;
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      if (depth > 0) current += ch;
+      continue;
+    }
+    if (ch === '[') {
+      if (depth > 0) current += ch;
+      depth += 1;
+    } else if (ch === ']') {
+      depth = Math.max(0, depth - 1);
+      if (depth > 0) current += ch;
+      else {
+        parts.push(current);
+        current = '';
+      }
+    } else if (depth > 0) current += ch;
+  }
+  return parts.join(' , ');
 }
 
 // Splits on `sep` at parenthesis depth 0.
@@ -187,17 +221,30 @@ function isRootContext(alternative) {
 // { checked: [element names], absolutePrefixes: [[names]], wholeDocument }
 // wholeDocument: a Schematron context that matches the document's root
 // element -- the example has to be a whole document.
+// predicateNames: the element names the predicates of the rule's paths
+// (BREX) or contexts (Schematron) mention -- a rule whose path selects
+// content nodes but whose predicate reads the metadata
+// (//*[@changeMark = '1' and ancestor::dmodule[identAndStatusSection/dmStatus[…]]])
+// needs both parts written by the LLM; see classifyRuleTargets.
 export function ruleTargets(ruleXml) {
   const out = { checked: new Set(), absolutePrefixes: [], alternatives: [] };
   const contexts = schematronContexts(ruleXml);
+  const predicateNames = new Set();
   let wholeDocument = false;
   for (const expression of contexts.length ? contexts : extractRuleXPaths(ruleXml || '')) {
     for (const alternative of splitTopLevel(stripPredicates(expression), '|')) {
       if (contexts.length && isRootContext(alternative)) wholeDocument = true;
       analyzeAlternative(alternative, out);
     }
+    for (const name of extractXPathNames(predicateText(expression)).elements) predicateNames.add(name);
   }
-  return { checked: [...out.checked], absolutePrefixes: out.absolutePrefixes, alternatives: out.alternatives, wholeDocument };
+  return {
+    checked: [...out.checked],
+    absolutePrefixes: out.absolutePrefixes,
+    alternatives: out.alternatives,
+    predicateNames: [...predicateNames],
+    wholeDocument,
+  };
 }
 
 // ─── Which schemas the examples use ─────────────────────────────────────────
@@ -354,7 +401,10 @@ function treeNames(node, out = new Set()) {
 // its element steps are in C (an attribute-only one: when an element in C
 // carries the attribute). An absolute path says where it goes by its second
 // step. An alternative that can be neither is unreachable; an opaque one
-// (steps that cannot be read) counts as content, as before.
+// (steps that cannot be read) counts as content, as before. The element
+// names in the predicates (targets.predicateNames) add the part they belong
+// to: a predicate on dmStatus/@issueType puts the section in the LLM's hands
+// even when the path selects content nodes.
 // → { metadata, content, contentAlternatives, unreachable } -- unreachable:
 // the names the rule looks at when EVERY alternative is unreachable (the
 // examples can never contain what it checks), else null.
@@ -415,7 +465,14 @@ export function classifyRuleTargets(structure, targets) {
     );
   }
   if (alternatives.length === 0) content = true;
-  const unreachable = alternatives.length > 0 && allUnreachable ? [...new Set(unreachableNames)] : null;
+  // A predicate that reads the other part: an element only the section has
+  // (dmStatus, updateCode, …) makes the LLM write the section too; an
+  // element only the content has (zoneSpec, …), the content.
+  const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n]);
+  if (section && predicateNames.some((n) => M.has(n) && !C.has(n))) metadata = true;
+  if (predicateNames.some((n) => C.has(n) && !M.has(n))) content = true;
+  const unreachable =
+    alternatives.length > 0 && allUnreachable && !metadata && !content ? [...new Set(unreachableNames)] : null;
   // A rule nothing can be said about keeps the content placement.
   if (!metadata && !content && !unreachable) content = true;
   return { metadata, content, contentAlternatives, unreachable };

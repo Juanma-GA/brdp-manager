@@ -348,6 +348,48 @@ _METADATA_TEMPLATE_301 = (
     ],
 )
 
+# 4.x data update file (update.xsd, root dataUpdateFile): the same idea for
+# its updateIdentAndStatusSection -- the update's own address (updateCode,
+# where @infoCode tells which CIR the file updates: 00N tools, …), its status
+# (source data module, target issue, the project's BREX) and the status of
+# the target data module. Added for the curated template's tool-CIR rule
+# (BRDP-EXT-00019, //updateCode[@infoCode='00N']): without it no example can
+# say which CIR it is.
+_DM_CODE_BREX = ("dmCode", {"infoCode": "022", "itemLocationCode": "D"}, None, [])
+_BREX_DM_REF_4X = ("brexDmRef", {}, None, [("dmRef", {}, None, [("dmRefIdent", {}, None, [_DM_CODE_BREX])])])
+_METADATA_TEMPLATE_UPDATE_4X = (
+    "updateIdentAndStatusSection", {}, None, [
+        ("updateAddress", {}, None, [
+            ("updateIdent", {}, None, [
+                ("updateCode", {"objectIdentCode": "DMC"}, None, []),
+                ("language", {}, None, []),
+                ("issueInfo", {}, None, []),
+            ]),
+            ("issueDate", {}, None, []),
+        ]),
+        ("updateStatus", {}, None, [
+            ("sourceDmIdent", {}, None, [
+                ("dmCode", {}, None, []),
+                ("language", {}, None, []),
+                ("issueInfo", {}, None, []),
+            ]),
+            ("targetDmIssueInfo", {}, None, []),
+            ("responsiblePartnerCompany", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("originator", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            _BREX_DM_REF_4X,
+            ("qualityAssurance", {}, None, [("unverified", {}, None, [])]),
+        ]),
+        ("targetDmStatus", {}, None, [
+            ("security", {}, None, []),
+            ("responsiblePartnerCompany", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("originator", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("applic", {}, None, [("displayText", {}, None, [("simplePara", {}, "All", [])])]),
+            _BREX_DM_REF_4X,
+            ("qualityAssurance", {}, None, [("unverified", {}, None, [])]),
+        ]),
+    ],
+)
+
 # Values of the required attributes that have no enum (keyed by attribute
 # name; the XSD patterns they must follow are checked by the tests).
 METADATA_ATTRIBUTE_VALUES = {
@@ -366,7 +408,13 @@ METADATA_ATTRIBUTE_VALUES = {
 METADATA_TEMPLATES = {
     "identAndStatusSection": _METADATA_TEMPLATE_4X,
     "idstatus": _METADATA_TEMPLATE_301,
+    "updateIdentAndStatusSection": _METADATA_TEMPLATE_UPDATE_4X,
 }
+
+# Roots whose identification and status section a template covers. The
+# other documents (pm, dml, ddn, comment, …) have their own status elements
+# (pmStatus, dmlStatus, …): not covered yet.
+_METADATA_ROOTS = {"dmodule", "dataUpdateFile"}
 
 
 def _card_variant(cards: dict, name: str, schema: str) -> dict | None:
@@ -411,9 +459,9 @@ def _metadata_tree(cards: dict, graph: dict[str, dict], schema: str, node: tuple
 @lru_cache(maxsize=256)
 def derive_metadata_skeleton(standard: str, schema: str) -> dict | None:
     """{"element", "tree"} -- the minimal identification and status section of
-    a data module schema (see above) -- or None: DITA, a document that is not
-    a data module (pm, dml, ddn, comment, …: their status sections are not
-    covered yet), or cards that do not fit the template."""
+    a data module schema or of the 4.x data update file (see above) -- or
+    None: DITA, another document (pm, dml, ddn, comment, …: their status
+    sections are not covered yet), or cards that do not fit the template."""
     if is_dita_standard(standard):
         return None
     graph = schema_graph(standard, schema)
@@ -421,7 +469,7 @@ def derive_metadata_skeleton(standard: str, schema: str) -> dict | None:
     if graph is None or data is None:
         return None
     root = _root_of(graph)
-    if root != "dmodule":
+    if root not in _METADATA_ROOTS:
         return None
     for element, template in METADATA_TEMPLATES.items():
         if element in graph[root]["children"]:

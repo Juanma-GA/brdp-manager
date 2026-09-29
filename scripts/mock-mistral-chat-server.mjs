@@ -154,6 +154,23 @@ function metadataReply(systemPrompt, rule, answer) {
   const base = minimal.join("\n");
   const ex = (label, expected, metadata, content) => ({ label, expected, schema, metadata, ...(content !== undefined ? { content } : {}) });
   const ownCode = (attr, value) => base.replace(new RegExp(`(<dmIdent>\\s*<dmCode [^>]*?)${attr}="[^"]*"`), `$1${attr}="${value}"`);
+  // Templates round: the curated 4.1 rules. The data update file's tool
+  // CIR (updateCode/@infoCode 00N, section + content), change marks in a
+  // data module that is not "changed" (section + content), issue 001 new.
+  if (/updateCode/.test(rule)) {
+    const cir = (code) => base.replace(/(<updateCode [^>]*?)infoCode="[^"]*"/, `$1infoCode="${code}"`);
+    const insert = (el) => `<insertObjectGroup><insertObject><${el}/></insertObject></insertObjectGroup>`;
+    return answer([ex("Tool in the tool CIR", "accept", cir("00N"), insert("toolSpec")), ex("Part in the tool CIR", "reject", cir("00N"), insert("partSpec")), ex("Part in the parts CIR", "accept", cir("00E"), insert("partSpec"))]);
+  }
+  if (/changeMark/.test(rule) && /issueType/.test(rule)) {
+    const type = (value) => base.replace("<dmStatus>", `<dmStatus issueType="${value}">`);
+    const marked = 'Torque the bolts <changeInline changeMark="1">to 25 N.m</changeInline>.';
+    return answer([ex("Change mark in a changed issue", "accept", type("changed"), marked), ex("Change mark in a new issue", "reject", type("new"), marked)]);
+  }
+  if (/issueNumber = "001"/.test(rule)) {
+    const type = (value) => base.replace("<dmStatus>", `<dmStatus issueType="${value}">`);
+    return answer([ex("Issue 001, new", "accept", type("new")), ex("Issue 001, changed", "reject", type("changed"))]);
+  }
   if (/@infoCode/.test(rule)) {
     return answer([ex("Info code 055", "accept", ownCode("infoCode", "055")), ex("Info code 930", "accept", ownCode("infoCode", "930")), ex("Info code 040", "reject", ownCode("infoCode", "040"))]);
   }
@@ -317,6 +334,34 @@ function ruleTestReply(systemPrompt, messages) {
       examples.push({ label: "Description with em03", expected: "accept", schema: otherSchema, content: 'The <emphasis emphasisType="em03">sealant</emphasis> is applied to the threads.' });
     }
     return answer(examples);
+  }
+  // Templates round: the curated content rules.
+  if (/\/\/changeInline\[/.test(rule)) {
+    return answer([
+      { label: "Changed words", expected: "accept", schema: ruleSchema, content: 'Set the valve <changeInline changeMark="1">to the open position</changeInline>.' },
+      { label: "Whole element in changeInline", expected: "reject", schema: ruleSchema, content: '<changeInline changeMark="1"><emphasis>Warning lights</emphasis></changeInline> come on.' },
+    ]);
+  }
+  if (/\/\/internalRef\[/.test(rule)) {
+    return answer([
+      { label: "Reference to live text", expected: "accept", schema: ruleSchema, content: 'See <internalRef internalRefId="fig-0001"/>; <changeInline changeType="delete" id="chg-0001">old text</changeInline>.' },
+      { label: "Reference to deleted text", expected: "reject", schema: ruleSchema, content: 'See <internalRef internalRefId="chg-0001"/>; <changeInline changeType="delete" id="chg-0001">old text</changeInline>.' },
+    ]);
+  }
+  if (/count\(proceduralStep\) = 1/.test(rule)) {
+    const step = (n) => `<proceduralStep><para>Remove the panel.</para>${Array.from({ length: n }, (_, i) => `<proceduralStep><para>Substep ${i + 1}.</para></proceduralStep>`).join("")}</proceduralStep>`;
+    return answer([
+      { label: "Two substeps", expected: "accept", schema: ruleSchema, content: step(2) },
+      { label: "One substep", expected: "reject", schema: ruleSchema, content: step(1) },
+    ]);
+  }
+  if (/listItemPrefix/.test(rule)) {
+    const list = (attr) => `<randomList${attr}><listItem><para>Item</para></listItem></randomList>`;
+    return answer([
+      { label: "Default prefix", expected: "accept", schema: ruleSchema, content: list("") },
+      { label: "Prefix pf02", expected: "accept", schema: ruleSchema, content: list(' listItemPrefix="pf02"') },
+      { label: "Prefix pf07", expected: "reject", schema: ruleSchema, content: list(' listItemPrefix="pf07"') },
+    ]);
   }
   if (otherSchema) {
     return answer([

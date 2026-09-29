@@ -220,8 +220,8 @@ def test_every_data_module_schema_has_a_metadata_section_that_fits_its_cards(sta
     for schema in get_document_schemas(standard):
         skeleton = derive_skeleton(standard, schema)
         metadata = derive_metadata_skeleton(standard, schema)
-        if skeleton["root"] != "dmodule":
-            # pm, dml, ddn, comment, dataUpdateFile, …: not covered yet.
+        if skeleton["root"] not in ("dmodule", "dataUpdateFile"):
+            # pm, dml, ddn, comment, …: not covered yet.
             assert metadata is None, (standard, schema)
             continue
         assert metadata is not None, (standard, schema)
@@ -229,7 +229,7 @@ def test_every_data_module_schema_has_a_metadata_section_that_fits_its_cards(sta
         graph = schema_graph(standard, schema)
         tree = metadata["tree"]
         assert tree["name"] == metadata["element"]
-        assert metadata["element"] in graph["dmodule"]["children"]
+        assert metadata["element"] in graph[skeleton["root"]]["children"]
         for node in _nodes(tree):
             variant = next(v for v in cards[node["name"]] if schema in v["schemas"])
             declared = {a["name"]: a for a in variant["attributes"]}
@@ -255,11 +255,12 @@ def test_every_metadata_section_is_valid_against_the_real_xsd(standard):
         # <description> needs more than one empty <para>): only the errors
         # inside the identification and status section count.
         path = derive_skeleton(standard, schema)["path"]
+        root = path[0]
         body = "".join(f"<{n}>" for n in path[1:]) + "".join(f"</{n}>" for n in reversed(path[1:]))
-        doc = f"<dmodule>{_serialize(metadata['tree'])}{body}</dmodule>"
+        doc = f"<{root}>{_serialize(metadata['tree'])}{body}</{root}>"
         xsd = etree.XMLSchema(etree.parse(str(SOURCES / XSD_DIRS[standard] / f"{schema}.xsd")))
         xsd.validate(etree.fromstring(doc))
-        section = f"/dmodule/{metadata['element']}"
+        section = f"/{root}/{metadata['element']}"
         errors = [e.message for e in xsd.error_log if (e.path or "").startswith(section)]
         assert errors == [], (standard, schema, errors)
 
@@ -282,6 +283,16 @@ def test_known_metadata_sections():
     assert tree301["name"] == "idstatus"
     assert [c["name"] for c in tree301["children"][1]["children"]] == ["security", "rpc", "orig", "applic", "brexref", "qa"]
     assert derive_metadata_skeleton("S1000D 4.2", "pm") is None
+    # 4.x data update file: its own section, with the update's code (the
+    # curated template's tool-CIR rule looks at //updateCode/@infoCode).
+    for standard in ("S1000D 4.1", "S1000D 4.2"):
+        update = derive_metadata_skeleton(standard, "update")
+        assert update["element"] == "updateIdentAndStatusSection"
+        assert [c["name"] for c in update["tree"]["children"]] == ["updateAddress", "updateStatus", "targetDmStatus"]
+        update_code = update["tree"]["children"][0]["children"][0]["children"][0]
+        assert update_code["name"] == "updateCode"
+        assert dict(update_code["attributes"])["infoCode"] == "040"
+    assert derive_metadata_skeleton("S1000D 3.0.1", "update") is None
     assert derive_metadata_skeleton("DITA 1.3 Xpath2.0", "topic") is None
     assert derive_metadata_skeleton("S1000D 5.0", "descript") is None
 

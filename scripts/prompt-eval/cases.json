@@ -1986,6 +1986,248 @@
           "note": "the reject example breaks the unit, never relies on the attribute being absent"
         }
       ]
+    },
+    {
+      "id": "rule-test-template-4-1-changeinline",
+      "type": "rule-test",
+      "standard": "S1000D 4.1",
+      "description": "Curated template rule, rewritten in the templates round: <changeInline> around a complete element (no text of its own) is rejected, around words accepted. Was flag 2 without values (could reject nothing).",
+      "templateRow": {
+        "file": "brdp-template-4-1.xlsx",
+        "id": "BRDP-EXT-00040"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "<changeInline> must not appear",
+          "note": "described as a prohibition, no longer 'allowed'"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-1-deleted-ref",
+      "type": "rule-test",
+      "standard": "S1000D 4.1",
+      "description": "Curated template rule, rewritten: an <internalRef> pointing to an element with changeType delete is rejected.",
+      "templateRow": {
+        "file": "brdp-template-4-1.xlsx",
+        "id": "BRDP-EXT-00041"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "changeType=\"delete\"",
+          "note": "every reject example has deleted information with an id the reference points at"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-1-tool-cir",
+      "type": "rule-test",
+      "standard": "S1000D 4.1",
+      "description": "Curated template rule, rewritten from a boolean expression to a path: in a data update file whose updateCode has infoCode 00N (tool CIR), zone/part/… specs and idents are rejected. Needs the update file's identification and status section (new in this round) and content.",
+      "templateRow": {
+        "file": "brdp-template-4-1.xlsx",
+        "id": "BRDP-EXT-00019"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<updateCode[^>]*infoCode=\"00N\"",
+          "note": "every reject example is a tool CIR (its own updateCode, in \"metadata\")"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "<updateIdentAndStatusSection>",
+          "note": "the prompt offers the minimal update identification and status section"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-1-change-marks",
+      "type": "rule-test",
+      "standard": "S1000D 4.1",
+      "description": "Curated template row that replaces EXT-00044: no change markers in a data module whose issue type is not changed. The path selects content, the predicate reads dmStatus: the examples need both.",
+      "templateRow": {
+        "file": "brdp-template-4-1.xlsx",
+        "id": "BRDP-EXT-00014"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<dmStatus[^>]*issueType=\"(?!changed\"|rinstate-changed\")",
+          "note": "every reject example sets an issue type other than changed in the data module's own dmStatus"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-1-issue-001-new",
+      "type": "rule-test",
+      "standard": "S1000D 4.1",
+      "description": "Curated template row that replaces EXT-00027: issue 001 of a data module must have issue type new (objectValue).",
+      "templateRow": {
+        "file": "brdp-template-4-1.xlsx",
+        "id": "BRDP-EXT-00036"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "issueNumber=\"001\"",
+          "note": "every reject example is an issue 001"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-2-random-list-prefix",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Curated template rule with a second structureObjectRule added: listItemPrefix other than pf02 is rejected (absent = pf02, the default). The nonContextRule part is known not testable.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00507"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "randomList",
+          "note": "the description covers the random list rules"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-2-single-substep",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Curated template row that replaces S1-00070 (Lufthansa's own CAGE code): a <proceduralStep> with exactly one substep is rejected.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00187"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<proceduralStep>[\\s\\S]*<proceduralStep>",
+          "note": "every reject example nests a substep"
+        }
+      ]
     }
   ]
 }
