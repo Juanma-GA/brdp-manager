@@ -33,7 +33,7 @@ import {
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
 import { analyzeRule } from '../src/utils/ruleTestEngine.js';
-import { checkCalsTableSpans, checkExampleStructure, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
+import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkExampleStructure, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
 import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, missesRuleProblem } from '../src/utils/ruleTestRun.js';
 import { ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
@@ -865,6 +865,124 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('C3b row covered: the other example (partial overlap) is not sent back', !correctionText.includes('Example 2'), correctionText.slice(0, 400));
   check('C3b row covered: first example not adjusted by the app, corrected example runs', JSON.stringify(coveredResult.examples[0].spannedEntriesRemoved) === '[]' && coveredResult.runs[0].validation.runnable, JSON.stringify({ e: coveredResult.examples[0].spannedEntriesRemoved, s: coveredResult.runs[0].validation.structure }));
   check('C3b row covered: the partial-overlap example is still fixed by the app', JSON.stringify(coveredResult.examples[1].spannedEntriesRemoved) === '[2]');
+
+  // C3b follow-up: missing colspecs, added by the app. The EXT-00001 run of
+  // 29/09: every table used colname c1/c2/c3 with no <colspec> at all. The
+  // real tables are not in the repo; these are the same titled-context
+  // tables above (from the real EXT-00001 runs) with their colspecs removed,
+  // which is exactly that shape.
+  {
+    const noSpecs = (html) => html.replace(/<colspec colname="c\d"\/>/g, '');
+    const bare = noSpecs(section('2'));
+    check('colspec: fixture has colnames and no colspec', bare.includes('colname="c3"') && !bare.includes('<colspec'));
+    const added = addMissingCalsColspecs(bare, parseXml);
+    check('colspec: EXT-00001 table → the three colspecs at the start of the tgroup', added.added === 3 && added.content === section('2'), added.content);
+    // Used out of order: still in column order.
+    const outOfOrder = '<table><tgroup cols="3"><tbody><row><entry colname="c3">C</entry><entry colname="c1">A</entry><entry colname="c2">B</entry></row></tbody></tgroup></table>';
+    check('colspec: sorted by column, not by first use',
+      addMissingCalsColspecs(outOfOrder, parseXml).content === outOfOrder.replace('<tgroup cols="3">', `<tgroup cols="3">${specs}`));
+    // Existing colspecs are never touched; new ones go around them in order.
+    const partial = '<table><tgroup cols="3"><colspec colname="c2" colnum="2" colwidth="2*"/><tbody><row><entry colname="c1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row></tbody></tgroup></table>';
+    const partialFixed = addMissingCalsColspecs(partial, parseXml);
+    check('colspec: existing colspec kept, missing ones before and after it', partialFixed.added === 2
+      && partialFixed.content.includes('<tgroup cols="3"><colspec colname="c1"/><colspec colname="c2" colnum="2" colwidth="2*"/><colspec colname="c3"/><tbody>'), partialFixed.content);
+    // A gap: the column after it needs @colnum.
+    const gap = '<table><tgroup cols="3"><tbody><row><entry colname="c1">A</entry><entry colname="c3">C</entry></row></tbody></tgroup></table>';
+    check('colspec: a gap gets @colnum', addMissingCalsColspecs(gap, parseXml).content.includes('<tgroup cols="3"><colspec colname="c1"/><colspec colname="c3" colnum="3"/><tbody>'));
+    // namest/nameend count as used names.
+    const spanNames = '<table><tgroup cols="2"><tbody><row><entry namest="c1" nameend="c2">AB</entry></row></tbody></tgroup></table>';
+    check('colspec: namest/nameend', addMissingCalsColspecs(spanNames, parseXml).content.includes('<tgroup cols="2"><colspec colname="c1"/><colspec colname="c2"/><tbody>'));
+    // Indented content: one colspec per line with the tgroup's child indentation.
+    const indented = '<table>\n  <tgroup cols="2">\n    <tbody>\n      <row><entry colname="c1">A</entry><entry colname="c2">B</entry></row>\n    </tbody>\n  </tgroup>\n</table>';
+    check('colspec: indented table keeps its layout', addMissingCalsColspecs(indented, parseXml).content
+      === '<table>\n  <tgroup cols="2">\n    <colspec colname="c1"/>\n    <colspec colname="c2"/>\n    <tbody>\n      <row><entry colname="c1">A</entry><entry colname="c2">B</entry></row>\n    </tbody>\n  </tgroup>\n</table>');
+    // Two tables: each gets its own; a complete table stays byte for byte.
+    const two = `${bare}<p>and</p>${noSpecs(section(''))}`;
+    const twoFixed = addMissingCalsColspecs(two, parseXml);
+    check('colspec: two tables, three each', twoFixed.added === 6 && twoFixed.content === `${section('2')}<p>and</p>${section('')}`, twoFixed.content);
+    const complete = section('2');
+    check('colspec: complete table untouched', addMissingCalsColspecs(complete, parseXml).content === complete && addMissingCalsColspecs(complete, parseXml).added === 0);
+    check('colspec: positional entries need nothing', addMissingCalsColspecs(tbl('<row><entry>A</entry><entry>B</entry><entry>C</entry></row>', ''), parseXml).added === 0);
+    check('colspec: malformed content left as is', addMissingCalsColspecs('<table><tgroup cols="1">', parseXml).content === '<table><tgroup cols="1">');
+
+    // Not adjusted: a colname with no column.
+    const part = '<table><tgroup cols="2"><tbody><row><entry colname="part">P-100</entry><entry colname="qty">2</entry></row></tbody></tgroup></table>';
+    const partResult = addMissingCalsColspecs(part, parseXml);
+    check('colspec: colname="part" → nothing added', partResult.added === 0 && partResult.content === part);
+    const partProblems = checkCalsColspecs(parseXml(`<dmodule>${part}</dmodule>`));
+    check('colspec: colname="part" → unorderableColname', JSON.stringify(partProblems) === '[{"kind":"unorderableColname","colname":"part"},{"kind":"unorderableColname","colname":"qty"}]', JSON.stringify(partProblems));
+    const partLine = 'colname="part" has no <colspec> and its column cannot be worked out: add <colspec colname="part"/> to the <tgroup>, in column order';
+    check('colspec: unorderable English message', formatStructureProblem(partProblems[0], 'descript') === partLine);
+    check('colspec: unorderable EN/ES through i18n', formatSchemaIssue(structureIssues([partProblems[0]], { schema: 'descript' })[0], i18n.getFixedT('en')) === partLine
+      && formatSchemaIssue(structureIssues([partProblems[0]], { schema: 'descript' })[0], i18n.getFixedT('es')) === 'colname="part" no tiene <colspec> y no se puede saber en qué columna va: añade <colspec colname="part"/> al <tgroup>, en el orden de las columnas');
+    // Two names for the same column.
+    const clash = '<table><tgroup cols="2"><tbody><row><entry colname="c1">A</entry><entry colname="col1">B</entry></row></tbody></tgroup></table>';
+    check('colspec: c1 and col1 → col1 unorderable, nothing added', addMissingCalsColspecs(clash, parseXml).added === 0
+      && JSON.stringify(checkCalsColspecs(parseXml(clash))) === '[{"kind":"unorderableColname","colname":"col1"}]', JSON.stringify(checkCalsColspecs(parseXml(clash))));
+    // Not adjusted: more columns than @cols.
+    const wide = noSpecs(section('2')).replace('cols="3"', 'cols="2"');
+    const wideProblems = checkCalsColspecs(parseXml(wide));
+    check('colspec: 3 columns with cols="2" → tooManyColumns, nothing added', addMissingCalsColspecs(wide, parseXml).content === wide
+      && JSON.stringify(wideProblems) === '[{"kind":"tooManyColumns","columns":3,"cols":2}]', JSON.stringify(wideProblems));
+    const wideLine = 'the table uses 3 columns but its <tgroup> says cols="2": use at most 2 columns or raise cols';
+    check('colspec: tooManyColumns English message', formatStructureProblem(wideProblems[0], 'topic') === wideLine);
+    check('colspec: tooManyColumns EN/ES through i18n', formatSchemaIssue(structureIssues(wideProblems, { schema: 'topic' })[0], i18n.getFixedT('en')) === wideLine
+      && formatSchemaIssue(structureIssues(wideProblems, { schema: 'topic' })[0], i18n.getFixedT('es')) === 'la tabla usa 3 columnas pero su <tgroup> dice cols="2": usa como mucho 2 columnas o sube cols');
+    const beyond = '<table><tgroup cols="3"><tbody><row><entry colname="c1">A</entry><entry colname="c5">E</entry></row></tbody></tgroup></table>';
+    check('colspec: c5 with cols="3" → tooManyColumns 5', JSON.stringify(checkCalsColspecs(parseXml(beyond))) === '[{"kind":"tooManyColumns","columns":5,"cols":3}]');
+    // One unfixable table leaves the whole example as written.
+    const mixed = `${bare}${part}`;
+    check('colspec: an unfixable table blocks the whole example', addMissingCalsColspecs(mixed, parseXml).content === mixed);
+    check('colspec: complete tables report nothing', checkCalsColspecs(parseXml(section('2'))).length === 0);
+    // Panel note.
+    check('colspec: panel note EN/ES', i18n.getFixedT('es')('records.ruleTest.colspecsAdded', { count: 3 }) === 'Ajustado por la app: se añadieron 3 colspec.'
+      && i18n.getFixedT('en')('records.ruleTest.colspecsAdded', { count: 1 }) === 'Adjusted by the app: added 1 colspec.');
+
+    // Through generateRuleTestExamples with the EXT-00001 tables: no
+    // correction round, 3 colspecs added to each example, then the morerows
+    // fix reads the columns by name, and both examples run.
+    const colAsked = [];
+    const colResult = await generateRuleTestExamples({
+      ruleXml: ext1.Rule, format: 'SCH-DITA', standard: 'DITA 1.3 Xpath3.0', schemaLocation: 'flat',
+      brdp: { identifier: 'BRDP-EXT-00001', title: '', definition: '', proposal: '' },
+      vocabulary: vocabDita, parseXml,
+      ask: async (messages) => {
+        colAsked.push(messages);
+        return JSON.stringify({ proposalMismatch: null, examples: [
+          { label: 'quantity given', expected: 'accept', schema: 'topic', content: noSpecs(section('2')) },
+          { label: 'quantity missing', expected: 'reject', schema: 'topic', content: noSpecs(section('')) },
+        ] });
+      },
+      fetchSchemaCards: async (_std, names) => ({ cards: {}, document_schemas: ['topic'], element_schemas: Object.fromEntries(names.map((n) => [n, ['topic']])) }),
+      fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
+    });
+    check('colspec EXT-00001: no correction round', colAsked.length === 1 && colResult.correction === null, JSON.stringify({ asked: colAsked.length, c: colResult.correction }));
+    check('colspec EXT-00001: 3 colspecs added to each example', colResult.examples.every((e) => e.colspecsAdded === 3), JSON.stringify(colResult.examples.map((e) => e.colspecsAdded)));
+    check('colspec EXT-00001: morerows fix applied after, by column name', colResult.examples.every((e) => JSON.stringify(e.spannedEntriesRemoved) === '[2]'), JSON.stringify(colResult.examples.map((e) => e.spannedEntriesRemoved)));
+    check('colspec EXT-00001: examples run', colResult.runs.every((r) => r.validation.runnable), JSON.stringify(colResult.runs.map((r) => r.validation.structure)));
+    const colVerdict = ruleTestVerdict(colResult.examples, colResult.runs, analyzeRule(ext1.Rule, 'SCH-DITA', { parseXml }));
+    check('colspec EXT-00001: verdict correct', colVerdict.kind === 'correct', JSON.stringify(colVerdict));
+
+    // "part" goes to the correction round with its reason.
+    const partAsked = [];
+    await generateRuleTestExamples({
+      ruleXml: ext1.Rule, format: 'SCH-DITA', standard: 'DITA 1.3 Xpath3.0', schemaLocation: 'flat',
+      brdp: { identifier: 'BRDP-EXT-00001', title: '', definition: '', proposal: '' },
+      vocabulary: vocabDita, parseXml,
+      ask: async (messages) => {
+        partAsked.push(messages);
+        const content = partAsked.length === 1 ? section('2').replace(/<colspec colname="c\d"\/>/g, '').replace(/colname="c1"/g, 'colname="part"') : section('2');
+        return JSON.stringify({ proposalMismatch: null, examples: [
+          { label: 'quantity given', expected: 'accept', schema: 'topic', content },
+          { label: 'quantity missing', expected: 'reject', schema: 'topic', content: section('') },
+        ] });
+      },
+      fetchSchemaCards: async (_std, names) => ({ cards: {}, document_schemas: ['topic'], element_schemas: Object.fromEntries(names.map((n) => [n, ['topic']])) }),
+      fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
+    });
+    const partCorrection = JSON.stringify(partAsked[1] || []);
+    check('colspec: colname="part" goes to the correction round with its reason', partAsked.length === 2 && partCorrection.includes('colname=\\"part\\" has no <colspec>') && !partCorrection.includes('Example 2'), partCorrection.slice(0, 600));
+  }
 
   // 2. Plain text for the markup of an element the rule does not name.
   const proced = structureOf(S42, 'proced');

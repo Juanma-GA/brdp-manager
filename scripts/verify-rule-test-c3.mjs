@@ -92,6 +92,9 @@ async function main() {
   await putDraft(qty, RULE_QTY);
   await putDraft(old, RULE_OK);
   await putDraft(spanned, RULE_THEAD);
+  // C3b follow-up: the same tables with no <colspec>.
+  const noSpecs = await makeBrdp({ identifier: "BRDP-C3-COLS", title: "Table headings, no colspecs", proposal: "Tables shall have no column headings. SPANNEDCELLS NOCOLSPECS" });
+  await putDraft(noSpecs, RULE_THEAD);
   // The old rule, as it was stored before the format check existed.
   const refused = await api(`/api/projects/${project.id}/brdps/${old.id}/approvals/BREX-4.2`, {
     method: "PUT",
@@ -179,6 +182,33 @@ async function main() {
     await page.waitForTimeout(300);
     const spanApproval = await api(`/api/projects/${project.id}/brdps/${spanned.id}/approvals/BREX-4.2`).then((r) => r.json());
     assert(spanApproval.last_test_result === "passed", `C3b: the registered result is the fixed examples' (${spanApproval.last_test_result})`);
+    await page.getByRole("button", { name: "Close" }).click();
+
+    // C3b follow-up. Missing colspecs: added by the app (then the morerows
+    // fix reads the columns by name), said in the panel, no correction round.
+    await select("BRDP-C3-COLS");
+    await fetch(`${MOCK}/reset`, { method: "POST" });
+    await page.getByRole("button", { name: "Test rule" }).click();
+    await verdict().waitFor({ timeout: 15000 });
+    const colsReq = await lastRequest();
+    assert(colsReq.messages.filter((m) => m.role !== "system").length === 1, "colspecs: no correction round (one LLM call)");
+    for (const i of [0, 1]) {
+      const ex = page.getByTestId(`rule-test-example-${i}`);
+      const colsNote = await ex.getByTestId("rule-test-colspecs-added").textContent();
+      assert(colsNote === "Adjusted by the app: added 3 colspecs.", `colspecs: example ${i + 1} says what the app added (${colsNote})`);
+      const spanNote = await ex.getByTestId("rule-test-app-adjusted").textContent();
+      assert(spanNote === "Adjusted by the app: removed 1 overlapping cell in row 2.", `colspecs: example ${i + 1} still gets the morerows fix (${spanNote})`);
+      const text = await ex.textContent();
+      assert((text.match(/<colspec colname="c\d"\/>/g) || []).length === 3, `colspecs: example ${i + 1} shows the three colspecs`);
+    }
+    assert((await verdict().textContent()).startsWith("Correct"), `colspecs: verdict correct (${await verdict().textContent()})`);
+    await panel().screenshot({ path: "/tmp/rule-test-c3b-colspecs-added.png" });
+    await page.locator("header select, nav select").first().selectOption("es");
+    await page.waitForTimeout(300);
+    const esCols = await page.getByTestId("rule-test-example-0").getByTestId("rule-test-colspecs-added").textContent();
+    assert(esCols === "Ajustado por la app: se añadieron 3 colspec.", `colspecs: Spanish note (${esCols})`);
+    await page.locator("header select, nav select").first().selectOption("en");
+    await page.waitForTimeout(300);
     await page.getByRole("button", { name: "Close" }).click();
 
     // 1d. The old non-rule: not executable with the format reason, no LLM call.

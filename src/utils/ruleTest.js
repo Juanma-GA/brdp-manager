@@ -19,7 +19,9 @@
 //   panel can highlight the nodes the rule selected and dim the skeleton.
 import { nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
 import {
+  addMissingCalsColspecs,
   checkAgainstVocabulary,
+  checkCalsColspecs,
   checkCalsTableSpans,
   checkExampleStructure,
   extractDocumentNames,
@@ -47,11 +49,15 @@ import { SKELETON_TEXT_SUFFIX, assembleExample } from './ruleTestSkeleton.js';
 // cell) for the panel's "Adjusted by the app" note. Every path goes through
 // here: the LLM's first answer, the correction round, "Run again" on an
 // edited example and the prompt eval.
+// C3b follow-up: first of all, the colspecs its tables' colnames need and do
+// not have are added (addMissingCalsColspecs), so the morerows fix and the
+// checks read the columns by name; the example carries `colspecsAdded`.
 export function materializeExample(example, setup, parseXml = parseXmlDocument) {
   const offered = Object.keys(setup.placements || {});
   const schema = example.schema || (offered.length === 1 ? offered[0] : null);
-  const { content, removedRows } = removeSpannedCalsEntries(example.content, parseXml);
-  const adjusted = { ...example, content, spannedEntriesRemoved: removedRows };
+  const withColspecs = addMissingCalsColspecs(example.content, parseXml);
+  const { content, removedRows } = removeSpannedCalsEntries(withColspecs.content, parseXml);
+  const adjusted = { ...example, content, colspecsAdded: withColspecs.added, spannedEntriesRemoved: removedRows };
   const entry = schema ? setup.placements[schema] : null;
   if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
   const { xml, skeletonNodePaths } = assembleExample({
@@ -89,6 +95,7 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
     ...(structure
       ? checkExampleStructure(doc, structure).filter((p) => !(p.kind === 'unknownElement' && reported.has(p.element)))
       : []),
+    ...checkCalsColspecs(doc),
     ...checkCalsTableSpans(doc),
   ];
   return {

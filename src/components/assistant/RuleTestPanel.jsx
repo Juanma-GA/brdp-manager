@@ -120,6 +120,17 @@ function SpannedEntriesNote({ rows }) {
   );
 }
 
+// C3b follow-up: the colspecs the application added to the example's tables
+// (colnames used with no <colspec>) -- said, never done silently.
+function ColspecsAddedNote({ count }) {
+  const { t } = useTranslation();
+  return (
+    <p className={styles.ruleTestNote} data-testid="rule-test-colspecs-added">
+      {t('records.ruleTest.colspecsAdded', { count })}
+    </p>
+  );
+}
+
 function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
@@ -160,6 +171,7 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
           </span>
         )}
       </div>
+      {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
       {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}
       {!run.validation.runnable && <ValidationProblems validation={run.validation} standard={standard} schema={example.schema} />}
       {showResult && result?.outOfScopeSchemas?.length > 0 && result.status === 'accepted' && example.schema && (

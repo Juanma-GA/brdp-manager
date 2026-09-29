@@ -1164,6 +1164,159 @@ export function removeSpannedCalsEntries(content, parseXml) {
   return { content: text, removedRows };
 }
 
+// ─── Missing CALS colspecs (C3b follow-up) ─────────────────────────────────
+// An <entry colname="c2"> only means something if its <tgroup> has a
+// <colspec colname="c2"/>; an LLM often writes the colnames and no colspec
+// at all (the EXT-00001 run of 29/09: every table used c1/c2/c3 with no
+// <colspec>). Like the morerows fix, the application adds them itself when
+// the fix is unambiguous: one <colspec> per colname used (@colname, @namest,
+// @nameend of the tgroup's own entries) that has none, placed in column
+// order at the start of the <tgroup>, among the colspecs already there
+// (never touched). A name's column comes from its number: c3, col3,
+// column3, col-3 or a bare 3 are column 3 (the only forms read -- a name
+// like "part" gives no column). Existing colspecs keep their CALS column
+// (@colnum, or the previous one + 1). A new colspec gets @colnum only when
+// its column does not follow the previous one (a gap), so c1/c2/c3 get the
+// plain <colspec colname="cX"/>.
+// Not adjusted -- the example goes to the correction round with the reason:
+//   { kind: 'unorderableColname', colname } -- no column can be worked out
+//                        (no number, column 0, or a column already taken
+//                        by another colspec or colname)
+//   { kind: 'tooManyColumns', columns, cols } -- the tgroup uses more
+//                        distinct columns (or a higher column) than its @cols
+// Either problem anywhere in the example leaves the whole example as
+// written (same as rowFullyCovered for morerows).
+const COLNAME_POSITION_RE = /^(?:c|col|column)?[-_]?(\d+)$/i;
+
+function calsColspecPlans(doc) {
+  const childrenNamed = (el, name) => Array.from(el.childNodes || []).filter((n) => n.nodeType === 1 && n.nodeName === name);
+  const allColspecs = Array.from(doc.getElementsByTagName('colspec'));
+  return Array.from(doc.getElementsByTagName('tgroup')).map((tgroup) => {
+    const problems = [];
+    const existing = [];
+    let prev = 0;
+    for (const c of childrenNamed(tgroup, 'colspec')) {
+      const colnum = Number.parseInt(c.getAttribute('colnum') || '', 10);
+      const position = Number.isFinite(colnum) && colnum > 0 ? colnum : prev + 1;
+      prev = position;
+      existing.push({ name: c.getAttribute('colname') || '', position, index: allColspecs.indexOf(c) });
+    }
+    const declared = new Set(existing.map((c) => c.name).filter(Boolean));
+    const used = [];
+    for (const section of ['thead', 'tbody', 'tfoot'].flatMap((n) => childrenNamed(tgroup, n))) {
+      for (const row of childrenNamed(section, 'row')) {
+        for (const entry of childrenNamed(row, 'entry')) {
+          for (const attr of ['colname', 'namest', 'nameend']) {
+            const name = entry.getAttribute(attr);
+            if (name && !used.includes(name)) used.push(name);
+          }
+        }
+      }
+    }
+    const taken = new Set(existing.map((c) => c.position));
+    const missing = [];
+    for (const name of used.filter((n) => !declared.has(n))) {
+      const m = COLNAME_POSITION_RE.exec(name);
+      const position = m ? Number.parseInt(m[1], 10) : 0;
+      if (!position || taken.has(position)) {
+        problems.push({ kind: 'unorderableColname', colname: name });
+        continue;
+      }
+      taken.add(position);
+      missing.push({ name, position });
+    }
+    const cols = Number.parseInt(tgroup.getAttribute('cols') || '', 10);
+    if (Number.isFinite(cols) && cols > 0) {
+      const distinct = new Set([...existing.map((c) => c.name || `#${c.position}`), ...used]).size;
+      const columns = Math.max(distinct, ...existing.map((c) => c.position), ...missing.map((c) => c.position), 0);
+      if (columns > cols) problems.push({ kind: 'tooManyColumns', columns, cols });
+    }
+    missing.sort((a, b) => a.position - b.position);
+    return { tgroup, existing, missing, problems };
+  });
+}
+
+// Problems the application cannot fix itself (see above); reported by
+// validateExample so they reach the correction round.
+export function checkCalsColspecs(doc) {
+  return calsColspecPlans(doc).flatMap((plan) => plan.problems);
+}
+
+// [start, end) of every <name> element (document order) in text; end is
+// null for an unclosed one.
+function elementSpans(text, name) {
+  const spans = [];
+  const open = [];
+  for (const m of text.matchAll(TAG_TOKEN_RE)) {
+    if (m[2] === undefined || m[2] !== name) continue;
+    if (m[1]) {
+      const index = open.pop();
+      if (index !== undefined) spans[index].end = m.index + m[0].length;
+    } else if (m[4]) {
+      spans.push({ start: m.index, end: m.index + m[0].length, openEnd: m.index + m[0].length });
+    } else {
+      open.push(spans.length);
+      spans.push({ start: m.index, end: null, openEnd: m.index + m[0].length });
+    }
+  }
+  return spans;
+}
+
+// Adds the missing colspecs to the TEXT of `content` (the rest stays exactly
+// as written) → { content, added }. Unchanged (added 0) when nothing is
+// missing, when any tgroup has an unfixable problem, or when the content
+// does not parse or its text and DOM disagree.
+export function addMissingCalsColspecs(content, parseXml) {
+  const original = String(content ?? '');
+  let doc;
+  try {
+    doc = parseXml(wrapRuleXmlFragment(original));
+    if (!doc?.documentElement) return { content: original, added: 0 };
+  } catch {
+    return { content: original, added: 0 };
+  }
+  const plans = calsColspecPlans(doc);
+  if (plans.some((p) => p.problems.length > 0)) return { content: original, added: 0 };
+  if (!plans.some((p) => p.missing.length > 0)) return { content: original, added: 0 };
+  const tgroupSpans = elementSpans(original, 'tgroup');
+  const colspecSpans = elementSpans(original, 'colspec');
+  if (tgroupSpans.length !== plans.length || colspecSpans.length !== doc.getElementsByTagName('colspec').length) {
+    return { content: original, added: 0 };
+  }
+  const inserts = [];
+  let added = 0;
+  plans.forEach((plan, t) => {
+    if (plan.missing.length === 0) return;
+    const openEnd = tgroupSpans[t].openEnd;
+    const lineBreak = /^\r?\n([ \t]*)/.exec(original.slice(openEnd));
+    const format = (tag) => (lineBreak ? `\n${lineBreak[1]}${tag}` : tag);
+    // Final order: existing and new colspecs by column; a new one goes after
+    // the tgroup's open tag or after the existing colspec before it.
+    const byAnchor = new Map();
+    let prevPosition = 0;
+    let anchor = openEnd;
+    const sequence = [...plan.existing.map((c) => ({ ...c, existing: true })), ...plan.missing].sort((a, b) => a.position - b.position);
+    for (const col of sequence) {
+      if (col.existing) {
+        const span = colspecSpans[col.index];
+        if (!span || span.end === null) return;
+        anchor = span.end;
+      } else {
+        const colnum = col.position === prevPosition + 1 ? '' : ` colnum="${col.position}"`;
+        const list = byAnchor.get(anchor) || [];
+        list.push(format(`<colspec colname="${col.name}"${colnum}/>`));
+        byAnchor.set(anchor, list);
+        added += 1;
+      }
+      prevPosition = col.position;
+    }
+    for (const [at, tags] of byAnchor) inserts.push({ at, text: tags.join('') });
+  });
+  let text = original;
+  for (const ins of inserts.sort((a, b) => b.at - a.at)) text = text.slice(0, ins.at) + ins.text + text.slice(ins.at);
+  return { content: text, added };
+}
+
 // English, for the correction request sent back to the LLM (the panel
 // translates the same problems through i18n).
 export function formatStructureProblem(problem, schema) {
@@ -1176,6 +1329,10 @@ export function formatStructureProblem(problem, schema) {
       return `row ${problem.row} has no entry`;
     case 'rowFullyCovered':
       return `row ${problem.row} is entirely covered by morerows from above: give row ${problem.row} its own entries or lower the morerows`;
+    case 'unorderableColname':
+      return `colname="${problem.colname}" has no <colspec> and its column cannot be worked out: add <colspec colname="${problem.colname}"/> to the <tgroup>, in column order`;
+    case 'tooManyColumns':
+      return `the table uses ${problem.columns} columns but its <tgroup> says cols="${problem.cols}": use at most ${problem.cols} columns or raise cols`;
     case 'unknownElement':
       return `<${problem.element}> does not exist in the ${schema} schema`;
     case 'notAllowed':
@@ -1411,6 +1568,8 @@ export const SCHEMA_ISSUE_KEYS = {
     morerowsPastEnd: 'records.ruleTest.structure.morerowsPastEnd',
     rowFullyCovered: 'records.ruleTest.structure.rowFullyCovered',
     emptyRow: 'records.ruleTest.structure.emptyRow',
+    unorderableColname: 'records.ruleTest.structure.unorderableColname',
+    tooManyColumns: 'records.ruleTest.structure.tooManyColumns',
   },
 };
 
