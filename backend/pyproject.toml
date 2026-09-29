@@ -19,6 +19,11 @@ dependencies = [
     "httpx>=0.27",
     "lxml>=5.3",
     "openpyxl>=3.1",
+    # openpyxl parses the sheet XML with defusedxml when it is installed
+    # (no entity expansion in an uploaded workbook -- app/services/excel_io.py).
+    "defusedxml>=0.7",
+    # FastAPI's UploadFile (POST .../brdps/import/parse).
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

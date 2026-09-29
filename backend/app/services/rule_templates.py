@@ -14,7 +14,8 @@ from functools import lru_cache
 from pathlib import Path
 
 import openpyxl
-from openpyxl.utils.escape import unescape
+
+from app.services.excel_io import cell_text
 
 PUBLIC_DIR = Path(__file__).resolve().parents[3] / "public"
 
@@ -49,12 +50,10 @@ def _load_file(filename: str) -> tuple[TemplateRule, ...]:
     out: list[TemplateRule] = []
     for raw in rows[1:]:
         # openpyxl hands back Excel's own escapes verbatim ("_x000d_" for a
-        # CR inside a cell) -- decoded here, then CRLF normalized, so the
-        # rule text reaches the prompt exactly as it reads in Excel.
-        row = {
-            name: ("" if value is None else unescape(str(value)).replace("\r\n", "\n").replace("\r", "\n"))
-            for name, value in zip(header, raw)
-        }
+        # CR inside a cell) -- cell_text() decodes them and normalizes line
+        # breaks (the same treatment as the Excel import), so the rule text
+        # reaches the prompt exactly as it reads in Excel.
+        row = {name: cell_text(value) for name, value in zip(header, raw)}
         if row.get("Rule Status", "").strip() != "Verified" or not row.get("Rule", "").strip():
             continue
         out.append(

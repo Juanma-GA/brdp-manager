@@ -13,6 +13,7 @@ from app.api.routes.brdp_import import router as brdp_import_router
 from app.api.routes.brdps import router as brdps_router
 from app.api.routes.config import router as config_router
 from app.api.routes.embedding_jobs import router as embedding_jobs_router
+from app.api.routes.excel import router as excel_router
 from app.api.routes.llm_proxy import router as llm_proxy_router
 from app.api.routes.notes import router as notes_router
 from app.api.routes.projects import router as projects_router
@@ -46,6 +47,7 @@ app.include_router(brdp_catalog_router)
 app.include_router(brdp_import_router)
 app.include_router(brdps_router)
 app.include_router(embedding_jobs_router)
+app.include_router(excel_router)
 app.include_router(notes_router)
 app.include_router(approvals_router)
 app.include_router(project_approvals_router)

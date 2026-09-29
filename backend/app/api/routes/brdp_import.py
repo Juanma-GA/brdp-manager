@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_project_role
@@ -12,10 +12,39 @@ from app.schemas.brdp_import import (
     ImportApplyRequest,
     ImportJobAccepted,
     ImportJobStatusOut,
+    ImportParseResponse,
 )
+from app.core.config import get_settings
+from app.services.excel_io import ExcelFileError, parse_import_file
 from app.services.import_jobs import analyze_rows, create_job, get_most_recent_job, get_running_job, run_import_job
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps/import", tags=["brdp-import"])
+
+
+@router.post("/parse", response_model=ImportParseResponse)
+async def parse_import(
+    project_id: uuid.UUID,
+    file: UploadFile = File(...),
+    _editor: User = Depends(require_project_role("editor")),
+) -> ImportParseResponse:
+    """Phase 0: reads the uploaded .xlsx on the server (openpyxl, read-only,
+    formulas never evaluated -- app/services/excel_io.py) and returns its
+    rows for /analyze and /apply, which do not change. Nothing is written.
+
+    A file that is not an .xlsx, is corrupt, or is over a size/row limit is
+    a 422 with the reason (HR7); a readable workbook with nothing to import
+    (no data rows, missing columns) comes back with `errors` and no rows,
+    the same messages the page has always shown. Editor-gated like the rest
+    of the import."""
+    limit = get_settings().excel_import_max_bytes
+    # One byte over the limit is enough to know it is too large, without
+    # reading an arbitrarily big upload into memory.
+    data = await file.read(limit + 1)
+    try:
+        parsed = parse_import_file(data, file.filename)
+    except ExcelFileError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return ImportParseResponse(**parsed)
 
 
 @router.post("/analyze", response_model=ImportAnalyzeResponse)

@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     # something this backend ships copies of.
     sources_dir: str = str(_REPO_ROOT / "sources")
 
+    # --- Excel import (app/services/excel_io.py) ---
+    # Defensive limits on an uploaded workbook; a file over any of them is
+    # refused with a 422 naming the limit, nothing imported. Generous for
+    # real projects (SOPTE, the largest, is ~2,800 BRDPs in well under 2 MB).
+    excel_import_max_bytes: int = 10 * 1024 * 1024
+    excel_import_max_uncompressed_bytes: int = 200 * 1024 * 1024
+    excel_import_max_rows: int = 20000
+
 
 @lru_cache
 def get_settings() -> Settings:

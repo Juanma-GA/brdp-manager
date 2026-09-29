@@ -145,3 +145,14 @@ class ImportJobStatusOut(BaseModel):
     started_at: datetime
     finished_at: datetime | None = None
     result: ImportApplyResultSummary | None = None
+
+
+class ImportParseResponse(BaseModel):
+    """POST .../brdps/import/parse: the rows of the uploaded workbook, ready
+    for /analyze and /apply, and the errors of a readable workbook with
+    nothing to import (the same messages the frontend's importFromExcel gave
+    before the Excel handling moved to the server). A file that cannot be
+    read safely is a 422 instead (app/services/excel_io.py)."""
+
+    rows: list[ImportRowIn]
+    errors: list[str]
