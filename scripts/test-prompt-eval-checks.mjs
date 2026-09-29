@@ -136,23 +136,14 @@ console.log("no_parent_as_child: 9 real answers (fixtures, reviewed by hand)");
 const fixtures = JSON.parse(fs.readFileSync(path.join(__dirname, "prompt-eval", "fixtures", "no-parent-as-child-fixtures.json"), "utf8"));
 check("fixtures are about S1000D 4.2 <para>", fixtures.element === "para" && fixtures.standard === "S1000D 4.2");
 check("9 answers", fixtures.answers.length === 9, String(fixtures.answers.length));
-// One correction to the hand review, kept here and not in the fixture file:
-// 026ec83 run 3 says "También admite elementos de soporte como
-// *sbMaterialInfo* o *sbSupportEquipsList*" -- in S1000D 4.2 both are only
-// PARENTS of <para> (backend/schema_cards/schema-cards-4-2.json: in
-// parents.para, in no variant's children), in the same sentence and with the
-// same wording, so the answer presents both the wrong way round. The review
-// lists sbMaterialInfo only; to be confirmed by Juanma.
-const FIXTURE_CORRECTIONS = { "026ec83#3": { add: ["sbSupportEquipsList"] } };
-check("the correction is backed by the schema cards", ["sbSupportEquipsList", "sbMaterialInfo"].every((n) => cards42.parents.para.includes(n) && !cards42.cards.para.some((v) => (v.children || []).includes(n))));
 for (const a of fixtures.answers) {
   const key = `${a.commit}#${a.run}`;
-  const expected = [...a.expectedOffenders, ...(FIXTURE_CORRECTIONS[key]?.add || [])].sort();
+  const expected = [...a.expectedOffenders].sort();
   const r = parentsPresentedAsChildren(a.answer, fixtures.element, loadSchemaCards(fixtures.standard), vocab42);
   const got = [...r.offenders].sort();
   const namesAnything = schemaNameCount(a.answer) > 0;
   check(
-    `${key}: exactly ${JSON.stringify(expected)}${FIXTURE_CORRECTIONS[key] ? " (with the correction)" : ""}`,
+    `${key}: exactly ${JSON.stringify(expected)}`,
     JSON.stringify(got) === JSON.stringify(expected),
     `got ${JSON.stringify(got)}; sentences analysed: ${r.units.map((u) => u.slice(0, 80)).join(" | ")}`
   );
