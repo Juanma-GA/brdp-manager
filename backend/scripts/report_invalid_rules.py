@@ -71,4 +71,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # UTF-8 whatever the console code page: the Node verify scripts read this
+    # output as UTF-8, and rule text / project names can be any character
+    # (on Windows stdout is cp1252 by default).
+    sys.stdout.reconfigure(encoding="utf-8")
     asyncio.run(main())

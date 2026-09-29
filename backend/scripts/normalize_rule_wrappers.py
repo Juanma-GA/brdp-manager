@@ -59,6 +59,10 @@ async def main(dry_run: bool, email: str | None) -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 whatever the console code page: the Node verify scripts read this
+    # output as UTF-8, and rule text / project names can be any character
+    # (on Windows stdout is cp1252 by default).
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true", help="list what would change, write nothing")
     parser.add_argument("--user", help="email of the account the history entries are recorded under")

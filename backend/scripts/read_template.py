@@ -44,7 +44,11 @@ def main() -> int:
         return 2
     source = sys.argv[1]
     data = sys.stdin.buffer.read() if source == "-" else Path(source).read_bytes()
-    sys.stdout.write(json.dumps(read_rows(data), ensure_ascii=False))
+    # Bytes, not sys.stdout.write: on Windows stdout uses the console code
+    # page (cp1252), and readXlsx.mjs decodes UTF-8 -- "Códigos" arrived as
+    # "C\ufffddigos".
+    sys.stdout.buffer.write(json.dumps(read_rows(data), ensure_ascii=False).encode("utf-8"))
+    sys.stdout.buffer.flush()
     return 0
 
 

@@ -9,7 +9,11 @@ is evaluated. Plus the five curated templates of public/ read -> exported ->
 read again cell for cell, and the generic template.
 """
 import io
+import json
+import os
 import re
+import subprocess
+import sys
 import uuid
 import zipfile
 from pathlib import Path
@@ -438,3 +442,41 @@ async def test_generic_template_endpoint(client, project_and_users):
     assert resp.status_code == 200
     assert resp.headers["content-disposition"] == 'attachment; filename="brdp-template.xlsx"'
     assert len(parse_import_file(resp.content, "brdp-template.xlsx")["rows"]) == 10
+
+
+READ_TEMPLATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "read_template.py"
+
+
+def test_read_template_script_writes_utf8_even_with_a_cp1252_console(tmp_path):
+    """scripts/read_template.py is read by Node (scripts/lib/readXlsx.mjs) as
+    UTF-8. On Windows stdout defaults to the console code page (cp1252), and
+    every non-ASCII character reached Node as "\ufffd" ("C\ufffddigos" !=
+    "Códigos" in verify-xlsx-roundtrip.mjs). PYTHONIOENCODING=cp1252 gives
+    the same stdout encoding here."""
+    row = {
+        "id": "BRDP-UTF8-001",
+        "title": "Códigos",
+        "definition": "El elemento raíz",
+        "proposal": "Campo vacío — sin valor",
+        "proposalStatus": "Validated",
+        "ruleStatus": "To Do",
+        "rule": "",
+    }
+    path = tmp_path / "utf8.xlsx"
+    path.write_bytes(build_export_workbook([row]))
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    out = subprocess.run(
+        [sys.executable, str(READ_TEMPLATE_SCRIPT), str(path)], capture_output=True, env=env, check=True
+    ).stdout
+    rows = json.loads(out.decode("utf-8"))
+    assert rows == [
+        {
+            "ID": "BRDP-UTF8-001",
+            "Title": "Códigos",
+            "Definition": "El elemento raíz",
+            "Proposal": "Campo vacío — sin valor",
+            "Proposal Status": "Validated",
+            "Rule Status": "To Do",
+            "Rule": "",
+        }
+    ]
