@@ -114,6 +114,7 @@ import {
   xpathErrorMessage,
 } from './ruleTestCommon.js';
 import { analyzeSchematron, describeSchematron, runSchematronOnFragment, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
+import { checkRuleFormat } from '../validation/schemaValidation.js';
 
 export { nodePath, parseXmlDocument };
 
@@ -440,8 +441,10 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
 //                                          // 2.0 project); [] for BREX
 // options.standard (T4) is the project's standard.
 export function analyzeRule(ruleXml, format, options = {}) {
-  if (SCHEMATRON_FORMATS.includes(format)) return analyzeSchematron(ruleXml, options);
   const none = (r) => ({ status: 'not_executable', reason: r, parts: [], total: 0, warnings: [] });
+  const formatProblem = ruleFormatReason(ruleXml, format, options.parseXml || parseXmlDocument);
+  if (formatProblem) return none(formatProblem);
+  if (SCHEMATRON_FORMATS.includes(format)) return analyzeSchematron(ruleXml, options);
   const spec = FORMATS[format];
   if (!spec) return none(REASON.format(format));
   const parseXml = options.parseXml || parseXmlDocument;
@@ -477,6 +480,24 @@ export function analyzeRule(ruleXml, format, options = {}) {
     total: parts.length,
     warnings: [],
   };
+}
+
+// C3, Part 1d: stored XML that is not a rule of its format (an old
+// "Paste rule" of just //&lt;emphasis&gt;, accepted before the format
+// check existed) is never tested: analyzeRule -- which the panel, the
+// recorded result and the Verify dialog all start from -- says
+// rule_format {problem, ...params} up front, with
+// checkRuleFormat's problem code (rule_format_missing, …) and parameters --
+// the same check that now refuses it on save. Only well-formed XML is
+// checked here; malformed XML keeps its own reason (rule_not_well_formed).
+function ruleFormatReason(ruleXml, format, parseXml) {
+  try {
+    parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+  } catch {
+    return null;
+  }
+  const result = checkRuleFormat(ruleXml, format);
+  return result.ok ? null : reason('rule_format', { problem: result.problem.code, ...result.problem.params });
 }
 
 // ─── describeRule (Test de reglas T3b, Part 1) ─────────────────────────────

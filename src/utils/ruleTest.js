@@ -18,7 +18,13 @@
 // - xmlDisplayLines: the example re-indented, split into segments so the
 //   panel can highlight the nodes the rule selected and dim the skeleton.
 import { nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
-import { checkAgainstVocabulary, checkExampleStructure, extractDocumentNames, formatStructureProblem } from '../validation/schemaValidation.js';
+import {
+  checkAgainstVocabulary,
+  checkCalsTableSpans,
+  checkExampleStructure,
+  extractDocumentNames,
+  formatStructureProblem,
+} from '../validation/schemaValidation.js';
 import { SKELETON_TEXT_SUFFIX, assembleExample } from './ruleTestSkeleton.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
@@ -47,41 +53,112 @@ export function materializeExample(example, setup) {
   return { ...example, schema, xml, skeletonNodePaths, structure: entry.structure, insertion: entry.placement.insertion };
 }
 
-// { wellFormed, error, names, structure, unknownSchema, runnable }
+// { wellFormed, error, names, structure, cards, unknownSchema, runnable }
 // `structure` (T2b) is the example's schema structure, or null (then only
-// the vocabulary is checked).
+// the vocabulary is checked). `structure` in the result also carries the
+// CALS table-span problems (C3, Part 1b), which need no schema.
 export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, structure = null, options = {}) {
   const empty = { available: false, notFound: [], wrongType: [] };
   if (options.unknownSchema) {
-    return { wellFormed: true, error: null, names: empty, structure: [], unknownSchema: options.unknownSchema, runnable: false };
+    return { wellFormed: true, error: null, names: empty, structure: [], cards: [], unknownSchema: options.unknownSchema, runnable: false };
   }
   let doc;
   try {
     doc = parseXml(String(xml || ''));
     if (!doc?.documentElement) throw new Error('no root element');
   } catch (err) {
-    return { wellFormed: false, error: err.message, names: empty, structure: [], unknownSchema: null, runnable: false };
+    return { wellFormed: false, error: err.message, names: empty, structure: [], cards: [], unknownSchema: null, runnable: false };
   }
   const names = checkAgainstVocabulary(extractDocumentNames(doc), vocabulary);
   const namesOk = !names.available || (names.notFound.length === 0 && names.wrongType.length === 0);
   // A name the vocabulary already reports is not repeated as "does not exist
   // in the <schema> schema".
   const reported = new Set(names.notFound.map((n) => n.replace(/^[<@]|>$/g, '')));
-  const structureProblems = structure
-    ? checkExampleStructure(doc, structure).filter((p) => !(p.kind === 'unknownElement' && reported.has(p.element)))
-    : [];
+  const structureProblems = [
+    ...(structure
+      ? checkExampleStructure(doc, structure).filter((p) => !(p.kind === 'unknownElement' && reported.has(p.element)))
+      : []),
+    ...checkCalsTableSpans(doc),
+  ];
   return {
     wellFormed: true,
     error: null,
     names,
     structure: structureProblems,
+    cards: structure ? elementCards(doc, names, structureProblems, structure) : [],
     unknownSchema: null,
     runnable: namesOk && structureProblems.length === 0,
   };
 }
 
+// ─── Element cards for the correction round (C3, Part 1a) ──────────────────
+// A real run wrote <quantity quantityValue="25" unitOfMeasure="N·m"> and,
+// asked to fix it, <quantity><quantityValue>… -- both invalid, because the
+// correction request only said what was wrong, never what the element takes.
+// For every problem about an element (a child not allowed inside it, an
+// element there that does not exist in the schema, an attribute it does not
+// have, an attribute that is really an element or the reverse), the request
+// now carries a compact card of that element in the example's schema: its
+// allowed children and its attributes, from the same structure the check
+// used. Lists over CARD_MAX_NAMES are cut with "+N more".
+export const CARD_MAX_NAMES = 20;
+
+function elementsNamed(doc, predicate) {
+  const out = [];
+  const walk = (el) => {
+    if (predicate(el)) out.push(el);
+    for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) walk(n);
+  };
+  walk(doc.documentElement);
+  return out;
+}
+
+function elementCards(doc, names, problems, structure) {
+  const wanted = [];
+  const want = (name) => {
+    if (name && structure.elements[name] && !wanted.includes(name)) wanted.push(name);
+  };
+  for (const p of problems) {
+    if (p.kind === 'notAllowed') want(p.parent);
+    else if (p.kind === 'unknownAttribute') want(p.element);
+    else if (p.kind === 'unknownElement') {
+      for (const el of elementsNamed(doc, (e) => e.nodeName === p.element)) want(el.parentNode?.nodeName);
+    }
+  }
+  for (const w of names.wrongType || []) {
+    if (w.usedAs === 'element') {
+      // <x> written as an element, but x is an attribute: the card of the
+      // element it was written inside says where @x may go.
+      for (const el of elementsNamed(doc, (e) => e.nodeName === w.name)) want(el.parentNode?.nodeName);
+    } else {
+      // @x written as an attribute, but x is an element: the element that
+      // carries it, and the element x itself.
+      for (const el of elementsNamed(doc, (e) => e.hasAttribute?.(w.name))) want(el.nodeName);
+      want(w.name);
+    }
+  }
+  return wanted.map((element) => ({
+    element,
+    children: [...structure.elements[element].children],
+    attributes: [...structure.elements[element].attributes],
+  }));
+}
+
+// "a, b, c" with at most CARD_MAX_NAMES names, then "+N more".
+export function cardNameList(names, prefix = '') {
+  if (!names.length) return 'none';
+  const shown = names.slice(0, CARD_MAX_NAMES).map((n) => `${prefix}${n}`).join(', ');
+  const omitted = names.length - CARD_MAX_NAMES;
+  return omitted > 0 ? `${shown}, +${omitted} more` : shown;
+}
+
+export function formatElementCard(card, schema) {
+  const where = schema ? ` in the ${schema} schema` : '';
+  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}; attributes: ${cardNameList(card.attributes, '@')}`;
+}
+
 // The validation problems of one example, in English (the correction
-// request to the LLM).
+// request to the LLM), followed by the cards of the elements involved.
 export function exampleProblems(validation, { standard, schema } = {}) {
   const out = [];
   if (validation.unknownSchema) out.push(`schema "${validation.unknownSchema}" was not offered; use one of the listed schemas`);
@@ -91,6 +168,7 @@ export function exampleProblems(validation, { standard, schema } = {}) {
     out.push(w.usedAs === 'element' ? `<${w.name}> is not an element (it is the attribute @${w.name})` : `@${w.name} is not an attribute (it is the element <${w.name}>)`);
   }
   for (const p of validation.structure || []) out.push(formatStructureProblem(p, schema));
+  for (const card of validation.cards || []) out.push(formatElementCard(card, schema));
   return out;
 }
 

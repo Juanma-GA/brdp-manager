@@ -370,6 +370,9 @@ export default function RuleTestPanel({
   const view = verdict ? verdictView(t, verdict) : null;
   const showResults = verdict && verdict.kind !== 'not_executable';
   const ruleNotExecutable = analysis.status === 'not_executable';
+  // C3, Part 1d: XML that is not a rule of its format has nothing to
+  // illustrate either -- no "Show illustrative examples".
+  const notARule = analysis.reason?.code === 'rule_format';
 
   return (
     <section className={styles.ruleTestPanel} aria-label={t('records.ruleTest.title')} data-testid="rule-test-panel">
@@ -382,7 +385,7 @@ export default function RuleTestPanel({
 
       {analysis.status !== 'executable' && (
         <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneWarn}`} data-testid="rule-test-analysis">
-          {t(ruleNotExecutable ? 'records.ruleTest.analysisNotExecutable' : 'records.ruleTest.analysisPartial', {
+          {t(notARule ? 'records.ruleTest.analysisNotARule' : ruleNotExecutable ? 'records.ruleTest.analysisNotExecutable' : 'records.ruleTest.analysisPartial', {
             reason: formatRuleTestReason(analysis.reason, t),
           })}
         </p>
@@ -396,7 +399,7 @@ export default function RuleTestPanel({
 
       <RuleDescription description={description} />
 
-      {state.status === 'idle' && (
+      {state.status === 'idle' && !notARule && (
         <div className={styles.suggestionActions}>
           <button type="button" onClick={() => generate()} data-testid="rule-test-show-examples">
             {t('records.ruleTest.showIllustrativeExamples')}

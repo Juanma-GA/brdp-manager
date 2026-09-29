@@ -1819,6 +1819,47 @@
           "note": "never a fixed column index such as entry[2]"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-quantity-correction",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "schemas": [
+        "proced"
+      ],
+      "description": "C3 Part 1a: the examples must build a <quantity> the way the schema models it (quantity > quantityGroup > quantityValue with @quantityUnitOfMeasure). A real run wrote <quantity quantityValue=\"25\" unitOfMeasure=\"N·m\"> and then <quantity><quantityValue>…, both invalid; the correction round now sends the card of each element involved. It is also a value rule (Part 1c): at least one accept example must contain the node.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-QTY",
+        "title": "Unit of measure of torque values",
+        "definition": "Decide the unit of measure of the torque values given in procedural steps.",
+        "proposal": "In procedural data modules, torque values shall be marked up with <quantity> and their unit of measure shall be N.m.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-QTY\"><objectPath allowedObjectFlag=\"2\">//quantityValue/@quantityUnitOfMeasure</objectPath><objectUse>The unit of measure of a torque value shall be N.m.</objectUse><objectValue valueForm=\"single\" valueAllowed=\"N.m\"/></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round (with the element cards)"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on a rule known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "reject_examples",
+          "pattern": "quantityUnitOfMeasure",
+          "note": "the reject example breaks the unit, never relies on the attribute being absent"
+        }
+      ]
     }
   ]
 }

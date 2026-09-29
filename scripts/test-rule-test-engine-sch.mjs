@@ -383,12 +383,19 @@ expect(
     check(`${name}: not_executable ${code}`, r.status === 'not_executable' && r.notExecutableReason?.code === code, JSON.stringify(r.notExecutableReason));
     if (params) check(`${name}: params`, JSON.stringify(r.notExecutableReason?.params) === JSON.stringify(params), JSON.stringify(r.notExecutableReason?.params));
     const a = analyze(rule);
-    check(`${name}: analyzeRule says so up front`, a.status === 'not_executable' && a.reason?.code === code, JSON.stringify(a));
+    // (C3 1d: a non-rule is refused by analyzeRule with rule_format; checked below.)
+    const analyzeCode = name === 'no pattern' ? 'rule_format' : code;
+    check(`${name}: analyzeRule says so up front`, a.status === 'not_executable' && a.reason?.code === analyzeCode, JSON.stringify(a));
     for (const [lang, t] of [['en', en], ['es', es]]) {
       const text = formatRuleTestReason(r.notExecutableReason, t);
       check(`${name}: ${lang} text`, text && !text.includes('{{') && text !== code && !text.startsWith('records.'), text);
     }
   }
+  // C3, Part 1d: analyzeRule refuses XML that is not a rule of the format
+  // up front (the engine itself still reports what it finds, above).
+  const notRule = analyze('<p>not a rule</p>');
+  check('C3 1d: analyzeRule on a non-rule → rule_format', notRule.status === 'not_executable' && notRule.reason?.code === 'rule_format' && notRule.reason.params.problem === 'rule_format_foreign', JSON.stringify(notRule));
+  check('C3 1d: rule_format text (es)', formatRuleTestReason(notRule.reason, es).startsWith('El XML guardado no es una regla de este formato'), formatRuleTestReason(notRule.reason, es));
   const lit = one("contains(., 'doc(') or @id");
   check("doc( inside a literal is not a call", run(lit, topic('<p id="a">x</p>')).status === 'accepted');
   check('fn: prefix is not an extension', run(one('fn:exists(.)'), topic('<p>x</p>')).status === 'accepted');

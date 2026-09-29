@@ -13,7 +13,8 @@
 import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleTestResponse, RULE_TEST_USER_MESSAGE } from '../prompts/ruleTestExamplesPrompt.js';
 import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
-import { parseXmlDocument } from './ruleTestEngine.js';
+import { describeRule, parseXmlDocument } from './ruleTestEngine.js';
+import { stripLiterals } from './ruleTestCommon.js';
 import { chooseTestSchemas, placeExample, ruleMatchExpressions, ruleTargets } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 
@@ -67,12 +68,73 @@ export function missesRuleProblem(example, run, ruleXml) {
   return `This example must contain a node matched by: ${matched}. Nothing in it matches, so the rule never runs.`;
 }
 
+// C3, Part 1c: a rule that restricts VALUES only shows it accepts a valid
+// value when an example meant to be accepted contains a node it selects --
+// an accept example without the node is accepted for the wrong reason (the
+// rule has nothing to look at). True for:
+//   BREX: a part with objectValue / objval (allowedObjectFlag="2" or no
+//         objappl: restricted values; flag 1: mandatory with values) --
+//         never a prohibition (allowedObjectFlag="0" / objappl="0"), where
+//         the correct accept example is precisely the one WITHOUT the node.
+//         allowedObjectFlag="2" WITHOUT values restricts no value at all
+//         (it rejects nothing; describeRule already warns "cannot reject"),
+//         and asking for the node there would contradict a Proposal that
+//         forbids it (eval case rule-test-4-2-wrong-rule-flag2), so it is
+//         left out;
+//   Schematron: an assert / report (not a warning, not a constant) whose
+//         test compares a value: = != < > eq ne lt le gt ge, or
+//         matches() / contains() / starts-with() / ends-with().
+const VALUE_STATEMENTS = new Set([
+  'describe_restricted_values',
+  'describe_mandatory_values',
+  'describe_mandatory_somewhere_values',
+]);
+const VALUE_TEST_RE = /!=|<|>|(?<![:!<>=])=|\b(?:eq|ne|lt|le|gt|ge)\b|\b(?:matches|contains|starts-with|ends-with)\s*\(/;
+
+export function ruleRestrictsValues(ruleXml, format, parseXml = parseXmlDocument) {
+  const description = describeRule(ruleXml, format, { parseXml });
+  if (!description.available) return false;
+  return description.statements.some(({ statement }) => {
+    if (VALUE_STATEMENTS.has(statement.code)) return true;
+    if (statement.code !== 'describe_sch_assert' && statement.code !== 'describe_sch_report') return false;
+    if (statement.params.warning || statement.params.constant) return false;
+    const test = stripLiterals(String(statement.params.test || '')).replace(/=>/g, ' ');
+    return VALUE_TEST_RE.test(test);
+  });
+}
+
+// The accept examples that must be sent back because none of them contains
+// a node the value rule selects: every accept example that ran, gave a
+// verdict and is in scope (an example of another schema, which the rule
+// does not apply to, never counts). None when one of them already has the
+// node, or when no accept example ran (the invalid ones are sent back for
+// their own problems anyway).
+export function acceptWithoutNodeIndices(examples, runs, restrictsValues) {
+  if (!restrictsValues) return [];
+  const candidates = runs
+    .map((r, index) => ({ r, index }))
+    .filter(({ r, index }) =>
+      examples[index].expected === 'accept' &&
+      r.result &&
+      r.result.status !== 'not_executable' &&
+      !(r.result.outOfScopeSchemas?.length > 0)
+    );
+  if (candidates.length === 0 || candidates.some(({ r }) => r.result.selectedNodePaths.length > 0)) return [];
+  return candidates.map(({ index }) => index);
+}
+
+export function acceptWithoutNodeProblem(ruleXml) {
+  const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
+  return `The rule checks values, so at least one example meant to be accepted must contain a node matched by: ${matched}, with a value the decision allows. No accept example contains one, so the test never shows the rule accepting a valid value.`;
+}
+
 // The examples the correction round must fix: [{ index, label, problems }].
-export function exampleFailures(examples, materialized, runs, { ruleXml, standard }) {
+export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, parseXml = parseXmlDocument }) {
+  const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
   return runs
     .map((r, index) => {
       const problems = r.validation.runnable
-        ? [missesRuleProblem(examples[index], r, ruleXml)].filter(Boolean)
+        ? [missesRuleProblem(examples[index], r, ruleXml), withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null].filter(Boolean)
         : exampleProblems(r.validation, { standard, schema: materialized[index].schema });
       return { index, label: examples[index].label, problems };
     })
@@ -141,7 +203,7 @@ export async function generateRuleTestExamples({
     // each failing example go back to the LLM once -- invalid examples and
     // (T4b) reject examples the rule never runs on. What still fails is
     // shown as it is, with its warnings -- never dropped.
-    const failures = exampleFailures(examples, materialized, runs, { ruleXml, standard });
+    const failures = exampleFailures(examples, materialized, runs, { ruleXml, standard, format, parseXml });
     let correction = null;
     if (failures.length > 0) {
       correction = { attempted: failures.length, fixed: 0, failed: null };
@@ -162,7 +224,7 @@ export async function generateRuleTestExamples({
               ? examples.map((ex, i) => (failing.has(i) ? reparsed.examples[i] : ex))
               : reparsed.examples;
           const rerun = run(next);
-          const still = new Set(exampleFailures(next, rerun.materialized, rerun.runs, { ruleXml, standard }).map((f) => f.index));
+          const still = new Set(exampleFailures(next, rerun.materialized, rerun.runs, { ruleXml, standard, format, parseXml }).map((f) => f.index));
           correction.fixed = failures.filter((f) => rerun.runs[f.index] && !still.has(f.index)).length;
           examples = next;
           ({ materialized, runs } = rerun);

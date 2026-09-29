@@ -976,10 +976,103 @@ export function checkExampleStructure(doc, structure) {
   return problems;
 }
 
+// ─── CALS table spans (C3, Part 1b) ────────────────────────────────────────
+
+// CALS tables (S1000D and DITA use the same model): an <entry
+// morerows="N"> also occupies its column(s) in the next N rows of its
+// thead/tbody/tfoot, so those rows must not have an entry of their own
+// there. An LLM writing examples often adds one anyway. The schema
+// structure cannot see this (every element is allowed where it is), so it
+// is checked here:
+//   { kind: 'spannedEntry', row, column }   -- row N has an entry in a
+//                                             column spanned from above
+//   { kind: 'morerowsPastEnd', row, column } -- the span of row N's entry
+//                                             runs past the last row
+// `row` is 1-based within its thead/tbody/tfoot; `column` is the colspec's
+// colname, or c1, c2… by position when the table has no colspecs.
+// Columns come from @colname / @namest–@nameend when the entry has them
+// (checked against the spans directly), otherwise by position: an entry
+// without a name takes the next column in reading order, ignoring spans the
+// way a writer who forgot them would -- so, when a row has more entries than
+// its free columns, the entries sitting in spanned columns are the extra
+// ones. Never throws: an unknown colname is treated as positional.
+export function checkCalsTableSpans(doc) {
+  const problems = [];
+  const childrenNamed = (el, name) => Array.from(el.childNodes || []).filter((n) => n.nodeType === 1 && n.nodeName === name);
+  const intAttr = (el, name) => {
+    const n = Number.parseInt(el.getAttribute(name) || '', 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const tgroups = Array.from(doc.getElementsByTagName('tgroup'));
+  for (const tgroup of tgroups) {
+    const colspecs = childrenNamed(tgroup, 'colspec');
+    const colIndex = new Map();
+    colspecs.forEach((c, i) => {
+      const name = c.getAttribute('colname');
+      if (name && !colIndex.has(name)) colIndex.set(name, i);
+    });
+    const label = (i) => colspecs[i]?.getAttribute('colname') || `c${i + 1}`;
+    for (const sectionName of ['thead', 'tbody', 'tfoot']) {
+      for (const section of childrenNamed(tgroup, sectionName)) {
+        const rows = childrenNamed(section, 'row');
+        const declared = intAttr(tgroup, 'cols') || colspecs.length;
+        // Without @cols or colspecs, the first row (nothing spans into it)
+        // gives the width.
+        const cols = declared || (rows[0] ? childrenNamed(rows[0], 'entry').length : 0);
+        const spanned = rows.map(() => new Set());
+        rows.forEach((row, r) => {
+          const entries = childrenNamed(row, 'entry');
+          const named = (entry) => {
+            const start = colIndex.get(entry.getAttribute('colname') || entry.getAttribute('namest'));
+            if (start === undefined) return null;
+            const end = colIndex.get(entry.getAttribute('nameend'));
+            return { start, end: end !== undefined && end >= start ? end : start };
+          };
+          const free = cols - spanned[r].size;
+          const overfull = entries.length > free;
+          let cursor = 0;
+          entries.forEach((entry, e) => {
+            let span = named(entry);
+            if (!span) {
+              if (overfull) {
+                // Position as written: entry e sits in column e.
+                span = { start: e, end: e };
+              } else {
+                while (spanned[r].has(cursor)) cursor += 1;
+                span = { start: cursor, end: cursor };
+              }
+            }
+            cursor = span.end + 1;
+            for (let c = span.start; c <= span.end; c += 1) {
+              if (spanned[r].has(c)) {
+                problems.push({ kind: 'spannedEntry', row: r + 1, column: label(c) });
+                break;
+              }
+            }
+            const more = intAttr(entry, 'morerows');
+            for (let k = 1; k <= more; k += 1) {
+              if (r + k >= rows.length) {
+                problems.push({ kind: 'morerowsPastEnd', row: r + 1, column: label(span.start) });
+                break;
+              }
+              for (let c = span.start; c <= span.end; c += 1) spanned[r + k].add(c);
+            }
+          });
+        });
+      }
+    }
+  }
+  return problems;
+}
+
 // English, for the correction request sent back to the LLM (the panel
 // translates the same problems through i18n).
 export function formatStructureProblem(problem, schema) {
   switch (problem.kind) {
+    case 'spannedEntry':
+      return `row ${problem.row}: column ${problem.column} is already spanned by the entry above (morerows); remove this entry`;
+    case 'morerowsPastEnd':
+      return `row ${problem.row}: morerows spans past the last row (column ${problem.column})`;
     case 'unknownElement':
       return `<${problem.element}> does not exist in the ${schema} schema`;
     case 'notAllowed':
@@ -1211,6 +1304,8 @@ export const SCHEMA_ISSUE_KEYS = {
     notAllowed: 'records.ruleTest.structure.notAllowed',
     unknownAttribute: 'records.ruleTest.structure.unknownAttribute',
     wrongRoot: 'records.ruleTest.structure.wrongRoot',
+    spannedEntry: 'records.ruleTest.structure.spannedEntry',
+    morerowsPastEnd: 'records.ruleTest.structure.morerowsPastEnd',
   },
 };
 

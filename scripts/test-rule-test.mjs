@@ -577,8 +577,11 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('T4b EXT-00001: prompt says the rule depends on a title', asked[0].systemPrompt.includes('THE RULE DEPENDS ON A TITLE'));
   check('T4b EXT-00001: prompt never quotes a real title as the example', asked[0].systemPrompt.includes('<section><title>Parts list</title><table>…</table></section>'));
   check('T4b EXT-00001: one correction round asked', asked.length === 2 && asked[1].messages.at(-1).content.includes('This example must contain a node matched by: `*[title = ('), asked[1]?.messages.at(-1).content);
-  check('T4b EXT-00001: correction names only the reject example', asked[1].messages.at(-1).content.includes('Example 2 ("quantity missing")') && !asked[1].messages.at(-1).content.includes('Example 1 '));
-  check('T4b EXT-00001: fixed', result.status === 'ready' && result.correction.attempted === 1 && result.correction.fixed === 1, JSON.stringify(result.correction));
+  // C3, Part 1c: EXT-00001 checks cell values, so the accept example (title
+  // on the table, so the rule selects nothing in it either) goes back too.
+  check('T4b EXT-00001: correction names the reject example (misses)', asked[1].messages.at(-1).content.includes('Example 2 ("quantity missing")'));
+  check('C3 1c EXT-00001: accept example without a selected node sent back too', asked[1].messages.at(-1).content.includes('Example 1 ("quantity given"):\n- The rule checks values, so at least one example meant to be accepted must contain a node matched by: `*[title = ('), asked[1].messages.at(-1).content);
+  check('T4b EXT-00001: fixed', result.status === 'ready' && result.correction.attempted === 2 && result.correction.fixed === 2, JSON.stringify(result.correction));
   check('T4b EXT-00001: reject example now in a titled section', result.examples[1].content.startsWith('<section><title>LISTA DE MATERIAL OBLIGATORIO</title><table>'));
   check('T4b EXT-00001: reject example rejected', result.runs[1].result.status === 'rejected' && result.runs[1].result.selectedNodePaths.length > 0, JSON.stringify(result.runs[1].result));
   check('T4b EXT-00001: topic title in the assembled document', result.examples[1].xml.startsWith(`<topic>\n  <title>${SKELETON_TITLE_TEXT}</title>`), result.examples[1].xml);
@@ -596,6 +599,133 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   });
   const stubbornVerdict = ruleTestVerdict(stubborn.examples, stubborn.runs, analyzeRule(ext1.Rule, 'SCH-DITA', { parseXml }));
   check('T4b EXT-00001: still nothing → 0 of 1 fixed, inconclusive', stubborn.correction.fixed === 0 && stubbornVerdict.kind === 'inconclusive', JSON.stringify({ c: stubborn.correction, v: stubbornVerdict }));
+}
+
+// ─── C3, Part 1: a correction round with useful information ────────────────
+{
+  const S42 = 'S1000D 4.2';
+  const DITA_STD = 'DITA 1.3 Xpath2.0';
+  const proced = structureOf(S42, 'proced');
+  const descript = structureOf(S42, 'descript');
+  const wrap = (inner) => `<dmodule><content><procedure><mainProcedure><proceduralStep><para>${inner}</para></proceduralStep></mainProcedure></procedure></content></dmodule>`;
+
+  // 1a. The real case: <quantity quantityValue="25" unitOfMeasure="N·m">.
+  const q1 = validateExample(wrap('Torque to <quantity quantityValue="25" unitOfMeasure="N·m"/>.'), vocabulary, parseXml, proced);
+  const p1 = exampleProblems(q1, { standard: S42, schema: 'proced' });
+  check('C3 1a: @quantityValue is really an element', p1.includes('@quantityValue is not an attribute (it is the element <quantityValue>)'), p1.join('\n'));
+  check('C3 1a: card of <quantity> sent', p1.includes('card of <quantity> in the proced schema: allowed children: quantityGroup; attributes: @changeMark, @changeType, @quantityType, @quantityTypeSpecifics, @reasonForUpdateRefIds'), p1.join('\n'));
+  check('C3 1a: card of <quantityValue> (the element @quantityValue really is)', p1.some((l) => l.startsWith('card of <quantityValue> in the proced schema: allowed children: none; attributes: @quantityUnitOfMeasure')), p1.join('\n'));
+  // The first "correction" of the real run.
+  const q2 = validateExample(wrap('Torque to <quantity><quantityValue>25</quantityValue></quantity>.'), vocabulary, parseXml, proced);
+  const p2 = exampleProblems(q2, { standard: S42, schema: 'proced' });
+  check('C3 1a: <quantityValue> not allowed inside <quantity>', p2.includes('<quantityValue> is not allowed inside <quantity>'), p2.join('\n'));
+  check('C3 1a: card of the parent <quantity> names quantityGroup', p2.some((l) => l.startsWith('card of <quantity> in the proced schema: allowed children: quantityGroup;')), p2.join('\n'));
+  check('C3 1a: one card per element, never repeated', p2.filter((l) => l.startsWith('card of <quantity>')).length === 1);
+  // An element with more than 20 children: the card is cut with "+N more".
+  const paraChildren = descript.elements.para.children;
+  check('C3 1a: fixture <para> has more than 20 children', paraChildren.length > 20, String(paraChildren.length));
+  const big = validateExample('<dmodule><content><description><levelledPara><para>Text <levelledPara><para>x</para></levelledPara></para></levelledPara></description></content></dmodule>', vocabulary, parseXml, descript);
+  const pBig = exampleProblems(big, { standard: S42, schema: 'descript' });
+  const cardLine = pBig.find((l) => l.startsWith('card of <para> in the descript schema'));
+  check('C3 1a: card of <para> for a child not allowed in it', Boolean(cardLine), pBig.join('\n'));
+  const childrenPart = (cardLine || '').split('; attributes:')[0].replace(/^.*allowed children: /, '');
+  check('C3 1a: >20 children cut to 20 with "+N more"', childrenPart.split(', ').length === 21 && childrenPart.endsWith(`+${paraChildren.length - 20} more`), childrenPart);
+  // No problem about an element → no card.
+  const clean = validateExample(wrap('Torque to 25 N·m.'), vocabulary, parseXml, proced);
+  check('C3 1a: valid example has no cards', clean.runnable && clean.cards.length === 0);
+
+  // 1b. CALS tables: an entry in a column spanned by morerows.
+  const tbl = (rows, { colspecs = '', cols = 3 } = {}) =>
+    `<dmodule><content><description><levelledPara><table><tgroup cols="${cols}">${colspecs}<tbody>${rows}</tbody></tgroup></table></levelledPara></description></content></dmodule>`;
+  const specs = '<colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/>';
+  const byName = validateExample(
+    tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row><entry colname="c1">X</entry><entry colname="c2">D</entry><entry colname="c3">E</entry></row>', { colspecs: specs }),
+    vocabulary, parseXml, descript
+  );
+  const pByName = exampleProblems(byName, { standard: S42, schema: 'descript' });
+  check('C3 1b: overlap by @colname', pByName.includes('row 2: column c1 is already spanned by the entry above (morerows); remove this entry'), pByName.join('\n'));
+  check('C3 1b: overlap makes the example not runnable', !byName.runnable);
+  const byPosition = validateExample(
+    tbl('<row><entry morerows="1">A</entry><entry>B</entry><entry>C</entry></row><row><entry>X</entry><entry>D</entry><entry>E</entry></row>', { cols: 3 }),
+    vocabulary, parseXml, descript
+  );
+  const pByPos = exampleProblems(byPosition, { standard: S42, schema: 'descript' });
+  check('C3 1b: table without colname → overlap detected by position', pByPos.includes('row 2: column c1 is already spanned by the entry above (morerows); remove this entry'), pByPos.join('\n'));
+  const middle = validateExample(
+    tbl('<row><entry>A</entry><entry morerows="2">B</entry><entry>C</entry></row><row><entry>D</entry><entry>E</entry></row><row><entry>F</entry><entry>G</entry><entry>H</entry></row>', { cols: 3 }),
+    vocabulary, parseXml, descript
+  );
+  const pMid = exampleProblems(middle, { standard: S42, schema: 'descript' });
+  check('C3 1b: a correct row below the span is fine; the extra entry of row 3 is caught', pMid.length === 1 && pMid[0] === 'row 3: column c2 is already spanned by the entry above (morerows); remove this entry', pMid.join('\n'));
+  const correct = validateExample(
+    tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row><entry colname="c2">D</entry><entry colname="c3">E</entry></row>', { colspecs: specs }),
+    vocabulary, parseXml, descript
+  );
+  check('C3 1b: a correct morerows table has no problem', correct.runnable && correct.structure.length === 0, JSON.stringify(correct.structure));
+  let past;
+  try {
+    past = validateExample(tbl('<row><entry morerows="3">A</entry><entry>B</entry><entry>C</entry></row><row><entry>D</entry><entry>E</entry></row>'), vocabulary, parseXml, descript);
+  } catch (err) {
+    past = { crashed: err.message };
+  }
+  const pPast = past.crashed ? [] : exampleProblems(past, { standard: S42, schema: 'descript' });
+  check('C3 1b: morerows past the last row → its own problem, no crash', !past.crashed && pPast.includes('row 1: morerows spans past the last row (column c1)'), past.crashed || pPast.join('\n'));
+  check('C3 1b: morerows past the end is not also an overlap', !pPast.some((l) => l.includes('already spanned')), pPast.join('\n'));
+  // DITA: same model.
+  const topicStructure = structureOf(DITA_STD, 'topic');
+  const ditaTable = validateExample(
+    `<topic id="t"><title>T</title><body><table><tgroup cols="2"><tbody><row><entry morerows="1">A</entry><entry>B</entry></row><row><entry>C</entry><entry>D</entry></row></tbody></tgroup></table></body></topic>`,
+    vocabOf('schema-vocabulary-dita.json'), parseXml, topicStructure
+  );
+  const pDita = exampleProblems(ditaTable, { standard: DITA_STD, schema: 'topic' });
+  check('C3 1b: DITA table overlap by position', pDita.includes('row 2: column c1 is already spanned by the entry above (morerows); remove this entry'), pDita.join('\n'));
+
+  // 1c. A value rule needs an accept example with a node it selects.
+  const setup = setupFor(S42, ETYPE, ['descript']);
+  const noEmph = (label) => ({ label, expected: 'accept', schema: 'descript', content: 'Plain text.' });
+  const withBad = { label: 'em05', expected: 'reject', schema: 'descript', content: '<emphasis emphasisType="em05">x</emphasis>' };
+  const valueRun = testRun(ETYPE, [noEmph('plain'), withBad], setup);
+  const valueFailures = exampleFailures([noEmph('plain'), withBad], valueRun.materialized, valueRun.runs, { ruleXml: ETYPE, standard: S42, format: 'BREX-4.2', parseXml });
+  check('C3 1c: value rule, accept example without the node → correction round', valueFailures.length === 1 && valueFailures[0].index === 0 && valueFailures[0].problems[0].startsWith('The rule checks values, so at least one example meant to be accepted must contain a node matched by: `//emphasis/@emphasisType`'), JSON.stringify(valueFailures));
+  const goodAccept = { label: 'em01', expected: 'accept', schema: 'descript', content: '<emphasis emphasisType="em01">x</emphasis>' };
+  const valueRun2 = testRun(ETYPE, [noEmph('plain'), goodAccept, withBad], setup);
+  check('C3 1c: one accept example with the node is enough', exampleFailures([noEmph('plain'), goodAccept, withBad], valueRun2.materialized, valueRun2.runs, { ruleXml: ETYPE, standard: S42, format: 'BREX-4.2', parseXml }).length === 0);
+  // A prohibition (flag 0): the correct accept example has no such node.
+  const emphSetup = setupFor(S42, EMPH, ['descript']);
+  const prohibition = [noEmph('no emphasis'), { label: 'emphasis', expected: 'reject', schema: 'descript', content: '<emphasis>x</emphasis>' }];
+  const prohibitionRun = testRun(EMPH, prohibition, emphSetup);
+  check('C3 1c: prohibition (flag 0), accept without the node → no correction round', exampleFailures(prohibition, prohibitionRun.materialized, prohibitionRun.runs, { ruleXml: EMPH, standard: S42, format: 'BREX-4.2', parseXml }).length === 0);
+  check('C3 1c: prohibition verdict correct', ruleTestVerdict(prohibition, prohibitionRun.runs).kind === 'correct');
+  const OBJAPPL0 = '<objrule><objpath objappl="0">//randlist</objpath><objuse>No random lists.</objuse></objrule>';
+  const { ruleRestrictsValues } = await import('../src/utils/ruleTestRun.js');
+  check('C3 1c: objappl="0" is a prohibition', !ruleRestrictsValues(OBJAPPL0, 'BREX-3.0.1', parseXml));
+  check('C3 1c: objectValue → restricts values', ruleRestrictsValues(ETYPE, 'BREX-4.2', parseXml));
+  check('C3 1c: flag 2 without values restricts nothing', !ruleRestrictsValues('<structureObjectRule><objectPath allowedObjectFlag="2">//emphasis</objectPath><objectUse>x</objectUse></structureObjectRule>', 'BREX-4.2', parseXml));
+  check('C3 1c: 3.0.1 objval without objappl → restricts values', ruleRestrictsValues('<objrule><objpath>//@emph</objpath><objuse>x</objuse><objval valtype="single" val1="em01"/></objrule>', 'BREX-3.0.1', parseXml));
+  check('C3 1c: flag 0 with values is still a prohibition', !ruleRestrictsValues('<structureObjectRule><objectPath allowedObjectFlag="0">//@emphasisType</objectPath><objectUse>x</objectUse><objectValue valueForm="single" valueAllowed="em05"/></structureObjectRule>', 'BREX-4.2', parseXml));
+  check('C3 1c: Schematron value test', ruleRestrictsValues('<sch:pattern><sch:rule context="note"><sch:assert test="@type = (\'caution\', \'note\')">x</sch:assert></sch:rule></sch:pattern>', 'SCH-DITA', parseXml));
+  check('C3 1c: Schematron prohibition is not a value rule', !ruleRestrictsValues('<sch:pattern><sch:rule context="note"><sch:report test="true()">x</sch:report></sch:rule></sch:pattern>', 'SCH-DITA', parseXml));
+  check('C3 1c: Schematron existence test is not a value rule', !ruleRestrictsValues('<sch:pattern><sch:rule context="note"><sch:assert test="@type">x</sch:assert></sch:rule></sch:pattern>', 'SCH-DITA', parseXml));
+  check('C3 1c: a literal "=" inside a string is not a comparison', !ruleRestrictsValues('<sch:pattern><sch:rule context="note"><sch:assert test="contains-token(@class, \'a=b\') or @type">x</sch:assert></sch:rule></sch:pattern>', 'SCH-DITA', parseXml));
+  // An example of another schema (the rule does not apply there) never counts.
+  const PROC_ONLY = wrapRuleInSchemaContexts(ETYPE, 'BREX-4.2', 'S1000D 4.2', ['proced']);
+  const ctxSetup = setupFor(S42, PROC_ONLY, ['proced', 'descript']);
+  const ctxExamples = [
+    { label: 'descript, no rule', expected: 'accept', schema: 'descript', content: '<emphasis emphasisType="em05">x</emphasis>' },
+    { label: 'proced plain', expected: 'accept', schema: 'proced', content: 'Plain.' },
+    { label: 'proced em05', expected: 'reject', schema: 'proced', content: '<emphasis emphasisType="em05">x</emphasis>' },
+  ];
+  const ctxRun = testRun(PROC_ONLY, ctxExamples, ctxSetup);
+  const ctxFailures = exampleFailures(ctxExamples, ctxRun.materialized, ctxRun.runs, { ruleXml: PROC_ONLY, standard: S42, format: 'BREX-4.2', parseXml });
+  check('C3 1c: the other-schema example is ignored; the in-scope accept example is sent', ctxFailures.length === 1 && ctxFailures[0].index === 1, JSON.stringify(ctxFailures.map((f) => f.index)));
+
+  // 1d. An old stored non-rule is not executable, with the format reason.
+  const old = analyzeRule('//&lt;emphasis&gt;', 'BREX-4.2', { parseXml });
+  check('C3 1d: //&lt;emphasis&gt; → not executable, rule_format', old.status === 'not_executable' && old.reason.code === 'rule_format' && old.reason.params.problem === 'rule_format_missing', JSON.stringify(old));
+  check('C3 1d: verdict not executable from the analysis', ruleTestVerdict([], [], old).kind === 'not_executable');
+  check('C3 1d: wrapper <rules> → rule_format_wrapper', analyzeRule(`<rules>${EMPH}</rules>`, 'BREX-4.2', { parseXml }).reason?.params.problem === 'rule_format_wrapper');
+  check('C3 1d: a real rule is still executable', analyzeRule(EMPH, 'BREX-4.2', { parseXml }).status === 'executable');
+  check('C3 1d: malformed XML keeps its own reason', analyzeRule('<structureObjectRule>', 'BREX-4.2', { parseXml }).reason?.code === 'rule_not_well_formed');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

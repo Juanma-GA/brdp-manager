@@ -181,6 +181,24 @@ function ruleTestReply(systemPrompt, messages) {
         : { label: "Note without a type", expected: "reject", schema: ditaType, content: "<note><p>Isolate the bilge pump before removal.</p></note>" },
     ]);
   }
+  // C3, Part 1a: the real <quantity> case. The first answer is the real
+  // run's (@quantityValue as an attribute, @unitOfMeasure that <quantity>
+  // does not have); the correction fixes it only when the request carries
+  // the card of <quantity> (its allowed children), and otherwise repeats
+  // the real second attempt (<quantity><quantityValue>, still invalid).
+  if (/@quantityUnitOfMeasure/.test(rule)) {
+    const card = /card of <quantity> in the \w+ schema: allowed children: quantityGroup/.test(lastUser);
+    const qty = (unit) =>
+      !correcting
+        ? `<quantity quantityValue="25" unitOfMeasure="${unit}"/>`
+        : card
+          ? `<quantity><quantityGroup><quantityValue quantityUnitOfMeasure="${unit}">25</quantityValue></quantityGroup></quantity>`
+          : `<quantity><quantityValue>25</quantityValue></quantity>`;
+    return answer([
+      { label: "Torque in N.m", expected: "accept", schema: ruleSchema, content: `Torque the bolts to ${qty("N.m")}.` },
+      { label: "Torque in lbf.in", expected: "reject", schema: ruleSchema, content: `Torque the bolts to ${qty("lbf.in")}.` },
+    ]);
+  }
   if (/@emphasisType/.test(rule)) {
     const broken = /BROKENSTRUCT|STUBBORN/.test(proposal) && (!correcting || /STUBBORN/.test(proposal));
     const examples = [

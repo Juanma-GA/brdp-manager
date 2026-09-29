@@ -22,16 +22,22 @@
 //   both engines (T4b): external_placeholder {placeholder} ('@@…@@'
 //     replaced by the project's tooling after Generate);
 //     analyzeRule warning (never a refusal): xpath3_syntax {features};
+//   analyzeRule (C3): rule_format {problem, ...params} -- the stored XML is
+//     not a rule of its format; `problem` is checkRuleFormat's code
+//     (rule_format_missing, …), shown with the same text as on save;
 //   several parts: parts {parts: [{ ruleId, reason }]};
 //   recorded verdicts (verdictToTestRecord below): test_incorrect
 //     {permissive, strict}, test_nothing_selected, test_missing_expectation,
 //     test_no_runnable.
+
+import { formatSchemaIssue } from '../validation/schemaValidation.js';
 
 export const ENGINE_REASON_CODES = [
   'external_document', 'non_context_rule', 'mandatory_whole_document', 'xpath_error', 'unsupported_value_form',
   'unsupported_format', 'fragment_not_well_formed', 'rule_not_well_formed', 'no_rule_element', 'empty_path',
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
+  'rule_format',
 ];
 export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable'];
 
@@ -48,6 +54,11 @@ export function formatRuleTestReason(reason, t) {
   if (reason.code === 'test_incorrect') {
     const which = params.permissive && params.strict ? 'both' : params.permissive ? 'permissive' : 'strict';
     return t(`records.ruleTest.reasons.test_incorrect.${which}`);
+  }
+  if (reason.code === 'rule_format') {
+    const { problem, ...problemParams } = params;
+    const detail = formatSchemaIssue({ source: 'rule', code: problem, params: problemParams }, t);
+    return t('records.ruleTest.reasons.rule_format', { detail, defaultValue: detail });
   }
   const values = { ...params };
   if (reason.code === 'path_not_nodes') values.kind = t(`records.ruleTest.reasons.valueKinds.${params.kind}`, { defaultValue: params.kind });

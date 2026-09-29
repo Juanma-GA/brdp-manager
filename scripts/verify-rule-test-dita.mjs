@@ -313,8 +313,10 @@ async function main() {
     assert(sys8.includes("THE RULE DEPENDS ON A TITLE") && sys8.includes("<section><title>Parts list</title><table>…</table></section>"), "EXT-00001: prompt asks for a titled section, generic example");
     const correction8 = req8.messages.filter((m) => m.role === "user").at(-1).content;
     assert(correction8.startsWith("Some examples are not valid.") && correction8.includes('Example 2 ("Part row without quantity")') && correction8.includes("This example must contain a node matched by: `*[title = ('LISTA DE MATERIAL OBLIGATORIO',") && correction8.includes("Nothing in it matches, so the rule never runs."), `EXT-00001: one correction round, for the reject example (${correction8})`);
-    assert(!correction8.includes("Example 1 "), "EXT-00001: the accept example is never sent back");
-    assert((await panel8.getByTestId("rule-test-correction").textContent()).includes("1 example was corrected automatically."), "EXT-00001: 1 of 1 corrected");
+    // C3, Part 1c: EXT-00001 checks cell values, so the accept example (the
+    // title on the table: nothing selected in it either) goes back too.
+    assert(correction8.includes('Example 1 ("Part row with quantity"):\n- The rule checks values, so at least one example meant to be accepted must contain a node matched by:'), "EXT-00001: the accept example without a selected node is sent back (value rule)");
+    assert((await panel8.getByTestId("rule-test-correction").textContent()).includes("2 examples were corrected automatically."), "EXT-00001: 2 of 2 corrected");
     const rej8 = examplesOf(panel8).nth(1);
     const rej8Text = await rej8.textContent();
     assert(rej8Text.includes("<section>") && rej8Text.includes("<title>LISTA DE MATERIAL OBLIGATORIO</title>") && rej8Text.includes("<title>Example topic</title>"), "EXT-00001: reject example in a titled section inside the titled topic");
