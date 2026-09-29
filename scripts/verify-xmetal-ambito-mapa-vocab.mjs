@@ -14,7 +14,8 @@
 // to be attached.
 import { chromium } from "playwright-core";
 
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 
 function assert(cond, msg) {
   if (!cond) throw new Error("ASSERTION FAILED: " + msg);
@@ -22,7 +23,7 @@ function assert(cond, msg) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage();
   page.on("console", (m) => {
     if (m.type() === "error") console.log("[console error]", m.text());

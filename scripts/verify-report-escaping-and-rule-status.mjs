@@ -13,7 +13,8 @@ import fs from "fs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
 const PROJECT_NAME = "Report Escaping Verification (Lufthansa-like)";
@@ -129,7 +130,7 @@ async function main() {
   console.log(`Seeded ${createdIds.length} BRDPs (1 verified, 1 draft, 2 to-do; includes the real <table> case, an & case, and a | case)`);
 
   // ---- Real browser: navigate to Generate Report, download both formats ----
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
   try {
     await page.goto(BASE_URL);

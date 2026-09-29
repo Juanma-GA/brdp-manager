@@ -9,7 +9,8 @@
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const rows = JSON.parse(
   fs.readFileSync(
     "/tmp/claude-0/-home-user-brdp-manager/98dcb646-cccc-5aae-b30c-7469530ec6c5/scratchpad/verified_rules.json",
@@ -23,7 +24,7 @@ function assert(cond, msg) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage();
   page.on("console", (m) => {
     if (m.type() === "error") console.log("[console error]", m.text());

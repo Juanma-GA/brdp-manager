@@ -23,7 +23,8 @@ import { chromium } from "playwright-core";
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const MOCK = "http://localhost:8902";
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
 const BACKEND = new URL("../backend/", import.meta.url).pathname;
@@ -102,7 +103,7 @@ async function main() {
   assert(report.includes(`| Rule test C3 ${suffix} | BRDP-C3-OLD | BREX-4.2 | Draft | This is not a BREX 4.2 rule: structureObjectRule is missing |`), `report_invalid_rules.py lists the old rule (${report.trim().split("\n")[0]})`);
   assert(!report.includes("BRDP-C3-QTY"), "report_invalid_rules.py does not list a valid rule");
 
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 1400 } })).newPage();
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
   const panel = () => page.getByTestId("rule-test-panel");

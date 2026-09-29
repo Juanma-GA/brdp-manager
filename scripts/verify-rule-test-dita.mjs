@@ -39,7 +39,8 @@ const EXT9_XPATH2 = templateRule("brdp-template-dita-xpath2.xlsx", "BRDP-EXT-000
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const MOCK = "http://localhost:8902";
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
 
@@ -136,7 +137,7 @@ async function main() {
   await makeBrdp(p2, "BRDP-DT-PLACEHOLDER", EXT9_XPATH2.Proposal, EXT9_XPATH2.Rule);
   for (const p of projects) await embed(p);
 
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1600 } });
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
   page.on("dialog", (d) => d.accept());

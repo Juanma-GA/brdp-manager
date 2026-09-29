@@ -28,7 +28,8 @@ import * as XLSX from "xlsx";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
 const PUBLIC_DIR = new URL("../public/", import.meta.url).pathname;
@@ -80,7 +81,7 @@ async function main() {
     return project;
   };
 
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 }, acceptDownloads: true })).newPage();
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
   const openConfig = async (project) => {

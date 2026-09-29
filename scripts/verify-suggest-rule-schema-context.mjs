@@ -32,7 +32,8 @@ import { chromium } from "playwright-core";
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const MOCK = "http://localhost:8902";
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -122,7 +123,7 @@ async function main() {
   await makeBrdp(pDita, { identifier: "BRDP-SC-DITA", title: "Notes", proposal: "In procedural topics every <note> shall declare @type." });
   for (const p of [p42, p41, p301, pMaster, pDita]) await embed(p);
 
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 1300 } })).newPage();
   page.on("dialog", (d) => d.accept());
   const ruleButton = () => page.getByRole("button", { name: "Suggest Rule" });

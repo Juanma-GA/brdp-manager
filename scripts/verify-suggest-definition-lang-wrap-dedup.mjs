@@ -20,7 +20,8 @@ import { chromium } from "playwright-core";
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const MOCK_CHAT = "http://localhost:8902";
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
 
@@ -71,7 +72,7 @@ async function main() {
   }).then((r) => r.json());
   console.log(`Seeded Project (S1000D 4.2) with a Spanish-Title BRDP: "${spanishTitle}"`);
 
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
   try {
     await page.goto(BASE_URL);

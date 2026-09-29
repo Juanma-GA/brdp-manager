@@ -24,7 +24,8 @@ import { chromium } from "playwright-core";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
 
@@ -110,7 +111,7 @@ async function main() {
     validation: "Pending",
   });
 
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   try {
     // ==== 1+2. Session mechanics + "Don't show again" gone ====
     {

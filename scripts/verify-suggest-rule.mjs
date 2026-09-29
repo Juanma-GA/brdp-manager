@@ -16,7 +16,8 @@ import { chromium } from "playwright-core";
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const MOCK = "http://localhost:8902";
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
 const CATALOG_ID = "BRDP-SPCAT-LIVE-001";
@@ -198,7 +199,7 @@ async function main() {
   assert(ditaBody.template_fallback.length >= 1 && ditaBody.template_fallback.every((c) => c.source === "Template"), "a standard with (almost) no Verified rules falls back to the curated template");
 
   // ---- UI ----
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE_URL });
   const page = await context.newPage();
