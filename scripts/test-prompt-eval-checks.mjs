@@ -4,7 +4,8 @@
 // on import, so it can't be imported here).
 //
 // Run:  node scripts/test-prompt-eval-checks.mjs
-//       node scripts/test-prompt-eval-checks.mjs --responses <dir or responses.json>
+//       node scripts/test-prompt-eval-checks.mjs --responses <026ec83 pass> --reference <e54b1f2 pass>
+// (each a directory or a responses.json)
 // Without --responses the saved answers are the reconstructions in
 // scripts/prompt-eval/check-fixtures/; with it, the same expectations run on
 // a real pass (the 026ec83 3-run pass: no-dump run 1 fails on proceduralStep,
@@ -65,6 +66,13 @@ check("±2% outside a placeholder fails", !p3("con una tolerancia de ±2 % [VALU
 check("5 years outside a placeholder fails", !p3("Los registros se conservarán 5 años."));
 check("without ignorePlaceholders the same allowed answer would fail", !p3Checks.every((c) => notContainsAny({ ...c, ignorePlaceholders: false }, "cada [VALUE: e.g. 90 días]")));
 
+console.log("CAGE check with ignorePlaceholders");
+const cage = cases.find((c) => c.id === "suggest-proposal-cage-code").checks.find((c) => c.type === "not_contains");
+const cageOk = (answer) => !new RegExp(cage.pattern, cage.flags || "").test(cage.ignorePlaceholders ? stripPlaceholders(answer) : answer);
+check("the CAGE not_contains carries ignorePlaceholders", cage.ignorePlaceholders === true);
+check("a CAGE-shaped example inside a placeholder passes", cageOk("Supplier part numbers shall be prefixed with [CONVENTION: e.g. the supplier CAGE code, such as 1ABC2]."));
+check("a CAGE-shaped code outside a placeholder fails", !cageOk("Supplier part numbers shall be prefixed with 1ABC2."));
+
 console.log("max_names (any form)");
 const names = (t) => distinctSchemaNames(t, vocab42);
 check("counts *x*, **x**, `x`, <x>, @x", JSON.stringify(names("*levelledPara*, **listItem**, `dmRef`, <emphasis>, @emphasisType")) === JSON.stringify(["<levelledPara>", "<listItem>", "<dmRef>", "<emphasis>", "@emphasisType"]), JSON.stringify(names("*levelledPara*, **listItem**, `dmRef`, <emphasis>, @emphasisType")));
@@ -88,6 +96,20 @@ check("the right direction ('<para> va dentro de <levelledPara>') passes", offen
 check("a parent named before the phrase is not judged", offenders("En *levelledPara*, dentro de `<para>` van *emphasis* y *dmRef*.").length === 0);
 check("a negation between the phrase and the name is not judged", offenders("Dentro de `<para>` no puede ir *levelledPara*.").length === 0);
 check("footnote (both child and parent) is never an offender", offenders("Dentro de `<para>` puedes usar *footnote*.").length === 0);
+// Wording the reference pass (e54b1f2) used and the first version missed.
+check("'permitiendo anidar' after the element", JSON.stringify(offenders("`<para>` es la unidad básica, permitiendo anidar *randomList* y pasos (*proceduralStep*).")) === '["proceduralStep"]');
+check("'permite incluir'", JSON.stringify(offenders("El `<para>` permite incluir *emphasis* y *listItem*.")) === '["listItem"]');
+check("'admite' after the element", JSON.stringify(offenders("`<para>` admite *dmRef* y *levelledPara*.")) === '["levelledPara"]');
+check("'tiene como hijos'", JSON.stringify(offenders("`<para>` tiene como hijos *emphasis* y *sbMaterialInfo*.")) === '["sbMaterialInfo"]');
+check("'se pueden anidar ... dentro de <para>' (phrase before)", JSON.stringify(offenders("Se pueden anidar varias cosas dentro de `<para>`: *emphasis* y *proceduralStep*.")) === '["proceduralStep"]');
+check("EN 'allowing you to nest'", JSON.stringify(offenders("A <para> holds text, allowing you to nest <randomList> and <proceduralStep>.")) === '["proceduralStep"]');
+check("EN 'its children include' as the next sentence", JSON.stringify(offenders("<para> is the basic paragraph. Its children include <emphasis> and <listItem>.")) === '["listItem"]');
+check("implied subject: 'Admite …' right after a sentence about <para>", JSON.stringify(offenders("`<para>` es el párrafo básico. Admite *emphasis* y *levelledPara*.")) === '["levelledPara"]');
+check("implied subject: 'Sus hijos incluyen …'", JSON.stringify(offenders("`<para>` agrupa texto. Sus hijos incluyen *emphasis* y *proceduralStep*.")) === '["proceduralStep"]');
+check("implied subject needs the element in the sentence right before", offenders("`<para>` es el párrafo básico. Se usa mucho. Admite *levelledPara*.").length === 0);
+check("the verb belongs to another element named in between", offenders("`<para>` va dentro de *levelledPara*, que admite *listItem*.").length === 0);
+check("names after a phrase that turns the relation round are not judged", JSON.stringify(offenders("`<para>` admite *emphasis* y se usa dentro de *levelledPara* y *proceduralStep*.")) === "[]");
+check("a real child after 'anidar' passes", offenders("`<para>` es flexible, permitiendo anidar *randomList*, *sequentialList* y *footnote*.").length === 0);
 check("the case carries the check", !!cases.find((c) => c.id === "ask-open-question-no-dump").checks.find((c) => c.type === "no_parent_as_child" && c.element === "para" && c.standard === "S1000D 4.2"));
 
 console.log("SCHEMA FACTS on the three open-question cases");
@@ -98,6 +120,10 @@ for (const id of ["ask-open-question-no-disclaimer", "ask-open-question-partial-
 
 // ---- Saved answers (reconstructed, or a real pass with --responses) ------
 
+function loadSaved(file) {
+  if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, "responses.json");
+  return { file, saved: JSON.parse(fs.readFileSync(file, "utf8")) };
+}
 const argIndex = process.argv.indexOf("--responses");
 let responsesPath = path.join(__dirname, "prompt-eval", "check-fixtures", "responses-reconstructed.json");
 if (argIndex !== -1) {
@@ -120,6 +146,22 @@ check("max_names counts the names in italics (some run with 10 or more)", dump.s
 const p3Answers = answersOf("suggest-proposal-spanish-title-english-refs");
 check("three suggest-proposal answers", p3Answers.length === 3, `got ${p3Answers.length}`);
 p3Answers.forEach((a, i) => check(`P3 checks pass on run ${i + 1}`, p3(a), stripPlaceholders(a).slice(0, 200)));
+
+// Reference pass (e54b1f2 or later): its expected verdicts are not fixed, so
+// this only checks that the detection finds the sentences to analyse in
+// every run, and prints what it decided for each one.
+const refIndex = process.argv.indexOf("--reference");
+const ref = loadSaved(refIndex === -1
+  ? path.join(__dirname, "prompt-eval", "check-fixtures", "responses-reconstructed-e54b1f2.json")
+  : path.resolve(process.argv[refIndex + 1] || ""));
+const refRuns = (ref.saved.cases.find((c) => c.id === "ask-open-question-no-dump")?.runs || []).map((r) => r.answer ?? "");
+console.log(`Reference answers: ${path.relative(process.cwd(), ref.file)}${ref.saved._readme ? " (RECONSTRUCTED)" : ""}`);
+check("reference: at least one no-dump answer", refRuns.length > 0);
+refRuns.forEach((a, i) => {
+  const r = parentsPresentedAsChildren(a, "para", cards42, vocab42);
+  console.log(`       run ${i + 1}: ${r.units.length} sentence(s) analysed; offenders ${JSON.stringify(r.offenders)}; names ${names(a).length}`);
+  check(`reference run ${i + 1}: finds sentences to analyse`, r.units.length > 0);
+});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

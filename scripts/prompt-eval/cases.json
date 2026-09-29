@@ -296,7 +296,8 @@
         {
           "type": "not_contains",
           "pattern": "\\b[A-Z0-9]{5}\\b",
-          "note": "must not contain an invented 5-character CAGE-code-shaped token (best-effort heuristic, may need manual confirmation too)"
+          "note": "must not contain an invented 5-character CAGE-code-shaped token (best-effort heuristic, may need manual confirmation too)",
+          "ignorePlaceholders": true
         },
         {
           "type": "manual",

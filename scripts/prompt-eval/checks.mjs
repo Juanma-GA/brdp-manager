@@ -148,23 +148,48 @@ const BEFORE_RE = new RegExp(
   String.raw`(?:dentro\s+de(?:l)?|en\s+el\s+interior\s+de(?:l)?|hijos?\s+(?:directos?\s+)?de(?:l)?|elementos\s+hijos?\s+de(?:l)?|inside|within|into|children\s+of|child\s+elements?\s+of)` + FILLER + String.raw`\s*$`,
   "iu"
 );
-// Verb AFTER the element: "<para> puede contener …", "<para> can contain …".
-const AFTER_RE = /^[^.;:\n]{0,40}?\b(?:puede[n]?\s+(?:contener|incluir|llevar|albergar|admitir|tener)|contiene[n]?|incluye[n]?|admite[n]?|alberga[n]?|lleva[n]?|(?:can|may)\s+(?:contain|include|hold|have|nest)|contains|includes|holds)\b/iu;
+// A verb or noun that says "has inside it", in Spanish and English:
+// contener/incluir/admitir/anidar/permitir incluir/sus hijos, contain/
+// include/allow/nest/its children. Used AFTER the element ("<para> puede
+// contener …", "<para> …, permitiendo anidar …") and, as the start of a
+// sentence with no element named, for an implied subject ("Admite …",
+// "Sus hijos incluyen …") that refers to the element of the sentence before.
+const CONTAIN_SRC = String.raw`(?:puede[n]?\s+(?:contener|incluir|llevar|albergar|admitir|tener|anidar)|permit(?:e|en|ir|iendo)\s+(?:anidar|incluir|contener|usar|utilizar|insertar|meter)|admit(?:e|en|iendo)|contien(?:e|en)|conteniendo|inclu(?:ye|yen|yendo)|alberga[n]?|lleva[n]?|anid(?:a|an|ar|ando)|(?:tiene[n]?\s+(?:como\s+)?|sus\s+|cuyos\s+|con\s+)?(?:elementos\s+)?hijos(?:\s+(?:directos|posibles|permitidos))?|(?:can|may)\s+(?:contain|include|hold|have|nest)|contain(?:s|ing)?|includ(?:es|ing)|holds|allow(?:s|ing)?(?:\s+(?:you\s+)?to)?\s+(?:nest(?:ing)?|include|including|contain)|nest(?:s|ing)?|its\s+(?:child\s+elements|children)|children\s+(?:are|include))`;
+const AFTER_RE = new RegExp(String.raw`^[^.;\n]{0,160}?\b` + CONTAIN_SRC + String.raw`\b`, "iu");
+const IMPLIED_RE = new RegExp(
+  String.raw`^\s*(?:[-*+•]\s+)?(?:(?:además|también|asimismo|also|in\s+addition|additionally)\s*,?\s*)?(?:(?:este\s+elemento|this\s+element|it)\s+)?` + CONTAIN_SRC + String.raw`\b`,
+  "iu"
+);
+// A phrase that turns the relation the other way round ("se usa dentro de",
+// "aparece en", "is used inside"): names after it are the element's
+// containers, not its contents, so they are never judged as children.
+const REVERSE_RE = /\b(?:dentro\s+de|en\s+el\s+interior\s+de|forma\s+parte\s+de|se\s+(?:usa|utiliza|emplea|coloca|sitúa|situa)\s+(?:en|dentro)|aparece\s+en|puede[n]?\s+ir\s+en|va[n]?\s+en|hijos?\s+de|contenid[oa]s?\s+en|padres?|inside|within|used\s+in|appears\s+in|goes\s+in|placed\s+in|part\s+of|child\s+of|contained\s+in|parents?)\b/iu;
 const NEGATION_RE = /\b(?:no|not|never|nunca|cannot|can't|ni|sin|without)\b/iu;
 
 // Names the answer presents as CHILDREN of `element` ("dentro de <para> …",
-// "<para> puede contener …", "children of <para>: …") that the schema only
-// has as its PARENTS -- the answer turned the relation around. A name that
-// is neither a child nor a parent (a descendant, something unrelated) is
-// not judged; nor is one with a negation between the phrase and it
-// ("dentro de <para> no puede ir <levelledPara>").
+// "<para> puede contener …", "<para> …, permitiendo anidar …", "children of
+// <para>: …", or the next sentence "Admite …" / "Sus hijos incluyen …") that
+// the schema only has as its PARENTS -- the answer turned the relation
+// around. Not judged:
+// - a name before the phrase;
+// - a name after a phrase that turns the relation round ("y se usa dentro
+//   de <levelledPara>");
+// - a name with a negation between the phrase and it ("dentro de <para> no
+//   puede ir <levelledPara>");
+// - a name that is neither a child nor a parent (a descendant, something
+//   unrelated), or both (`footnote` in 4.2).
+// After the element, the verb must come before any other element name: in
+// "<para> va dentro de <levelledPara>, que admite …" the verb belongs to
+// <levelledPara>.
 export function parentsPresentedAsChildren(answer, element, cards, vocabulary) {
   const rel = elementRelations(cards, element);
   if (!rel) return { available: false, offenders: [], units: [] };
   const offenders = new Map();
   const matchedUnits = [];
+  let previousNamedElement = false;
   for (const unit of answerUnits(answer)) {
     const mentions = schemaNameMentions(unit, vocabulary);
+    const namesElement = mentions.some((m) => m.kind === "element" && m.name === element);
     let start = null;
     for (const m of mentions) {
       if (m.kind !== "element" || m.name !== element) continue;
@@ -176,14 +201,25 @@ export function parentsPresentedAsChildren(answer, element, cards, vocabulary) {
       }
       const a = AFTER_RE.exec(after);
       if (a) {
-        start = m.index + m.length + a.index + a[0].length;
-        break;
+        const verbEnd = m.index + m.length + a.index + a[0].length;
+        const between = mentions.some((o) => o.kind === "element" && o.name !== element && o.index > m.index && o.index < verbEnd);
+        if (!between) {
+          start = verbEnd;
+          break;
+        }
       }
     }
+    if (start === null && !namesElement && previousNamedElement) {
+      const implied = IMPLIED_RE.exec(unit);
+      if (implied) start = implied.index + implied[0].length;
+    }
+    previousNamedElement = namesElement;
     if (start === null) continue;
     matchedUnits.push(unit);
+    const reverse = REVERSE_RE.exec(unit.slice(start));
+    const stop = reverse ? start + reverse.index : unit.length;
     for (const m of mentions) {
-      if (m.index < start || m.kind !== "element" || m.name === element) continue;
+      if (m.index < start || m.index >= stop || m.kind !== "element" || m.name === element) continue;
       if (NEGATION_RE.test(unit.slice(start, m.index))) continue;
       if (rel.parents.has(m.name) && !rel.children.has(m.name)) offenders.set(m.name, true);
     }

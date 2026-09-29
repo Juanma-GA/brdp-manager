@@ -1,0 +1,15 @@
+{
+  "_readme": "RECONSTRUCTED answers, not the real e54b1f2 pass: the real responses.json was not available in this environment. They reproduce the wording the reference pass reported for ask-open-question-no-dump -- the containment said with 'permitiendo anidar', an implied subject ('Admite ...') and 'sus hijos' -- which the first version of no_parent_as_child did not analyse. Run the real file with: node scripts/test-prompt-eval-checks.mjs --reference <dir-or-file>.",
+  "header": { "commit": "reconstructed", "model": "n/a", "runs": 3 },
+  "cases": [
+    {
+      "id": "ask-open-question-no-dump",
+      "type": "ask",
+      "runs": [
+        { "answer": "`<para>` es la unidad básica de texto de un módulo de datos y se usa en casi todos los esquemas, permitiendo anidar listas (*randomList*), referencias (*dmRef*) y pasos procedimentales (*proceduralStep*).\n\nConviene mantener cada párrafo breve." },
+        { "answer": "El elemento `<para>` es el párrafo de texto de S1000D 4.2. Admite marcado en línea como *emphasis*, *acronym* o *dmRef*, y listas como *randomList*.\n\nNo debe usarse para dar estructura: eso lo hacen los elementos que lo contienen." },
+        { "answer": "`<para>` agrupa texto. Sus hijos incluyen *emphasis*, *internalRef* y *levelledPara*.\n\nTen en cuenta que varía algo según el esquema." }
+      ]
+    }
+  ]
+}
