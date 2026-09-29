@@ -18,6 +18,7 @@
 //
 //     node scripts/verify-rule-test-c3.mjs
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const BASE_URL = "http://localhost:5173";
@@ -27,7 +28,7 @@ const MOCK = "http://localhost:8902";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
-const BACKEND = new URL("../backend/", import.meta.url).pathname;
+const BACKEND = fileURLToPath(new URL("../backend/", import.meta.url));
 
 let failures = 0;
 function assert(condition, message) {

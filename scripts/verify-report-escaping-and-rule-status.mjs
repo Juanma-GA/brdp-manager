@@ -10,6 +10,9 @@
 // named edge case), and BRDPs spanning all three Rule Status states.
 import { chromium } from "playwright-core";
 import fs from "fs";
+import os from "os";
+import path from "path";
+import { pathToFileURL } from "url";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -152,13 +155,13 @@ async function main() {
       page.waitForEvent("download"),
       page.locator('input[type="radio"]').first().check().then(() => page.getByRole("button", { name: /Download \.html/i }).click()),
     ]);
-    const htmlPath = "/tmp/brexdoc-report-verify.html";
+    const htmlPath = path.join(os.tmpdir(), "brexdoc-report-verify.html");
     await download.saveAs(htmlPath);
     console.log("Downloaded HTML report to", htmlPath);
 
     // ---- Open the DOWNLOADED report itself in a fresh page and inspect real DOM ----
     const reportPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    await reportPage.goto("file://" + htmlPath);
+    await reportPage.goto(pathToFileURL(htmlPath).href);
     await reportPage.waitForSelector("#brdp-tbody tr", { timeout: 10000 });
 
     const headerTexts = await reportPage.locator("thead th").allInnerTexts();
@@ -219,7 +222,7 @@ async function main() {
       page.waitForEvent("download"),
       page.getByRole("button", { name: /Download \.md/i }).click(),
     ]);
-    const mdPath = "/tmp/brexdoc-report-verify.md";
+    const mdPath = path.join(os.tmpdir(), "brexdoc-report-verify.md");
     await mdDownload.saveAs(mdPath);
     const mdContent = fs.readFileSync(mdPath, "utf-8");
     assert(mdContent.includes("| Rule Status |"), "Markdown report's table header shows 'Rule Status'");

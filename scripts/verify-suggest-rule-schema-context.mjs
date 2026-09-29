@@ -27,6 +27,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const BASE_URL = "http://localhost:5173";
@@ -36,7 +37,7 @@ const MOCK = "http://localhost:8902";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const XSD = {
   "S1000D 4.2": "sources/S4.2/brex4.2.xsd",
   "S1000D 4.1": "sources/S4.1/brex4.1.xsd",

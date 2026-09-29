@@ -19,10 +19,17 @@
 // Preconditions: uvicorn on 8000, Vite on 5173 (no LLM involved). Cleans up
 // the projects it creates.
 //
+// User: PROMPT_EVAL_EMAIL / PROMPT_EVAL_PASSWORD (the same variables as the
+// prompt eval), or the dev seed admin (admin@example.com) when they are not
+// set. The user must be able to create and delete projects, i.e. have the
+// global role admin, and must not be waiting to change its password.
+//
 //     node scripts/verify-xlsx-roundtrip.mjs
+//     PROMPT_EVAL_EMAIL=me@example.com PROMPT_EVAL_PASSWORD=... node scripts/verify-xlsx-roundtrip.mjs
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import * as XLSX from "xlsx";
 
@@ -30,9 +37,10 @@ const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
-const ADMIN_EMAIL = "admin@example.com";
-const ADMIN_PASSWORD = "AdminTest123!";
-const PUBLIC_DIR = new URL("../public/", import.meta.url).pathname;
+const ADMIN_EMAIL = process.env.PROMPT_EVAL_EMAIL || "admin@example.com";
+const ADMIN_PASSWORD = process.env.PROMPT_EVAL_EMAIL ? process.env.PROMPT_EVAL_PASSWORD || "" : "AdminTest123!";
+// fileURLToPath, not URL.pathname: on Windows .pathname gives "/C:/...".
+const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
 const XLSX_PACKAGE = JSON.parse(fs.readFileSync(new URL("../node_modules/xlsx/package.json", import.meta.url), "utf8"));
 
 const CURATED = {
@@ -63,15 +71,30 @@ function readSheet(file) {
 
 async function main() {
   console.log(`xlsx in node_modules: ${XLSX_PACKAGE.version} (SheetJS reports ${XLSX.version})`);
-  const token = (
-    await fetch(`${API}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
-    }).then((r) => r.json())
-  ).access_token;
+  console.log(`user: ${ADMIN_EMAIL}`);
+  const loginResponse = await fetch(`${API}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+  });
+  const loginBody = await loginResponse.json().catch(() => ({}));
+  if (!loginResponse.ok || !loginBody.access_token) {
+    const detail = typeof loginBody.detail === "string" ? loginBody.detail : JSON.stringify(loginBody.detail ?? loginBody);
+    throw new Error(
+      `login failed for ${ADMIN_EMAIL} (HTTP ${loginResponse.status}: ${detail}). ` +
+        "Set PROMPT_EVAL_EMAIL / PROMPT_EVAL_PASSWORD to an existing user with the global role admin."
+    );
+  }
+  const token = loginBody.access_token;
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const api = (p, init = {}) => fetch(`${API}${p}`, { headers: auth, ...init });
+  const me = await api("/api/auth/me").then((r) => r.json());
+  if (me.global_role !== "admin") {
+    throw new Error(`${ADMIN_EMAIL} cannot create projects: its global role is "${me.global_role}", it must be "admin".`);
+  }
+  if (me.must_change_password) {
+    throw new Error(`${ADMIN_EMAIL} must change its password first: log in once in the app and change it.`);
+  }
   const suffix = Math.random().toString(36).slice(2, 8);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "xlsx-roundtrip-"));
   const projects = [];
@@ -115,7 +138,11 @@ async function main() {
     await page.fill("#login-email", ADMIN_EMAIL);
     await page.fill("#login-password", ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
-    await page.waitForSelector("table", { timeout: 10000 });
+    try {
+      await page.waitForSelector("table", { timeout: 10000 });
+    } catch {
+      throw new Error(`login failed for ${ADMIN_EMAIL} in the browser (the project list never appeared at ${BASE_URL})`);
+    }
     await page.locator("header select, nav select").first().selectOption("en");
 
     for (const [standard, [file, format]] of Object.entries(CURATED)) {
@@ -193,6 +220,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(`\nERROR: ${err.message}`);
   process.exit(1);
 });
