@@ -30,7 +30,7 @@ import {
   RULE_TEST_REVIEW_USER_MESSAGE,
 } from '../prompts/ruleTestReviewPrompt.js';
 import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
-import { materializeExample, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
+import { editExample, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
 import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
 import { ruleDescriptionText, verdictToTestRecord } from '../utils/ruleTestReasons.js';
 
@@ -134,18 +134,21 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // "Run again" on an edited example's content (and, for a rule on the
   // metadata, its identification and status section): rebuilt on its
   // skeleton, checked and run -- engine only, no LLM, nothing saved.
+  // Pending of the test rule, Part 3: the example keeps what the generation
+  // wrote (`generated`) and is marked `editedByUser` while its text differs
+  // from it, so the panel says the verdict includes hand-edited examples and
+  // is not recorded. A new generation (Regenerate) starts without marks.
   const runAgain = (index, content, metadata) =>
     setState((prev) => {
       if (prev.status !== 'ready') return prev;
-      const edited = { ...prev.examples[index], content };
-      if (metadata !== undefined) edited.metadata = metadata;
-      const example = materializeExample(edited, setupRef.current);
+      const example = editExample(prev.examples[index], content, metadata, setupRef.current);
       const examples = prev.examples.map((ex, i) => (i === index ? example : ex));
       const runs = prev.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary }) : r));
       return { ...prev, examples, runs };
     });
 
   const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis) : null;
+  const hasEditedExamples = state.status === 'ready' && state.examples.some((ex) => ex.editedByUser);
   const shownAnalysis = lateAnalysis || analysis;
 
   // T3b "Review with the assistant" (incorrect verdict only): the Proposal,
@@ -186,6 +189,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     analysis: shownAnalysis,
     description,
     verdict,
+    hasEditedExamples,
     copyablePrompt,
     generate,
     regenerate: generate,

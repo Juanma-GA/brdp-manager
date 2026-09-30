@@ -1134,6 +1134,13 @@
   border-radius: 4px;
 }
 
+/* "Edited" mark of an example edited by hand (the verdict is not recorded). */
+.ruleTestEditedMark {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
 .ruleTestXml {
   margin: 4px 0;
   padding: 6px 8px;

@@ -19,6 +19,7 @@ import {
 } from '../src/prompts/ruleTestExamplesPrompt.js';
 import {
   displayText,
+  editExample,
   exampleProblems,
   materializeExample,
   runExample,
@@ -29,6 +30,8 @@ import {
 import {
   assembleExample,
   chooseTestSchemas,
+  nestingPath,
+  nestingPaths,
   placeExample,
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
@@ -1499,6 +1502,97 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     { label: 'pf07', expected: 'reject', schema: 'descript', content: list(' listItemPrefix="pf07"') },
   ], setupFor(S42, R507, ['descript']));
   check('S1-00507: listItemPrefix other than pf02 rejected, absent or pf02 accepted', statuses(r507) === 'accepted,accepted,rejected' && r507.verdict.kind === 'correct', statuses(r507));
+}
+
+// ─── Pending of the test rule: valid nesting for A//B, edited examples ─────
+{
+  const S42 = 'S1000D 4.2';
+  const descript = structureOf(S42, 'descript');
+  const NESTED = '<structureObjectRule id="BRDP-S1-00507"><objectPath allowedObjectFlag="0">//randomList//randomList</objectPath><objectUse>Random lists must not be nested.</objectUse></structureObjectRule>';
+  const t = ruleTargets(NESTED);
+  check('nesting: //randomList//randomList gives the pair', JSON.stringify(t.alternatives[0].descendantPairs) === '[["randomList","randomList"]]', JSON.stringify(t.alternatives));
+  check('nesting: shortest path randomList/listItem/para/randomList', nestingPath(descript.elements, 'randomList', 'randomList')?.join('/') === 'randomList/listItem/para/randomList');
+  const pl = placeExample(descript, t);
+  check('nesting: the placement carries it', JSON.stringify(pl.nestings) === JSON.stringify([{ ancestor: 'randomList', descendant: 'randomList', path: ['randomList', 'listItem', 'para', 'randomList'] }]), JSON.stringify(pl.nestings));
+  const prompt = buildRuleTestExamplesPrompt({ brdp, standard: S42, format: 'BREX-4.2', ruleXml: NESTED, placements: [{ schema: 'descript', role: 'rule', ...pl }] });
+  check('nesting: prompt gives the valid nesting', prompt.includes('To put <randomList> inside <randomList>, the valid nesting is: randomList/listItem/para/randomList.'));
+  // Direct child steps, no descendant step: nothing.
+  const DIRECT = '<structureObjectRule><objectPath allowedObjectFlag="0">//randomList/listItem</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  check('nesting: no descendant step → none', placeExample(descript, ruleTargets(DIRECT)).nestings.length === 0);
+  check('nesting: prompt without a descendant step has no nesting line', !buildRuleTestExamplesPrompt({ brdp, standard: S42, format: 'BREX-4.2', ruleXml: DIRECT, placements: [{ schema: 'descript', role: 'rule', ...placeExample(descript, ruleTargets(DIRECT)) }] }).includes('the valid nesting is'));
+  // A//B where B is a direct child of A: trivially valid, nothing added.
+  const CHILD = '<structureObjectRule><objectPath allowedObjectFlag="0">//randomList//listItem</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  check('nesting: B a direct child of A → none', placeExample(descript, ruleTargets(CHILD)).nestings.length === 0);
+  // A//B with no path in the schema: nothing.
+  const NONE = '<structureObjectRule><objectPath allowedObjectFlag="0">//para//dmodule</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  check('nesting: no path in the schema → none', nestingPath(descript.elements, 'para', 'dmodule') === null && placeExample(descript, ruleTargets(NONE)).nestings.length === 0);
+  // Other spellings: descendant:: axis, "*" breaks the chain, attribute end.
+  check('nesting: descendant:: axis', JSON.stringify(ruleTargets('<structureObjectRule><objectPath allowedObjectFlag="0">//randomList/descendant::randomList</objectPath><objectUse>x</objectUse></structureObjectRule>').alternatives[0].descendantPairs) === '[["randomList","randomList"]]');
+  check('nesting: "*" in between → no pair', ruleTargets('<structureObjectRule><objectPath allowedObjectFlag="0">//randomList//*//randomList</objectPath><objectUse>x</objectUse></structureObjectRule>').alternatives[0].descendantPairs.length === 0);
+  check('nesting: a predicate is not a step', ruleTargets('<structureObjectRule><objectPath allowedObjectFlag="0">//randomList[.//randomList]</objectPath><objectUse>x</objectUse></structureObjectRule>').alternatives[0].descendantPairs.length === 0);
+
+  // Correction round: a reject example with <randomList> straight inside
+  // another one gets the path and "keep the nesting"; an accept example
+  // with the same problem does not.
+  const setup = setupFor(S42, NESTED, ['descript']);
+  const flat = '<randomList><listItem><para>Remove the panel.</para></listItem><randomList><listItem><para>Screws.</para></listItem></randomList></randomList>';
+  const nested = '<randomList><listItem><para>Remove the panel.<randomList><listItem><para>Screws.</para></listItem></randomList></para></listItem></randomList>';
+  const single = '<randomList><listItem><para>Remove the panel.</para></listItem></randomList>';
+  const exs = [
+    { label: 'one list', expected: 'accept', schema: 'descript', content: flat },
+    { label: 'nested lists', expected: 'reject', schema: 'descript', content: flat },
+  ];
+  const r = testRun(NESTED, exs, setup);
+  const failures = exampleFailures(exs, r.materialized, r.runs, { ruleXml: NESTED, standard: S42, format: 'BREX-4.2', setup, parseXml });
+  const rejectProblems = failures.find((f) => f.index === 1)?.problems.join('\n') || '';
+  const acceptProblems = failures.find((f) => f.index === 0)?.problems.join('\n') || '';
+  check('nesting: reject example → path and "keep the nesting"', rejectProblems.includes('<randomList> is not allowed inside <randomList>. To put <randomList> inside <randomList>, the valid nesting is: randomList/listItem/para/randomList. Keep the nesting — do not move <randomList> outside <randomList>.'), rejectProblems);
+  check('nesting: accept example → no nesting hint', acceptProblems.includes('<randomList> is not allowed inside <randomList>') && !acceptProblems.includes('valid nesting'), acceptProblems);
+  // Without the setup (older callers): the problem as before.
+  const noSetup = exampleFailures(exs, r.materialized, r.runs, { ruleXml: NESTED, standard: S42, format: 'BREX-4.2', parseXml }).find((f) => f.index === 1).problems.join('\n');
+  check('nesting: without setup the problem stays as it was', !noSetup.includes('valid nesting'));
+  // The real case: corrected with the hint, the reject example is nested
+  // and valid → rejected ✓, verdict correct.
+  const fixed = testRun(NESTED, [
+    { label: 'one list', expected: 'accept', schema: 'descript', content: single },
+    { label: 'nested lists', expected: 'reject', schema: 'descript', content: nested },
+  ], setup);
+  check('nesting: nested reject example valid and rejected, verdict correct', fixed.runs.every((x) => x.validation.runnable) && fixed.runs.map((x) => x.result.status).join() === 'accepted,rejected' && fixed.verdict.kind === 'correct', JSON.stringify(fixed.runs.map((x) => [x.validation.structure, x.result?.status])));
+  // And through generateRuleTestExamples: first answer flat, the correction
+  // request carries the path, the corrected answer is nested.
+  const answer = (rejectContent) => JSON.stringify({ proposalMismatch: null, examples: [
+    { label: 'one list', expected: 'accept', schema: 'descript', content: single },
+    { label: 'nested lists', expected: 'reject', schema: 'descript', content: rejectContent },
+  ] });
+  const asked = [];
+  const gen = await generateRuleTestExamples({
+    ruleXml: NESTED, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-S1-00507', title: 'Nested lists', definition: '', proposal: 'Random lists shall not be nested.' },
+    vocabulary, parseXml,
+    ask: async (messages, systemPrompt) => { asked.push({ messages, systemPrompt }); return asked.length === 1 ? answer(flat) : answer(nested); },
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['descript', 'proced'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S42, schema) }),
+  });
+  check('nesting: generation prompt has the path', asked[0].systemPrompt.includes('the valid nesting is: randomList/listItem/para/randomList'));
+  check('nesting: correction request has the path and "keep the nesting"', asked.length === 2 && asked[1].messages.at(-1).content.includes('Keep the nesting — do not move <randomList> outside <randomList>.'), asked[1]?.messages.at(-1).content);
+  check('nesting: corrected → rejected ✓ and correct', gen.status === 'ready' && gen.correction.fixed === 1 && gen.runs[1].result.status === 'rejected' && gen.runs[1].matches === true && ruleTestVerdict(gen.examples, gen.runs, analyzeRule(NESTED, 'BREX-4.2', { parseXml })).kind === 'correct', JSON.stringify({ c: gen.correction, s: gen.runs.map((x) => x.result?.status) }));
+
+  // Part 3: edited examples.
+  const base = fixed.materialized[1];
+  check('edited: a generated example has no mark', !base.editedByUser);
+  const edited = editExample(base, single, undefined, setup, parseXml);
+  check('edited: changed content → marked, generated text kept', edited.editedByUser === true && edited.generated.content === base.content && edited.content === single);
+  const back = editExample(edited, base.content, undefined, setup, parseXml);
+  check('edited: back to the generated text → no mark', back.editedByUser === false);
+  const same = editExample(base, base.content, undefined, setup, parseXml);
+  check('edited: run again unchanged → no mark', same.editedByUser === false);
+  const reRun = runExample(NESTED, 'BREX-4.2', edited, { vocabulary, parseXml });
+  check('edited: the edited example runs (accepted now)', reRun.result.status === 'accepted');
+  for (const lng of ['en', 'es']) {
+    const tt = i18n.getFixedT(lng);
+    check(`edited: notice and mark texts (${lng})`, tt('records.ruleTest.editedNotice') !== 'records.ruleTest.editedNotice' && tt('records.ruleTest.editedMark') !== 'records.ruleTest.editedMark');
+  }
+  check('edited: exact ES notice', i18n.getFixedT('es')('records.ruleTest.editedNotice') === 'Este resultado incluye ejemplos editados a mano y no se guarda. Regenera los ejemplos para registrar un test.');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

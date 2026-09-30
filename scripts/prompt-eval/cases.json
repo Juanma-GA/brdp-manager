@@ -2200,7 +2200,7 @@
       "id": "rule-test-template-4-2-assycode",
       "type": "rule-test",
       "standard": "S1000D 4.2",
-      "description": "Curated template rule rewritten by the stored-rules lint round: allowedObjectFlag=\"1\" on //@assyCode[matches(...)] only required ONE good code; now flag 0 on the opposite predicate, so any assyCode that is not two digits is rejected, in the DM's own code or in a reference.",
+      "description": "Curated template rule rewritten by the stored-rules lint round: allowedObjectFlag=\"1\" on //@assyCode[matches(...)] only required ONE good code; now flag 0 on //@assyCode[string-length(.) != 2] (the Proposal says two characters, not digits), so any assyCode that is not two characters long is rejected, in the DM's own code or in a reference.",
       "templateRow": {
         "file": "brdp-template-4-2.xlsx",
         "id": "BRDP-S1-00338"
@@ -2260,6 +2260,49 @@
           "type": "rule_test_reject_examples_contain",
           "pattern": "<proceduralStep>[\\s\\S]*<proceduralStep>",
           "note": "every reject example nests a substep"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-nested-randomlist",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Pending of the test rule, Part 1 (real S1-00507 run): //randomList//randomList. Mistral put a <randomList> straight inside another one (invalid) and, corrected, moved it out, so the reject example was no longer nested (accepted ✗). The prompt now gives the valid nesting randomList/listItem/para/randomList and the correction round says to keep it.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-NESTED",
+        "title": "Nested random lists",
+        "definition": "Decide whether a random list may contain another random list.",
+        "proposal": "Random lists shall not be nested.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-NESTED\"><objectPath allowedObjectFlag=\"0\">//randomList//randomList</objectPath><objectUse>Random lists must not be nested.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the reject example keeps a <randomList> nested inside another one (through listItem/para), so the rule rejects it"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "To put <randomList> inside <randomList>, the valid nesting is: randomList/listItem/para/randomList\\.",
+          "note": "the prompt gives the valid nesting from the schema's graph"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<randomList[^>]*>[\\s\\S]*<randomList",
+          "note": "every reject example still has a <randomList> inside another one"
         }
       ]
     }

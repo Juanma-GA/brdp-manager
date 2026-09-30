@@ -215,7 +215,34 @@ export const PLAIN_TEXT_HINT = 'If this element is not needed to test the rule, 
 // `ruleNames` ({ elements, attributes } of the rule, extractRuleNames), when
 // given, adds PLAIN_TEXT_HINT to each problem about the markup of an element
 // the rule does not name.
-export function exampleProblems(validation, { standard, schema, ruleNames = null } = {}) {
+// Pending of the test rule, Part 3: "Run again" on an example edited by
+// hand. The example keeps what the generation wrote (`generated`) and is
+// marked `editedByUser` while its text differs from it -- the panel then
+// says the verdict includes hand-edited examples and is not recorded (T3:
+// only the examples as the LLM wrote them are). Running it again unchanged,
+// or back to the generated text, leaves no mark.
+export function editExample(current, content, metadata, setup, parseXml = parseXmlDocument) {
+  const generated = current.generated || { content: current.content, metadata: current.metadata ?? null };
+  const edited = { ...current, content, generated };
+  if (metadata !== undefined) edited.metadata = metadata;
+  edited.editedByUser = edited.content !== generated.content || (edited.metadata ?? null) !== generated.metadata;
+  return materializeExample(edited, setup, parseXml);
+}
+
+// Pending of the test rule (Part 1): `nestings` (the placement's
+// nestingPaths) and `expected` -- in an example meant to be rejected, a
+// "<B> is not allowed inside <A>" problem on the way of a rule's A//B also
+// gives the valid nesting and says to keep it: corrected without it, an LLM
+// moved the <randomList> out of the other one and the reject example was no
+// longer nested.
+function nestingHint(problem, nestings) {
+  if (problem.kind !== 'notAllowed') return null;
+  const n = nestings.find((x) => x.descendant === problem.element && x.path.slice(0, -1).includes(problem.parent));
+  if (!n) return null;
+  return `To put <${n.descendant}> inside <${n.ancestor}>, the valid nesting is: ${n.path.join('/')}. Keep the nesting — do not move <${n.descendant}> outside <${n.ancestor}>.`;
+}
+
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null } = {}) {
   const ruleElements = new Set(ruleNames?.elements || []);
   const ruleAttributes = new Set(ruleNames?.attributes || []);
   const offer = (line, element, alsoAttribute = false) =>
@@ -238,6 +265,11 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     );
   }
   for (const p of validation.structure || []) {
+    const hint = expected === 'reject' ? nestingHint(p, nestings) : null;
+    if (hint) {
+      out.push(`${formatStructureProblem(p, schema)}. ${hint}`);
+      continue;
+    }
     const element = ['unknownElement', 'notAllowed', 'unknownAttribute'].includes(p.kind) ? p.element : null;
     out.push(offer(formatStructureProblem(p, schema), element));
   }

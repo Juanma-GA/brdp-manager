@@ -154,14 +154,20 @@ export function acceptWithoutNodeProblem(ruleXml) {
 }
 
 // The examples the correction round must fix: [{ index, label, problems }].
-export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, parseXml = parseXmlDocument }) {
+export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, setup = null, parseXml = parseXmlDocument }) {
   const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
   const ruleNames = extractRuleNames(ruleXml);
   return runs
     .map((r, index) => {
       const problems = r.validation.runnable
         ? [missesRuleProblem(examples[index], r, ruleXml), withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null].filter(Boolean)
-        : exampleProblems(r.validation, { standard, schema: materialized[index].schema, ruleNames });
+        : exampleProblems(r.validation, {
+            standard,
+            schema: materialized[index].schema,
+            ruleNames,
+            nestings: setup?.placements?.[materialized[index].schema]?.placement?.nestings || [],
+            expected: examples[index].expected,
+          });
       return { index, label: examples[index].label, problems };
     })
     .filter((f) => f.problems.length > 0);
@@ -232,7 +238,7 @@ export async function generateRuleTestExamples({
     // each failing example go back to the LLM once -- invalid examples and
     // (T4b) reject examples the rule never runs on. What still fails is
     // shown as it is, with its warnings -- never dropped.
-    const failures = exampleFailures(examples, materialized, runs, { ruleXml, standard, format, parseXml });
+    const failures = exampleFailures(examples, materialized, runs, { ruleXml, standard, format, setup: prepared.setup, parseXml });
     let correction = null;
     if (failures.length > 0) {
       correction = { attempted: failures.length, fixed: 0, failed: null };
@@ -253,7 +259,7 @@ export async function generateRuleTestExamples({
               ? examples.map((ex, i) => (failing.has(i) ? reparsed.examples[i] : ex))
               : reparsed.examples;
           const rerun = run(next);
-          const still = new Set(exampleFailures(next, rerun.materialized, rerun.runs, { ruleXml, standard, format, parseXml }).map((f) => f.index));
+          const still = new Set(exampleFailures(next, rerun.materialized, rerun.runs, { ruleXml, standard, format, setup: prepared.setup, parseXml }).map((f) => f.index));
           correction.fixed = failures.filter((f) => rerun.runs[f.index] && !still.has(f.index)).length;
           examples = next;
           ({ materialized, runs } = rerun);

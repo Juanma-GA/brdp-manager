@@ -179,6 +179,11 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
     <div className={styles.ruleTestExample} data-testid={`rule-test-example-${index}`}>
       <div className={styles.ruleTestExampleHead}>
         <strong>{example.label}</strong>
+        {example.editedByUser && (
+          <span className={`${styles.ruleTestEditedMark} ${styles.ruleTestToneWarn}`} data-testid="rule-test-edited-mark">
+            {t('records.ruleTest.editedMark')}
+          </span>
+        )}
         {example.schema && (
           <span className={styles.muted}>{t(dita ? 'records.ruleTest.topicType' : 'records.ruleTest.schema', { schema: example.schema })}</span>
         )}
@@ -426,7 +431,7 @@ export default function RuleTestPanel({
   correctedRuleBlockedReason = null,
 }) {
   const { t } = useTranslation();
-  const { state, analysis, description, verdict, copyablePrompt, generate, regenerate, runAgain, review, reviewFailure, regenerateWithReview } = useRuleTest({
+  const { state, analysis, description, verdict, hasEditedExamples, copyablePrompt, generate, regenerate, runAgain, review, reviewFailure, regenerateWithReview } = useRuleTest({
     ruleXml,
     format,
     standard,
@@ -509,6 +514,11 @@ export default function RuleTestPanel({
           {!ruleNotExecutable && (
             <p className={`${styles.ruleTestVerdict} ${styles[TONE_CLASS[view.tone]]}`} data-testid="rule-test-verdict">
               {view.text}
+            </p>
+          )}
+          {hasEditedExamples && (
+            <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-edited-notice">
+              {t('records.ruleTest.editedNotice')}
             </p>
           )}
           {verdict?.kind === 'incorrect' && (

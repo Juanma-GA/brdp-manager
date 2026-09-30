@@ -338,6 +338,8 @@ const ruleEmphasisType =
   '<structureObjectRule>\n  <objectPath allowedObjectFlag="2">//@emphasisType</objectPath>\n  <objectUse>Only em01 and em02.</objectUse>\n  <objectValue valueForm="single" valueAllowed="em01"/>\n  <objectValue valueForm="single" valueAllowed="em02"/>\n</structureObjectRule>';
 const ruleProcedContext = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">\n<structureObjectRuleGroup>\n${ruleEmphasisFlag0}\n</structureObjectRuleGroup>\n</contextRules>`;
 const rule301Mandatory = '<objrule id="R-1">\n  <objpath objappl="1">/dmodule/content//tgroup/tbody</objpath>\n  <objuse>Every tgroup needs a tbody.</objuse>\n</objrule>';
+const ruleNestedRandomList =
+  '<structureObjectRule id="BRDP-S1-00507"><objectPath allowedObjectFlag="0">//randomList//randomList</objectPath><objectUse>Random lists must not be nested.</objectUse></structureObjectRule>';
 const ruleStepTitle =
   '<structureObjectRule>\n  <objectPath allowedObjectFlag="0">//proceduralStep[not(title)]</objectPath>\n  <objectUse>Every procedural step needs a title.</objectUse>\n</structureObjectRule>';
 const ruleInfoCode =
@@ -425,6 +427,21 @@ export const ruleTestExamplesCases = [
         format: 'BREX-4.2',
         ruleXml: ruleAssyCode,
         placements: placementsFor('S1000D 4.2', ruleAssyCode, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Pending of the test rule, Part 1: "//randomList//randomList" (Lufthansa
+    // S1-00507) -- the prompt gives the valid nesting randomList/listItem/
+    // para/randomList, so the reject example is nested and valid.
+    name: 'brex-4-2-nested-randomlist',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Nested random lists', proposal: 'Random lists shall not be nested.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleNestedRandomList,
+        placements: placementsFor('S1000D 4.2', ruleNestedRandomList, [['descript', 'rule']]),
       },
     ],
   },

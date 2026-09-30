@@ -355,6 +355,22 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "One substep", expected: "reject", schema: ruleSchema, content: step(1) },
     ]);
   }
+  // Pending of the test rule, Part 1: //randomList//randomList (the real
+  // S1-00507 run). The first answer puts a <randomList> straight inside
+  // another one (invalid). Corrected WITH the valid nesting and "Keep the
+  // nesting", it nests it through listItem/para; without it, it moves the
+  // list out (valid, but no longer nested: "accepted ✗").
+  if (/\/\/randomList\/\/randomList/.test(rule) && !/listItemPrefix/.test(rule)) {
+    const single = "<randomList><listItem><para>Remove the access panel.</para></listItem></randomList>";
+    const flat = "<randomList><listItem><para>Remove the access panel.</para></listItem><randomList><listItem><para>Remove the screws.</para></listItem></randomList></randomList>";
+    const nested = "<randomList><listItem><para>Remove the access panel.<randomList><listItem><para>Remove the screws.</para></listItem></randomList></para></listItem></randomList>";
+    const moved = "<randomList><listItem><para>Remove the access panel.</para></listItem></randomList><randomList><listItem><para>Remove the screws.</para></listItem></randomList>";
+    const reject = !correcting ? flat : /Keep the nesting/.test(lastUser) ? nested : moved;
+    return answer([
+      { label: "One list", expected: "accept", schema: ruleSchema, content: single },
+      { label: "List inside a list", expected: "reject", schema: ruleSchema, content: reject },
+    ]);
+  }
   if (/listItemPrefix/.test(rule)) {
     const list = (attr) => `<randomList${attr}><listItem><para>Item</para></listItem></randomList>`;
     return answer([

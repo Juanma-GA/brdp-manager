@@ -173,21 +173,46 @@ function analyzeAlternative(alternative, out) {
   const steps = [];
   let attribute = null;
   let opaque = false;
+  // Descendant steps "A//B" (or descendant::B): the pairs [A, B], so the
+  // prompt can give the valid nesting between them (nestingPaths).
+  const descendantPairs = [];
+  let previous = null;
+  let descendant = false;
   segments.forEach((raw, i) => {
     const seg = raw.trim();
-    if (!seg || seg === '.' || seg === '*' || /^(?:node|text|comment)\(\)$/.test(seg)) return;
+    if (!seg) {
+      if (i > 0) descendant = true; // the empty segment of "//"
+      return;
+    }
+    if (/^descendant(?:-or-self)?::node\(\)$/.test(seg)) {
+      descendant = true;
+      return;
+    }
+    if (seg === '.' || /^(?:node|text|comment)\(\)$/.test(seg)) return;
+    if (seg === '*') {
+      previous = null;
+      return;
+    }
     const attr = /^(?:@|attribute::)([A-Za-z_][\w.-]*)$/.exec(seg);
     if (attr) {
       if (i === segments.length - 1) attribute = attr[1];
       else opaque = true;
+      previous = null;
       return;
     }
     const name = stepName(seg);
-    if (name) steps.push(name);
-    else opaque = true;
+    if (name) {
+      steps.push(name);
+      if (previous && (descendant || /^descendant(?:-or-self)?::/.test(seg))) descendantPairs.push([previous, name]);
+      previous = name;
+    } else {
+      opaque = true;
+      previous = null;
+    }
+    descendant = false;
   });
   if (steps.length === 0 && !attribute) opaque = true;
-  out.alternatives.push({ steps, attribute, checked, absolutePrefix, opaque });
+  out.alternatives.push({ steps, attribute, checked, absolutePrefix, opaque, descendantPairs });
 }
 
 const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
@@ -343,6 +368,60 @@ export function targetsForGroup(targets, group) {
 }
 
 // ─── Where the content goes ─────────────────────────────────────────────────
+
+// The shortest chain of elements that puts `to` inside `from` in this
+// schema's graph -- [from, …, to] -- or null when there is none. At least
+// one step: "randomList//randomList" → randomList/listItem/para/randomList.
+export function nestingPath(elements, from, to) {
+  if (!elements[from] || !elements[to]) return null;
+  const previous = new Map();
+  let frontier = [from];
+  const seen = new Set();
+  while (frontier.length) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of [...(elements[name]?.children || [])].sort()) {
+        if (child === to) {
+          const path = [to, name];
+          for (let at = name; previous.has(at); ) {
+            at = previous.get(at);
+            path.push(at);
+          }
+          return path.reverse();
+        }
+        if (!seen.has(child) && elements[child]) {
+          seen.add(child);
+          previous.set(child, name);
+          next.push(child);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+// Pending of the test rule (Part 1): for each "A//B" of the rule whose B is
+// not a direct child of A, the valid nesting in this schema. An LLM put a
+// <randomList> straight inside another one (invalid) and, corrected, moved
+// it out -- the reject example was no longer nested. Nothing for a pair
+// with no path in the schema.
+export function nestingPaths(structure, targets) {
+  const elements = structure.elements;
+  const out = [];
+  const seen = new Set();
+  for (const alternative of targets?.alternatives || []) {
+    if (alternative.opaque) continue;
+    for (const [ancestor, descendant] of alternative.descendantPairs || []) {
+      const key = `${ancestor}//${descendant}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const path = nestingPath(elements, ancestor, descendant);
+      if (path && path.length > 2) out.push({ ancestor, descendant, path });
+    }
+  }
+  return out;
+}
 
 function reachable(elements, from, target, maxDepth = 8) {
   const seen = new Set([from]);
@@ -512,6 +591,7 @@ export function placeExample(structure, targets) {
       metadata: section ? { element: section.element, tree: section.tree, insertion: true } : null,
       contentInsertion: true,
       unreachable: null,
+      nestings: nestingPaths(structure, targets),
     };
   }
   const classes = classifyRuleTargets(structure, targets);
@@ -530,6 +610,7 @@ export function placeExample(structure, targets) {
     metadata,
     contentInsertion,
     unreachable: classes.unreachable,
+    nestings: nestingPaths(structure, targets),
   });
   if (!classes.content) return whole(chain[chain.length - 1], chain, false);
 

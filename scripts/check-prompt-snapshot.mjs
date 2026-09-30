@@ -292,6 +292,13 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // of an aircraft maintenance manual… at most 10 lines of content", which
 // contradicted it; it says to change only what the decision is about in the
 // minimal section. Only ruleTestExamples/brex-4-2-metadata-infocode changes.
+//
+// Pending of the test rule, Part 1: a rule path with a descendant step A//B
+// now gives, from the schema's graph, the shortest valid nesting ("To put <B>
+// inside <A>, the valid nesting is: …"). Only the A//B cases change:
+// ruleTestExamples/brex-3-0-1-mandatory-absolute (content//tgroup) and the
+// NEW case ruleTestExamples/brex-4-2-nested-randomlist (S1-00507,
+// //randomList//randomList). Every other prompt is unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

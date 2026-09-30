@@ -267,8 +267,13 @@ const TEMPLATE_CASES = {
       // Stored-rules lint round: the template had allowedObjectFlag="1" on
       // //@assyCode[matches(...)], which only required ONE good assyCode --
       // a bad one next to it (here in a dmRef) was accepted. Now flag 0 on
-      // the opposite predicate: every bad value is rejected.
-      alsoBad: ['<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" assyCode="12"/></dmIdent></dmAddress></identAndStatusSection><content><description><para><dmRef><dmRefIdent><dmCode modelIdentCode="BIKE" assyCode="123"/></dmRefIdent></dmRef></para></description></content></dmodule>'],
+      // //@assyCode[string-length(.) != 2]: every bad value is rejected.
+      alsoBad: [
+        '<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" assyCode="12"/></dmIdent></dmAddress></identAndStatusSection><content><description><para><dmRef><dmRefIdent><dmCode modelIdentCode="BIKE" assyCode="123"/></dmRefIdent></dmRef></para></description></content></dmodule>',
+        '<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" assyCode="A"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>',
+      ],
+      // The Proposal says two CHARACTERS, not two digits.
+      alsoGood: ['<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" assyCode="AB"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>'],
     },
     'BRDP-S1-00065': {
       bad: DM('<copyright><copyrightPara><emphasis>Copyright 2023</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),

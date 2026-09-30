@@ -81,6 +81,17 @@ function metadataLine(p, alsoContent = false) {
 ${minimalSection(p)}`;
 }
 
+// Pending of the test rule (Part 1): the rule looks at <B> somewhere inside
+// <A> ("A//B"), and the application knows, from the schema's graph, the
+// shortest valid way to put one inside the other (nestingPaths). Nothing
+// when the rule has no such step or the schema has no such path.
+function nestingLines(p) {
+  return (p.nestings || [])
+    .map((n) => `
+  To put <${n.descendant}> inside <${n.ancestor}>, the valid nesting is: ${n.path.join('/')}.`)
+    .join('');
+}
+
 function placementLine(p, dita) {
   const allowed = p.allowedChildren.length > 0 ? p.allowedChildren.join(', ') : 'text only';
   const kind = dita ? 'topic type' : 'schema';
@@ -98,7 +109,7 @@ function placementLine(p, dita) {
   this minimal, valid one:
 ${minimalSection(p)}` : ''
     }
-  Allowed directly inside <${p.root}>: ${allowed}.`;
+  Allowed directly inside <${p.root}>: ${allowed}.${nestingLines(p)}`;
   }
   if (p.metadata?.insertion && p.contentInsertion === false) {
     return `- ${kind} "${p.schema}": the application builds the rest of the document
@@ -113,7 +124,7 @@ ${metadataLine(p)}`;
       : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
   ${p.path.join('/')}.${titleLine}
-  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${
+  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${nestingLines(p)}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''
   }`;
