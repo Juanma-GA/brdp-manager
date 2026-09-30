@@ -1,4 +1,9 @@
 import { authFetch } from '../services/apiClient.js';
+import { LLM_TRUNCATED, isTruncatedAnswer, truncatedAnswerError } from './llmTruncation.js';
+
+// The output limit of an answer, unless the use sets its own (the rule
+// test's examples need more: src/prompts/shared.js RULE_TEST_MAX_TOKENS).
+export const DEFAULT_MAX_TOKENS = 4000;
 
 /**
  * Build request body based on provider
@@ -9,10 +14,10 @@ import { authFetch } from '../services/apiClient.js';
  * @param {number} temperature - Temperature parameter for sampling
  * @returns {Object} Request body
  */
-function buildRequestBody(provider, modelName, messages, systemPrompt, temperature) {
+function buildRequestBody(provider, modelName, messages, systemPrompt, temperature, maxTokens = DEFAULT_MAX_TOKENS) {
   const baseBody = {
     model: modelName,
-    max_tokens: 4000,
+    max_tokens: maxTokens,
     temperature,
   };
 
@@ -81,7 +86,7 @@ export async function sendMessage(
   systemPrompt = "",
   options = {}
 ) {
-  const { temperature = 1 } = options;
+  const { temperature = 1, maxTokens = DEFAULT_MAX_TOKENS } = options;
 
   if (!modelName || !provider) {
     throw new Error('Missing model configuration.');
@@ -92,7 +97,7 @@ export async function sendMessage(
   // construction, since targetEndpoint/apiKey never travel from the
   // client). This is the ONLY thing that changed here versus v1 -- prompt
   // construction (buildRequestBody/buildSystemPrompt) is untouched.
-  const payload = buildRequestBody(provider, modelName, messages, systemPrompt, temperature);
+  const payload = buildRequestBody(provider, modelName, messages, systemPrompt, temperature, maxTokens);
 
   try {
     const response = await authFetch('/api/llm-proxy', {
@@ -109,6 +114,7 @@ export async function sendMessage(
     }
 
     const data = await response.json();
+    if (isTruncatedAnswer(provider, data)) throw truncatedAnswerError();
 
     // Extract message content based on provider response format
     if (provider === 'Anthropic') {
@@ -124,7 +130,8 @@ export async function sendMessage(
       content: data.choices[0].message.content,
     };
   } catch (error) {
-    if (error.message.includes('Invalid API key') ||
+    if (error.code === LLM_TRUNCATED ||
+        error.message.includes('Invalid API key') ||
         error.message.includes('Connection error')) {
       throw error;
     }

@@ -402,7 +402,9 @@ function UntestedNote({ untested }) {
 function CorrectionNote({ correction }) {
   const { t } = useTranslation();
   if (!correction) return null;
-  const text = correction.failed
+  const text = correction.truncated
+    ? t('records.ruleTest.correctionTruncated')
+    : correction.failed
     ? t('records.ruleTest.correctionFailed', { error: correction.failed })
     : correction.fixed === correction.attempted
       ? t('records.ruleTest.correctedAll', { count: correction.fixed })
@@ -619,7 +621,9 @@ export default function RuleTestPanel({
       {state.status === 'loading' && <p className={styles.muted}>{t('records.ruleTest.generating')}</p>}
       {state.status === 'error' && (
         <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneBad}`} role="alert">
-          ⚠ {t(state.badResponse ? 'records.ruleTest.badResponse' : 'records.ruleTest.error', { error: state.error })}
+          ⚠ {state.truncated
+            ? t('records.ruleTest.truncated')
+            : t(state.badResponse ? 'records.ruleTest.badResponse' : 'records.ruleTest.error', { error: state.error })}
         </p>
       )}
 

@@ -30,6 +30,17 @@ export const RULE_TEST_TEMPERATURE = 0.5;
 // Test de reglas T3b: "Review with the assistant" -- a diagnosis, not a
 // creative text: as steady as Suggest.
 export const RULE_TEST_REVIEW_TEMPERATURE = 0.3;
+// Respuestas cortadas por el límite de tokens: the output limit of the rule
+// test's examples (generation and correction round). The default 4000 cut
+// the real BRDP-EXT-00029 answer (CMP ATA 4.2: ~8 examples across
+// descript, pm, ddn and dml, each rewriting a whole identification and
+// status section of ~1,500 characters) at character 12,827 -- about 3.2
+// characters per token of this JSON-with-XML. The whole answer is ~15-20k
+// characters (~5-6k tokens), and the correction round sends every example
+// again; 16000 tokens (~50k characters) leaves about three times that.
+// The other uses keep llmAPI.js's DEFAULT_MAX_TOKENS: their answers are
+// prose or one rule, far below it.
+export const RULE_TEST_MAX_TOKENS = 16000;
 
 // A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
 // examples with inline function expressions run well past this) -- rather

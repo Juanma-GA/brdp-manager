@@ -559,6 +559,42 @@ let invertNextArmed = false;
 // which the encargo's error-entry edge case doesn't need to set up. This
 // flag forces the NEXT call to fail regardless of its content.
 let errorNextArmed = false;
+// Respuestas cortadas por el límite de tokens: the mock honours the
+// request's max_tokens like a real provider -- an answer longer than
+// max_tokens * CHARS_PER_TOKEN (3.2, measured on the real EXT-00029 cut:
+// "position 12827" at max_tokens 4000) comes back cut there with
+// finish_reason "length". POST /truncate-next cuts the NEXT answer in half
+// whatever its size (one-shot), for the message of a cut answer.
+const CHARS_PER_TOKEN = 3.2;
+let truncateNextArmed = false;
+// The XML of each example re-indented, and the JSON pretty-printed, as a
+// real model writes them (REALSIZE in the prompt, and always for
+// BRDP-EXT-00029): the size of the real EXT-00029 answer, which 4000
+// tokens could not hold.
+function realSize(reply) {
+  let data;
+  try {
+    data = JSON.parse(reply);
+  } catch {
+    return reply;
+  }
+  const indent = (xml) => {
+    let depth = 0;
+    return String(xml)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        if (/^<\//.test(line)) depth = Math.max(0, depth - 1);
+        const out = "    ".repeat(depth) + line;
+        if (/^<[^/!?][^>]*[^/]>$/.test(line) && !/<\/[^>]+>$/.test(line)) depth += 1;
+        return out;
+      })
+      .join("\n");
+  };
+  data.examples = (data.examples || []).map((ex) => ({ ...ex, ...(ex.metadata ? { metadata: indent(ex.metadata) } : {}) }));
+  return JSON.stringify(data, null, 2);
+}
 
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/last-request") {
@@ -571,6 +607,7 @@ const server = http.createServer((req, res) => {
     slowNextArmed = false;
     errorNextArmed = false;
     stepNextArmed = false;
+    truncateNextArmed = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -583,6 +620,12 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && req.url === "/error-next") {
     errorNextArmed = true;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.method === "POST" && req.url === "/truncate-next") {
+    truncateNextArmed = true;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -684,6 +727,8 @@ const server = http.createServer((req, res) => {
           // not JSON (BROKENJSON): left as it is
         }
       }
+      // BRDP-EXT-00029 always at its real size (the case that was cut).
+      if (/REALSIZE|\/ddn or \/dml/.test(messages.find((m) => m.role === "system")?.content || "")) reply = realSize(reply);
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
     } else {
@@ -696,7 +741,18 @@ const server = http.createServer((req, res) => {
       // OpenAI/Mistral-compatible shape -- matches what llmAPI.js's
       // sendMessage() parses for any non-Anthropic provider:
       // data.choices[0].message.content
-      res.end(JSON.stringify({ choices: [{ message: { content: reply } }] }));
+      let finishReason = "stop";
+      const limit = Math.floor((Number(parsed.max_tokens) || Infinity) * CHARS_PER_TOKEN);
+      if (truncateNextArmed) {
+        truncateNextArmed = false; // one-shot
+        reply = reply.slice(0, Math.floor(reply.length / 2));
+        finishReason = "length";
+      } else if (reply.length > limit) {
+        reply = reply.slice(0, limit);
+        finishReason = "length";
+      }
+      if (finishReason === "length") console.log(`chat call -- answer cut at ${reply.length} chars (max_tokens ${parsed.max_tokens})`);
+      res.end(JSON.stringify({ choices: [{ message: { content: reply }, finish_reason: finishReason }] }));
     };
     if (slowNextArmed) {
       slowNextArmed = false; // one-shot -- doesn't affect the next unrelated call

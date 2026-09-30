@@ -292,6 +292,7 @@ const resources = {
           generating: 'Writing example fragments…',
           badResponse: 'The examples could not be used: {{error}}',
           error: 'Could not generate the examples: {{error}}',
+          truncated: "The AI's answer was cut off by its length, so the examples could not be used. Regenerate the examples.",
           regenerate: 'Regenerate examples',
           copyPrompt: 'Copy test prompt',
           copyPromptTitle: 'Copy the prompt that writes the examples, to use it with another LLM',
@@ -368,6 +369,7 @@ const resources = {
           correctedAll_other: '{{count}} examples were corrected automatically.',
           correctedSome: 'Automatic correction fixed {{fixed}} of {{attempted}} examples; the others are shown with their problems.',
           correctionFailed: 'The automatic correction could not be used ({{error}}); the examples are shown with their problems.',
+          correctionTruncated: "The automatic correction could not be used: the AI's answer was cut off by its length. The examples are shown with their problems.",
           unknownSchema: 'the schema "{{schema}}" was not one of the offered schemas',
           missingMetadata: 'the example has no <{{element}}>: the rule looks at it, so the example must include it',
           structure: {
@@ -1146,6 +1148,7 @@ const resources = {
           generating: 'Escribiendo fragmentos de ejemplo…',
           badResponse: 'Los ejemplos no se pueden usar: {{error}}',
           error: 'No se pudieron generar los ejemplos: {{error}}',
+          truncated: 'La respuesta de la IA se cortó por su longitud y no se pueden usar los ejemplos. Vuelve a generarlos.',
           regenerate: 'Regenerar ejemplos',
           copyPrompt: 'Copiar prompt de prueba',
           copyPromptTitle: 'Copia el prompt que escribe los ejemplos, para usarlo con otro LLM',
@@ -1221,6 +1224,7 @@ const resources = {
           correctedAll_other: 'Se corrigieron automáticamente {{count}} ejemplos.',
           correctedSome: 'La corrección automática arregló {{fixed}} de {{attempted}} ejemplos; los demás se muestran con sus problemas.',
           correctionFailed: 'La corrección automática no se pudo usar ({{error}}); los ejemplos se muestran con sus problemas.',
+          correctionTruncated: 'La corrección automática no se pudo usar: la respuesta de la IA se cortó por su longitud. Los ejemplos se muestran con sus problemas.',
           unknownSchema: 'el esquema "{{schema}}" no era uno de los ofrecidos',
           missingMetadata: 'el ejemplo no tiene <{{element}}>: la regla lo mira, así que el ejemplo debe incluirlo',
           structure: {

@@ -55,7 +55,12 @@ import {
   buildSuggestRulePrompt,
   parseSuggestRuleResponse,
 } from "../src/prompts/suggestRulePrompt.js";
-import { ASK_TEMPERATURE, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { ASK_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { isTruncatedAnswer, truncatedAnswerError } from "../src/api/llmTruncation.js";
+
+// The default output limit of every other use (llmAPI.js DEFAULT_MAX_TOKENS;
+// not imported: llmAPI.js pulls in the browser's API client).
+const DEFAULT_MAX_TOKENS = 4000;
 import {
   buildRuleTestReviewPrompt,
   parseRuleTestReviewResponse,
@@ -266,13 +271,16 @@ async function runCheck(check, answer, ctx = {}) {
     case "rule_test_json_valid": {
       const r = ctx.ruleTest;
       const ok = r && !r.badResponse && r.status === "ready";
-      return { status: ok ? "pass" : "fail", detail: ok ? "valid JSON with examples" : `not usable: ${r?.error || "no answer"}` };
+      return {
+        status: ok ? "pass" : "fail",
+        detail: ok ? "valid JSON with examples" : r?.truncated ? "the answer was cut off by the max_tokens limit" : `not usable: ${r?.error || "no answer"}`,
+      };
     }
     case "rule_test_examples_valid": {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       const bad = r.runs.map((run, i) => (run.validation.runnable ? null : r.examples[i].label)).filter(Boolean);
-      const corrected = r.correction ? ` (correction round: ${r.correction.fixed}/${r.correction.attempted} fixed)` : "";
+      const corrected = r.correction ? ` (correction round: ${r.correction.truncated ? "answer cut off by max_tokens" : `${r.correction.fixed}/${r.correction.attempted} fixed`})` : "";
       return { status: bad.length ? "fail" : "pass", detail: bad.length ? `still invalid after the correction round: ${bad.join(", ")}${corrected}` : `all ${r.examples.length} examples valid${corrected}` };
     }
     case "rule_test_accept_and_reject": {
@@ -517,14 +525,15 @@ async function getAiProvider() {
 async function sendToLlm(aiProvider, systemPrompt, userMessage, temperature) {
   const payload =
     aiProvider.provider === "Anthropic"
-      ? { model: aiProvider.model, max_tokens: 4000, temperature, system: systemPrompt, messages: [{ role: "user", content: userMessage }] }
+      ? { model: aiProvider.model, max_tokens: DEFAULT_MAX_TOKENS, temperature, system: systemPrompt, messages: [{ role: "user", content: userMessage }] }
       : {
           model: aiProvider.model,
-          max_tokens: 4000,
+          max_tokens: DEFAULT_MAX_TOKENS,
           temperature,
           messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
         };
   const res = await apiFetch("/api/llm-proxy", { method: "POST", body: JSON.stringify({ payload }) });
+  if (isTruncatedAnswer(aiProvider.provider, res)) throw truncatedAnswerError();
   if (aiProvider.provider === "Anthropic") return res.content[0].text;
   return res.choices[0].message.content;
 }
@@ -697,12 +706,15 @@ function xmldomParse(text) {
   return doc;
 }
 
-async function sendMessagesToLlm(aiProvider, systemPrompt, messages, temperature) {
+// maxTokens: the same limit as the app's use (the rule test's examples:
+// RULE_TEST_MAX_TOKENS); a cut answer throws the app's LLM_TRUNCATED error.
+async function sendMessagesToLlm(aiProvider, systemPrompt, messages, temperature, maxTokens = DEFAULT_MAX_TOKENS) {
   const payload =
     aiProvider.provider === "Anthropic"
-      ? { model: aiProvider.model, max_tokens: 4000, temperature, system: systemPrompt, messages }
-      : { model: aiProvider.model, max_tokens: 4000, temperature, messages: [{ role: "system", content: systemPrompt }, ...messages] };
+      ? { model: aiProvider.model, max_tokens: maxTokens, temperature, system: systemPrompt, messages }
+      : { model: aiProvider.model, max_tokens: maxTokens, temperature, messages: [{ role: "system", content: systemPrompt }, ...messages] };
   const res = await apiFetch("/api/llm-proxy", { method: "POST", body: JSON.stringify({ payload }) });
+  if (isTruncatedAnswer(aiProvider.provider, res)) throw truncatedAnswerError();
   if (aiProvider.provider === "Anthropic") return res.content[0].text;
   return res.choices[0].message.content;
 }
@@ -721,7 +733,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
     schemaLocation: location,
     brdp: createdBrdp,
     vocabulary,
-    ask: (messages, systemPrompt) => sendMessagesToLlm(aiProvider, systemPrompt, messages, RULE_TEST_TEMPERATURE),
+    ask: (messages, systemPrompt) => sendMessagesToLlm(aiProvider, systemPrompt, messages, RULE_TEST_TEMPERATURE, RULE_TEST_MAX_TOKENS),
     fetchSchemaCards: (standard, names) =>
       apiFetch(`/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(names.join(","))}`),
     fetchStructure: (standard, schema) =>

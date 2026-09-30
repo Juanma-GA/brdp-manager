@@ -17,6 +17,7 @@ import { describeRule, parseXmlDocument, ruleConditions } from './ruleTestEngine
 import { stripLiterals } from './ruleTestCommon.js';
 import { chooseTestSchemas, placeExample, ruleLooksAtBrexReference, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
+import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 
 // Same cap as the schema facts of Ask / Suggest Rule.
 const MAX_SCHEMA_FACTS = 6;
@@ -256,7 +257,9 @@ export function runRuleTestExamples(examples, { ruleXml, format, setup, vocabula
 //     correction, setup, systemPrompt, responses }
 //   | { status: 'not_executable', reason, setup } -- the rule looks at
 //     nothing the examples can contain (no LLM call)
-//   | { status: 'error', error, badResponse?, systemPrompt?, responses? }
+//   | { status: 'error', error, badResponse?, truncated?, systemPrompt?, responses? }
+//   truncated: the LLM's answer was cut by its length limit (ask threw
+//   llmAPI.js's LLM_TRUNCATED error) -- said as such, never "not valid JSON".
 //   | null when isCurrent() turned false (a newer generation started).
 // onPrompt(systemPrompt) is called as soon as the prompt exists (Copy test
 // prompt works even if the LLM then fails).
@@ -343,6 +346,8 @@ export async function generateRuleTestExamples({
       } catch (err) {
         if (!isCurrent()) return null;
         correction.failed = err.message;
+        // Respuestas cortadas: the correction was cut by the length limit.
+        if (err?.code === LLM_TRUNCATED) correction.truncated = true;
       }
     }
     return {
@@ -358,6 +363,6 @@ export async function generateRuleTestExamples({
     };
   } catch (err) {
     if (!isCurrent()) return null;
-    return { status: 'error', error: err.message, systemPrompt, responses };
+    return { status: 'error', error: err.message, truncated: err?.code === LLM_TRUNCATED, systemPrompt, responses };
   }
 }

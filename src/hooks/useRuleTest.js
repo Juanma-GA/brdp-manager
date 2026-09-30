@@ -21,7 +21,7 @@ import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { fetchSchemaCards } from '../api/schemaFacts.js';
 import i18n from '../i18n';
-import { RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
+import { RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
 import { buildCopyableTestPrompt } from '../prompts/ruleTestExamplesPrompt.js';
 import {
   buildRuleTestReviewPrompt,
@@ -142,6 +142,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
         (
           await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
             temperature: RULE_TEST_TEMPERATURE,
+            maxTokens: RULE_TEST_MAX_TOKENS,
           })
         ).content,
       fetchSchemaCards,
@@ -158,7 +159,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       return;
     }
     if (result.status !== 'ready') {
-      setState({ status: 'error', error: result.error, badResponse: Boolean(result.badResponse) });
+      setState({ status: 'error', error: result.error, badResponse: Boolean(result.badResponse), truncated: Boolean(result.truncated) });
       return;
     }
     setupRef.current = result.setup;

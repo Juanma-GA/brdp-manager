@@ -613,6 +613,34 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   });
   const stubbornVerdict = ruleTestVerdict(stubborn.examples, stubborn.runs, analyzeRule(ext1.Rule, 'SCH-DITA', { parseXml }));
   check('T4b EXT-00001: still nothing → 0 of 1 fixed, inconclusive', stubborn.correction.fixed === 0 && stubbornVerdict.kind === 'inconclusive', JSON.stringify({ c: stubborn.correction, v: stubbornVerdict }));
+
+  // Respuestas cortadas por el límite de tokens: a cut answer is said as
+  // such, never "not valid JSON" -- in the generation and in the correction
+  // round.
+  const { truncatedAnswerError, isTruncatedAnswer, LLM_TRUNCATED } = await import('../src/api/llmTruncation.js');
+  const { RULE_TEST_MAX_TOKENS } = await import('../src/prompts/shared.js');
+  const base = {
+    ruleXml: ext1.Rule, format: 'SCH-DITA', standard: DITA3, schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00001', title: '', definition: '', proposal: '' },
+    vocabulary: vocabDita, parseXml,
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['topic'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
+  };
+  const cut = await generateRuleTestExamples({ ...base, ask: async () => { throw truncatedAnswerError(); } });
+  check('truncated: a cut answer → error flagged truncated, not a bad JSON', cut.status === 'error' && cut.truncated === true && !cut.badResponse, JSON.stringify(cut).slice(0, 200));
+  let calls = 0;
+  const cutCorrection = await generateRuleTestExamples({ ...base, ask: async () => { calls += 1; if (calls === 1) return first; throw truncatedAnswerError(); } });
+  check('truncated: a cut correction → the examples are kept, the correction says it was cut', cutCorrection.status === 'ready' && cutCorrection.correction.truncated === true && cutCorrection.examples.length === 2);
+  const broken = await generateRuleTestExamples({ ...base, ask: async () => first.slice(0, 200) });
+  check('truncated: a really broken answer (not flagged cut by the provider) stays "not valid JSON"', broken.status === 'error' && broken.badResponse === true && !broken.truncated);
+  check('truncated: provider signals', isTruncatedAnswer('Mistral', { choices: [{ finish_reason: 'length' }] }) && isTruncatedAnswer('Custom', { choices: [{ finish_reason: 'model_length' }] })
+    && isTruncatedAnswer('Anthropic', { stop_reason: 'max_tokens' }) && !isTruncatedAnswer('Mistral', { choices: [{ finish_reason: 'stop' }] }) && !isTruncatedAnswer('Anthropic', { stop_reason: 'end_turn' }));
+  check('truncated: error code', truncatedAnswerError().code === LLM_TRUNCATED);
+  check('truncated: the rule test asks for more than the default 4000 tokens', RULE_TEST_MAX_TOKENS >= 16000);
+  const enT = i18n.getFixedT('en');
+  const esT = i18n.getFixedT('es');
+  check('truncated: texts EN/ES', esT('records.ruleTest.truncated').startsWith('La respuesta de la IA se cortó por su longitud') && enT('records.ruleTest.truncated').startsWith("The AI's answer was cut off by its length")
+    && esT('records.ruleTest.correctionTruncated').includes('se cortó por su longitud'));
 }
 
 // ─── C3, Part 1: a correction round with useful information ────────────────
