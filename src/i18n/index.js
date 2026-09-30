@@ -472,10 +472,24 @@ const resources = {
             passedEdited_other: 'Passed with {{count}} examples edited by hand',
             withReason: '{{result}}: {{reason}}',
             notRecorded: '{{result}} — not recorded (the test of {{date}} was kept)',
+            onSavedExamples: '{{result}} (examples from the test of {{date}})',
+          },
+          // Guardar la prueba aprobada: the last passed test, kept with its examples.
+          saved: {
+            open: 'See approved test ({{date}})',
+            title: 'Approved test of {{date}}',
+            ruleLabel: 'Rule it was tested with:',
+            ruleChanged: 'Tested with an earlier version of the rule: the saved rule has changed since.',
+            proposalChanged: 'The Proposal has changed since: these examples were written for the earlier Proposal.',
+            examplesFrom: 'Examples from the test of {{date}}.',
+            edited_one: 'Includes {{count}} example edited by hand.',
+            edited_other: 'Includes {{count}} examples edited by hand.',
           },
           // T3 Part 2: the indicator in the Rule Status box.
           indicator: {
             passed: 'Tested ✓ ({{date}})',
+            passedSavedExamples: 'Tested ✓ (examples from the test of {{from}})',
+            passedSavedExamplesTitle: 'The last test passed on {{date}}, on the saved examples of the test of {{from}} (no AI).',
             passedEdited_one: 'Tested ✓ ({{date}}) · {{count}} example edited by hand',
             passedEdited_other: 'Tested ✓ ({{date}}) · {{count}} examples edited by hand',
             passedEditedTitle_one: 'The last test passed on {{date}}, with {{count}} example edited by hand.',
@@ -1290,9 +1304,23 @@ const resources = {
             passedEdited_other: 'Probada con {{count}} ejemplos editados a mano',
             withReason: '{{result}}: {{reason}}',
             notRecorded: '{{result}} — no registrado (se mantuvo la prueba del {{date}})',
+            onSavedExamples: '{{result}} (ejemplos de la prueba del {{date}})',
+          },
+          // Guardar la prueba aprobada: la última prueba superada, con sus ejemplos.
+          saved: {
+            open: 'Ver prueba aprobada ({{date}})',
+            title: 'Prueba aprobada del {{date}}',
+            ruleLabel: 'Regla con la que se probó:',
+            ruleChanged: 'Probada con una versión anterior de la regla: la regla guardada ha cambiado desde entonces.',
+            proposalChanged: 'La Propuesta ha cambiado desde entonces: estos ejemplos se escribieron para la Propuesta anterior.',
+            examplesFrom: 'Ejemplos de la prueba del {{date}}.',
+            edited_one: 'Incluye {{count}} ejemplo editado a mano.',
+            edited_other: 'Incluye {{count}} ejemplos editados a mano.',
           },
           indicator: {
             passed: 'Probada ✓ ({{date}})',
+            passedSavedExamples: 'Probada ✓ (ejemplos de la prueba del {{from}})',
+            passedSavedExamplesTitle: 'El último test se superó el {{date}}, con los ejemplos guardados de la prueba del {{from}} (sin IA).',
             passedEdited_one: 'Probada ✓ ({{date}}) · {{count}} ejemplo editado a mano',
             passedEdited_other: 'Probada ✓ ({{date}}) · {{count}} ejemplos editados a mano',
             passedEditedTitle_one: 'El último test se superó el {{date}}, con {{count}} ejemplo editado a mano.',

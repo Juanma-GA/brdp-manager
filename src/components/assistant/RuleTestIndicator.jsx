@@ -27,8 +27,9 @@ export function RuleTestIndicator({ approval }) {
   const date = formatDate(status.at, i18n.language);
   const reason = formatRuleTestReason(status.reason, t);
   const text = {
-    passed:
-      status.editedCount > 0
+    passed: status.examplesFrom
+      ? t('records.ruleTest.indicator.passedSavedExamples', { from: formatDate(status.examplesFrom, i18n.language) })
+      : status.editedCount > 0
         ? t('records.ruleTest.indicator.passedEdited', { date, count: status.editedCount })
         : t('records.ruleTest.indicator.passed', { date }),
     review: t('records.ruleTest.indicator.review'),
@@ -39,8 +40,9 @@ export function RuleTestIndicator({ approval }) {
     outdated: t('records.ruleTest.indicator.outdated'),
   }[status.kind];
   const title = {
-    passed:
-      status.editedCount > 0
+    passed: status.examplesFrom
+      ? t('records.ruleTest.indicator.passedSavedExamplesTitle', { date, from: formatDate(status.examplesFrom, i18n.language) })
+      : status.editedCount > 0
         ? t('records.ruleTest.indicator.passedEditedTitle', { date, count: status.editedCount })
         : t('records.ruleTest.indicator.passedTitle', { date }),
     review: t('records.ruleTest.indicator.reviewTitle', { date, reason }),
@@ -57,6 +59,7 @@ export function RuleTestIndicator({ approval }) {
       data-testid="rule-test-indicator"
       data-state={status.kind}
       data-edited={status.editedCount || undefined}
+      data-saved-examples={status.examplesFrom ? 'true' : undefined}
     >
       {text}
     </p>

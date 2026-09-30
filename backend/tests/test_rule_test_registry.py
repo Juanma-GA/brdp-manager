@@ -344,7 +344,7 @@ async def test_keep_previous_leaves_the_passed_test_and_notes_the_attempt(client
     assert json.loads(latest["old_value"])["result"] == "passed"
 
 
-async def test_keep_previous_needs_a_passed_test_of_this_rule(client, editor_viewer_and_project):
+async def test_keep_previous_needs_a_passed_test(client, editor_viewer_and_project):
     project, headers, _ = editor_viewer_and_project
     _, url = await _brdp_with_rule(client, project, headers)
     reason = {"code": "test_no_runnable", "params": {}}
@@ -367,3 +367,140 @@ async def test_replacing_a_passed_test_without_keep_records_it(client, editor_vi
     reason = {"code": "test_incorrect", "params": {"permissive": True, "strict": False}}
     body = (await client.post(url + "/test", json={"result": "failed", "reason": reason, "rule_hash": _hash(RULE)}, headers=headers)).json()
     assert body["last_test_result"] == "failed" and body["last_test_reason"] == reason
+
+
+# ─── Guardar la prueba aprobada (last_passed_test) ─────────────────────────
+
+RULE_B = RULE.replace("//emphasis", "//acronym")
+
+
+def _passed_payload(examples_from=None, proposal="No emphasis in the text."):
+    payload = {
+        "proposal": proposal,
+        "examples": [
+            {
+                "label": "Plain text",
+                "expected": "accept",
+                "schema": "descript",
+                "xml": "<dmodule><content><description><levelledPara><para>Plain.</para></levelledPara></description></content></dmodule>",
+                "skeleton_node_paths": ["/dmodule[1]", "/dmodule[1]/content[1]"],
+                "result": "accepted",
+                "matches": True,
+            },
+            {
+                "label": "Emphasis",
+                "expected": "reject",
+                "schema": "descript",
+                "xml": "<dmodule><content><description><levelledPara><para><emphasis>X</emphasis></para></levelledPara></description></content></dmodule>",
+                "skeleton_node_paths": [],
+                "result": "rejected",
+                "matches": True,
+            },
+        ],
+    }
+    if examples_from is not None:
+        payload["examples_from"] = examples_from
+    return payload
+
+
+async def test_passed_test_is_kept_with_its_examples(client, editor_viewer_and_project):
+    project, headers, viewer_headers = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    body = (
+        await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": _passed_payload()}, headers=headers)
+    ).json()
+    saved = body["last_passed_test"]
+    assert saved["rule_xml"] == RULE and saved["rule_hash"] == _hash(RULE)
+    assert saved["proposal"] == "No emphasis in the text."
+    assert saved["examples_from"] is None and saved["edited_count"] == 0
+    assert saved["at"][:19] == body["last_test_at"][:19]
+    assert [e["label"] for e in saved["examples"]] == ["Plain text", "Emphasis"]
+    first = saved["examples"][0]
+    assert first["schema"] == "descript" and first["expected"] == "accept" and first["result"] == "accepted" and first["matches"] is True
+    assert first["skeleton_node_paths"] == ["/dmodule[1]", "/dmodule[1]/content[1]"]
+    # A viewer reads it too.
+    assert (await client.get(url, headers=viewer_headers)).json()["last_passed_test"]["rule_hash"] == _hash(RULE)
+
+
+async def test_a_failed_test_leaves_the_passed_test_and_a_new_pass_replaces_it(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    first = (
+        await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": _passed_payload()}, headers=headers)
+    ).json()["last_passed_test"]
+    reason = {"code": "test_incorrect", "params": {"permissive": True, "strict": False}}
+    body = (await client.post(url + "/test", json={"result": "failed", "reason": reason, "rule_hash": _hash(RULE)}, headers=headers)).json()
+    assert body["last_test_result"] == "failed"
+    assert body["last_passed_test"] == first
+    # The rule changes: the saved test stays (of an earlier version).
+    await client.put(url, json={"rule_xml": RULE_B, "source": "manual"}, headers=headers)
+    assert (await client.get(url, headers=headers)).json()["last_passed_test"] == first
+    # A new passed test replaces it.
+    body = (
+        await client.post(
+            url + "/test",
+            json={"result": "passed", "rule_hash": _hash(RULE_B), "passed_test": _passed_payload(proposal="Other")},
+            headers=headers,
+        )
+    ).json()
+    assert body["last_passed_test"]["rule_xml"] == RULE_B and body["last_passed_test"]["proposal"] == "Other"
+
+
+async def test_a_passed_test_without_examples_clears_the_saved_one(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": _passed_payload()}, headers=headers)
+    body = (await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)).json()
+    assert body["last_passed_test"] is None
+
+
+async def test_a_pass_on_saved_examples_keeps_their_date_and_notes_it_in_history(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    first = (
+        await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": _passed_payload()}, headers=headers)
+    ).json()["last_passed_test"]
+    body = (
+        await client.post(
+            url + "/test",
+            json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": _passed_payload(examples_from=first["at"])},
+            headers=headers,
+        )
+    ).json()
+    assert body["last_passed_test"]["examples_from"][:19] == first["at"][:19]
+    history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
+    latest = max((h for h in history if h["field_name"] == "rule_test"), key=lambda h: h["changed_at"])
+    assert json.loads(latest["new_value"])["examples_from"][:19] == first["at"][:19]
+
+
+async def test_passed_test_payload_is_validated(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    reason = {"code": "test_incorrect", "params": {}}
+    # Only with a passed result.
+    res = await client.post(url + "/test", json={"result": "failed", "reason": reason, "rule_hash": _hash(RULE), "passed_test": _passed_payload()}, headers=headers)
+    assert res.status_code == 422
+    # Never without examples, never an unknown expectation.
+    empty = {**_passed_payload(), "examples": []}
+    assert (await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": empty}, headers=headers)).status_code == 422
+    bad = _passed_payload()
+    bad["examples"][0]["expected"] = "maybe"
+    assert (await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": bad}, headers=headers)).status_code == 422
+
+
+async def test_keep_previous_over_a_passed_test_of_an_earlier_rule(client, editor_viewer_and_project):
+    """"Probar con los ejemplos guardados" re-runs the saved test after the
+    rule changed and asks before replacing the passed test: "Keep the
+    previous one" is allowed although the passed test is outdated."""
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    passed = (
+        await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": _passed_payload()}, headers=headers)
+    ).json()
+    await client.put(url, json={"rule_xml": RULE_B, "source": "manual"}, headers=headers)
+    reason = {"code": "test_incorrect", "params": {"permissive": False, "strict": True}}
+    res = await client.post(url + "/test", json={"result": "failed", "reason": reason, "rule_hash": _hash(RULE_B), "keep_previous": True}, headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["last_test_result"] == "passed" and body["last_test_at"] == passed["last_test_at"]
+    assert body["last_test_up_to_date"] is False

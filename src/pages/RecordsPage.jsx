@@ -29,8 +29,10 @@ import RuleSchemaSelector from '../components/assistant/RuleSchemaSelector';
 import { schemaLocationOf, supportsSchemaContext } from '../utils/ruleSchemaContext.js';
 import { hasUnfilledMarkers } from '../utils/proposalMarkers';
 import RuleStatusStepper from '../components/RuleStatusStepper';
-import RuleTestPanel, { canTestRule, TestRuleButton } from '../components/assistant/RuleTestPanel';
+import RuleTestPanel, { canTestRule, formatTestDate, TestRuleButton } from '../components/assistant/RuleTestPanel';
 import { RuleTestIndicator, VerifyWarningDialog } from '../components/assistant/RuleTestIndicator';
+import SavedRuleTestPanel from '../components/assistant/SavedRuleTestPanel';
+import { savedPassedTest } from '../utils/ruleTestSaved.js';
 import { registerRuleTest } from '../api/ruleTests';
 import { parseRuleTestHistoryValue, verifyWarning } from '../utils/ruleTestStatus.js';
 import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
@@ -113,7 +115,12 @@ function formatRuleTestHistoryValue(t, value) {
   }
   const result = t(`records.ruleTest.results.${parsed.result}`, { defaultValue: parsed.result });
   const reason = formatRuleTestReason(parsed.reason, t);
-  const text = reason ? t('records.ruleTest.results.withReason', { result, reason }) : result;
+  let text = reason ? t('records.ruleTest.results.withReason', { result, reason }) : result;
+  // A test run on the saved examples of an earlier passed test.
+  if (parsed.examplesFrom) {
+    const from = new Date(parsed.examplesFrom).toLocaleDateString(i18n.language, { year: 'numeric', month: 'short', day: 'numeric' });
+    text = t('records.ruleTest.results.onSavedExamples', { result: text, date: from });
+  }
   // "Mantener la anterior": an attempt that was not recorded.
   if (parsed.notRecorded) {
     const date = parsed.keptTestAt ? new Date(parsed.keptTestAt).toLocaleDateString(i18n.language, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
@@ -334,6 +341,8 @@ export default function RecordsPage() {
   const [rulePreviewOpen, setRulePreviewOpen] = useState(false);
   // Test rule (T2) on the saved Draft rule -- open for this BRDP only.
   const [draftTestOpenFor, setDraftTestOpenFor] = useState(null);
+  // Guardar la prueba aprobada: the kept passed test shown for this BRDP.
+  const [savedTestOpenFor, setSavedTestOpenFor] = useState(null);
   const [ruleDraftText, setRuleDraftText] = useState('');
   const [ruleBusy, setRuleBusy] = useState(false);
   const [ruleValidationError, setRuleValidationError] = useState(null);
@@ -622,6 +631,9 @@ export default function RecordsPage() {
     t,
   });
   const selectedSuggestion = suggestions.selectedSuggestion;
+  // Guardar la prueba aprobada: the kept passed test of the saved rule (and
+  // whether the rule or the Proposal changed since), or null.
+  const savedTest = selected && ruleApproval && canTestRule(ruleFormat) ? savedPassedTest(ruleApproval, selected.proposal) : null;
 
   // docs request (Suggest Rule round), Part 1: why Suggest Rule is
   // unavailable for the selected BRDP, or null when it is. Order matters
@@ -1401,6 +1413,19 @@ export default function RecordsPage() {
                 <div className={styles.ruleStatusRow}>
                   <RuleStatusStepper state={ruleStateOf(ruleApproval)} />
                   {ruleApproval && canTestRule(ruleFormat) && <RuleTestIndicator approval={ruleApproval} />}
+                  {savedTest && (
+                    <div className={styles.ruleTestSavedActions}>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => setSavedTestOpenFor((id) => (id === selected.id ? null : selected.id))}
+                        aria-expanded={savedTestOpenFor === selected.id}
+                        data-testid="saved-rule-test-open"
+                      >
+                        {t('records.ruleTest.saved.open', { date: formatTestDate(savedTest.at, i18n.language) })}
+                      </button>
+                    </div>
+                  )}
                   {ruleTestRecordError && (
                     <p className={styles.ruleErrorText} role="alert">
                       {t('records.ruleTest.recordError', { error: ruleTestRecordError })}
@@ -1439,6 +1464,16 @@ export default function RecordsPage() {
                       </>
                     )}
                   </div>
+                  {savedTest && savedTestOpenFor === selected.id && (
+                    <SavedRuleTestPanel
+                      key={`${selected.id}:${savedTest.at}`}
+                      saved={savedTest}
+                      format={ruleFormat}
+                      standard={project.standard}
+                      vocabulary={vocabulary}
+                      onClose={() => setSavedTestOpenFor(null)}
+                    />
+                  )}
                   {draftTestOpenFor === selected.id && ruleStateOf(ruleApproval) === 'draft' && aiProvider && canTestRule(ruleFormat) && (
                     <RuleTestPanel
                       key={`${selected.id}:${ruleApproval.rule_xml}`}

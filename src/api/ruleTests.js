@@ -16,6 +16,8 @@ export function registerRuleTest(projectId, brdpId, format, testedRuleXml, recor
       rule_hash: ruleXmlHash(testedRuleXml),
       // A test passed after editing examples by hand carries them.
       ...(record.editedExamples?.length ? { edited_examples: record.editedExamples } : {}),
+      // A passed test keeps its examples (Guardar la prueba aprobada).
+      ...(record.result === 'passed' && record.passedTest ? { passed_test: record.passedTest } : {}),
       ...(keepPrevious ? { keep_previous: true } : {}),
     }),
   });

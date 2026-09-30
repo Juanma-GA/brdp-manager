@@ -2107,5 +2107,59 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('root with a predicate: not root only', !placeExample(structureOf(S42, 'ddn'), ruleTargets('<structureObjectRule><objectPath allowedObjectFlag="0">/ddn[ddnContent]</objectPath><objectUse>u</objectUse></structureObjectRule>')).rootOnly);
 }
 
+// ---------------------------------------------------------------------------
+// Guardar la prueba aprobada: the last passed test kept with its examples.
+{
+  const { passedTestPayload, withPassedTest, savedPassedTest, savedExamplesDate } = await import('../src/utils/ruleTestSaved.js');
+  const { ruleTestStatus, parseRuleTestHistoryValue } = await import('../src/utils/ruleTestStatus.js');
+  const { ruleXmlHash } = await import('../src/utils/ruleHash.js');
+  const { verdictToTestRecord } = await import('../src/utils/ruleTestReasons.js');
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const S42 = 'S1000D 4.2';
+  const R187 = readPublicTemplate('brdp-template-4-2.xlsx').find((row) => row.ID === 'BRDP-S1-00187')?.Rule;
+  const exs = [
+    { label: 'two substeps', expected: 'accept', schema: 'proced', content: '<proceduralStep><para>Remove the panel.</para><proceduralStep><para>Remove the screws.</para></proceduralStep><proceduralStep><para>Lift the panel.</para></proceduralStep></proceduralStep>' },
+    { label: 'one substep', expected: 'reject', schema: 'proced', content: '<proceduralStep><para>Remove the panel.</para><proceduralStep><para>Remove the screws.</para></proceduralStep></proceduralStep>' },
+    { label: 'broken', expected: 'reject', schema: 'proced', content: '<proceduralStep><pokemon/></proceduralStep>' },
+  ];
+  const r = testRun(R187, exs, setupFor(S42, R187, ['proced']));
+  const payload = passedTestPayload(r.materialized, r.runs, 'A minimum of two sub-steps is required');
+  check('saved: only the examples the engine ran are kept', payload.examples.length === 2 && payload.examples.map((e) => e.label).join() === 'two substeps,one substep', JSON.stringify(payload.examples.map((e) => e.label)));
+  check('saved: each example keeps its complete document, expected, schema, result and match',
+    payload.examples.every((e, i) => e.xml === r.materialized[i].xml && e.xml.startsWith('<dmodule') && e.schema === 'proced' && e.expected === exs[i].expected && e.matches === true)
+      && payload.examples[0].result === 'accepted' && payload.examples[1].result === 'rejected');
+  check('saved: the dimmed skeleton paths travel with each example', payload.examples[0].skeleton_node_paths.length > 0 && payload.examples[0].skeleton_node_paths.every((p) => typeof p === 'string'));
+  check('saved: the Proposal is kept, no examples_from on a new test', payload.proposal === 'A minimum of two sub-steps is required' && !('examples_from' in payload));
+  check('saved: examples_from when the test ran on saved examples', passedTestPayload(r.materialized, r.runs, 'p', '2026-09-01T10:00:00Z').examples_from === '2026-09-01T10:00:00Z');
+  check('saved: nothing run → nothing kept', passedTestPayload([exs[2]], [{ result: null }], 'p') === null);
+  const passedRec = { result: 'passed', reason: null };
+  check('saved: withPassedTest adds the examples to a passed record', withPassedTest(passedRec, r.materialized, r.runs, 'p').passedTest?.examples.length === 2);
+  const failedRec = verdictToTestRecord({ kind: 'inconclusive' });
+  check('saved: withPassedTest leaves any other result alone', withPassedTest(failedRec, r.materialized, r.runs, 'p') === failedRec);
+
+  const at = '2026-09-30T10:00:00+00:00';
+  const approval = {
+    rule_xml: R187, last_test_result: 'passed', last_test_at: at, last_test_up_to_date: true,
+    last_passed_test: { at, rule_xml: R187, rule_hash: ruleXmlHash(R187), proposal: payload.proposal, examples_from: null, edited_count: 0, examples: payload.examples },
+  };
+  const saved = savedPassedTest(approval, 'A minimum of two sub-steps is required');
+  check('saved: the kept test reads back as the panel shows it', saved.examples.length === 2 && saved.examples[0].saved.result === 'accepted' && saved.examples[1].skeletonNodePaths.length > 0 && saved.ruleXml === R187 && !saved.ruleChanged && !saved.proposalChanged);
+  check('saved: rule changed → "tested with an earlier version"', savedPassedTest({ ...approval, rule_xml: R187.replace('= 1', '&gt;= 2') }, payload.proposal).ruleChanged === true);
+  check('saved: Proposal changed → flagged; blank spaces are not a change', savedPassedTest(approval, 'At least three.').proposalChanged === true && savedPassedTest(approval, '  A minimum of two sub-steps is required ').proposalChanged === false);
+  check('saved: no kept test → null', savedPassedTest({ ...approval, last_passed_test: null }) === null && savedPassedTest(null) === null);
+  check('saved: the examples date is their own test when they came from one', savedExamplesDate({ at, examplesFrom: '2026-09-01T10:00:00Z' }) === '2026-09-01T10:00:00Z' && savedExamplesDate({ at, examplesFrom: null }) === at);
+  check('saved: indicator plain "Tested" when the examples are its own', ruleTestStatus(approval).kind === 'passed' && ruleTestStatus(approval).examplesFrom === null);
+  const rerun = { ...approval, last_passed_test: { ...approval.last_passed_test, examples_from: '2026-09-01T10:00:00Z' } };
+  check('saved: indicator knows a test on saved examples', ruleTestStatus(rerun).examplesFrom === '2026-09-01T10:00:00Z');
+  check('saved: a kept test that is not the last one never labels the indicator', ruleTestStatus({ ...rerun, last_test_at: '2026-09-30T11:00:00+00:00' }).examplesFrom === null && ruleTestStatus({ ...rerun, last_test_result: 'failed' }).examplesFrom === null);
+  check('saved: History value reads examples_from', parseRuleTestHistoryValue(JSON.stringify({ result: 'passed', reason: null, examples_from: '2026-09-01T10:00:00Z' })).examplesFrom === '2026-09-01T10:00:00Z' && parseRuleTestHistoryValue(JSON.stringify({ result: 'passed', reason: null })).examplesFrom === null);
+  check('saved: texts EN/ES', en('records.ruleTest.saved.open', { date: '30/09/2026' }) === 'See approved test (30/09/2026)' && es('records.ruleTest.saved.open', { date: '30/09/2026' }) === 'Ver prueba aprobada (30/09/2026)'
+    && es('records.ruleTest.saved.ruleChanged').startsWith('Probada con una versión anterior de la regla')
+    && es('records.ruleTest.indicator.passedSavedExamples', { from: '01/09/2026' }) === 'Probada ✓ (ejemplos de la prueba del 01/09/2026)'
+    && en('records.ruleTest.indicator.passedSavedExamples', { from: '01/09/2026' }) === 'Tested ✓ (examples from the test of 01/09/2026)'
+    && es('records.ruleTest.saved.edited', { count: 2 }).includes('2'), [en('records.ruleTest.saved.open', { date: '30/09/2026' }), es('records.ruleTest.saved.ruleChanged')].join(' | '));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

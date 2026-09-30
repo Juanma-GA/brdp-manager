@@ -78,6 +78,40 @@ class RuleTestEditedExample(BaseModel):
     xml: str = Field(min_length=1, max_length=_MAX_EDITED_XML)
 
 
+# The examples of a passed test, kept with it ("Ver prueba aprobada",
+# "Probar con los ejemplos guardados"): each example that ran, as it ran --
+# the complete document (skeleton + content + metadata), what it expected
+# and what the engine gave. Caps only there so the column never stores an
+# arbitrary payload.
+_MAX_PASSED_EXAMPLES = 50
+_MAX_PASSED_PATHS = 500
+_MAX_PROPOSAL = 20000
+
+
+class RuleTestPassedExample(BaseModel):
+    label: str = Field(default="", max_length=500)
+    expected: Literal["accept", "reject"]
+    schema_: str | None = Field(default=None, alias="schema", max_length=100)
+    xml: str = Field(min_length=1, max_length=_MAX_EDITED_XML)
+    # The nodes the application built (dimmed in the panel).
+    skeleton_node_paths: list[str] = Field(default_factory=list, max_length=_MAX_PASSED_PATHS)
+    result: Literal["accepted", "rejected"]
+    matches: bool
+
+    model_config = {"populate_by_name": True}
+
+
+class RuleTestPassedTest(BaseModel):
+    examples: list[RuleTestPassedExample] = Field(min_length=1, max_length=_MAX_PASSED_EXAMPLES)
+    # The Proposal the examples were written for: re-running them after the
+    # Proposal changed warns that they may no longer test the decision.
+    proposal: str = Field(default="", max_length=_MAX_PROPOSAL)
+    # A test passed by re-running the saved examples of an earlier test
+    # ("Probar con los ejemplos guardados"): the date of the test the
+    # examples come from. None for examples generated for this test.
+    examples_from: datetime | None = None
+
+
 class RuleTestRegister(BaseModel):
     result: RuleTestResult
     reason: RuleTestReason | None = None
@@ -93,6 +127,9 @@ class RuleTestRegister(BaseModel):
     # rule changes; History notes the attempt as not recorded. Only for a
     # result other than "passed" (a passed test is always recorded).
     keep_previous: bool = False
+    # A passed test's examples, kept as the rule's last passed test. Only
+    # with result "passed".
+    passed_test: RuleTestPassedTest | None = None
 
     @field_validator("reason")
     @classmethod
@@ -115,6 +152,8 @@ class RuleTestRegister(BaseModel):
                 raise ValueError("only a passed test is recorded with edited examples")
             if not self.edited_examples:
                 raise ValueError("edited_examples, when given, is not empty")
+        if self.passed_test is not None and self.result != "passed":
+            raise ValueError("only a passed test is kept with its examples")
         return self
 
 
@@ -128,6 +167,8 @@ class RuleApprovalOut(BaseModel):
     last_test_at: datetime | None = None
     last_test_rule_hash: str | None = None
     last_test_edited_examples: list[dict[str, Any]] | None = None
+    # The last passed test with its examples (see the model).
+    last_passed_test: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
 

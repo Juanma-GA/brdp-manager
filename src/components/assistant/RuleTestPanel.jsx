@@ -30,7 +30,7 @@ export function TestRuleButton({ aiProvider, open, onToggle }) {
   );
 }
 
-function verdictView(t, verdict, standard) {
+export function verdictView(t, verdict, standard) {
   switch (verdict.kind) {
     case 'correct':
       return { tone: 'ok', text: t('records.ruleTest.verdicts.correct') };
@@ -73,9 +73,9 @@ function verdictView(t, verdict, standard) {
   }
 }
 
-const TONE_CLASS = { ok: 'ruleTestToneOk', bad: 'ruleTestToneBad', warn: 'ruleTestToneWarn' };
+export const TONE_CLASS = { ok: 'ruleTestToneOk', bad: 'ruleTestToneBad', warn: 'ruleTestToneWarn' };
 
-function formatTestDate(value, language) {
+export function formatTestDate(value, language) {
   if (!value) return '';
   return new Date(value).toLocaleDateString(language, { year: 'numeric', month: 'short', day: 'numeric' });
 }
@@ -83,7 +83,7 @@ function formatTestDate(value, language) {
 // "No sobrescribir una prueba aprobada sin preguntar": the last recorded
 // test of this rule passed and this run gave another result -- ask before
 // replacing it. After "Keep the previous one", a note says it was kept.
-function ReplacePassedQuestion({ question, answer, onAnswer }) {
+export function ReplacePassedQuestion({ question, answer, onAnswer }) {
   const { t, i18n } = useTranslation();
   if (question) {
     return (
@@ -190,7 +190,9 @@ function ColspecsAddedNote({ count }) {
   );
 }
 
-function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain }) {
+// readOnly (Guardar la prueba aprobada): a kept example -- no Edit, only
+// Copy XML.
+export function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain, readOnly = false, testIdPrefix = 'rule-test-example' }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(example.content);
@@ -213,7 +215,7 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
   };
 
   return (
-    <div className={styles.ruleTestExample} data-testid={`rule-test-example-${index}`}>
+    <div className={styles.ruleTestExample} data-testid={`${testIdPrefix}-${index}`}>
       <div className={styles.ruleTestExampleHead}>
         <strong>{example.label}</strong>
         {example.editedByUser && (
@@ -315,7 +317,7 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
           )}
           <HighlightedXml lines={lines} xml={example.xml || example.content} />
           <div className={styles.ruleTestExampleActions}>
-            {!example.rootOnly && (
+            {!example.rootOnly && !readOnly && (
               <button
                 type="button"
                 className={styles.linkButton}

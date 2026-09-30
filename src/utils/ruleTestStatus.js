@@ -15,11 +15,20 @@ import { analyzeRule, RULE_TEST_FORMATS } from './ruleTestEngine.js';
 // recorded passed test (last_test_edited_examples; 0 for a test recorded
 // from the examples as the LLM wrote them).
 export function ruleTestStatus(approval) {
-  if (!approval || !approval.last_test_result) return { kind: 'not_tested', reason: null, at: null, editedCount: 0 };
+  if (!approval || !approval.last_test_result) return { kind: 'not_tested', reason: null, at: null, editedCount: 0, examplesFrom: null };
   const at = approval.last_test_at || null;
   const editedCount = Array.isArray(approval.last_test_edited_examples) ? approval.last_test_edited_examples.length : 0;
-  if (approval.last_test_up_to_date === false) return { kind: 'outdated', reason: null, at, editedCount: 0 };
-  return { kind: approval.last_test_result, reason: approval.last_test_reason || null, at, editedCount };
+  if (approval.last_test_up_to_date === false) return { kind: 'outdated', reason: null, at, editedCount: 0, examplesFrom: null };
+  return { kind: approval.last_test_result, reason: approval.last_test_reason || null, at, editedCount, examplesFrom: examplesFromOf(approval) };
+}
+
+// A passed test run on the saved examples of an earlier test ("Probar con
+// los ejemplos guardados"): the date of that earlier test -- only when the
+// kept passed test IS the last recorded test.
+function examplesFromOf(approval) {
+  const saved = approval.last_passed_test;
+  if (approval.last_test_result !== 'passed' || !saved?.examples_from || !saved.at || !approval.last_test_at) return null;
+  return Date.parse(saved.at) === Date.parse(approval.last_test_at) ? saved.examples_from : null;
 }
 
 // A "rule_test" History value is JSON: {"result", "reason"} plus, for a
@@ -40,6 +49,8 @@ export function parseRuleTestHistoryValue(value) {
       // keeping the passed test of kept_test_at.
       notRecorded: parsed.not_recorded === true,
       keptTestAt: typeof parsed.kept_test_at === 'string' ? parsed.kept_test_at : null,
+      // A test run on the saved examples of an earlier passed test.
+      examplesFrom: typeof parsed.examples_from === 'string' ? parsed.examples_from : null,
     };
   } catch {
     return null;

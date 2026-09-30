@@ -232,7 +232,11 @@ async def propose_approval(
 
 
 def _rule_test_history_value(
-    result: str | None, reason: dict | None, edited_examples: list | None = None, kept_test_at: datetime | None = None
+    result: str | None,
+    reason: dict | None,
+    edited_examples: list | None = None,
+    kept_test_at: datetime | None = None,
+    examples_from: datetime | None = None,
 ) -> str:
     """The History value of a "rule_test" entry: the result and its reason
     as JSON codes (never a sentence), so the History panel translates it in
@@ -251,6 +255,10 @@ def _rule_test_history_value(
     if kept_test_at is not None:
         value["not_recorded"] = True
         value["kept_test_at"] = kept_test_at.isoformat()
+    # A test run on the saved examples of an earlier passed test ("Probar
+    # con los ejemplos guardados"): the date of the test they come from.
+    if examples_from is not None:
+        value["examples_from"] = examples_from.isoformat()
     return json.dumps(value, sort_keys=True, ensure_ascii=False)
 
 
@@ -283,8 +291,15 @@ async def register_rule_test(
 
     keep_previous ("Mantener la anterior"): the recorded test passed and the
     user kept it over this new result -- the rule's test is left as it is
-    and History notes the attempt as not recorded (409 if there is no
-    passed test of this rule to keep).
+    and History notes the attempt as not recorded (409 if the last recorded
+    test did not pass). The passed test may be of an earlier version of the
+    rule: "Probar con los ejemplos guardados" re-runs it after the rule
+    changed and asks before replacing it.
+
+    passed_test (a passed result only): its examples, kept as the rule's
+    last passed test (last_passed_test) -- replaced by the next passed test,
+    left alone by any other result. A passed test recorded without them
+    clears it: the examples kept would no longer be those of the last pass.
     """
     await _get_owned_brdp(project_id, brdp_id, db)
     approval = await db.get(RuleApproval, (brdp_id, format))
@@ -304,8 +319,9 @@ async def register_rule_test(
         approval.last_test_result, approval.last_test_reason, approval.last_test_edited_examples
     )
     if body.keep_previous:
-        # "Mantener la anterior": only over a passed test of this same rule.
-        if approval.last_test_result != "passed" or approval.last_test_rule_hash != body.rule_hash:
+        # "Mantener la anterior": only over a passed test (of this rule or,
+        # re-running its saved examples, of an earlier version of it).
+        if approval.last_test_result != "passed":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="There is no passed test of this rule to keep",
@@ -328,8 +344,29 @@ async def register_rule_test(
     approval.last_test_by = editor.id
     approval.last_test_rule_hash = body.rule_hash
     approval.last_test_edited_examples = edited
+    examples_from = body.passed_test.examples_from if body.passed_test is not None else None
+    if body.result == "passed":
+        approval.last_passed_test = (
+            {
+                "at": approval.last_test_at.isoformat(),
+                "rule_xml": approval.rule_xml,
+                "rule_hash": body.rule_hash,
+                "proposal": body.passed_test.proposal,
+                "examples_from": examples_from.isoformat() if examples_from is not None else None,
+                "edited_count": len(edited) if edited else 0,
+                "examples": [e.model_dump(by_alias=True) for e in body.passed_test.examples],
+            }
+            if body.passed_test is not None
+            else None
+        )
     record_change(
-        db, brdp_id, editor, "rule_test", old_value, _rule_test_history_value(body.result, reason, edited), always=True
+        db,
+        brdp_id,
+        editor,
+        "rule_test",
+        old_value,
+        _rule_test_history_value(body.result, reason, edited, examples_from=examples_from),
+        always=True,
     )
     await db.commit()
     await db.refresh(approval)

@@ -48,3 +48,12 @@ class RuleApproval(Base):
     # runnable: [{"label", "xml"}] -- each edited example as it was run.
     # NULL for a test recorded from the examples as the LLM wrote them.
     last_test_edited_examples: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # The last test of this rule that PASSED, with its examples (Test de
+    # reglas: guardar la prueba aprobada): {"at", "rule_xml", "rule_hash",
+    # "proposal", "examples_from", "edited_count", "examples": [{"label",
+    # "expected", "schema", "xml", "skeleton_node_paths", "result",
+    # "matches"}]}. Replaced by the next passed test, left alone by any other
+    # result -- so a failed test never loses the evidence of the last pass,
+    # and "Probar con los ejemplos guardados" can re-run it after the rule
+    # changes. NULL: no passed test has been recorded with its examples.
+    last_passed_test: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

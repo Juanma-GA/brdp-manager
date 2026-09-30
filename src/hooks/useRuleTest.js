@@ -33,6 +33,7 @@ import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
 import { editExample, editedExamplesRecord, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
 import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
 import { passedTestToReplaceAt } from '../utils/ruleTestStatus.js';
+import { withPassedTest } from '../utils/ruleTestSaved.js';
 import { ruleDescriptionText, verdictToTestRecord } from '../utils/ruleTestReasons.js';
 
 async function fetchStructure(standard, schema) {
@@ -164,7 +165,8 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     const { proposalMismatch, examples, runs, correction, untested } = result;
     setState({ status: 'ready', proposalMismatch, examples, runs, correction, untested });
     if (!onDemand) {
-      const record = verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalMismatch));
+      // A passed test keeps its examples (Guardar la prueba aprobada).
+      const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalMismatch)), examples, runs, brdp?.proposal);
       recordedRef.current = record;
       report(record);
     }
@@ -206,12 +208,17 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     }
     const record = onDemand
       ? null
-      : editedExamplesRecord({
-          recorded: recordedRef.current,
-          alreadyRecorded: editsRecordedRef.current,
+      : withPassedTest(
+          editedExamplesRecord({
+            recorded: recordedRef.current,
+            alreadyRecorded: editsRecordedRef.current,
+            examples,
+            verdict: ruleTestVerdict(examples, runs, analysis, state.proposalMismatch),
+          }),
           examples,
-          verdict: ruleTestVerdict(examples, runs, analysis, state.proposalMismatch),
-        });
+          runs,
+          brdp?.proposal
+        );
     if (!record) {
       setEditNotice({ kind: 'not_saved' });
       return;
