@@ -390,6 +390,101 @@ _METADATA_TEMPLATE_UPDATE_4X = (
     ],
 )
 
+# 4.x publication module (pm.xsd), data dispatch note (ddn.xsd) and data
+# management list (dml.xsd): each has its own identAndStatusSection
+# (pmAddress/pmStatus, ddnAddress/ddnStatus, dmlAddress/dmlStatus), with the
+# XSD's required elements in the XSD's order. A rule on a publication
+# module's applicability (//pmStatus/applicRef, BRDP-EXT-00029 of Official
+# Default CMP ATA 4.2) had no section to look at: Mistral put <pmStatus>
+# inside <content>.
+_METADATA_TEMPLATE_PM_4X = (
+    "identAndStatusSection", {}, None, [
+        ("pmAddress", {}, None, [
+            ("pmIdent", {}, None, [
+                ("pmCode", {}, None, []),
+                ("language", {}, None, []),
+                ("issueInfo", {}, None, []),
+            ]),
+            ("pmAddressItems", {}, None, [
+                ("issueDate", {}, None, []),
+                ("pmTitle", {}, "Example publication module", []),
+            ]),
+        ]),
+        ("pmStatus", {}, None, [
+            ("security", {}, None, []),
+            ("responsiblePartnerCompany", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("originator", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("applic", {}, None, [("displayText", {}, None, [("simplePara", {}, "All", [])])]),
+            _BREX_DM_REF_4X,
+            ("qualityAssurance", {}, None, [("unverified", {}, None, [])]),
+        ]),
+    ],
+)
+
+_DISPATCH_ADDRESS_4X = ("dispatchAddress", {}, None, [
+    ("enterprise", {}, None, [("enterpriseName", {}, "Example company", [])]),
+    ("address", {}, None, [("city", {}, "Example city", []), ("country", {}, "Example country", [])]),
+])
+_METADATA_TEMPLATE_DDN_4X = (
+    "identAndStatusSection", {}, None, [
+        ("ddnAddress", {}, None, [
+            ("ddnIdent", {}, None, [("ddnCode", {}, None, [])]),
+            ("ddnAddressItems", {}, None, [
+                ("issueDate", {}, None, []),
+                ("dispatchTo", {}, None, [_DISPATCH_ADDRESS_4X]),
+                ("dispatchFrom", {}, None, [_DISPATCH_ADDRESS_4X]),
+            ]),
+        ]),
+        ("ddnStatus", {}, None, [
+            ("security", {}, None, []),
+            ("authorization", {}, "Example authorization", []),
+            _BREX_DM_REF_4X,
+        ]),
+    ],
+)
+
+_METADATA_TEMPLATE_DML_4X = (
+    "identAndStatusSection", {}, None, [
+        ("dmlAddress", {}, None, [
+            ("dmlIdent", {}, None, [("dmlCode", {}, None, []), ("issueInfo", {}, None, [])]),
+            ("dmlAddressItems", {}, None, [("issueDate", {}, None, [])]),
+        ]),
+        ("dmlStatus", {}, None, [
+            ("security", {}, None, []),
+            _BREX_DM_REF_4X,
+        ]),
+    ],
+)
+
+# 3.0.1 publication module: idstatus with pmaddres (the code as elements
+# with text, like the data module's avee) and pmstatus -- which has no
+# reference to the BREX in 3.0.1. 3.0.1 ddn and dml have no section at all
+# (ddnc, issdate, dispto… and dmlc, issno… sit directly in the root), so
+# there is nothing to add there: the examples' content goes in the root.
+_METADATA_TEMPLATE_PM_301 = (
+    "idstatus", {}, None, [
+        ("pmaddres", {}, None, [
+            ("pmc", {}, None, [
+                ("modelic", {}, "EXAMPLE", []),
+                ("pmissuer", {}, "12345", []),
+                ("pmnumber", {}, "00001", []),
+                ("pmvolume", {}, "00", []),
+            ]),
+            ("pmtitle", {}, "Example publication module", []),
+            ("issno", {}, None, []),
+            ("issdate", {}, None, []),
+            ("language", {"country": "US"}, None, []),
+        ]),
+        ("pmstatus", {}, None, [
+            ("security", {}, None, []),
+            ("rpc", {}, "Example company", []),
+            ("orig", {}, "Example company", []),
+            ("applic", {}, None, [("displaytext", {}, None, [("p", {}, "All", [])])]),
+            ("qa", {}, None, [("unverif", {}, None, [])]),
+        ]),
+    ],
+)
+
 # Values of the required attributes that have no enum (keyed by attribute
 # name; the XSD patterns they must follow are checked by the tests).
 METADATA_ATTRIBUTE_VALUES = {
@@ -403,18 +498,25 @@ METADATA_ATTRIBUTE_VALUES = {
     "issno": "001", "language": "en",
     # issueDate / issdate
     "year": "2026", "month": "01", "day": "01",
+    # 4.x pmCode, ddnCode, dmlCode ([A-Z0-9]{5}, \d{2}, [0-9]{4}, [0-9]{5})
+    "pmIssuer": "12345", "pmNumber": "00001", "pmVolume": "00",
+    "senderIdent": "SENDR", "receiverIdent": "RECVR", "yearOfDataIssue": "2026", "seqNumber": "00001",
 }
 
-METADATA_TEMPLATES = {
-    "identAndStatusSection": _METADATA_TEMPLATE_4X,
-    "idstatus": _METADATA_TEMPLATE_301,
-    "updateIdentAndStatusSection": _METADATA_TEMPLATE_UPDATE_4X,
+# The templates of each document root, tried in order: the first whose
+# section element is a child of the root (4.x identAndStatusSection, 3.0.1
+# idstatus). pm, ddn and dml share the element name identAndStatusSection
+# with the data module, so the templates are keyed by root, not by element.
+# Not covered yet (no section): comment, scormContentPackage,
+# icnMetadataFile -- the Test rule panel does not offer those schemas to a
+# rule that looks at their section (ruleTestSkeleton.js, sectionMissing).
+METADATA_TEMPLATES_BY_ROOT = {
+    "dmodule": (_METADATA_TEMPLATE_4X, _METADATA_TEMPLATE_301),
+    "dataUpdateFile": (_METADATA_TEMPLATE_UPDATE_4X,),
+    "pm": (_METADATA_TEMPLATE_PM_4X, _METADATA_TEMPLATE_PM_301),
+    "ddn": (_METADATA_TEMPLATE_DDN_4X,),
+    "dml": (_METADATA_TEMPLATE_DML_4X,),
 }
-
-# Roots whose identification and status section a template covers. The
-# other documents (pm, dml, ddn, comment, …) have their own status elements
-# (pmStatus, dmlStatus, …): not covered yet.
-_METADATA_ROOTS = {"dmodule", "dataUpdateFile"}
 
 
 def _card_variant(cards: dict, name: str, schema: str) -> dict | None:
@@ -459,9 +561,10 @@ def _metadata_tree(cards: dict, graph: dict[str, dict], schema: str, node: tuple
 @lru_cache(maxsize=256)
 def derive_metadata_skeleton(standard: str, schema: str) -> dict | None:
     """{"element", "tree"} -- the minimal identification and status section of
-    a data module schema or of the 4.x data update file (see above) -- or
-    None: DITA, another document (pm, dml, ddn, comment, …: their status
-    sections are not covered yet), or cards that do not fit the template."""
+    a data module schema, of the 4.x data update file, of a publication
+    module (4.x and 3.0.1) or of a 4.x DDN or DML (see above) -- or None:
+    DITA, another document (comment, …, and the 3.0.1 ddn/dml, which have no
+    section), or cards that do not fit the template."""
     if is_dita_standard(standard):
         return None
     graph = schema_graph(standard, schema)
@@ -469,9 +572,8 @@ def derive_metadata_skeleton(standard: str, schema: str) -> dict | None:
     if graph is None or data is None:
         return None
     root = _root_of(graph)
-    if root not in _METADATA_ROOTS:
-        return None
-    for element, template in METADATA_TEMPLATES.items():
+    for template in METADATA_TEMPLATES_BY_ROOT.get(root, ()):
+        element = template[0]
         if element in graph[root]["children"]:
             tree = _metadata_tree(data.get("cards", {}), graph, schema, template, root)
             return {"element": element, "tree": tree} if tree else None

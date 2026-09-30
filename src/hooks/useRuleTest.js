@@ -161,8 +161,8 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       return;
     }
     setupRef.current = result.setup;
-    const { proposalMismatch, examples, runs, correction } = result;
-    setState({ status: 'ready', proposalMismatch, examples, runs, correction });
+    const { proposalMismatch, examples, runs, correction, untested } = result;
+    setState({ status: 'ready', proposalMismatch, examples, runs, correction, untested });
     if (!onDemand) {
       const record = verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalMismatch));
       recordedRef.current = record;

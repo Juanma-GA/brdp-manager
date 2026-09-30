@@ -28,6 +28,7 @@
 // whole document: the LLM writes the complete root element.
 import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js';
 import { extractRuleXPaths, extractXPathNames } from '../validation/schemaValidation.js';
+import { stripLiterals } from './ruleTestCommon.js';
 
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -327,12 +328,18 @@ function isRootContext(alternative) {
 // content nodes but whose predicate reads the metadata
 // (//*[@changeMark = '1' and ancestor::dmodule[identAndStatusSection/dmStatus[…]]])
 // needs both parts written by the LLM; see classifyRuleTargets.
+// rootPredicates: the roots an absolute path puts a predicate on ("/ddn[…]"):
+// such an alternative looks at more than the document's type, so it is never
+// a "root only" part (placeExample).
+const ROOT_PREDICATE_RE = /(?:^|[\s(,|=!<>])\/([A-Za-z_][\w.-]*)\s*\[/g;
 export function ruleTargets(ruleXml) {
   const out = { checked: new Set(), absolutePrefixes: [], alternatives: [] };
   const contexts = schematronContexts(ruleXml);
   const predicateNames = new Set();
+  const rootPredicates = new Set();
   let wholeDocument = false;
   for (const expression of contexts.length ? contexts : extractRuleXPaths(ruleXml || '')) {
+    for (const m of stripLiterals(expression).matchAll(ROOT_PREDICATE_RE)) rootPredicates.add(m[1]);
     const operands = contexts.length ? [stripPredicates(expression)] : conditionOperands(stripPredicates(expression));
     for (const alternative of operands.flatMap((operand) => splitTopLevel(operand, '|'))) {
       if (contexts.length && isRootContext(alternative)) wholeDocument = true;
@@ -345,6 +352,7 @@ export function ruleTargets(ruleXml) {
     absolutePrefixes: out.absolutePrefixes,
     alternatives: out.alternatives,
     predicateNames: [...predicateNames],
+    rootPredicates: [...rootPredicates],
     wholeDocument,
   };
 }
@@ -649,13 +657,20 @@ function treeNames(node, out = new Set()) {
 // names in the predicates (targets.predicateNames) add the part they belong
 // to: a predicate on dmStatus/@issueType puts the section in the LLM's hands
 // even when the path selects content nodes.
-// → { metadata, content, contentAlternatives, unreachable } -- unreachable:
-// the names the rule looks at when EVERY alternative is unreachable (the
-// examples can never contain what it checks), else null.
+// → { metadata, content, contentAlternatives, unreachable, sectionMissing }
+// -- unreachable: the names the rule looks at when EVERY alternative is
+// unreachable (the examples can never contain what it checks), else null.
+// sectionMissing: a document whose identification and status section the
+// application does not build yet (comment, …: skeleton.metadata is null,
+// but its root has one of STATUS_SECTION_NAMES) -- { element, names, all }
+// for the alternatives that can only look inside that section (never
+// written into the content: Mistral put <pmStatus> inside <content> before
+// the pm had one); all: every alternative is like that. Else null.
 export function classifyRuleTargets(structure, targets) {
   const elements = structure.elements;
   const root = structure.skeleton.path[0];
   const section = structure.skeleton.metadata || null;
+  const missing = section ? null : missingSection(structure);
   // The root is an ancestor of both parts (an absolute path names it).
   const M = section ? reachableSet(elements, [section.element]).add(root) : new Set();
   const T = section ? treeNames(section.tree) : new Set();
@@ -667,7 +682,15 @@ export function classifyRuleTargets(structure, targets) {
   const unreachableNames = [];
   let allUnreachable = true;
   const alternatives = targets?.alternatives || [];
+  const missingNames = [];
+  let allMissing = alternatives.length > 0;
   for (const alt of alternatives) {
+    const needs = missing ? sectionOnlyNames(alt, missing, elements) : null;
+    if (needs) {
+      missingNames.push(...needs);
+      continue;
+    }
+    allMissing = false;
     if (alt.opaque) {
       content = true;
       contentAlternatives.push(alt);
@@ -709,6 +732,10 @@ export function classifyRuleTargets(structure, targets) {
     );
   }
   if (alternatives.length === 0) content = true;
+  const sectionMissing = missingNames.length
+    ? { element: missing.element, names: [...new Set(missingNames)], all: allMissing }
+    : null;
+  if (sectionMissing?.all) return { metadata: false, content: false, contentAlternatives: [], unreachable: null, sectionMissing };
   // A predicate that reads the other part: an element only the section has
   // (dmStatus, updateCode, …) makes the LLM write the section too; an
   // element only the content has (zoneSpec, …), the content.
@@ -719,7 +746,48 @@ export function classifyRuleTargets(structure, targets) {
     alternatives.length > 0 && allUnreachable && !metadata && !content ? [...new Set(unreachableNames)] : null;
   // A rule nothing can be said about keeps the content placement.
   if (!metadata && !content && !unreachable) content = true;
-  return { metadata, content, contentAlternatives, unreachable };
+  return { metadata, content, contentAlternatives, unreachable, sectionMissing };
+}
+
+// The identification and status section of a document the application does
+// not build it for: { element, M: reachable from it, C: reachable from the
+// rest of the document (the root included) }, or null.
+const STATUS_SECTION_NAMES = ['identAndStatusSection', 'idstatus', 'updateIdentAndStatusSection'];
+function missingSection(structure) {
+  const elements = structure.elements;
+  const root = structure.skeleton.path[0];
+  const element = STATUS_SECTION_NAMES.find((n) => (elements[root]?.children || []).includes(n));
+  if (!element) return null;
+  return {
+    element,
+    M: reachableSet(elements, [element]),
+    C: reachableSet(elements, (elements[root]?.children || []).filter((c) => c !== element)).add(root),
+  };
+}
+
+// The names by which an alternative can only look inside that section (a
+// step, or an attribute's every carrier, that the rest of the document does
+// not have), or null.
+function sectionOnlyNames(alt, missing, elements) {
+  if (alt.opaque) return null;
+  if (alt.steps.length > 0) {
+    const only = alt.steps.filter((s) => missing.M.has(s) && !missing.C.has(s));
+    return only.length ? only.map((s) => `<${s}>`) : null;
+  }
+  const carriers = Object.keys(elements).filter((n) => elements[n].attributes.includes(alt.attribute));
+  return carriers.length && carriers.every((o) => missing.M.has(o) && !missing.C.has(o)) ? [`@${alt.attribute}`] : null;
+}
+
+function isRootOnly(targets, root) {
+  const alternatives = targets?.alternatives || [];
+  return (
+    alternatives.length > 0 &&
+    !(targets.wholeDocument) &&
+    !(targets.rootPredicates || []).includes(root) &&
+    alternatives.every(
+      (a) => !a.opaque && !a.attribute && a.steps.length === 1 && a.steps[0] === root && a.absolutePrefix?.length === 1
+    )
+  );
 }
 
 // { path, insertion, root, allowedChildren, titled, metadata,
@@ -748,6 +816,26 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   const section = structure.skeleton.metadata || null;
   const checked = (targets?.checked || []).filter((name) => elements[name]);
   const skeletonTitled = checked.includes('title') ? [] : structure.skeleton.titled || [];
+  // Every part only asks whether the document IS of this type ("/ddn",
+  // "/dml" in a condition, BRDP-EXT-00029): nothing in the example can
+  // change that, so the application builds the whole document (its minimal
+  // identification and status section and the bare skeleton) and the LLM
+  // writes no content -- only the example's "expected" (rootOnly).
+  if (isRootOnly(targets, chain[0])) {
+    return {
+      path: chain,
+      insertion: chain[chain.length - 1],
+      root: chain[0],
+      allowedChildren: [...(elements[chain[chain.length - 1]]?.children || [])],
+      titled: [],
+      metadata: section ? { element: section.element, tree: section.tree, insertion: false } : null,
+      contentInsertion: false,
+      rootOnly: true,
+      unreachable: null,
+      sectionMissing: null,
+      nestings: [],
+    };
+  }
   if (targets?.wholeDocument || checked.includes(chain[0])) {
     return {
       path: [],
@@ -760,6 +848,7 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
       metadata: section ? { element: section.element, tree: section.tree, insertion: true } : null,
       contentInsertion: true,
       unreachable: null,
+      sectionMissing: null,
       nestings: nestingPaths(structure, targets),
     };
   }
@@ -779,6 +868,7 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     metadata,
     contentInsertion,
     unreachable: classes.unreachable,
+    sectionMissing: classes.sectionMissing,
     nestings: nestingPaths(structure, targets),
   });
   if (!classes.content) return whole(chain[chain.length - 1], chain, false);
@@ -910,6 +1000,17 @@ const BREX_REFERENCE_CODE = {
   idstatus: { own: ['dmaddres', 'dmc'], brex: 'brexref', code: 'avee', overrides: { incode: '022', itemloc: 'D' } },
 };
 const BREX_REFERENCE_NAMES = new Set(['brexDmRef', 'brexref']);
+// A publication module, DDN or DML (4.x) has no data module code of its own
+// -- its pmCode / ddnCode / dmlCode shares only @modelIdentCode with the
+// BREX's dmCode, so only that follows (a rule on //@modelIdentCode sees the
+// same value in both codes; the BREX's other attributes are left as they
+// are).
+const OTHER_OWN_CODES = [
+  { inside: ['pmIdent'], code: 'pmCode' },
+  { inside: ['ddnIdent'], code: 'ddnCode' },
+  { inside: ['dmlIdent'], code: 'dmlCode' },
+];
+const SHARED_CODE_ATTRIBUTES = ['modelIdentCode'];
 const SECTION_TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
 const ATTRIBUTE_RE = /([^\s=/>]+)\s*=\s*("[^"]*"|'[^']*')/g;
 
@@ -959,8 +1060,9 @@ export function normalizeBrexReferenceCode(sectionText, sectionElement) {
   const text = String(sectionText ?? '');
   const spec = BREX_REFERENCE_CODE[sectionElement];
   if (!spec || !text.trim()) return { text, changed: false };
-  const own = findCodeElement(text, spec.code, { inside: spec.own });
   const brex = findCodeElement(text, spec.code, { brex: spec.brex });
+  const own = findCodeElement(text, spec.code, { inside: spec.own });
+  if (brex && !own && spec.code === 'dmCode') return followSharedCode(text, brex, spec.code);
   if (!own || !brex) return { text, changed: false };
   if (spec.code === 'dmCode') {
     const ownAttrs = attributeList(own.attrs);
@@ -993,6 +1095,24 @@ export function normalizeBrexReferenceCode(sectionText, sectionElement) {
   const inner = multiline ? `\n${children.join('\n')}\n${brexIndent}` : children.join('');
   const openTag = brex.selfClosing ? `<${spec.code}>` : text.slice(brex.start, brex.openEnd);
   return { text: text.slice(0, brex.start) + openTag + inner + `</${spec.code}>` + text.slice(brex.end), changed: true };
+}
+
+function followSharedCode(text, brex, codeName) {
+  const own = OTHER_OWN_CODES.map((o) => findCodeElement(text, o.code, { inside: o.inside })).find(Boolean);
+  if (!own) return { text, changed: false };
+  const ownAttrs = new Map(attributeList(own.attrs));
+  const brexAttrs = attributeList(brex.attrs);
+  let changed = false;
+  const wanted = brexAttrs.map(([name, quoted]) => {
+    if (SHARED_CODE_ATTRIBUTES.includes(name) && ownAttrs.has(name) && ownAttrs.get(name) !== quoted) {
+      changed = true;
+      return [name, ownAttrs.get(name)];
+    }
+    return [name, quoted];
+  });
+  if (!changed) return { text, changed: false };
+  const tag = `<${codeName} ${wanted.map(([n, q]) => `${n}=${q}`).join(' ')}${brex.selfClosing ? '/' : ''}>`;
+  return { text: text.slice(0, brex.start) + tag + text.slice(brex.openEnd), changed: true, shared: true };
 }
 
 // A data module (placement.metadata) starts with its identification and

@@ -28,12 +28,15 @@ function schemaInstructions(contextSchemas, placements, dita) {
   if (groups.length > 1) {
     // One schema per part of the rule (chooseTestSchemas' groups): the parts
     // look at elements that live in different schemas (topic types in DITA).
+    // A part that only asks whether the document IS of that type ("/ddn",
+    // rootOnly) gets one example only: nothing in it can change that.
     const kind = dita ? 'topic type' : 'schema';
+    const oneOnly = groups.some((p) => p.rootOnly);
     const lines = groups.map(
-      (p) => `- "${p.schema}": for ${p.group.map((n) => `<${n}>`).join(', ')}`
+      (p) => `- "${p.schema}": for ${p.group.map((n) => `<${n}>`).join(', ')}${p.rootOnly ? ' — ONE example only (see below)' : ''}`
     );
     return `The rule's parts look at elements that live in different ${kind}s, so the
-examples are split by ${kind}. For EACH of these ${kind}s write at least one
+examples are split by ${kind}. For EACH of these ${kind}s${oneOnly ? ' (except those marked "ONE example only")' : ''} write at least one
 example that follows the decision and one that goes against it, each with
 its "schema", and write in each only about the elements of its ${kind}:
 ${lines.join('\n')}`;
@@ -62,6 +65,12 @@ function minimalSection(p) {
   return metadataXml(p.metadata.tree, 2).xml;
 }
 
+// What each document root is called in the prompt. The data module's text
+// (and the data update file's, which has always said "data module") never
+// changes; pm, ddn and dml got their sections later.
+const DOCUMENT_NOUNS = { pm: 'publication module', ddn: 'data dispatch note', dml: 'data management list' };
+const documentNoun = (root) => DOCUMENT_NOUNS[root] || 'data module';
+
 // Rule test on DM metadata: the rule looks at the data module's
 // identification and status section, so the LLM writes that whole section
 // for every example (its "metadata"), starting from the minimal one.
@@ -74,7 +83,7 @@ function metadataLine(p, alsoContent = false) {
   both:`
     : ` — the values of the reject example go
   HERE, never in a reference (<dmRef>) of the content:`;
-  return `  The rule ${alsoContent ? 'also ' : ''}looks at the data module's identification and status section:
+  return `  The rule ${alsoContent ? 'also ' : ''}looks at the ${documentNoun(p.root)}'s identification and status section:
   your "metadata" is the WHOLE <${element}> of the example, written
   directly inside <${p.root}>. Start from this minimal, valid one and change
   only what the decision is about${where}
@@ -117,6 +126,13 @@ function placementLine(p, dita) {
   const allowed = p.allowedChildren.length > 0 ? p.allowedChildren.join(', ') : 'text only';
   const kind = dita ? 'topic type' : 'schema';
   const titled = p.titled || [];
+  if (p.rootOnly) {
+    return `- ${kind} "${p.schema}": the rule's part for it only asks whether the document IS a
+  <${p.root}>, so every <${p.root}> meets it whatever it contains. The application
+  builds the whole document (${p.path.join('/')}${p.metadata ? ', with its minimal identification and status section' : ''}):
+  write ONE example of this ${kind}, with no "content", and the "expected" the
+  decision gives to any ${documentNoun(p.root) === 'data module' ? `<${p.root}>` : documentNoun(p.root)}.`;
+  }
   if (!p.insertion) {
     // T4: the rule checks the document's root element. T4b: a topic's
     // <title> is mandatory, so the LLM writes it here.
@@ -359,7 +375,10 @@ export function buildCopyableTestPrompt(systemPrompt) {
 // markdown fence and of text around the JSON object, strict about its shape.
 // An "explanation" (asked for until T3b) is ignored: the panel shows
 // describeRule's instead.
-export function parseRuleTestResponse(raw) {
+// options.contentOptionalSchemas: the schemas whose examples the
+// application builds whole (placeExample's rootOnly) -- their examples come
+// with no "content".
+export function parseRuleTestResponse(raw, { contentOptionalSchemas = [] } = {}) {
   let text = (raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -391,7 +410,8 @@ export function parseRuleTestResponse(raw) {
     // an example may then have no content at all.
     const content = typeof ex.content === 'string' ? ex.content : typeof ex.xml === 'string' ? ex.xml : '';
     const metadata = typeof ex.metadata === 'string' ? ex.metadata.trim() : '';
-    if (!content.trim() && !metadata) return { ok: false, error: `${where} has no "content".` };
+    const contentOptional = typeof ex.schema === 'string' && contentOptionalSchemas.includes(ex.schema);
+    if (!content.trim() && !metadata && !contentOptional) return { ok: false, error: `${where} has no "content".` };
     if (ex.schema !== undefined && ex.schema !== null && typeof ex.schema !== 'string') {
       return { ok: false, error: `${where} has a "schema" that is not text or null.` };
     }

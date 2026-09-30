@@ -220,8 +220,10 @@ def test_every_data_module_schema_has_a_metadata_section_that_fits_its_cards(sta
     for schema in get_document_schemas(standard):
         skeleton = derive_skeleton(standard, schema)
         metadata = derive_metadata_skeleton(standard, schema)
-        if skeleton["root"] not in ("dmodule", "dataUpdateFile"):
-            # pm, dml, ddn, comment, …: not covered yet.
+        covered_roots = ("dmodule", "dataUpdateFile", "pm") + (("ddn", "dml") if standard != "S1000D 3.0.1" else ())
+        if skeleton["root"] not in covered_roots:
+            # comment, scormContentPackage, icnMetadataFile: not covered yet;
+            # the 3.0.1 ddn and dml have no section at all.
             assert metadata is None, (standard, schema)
             continue
         assert metadata is not None, (standard, schema)
@@ -242,7 +244,9 @@ def test_every_data_module_schema_has_a_metadata_section_that_fits_its_cards(sta
                     assert value in declared[name]["enum"], (schema, node["name"], name, value)
             for child in node["children"]:
                 assert child["name"] in graph[node["name"]]["children"], (schema, node["name"], child["name"])
-    assert "descript" in covered and "proced" in covered
+    assert "descript" in covered and "proced" in covered and "pm" in covered
+    if standard != "S1000D 3.0.1":
+        assert "ddn" in covered and "dml" in covered
 
 
 @pytest.mark.parametrize("standard", S1000D)
@@ -282,7 +286,30 @@ def test_known_metadata_sections():
     tree301 = derive_metadata_skeleton("S1000D 3.0.1", "descript")["tree"]
     assert tree301["name"] == "idstatus"
     assert [c["name"] for c in tree301["children"][1]["children"]] == ["security", "rpc", "orig", "applic", "brexref", "qa"]
-    assert derive_metadata_skeleton("S1000D 4.2", "pm") is None
+    # pm, ddn and dml: their own sections (EXT-00029 of CMP ATA looks at
+    # //pmStatus/applic…). 3.0.1: the pm's idstatus; ddn and dml have none.
+    for standard in ("S1000D 4.1", "S1000D 4.2"):
+        pm = derive_metadata_skeleton(standard, "pm")
+        assert pm["element"] == "identAndStatusSection"
+        assert [c["name"] for c in pm["tree"]["children"]] == ["pmAddress", "pmStatus"]
+        assert [c["name"] for c in pm["tree"]["children"][1]["children"]] == [
+            "security", "responsiblePartnerCompany", "originator", "applic", "brexDmRef", "qualityAssurance",
+        ]
+        pm_code = pm["tree"]["children"][0]["children"][0]["children"][0]
+        assert pm_code["name"] == "pmCode" and dict(pm_code["attributes"])["modelIdentCode"] == "EXAMPLE"
+        ddn = derive_metadata_skeleton(standard, "ddn")
+        assert [c["name"] for c in ddn["tree"]["children"]] == ["ddnAddress", "ddnStatus"]
+        assert [c["name"] for c in ddn["tree"]["children"][1]["children"]] == ["security", "authorization", "brexDmRef"]
+        dml = derive_metadata_skeleton(standard, "dml")
+        assert [c["name"] for c in dml["tree"]["children"]] == ["dmlAddress", "dmlStatus"]
+        assert [c["name"] for c in dml["tree"]["children"][1]["children"]] == ["security", "brexDmRef"]
+        assert derive_metadata_skeleton(standard, "comment") is None
+    pm301 = derive_metadata_skeleton("S1000D 3.0.1", "pm")
+    assert pm301["element"] == "idstatus"
+    assert [c["name"] for c in pm301["tree"]["children"]] == ["pmaddres", "pmstatus"]
+    assert [c["name"] for c in pm301["tree"]["children"][1]["children"]] == ["security", "rpc", "orig", "applic", "qa"]
+    assert derive_metadata_skeleton("S1000D 3.0.1", "ddn") is None
+    assert derive_metadata_skeleton("S1000D 3.0.1", "dml") is None
     # 4.x data update file: its own section, with the update's code (the
     # curated template's tool-CIR rule looks at //updateCode/@infoCode).
     for standard in ("S1000D 4.1", "S1000D 4.2"):

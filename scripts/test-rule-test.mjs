@@ -407,7 +407,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const SHORTDESC = '<sch:pattern><sch:rule context="shortdesc"><sch:assert id="SD" test="string-length(.) le 80">Short description too long.</sch:assert></sch:rule></sch:pattern>';
 
   const stepTargets = ruleTargets(STEP);
-  check('T4 targets: Schematron → contexts only', JSON.stringify({ ...stepTargets, alternatives: undefined }) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], predicateNames: [], wholeDocument: false }) && stepTargets.alternatives.length === 1, JSON.stringify(stepTargets));
+  check('T4 targets: Schematron → contexts only', JSON.stringify({ ...stepTargets, alternatives: undefined }) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], predicateNames: [], rootPredicates: [], wholeDocument: false }) && stepTargets.alternatives.length === 1, JSON.stringify(stepTargets));
   check('T4 targets: note', ruleTargets(NOTE).checked.join() === 'note');
   check('T4 targets: root context → whole document', ruleTargets(ROOT_LANG).wholeDocument === true);
   check('T4 targets: entities decoded in the context', ruleTargets('<rule context="p[. = &apos;x&apos;]"><assert test="1">x</assert></rule>').checked.join() === 'p');
@@ -1035,7 +1035,8 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const withInfoCode = (code) => minimal.replace(docCode, `<dmCode $1infoCode="${code}"`);
 
   check('metadata: every data module skeleton has the minimal section', descript.skeleton.metadata?.element === 'identAndStatusSection' && structureOf(S301, 'descript').skeleton.metadata?.element === 'idstatus');
-  check('metadata: not for other documents (pm)', structureOf(S42, 'pm').skeleton.metadata === null);
+  check('metadata: pm, ddn and dml have their own section', ['pm', 'ddn', 'dml'].every((s) => structureOf(S42, s).skeleton.metadata?.element === 'identAndStatusSection') && structureOf(S301, 'pm').skeleton.metadata?.element === 'idstatus');
+  check('metadata: not for documents without one (comment, 3.0.1 ddn)', structureOf(S42, 'comment').skeleton.metadata === null && structureOf(S301, 'ddn').skeleton.metadata === null);
   check('metadata: minimal section, in XSD order', /<dmIdent>\s*<dmCode [^>]*\/>\s*<language [^>]*\/>\s*<issueInfo [^>]*\/>/.test(minimal) && /<dmStatus>\s*<security [^>]*\/>\s*<responsiblePartnerCompany>/.test(minimal), minimal);
 
   // A content-only rule: unchanged placement, the minimal section is part of
@@ -1977,6 +1978,133 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('replace: question text EN/ES', en('records.ruleTest.replaceQuestion.text', { date: 'Sep 30, 2026' }) === 'The previous test passed on Sep 30, 2026. Record this result and replace it?' && es('records.ruleTest.replaceQuestion.text', { date: '30 sept 2026' }) === 'La prueba anterior salió correcta el 30 sept 2026. ¿Registrar este resultado y sustituirla?');
   check('replace: buttons ES', es('records.ruleTest.replaceQuestion.register') === 'Registrar este resultado' && es('records.ruleTest.replaceQuestion.keep') === 'Mantener la anterior');
   check('replace: History text ES', es('records.ruleTest.results.notRecorded', { result: 'Fallida', date: '30 sept 2026' }) === 'Fallida — no registrado (se mantuvo la prueba del 30 sept 2026)');
+}
+
+// ---------------------------------------------------------------------------
+// Condiciones con raíz absoluta, y cabecera de pm/ddn/dml. BRDP-EXT-00029 of
+// Official Default CMP ATA 4.2 (flag 1): the applicability of a data module
+// or a publication module must be stated (All, an assert or an applicRef);
+// a DDN or a DML always passes (/ddn, /dml). Before: "not executable: the
+// path starts at /ddn…" and 7 invalid pm/ddn/dml examples (Mistral put
+// <pmStatus> inside <content>).
+{
+  const S42 = 'S1000D 4.2';
+  const S301 = 'S1000D 3.0.1';
+  const es = i18n.getFixedT('es');
+  const status = (el) => `(//${el}/applic/assert/@applicPropertyType or //${el}/applic//evaluate/assert/@applicPropertyType or //${el}/applicRef or //${el}/applic/displayText/simplePara[lower-case(.)[contains(.,'all')]])`;
+  const EXT29 = `<structureObjectRule id="BRDP-EXT-00029"><objectPath allowedObjectFlag="1">(/ddn or /dml or ${status('dmStatus').slice(1, -1)}) or ${status('pmStatus')}</objectPath><objectUse>The applicability must be stated.</objectUse></structureObjectRule>`;
+  // GET /api/schema-cards, from the real structures: which schemas have each name.
+  const docs42 = ['comment', 'ddn', 'descript', 'dml', 'ipd', 'pm', 'proced', 'sb'];
+  const fetchCards42 = async (_std, names) => ({
+    cards: Object.fromEntries(
+      names.map((n) => [n, {
+        variants: [{ schemas: docs42.filter((d) => structureOf(S42, d).elements[n]), attributes: [], children: [], resolved: true }],
+        parents: [],
+      }])
+    ),
+    document_schemas: docs42,
+  });
+  const fetchStructure = async (std, schema) => ({ available: true, ...structureOf(std, schema) });
+  const minimal = (std, schema) => metadataXml(structureOf(std, schema).skeleton.metadata.tree).xml;
+  const dm = minimal(S42, 'descript');
+  const pm = minimal(S42, 'pm');
+  const someText = (x) => x.replace('<simplePara>All</simplePara>', '<simplePara>Some text</simplePara>');
+  const assertApplic = dm.replace(/<applic>[\s\S]*?<\/applic>/, '<applic><assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"/></applic>');
+  const applicRef = dm.replace(/<applic>[\s\S]*?<\/applic>/, '<applicRef applicIdentValue="a1"/>');
+
+  // The setup: descript, pm, ddn, dml; ddn and dml built whole by the app.
+  const setup29 = await prepareRuleTestSetup({ ruleXml: EXT29, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure });
+  const bySchema = Object.fromEntries(setup29.promptPlacements.map((p) => [p.schema, p]));
+  check('EXT-00029: split into descript, pm, ddn and dml', JSON.stringify(Object.keys(bySchema).sort()) === '["ddn","descript","dml","pm"]', JSON.stringify(Object.keys(bySchema)));
+  check('EXT-00029: descript and pm write their section, no content', ['descript', 'pm'].every((s) => bySchema[s].metadata?.insertion === true && bySchema[s].contentInsertion === false));
+  check('EXT-00029: ddn and dml are built whole by the app', ['ddn', 'dml'].every((s) => bySchema[s].rootOnly === true && bySchema[s].contentInsertion === false && bySchema[s].metadata?.insertion === false));
+  check('EXT-00029: nothing untested, nothing unreachable', setup29.untested.length === 0 && setup29.unreachable === null);
+
+  const asked = [];
+  const answer = {
+    proposalMismatch: null,
+    examples: [
+      { label: 'DM applicable to All', expected: 'accept', schema: 'descript', metadata: dm },
+      { label: 'DM with free text', expected: 'reject', schema: 'descript', metadata: someText(dm) },
+      { label: 'DM with an assert', expected: 'accept', schema: 'descript', metadata: assertApplic },
+      { label: 'DM with an applicRef', expected: 'accept', schema: 'descript', metadata: applicRef },
+      { label: 'PM applicable to All', expected: 'accept', schema: 'pm', metadata: pm },
+      { label: 'PM with free text', expected: 'reject', schema: 'pm', metadata: someText(pm) },
+      { label: 'A DDN', expected: 'accept', schema: 'ddn' },
+      { label: 'A DML', expected: 'accept', schema: 'dml' },
+    ],
+  };
+  const g29 = await generateRuleTestExamples({
+    ruleXml: EXT29, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00029', title: 'Applicability', definition: 'Applicability of DMs and PMs.', proposal: 'The applicability of every data module and publication module must be stated.' },
+    vocabulary, parseXml,
+    ask: async (_messages, systemPrompt) => { asked.push(systemPrompt); return JSON.stringify(answer); },
+    fetchSchemaCards: fetchCards42, fetchStructure,
+  });
+  check('EXT-00029: one LLM call, no correction round', asked.length === 1 && g29.status === 'ready' && g29.correction === null, JSON.stringify({ status: g29.status, error: g29.error, correction: g29.correction }));
+  const verdictOf = (r) => r.result?.status;
+  check('EXT-00029: every example valid', g29.runs.every((r) => r.validation.runnable), JSON.stringify(g29.runs.map((r, i) => [g29.examples[i].label, r.validation.structure, r.validation.names?.notFound])));
+  check('EXT-00029: descript All / assert / applicRef accepted, "Some text" rejected', ['accepted', 'rejected', 'accepted', 'accepted'].join() === g29.runs.slice(0, 4).map(verdictOf).join(), g29.runs.map(verdictOf).join());
+  check('EXT-00029: pm All accepted, pm without anything rejected', verdictOf(g29.runs[4]) === 'accepted' && verdictOf(g29.runs[5]) === 'rejected');
+  check('EXT-00029: ddn and dml accepted (the condition is true)', verdictOf(g29.runs[6]) === 'accepted' && verdictOf(g29.runs[7]) === 'accepted' && g29.runs[6].result.conditions[0].holds === true);
+  check('EXT-00029: nothing is "not executable"', g29.runs.every((r) => r.result.notExecutableParts.length === 0));
+  check('EXT-00029: verdict correct', ruleTestVerdict(g29.examples, g29.runs, analyzeRule(EXT29, 'BREX-4.2', { parseXml })).kind === 'correct');
+  const ddnXml = g29.examples[6].xml;
+  check('EXT-00029: the ddn is a whole document with its minimal section', /^<ddn [^>]*xsi:noNamespaceSchemaLocation="[^"]*ddn\.xsd"/.test(ddnXml) && ddnXml.includes('<ddnStatus>') && ddnXml.includes('<deliveryList></deliveryList>') && g29.examples[6].rootOnly === true, ddnXml);
+  check('EXT-00029: the pm example has its pmStatus in the section, not in <content>', /<identAndStatusSection>[\s\S]*<pmStatus>/.test(g29.examples[4].xml) && !/<content>[\s\S]*<pmStatus>/.test(g29.examples[4].xml));
+  const prompt = asked[0];
+  check('EXT-00029: prompt — ddn and dml ONE example only', prompt.includes('- "ddn": for <ddn> — ONE example only (see below)') && prompt.includes('(except those marked "ONE example only")'));
+  check('EXT-00029: prompt — ddn built whole, no content', prompt.includes('schema "ddn": the rule\'s part for it only asks whether the document IS a\n  <ddn>') && prompt.includes('decision gives to any data dispatch note.'));
+  check('EXT-00029: prompt — the pm section is the publication module\'s', prompt.includes("looks at the publication module's identification and status section") && prompt.includes('<pmStatus>'));
+  check('EXT-00029: parse — no content is fine only for ddn/dml', parseRuleTestResponse(JSON.stringify({ examples: [{ label: 'a', expected: 'accept', schema: 'ddn' }] }), { contentOptionalSchemas: ['ddn'] }).ok && !parseRuleTestResponse(JSON.stringify({ examples: [{ label: 'a', expected: 'accept', schema: 'descript' }] }), { contentOptionalSchemas: ['ddn'] }).ok);
+  check('EXT-00029: root-only note EN/ES', es('records.ruleTest.rootOnlyExample', { root: 'ddn' }) === 'Montado por la aplicación: la regla solo pregunta si el documento es un <ddn>, así que todo <ddn> cumple esa parte.');
+
+  // A node path whose only root is /pm, tested on a pm.
+  const pmOnly = '<structureObjectRule id="PMREF"><objectPath allowedObjectFlag="0">/pm/identAndStatusSection/pmStatus/applicRef</objectPath><objectUse>No applicRef in a PM.</objectUse></structureObjectRule>';
+  const setupPm = await prepareRuleTestSetup({ ruleXml: pmOnly, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure });
+  const pPm = setupPm.promptPlacements[0];
+  check('/pm only: tested on pm, in its section', setupPm.promptPlacements.length === 1 && pPm.schema === 'pm' && pPm.metadata?.insertion === true, JSON.stringify(setupPm.promptPlacements.map((p) => p.schema)));
+  const pmRef = pm.replace(/<applic>[\s\S]*?<\/applic>/, '<applicRef applicIdentValue="a1"/>');
+  const rPm = testRun(pmOnly, [
+    { label: 'applic', expected: 'accept', schema: 'pm', metadata: pm },
+    { label: 'applicRef', expected: 'reject', schema: 'pm', metadata: pmRef },
+  ], setupPm.setup);
+  check('/pm only: runs on a pm (accepted / rejected)', rPm.runs.map(verdictOf).join() === 'accepted,rejected' && rPm.runs.every((r) => r.validation.runnable), JSON.stringify(rPm.runs.map((r) => [r.result?.status, r.result?.notExecutableReason, r.validation.structure])));
+
+  // The pm's brexDmRef follows its own modelIdentCode.
+  const pmOwnModel = pm.replace(/(<pmCode [^>]*modelIdentCode=")EXAMPLE/, '$1ACME');
+  const followed = testRun(pmOnly, [{ label: 'model', expected: 'accept', schema: 'pm', metadata: pmOwnModel }], setupPm.setup).materialized[0];
+  check('pm: the brexDmRef modelIdentCode follows the pmCode', /<brexDmRef>[\s\S]*<dmCode [^>]*modelIdentCode="ACME"/.test(followed.xml) && followed.brexModelIdentFollowed === true && followed.brexReferenceNormalized === false, followed.xml);
+  check('pm: the brexDmRef keeps its own infoCode 022', /<brexDmRef>[\s\S]*<dmCode [^>]*infoCode="022"/.test(followed.xml));
+  check('pm: note EN', i18n.getFixedT('en')('records.ruleTest.brexModelIdentFollowed').startsWith("Adjusted by the app: the brexDmRef's modelIdentCode"));
+
+  // 3.0.1 publication module: its idstatus.
+  const pm301 = structureOf(S301, 'pm');
+  const p301 = placeExample(pm301, ruleTargets('<objrule><objpath objappl="0">//pmstatus/applic</objpath><objuse>u</objuse></objrule>'));
+  check('3.0.1 pm: the rule on pmstatus writes its idstatus', p301.metadata?.element === 'idstatus' && p301.metadata.insertion === true && p301.contentInsertion === false);
+  check('3.0.1 ddn: no section, content at the root', structureOf(S301, 'ddn').skeleton.metadata === null && structureOf(S301, 'ddn').skeleton.path.join() === 'ddn');
+
+  // A document whose section the app does not build yet (comment): not
+  // offered; the result says which part was not tested and why.
+  const commentOnly = '<structureObjectRule id="C1"><objectPath allowedObjectFlag="0">//commentStatus/commentResponse</objectPath><objectUse>u</objectUse></structureObjectRule>';
+  const sc = await prepareRuleTestSetup({ ruleXml: commentOnly, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure });
+  check('comment only: not executable, section_unavailable', sc.unreachable?.code === 'section_unavailable' && sc.unreachable.params.schemas === 'comment' && /commentStatus/.test(sc.unreachable.params.names), JSON.stringify(sc.unreachable));
+  const gc = await generateRuleTestExamples({
+    ruleXml: commentOnly, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat', brdp: { identifier: 'C1', title: 't', definition: 'd', proposal: 'p' },
+    vocabulary, parseXml, ask: async () => { throw new Error('the LLM must not be called'); }, fetchSchemaCards: fetchCards42, fetchStructure,
+  });
+  check('comment only: no LLM call, not executable', gc.status === 'not_executable' && gc.reason.code === 'section_unavailable');
+  check('comment only: reason EN/ES', formatRuleTestReason(gc.reason, i18n.getFixedT('en')).includes('looks inside the identification and status section of the comment schema (<commentStatus>') && formatRuleTestReason(gc.reason, es).includes('mira dentro de la sección de identificación y estado del esquema comment (<commentStatus>'), formatRuleTestReason(gc.reason, i18n.getFixedT('en')));
+  const mixed = '<structureObjectRule id="C2"><objectPath allowedObjectFlag="0">//commentStatus/commentResponse | //dmStatus/applicRef</objectPath><objectUse>u</objectUse></structureObjectRule>';
+  const sm = await prepareRuleTestSetup({ ruleXml: mixed, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure });
+  check('comment + dmStatus: descript tested, comment not offered and reported', sm.unreachable === null && sm.promptPlacements.map((p) => p.schema).join() === 'descript' && sm.untested.length === 1 && sm.untested[0].schema === 'comment' && sm.untested[0].element === 'identAndStatusSection', JSON.stringify({ p: sm.promptPlacements.map((p) => p.schema), u: sm.untested }));
+  check('untested note ES', es('records.ruleTest.untestedPart', { names: '<commentStatus>', schema: 'comment', element: 'identAndStatusSection' }) === 'Parte de la regla no probada: <commentStatus> (esquema comment). La aplicación todavía no monta la <identAndStatusSection> de ese documento, así que no se ofrecen ejemplos de él.');
+
+  // A content-only rule: unchanged (no rootOnly, no untested).
+  const sContent = await prepareRuleTestSetup({ ruleXml: '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>u</objectUse></structureObjectRule>', standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure });
+  check('content-only rule: unchanged', sContent.promptPlacements.length === 1 && sContent.promptPlacements[0].schema === 'descript' && !sContent.promptPlacements[0].rootOnly && sContent.untested.length === 0 && sContent.promptPlacements[0].contentInsertion === true);
+  // A predicate on the root is not "root only".
+  check('root with a predicate: not root only', !placeExample(structureOf(S42, 'ddn'), ruleTargets('<structureObjectRule><objectPath allowedObjectFlag="0">/ddn[ddnContent]</objectPath><objectUse>u</objectUse></structureObjectRule>')).rootOnly);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

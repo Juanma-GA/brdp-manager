@@ -356,6 +356,27 @@ const ruleStepTitle =
 const ruleInfoCode =
   '<structureObjectRule id="BRDP-S1-00052"><objectPath allowedObjectFlag="2">//dmIdent/dmCode/@infoCode</objectPath><objectUse>Only the information codes 055 and 930 are used.</objectUse><objectValue valueForm="single" valueAllowed="055"/><objectValue valueForm="single" valueAllowed="930"/></structureObjectRule>';
 const ruleToolCirBoolean = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-1/xml_schema_flat/update.xsd"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//updateCode[attribute::infoCode="00N"] and (//zoneSpec or //partSpec or //partIdent or //zoneIdent)</objectPath><objectUse>Only toolSpec, toolIdent, figure, figureIdent elements can be used in the Data update file representing the tool CIR.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+// Condiciones con raíz absoluta, y cabecera de pm/ddn/dml: BRDP-EXT-00029
+// of Official Default CMP ATA 4.2 (flag 1) -- descript and pm examples write
+// their identification and status section; ddn and dml are built whole by
+// the application (their part is only "/ddn", "/dml"). Groups placed like
+// prepareRuleTestSetup does, with cards read from the real structures.
+const ext29Status = (el) => `(//${el}/applic/assert/@applicPropertyType or //${el}/applic//evaluate/assert/@applicPropertyType or //${el}/applicRef or //${el}/applic/displayText/simplePara[lower-case(.)[contains(.,'all')]])`;
+const ruleExt29 = `<structureObjectRule id="BRDP-EXT-00029"><objectPath allowedObjectFlag="1">(/ddn or /dml or ${ext29Status('dmStatus').slice(1, -1)}) or ${ext29Status('pmStatus')}</objectPath><objectUse>The applicability must be stated.</objectUse></structureObjectRule>`;
+function appGroupPlacementsFor(standard, ruleXml, documentSchemas) {
+  const targets = ruleTargets(ruleXml);
+  const names = [...new Set(targets.alternatives.flatMap((a) => a.steps).concat(targets.checked))];
+  const cards = Object.fromEntries(
+    names.map((n) => [n, { variants: [{ schemas: documentSchemas.filter((d) => realStructures[`${standard}|${d}`]?.elements[n]) }] }])
+  );
+  const { groups } = chooseTestSchemas({ documentSchemas, cards, targets });
+  return groups.map((g) => ({
+    schema: g.schema,
+    role: 'rule',
+    ...placeExample(realStructures[`${standard}|${g.schema}`], targetsForGroup(targets, g), { useNames: ruleUseNames(ruleXml), withRoutes: true }),
+    group: g.checked,
+  }));
+}
 const ruleApplicRefOr = '<structureObjectRule id="BRDP-S1-00316"><objectPath allowedObjectFlag="0">//dmStatus/applicRef or //pmStatus/applicRef</objectPath><objectUse>Applicability is written in the status, never referenced.</objectUse></structureObjectRule>';
 const ruleAssyCode =
   '<structureObjectRule id="BRDP-S1-00338"><objectPath allowedObjectFlag="0">//@assyCode[string-length(.) != 2]</objectPath><objectUse>The assembly code has two characters.</objectUse></structureObjectRule>';
@@ -472,6 +493,20 @@ export const ruleTestExamplesCases = [
         ruleXml: ruleApplicRefOr,
         placements: appPlacementsFor('S1000D 4.2', ruleApplicRefOr, [['descript', 'rule']]),
         conditions: ruleConditions(ruleApplicRefOr, 'BREX-4.2', { parseXml: xmldomParse }),
+      },
+    ],
+  },
+  {
+    // Condiciones con raíz absoluta, y cabecera de pm/ddn/dml: EXT-00029.
+    name: 'brex-4-2-ext29-applicability-pm-ddn-dml',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-00029', title: 'Applicability of DMs and PMs', proposal: 'The applicability of every data module and publication module shall be stated (All, an assertion or an applicability reference). DDNs and DMLs have none.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleExt29,
+        placements: appGroupPlacementsFor('S1000D 4.2', ruleExt29, ['comment', 'ddn', 'descript', 'dml', 'ipd', 'pm', 'proced', 'sb']),
+        conditions: ruleConditions(ruleExt29, 'BREX-4.2', { parseXml: xmldomParse }),
       },
     ],
   },

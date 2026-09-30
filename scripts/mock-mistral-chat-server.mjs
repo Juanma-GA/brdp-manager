@@ -148,6 +148,39 @@ function isRuleTest(text) {
 function metadataReply(systemPrompt, rule, answer) {
   const element = (systemPrompt.match(/your "metadata" is the WHOLE <([\w-]+)>/) || [])[1];
   if (!element) return null;
+  // Condiciones con raíz absoluta, y cabecera de pm/ddn/dml (BRDP-EXT-00029,
+  // CMP ATA): the applicability of a DM or PM must be stated; a DDN or DML
+  // always passes. The examples of each schema start from ITS minimal
+  // section (descript's identAndStatusSection with dmStatus, pm's with
+  // pmStatus); ddn and dml ("ONE example only") come with no content.
+  if (/\/ddn or \/dml/.test(rule)) {
+    const minimalOf = (schema) => {
+      const lines = systemPrompt.split("\n");
+      const at = lines.findIndex((l) => l.startsWith(`- schema "${schema}": the application builds the rest`));
+      if (at === -1) return null;
+      const start = lines.findIndex((l, i) => i > at && l.startsWith(`    <${element}>`));
+      const out = [];
+      for (let i = start; i < lines.length && lines[i].startsWith("    "); i += 1) out.push(lines[i].slice(4));
+      return out.join("\n");
+    };
+    const withText = (x, text) => x.replace("<simplePara>All</simplePara>", `<simplePara>${text}</simplePara>`);
+    const examples = [];
+    for (const schema of ["descript", "pm"]) {
+      const base = minimalOf(schema);
+      if (!base) continue;
+      const kind = schema === "pm" ? "PM" : "DM";
+      examples.push({ label: `${kind} applicable to All`, expected: "accept", schema, metadata: base });
+      examples.push({ label: `${kind} with free applicability text`, expected: "reject", schema, metadata: withText(base, "Some text") });
+      if (schema === "descript") {
+        examples.push({ label: "DM with an assert", expected: "accept", schema, metadata: base.replace(/<applic>[\s\S]*?<\/applic>/, '<applic><assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"/></applic>') });
+        examples.push({ label: "DM with an applicRef", expected: "accept", schema, metadata: base.replace(/<applic>[\s\S]*?<\/applic>/, '<applicRef applicIdentValue="app-001"/>') });
+      }
+    }
+    for (const schema of ["ddn", "dml"]) {
+      if (systemPrompt.includes(`- "${schema}": for <${schema}> — ONE example only`)) examples.push({ label: `Any ${schema.toUpperCase()}`, expected: "accept", schema });
+    }
+    return answer(examples);
+  }
   const schema = (systemPrompt.match(/- schema "([\w-]+)": (?:the application builds the rest|your content goes directly inside)/) || [])[1];
   const lines = systemPrompt.split("\n");
   const start = lines.findIndex((l) => l.startsWith(`    <${element}>`)) - 1;

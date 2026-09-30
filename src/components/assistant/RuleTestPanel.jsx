@@ -245,6 +245,11 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
           {t('records.ruleTest.brexReferenceNormalized')}
         </p>
       )}
+      {example.brexModelIdentFollowed && (
+        <p className={styles.ruleTestNote} data-testid="rule-test-brex-model-ident">
+          {t('records.ruleTest.brexModelIdentFollowed')}
+        </p>
+      )}
       {!run.validation.runnable && <ValidationProblems validation={run.validation} standard={standard} schema={example.schema} />}
       {showResult && result?.outOfScopeSchemas?.length > 0 && result.status === 'accepted' && example.schema && (
         <p className={styles.ruleTestNote}>{t('records.ruleTest.notApplicable', { schema: example.schema })}</p>
@@ -303,19 +308,26 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
         </>
       ) : (
         <>
+          {example.rootOnly && (
+            <p className={styles.ruleTestNote} data-testid="rule-test-root-only">
+              {t('records.ruleTest.rootOnlyExample', { root: example.xml ? rootName(example.xml) : example.schema })}
+            </p>
+          )}
           <HighlightedXml lines={lines} xml={example.xml || example.content} />
           <div className={styles.ruleTestExampleActions}>
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() => {
-                setDraft(example.content);
-                setMetadataDraft(example.metadata || '');
-                setEditing(true);
-              }}
-            >
-              {t('records.ruleTest.edit')}
-            </button>
+            {!example.rootOnly && (
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => {
+                  setDraft(example.content);
+                  setMetadataDraft(example.metadata || '');
+                  setEditing(true);
+                }}
+              >
+                {t('records.ruleTest.edit')}
+              </button>
+            )}
             <button type="button" className={styles.linkButton} onClick={copyXml}>
               {copied ? t('records.ruleTest.xmlCopied') : t('records.ruleTest.copyXml')}
             </button>
@@ -358,6 +370,20 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
           ))}
     </div>
   );
+}
+
+const rootName = (xml) => (/<([A-Za-z_][\w.-]*)/.exec(String(xml).replace(/<\?[\s\S]*?\?>/g, '')) || [])[1] || '';
+
+// Parts of the rule the examples could not test: the document they look
+// into has no identification and status section in the application yet.
+function UntestedNote({ untested }) {
+  const { t } = useTranslation();
+  if (!untested || untested.length === 0) return null;
+  return untested.map((u) => (
+    <p key={u.schema} className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-untested">
+      ⚠ {t('records.ruleTest.untestedPart', { names: u.names.join(', '), schema: u.schema, element: u.element })}
+    </p>
+  ));
 }
 
 function CorrectionNote({ correction }) {
@@ -627,6 +653,7 @@ export default function RuleTestPanel({
             </p>
           )}
           <CorrectionNote correction={state.correction} />
+          <UntestedNote untested={state.untested} />
           <p className={styles.hint}>{t('records.ruleTest.skeletonLegend')}</p>
           {state.examples.map((ex, i) => (
             <ExampleCard

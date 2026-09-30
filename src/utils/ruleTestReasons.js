@@ -24,7 +24,10 @@
 //     analyzeRule warning (never a refusal): xpath3_syntax {features};
 //   the rule test's setup (rule test on DM metadata): unreachable_target
 //     {names} -- no document the examples can be built on can contain what
-//     the rule looks at (known before any LLM call);
+//     the rule looks at (known before any LLM call); section_unavailable
+//     {names, schemas} -- what the rule looks at lives only in the
+//     identification and status section of a document the application does
+//     not build it for yet (comment, …), so that schema is not offered;
 //   analyzeRule (C3): rule_format {problem, ...params} -- the stored XML is
 //     not a rule of its format; `problem` is checkRuleFormat's code
 //     (rule_format_missing, …), shown with the same text as on save;
@@ -40,7 +43,7 @@ export const ENGINE_REASON_CODES = [
   'unsupported_format', 'fragment_not_well_formed', 'rule_not_well_formed', 'no_rule_element', 'empty_path',
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
-  'rule_format', 'unreachable_target',
+  'rule_format', 'unreachable_target', 'section_unavailable',
 ];
 export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch'];
 

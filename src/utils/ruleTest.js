@@ -71,7 +71,9 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     const normalized = normalizeBrexReferenceCode(metadata, section.element);
     metadata = normalized.text;
     adjusted.metadata = metadata;
-    adjusted.brexReferenceNormalized = normalized.changed;
+    // A pm, DDN or DML: only the shared @modelIdentCode followed.
+    adjusted.brexReferenceNormalized = normalized.changed && !normalized.shared;
+    if (normalized.shared) adjusted.brexModelIdentFollowed = true;
   }
   const { xml, skeletonNodePaths } = assembleExample({
     standard: setup.standard,
@@ -92,6 +94,9 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     insertion: entry.placement.insertion,
     metadataElement: section?.insertion && entry.placement.path.length > 0 ? section.element : null,
     contentInsertion: entry.placement.contentInsertion !== false,
+    // The application built the whole document (placeExample's rootOnly):
+    // nothing in it is the LLM's, so nothing can be edited.
+    rootOnly: entry.placement.rootOnly === true,
     missingMetadata,
   };
 }

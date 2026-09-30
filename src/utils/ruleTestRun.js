@@ -54,6 +54,12 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   const { testSchema, otherSchema, groups } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, targets });
   const placements = {};
   const promptPlacements = [];
+  // Parts of the rule that look only inside the identification and status
+  // section of a document the application does not build it for (comment,
+  // …): that schema is not offered -- the examples could only be invalid
+  // (Mistral put <pmStatus> inside <content> before the pm had a section) --
+  // and the result says which part was not tested and why.
+  const untested = [];
   // One schema per part of the rule (groups), or the test schema and, for
   // a context-scoped rule, the "does not apply" one.
   const wanted = groups
@@ -75,8 +81,28 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       // <procedure> -- the skeleton reaching <para> is not enough.
       withRoutes: !String(standard).startsWith('DITA'),
     });
+    if (placement.sectionMissing && role === 'rule') {
+      untested.push({ schema, element: placement.sectionMissing.element, names: placement.sectionMissing.names });
+    }
+    if (placement.sectionMissing?.all) continue;
     placements[schema] = { structure, placement };
     promptPlacements.push({ schema, role, ...placement, ...(group ? { group } : {}) });
+  }
+  if (!promptPlacements.some((p) => p.role === 'rule') && untested.length > 0) {
+    return {
+      contextSchemas,
+      schemaFacts,
+      promptPlacements,
+      untested,
+      unreachable: {
+        code: 'section_unavailable',
+        params: {
+          names: [...new Set(untested.flatMap((u) => u.names))].join(', '),
+          schemas: [...new Set(untested.map((u) => u.schema))].join(', '),
+        },
+      },
+      setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
+    };
   }
   if (promptPlacements.length === 0) throw new Error(`No schema structure is available for ${standard}.`);
   // Rule test on DM metadata, Part 3: when nothing the examples of the test
@@ -88,7 +114,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     rulePlacements.length > 0 && rulePlacements.every((p) => p.unreachable)
       ? { code: 'unreachable_target', params: { names: [...new Set(rulePlacements.flatMap((p) => p.unreachable))].join(', ') } }
       : null;
-  return { contextSchemas, schemaFacts, promptPlacements, unreachable, setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) } };
+  return { contextSchemas, schemaFacts, promptPlacements, unreachable, untested, setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) } };
 }
 
 // T4b: an example meant to be rejected in which the rule selects nothing
@@ -254,7 +280,10 @@ export async function generateRuleTestExamples({
   try {
     const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure });
     if (!isCurrent()) return null;
-    if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup };
+    if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup, untested: prepared.untested };
+    // The schemas whose examples the application builds whole (rootOnly):
+    // their examples come with no "content".
+    const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema) };
     systemPrompt = buildRuleTestExamplesPrompt({
       brdp,
       standard,
@@ -273,7 +302,7 @@ export async function generateRuleTestExamples({
     const answer = await ask(first, systemPrompt);
     responses.push(answer);
     if (!isCurrent()) return null;
-    const parsed = parseRuleTestResponse(answer);
+    const parsed = parseRuleTestResponse(answer, parseOptions);
     if (!parsed.ok) {
       // Nothing runs on a broken answer (docs request).
       return { status: 'error', error: parsed.error, badResponse: true, systemPrompt, responses };
@@ -296,7 +325,7 @@ export async function generateRuleTestExamples({
         );
         responses.push(again);
         if (!isCurrent()) return null;
-        const reparsed = parseRuleTestResponse(again);
+        const reparsed = parseRuleTestResponse(again, parseOptions);
         if (!reparsed.ok) {
           correction.failed = reparsed.error;
         } else {
@@ -323,6 +352,7 @@ export async function generateRuleTestExamples({
       runs,
       correction,
       setup: prepared.setup,
+      untested: prepared.untested,
       systemPrompt,
       responses,
     };

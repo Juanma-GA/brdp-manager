@@ -2831,6 +2831,56 @@
           "note": "every reject example still has a <randomList> inside another one"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-applicability-dm-pm-ddn-dml",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Condiciones con raíz absoluta, y cabecera de pm/ddn/dml: BRDP-EXT-00029 of Official Default CMP ATA 4.2 (flag 1, a condition). Before: 'not executable: the path starts at /ddn' and invalid pm/ddn/dml examples. Now descript and pm examples write their identification and status section (All / free text / assert / applicRef), ddn and dml are built whole by the app (accept), verdict correct.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-EXT29",
+        "title": "Applicability of data modules and publication modules",
+        "definition": "Decide how the applicability of data modules and publication modules is stated.",
+        "proposal": "The applicability of every data module and publication module shall be stated: All, an assertion or an applicability reference. Data dispatch notes and data management lists have none.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-EXT29\"><objectPath allowedObjectFlag=\"1\">(/ddn or /dml or //dmStatus/applic/assert/@applicPropertyType or //dmStatus/applic//evaluate/assert/@applicPropertyType or //dmStatus/applicRef or //dmStatus/applic/displayText/simplePara[lower-case(.)[contains(.,'all')]]) or (//pmStatus/applic/assert/@applicPropertyType or //pmStatus/applic//evaluate/assert/@applicPropertyType or //pmStatus/applicRef or //pmStatus/applic/displayText/simplePara[lower-case(.)[contains(.,'all')]])</objectPath><objectUse>The applicability of a data module or publication module must be stated.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (the pm's section included) is valid after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example: nothing is 'not executable' (/ddn on a <dmodule> is false)"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "- \"ddn\": for <ddn> — ONE example only",
+          "note": "ddn is offered, built whole by the app"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "looks at the publication module's identification and status section",
+          "note": "the pm examples write the pm's own section"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<(?:dm|pm)Status\\b[^>]*>[\\s\\S]*<applic>[\\s\\S]*<simplePara>(?![^<]*[Aa][Ll][Ll])",
+          "note": "every reject example states the applicability in its own status with a text that does not say All"
+        }
+      ]
     }
   ]
 }
