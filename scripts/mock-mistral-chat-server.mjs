@@ -338,10 +338,18 @@ function ruleTestReply(systemPrompt, messages) {
     return answer(examples);
   }
   // Templates round: the curated content rules.
+  // The real run (929d9c5): the first reject example wraps an invalid
+  // element in the changeInline; corrected without "Keep a node matched
+  // by", the LLM dropped the changeInline and the test was inconclusive.
   if (/\/\/changeInline\[/.test(rule)) {
+    const reject = !correcting
+      ? '<changeInline changeMark="1"><dmRefCode>Warning lights</dmRefCode></changeInline> come on.'
+      : /Keep a node matched by/.test(lastUser)
+        ? '<changeInline changeMark="1"><emphasis>Warning lights</emphasis></changeInline> come on.'
+        : "Warning lights come on.";
     return answer([
       { label: "Changed words", expected: "accept", schema: ruleSchema, content: 'Set the valve <changeInline changeMark="1">to the open position</changeInline>.' },
-      { label: "Whole element in changeInline", expected: "reject", schema: ruleSchema, content: '<changeInline changeMark="1"><emphasis>Warning lights</emphasis></changeInline> come on.' },
+      { label: "Whole element in changeInline", expected: "reject", schema: ruleSchema, content: reject },
     ]);
   }
   if (/\/\/internalRef\[/.test(rule)) {

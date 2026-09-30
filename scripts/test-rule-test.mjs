@@ -1462,6 +1462,60 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   ], ['descript']);
   check('EXT-00040: changeInline around a whole element rejected, around words accepted', statuses(r40) === 'accepted,rejected' && r40.verdict.kind === 'correct', statuses(r40));
 
+  // Ajustes tras la pasada real, Part 2: every reject example sent back is
+  // told to keep what the rule checks. Real case: the reject example had a
+  // <changeInline> around an invalid element and the correction replaced it
+  // with plain text (the test ended inconclusive).
+  const keepLine = 'Keep a node matched by `//changeInline[* and not(text()[normalize-space()])]`: fix the markup around it, do not remove it.';
+  const brokenReject = '<changeInline changeMark="1"><pokemonRef>Warning lights</pokemonRef></changeInline> come on.';
+  const wordsAccept = 'Set the valve <changeInline changeMark="1">to the open position</changeInline>.';
+  const broken40 = run41(R40, [
+    { label: 'words', expected: 'accept', schema: 'descript', content: wordsAccept },
+    { label: 'element', expected: 'reject', schema: 'descript', content: brokenReject },
+  ], ['descript']);
+  const f40 = exampleFailures(
+    [{ label: 'words', expected: 'accept' }, { label: 'element', expected: 'reject' }],
+    broken40.materialized, broken40.runs, { ruleXml: R40, standard: S41, format: 'BREX-4.1', parseXml });
+  check('keep matched node: the invalid reject example is told to keep the changeInline', f40.length === 1 && f40[0].index === 1 && f40[0].problems.at(-1) === keepLine, JSON.stringify(f40));
+  const brokenAccept = run41(R40, [
+    { label: 'words', expected: 'accept', schema: 'descript', content: 'Set the <pokemonRef>valve</pokemonRef> open.' },
+    { label: 'element', expected: 'reject', schema: 'descript', content: '<changeInline changeMark="1"><emphasis>Warning lights</emphasis></changeInline> come on.' },
+  ], ['descript']);
+  const fAccept = exampleFailures(
+    [{ label: 'words', expected: 'accept' }, { label: 'element', expected: 'reject' }],
+    brokenAccept.materialized, brokenAccept.runs, { ruleXml: R40, standard: S41, format: 'BREX-4.1', parseXml });
+  check('keep matched node: never on an accept example', fAccept.length === 1 && fAccept[0].index === 0 && !fAccept[0].problems.some((p) => p.startsWith('Keep a node')), JSON.stringify(fAccept));
+  const missing40 = run41(R40, [
+    { label: 'words', expected: 'accept', schema: 'descript', content: wordsAccept },
+    { label: 'element', expected: 'reject', schema: 'descript', content: 'Warning lights come on.' },
+  ], ['descript']);
+  const fMissing = exampleFailures(
+    [{ label: 'words', expected: 'accept' }, { label: 'element', expected: 'reject' }],
+    missing40.materialized, missing40.runs, { ruleXml: R40, standard: S41, format: 'BREX-4.1', parseXml });
+  check('keep matched node: a valid reject example without the node gets only the "must contain" line', fMissing.length === 1 && fMissing[0].problems.length === 1 && fMissing[0].problems[0].startsWith('This example must contain'), JSON.stringify(fMissing));
+  const asked40 = [];
+  const answer40 = (rejectContent) => JSON.stringify({ proposalMismatch: null, examples: [
+    { label: 'words', expected: 'accept', schema: 'descript', content: wordsAccept },
+    { label: 'element', expected: 'reject', schema: 'descript', content: rejectContent },
+  ] });
+  const gen40 = await generateRuleTestExamples({
+    ruleXml: R40, format: 'BREX-4.1', standard: S41, schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00040', title: 'Change marks on whole elements', definition: '', proposal: 'Whole elements shall not be marked with changeInline.' },
+    vocabulary: vocab41, parseXml,
+    ask: async (messages, systemPrompt) => {
+      asked40.push({ messages, systemPrompt });
+      if (asked40.length === 1) return answer40(brokenReject);
+      // Like the real LLM: without the keep line it drops the changeInline.
+      return answer40(messages.at(-1).content.includes('Keep a node matched by')
+        ? '<changeInline changeMark="1"><emphasis>Warning lights</emphasis></changeInline> come on.'
+        : 'Warning lights come on.');
+    },
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['descript', 'proced'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S41, schema) }),
+  });
+  check('keep matched node: the correction request carries the line', asked40.length === 2 && asked40[1].messages.at(-1).content.includes(keepLine), asked40[1]?.messages.at(-1).content);
+  check('keep matched node: corrected example keeps the changeInline → correct', gen40.status === 'ready' && gen40.runs[1].result?.status === 'rejected' && ruleTestVerdict(gen40.examples, gen40.runs, analyzeRule(R40, 'BREX-4.1', { parseXml })).kind === 'correct', JSON.stringify(gen40.runs.map((x) => x.result?.status)));
+
   const R41 = rule41('BRDP-EXT-00041');
   const r41 = run41(R41, [
     { label: 'live target', expected: 'accept', schema: 'descript', content: 'See <internalRef internalRefId="par-0002"/> and <changeInline changeType="delete" id="chg-0001">old text</changeInline>.' },

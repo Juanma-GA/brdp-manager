@@ -153,14 +153,28 @@ export function acceptWithoutNodeProblem(ruleXml) {
   return `The rule checks values, so at least one example meant to be accepted must contain a node matched by: ${matched}, with a value the decision allows. No accept example contains one, so the test never shows the rule accepting a valid value.`;
 }
 
+// Ajustes tras la pasada real de las plantillas, Part 2: an example meant
+// to be rejected that goes back to the correction round is always told to
+// keep what the rule checks -- corrected without it, an LLM replaced the
+// <changeInline> around an invalid <dmRef> with plain text (EXT-00040) and
+// the test ended inconclusive. The line comes last, after the problems it
+// has to fix. A valid reject example with no matched node gets
+// missesRuleProblem instead (it already says what it must contain).
+export function keepMatchedNodeProblem(ruleXml) {
+  const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
+  return matched ? `Keep a node matched by ${matched}: fix the markup around it, do not remove it.` : null;
+}
+
 // The examples the correction round must fix: [{ index, label, problems }].
 export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, setup = null, parseXml = parseXmlDocument }) {
   const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
   const ruleNames = extractRuleNames(ruleXml);
+  const keep = keepMatchedNodeProblem(ruleXml);
   return runs
     .map((r, index) => {
+      const missing = r.validation.runnable ? missesRuleProblem(examples[index], r, ruleXml) : null;
       const problems = r.validation.runnable
-        ? [missesRuleProblem(examples[index], r, ruleXml), withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null].filter(Boolean)
+        ? [missing, withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null].filter(Boolean)
         : exampleProblems(r.validation, {
             standard,
             schema: materialized[index].schema,
@@ -168,6 +182,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             nestings: setup?.placements?.[materialized[index].schema]?.placement?.nestings || [],
             expected: examples[index].expected,
           });
+      if (problems.length > 0 && !missing && keep && examples[index].expected === 'reject') problems.push(keep);
       return { index, label: examples[index].label, problems };
     })
     .filter((f) => f.problems.length > 0);
