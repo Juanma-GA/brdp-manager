@@ -338,6 +338,70 @@ const TEMPLATE_CASES = {
       alsoBad: [DM('<catalogSeqNumber><itemSeqNumber><partSegment/></itemSeqNumber><itemSeqNumber><partRef/></itemSeqNumber></catalogSeqNumber>')],
     },
   },
+  // Plantillas 4.1/4.2: the same 10 project decisions (S1-00219 with the
+  // 4.1 rulesContext, which the schema argument does not care about).
+  'BREX-4.1': null,
+  'BREX-3.0.1': {
+    'BRDP-EXT-02634': {
+      bad: '<dmodule><content><table><tgroup cols="1"><thead><colspec colname="c1"/><row/></thead></tgroup></table></content></dmodule>',
+      good: '<dmodule><content><table><tgroup cols="1"><colspec colname="c1"/><thead><row/></thead><tbody/></tgroup></table></content></dmodule>',
+    },
+    'BRDP-EXT-02635': {
+      bad: '<dmodule><content><table><tgroup cols="1"><thead><row/></thead></tgroup></table></content></dmodule>',
+      good: '<dmodule><content><table><tgroup cols="1"><tbody><row/></tbody></tgroup></table></content></dmodule>',
+    },
+    'BRDP-EXT-02764': { bad: '<avehcfg><jacked status="maybe"/><fuel status="yes"/></avehcfg>', good: '<avehcfg><jacked status="Yes"/><fuel status="na"/></avehcfg>' },
+    'BRDP-EXT-00001': {
+      bad: '<dmodule><idstatus><status><orig origname="ACME ENGINEERING">9AAAA</orig></status></idstatus></dmodule>',
+      good: '<dmodule><idstatus><status><orig origname="INDRA SISTEMAS SA">9BBBB</orig></status></idstatus></dmodule>',
+    },
+    'BRDP-EXT-02767': { bad: '<step1><title>Remove</title><para>x</para></step1>', good: '<step1><para>x</para><step2><para>y</para></step2></step1>' },
+    'BRDP-S1-00019': {
+      bad: '<dmodule><content><proced><prelreqs><reqpers><perskill skill="sk09"/></reqpers><reqpers/></prelreqs></proced></content></dmodule>',
+      good: '<dmodule><content><proced><prelreqs><reqpers><perskill skill="sk01"/></reqpers></prelreqs></proced></content></dmodule>',
+    },
+    'BRDP-S1-00024': {
+      bad: '<dmodule><idstatus><status><qa><firstver type="onobject"/></qa></status></idstatus></dmodule>',
+      good: '<dmodule><idstatus><status><qa><firstver type="tabtop"/></qa></status></idstatus></dmodule>',
+    },
+    'BRDP-EXT-00006': {
+      bad: '<status><orig origname="TESS-DEFENCE SA">1234A</orig></status>',
+      good: '<status><orig origname="TESS-DEFENCE SA">9AEWB</orig><orig origname="INDRA SISTEMAS SA">1234A</orig></status>',
+    },
+    'BRDP-S1-00025': {
+      bad: '<dmodule><content><proced><supply><qty uom="ZZ">2</qty></supply><spare><qty>3</qty></spare></proced></content></dmodule>',
+      good: '<dmodule><content><proced><supply><qty uom="EA">2</qty></supply><spare><qty>AR</qty></spare></proced></content></dmodule>',
+    },
+    'BRDP-EXT-00267': {
+      bad: '<dmodule><idstatus><dmaddres><dmc><avee><chapnum>A21</chapnum><section>0</section><subsect>1</subsect><subject>0</subject></avee></dmc><dmtitle><techname>CIGUENAL</techname></dmtitle></dmaddres></idstatus></dmodule>',
+      good: '<dmodule><idstatus><dmaddres><dmc><avee><chapnum>A21</chapnum><section>0</section><subsect>1</subsect><subject>0</subject></avee></dmc><dmtitle><techname>CIGÜEÑAL</techname></dmtitle></dmaddres></idstatus></dmodule>',
+    },
+  },
+};
+TEMPLATE_CASES['BREX-4.1'] = TEMPLATE_CASES['BREX-4.2'];
+
+// Rules retired from the 4.1/4.2 templates (scripts/rule-test-fixtures/
+// retired-template-rules.json): still real rules, still covered.
+const RETIRED_CASES = {
+  'BREX-4.2': {
+    'BRDP-S1-00065': {
+      bad: DM('<copyright><copyrightPara><emphasis>Copyright 2023</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),
+      good: DM('<copyright><copyrightPara><emphasis>Copyright (C) 2024</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),
+    },
+    'BRDP-S1-00053': { bad: '<dmStatus issueType="revised"/>', good: '<dmStatus issueType="changed"/>' },
+    'BRDP-EXT-00001': { notExecutable: NON_CONTEXT, fragment: '<para/>' },
+    'BRDP-S1-00006': {
+      schema: 'fault',
+      bad: DM('<faultIsolation/>', XSI('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd')),
+      goodSchema: 'proced',
+      good: DM('<procedure/>', XSI('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd')),
+    },
+    'BRDP-S1-00377': {
+      schema: 'comrep',
+      bad: '<commonRepository><applicRepository/></commonRepository>',
+      good: '<commonRepository><partRepository/><toolRepository/></commonRepository>',
+    },
+  },
   'BREX-4.1': {
     // Templates round: replaces BRDP-EXT-00027 (the root must be dmodule --
     // nothing to reject in a data module).
@@ -394,66 +458,6 @@ const TEMPLATE_CASES = {
       schema: 'ddn',
       bad: '<ddn><ddnContent><deliveryList><dispatchFileName>x</dispatchFileName><entityControlNumber>ICN-BIKE-0001</entityControlNumber></deliveryList></ddnContent></ddn>',
       good: '<ddn><ddnContent><deliveryList><entityControlNumber>BIKE-0001</entityControlNumber></deliveryList></ddnContent></ddn>',
-    },
-  },
-  'BREX-3.0.1': {
-    'BRDP-EXT-02634': {
-      bad: '<dmodule><content><table><tgroup cols="1"><thead><colspec colname="c1"/><row/></thead></tgroup></table></content></dmodule>',
-      good: '<dmodule><content><table><tgroup cols="1"><colspec colname="c1"/><thead><row/></thead><tbody/></tgroup></table></content></dmodule>',
-    },
-    'BRDP-EXT-02635': {
-      bad: '<dmodule><content><table><tgroup cols="1"><thead><row/></thead></tgroup></table></content></dmodule>',
-      good: '<dmodule><content><table><tgroup cols="1"><tbody><row/></tbody></tgroup></table></content></dmodule>',
-    },
-    'BRDP-EXT-02764': { bad: '<avehcfg><jacked status="maybe"/><fuel status="yes"/></avehcfg>', good: '<avehcfg><jacked status="Yes"/><fuel status="na"/></avehcfg>' },
-    'BRDP-EXT-00001': {
-      bad: '<dmodule><idstatus><status><orig origname="ACME ENGINEERING">9AAAA</orig></status></idstatus></dmodule>',
-      good: '<dmodule><idstatus><status><orig origname="INDRA SISTEMAS SA">9BBBB</orig></status></idstatus></dmodule>',
-    },
-    'BRDP-EXT-02767': { bad: '<step1><title>Remove</title><para>x</para></step1>', good: '<step1><para>x</para><step2><para>y</para></step2></step1>' },
-    'BRDP-S1-00019': {
-      bad: '<dmodule><content><proced><prelreqs><reqpers><perskill skill="sk09"/></reqpers><reqpers/></prelreqs></proced></content></dmodule>',
-      good: '<dmodule><content><proced><prelreqs><reqpers><perskill skill="sk01"/></reqpers></prelreqs></proced></content></dmodule>',
-    },
-    'BRDP-S1-00024': {
-      bad: '<dmodule><idstatus><status><qa><firstver type="onobject"/></qa></status></idstatus></dmodule>',
-      good: '<dmodule><idstatus><status><qa><firstver type="tabtop"/></qa></status></idstatus></dmodule>',
-    },
-    'BRDP-EXT-00006': {
-      bad: '<status><orig origname="TESS-DEFENCE SA">1234A</orig></status>',
-      good: '<status><orig origname="TESS-DEFENCE SA">9AEWB</orig><orig origname="INDRA SISTEMAS SA">1234A</orig></status>',
-    },
-    'BRDP-S1-00025': {
-      bad: '<dmodule><content><proced><supply><qty uom="ZZ">2</qty></supply><spare><qty>3</qty></spare></proced></content></dmodule>',
-      good: '<dmodule><content><proced><supply><qty uom="EA">2</qty></supply><spare><qty>AR</qty></spare></proced></content></dmodule>',
-    },
-    'BRDP-EXT-00267': {
-      bad: '<dmodule><idstatus><dmaddres><dmc><avee><chapnum>A21</chapnum><section>0</section><subsect>1</subsect><subject>0</subject></avee></dmc><dmtitle><techname>CIGUENAL</techname></dmtitle></dmaddres></idstatus></dmodule>',
-      good: '<dmodule><idstatus><dmaddres><dmc><avee><chapnum>A21</chapnum><section>0</section><subsect>1</subsect><subject>0</subject></avee></dmc><dmtitle><techname>CIGÜEÑAL</techname></dmtitle></dmaddres></idstatus></dmodule>',
-    },
-  },
-};
-
-// Rules retired from the 4.1/4.2 templates (scripts/rule-test-fixtures/
-// retired-template-rules.json): still real rules, still covered.
-const RETIRED_CASES = {
-  'BREX-4.2': {
-    'BRDP-S1-00065': {
-      bad: DM('<copyright><copyrightPara><emphasis>Copyright 2023</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),
-      good: DM('<copyright><copyrightPara><emphasis>Copyright (C) 2024</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),
-    },
-    'BRDP-S1-00053': { bad: '<dmStatus issueType="revised"/>', good: '<dmStatus issueType="changed"/>' },
-    'BRDP-EXT-00001': { notExecutable: NON_CONTEXT, fragment: '<para/>' },
-    'BRDP-S1-00006': {
-      schema: 'fault',
-      bad: DM('<faultIsolation/>', XSI('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd')),
-      goodSchema: 'proced',
-      good: DM('<procedure/>', XSI('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd')),
-    },
-    'BRDP-S1-00377': {
-      schema: 'comrep',
-      bad: '<commonRepository><applicRepository/></commonRepository>',
-      good: '<commonRepository><partRepository/><toolRepository/></commonRepository>',
     },
   },
 };

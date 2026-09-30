@@ -16,7 +16,7 @@ from app.services.rule_test_skeletons import get_schema_structure
 
 _REQUESTS = [
     ("S1000D 4.2", ["descript", "proced", "ipd", "pm", "sb"]),
-    ("S1000D 4.1", ["descript", "proced", "update"]),
+    ("S1000D 4.1", ["descript", "proced", "update", "ipd"]),
     ("S1000D 3.0.1", ["descript", "proced"]),
     # T4: DITA topic types (the XPath 3.0 standard has the same graphs).
     ("DITA 1.3 Xpath2.0", ["topic", "task", "map"]),

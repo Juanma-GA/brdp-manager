@@ -1618,9 +1618,8 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
 // insertion point is now given in every S1000D schema (it only was for
 // schemas whose skeleton does not reach <para>), to where each part of the
 // rule enters the example.
-{
-  const S42 = 'S1000D 4.2';
-  const t42 = readPublicTemplate('brdp-template-4-2.xlsx');
+for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.1', 'brdp-template-4-1.xlsx']]) {
+  const t42 = readPublicTemplate(file);
   const rule = (id) => t42.find((r) => r.ID === id).Rule;
   const route = (id, schema) => {
     const r = rule(id);
@@ -1628,21 +1627,21 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     return { insertion: p.insertion, steps: (p.routes?.steps || []).map((st) => `${st.parent}>${st.children.join('|')}`) };
   };
   const r133 = route('BRDP-S1-00133', 'descript');
-  check('templates: <parameter> reached through multimedia/multimediaObject', r133.insertion === 'levelledPara' && r133.steps.join(' ') === 'levelledPara>multimedia multimedia>multimediaObject multimediaObject>parameter', JSON.stringify(r133));
+  check(`${S42} templates: <parameter> reached through multimedia/multimediaObject`, r133.insertion === 'levelledPara' && r133.steps.join(' ') === 'levelledPara>multimedia multimedia>multimediaObject multimediaObject>parameter', JSON.stringify(r133));
   const r95 = route('BRDP-S1-00095', 'descript');
-  check('templates: //title/internalRef routes to the <title> (its entry), not only to <internalRef>', r95.steps.join(' ') === 'para>definitionList definitionList>title', JSON.stringify(r95));
+  check(`${S42} templates: //title/internalRef routes to the <title> (its entry), not only to <internalRef>`, r95.steps.join(' ') === 'para>definitionList definitionList>title', JSON.stringify(r95));
   const r150 = route('BRDP-S1-00150', 'proced');
-  check('templates: <supportEquipDescr> four levels below <procedure>', r150.insertion === 'procedure' && r150.steps.at(-1) === 'supportEquipDescrGroup>supportEquipDescr' && r150.steps.length === 4, JSON.stringify(r150));
+  check(`${S42} templates: <supportEquipDescr> four levels below <procedure>`, r150.insertion === 'procedure' && r150.steps.at(-1) === 'supportEquipDescrGroup>supportEquipDescr' && r150.steps.length === 4, JSON.stringify(r150));
   const r120 = route('BRDP-S1-00120', 'descript');
-  check('templates: levelledPara/title gets no misleading way to a <figure> title', r120.steps.length === 0, JSON.stringify(r120));
+  check(`${S42} templates: levelledPara/title gets no misleading way to a <figure> title`, r120.steps.length === 0, JSON.stringify(r120));
   const r187 = route('BRDP-S1-00187', 'proced');
-  check('templates: a checked element directly inside the insertion point → no way down', r187.steps.length === 0, JSON.stringify(r187));
+  check(`${S42} templates: a checked element directly inside the insertion point → no way down`, r187.steps.length === 0, JSON.stringify(r187));
   const prep = await prepareRuleTestSetup({
     ruleXml: rule('BRDP-S1-00133'), standard: S42, schemaLocation: 'flat',
     fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['descript'] }),
     fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S42, schema) }),
   });
-  check('prepareRuleTestSetup: a para-derived schema gets the way down when it is needed', !!prep.promptPlacements[0]?.routes);
+  check(`${S42} prepareRuleTestSetup: a para-derived schema gets the way down when it is needed`, !!prep.promptPlacements[0]?.routes);
 
   // Each row with a valid pair of examples, written along that way down.
   const runRow = (id, schema, accept, reject) => {
@@ -1656,16 +1655,16 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const why = (res) => JSON.stringify(res.runs.map((x) => [x.validation.structure, x.result?.status]));
   const media = (param) => `<para>The animation shows the pump.</para><multimedia><title>Pump</title><multimediaObject infoEntityIdent="ICN-EXAMPLE-00001-A-00001-01">${param}</multimediaObject></multimedia>`;
   const r133run = runRow('BRDP-S1-00133', 'descript', media(''), media('<parameter id="par-0001" parameterName="speed" parameterValue="slow"/>'));
-  check('templates S1-00133: <parameter> rejected', ok(r133run), why(r133run));
+  check(`${S42} templates S1-00133: <parameter> rejected`, ok(r133run), why(r133run));
   const list = (title) => `See the list.<definitionList><title>${title}</title><definitionListItem><listItemTerm>M6</listItemTerm><listItemDefinition><para>10 N.m</para></listItemDefinition></definitionListItem></definitionList>`;
   const r95run = runRow('BRDP-S1-00095', 'descript', list('Torque values'), list('Torque values (<internalRef internalRefId="fig-0001"/>)'));
-  check('templates S1-00095: <internalRef> in a title rejected', ok(r95run), why(r95run));
+  check(`${S42} templates S1-00095: <internalRef> in a title rejected`, ok(r95run), why(r95run));
   const rq = (attr) => `<preliminaryRqmts><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr${attr}><name>Jack</name></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips></preliminaryRqmts><mainProcedure><proceduralStep><para>Lift.</para></proceduralStep></mainProcedure>`;
   const r150run = runRow('BRDP-S1-00150', 'proced', rq(' id="seq-0001"'), rq(''));
-  check('templates S1-00150: <supportEquipDescr> without id rejected', ok(r150run), why(r150run));
+  check(`${S42} templates S1-00150: <supportEquipDescr> without id rejected`, ok(r150run), why(r150run));
   const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
   const r219run = runRow('BRDP-S1-00219', 'ipd', csn('<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>'), csn('<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"/>'));
-  check('templates S1-00219: <itemSeqNumber> without <partSegment> rejected in ipd', ok(r219run), why(r219run));
+  check(`${S42} templates S1-00219: <itemSeqNumber> without <partSegment> rejected in ipd`, ok(r219run), why(r219run));
 }
 
 // ─── Pending of the test rule: valid nesting for A//B, edited examples ─────

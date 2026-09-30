@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { readPublicTemplate } from './lib/readXlsx.mjs';
+import { readPublicTemplate, retiredTemplateRows } from './lib/readXlsx.mjs';
 import { extractRuleXPaths, extractXPathNames, extractRuleNames, checkRuleNames } from '../src/validation/schemaValidation.js';
 import { hasUnfilledMarkers } from '../src/utils/proposalMarkers.js';
 import { parseSuggestRuleResponse } from '../src/prompts/suggestRulePrompt.js';
@@ -85,7 +85,13 @@ for (const [standard, [xlsx, vocab]] of Object.entries(TEMPLATES)) {
   assert(same(n.elements, ['parameter']) && n.attributes.length === 0, '4.2 //parameter -> <parameter>');
 }
 {
-  const n = extractRuleNames(rules['S1000D 4.1'].get('BRDP-EXT-00037'));
+  const n = extractRuleNames(rules['S1000D 4.1'].get('BRDP-S1-00150'));
+  assert(same(n.elements, ['supportEquipDescr']) && same(n.attributes, ['id']), `4.1 //supportEquipDescr[not(@id)] -> <supportEquipDescr>, @id (got ${JSON.stringify(n)})`);
+}
+{
+  // EXT-00037 left the 4.1 template when it was rebuilt; its real rule is
+  // in the retired-rows fixture.
+  const n = extractRuleNames(retiredTemplateRows('brdp-template-4-1.xlsx').find((r) => r.ID === 'BRDP-EXT-00037').Rule);
   assert(n.attributes.includes('inWork') && n.attributes.includes('issueNumber') && n.elements.includes('dmStatus'), `4.1 structureObjectRule names (got ${JSON.stringify(n)})`);
 }
 {
