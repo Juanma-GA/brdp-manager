@@ -19,7 +19,7 @@ function _quote(value) {
 // "scan char-by-char, track whether inside a quoted string" approach
 // _isSafePattern/_splitTopLevel already use below, reused here rather than
 // inventing a second way to do it.
-function _normSpace(s) {
+export function _normSpace(s) {
   const str = String(s == null ? '' : s);
   let out = '';
   let inStr = false;

@@ -110,7 +110,7 @@
 // result also carries `warnings` (T4): Schematron assert/report with
 // role="warning"/"info" that fired (they never reject), [] for BREX.
 import fontoxpath from 'fontoxpath';
-import { _isContextPattern, _splitTopLevel, _valueCheckXPath } from '../api/brexToSchematron.js';
+import { _isContextPattern, _normSpace, _splitTopLevel, _valueCheckXPath } from '../api/brexToSchematron.js';
 import { schemaNameFromContext } from './ruleSchemaContext.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
 import {
@@ -793,4 +793,70 @@ export function ruleConditions(ruleXml, format, options = {}) {
     }
   }
   return out;
+}
+
+// "Comparar dos BRDP lado a lado": the structure of a rule, for the
+// structural summary of the side-by-side view (computed by code, never by
+// the LLM). BREX: one entry per rule part -- its path, flag (the attribute,
+// or the format's default) and values; a nonContextRule has kind
+// 'nonContext'. Schematron: one entry per assert/report, with its context
+// and test (describeSchematron's own reading).
+//   ruleStructure(ruleXml, format, options) →
+//     { available: false }
+//   | { available: true, family: 'brex4'|'brex301'|'sch',
+//       parts: [{ ruleId, kind, schema, path, flag, values: ['055', '1~10', 'pattern: em0[1-5]'] }] }
+//   | { available: true, family: 'sch', checks: [{ ruleId, kind: 'assert'|'report', context, test, message }] }
+export function ruleFormatFamily(format) {
+  if (format === 'BREX-4.2' || format === 'BREX-4.1') return 'brex4';
+  if (format === 'BREX-3.0.1') return 'brex301';
+  if (SCHEMATRON_FORMATS.includes(format)) return 'sch';
+  return null;
+}
+
+function valueToken(v) {
+  if (v.form === 'single') return v.value;
+  if (v.form === 'range') return `${v.from}~${v.to}`;
+  if (v.form === 'pattern') return `pattern: ${v.pattern}`;
+  return `${v.form}?`;
+}
+
+export function ruleStructure(ruleXml, format, options = {}) {
+  const family = ruleFormatFamily(format);
+  if (!family) return { available: false };
+  if (family === 'sch') {
+    const described = describeSchematron(ruleXml, options);
+    if (!described.available) return { available: false };
+    const checks = described.statements
+      .filter((s) => s.statement.code === 'describe_sch_assert' || s.statement.code === 'describe_sch_report')
+      .map((s) => ({
+        ruleId: s.ruleIds[0],
+        kind: s.statement.code === 'describe_sch_assert' ? 'assert' : 'report',
+        context: s.statement.params.context,
+        test: s.statement.params.test,
+        message: s.statement.params.message,
+      }));
+    return { available: true, family, checks };
+  }
+  const spec = FORMATS[format];
+  const parseXml = options.parseXml || parseXmlDocument;
+  let ruleDoc;
+  try {
+    ruleDoc = parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+  } catch {
+    return { available: false };
+  }
+  const parts = collectParts(ruleDoc.documentElement, spec).map((part) => {
+    if (part.kind === 'nonContext') return { ruleId: part.ruleId, kind: 'nonContext', schema: part.schema || null, path: '', flag: null, values: [] };
+    const pathEl = childElements(part.element, spec.path)[0];
+    const rawFlag = pathEl ? pathEl.getAttribute(spec.flagAttr) : null;
+    return {
+      ruleId: part.ruleId,
+      kind: 'rule',
+      schema: part.schema || null,
+      path: pathEl ? _normSpace(pathEl.textContent || '') : '',
+      flag: rawFlag === null || rawFlag === '' ? spec.defaultFlag : rawFlag.trim(),
+      values: describeValues(part, spec).map(valueToken),
+    };
+  });
+  return { available: true, family, parts };
 }

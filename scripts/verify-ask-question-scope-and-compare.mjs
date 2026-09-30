@@ -227,7 +227,8 @@ async function main() {
     assert(sys4.includes("Proposal Status: Validated"), "Compare block (Records source) includes Proposal Status");
     assert(sys4.includes("Rule Status: Verified"), "Compare block (Records source) includes real Rule Status");
     assert(sys4.includes("RULE-B-TEST"), "Compare block (Records source) includes the real Rule text");
-    assert(sys4.includes("The user may ask you to compare the current BRDP with the one above"), "Compare block ends with the explicit both-in-scope instruction");
+    // C2b (936fdbc) merged the two comparison sentences into one next to SCOPE.
+    assert(sys4.includes("The BRDP being compared against (shown below) is also in scope: the user\nmay ask you to compare it with the current one."), "Compare block: the BRDP compared against is also in scope");
 
     // Remove the chip
     await page.getByRole("button", { name: "Remove comparison" }).click();

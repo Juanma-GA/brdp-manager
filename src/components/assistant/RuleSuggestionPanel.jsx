@@ -51,7 +51,7 @@ const RULE_FORMAT_TEST_IDS = Object.fromEntries(
 // Part 4) -- same style as the BRDP text's vocabulary warning. Malformed
 // XML, an invalid XPath expression and content that is not a rule of the
 // project's format (C2, Part 0) disable Accept; name warnings never do.
-function RuleValidationWarnings({ validation, standard }) {
+export function RuleValidationWarnings({ validation, standard }) {
   const { t } = useTranslation();
   const { wellFormed, wellFormedError, invalidXPaths, names } = validation;
   return (

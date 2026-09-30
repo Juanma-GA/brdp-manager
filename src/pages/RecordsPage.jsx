@@ -39,6 +39,7 @@ import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
 import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
 import SchemaNavCard from '../components/assistant/SchemaNavCard';
+import BrdpCompareDialog from '../components/compare/BrdpCompareDialog';
 import SchemaSearch from '../components/assistant/SchemaSearch';
 import { useSchemaNavigation } from '../hooks/useSchemaNavigation';
 import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
@@ -135,10 +136,24 @@ function formatRuleTestHistoryValue(t, value) {
   return text;
 }
 
+// "Usar esta Regla" (Comparar dos BRDP): the "rule_copied" event's value is
+// JSON ({ project_name, identifier, standard, ... }); it reads as
+// "<project> / <BRDP>".
+function formatRuleCopiedValue(value) {
+  if (!value) return '—';
+  try {
+    const parsed = JSON.parse(value);
+    return `${parsed.project_name} / ${parsed.identifier}`;
+  } catch {
+    return value;
+  }
+}
+
 // The full value on hover: the raw text, except a rule test (its codes
 // would read as JSON), which shows its translated text.
 function historyValueTitle(t, fieldName, value) {
   if (!value) return undefined;
+  if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
   return fieldName === 'rule_test' ? formatRuleTestHistoryValue(t, value) : value;
 }
 
@@ -164,7 +179,7 @@ function HistoryEditedExamples({ value }) {
 // long Definition) or it carries examples edited by hand (their XML).
 function isLongHistoryEntry(entry) {
   if (entry.field_name === 'rule_test') return (parseRuleTestHistoryValue(entry.new_value)?.editedExamples.length || 0) > 0;
-  if (HISTORY_TRANSLATED_FIELDS[entry.field_name]) return false;
+  if (HISTORY_TRANSLATED_FIELDS[entry.field_name] || entry.field_name === 'rule_copied') return false;
   return [entry.old_value, entry.new_value].some((v) => historyText(entry.field_name, v).length > HISTORY_MAX_CHARS);
 }
 
@@ -176,7 +191,7 @@ function historyText(fieldName, value) {
 // The whole value of an expanded entry: the text as it was saved (a rule
 // keeps its line breaks and indentation).
 function fullHistoryValue(t, fieldName, value) {
-  if (fieldName === 'rule_test' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
+  if (fieldName === 'rule_test' || fieldName === 'rule_copied' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
   return value || '—';
 }
 
@@ -210,6 +225,7 @@ function historyReviewTag(entry) {
 
 function formatHistoryValue(t, fieldName, value) {
   if (fieldName === 'rule_test') return formatRuleTestHistoryValue(t, value);
+  if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
   const prefix = HISTORY_TRANSLATED_FIELDS[fieldName];
   if (prefix) return t(`${prefix}.${value}`, { defaultValue: value });
   if (!value) return '—';
@@ -386,6 +402,10 @@ export default function RecordsPage() {
     });
   const latestHistoryAt = history.reduce((latest, h) => (!latest || h.changed_at > latest ? h.changed_at : latest), null);
   const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
+  // "Comparar dos BRDP lado a lado": the comparison dialog of the selected
+  // BRDP, and the Ask question box it focuses on "Explain the differences".
+  const [compareDialogOpen, setCompareDialogOpen] = useState(false);
+  const askTextareaRef = useRef(null);
 
   // proposalStatusFilter/ruleStatusFilter reduce the result set in SQL
   // itself (brdps.py's list_brdps -> list_active_brdps), not just in this
@@ -1284,7 +1304,37 @@ export default function RecordsPage() {
           ) : (
             <>
               <label className={styles.fieldLabel}>{t('records.fieldId')}</label>
-              <p className={styles.mono}>{selected.identifier}</p>
+              <div className={styles.idRow}>
+                <p className={styles.mono}>{selected.identifier}</p>
+                <button type="button" onClick={() => setCompareDialogOpen(true)} title={t('records.compare.buttonTitle')} data-testid="compare-open">
+                  {t('records.compare.button')}
+                </button>
+              </div>
+              {compareDialogOpen && (
+                <BrdpCompareDialog
+                  projectId={projectId}
+                  project={project}
+                  selected={selected}
+                  brdps={brdps}
+                  canEdit={canEdit}
+                  ruleFormat={ruleFormat}
+                  vocabulary={vocabulary}
+                  handleUpdate={handleUpdate}
+                  onRuleCopied={() => {
+                    setApprovalsRefreshToken((n) => n + 1);
+                    setHistoryRefreshToken((n) => n + 1);
+                  }}
+                  onExplain={(entry) => {
+                    ask.compareWith(entry);
+                    setCompareDialogOpen(false);
+                    requestAnimationFrame(() => {
+                      askTextareaRef.current?.scrollIntoView({ block: 'center' });
+                      askTextareaRef.current?.focus();
+                    });
+                  }}
+                  onClose={() => setCompareDialogOpen(false)}
+                />
+              )}
               <label className={styles.fieldLabel}>{t('records.fieldTitle')}</label>
               <input
                 className={styles.input}
@@ -1716,6 +1766,7 @@ export default function RecordsPage() {
                 <SchemaNavCard nav={schemaNav} standard={project.standard} />
 
                 <textarea
+                  ref={askTextareaRef}
                   className={styles.textarea}
                   rows={2}
                   value={ask.question}

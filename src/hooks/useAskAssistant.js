@@ -68,9 +68,10 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   const [schemaAnswerView, setSchemaAnswerView] = useState(null);
   const schemaAnswerSeqRef = useRef(0);
   // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
-  // the chosen entry ({ source: 'records'|'catalog', identifier, title,
-  // definition, and for 'records' also proposal/validation/ruleState/
-  // ruleXml }) or null. compareCatalogEntries is fetched lazily, once,
+  // the chosen entry ({ source: 'records'|'catalog'|'other_project',
+  // identifier, title, definition, and for 'records'/'other_project' also
+  // proposal/validation/ruleState/ruleXml -- 'other_project' also carries
+  // projectName and standard }) or null. compareCatalogEntries is fetched lazily, once,
   // the first time the search opens (same lazy-load pattern as Add BRDP's
   // catalog picker) -- it's global reference data keyed only by the
   // project's standard, so it stays valid across switching BRDPs and
@@ -255,6 +256,15 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
 
   const clearCompareBrdp = () => setCompareBrdp(null);
 
+  // "Explicar las diferencias" from the side-by-side comparison: compare
+  // with an entry the view already loaded ({ source: 'records' |
+  // 'other_project', projectName, standard, identifier, title, definition,
+  // proposal, validation, ruleState, ruleXml }), without another fetch.
+  const compareWith = (entry) => {
+    setCompareBrdp(entry);
+    closeCompareSearch();
+  };
+
   return {
     question,
     setQuestion,
@@ -282,5 +292,6 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     closeCompareSearch,
     chooseCompareBrdp,
     clearCompareBrdp,
+    compareWith,
   };
 }

@@ -9,6 +9,15 @@ import { RULE_STATUS_LABELS, ruleTextForAsk, buildSchemaFactsBlock, buildUnknown
 // Rule/Rule Status, which askGeneric previously never sent at all -- plus
 // an optional second BRDP (from Records or the official catalog) when the
 // user has picked one to compare against.
+// The compare block's source: this project's Records, the standard's
+// Catalog, or another project ("Comparar dos BRDP lado a lado": the same
+// BRDP in another project the user can see, with its standard).
+function compareSourceLabel(compareBrdp) {
+  if (compareBrdp.source === 'records') return 'Records';
+  if (compareBrdp.source === 'other_project') return `Project "${compareBrdp.projectName}" (${compareBrdp.standard})`;
+  return 'Catalog';
+}
+
 export function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, vocabCheck, schemaFacts) {
   const ruleState = ruleStateOf(ruleApproval);
   // Ask-with-schema-cards follow-up round, points 2-3: a real report
@@ -96,13 +105,11 @@ Rule Status: ${RULE_STATUS_LABELS[ruleState]}
 Rule: ${ruleTextForAsk(ruleState, ruleApproval?.rule_xml)}`;
 
   if (compareBrdp) {
-    prompt += `\n\nBRDP being compared against (source: ${
-      compareBrdp.source === 'records' ? 'Records' : 'Catalog'
-    }):
+    prompt += `\n\nBRDP being compared against (source: ${compareSourceLabel(compareBrdp)}):
 ID: ${compareBrdp.identifier}
 Title: ${compareBrdp.title}
 Definition: ${compareBrdp.definition}`;
-    if (compareBrdp.source === 'records') {
+    if (compareBrdp.source === 'records' || compareBrdp.source === 'other_project') {
       prompt += `
 Proposal: ${compareBrdp.proposal}
 Proposal Status: ${compareBrdp.validation}
