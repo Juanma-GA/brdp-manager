@@ -98,6 +98,9 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1500 } });
+  // History starts collapsed ("Historial desplegable"); this script reads
+  // its entries, so it opens it for the tab before any page loads.
+  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
   const indicator = () => page.getByTestId("rule-test-indicator");
   const dialog = () => page.getByTestId("verify-warning-dialog");

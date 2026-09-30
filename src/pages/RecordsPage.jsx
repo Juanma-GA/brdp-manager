@@ -130,22 +130,62 @@ function historyValueTitle(t, fieldName, value) {
 }
 
 // The examples edited by hand of a recorded rule test, as they were run --
-// collapsed under the History entry.
+// shown under the History entry once it is expanded ("Show more").
 function HistoryEditedExamples({ value }) {
-  const { t } = useTranslation();
   const parsed = parseRuleTestHistoryValue(value);
   if (!parsed || parsed.editedExamples.length === 0) return null;
   return (
-    <details className={styles.historyEditedExamples} data-testid="history-edited-examples">
-      <summary>{t('records.ruleTest.historyEditedExamples', { count: parsed.editedExamples.length })}</summary>
+    <div className={styles.historyEditedExamples} data-testid="history-edited-examples">
       {parsed.editedExamples.map((ex, i) => (
         <div key={i} className={styles.historyEditedExample}>
           {ex.label && <div className={styles.historyEditedExampleLabel}>{ex.label}</div>}
           <pre className={styles.historyEditedExampleXml}>{ex.xml}</pre>
         </div>
       ))}
-    </details>
+    </div>
   );
+}
+
+// "Historial desplegable": an entry is long -- collapsed behind "Show more"
+// -- when a free-text value does not fit HISTORY_MAX_CHARS (a rule's XML, a
+// long Definition) or it carries examples edited by hand (their XML).
+function isLongHistoryEntry(entry) {
+  if (entry.field_name === 'rule_test') return (parseRuleTestHistoryValue(entry.new_value)?.editedExamples.length || 0) > 0;
+  if (HISTORY_TRANSLATED_FIELDS[entry.field_name]) return false;
+  return [entry.old_value, entry.new_value].some((v) => historyText(entry.field_name, v).length > HISTORY_MAX_CHARS);
+}
+
+function historyText(fieldName, value) {
+  if (!value) return '';
+  return fieldName === 'rule' ? value.replace(/\s+/g, ' ').trim() : value;
+}
+
+// The whole value of an expanded entry: the text as it was saved (a rule
+// keeps its line breaks and indentation).
+function fullHistoryValue(t, fieldName, value) {
+  if (fieldName === 'rule_test' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
+  return value || '—';
+}
+
+// The History section starts collapsed ("History (N)" and the date of the
+// latest entry); open or closed is remembered for this browser tab, also
+// when another BRDP is selected -- a UI preference, never data (HR1 does
+// not apply; sessionStorage may be unavailable, so every access is
+// guarded).
+const HISTORY_OPEN_KEY = 'brdp-records-history-open';
+function readHistoryOpen() {
+  try {
+    return sessionStorage.getItem(HISTORY_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeHistoryOpen(open) {
+  try {
+    sessionStorage.setItem(HISTORY_OPEN_KEY, open ? '1' : '0');
+  } catch {
+    // not remembered: the section still works
+  }
 }
 
 // A rule test recorded as "review" (the examples passed but the rule does
@@ -160,7 +200,7 @@ function formatHistoryValue(t, fieldName, value) {
   const prefix = HISTORY_TRANSLATED_FIELDS[fieldName];
   if (prefix) return t(`${prefix}.${value}`, { defaultValue: value });
   if (!value) return '—';
-  const text = fieldName === 'rule' ? value.replace(/\s+/g, ' ').trim() : value;
+  const text = historyText(fieldName, value);
   return text.length > HISTORY_MAX_CHARS ? `${text.slice(0, HISTORY_MAX_CHARS)}…` : text;
 }
 
@@ -312,6 +352,24 @@ export default function RecordsPage() {
   // refetched whenever the selection changes or historyRefreshToken is
   // bumped by a successful field edit or rule-status transition.
   const [history, setHistory] = useState([]);
+  // "Historial desplegable": the section starts collapsed and remembers
+  // open/closed for the tab (also across BRDPs); long entries open one by
+  // one with "Show more".
+  const [historyOpen, setHistoryOpen] = useState(readHistoryOpen);
+  const toggleHistory = () =>
+    setHistoryOpen((open) => {
+      writeHistoryOpen(!open);
+      return !open;
+    });
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState(() => new Set());
+  const toggleHistoryEntry = (id) =>
+    setExpandedHistoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const latestHistoryAt = history.reduce((latest, h) => (!latest || h.changed_at > latest ? h.changed_at : latest), null);
   const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
 
   // proposalStatusFilter/ruleStatusFilter reduce the result set in SQL
@@ -2011,30 +2069,66 @@ export default function RecordsPage() {
               </div>
 
               <div className={styles.historySection}>
-                <h3 className={styles.assistantTitle}>{t('records.history.title')}</h3>
-                {history.length === 0 ? (
+                <h3 className={styles.assistantTitle}>
+                  <button
+                    type="button"
+                    className={styles.historyToggle}
+                    aria-expanded={historyOpen}
+                    onClick={toggleHistory}
+                    data-testid="history-toggle"
+                  >
+                    <span className={styles.historyToggleArrow} aria-hidden="true">
+                      {historyOpen ? '▾' : '▸'}
+                    </span>
+                    {t('records.history.titleCount', { count: history.length })}
+                    {latestHistoryAt && (
+                      <span className={styles.historyLatest} data-testid="history-latest">
+                        {t('records.history.latest', { date: new Date(latestHistoryAt).toLocaleString() })}
+                      </span>
+                    )}
+                  </button>
+                </h3>
+                {!historyOpen ? null : history.length === 0 ? (
                   <p className={styles.muted}>{t('records.history.empty')}</p>
                 ) : (
                   <ul className={styles.historyList}>
-                    {history.map((h) => (
-                      <li key={h.id} className={styles.historyItem}>
+                    {history.map((h) => {
+                      const long = isLongHistoryEntry(h);
+                      const expanded = long && expandedHistoryIds.has(h.id);
+                      return (
+                      <li key={h.id} className={styles.historyItem} data-testid="history-item">
                         <div className={styles.historyField}>
                           {t(`records.history.fields.${h.field_name}`, { defaultValue: h.field_name })}
                         </div>
-                        <div className={styles.historyChange}>
-                          <span className={styles.historyOld} title={historyValueTitle(t, h.field_name, h.old_value)}>
-                            {formatHistoryValue(t, h.field_name, h.old_value)}
+                        <div
+                          className={`${styles.historyChange} ${expanded ? styles.historyChangeExpanded : ''} ${
+                            expanded && h.field_name === 'rule' ? styles.historyChangeCode : ''
+                          }`}
+                        >
+                          <span className={styles.historyOld} title={expanded ? undefined : historyValueTitle(t, h.field_name, h.old_value)}>
+                            {expanded ? fullHistoryValue(t, h.field_name, h.old_value) : formatHistoryValue(t, h.field_name, h.old_value)}
                           </span>
                           <span className={styles.historyArrow}>→</span>
                           <span
                             className={`${styles.historyNew} ${historyReviewTag(h) ? `${styles.historyResultTag} ${styles.ruleTestToneWarn}` : ''}`}
-                            title={historyValueTitle(t, h.field_name, h.new_value)}
+                            title={expanded ? undefined : historyValueTitle(t, h.field_name, h.new_value)}
                             data-testid={historyReviewTag(h) ? 'history-rule-test-review' : undefined}
                           >
-                            {formatHistoryValue(t, h.field_name, h.new_value)}
+                            {expanded ? fullHistoryValue(t, h.field_name, h.new_value) : formatHistoryValue(t, h.field_name, h.new_value)}
                           </span>
                         </div>
-                        {h.field_name === 'rule_test' && <HistoryEditedExamples value={h.new_value} />}
+                        {expanded && h.field_name === 'rule_test' && <HistoryEditedExamples value={h.new_value} />}
+                        {long && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            aria-expanded={expanded}
+                            onClick={() => toggleHistoryEntry(h.id)}
+                            data-testid="history-show-more"
+                          >
+                            {t(expanded ? 'records.history.showLess' : 'records.history.showMore')}
+                          </button>
+                        )}
                         <div className={styles.historyMeta}>
                           {h.user_email || t('records.history.unknownUser')} ·{' '}
                           {new Date(h.changed_at).toLocaleString()}
@@ -2049,7 +2143,8 @@ export default function RecordsPage() {
                           </button>
                         )}
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 )}
               </div>

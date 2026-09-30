@@ -133,6 +133,9 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 1100 } })).newPage();
+  // History starts collapsed ("Historial desplegable"); this script reads
+  // its entries, so it opens it for the tab before any page loads.
+  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
   const generate = async (project) => {
     await page.goto(`${BASE_URL}/projects/${project.id}/generate`);
     const btn = page.locator('button:has-text("Generate")').first();

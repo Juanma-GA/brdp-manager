@@ -113,6 +113,41 @@ async function main() {
     await page.waitForSelector("tbody tr", { timeout: 20000 });
     await fetch(`${MOCK}/reset`, { method: "POST" }).catch(() => {});
 
+    // 5a. History starts collapsed: "History (N)" and the latest date.
+    await select("BRDP-REV-001");
+    const toggle = page.getByTestId("history-toggle");
+    await toggle.waitFor({ timeout: 5000 });
+    const hist0 = await api(`/api/projects/${project.id}/brdps/${review.id}/history`).then((r) => r.json());
+    assert((await toggle.getAttribute("aria-expanded")) === "false" && (await page.getByTestId("history-item").count()) === 0, "History collapsed by default");
+    assert(((await toggle.textContent()) || "").includes(`History (${hist0.length})`), `header with the count (${await toggle.textContent()})`);
+    assert(((await page.getByTestId("history-latest").textContent()) || "").startsWith("latest: "), "header with the latest date");
+    await toggle.click();
+    assert((await page.getByTestId("history-item").count()) === hist0.length, "expands on click, with every entry");
+    // The seeded rule (longer than 160 characters): collapsed with "Show more".
+    const ruleItem = page.getByTestId("history-item").filter({ has: page.getByTestId("history-show-more") }).first();
+    const shortText = (await ruleItem.textContent()) || "";
+    assert(shortText.includes("…") && !shortText.includes("must not have a single substep.</objectUse>"), "long rule entry shortened");
+    await ruleItem.getByTestId("history-show-more").click();
+    const longText = (await ruleItem.textContent()) || "";
+    assert(longText.includes("A step must not have a single substep.</objectUse></structureObjectRule>") && longText.includes("Show less"), "Show more: the whole rule");
+    await ruleItem.screenshot({ path: path.join(SHOTS, "history-show-more.png") });
+    await ruleItem.getByTestId("history-show-more").click();
+    assert(((await ruleItem.textContent()) || "").includes("Show more"), "Show less: shortened again");
+    await page.locator('[class*="historySection"]').first().screenshot({ path: path.join(SHOTS, "history-expanded.png") });
+    // Kept when another BRDP is selected (open)...
+    await select("BRDP-S1-00187");
+    assert((await page.getByTestId("history-toggle").getAttribute("aria-expanded")) === "true" && (await page.getByTestId("history-item").count()) > 0, "stays open on another BRDP");
+    // ...and closed.
+    await page.getByTestId("history-toggle").click();
+    await select("BRDP-REV-001");
+    assert((await page.getByTestId("history-toggle").getAttribute("aria-expanded")) === "false" && (await page.getByTestId("history-item").count()) === 0, "stays collapsed on another BRDP");
+    await page.locator('[class*="historySection"]').first().screenshot({ path: path.join(SHOTS, "history-collapsed.png") });
+    await language().selectOption("es");
+    await settle(300);
+    assert(((await page.getByTestId("history-toggle").textContent()) || "").includes(`Historial (${hist0.length})`) && ((await page.getByTestId("history-latest").textContent()) || "").startsWith("último: "), "Spanish header");
+    await language().selectOption("en");
+    await settle(300);
+
     // 1. "Review".
     await select("BRDP-REV-001");
     await page.getByRole("button", { name: "Test rule" }).click();

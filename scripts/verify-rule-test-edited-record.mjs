@@ -85,6 +85,9 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1600 } });
+  // History starts collapsed ("Historial desplegable"); this script reads
+  // its entries, so it opens it for the tab before any page loads.
+  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
   const verdict = () => page.getByTestId("rule-test-verdict");
   const notice = () => page.getByTestId("rule-test-edited-notice");
@@ -145,11 +148,11 @@ async function main() {
     assert(/^Tested ✓ \(.+\) · 1 example edited by hand$/.test(indText), `indicator: ${indText}`);
     assert((await indicator().getAttribute("class")).includes("ruleTestToneOk"), "indicator green like Tested");
     // History: the text and the edited XML.
-    const histItem = page.locator("li", { has: page.getByTestId("history-edited-examples") }).first();
+    const histItem = page.getByTestId("history-item").filter({ hasText: "Passed with 1 example edited by hand" }).first();
     assert((await histItem.textContent()).includes("Passed with 1 example edited by hand"), "History: Passed with 1 example edited by hand");
     const details = histItem.getByTestId("history-edited-examples");
-    assert(!(await details.locator("pre").isVisible()), "History: the XML is collapsed");
-    await details.locator("summary").click();
+    assert((await details.count()) === 0, "History: the XML is collapsed");
+    await histItem.getByTestId("history-show-more").click();
     const pre = (await details.locator("pre").textContent()) || "";
     assert(pre.includes("Remove the screws.</para></listItem></randomList></para>"), "History: shows the edited XML");
     await page.getByTestId("rule-test-panel").screenshot({ path: path.join(SHOTS, "rule-test-edited-recorded.png") });
@@ -169,7 +172,7 @@ async function main() {
     await page.waitForTimeout(500);
     const indEs = (await indicator().textContent()) || "";
     assert(/^Probada ✓ \(.+\) · 1 ejemplo editado a mano$/.test(indEs), `indicator (ES): ${indEs}`);
-    assert((await page.locator("li", { has: page.getByTestId("history-edited-examples") }).first().textContent()).includes("Probada con 1 ejemplo editado a mano"), "History (ES)");
+    assert((await page.getByTestId("history-item").filter({ hasText: "Probada con 1 ejemplo editado a mano" }).count()) >= 1, "History (ES)");
 
     // 5. Verify: the warning mentions the edited example.
     await page.getByRole("button", { name: "Verificar", exact: true }).click();

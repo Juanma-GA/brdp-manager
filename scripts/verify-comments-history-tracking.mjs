@@ -80,6 +80,9 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  // History starts collapsed ("Historial desplegable"); this script reads
+  // its entries, so it opens it for the tab before any page loads.
+  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
   try {
     await page.goto(BASE_URL);
     await page.fill("#login-email", ADMIN_EMAIL);

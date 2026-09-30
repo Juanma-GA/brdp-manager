@@ -203,6 +203,9 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE_URL });
   const page = await context.newPage();
+  // History starts collapsed ("Historial desplegable"); this script reads
+  // its entries, so it opens it for the tab before any page loads.
+  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
   const dialogs = [];
   page.on("dialog", (d) => {
     dialogs.push(d.message());
