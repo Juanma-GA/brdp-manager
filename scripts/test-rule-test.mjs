@@ -1755,12 +1755,16 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   for (const [got, want] of texts) check(`edited text: ${want}`, got === want, got);
   check('edited text: Verify warning (ES) says the last test includes them', es('records.ruleTest.verifyDialog.passedEdited', { count: 2 }).includes('El último test incluye 2 ejemplos editados a mano'));
   check('edited text: Verify warning (EN)', en('records.ruleTest.verifyDialog.passedEdited', { count: 1 }).includes('The last test includes 1 example edited by hand'));
-  for (const key of ['editedRecordedOnAccept', 'historyEditedExamples', 'indicator.passedEditedTitle']) {
+  for (const key of ['editedRecordedOnAccept', 'indicator.passedEditedTitle']) {
     for (const [lng, tt] of [['en', en], ['es', es]]) {
       const v = tt(`records.ruleTest.${key}`, { count: 2, date: 'd' });
       check(`edited text: ${key} (${lng}) translated`, !v.startsWith('records.') && v.includes('2'), v);
     }
   }
+  // "Historial desplegable": the edited examples' XML opens with "Show
+  // more" (records.history.*), no longer with its own summary text.
+  check('history text: header with the count and latest date (EN/ES)', en('records.history.titleCount', { count: 3 }) === 'History (3)' && es('records.history.titleCount', { count: 3 }) === 'Historial (3)' && es('records.history.latest', { date: 'd' }) === 'último: d');
+  check('history text: Show more / Ver más', en('records.history.showMore') === 'Show more' && es('records.history.showMore') === 'Ver más' && es('records.history.showLess') === 'Ver menos');
 }
 
 // ─── Plantillas, Part 4: boolean paths (s1kd-brexcheck) ────────────────────

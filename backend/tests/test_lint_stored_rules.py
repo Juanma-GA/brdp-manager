@@ -47,6 +47,14 @@ RULES = {
     "BRDP-LINT-OK": _sor("//emphasis", "0", "Emphasis must not be used."),
     "BRDP-LINT-OK-DEPTH": _sor("//proceduralStep[count(ancestor-or-self::proceduralStep) &gt; 5]", "0"),
     "BRDP-LINT-OK-FLAG1": _sor("//dmodule[.//dmCode]", "1"),
+    # A boolean condition with a value predicate inside it: flag 1 only
+    # requires the condition to hold, never "flag 1 with a value predicate"
+    # (real case: Official Default CMP ATA 4.2, EXT-00029).
+    "BRDP-LINT-OK-FLAG1-CONDITION": _sor(
+        "(/ddn or /dml or //dmStatus/applic/assert/@applicPropertyType or "
+        "//dmStatus/applic/displayText/simplePara[normalize-space(.) != ''])",
+        "1",
+    ),
     "BRDP-LINT-OK-VALUES": _sor(
         "//@assyCode[matches(., '^\\d{2}$')]",
         "1",
@@ -122,12 +130,19 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
     for identifier in ("BRDP-LINT-INFO", "BRDP-LINT-INFO-BOOLEAN"):
         assert any("| informative rule (flag 2) |" in line and "never rejects" in line for line in _rows(known, identifier)), (identifier, out)
         assert _rows(counted, identifier) == [], (identifier, out)
-    for identifier in ("BRDP-LINT-OK", "BRDP-LINT-OK-DEPTH", "BRDP-LINT-OK-FLAG1", "BRDP-LINT-OK-VALUES", "BRDP-LINT-OK-BOOLEAN"):
+    for identifier in (
+        "BRDP-LINT-OK",
+        "BRDP-LINT-OK-DEPTH",
+        "BRDP-LINT-OK-FLAG1",
+        "BRDP-LINT-OK-FLAG1-CONDITION",
+        "BRDP-LINT-OK-VALUES",
+        "BRDP-LINT-OK-BOOLEAN",
+    ):
         assert _rows(out, identifier) == [], (identifier, out)
     # 8 counted findings: one per seeded rule, plus "cannot reject" next to
     # "must not" but allowed, and "not executable" next to "not a rule of the
     # format" (document() and the informative rules are known, not counted).
-    assert "Checked 14 stored rule(s) in 1 project(s); 8 finding(s)." in out
+    assert "Checked 15 stored rule(s) in 1 project(s); 8 finding(s)." in out
 
 
 async def test_project_filter_by_name_and_unknown_project(seeded_project):

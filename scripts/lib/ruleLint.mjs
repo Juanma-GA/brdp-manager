@@ -27,14 +27,18 @@
 //     path whose last step filters by the node's value
 //     (//@assyCode[matches(., …)]) and no objectValue/objval -- the rule only
 //     requires that ONE node with a good value exists, so a node with a bad
-//     value is never rejected (a real Lufthansa pattern);
+//     value is never rejected (a real Lufthansa pattern). Never for a
+//     path that is a condition on the whole document (it returns true/false,
+//     like s1kd-brexcheck): a predicate inside it selects no node to reject,
+//     flag 1 just requires the condition to hold (real case: Official
+//     Default CMP ATA 4.2, EXT-00029, "(/ddn or /dml or …)");
 //   - count(ancestor::*) as depth: counts every ancestor (dmodule, content,
 //     …), not how deep the element is nested (a real Lufthansa pattern).
 //
 //   lintRule(ruleXml, format) -> [{ kind, detail, known? }]
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
-import { analyzeRule, describeRule } from '../../src/utils/ruleTestEngine.js';
+import { analyzeRule, describeRule, ruleConditions } from '../../src/utils/ruleTestEngine.js';
 import { formatRuleStatement, formatRuleTestReason } from '../../src/utils/ruleTestReasons.js';
 import { checkRuleFormat, extractRuleXPaths, formatSchemaIssue, ruleFormatIssues } from '../../src/validation/schemaValidation.js';
 
@@ -183,10 +187,14 @@ function filtersByOwnValue(predicate) {
 
 const ANCESTOR_WILDCARD_RE = /\bcount\s*\(\s*ancestor(?:-or-self)?::(?:\*|node\s*\(\s*\))/;
 
+const normalizeSpace = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+
 function lufthansaPatterns(ruleXml, format) {
   const findings = [];
   if (format !== 'SCH-DITA') {
+    const conditionPaths = new Set(ruleConditions(ruleXml, format, { parseXml }).map((c) => normalizeSpace(c.path)));
     for (const rule of brexRules(ruleXml)) {
+      if (conditionPaths.has(normalizeSpace(rule.path))) continue;
       if (rule.flag === '1' && !rule.hasValues && lastStepPredicates(rule.path).some(filtersByOwnValue)) {
         findings.push({
           kind: 'flag 1 with a value predicate',
