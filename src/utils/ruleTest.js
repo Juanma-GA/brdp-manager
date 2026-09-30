@@ -353,7 +353,9 @@ export function ruleTestVerdict(examples, runs, analysis = null) {
     });
     return { kind: 'no_runnable', bySchema };
   }
-  if (ran.every((r) => r.result.selectedNodePaths.length === 0)) return { kind: 'inconclusive', why: 'nothing_selected' };
+  // A condition (Plantillas, Part 4) is always evaluated on the document,
+  // so a rule made of conditions has always looked at it.
+  if (ran.every((r) => r.result.selectedNodePaths.length === 0 && !(r.result.conditions?.length > 0))) return { kind: 'inconclusive', why: 'nothing_selected' };
   const ranExpectations = new Set(runs.map((r, i) => (r.result ? examples[i].expected : null)).filter(Boolean));
   const mismatches = runs.map((r, i) => (r.matches === false ? examples[i].expected : null)).filter(Boolean);
   if (mismatches.length > 0) {

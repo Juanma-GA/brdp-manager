@@ -295,6 +295,17 @@ function ExampleCard({ example, run, index, standard, dita, showResult, onRunAga
               {t('records.ruleTest.ruleMessage', { message: v.message })}
             </p>
           ))}
+      {/* Plantillas, Part 4: a rule whose path is a true/false condition
+          (s1kd-brexcheck) has no node to highlight -- say whether the
+          condition held in this document. */}
+      {showResult &&
+        result &&
+        result.status !== 'not_executable' &&
+        (result.conditions || []).map((c, i) => (
+          <p key={`c:${c.ruleId}:${i}`} className={styles.ruleTestNote} data-testid="rule-test-condition">
+            {t(c.holds ? 'records.ruleTest.conditionHolds' : 'records.ruleTest.conditionNotHolds')}
+          </p>
+        ))}
       {showResult && run.rejectedByBrexReference && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-brex-rejection">
           {t('records.ruleTest.rejectedByBrexReference')}

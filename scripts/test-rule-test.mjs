@@ -35,12 +35,12 @@ import {
   placeExample,
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
-import { analyzeRule } from '../src/utils/ruleTestEngine.js';
+import { analyzeRule, describeRule, ruleConditions } from '../src/utils/ruleTestEngine.js';
 import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkExampleStructure, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
 import i18n from '../src/i18n/index.js';
-import { exampleFailures, generateRuleTestExamples, missesRuleProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
+import { exampleFailures, generateRuleTestExamples, keepMatchedNodeProblem, missesRuleProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
 import { contentRoutes, metadataXml, normalizeBrexReferenceCode, ruleLooksAtBrexReference, ruleMatchExpressions, ruleUseNames, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
-import { formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
+import { formatRuleDescription, formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
 import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
@@ -207,7 +207,10 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const partial = a(`<nonContextRule id="n1"><simplePara>Text</simplePara></nonContextRule>${EMPH}`);
   check('analyze: nonContextRule next to a rule → partial, says which part', partial.status === 'partial' && partial.reason?.code === 'parts' && partial.parts[0]?.ruleId === 'n1' && partial.parts[0].reason.code === 'non_context_rule', JSON.stringify(partial));
   const bool = a('<structureObjectRule><objectPath allowedObjectFlag="2">//updateCode[@x] and (//zoneSpec or //zone)</objectPath></structureObjectRule>');
-  check('analyze: a boolean objectPath is not a path', bool.status === 'not_executable' && bool.reason?.code === 'path_not_nodes' && bool.reason.params.kind === 'boolean', JSON.stringify(bool));
+  // Plantillas, Part 4: a boolean objectPath is a condition (s1kd-brexcheck).
+  check('analyze: a boolean objectPath is executable (a condition)', bool.status === 'executable', JSON.stringify(bool));
+  const num = a('<structureObjectRule><objectPath allowedObjectFlag="0">count(//zoneSpec)</objectPath></structureObjectRule>');
+  check('analyze: a number is not a path', num.status === 'not_executable' && num.reason?.code === 'path_not_nodes' && num.reason.params.kind === 'number', JSON.stringify(num));
   check('analyze: unknown format', a(EMPH, 'XSD-1.1').status === 'not_executable');
   check('analyze: XPath syntax error', a('<structureObjectRule><objectPath>//&lt;emphasis&gt;</objectPath></structureObjectRule>').reason?.code === 'xpath_error');
   check('analyze: mandatory-node rule is executable (examples are whole documents)', a('<objrule><objpath objappl="1">//dmodule/content</objpath></objrule>', 'BREX-3.0.1').status === 'executable');
@@ -1758,6 +1761,95 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
       check(`edited text: ${key} (${lng}) translated`, !v.startsWith('records.') && v.includes('2'), v);
     }
   }
+}
+
+// ─── Plantillas, Part 4: boolean paths (s1kd-brexcheck) ────────────────────
+// A path that returns true/false is a condition on the whole document; the
+// same placement as its node-union twin, a verdict that never ends
+// "nothing selected", and a correction round that says which way the
+// condition has to go.
+{
+  const S41 = 'S1000D 4.1';
+  const S42 = 'S1000D 4.2';
+  const vocab41 = vocabOf('schema-vocabulary-4-1.json');
+  const statuses = (r) => r.runs.map((x) => x.result?.status || `invalid:${JSON.stringify(x.validation)}`).join();
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+
+  // EXT-00019 as the 4.1 template had it before the rewrite.
+  const R19B = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-1/xml_schema_flat/update.xsd"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//updateCode[attribute::infoCode="00N"] and (//zoneSpec or //partSpec or //circuitBreakerSpec or //zoneIdent or //partIdent)</objectPath><objectUse>Only toolSpec, toolIdent, figure elements can be used in the Data update file representing the tool CIR.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+  const t19 = ruleTargets(R19B);
+  check('boolean EXT-00019: the condition\'s operands are the alternatives', ['updateCode', 'zoneSpec', 'partSpec', 'partIdent'].every((n) => t19.checked.includes(n)), JSON.stringify(t19.checked));
+  const u41 = structureOf(S41, 'update');
+  const p19 = placeExample(u41, t19);
+  check('boolean EXT-00019: section and content in the LLM\'s hands', p19.metadata.insertion === true && p19.contentInsertion === true, JSON.stringify({ m: p19.metadata.insertion, c: p19.contentInsertion }));
+  const minU = metadataXml(u41.skeleton.metadata.tree).xml;
+  const cir = (code) => minU.replace(/(<updateCode [^>]*)infoCode="040"/, `$1infoCode="${code}"`);
+  const insert = (el) => `<insertObjectGroup><insertObject insertionOrder="1" targetPath="/">${el}</insertObject></insertObjectGroup>`;
+  const tool = insert('<toolSpec><toolIdent manufacturerCodeValue="K0001" toolNumber="T-100"/></toolSpec>');
+  const part = insert('<partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/></partSpec>');
+  const set19 = setupFor(S41, R19B, ['update']);
+  const r19 = testRun(R19B, [
+    { label: 'tool in the tool CIR', expected: 'accept', schema: 'update', content: tool, metadata: cir('00N') },
+    { label: 'part in the tool CIR', expected: 'reject', schema: 'update', content: part, metadata: cir('00N') },
+  ], set19, { format: 'BREX-4.1', vocab: vocab41 });
+  check('boolean EXT-00019: condition met → rejected, not met → accepted, verdict correct', statuses(r19) === 'accepted,rejected' && r19.verdict.kind === 'correct', statuses(r19));
+  check('boolean EXT-00019: the result carries the condition, no node', r19.runs[1].result.conditions[0]?.holds === true && r19.runs[1].result.selectedNodePaths.length === 0 && r19.runs[0].result.conditions[0]?.holds === false);
+  // A reject example that does not trigger the condition goes to the
+  // correction round with which way it must go.
+  const r19miss = testRun(R19B, [
+    { label: 'part in the parts CIR', expected: 'reject', schema: 'update', content: part, metadata: cir('00E') },
+  ], set19, { format: 'BREX-4.1', vocab: vocab41 });
+  const miss = missesRuleProblem({ expected: 'reject' }, r19miss.runs[0], R19B);
+  check('boolean: the correction asks the reject example to make the condition TRUE', /must make the rule's condition TRUE: `\/\/updateCode\[attribute::infoCode="00N"\] and/.test(miss || ''), miss);
+  check('boolean: never "inconclusive / nothing selected"', r19miss.verdict.kind !== 'inconclusive' || r19miss.verdict.why !== 'nothing_selected', JSON.stringify(r19miss.verdict));
+  const conds = ruleConditions(R19B, 'BREX-4.1', { parseXml });
+  check('boolean: keep line speaks of the condition', keepMatchedNodeProblem(R19B, conds).startsWith('Keep what makes `//updateCode'), keepMatchedNodeProblem(R19B, conds));
+  check('node path: keep line unchanged', keepMatchedNodeProblem(EMPH, []) === 'Keep a node matched by `//emphasis`: fix the markup around it, do not remove it.');
+  const failures = exampleFailures([{ label: 'x', expected: 'reject' }], r19miss.materialized, r19miss.runs, { ruleXml: R19B, standard: S41, format: 'BREX-4.1', setup: set19, parseXml });
+  check('boolean: exampleFailures sends the reject example back', failures.length === 1 && failures[0].problems[0].includes('condition TRUE'), JSON.stringify(failures));
+
+  // Flag 1: rejects when the condition is false.
+  const RF1 = '<structureObjectRule><objectPath allowedObjectFlag="1">//dmStatus/applic or //dmStatus/applicRef</objectPath><objectUse>The status must state the applicability.</objectUse></structureObjectRule>';
+  const setF1 = setupFor(S42, RF1, ['descript']);
+  const d42 = structureOf(S42, 'descript');
+  const min42 = metadataXml(d42.skeleton.metadata.tree).xml;
+  const noApplic = min42.replace(/\s*<applic>[\s\S]*?<\/applic>/, '');
+  const rF1 = testRun(RF1, [
+    { label: 'applic in the status', expected: 'accept', schema: 'descript', content: '', metadata: min42 },
+    { label: 'no applicability', expected: 'reject', schema: 'descript', content: '', metadata: noApplic },
+  ], setF1);
+  check('boolean flag 1: false → rejected, true → accepted', rF1.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && rF1.verdict.kind === 'correct', JSON.stringify(rF1.runs.map((r) => r.result?.status || r.validation)));
+  const missF1 = missesRuleProblem({ expected: 'reject' }, rF1.runs[0], RF1);
+  check('boolean flag 1: the correction asks for FALSE', /condition FALSE/.test(missF1 || ''), missF1);
+
+  // S1-00316: "or" and "|" -- same placement, same verdict; "|" highlights
+  // the node, "or" gives the condition.
+  const ror = '<structureObjectRule id="BRDP-S1-00316"><objectPath allowedObjectFlag="0">//dmStatus/applicRef or //pmStatus/applicRef</objectPath><objectUse>Applicability is written in the status, never referenced.</objectUse></structureObjectRule>';
+  const rbar = ror.replace(' or ', ' | ');
+  const withRef = min42.replace(/<applic>[\s\S]*?<\/applic>/, '<applicRef applicIdentValue="app-0001"/>');
+  const ex316 = [
+    { label: 'applic', expected: 'accept', schema: 'descript', content: '', metadata: min42 },
+    { label: 'applicRef', expected: 'reject', schema: 'descript', content: '', metadata: withRef },
+  ];
+  const pOr = placeExample(d42, ruleTargets(ror));
+  const pBar = placeExample(d42, ruleTargets(rbar));
+  check('S1-00316 "or" / "|": same placement', JSON.stringify(pOr) === JSON.stringify(pBar));
+  const rOr = testRun(ror, ex316, setupFor(S42, ror, ['descript']));
+  const rBar = testRun(rbar, ex316, setupFor(S42, rbar, ['descript']));
+  check('S1-00316 "or" / "|": same verdict', statuses(rOr) === statuses(rBar) && statuses(rOr) === 'accepted,rejected' && rOr.verdict.kind === 'correct' && rBar.verdict.kind === 'correct', `${statuses(rOr)} / ${statuses(rBar)}`);
+  check('S1-00316 "|": node highlighted; "or": condition', rBar.runs[1].result.selectedNodePaths.some((p) => p.endsWith('/applicRef[1]')) && rOr.runs[1].result.selectedNodePaths.length === 0 && rOr.runs[1].result.conditions[0].holds === true);
+
+  // describeRule explains the condition (EN/ES), never "not executable".
+  const d19 = formatRuleDescription(describeRule(R19B, 'BREX-4.1', { parseXml }), en);
+  check('describe boolean flag 0 (EN)', d19.lines[0].startsWith('The rule rejects a document in which this condition is true: //updateCode') && d19.lines[0].includes('<zoneSpec>') && d19.lines[0].includes('Only in the schemas: update') && !d19.cannotReject, d19.lines[0]);
+  const dF1 = formatRuleDescription(describeRule(RF1, 'BREX-4.2', { parseXml }), es);
+  check('describe boolean flag 1 (ES)', dF1.lines[0].startsWith('La regla rechaza un documento en el que no se cumple esta condición: //dmStatus/applic'), dF1.lines[0]);
+  const RF2 = RF1.replace('allowedObjectFlag="1"', 'allowedObjectFlag="2"');
+  const dF2 = describeRule(RF2, 'BREX-4.2', { parseXml });
+  check('describe boolean flag 2: informative, cannot reject', dF2.statements[0].statement.code === 'describe_condition_informative' && dF2.cannotReject === true);
+  check('describe boolean flag 2 (EN)', formatRuleDescription(dF2, en).lines[0].startsWith('The condition //dmStatus/applic or //dmStatus/applicRef is only informative'));
+  check('ruleConditions: flag of each condition', ruleConditions(RF1, 'BREX-4.2', { parseXml })[0].flag === '1' && conds[0].flag === '0' && conds[0].schema === 'update');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -13,7 +13,7 @@
 import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleTestResponse, RULE_TEST_USER_MESSAGE } from '../prompts/ruleTestExamplesPrompt.js';
 import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
-import { describeRule, parseXmlDocument } from './ruleTestEngine.js';
+import { describeRule, parseXmlDocument, ruleConditions } from './ruleTestEngine.js';
 import { stripLiterals } from './ruleTestCommon.js';
 import { chooseTestSchemas, placeExample, ruleLooksAtBrexReference, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
@@ -93,6 +93,13 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
 export function missesRuleProblem(example, run, ruleXml) {
   if (example.expected !== 'reject' || !run.result || run.result.status === 'not_executable') return null;
   if (run.result.selectedNodePaths.length > 0) return null;
+  // Plantillas, Part 4: a rule whose path is a true/false condition selects
+  // no node; a reject example it accepted did not trigger the condition.
+  const conditions = run.result.conditions || [];
+  if (conditions.length > 0) {
+    if (run.result.status === 'rejected') return null;
+    return conditions.map(conditionToMeet).join(' ');
+  }
   const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
   return `This example must contain a node matched by: ${matched}. Nothing in it matches, so the rule never runs.`;
 }
@@ -164,7 +171,22 @@ export function acceptWithoutNodeProblem(ruleXml) {
 // the test ended inconclusive. The line comes last, after the problems it
 // has to fix. A valid reject example with no matched node gets
 // missesRuleProblem instead (it already says what it must contain).
-export function keepMatchedNodeProblem(ruleXml) {
+// Plantillas, Part 4: what a reject example must do with a condition --
+// make it true (flag 0 / objappl 0) or false (flag 1 / objappl 1).
+function conditionToMeet(c) {
+  return c.flag === '1'
+    ? `This example must make the rule's condition FALSE: \`${c.path.replace(/\s+/g, ' ').trim()}\` (the rule rejects a document where it is false); here it is true.`
+    : `This example must make the rule's condition TRUE: \`${c.path.replace(/\s+/g, ' ').trim()}\` (the rule rejects a document where it is true); here it is false.`;
+}
+
+export function keepMatchedNodeProblem(ruleXml, conditions = []) {
+  // A rule made only of conditions: keep what triggers them.
+  if (conditions.length > 0 && conditions.length === ruleMatchExpressions(ruleXml).length) {
+    const kept = conditions
+      .map((c) => `what makes \`${c.path.replace(/\s+/g, ' ').trim()}\` ${c.flag === '1' ? 'false' : 'true'}`)
+      .join(' and ');
+    return `Keep ${kept}: fix the markup around it, do not remove it.`;
+  }
   const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
   return matched ? `Keep a node matched by ${matched}: fix the markup around it, do not remove it.` : null;
 }
@@ -173,7 +195,7 @@ export function keepMatchedNodeProblem(ruleXml) {
 export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, setup = null, parseXml = parseXmlDocument }) {
   const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
   const ruleNames = extractRuleNames(ruleXml);
-  const keep = keepMatchedNodeProblem(ruleXml);
+  const keep = keepMatchedNodeProblem(ruleXml, format ? ruleConditions(ruleXml, format, { parseXml }) : []);
   return runs
     .map((r, index) => {
       const missing = r.validation.runnable ? missesRuleProblem(examples[index], r, ruleXml) : null;
@@ -238,6 +260,7 @@ export async function generateRuleTestExamples({
       schemaFacts: prepared.schemaFacts,
       previousReview,
       matchExpressions: ruleMatchExpressions(ruleXml),
+      conditions: ruleConditions(ruleXml, format, { parseXml }),
     });
     onPrompt?.(systemPrompt);
     const run = (examples) => runRuleTestExamples(examples, { ruleXml, format, setup: prepared.setup, vocabulary, parseXml });

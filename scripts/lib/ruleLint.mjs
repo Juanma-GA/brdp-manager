@@ -5,15 +5,22 @@
 // panel uses, no LLM -- and flags:
 //   - not a rule of the format: what Paste rule, the manual editor and
 //     PUT …/approvals/{format} would now refuse (C2, Part 0);
-//   - not a node path: the path returns true/false (or a number) instead of
-//     nodes, e.g. //a and //b;
+//   - not a node path: the path returns a number or a string instead of
+//     nodes, e.g. count(//a). A path that returns true/false (//a and //b)
+//     is a condition that the engine evaluates like s1kd-brexcheck
+//     (Plantillas, Part 4) -- not a finding; one that does not parse is
+//     "not executable" with its XPath error;
 //   - not executable (whole rule) or partially executable, with the reason.
 //     Reasons that are known and accepted (another file: doc-available(),
 //     doc(), document(); a value replaced outside the app, @@…@@; a
 //     nonContextRule, no XPath by design) carry known: true -- the callers
 //     list them apart and do not count them;
-//   - cannot reject: the rule can reject no document (BREX flag 2 without
-//     values; Schematron whose checks never fail);
+//   - cannot reject: the rule can reject no document (Schematron whose checks
+//     never fail; BREX flag 2 without values whose objectUse says "must
+//     not"). BREX flag 2 without values (a node path or a condition) that
+//     does not say "must not" is an informative rule -- it documents what is
+//     allowed, as in the default S1000D BREX, and s1kd-brexcheck never
+//     rejects it -- listed as known: true, "informative rule (flag 2)";
 //   - "must not" but allowed: the rule's own text says "must not" / "no
 //     debe" … but its semantics allow the node;
 //   - flag 1 with a value predicate: allowedObjectFlag="1" / objappl="1" on a
@@ -219,19 +226,32 @@ export function lintRule(ruleXml, format) {
     findings.push({ kind: 'partially executable', detail: formatRuleTestReason(analysis.reason, t), known: isKnownReason(analysis.reason) });
   }
   const description = describeRule(ruleXml, format, { parseXml });
-  if (description.available && description.cannotReject) {
+  const texts = format === 'SCH-DITA' ? {} : ruleTexts(ruleXml);
+  const informativeCodes = new Set(['describe_allowed', 'describe_condition_informative']);
+  const saysMustNot = (s) => MUST_NOT_RE.test(s.ruleIds.map((id) => texts[id] || '').join(' '));
+  const informative =
+    description.available &&
+    description.cannotReject &&
+    format !== 'SCH-DITA' &&
+    description.statements.some((s) => informativeCodes.has(s.statement.code)) &&
+    !description.statements.some((s) => informativeCodes.has(s.statement.code) && saysMustNot(s));
+  if (informative) {
     const allowed = description.statements
-      .filter((s) => ['describe_allowed', 'describe_sch_assert', 'describe_sch_report'].includes(s.statement.code))
+      .filter((s) => informativeCodes.has(s.statement.code))
+      .map((s) => formatRuleStatement(s.statement, s.schemas, t));
+    findings.push({ kind: 'informative rule (flag 2)', detail: `documents what is allowed; never rejects — ${allowed.join(' / ')}`, known: true });
+  } else if (description.available && description.cannotReject) {
+    const allowed = description.statements
+      .filter((s) => ['describe_allowed', 'describe_condition_informative', 'describe_sch_assert', 'describe_sch_report'].includes(s.statement.code))
       .map((s) => formatRuleStatement(s.statement, s.schemas, t))
       .filter(Boolean);
     findings.push({ kind: 'cannot reject', detail: allowed.join(' / ') || 'no check can fail' });
   }
   if (description.available) {
-    const texts = format === 'SCH-DITA' ? {} : ruleTexts(ruleXml);
     for (const s of description.statements) {
       const { code, params } = s.statement;
       let says = '';
-      if (code === 'describe_allowed') says = s.ruleIds.map((id) => texts[id] || '').join(' ');
+      if (informativeCodes.has(code)) says = s.ruleIds.map((id) => texts[id] || '').join(' ');
       else if ((code === 'describe_sch_assert' || code === 'describe_sch_report') && (params.warning || params.constant)) says = params.message || '';
       if (says && MUST_NOT_RE.test(says)) {
         findings.push({ kind: '"must not" but allowed', detail: `${s.ruleIds.join(', ')}: says "${clip(says)}" — ${formatRuleStatement(s.statement, s.schemas, t)}` });

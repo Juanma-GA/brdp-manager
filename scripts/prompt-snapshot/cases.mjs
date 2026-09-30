@@ -24,10 +24,10 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { chooseTestSchemas, placeExample, ruleMatchExpressions, ruleTargets, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
+import { chooseTestSchemas, placeExample, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
-import { describeRule } from '../../src/utils/ruleTestEngine.js';
+import { describeRule, ruleConditions } from '../../src/utils/ruleTestEngine.js';
 import { ruleDescriptionText } from '../../src/utils/ruleTestReasons.js';
 
 const xmldomParse = (text) => new DOMParser().parseFromString(text, 'text/xml');
@@ -56,6 +56,16 @@ function groupPlacementsFor(standard, ruleXml, cards, documentSchemas) {
     ...placeExample(realStructures[`${standard}|${g.schema}`], targetsForGroup(targets, g)),
     group: g.checked,
   }));
+}
+// Plantillas, Part 4: placed like prepareRuleTestSetup does -- with the
+// objectUse names and, for a schema whose skeleton does not reach <para>,
+// the valid way down (Part 3).
+function appPlacementsFor(standard, ruleXml, roles) {
+  const targets = ruleTargets(ruleXml);
+  return roles.map(([schema, role]) => {
+    const structure = realStructures[`${standard}|${schema}`];
+    return { schema, role, ...placeExample(structure, targets, { useNames: ruleUseNames(ruleXml), withRoutes: structure.skeleton?.derivation !== 'para' }) };
+  });
 }
 const paraEntry = realCards['S1000D 4.2'].para;
 const tableEntry = realCards['S1000D 4.2'].table;
@@ -344,6 +354,8 @@ const ruleStepTitle =
   '<structureObjectRule>\n  <objectPath allowedObjectFlag="0">//proceduralStep[not(title)]</objectPath>\n  <objectUse>Every procedural step needs a title.</objectUse>\n</structureObjectRule>';
 const ruleInfoCode =
   '<structureObjectRule id="BRDP-S1-00052"><objectPath allowedObjectFlag="2">//dmIdent/dmCode/@infoCode</objectPath><objectUse>Only the information codes 055 and 930 are used.</objectUse><objectValue valueForm="single" valueAllowed="055"/><objectValue valueForm="single" valueAllowed="930"/></structureObjectRule>';
+const ruleToolCirBoolean = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-1/xml_schema_flat/update.xsd"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//updateCode[attribute::infoCode="00N"] and (//zoneSpec or //partSpec or //partIdent or //zoneIdent)</objectPath><objectUse>Only toolSpec, toolIdent, figure, figureIdent elements can be used in the Data update file representing the tool CIR.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+const ruleApplicRefOr = '<structureObjectRule id="BRDP-S1-00316"><objectPath allowedObjectFlag="0">//dmStatus/applicRef or //pmStatus/applicRef</objectPath><objectUse>Applicability is written in the status, never referenced.</objectUse></structureObjectRule>';
 const ruleAssyCode =
   '<structureObjectRule id="BRDP-S1-00338"><objectPath allowedObjectFlag="0">//@assyCode[string-length(.) != 2]</objectPath><objectUse>The assembly code has two characters.</objectUse></structureObjectRule>';
 const ruleLevels =
@@ -427,6 +439,38 @@ export const ruleTestExamplesCases = [
         format: 'BREX-4.2',
         ruleXml: ruleAssyCode,
         placements: placementsFor('S1000D 4.2', ruleAssyCode, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Plantillas, Part 4: EXT-00019 as the 4.1 template had it before the
+    // rewrite -- a boolean objectPath (flag 0), which s1kd-brexcheck
+    // evaluates as a condition. The prompt says which condition the reject
+    // and accept examples meet or avoid.
+    name: 'brex-4-1-boolean-condition-tool-cir',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-00019', title: 'Elements in the tool CIR', proposal: 'Only toolSpec, toolIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the tool CIR.' },
+        standard: 'S1000D 4.1',
+        format: 'BREX-4.1',
+        ruleXml: ruleToolCirBoolean,
+        placements: appPlacementsFor('S1000D 4.1', ruleToolCirBoolean, [['update', 'rule']]),
+        conditions: ruleConditions(ruleToolCirBoolean, 'BREX-4.1', { parseXml: xmldomParse }),
+      },
+    ],
+  },
+  {
+    // Plantillas, Part 4: S1-00316 written with "or" -- a condition, the
+    // same verdict as the "|" version.
+    name: 'brex-4-2-boolean-condition-applicref-or',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-S1-00316', title: 'Applicability in the status', proposal: 'The applicability of a data module shall be written in its status, never referenced with <applicRef>.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleApplicRefOr,
+        placements: appPlacementsFor('S1000D 4.2', ruleApplicRefOr, [['descript', 'rule']]),
+        conditions: ruleConditions(ruleApplicRefOr, 'BREX-4.2', { parseXml: xmldomParse }),
       },
     ],
   },

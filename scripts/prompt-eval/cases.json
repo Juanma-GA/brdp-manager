@@ -2101,6 +2101,94 @@
       ]
     },
     {
+      "id": "rule-test-4-1-boolean-tool-cir",
+      "type": "rule-test",
+      "standard": "S1000D 4.1",
+      "description": "Plantillas, Part 4: EXT-00019 as the 4.1 template had it before the rewrite -- a boolean objectPath (//updateCode[…] and (//zoneSpec or …)), allowedObjectFlag 0, which s1kd-brexcheck evaluates as a condition. A reject example makes the condition true (a non-tool element in the tool CIR), an accept example makes it false; the verdict is correct, never 'not executable'.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-BOOL",
+        "title": "Elements in the tool CIR",
+        "definition": "Decide which elements can be used in the data update file representing the tool CIR.",
+        "proposal": "Only toolSpec, toolIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the tool CIR.",
+        "validation": "Validated"
+      },
+      "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-1/xml_schema_flat/update.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00N\"] and (//zoneSpec or //partSpec or //circuitBreakerSpec or //functionalItemSpec or //accessPointSpec or //enterpriseSpec or //supplySpec or //supplyRqmtSpec or //functionalPhysicalAreaSpec or //controlIndicatorSpec or //applicSpec or //warningSpec or //cautionSpec or //zoneIdent or //partIdent or //functionalItemIdent or //circuitBreakerIdent or //accessPointIdent or //enterpriseIdent or //supplyIdent or //supplyRqmtIdent or //functionalPhysicalAreaIdent or //controlIndicatorIdent or //applicSpecIdent or //warningIdent or //cautionIdent)</objectPath><objectUse>Only toolSpec, toolIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the tool CIR (Chap 4.13.2.1, Para 2.3.1). </objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (section and content) is valid after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the condition is true in the reject example and false in the accept one: the engine agrees with every example"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "The rule rejects a document in which this condition is true",
+          "note": "describeRule explains the condition, never 'not executable'"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "THE RULE CHECKS A CONDITION ON THE WHOLE DOCUMENT",
+          "note": "the prompt says which condition each example meets or avoids"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-boolean-applicref-or",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Plantillas, Part 4: S1-00316 written with 'or' (//dmStatus/applicRef or //pmStatus/applicRef, flag 0): a condition, the same verdict as the '|' version -- applicRef in the status rejected, applic accepted.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-OR",
+        "title": "Applicability in the status",
+        "definition": "Decide how the applicability of a data module is given in its status.",
+        "proposal": "The applicability of a data module shall be written in its status, never referenced with <applicRef>.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-OR\"><objectPath allowedObjectFlag=\"0\">//dmStatus/applicRef or //pmStatus/applicRef</objectPath><objectUse>Applicability is written in the status, never referenced.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (its identification and status section) is valid after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example (the same verdict as the '|' version of the rule)"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<dmStatus\\b[^>]*>[\\s\\S]*<applicRef\\b",
+          "note": "every reject example references the applicability with <applicRef> in its own dmStatus"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "The rule rejects a document in which this condition is true",
+          "note": "describeRule explains the condition"
+        }
+      ]
+    },
+    {
       "id": "rule-test-template-4-1-change-marks",
       "type": "rule-test",
       "standard": "S1000D 4.1",

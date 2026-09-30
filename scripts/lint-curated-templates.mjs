@@ -15,8 +15,12 @@
 //     document(): the DITA templates read the ditamap), a value replaced
 //     outside the app (@@URI-CARPETA-DOSIER@@, filled in by an external
 //     script) and a nonContextRule (a BREX rule with no XPath by design) --
-//     go to a separate "Known, not testable here" section and are not
-//     counted as findings.
+//     go to a separate "Known and accepted" section and are not
+//     counted as findings. So does an informative rule (Plantillas, Part 4):
+//     BREX allowedObjectFlag="2" without values that does not say "must
+//     not" -- it documents what is allowed and never rejects, as in the
+//     default S1000D BREX; a boolean path (//a and //b) is a condition the
+//     engine evaluates like s1kd-brexcheck, never "not a node path".
 //   - not a rule of the format (C2, Part 0): what Paste rule, the manual
 //     editor and PUT …/approvals/{format} would now refuse -- loose text, a
 //     wrapper such as <rules>, or an element of another format.
@@ -47,7 +51,7 @@ for (const [standard, file] of Object.entries(CURATED_TEMPLATE_BY_STANDARD)) {
   if (lines.length === 0) console.log('No findings.');
   else console.log(['| Rule | Finding | Detail |', '|---|---|---|', ...lines].join('\n'));
 }
-console.log('\n### Known, not testable here (not counted)\n');
+console.log('\n### Known and accepted (not counted)\n');
 if (known.length === 0) console.log('None.');
 else console.log(['| Template | Rule | Finding | Detail |', '|---|---|---|---|', ...known].join('\n'));
 console.log(`\n${total} finding(s).`);

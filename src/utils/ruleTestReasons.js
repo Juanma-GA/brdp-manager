@@ -115,6 +115,8 @@ export function formatRuleStatement(statement, schemas, t) {
   const values = { ...params };
   if ('target' in params) values.target = params.target || t('records.ruleTest.describe.nodesOf', { path: params.path });
   if (params.values) values.values = formatValues(params.values, t);
+  // Plantillas, Part 4: the names a condition looks at.
+  if (Array.isArray(params.names)) values.names = params.names.join(', ');
   let text = t(`records.ruleTest.describe.${statement.code}`, { ...values, defaultValue: statement.code });
   // Schematron: a role="warning"/"info" check never rejects (T4).
   if (params.warning) text = t('records.ruleTest.describe.schWarning', { text });

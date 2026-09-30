@@ -10,7 +10,9 @@
 //       selectedNodePaths: [...],        // every node each executed path selected
 //       notExecutableReason: { code, params } | null,   // see REASON below
 //       notExecutableParts: [{ ruleId, reason: { code, params } }],
-//       outOfScopeSchemas: [...] }       // context blocks skipped: other schema
+//       outOfScopeSchemas: [...],        // context blocks skipped: other schema
+//       conditions: [{ ruleId, holds, flag, path }] } // parts whose path is a
+//                                        // true/false condition (see the table)
 //
 // A rule with several parts (a group, context blocks, a nonContextRule next
 // to a structureObjectRule) runs every part it can: status comes from the
@@ -76,6 +78,13 @@
 // | nonContextRule (4.x element,   | nothing to execute → not executable                             | XSD42/41, GEN |
 // | 3.0.1 comment)                 |                                                                  |        |
 //
+// | Boolean path (s1kd-brexcheck) | a path that returns true/false instead of nodes (EXT-00019's    | s1kd-brexcheck |
+// |                                | //updateCode[…] and (//zoneSpec or …)) is a condition on the     | is_invalid() |
+// |                                | whole document: flag 0 / objappl 0 rejects when it is true,      |        |
+// |                                | flag 1 / objappl 1 when it is false, flag 2 / no objappl never   |        |
+// |                                | (values are ignored, as there). No node is selected: the result  |        |
+// |                                | carries conditions: [{ruleId, holds, flag}] instead             |        |
+//
 // Value checks (single/range/pattern) are not reimplemented here: the engine
 // evaluates the very XPath expression brexToSchematron.js writes into the
 // Schematron (_valueCheckXPath), so a value the test accepts is a value the
@@ -83,8 +92,8 @@
 //
 // Beyond the table, a path is not executable when (reasons below): it reads
 // another file (document()/doc()/collection()/doc-available()/unparsed-text*);
-// it is not a node path (EXT-00019 in the 4.1 template is a boolean
-// expression; REF turns such rules into no-ops); or it starts at an absolute
+// it returns a number or a string (a true/false result is a condition, see
+// the table); or it starts at an absolute
 // root (/dmodule/…) that is not the fragment's root element — it could never
 // select anything there, and "accepted" would be a verdict nobody computed.
 // A path starting with "(" ("(/a | /b)/c") is a location path for both
@@ -114,7 +123,7 @@ import {
   xpathErrorMessage,
 } from './ruleTestCommon.js';
 import { analyzeSchematron, describeSchematron, runSchematronOnFragment, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
-import { checkRuleFormat } from '../validation/schemaValidation.js';
+import { checkRuleFormat, extractXPathNames } from '../validation/schemaValidation.js';
 
 export { nodePath, parseXmlDocument };
 
@@ -267,7 +276,20 @@ function runPart(part, spec, doc, evaluate) {
   }
   if (flag === '1' && !WHOLE_DOCUMENT_ROOTS.has(localName(root))) throw new NotExecutable(REASON.mandatory());
 
-  const selected = evaluate(expression, doc, null, 'nodes');
+  const evaluated = evaluate(expression, doc, null, 'path');
+  const message = () => textOf(childElements(part.element, spec.use)[0]);
+  if (evaluated.condition !== undefined) {
+    // s1kd-brexcheck: flag 0 rejects when true, flag 1 when false, flag 2
+    // (or no objappl) never; values do not apply to a condition.
+    const holds = evaluated.condition;
+    const violated = (flag === '0' && holds) || (flag === '1' && !holds);
+    return {
+      selectedNodePaths: [],
+      condition: { ruleId: part.ruleId, holds, flag, path: expression },
+      violation: violated ? { ruleId: part.ruleId, message: message(), nodePaths: [], condition: true } : null,
+    };
+  }
+  const selected = evaluated.nodes;
   const matches = (node) => matchers.some((m) => m(node));
 
   let offending = [];
@@ -291,7 +313,7 @@ function runPart(part, spec, doc, evaluate) {
   return {
     selectedNodePaths: selected.map(nodePath),
     violation: offending.length
-      ? { ruleId: part.ruleId, message: textOf(childElements(part.element, spec.use)[0]), nodePaths: [...new Set(offending.map(nodePath))] }
+      ? { ruleId: part.ruleId, message: message(), nodePaths: [...new Set(offending.map(nodePath))] }
       : null,
   };
 }
@@ -311,9 +333,11 @@ function makeEvaluator(doc) {
     try {
       if (kind === 'boolean') return fontoxpath.evaluateXPathToBoolean(expression, contextNode, null, variables, options);
       const items = evaluateXPath(expression, contextNode, null, variables, evaluateXPath.ALL_RESULTS_TYPE, options);
+      // A path that is a condition (s1kd-brexcheck evaluates it as such).
+      if (kind === 'path' && items.length === 1 && typeof items[0] === 'boolean') return { condition: items[0] };
       const nonNode = items.find((item) => item === null || typeof item !== 'object' || typeof item.nodeType !== 'number');
       if (nonNode !== undefined) throw new NotExecutable(REASON.notNodes(typeof nonNode === 'boolean' ? 'boolean' : typeof nonNode === 'number' ? 'number' : 'value'));
-      return items;
+      return kind === 'path' ? { nodes: items } : items;
     } catch (err) {
       if (err instanceof NotExecutable) throw err;
       throw new NotExecutable(REASON.xpath(xpathErrorMessage(err)));
@@ -352,7 +376,7 @@ function collectParts(ruleRoot, spec) {
 }
 
 function notExecutable(r) {
-  return { status: 'not_executable', violations: [], warnings: [], selectedNodePaths: [], notExecutableReason: r, notExecutableParts: [], outOfScopeSchemas: [] };
+  return { status: 'not_executable', violations: [], warnings: [], selectedNodePaths: [], notExecutableReason: r, notExecutableParts: [], outOfScopeSchemas: [], conditions: [] };
 }
 
 export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema = null, options = {}) {
@@ -388,6 +412,7 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
   const selected = [];
   const notRun = [];
   const outOfScope = [];
+  const conditions = [];
   let ran = 0;
   for (const part of parts) {
     try {
@@ -397,6 +422,7 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
       const result = runPart(part, spec, doc, evaluate);
       ran += 1;
       selected.push(...result.selectedNodePaths);
+      if (result.condition) conditions.push(result.condition);
       if (result.violation) violations.push(result.violation);
     } catch (err) {
       if (!(err instanceof NotExecutable)) throw err;
@@ -418,6 +444,7 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
     notExecutableReason,
     notExecutableParts: notRun,
     outOfScopeSchemas: [...new Set(outOfScope)],
+    conditions,
   };
 }
 
@@ -466,7 +493,7 @@ export function analyzeRule(ruleXml, format, options = {}) {
       const doc = parseXml(`<${root}/>`);
       const evaluate = makeEvaluator(doc);
       for (const v of childElements(part.element, spec.value)) buildValueMatcher(v, spec, evaluate);
-      evaluate(expression, doc, null, 'nodes');
+      evaluate(expression, doc, null, 'path');
     } catch (err) {
       if (!(err instanceof NotExecutable)) throw err;
       notRun.push({ ruleId: part.ruleId, reason: err.reason });
@@ -518,6 +545,10 @@ function ruleFormatReason(ruleXml, format, parseXml) {
 //   describe_restricted_values {target, values, path}  flag 2 (or no objappl) with values
 //   describe_allowed {target, path}                    flag 2 (or no objappl), no values:
 //                                                      rejects nothing
+//   describe_condition_forbidden {path, names}         a true/false path, flag 0 /
+//                                                      objappl 0: rejects when true
+//   describe_condition_required {path, names}          flag 1 / objappl 1: rejects when false
+//   describe_condition_informative {path, names}       flag 2 / no objappl: never rejects
 //   describe_non_context {}                            nonContextRule
 //   describe_not_executable {reason}                   a part the engine cannot run
 // `target` is the node the path points at ("<emphasis>", "@emphasisType"),
@@ -578,16 +609,39 @@ function describeValues(part, spec) {
   });
 }
 
-function describePart(part, spec) {
+// Whether a part's path is a condition (true/false) or a node path, by
+// evaluating it once on an empty document of its own root -- the same probe
+// analyzeRule uses. Throws NotExecutable (an XPath error, a number…).
+function isConditionPath(expression, parseXml) {
+  const root = absoluteRootNames(expression)[0] || 'dmodule';
+  const doc = parseXml(`<${root}/>`);
+  return makeEvaluator(doc)(expression, doc, null, 'path').condition !== undefined;
+}
+
+// The names a condition mentions (elements as <x>, attributes as @x).
+function conditionNames(path) {
+  const { elements, attributes } = extractXPathNames(path);
+  return [...[...elements].map((n) => `<${n}>`), ...[...attributes].map((n) => `@${n}`)];
+}
+
+function describePart(part, spec, parseXml) {
   if (part.kind === 'nonContext') return { code: 'describe_non_context', params: {} };
   let basics;
+  let condition;
   try {
     basics = partBasics(part, spec);
+    condition = isConditionPath(basics.expression, parseXml);
   } catch (err) {
     if (!(err instanceof NotExecutable)) throw err;
     return { code: 'describe_not_executable', params: { reason: err.reason } };
   }
   const { expression: path, flag } = basics;
+  if (condition) {
+    const params = { path, names: conditionNames(path) };
+    if (flag === '0') return { code: 'describe_condition_forbidden', params };
+    if (flag === '1') return { code: 'describe_condition_required', params };
+    return { code: 'describe_condition_informative', params };
+  }
   const target = pathTarget(path);
   const values = describeValues(part, spec);
   const withValues = values.length > 0;
@@ -615,6 +669,7 @@ function describePart(part, spec) {
 }
 
 const CAN_REJECT = new Set([
+  'describe_condition_forbidden', 'describe_condition_required',
   'describe_forbidden', 'describe_forbidden_values', 'describe_mandatory', 'describe_mandatory_values',
   'describe_mandatory_somewhere', 'describe_mandatory_somewhere_values', 'describe_restricted_values',
 ]);
@@ -632,7 +687,7 @@ export function describeRule(ruleXml, format, options = {}) {
   }
   const statements = [];
   for (const part of collectParts(ruleDoc.documentElement, spec)) {
-    const statement = describePart(part, spec);
+    const statement = describePart(part, spec, parseXml);
     const key = JSON.stringify(statement);
     const same = statements.find((s) => s.key === key && (s.schemas.length > 0) === Boolean(part.schema));
     if (same) {
@@ -646,6 +701,35 @@ export function describeRule(ruleXml, format, options = {}) {
   return {
     available: true,
     statements: statements.map(({ key: _key, ...s }) => s),
-    cannotReject: codes.includes('describe_allowed') && !codes.some((c) => CAN_REJECT.has(c)),
+    cannotReject: (codes.includes('describe_allowed') || codes.includes('describe_condition_informative')) && !codes.some((c) => CAN_REJECT.has(c)),
   };
+}
+
+// Plantillas, Part 4: the parts of a BREX rule whose path is a true/false
+// condition (s1kd-brexcheck's boolean objectPath) -- for the examples
+// prompt (the condition each example meets or avoids) and the correction
+// round. [] for Schematron, unknown formats and unparsable rules.
+//   ruleConditions(ruleXml, format, options) →
+//     [{ ruleId, path, flag, names: ['<x>', '@y'], schema }]
+export function ruleConditions(ruleXml, format, options = {}) {
+  const spec = FORMATS[format];
+  if (!spec) return [];
+  const parseXml = options.parseXml || parseXmlDocument;
+  let ruleDoc;
+  try {
+    ruleDoc = parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const part of collectParts(ruleDoc.documentElement, spec)) {
+    if (part.kind !== 'rule') continue;
+    try {
+      const { expression, flag } = partBasics(part, spec);
+      if (isConditionPath(expression, parseXml)) out.push({ ruleId: part.ruleId, path: expression, flag, names: conditionNames(expression), schema: part.schema });
+    } catch (err) {
+      if (!(err instanceof NotExecutable)) throw err;
+    }
+  }
+  return out;
 }

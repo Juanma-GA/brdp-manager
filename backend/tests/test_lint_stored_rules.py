@@ -29,14 +29,21 @@ def _sor(path: str, flag: str, use: str = "x", extra: str = "", rule_id: str | N
 
 RULES = {
     # One of each finding.
-    "BRDP-LINT-CANNOT": _sor("//acronym", "2", "Acronyms are allowed."),
     "BRDP-LINT-MUSTNOT": _sor("//emphasis", "2", "Emphasis must not be used."),
-    "BRDP-LINT-BOOLEAN": _sor("//emphasis and //para", "0"),
+    "BRDP-LINT-NUMBER": _sor("count(//emphasis)", "0"),
+    "BRDP-LINT-BADBOOL": _sor("//emphasis and (//para", "0"),
     "BRDP-LINT-DOCUMENT": _sor("//dmRef[not(document('x.xml'))]", "0"),
     "BRDP-LINT-FLAG1": _sor("//@assyCode[matches(., '^\\d{2}$')]", "1", rule_id="R-FLAG1"),
     "BRDP-LINT-DEPTH": _sor("//proceduralStep[count(ancestor::*) &gt; 8]", "0"),
     "BRDP-LINT-FORMAT": "//&lt;emphasis&gt;",
-    # Correct rules: never listed.
+    # Known, not counted (Plantillas, Part 4): an informative rule -- flag 2
+    # without values that does not say "must not" (a node path or a
+    # condition), as in the default S1000D BREX.
+    "BRDP-LINT-INFO": _sor("//acronym", "2", "Acronyms are allowed."),
+    "BRDP-LINT-INFO-BOOLEAN": _sor("//acronym or //abbreviation", "2", "Acronyms and abbreviations may be used."),
+    # Correct rules: never listed. A boolean path is a condition the engine
+    # evaluates like s1kd-brexcheck (Plantillas, Part 4).
+    "BRDP-LINT-OK-BOOLEAN": _sor("//emphasis and //para", "0"),
     "BRDP-LINT-OK": _sor("//emphasis", "0", "Emphasis must not be used."),
     "BRDP-LINT-OK-DEPTH": _sor("//proceduralStep[count(ancestor-or-self::proceduralStep) &gt; 5]", "0"),
     "BRDP-LINT-OK-FLAG1": _sor("//dmodule[.//dmCode]", "1"),
@@ -89,9 +96,9 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
     out = _run(seeded_project.id)
     assert f"### {seeded_project.name} — S1000D 4.2" in out
     expected = {
-        "BRDP-LINT-CANNOT": "cannot reject",
         "BRDP-LINT-MUSTNOT": '"must not" but allowed',
-        "BRDP-LINT-BOOLEAN": "not a node path",
+        "BRDP-LINT-NUMBER": "not a node path",
+        "BRDP-LINT-BADBOOL": "not executable",
         "BRDP-LINT-DOCUMENT": "not executable",
         "BRDP-LINT-FLAG1": "flag 1 with a value predicate",
         "BRDP-LINT-DEPTH": "count(ancestor::*) as depth",
@@ -99,19 +106,28 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
     }
     for identifier, kind in expected.items():
         assert any(f"| {kind} |" in line for line in _rows(out, identifier)), (identifier, out)
-    # The boolean path says so; the flag-1 row names the rule and the fix.
-    assert any("does not select nodes" in line for line in _rows(out, "BRDP-LINT-BOOLEAN")), out
+    # A flag 2 rule that says "must not" still cannot reject: a finding.
+    assert any("| cannot reject |" in line for line in _rows(out, "BRDP-LINT-MUSTNOT")), out
+    # A number says so; a boolean that does not parse keeps its XPath error;
+    # the flag-1 row names the rule and the fix.
+    assert any("does not select nodes" in line and "a number" in line for line in _rows(out, "BRDP-LINT-NUMBER")), out
+    assert any("XPath error" in line for line in _rows(out, "BRDP-LINT-BADBOOL")), out
     assert any("R-FLAG1" in line and "never rejected" in line for line in _rows(out, "BRDP-LINT-FLAG1")), out
     # document() is known and accepted: listed apart, not counted.
-    known = out.split("### Known, not testable here (not counted)")[1]
+    known = out.split("### Known and accepted (not counted)")[1]
     assert "BRDP-LINT-DOCUMENT" in known
     assert "reads another file (document())" in known
-    for identifier in ("BRDP-LINT-OK", "BRDP-LINT-OK-DEPTH", "BRDP-LINT-OK-FLAG1", "BRDP-LINT-OK-VALUES"):
+    # Informative rules: known, not counted -- node path and condition.
+    counted = out.split("### Known and accepted (not counted)")[0]
+    for identifier in ("BRDP-LINT-INFO", "BRDP-LINT-INFO-BOOLEAN"):
+        assert any("| informative rule (flag 2) |" in line and "never rejects" in line for line in _rows(known, identifier)), (identifier, out)
+        assert _rows(counted, identifier) == [], (identifier, out)
+    for identifier in ("BRDP-LINT-OK", "BRDP-LINT-OK-DEPTH", "BRDP-LINT-OK-FLAG1", "BRDP-LINT-OK-VALUES", "BRDP-LINT-OK-BOOLEAN"):
         assert _rows(out, identifier) == [], (identifier, out)
     # 8 counted findings: one per seeded rule, plus "cannot reject" next to
     # "must not" but allowed, and "not executable" next to "not a rule of the
-    # format" (document() is the known one, not counted).
-    assert "Checked 11 stored rule(s) in 1 project(s); 8 finding(s)." in out
+    # format" (document() and the informative rules are known, not counted).
+    assert "Checked 14 stored rule(s) in 1 project(s); 8 finding(s)." in out
 
 
 async def test_project_filter_by_name_and_unknown_project(seeded_project):

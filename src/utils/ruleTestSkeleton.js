@@ -110,6 +110,82 @@ function splitTopLevel(text, sep) {
   return parts;
 }
 
+// Plantillas, Part 4: a BREX path can be a true/false condition
+// (s1kd-brexcheck evaluates it as such): //updateCode and (//zoneSpec or
+// //partIdent), not(//title), count(//para) > 2. Its operands are the
+// location paths the condition looks at -- split on top-level and/or and
+// comparisons, unwrapping parentheses and not()/boolean()/exists()/
+// empty()/count(). A node path comes back unchanged. Works on text whose
+// predicates and literals are already stripped.
+const CONDITION_WRAPPER_RE = /^(?:not|boolean|exists|empty|count)\s*\(/;
+function closesAtEnd(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '(') depth += 1;
+    else if (text[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return i === text.length - 1;
+    }
+  }
+  return false;
+}
+// Split on a top-level word operator (and/or) or comparison.
+function splitTopLevelOperators(text, words) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    if (depth !== 0) continue;
+    if (words) {
+      const m = /^\s(and|or)\s/.exec(text.slice(i));
+      const before = text.slice(0, i).trimEnd().slice(-1);
+      if (m && before && !/[/@:]/.test(before)) {
+        parts.push(text.slice(start, i));
+        start = i + m[0].length;
+        i = start - 1;
+      }
+    } else {
+      const m = /^(?:!=|<=|>=|=|<|>|\s(?:eq|ne|lt|le|gt|ge)\s)/.exec(text.slice(i));
+      if (m) {
+        parts.push(text.slice(start, i));
+        start = i + m[0].length;
+        i = start - 1;
+      }
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+export function conditionOperands(expression) {
+  const out = [];
+  const visit = (raw) => {
+    let e = raw.trim();
+    for (;;) {
+      if (e.startsWith('(') && closesAtEnd(e, 0)) {
+        e = e.slice(1, -1).trim();
+        continue;
+      }
+      const w = CONDITION_WRAPPER_RE.exec(e);
+      if (w && closesAtEnd(e, w[0].length - 1)) {
+        e = e.slice(w[0].length, -1).trim();
+        continue;
+      }
+      break;
+    }
+    if (!e) return;
+    const words = splitTopLevelOperators(e, true);
+    if (words.length > 1) return words.forEach(visit);
+    const sides = splitTopLevelOperators(e, false);
+    if (sides.length > 1) return sides.filter((side) => /^\s*[/(.@A-Za-z]/.test(side)).forEach(visit);
+    out.push(e);
+  };
+  visit(expression);
+  return out;
+}
+
 const NAME_RE = /^[A-Za-z_][\w.-]*$/;
 const AXIS_RE = /^(?:child|descendant|descendant-or-self|self|following-sibling|preceding-sibling|following|preceding|ancestor|ancestor-or-self|parent)::/;
 
@@ -257,7 +333,8 @@ export function ruleTargets(ruleXml) {
   const predicateNames = new Set();
   let wholeDocument = false;
   for (const expression of contexts.length ? contexts : extractRuleXPaths(ruleXml || '')) {
-    for (const alternative of splitTopLevel(stripPredicates(expression), '|')) {
+    const operands = contexts.length ? [stripPredicates(expression)] : conditionOperands(stripPredicates(expression));
+    for (const alternative of operands.flatMap((operand) => splitTopLevel(operand, '|'))) {
       if (contexts.length && isRootContext(alternative)) wholeDocument = true;
       analyzeAlternative(alternative, out);
     }

@@ -174,6 +174,13 @@
 // quoted in the prompt, and no content) and
 // brex-4-2-metadata-and-content-assycode (//@assyCode[…]: the section AND
 // the content are insertion points).
+//
+// Plantillas, Part 4: 2 NEW ruleTestExamples cases, no existing case changes
+// -- brex-4-1-boolean-condition-tool-cir (EXT-00019 as the 4.1 template had
+// it: a boolean objectPath, flag 0, plus the valid way down inside <update>
+// of Part 3) and brex-4-2-boolean-condition-applicref-or (S1-00316 written
+// with "or"). Both carry the "THE RULE CHECKS A CONDITION ON THE WHOLE
+// DOCUMENT" block; a node path gets the same prompt as before.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

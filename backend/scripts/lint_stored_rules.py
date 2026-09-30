@@ -21,8 +21,11 @@ Node: $NODE if set, else "node" on the PATH.
 
 It changes nothing: fixing a rule is a decision for the project's editors.
 Reasons that are known and accepted (another file: doc-available(), doc(),
-document(); a value replaced outside the app, @@...@@; a nonContextRule) are
-listed apart and not counted. Rules in the trash are listed too, marked as
+document(); a value replaced outside the app, @@...@@; a nonContextRule), and
+informative rules (BREX flag 2 without values whose objectUse does not say
+"must not" -- they document what is allowed, s1kd-brexcheck never rejects
+them), are listed apart and not counted. A boolean objectPath is a condition
+evaluated like s1kd-brexcheck, not a finding. Rules in the trash are listed too, marked as
 such. Exit code 0 always (a report, not a gate).
 """
 import argparse
@@ -109,7 +112,7 @@ def render(rows: list[tuple], findings: dict) -> str:
         out += ["", f"### {project} — {standard}", "", "| BRDP | Format | Rule Status | Finding | Detail |", "|---|---|---|---|---|", *lines]
     if clean_projects:
         out += ["", "Projects with no findings: " + ", ".join(sorted(clean_projects)) + "."]
-    out += ["", "### Known, not testable here (not counted)", ""]
+    out += ["", "### Known and accepted (not counted)", ""]
     if known:
         out += ["| Project | BRDP | Format | Finding | Detail |", "|---|---|---|---|---|", *known]
     else:

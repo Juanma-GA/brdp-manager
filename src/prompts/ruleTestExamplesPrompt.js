@@ -174,6 +174,25 @@ Never put that title on the checked element itself (never <table><title>…),
 and never rely on the topic's own title.`;
 }
 
+// Plantillas, Part 4: a BREX path that is a true/false condition
+// (s1kd-brexcheck's boolean objectPath) is judged on the whole document --
+// say which condition each example has to meet or avoid, and the names it
+// looks at. conditions: ruleConditions() of the engine.
+function conditionInstructions(conditions) {
+  const lines = conditions.map((c) => {
+    const path = c.path.replace(/\s+/g, ' ').trim();
+    const names = c.names.length ? ` It looks at ${c.names.join(', ')}.` : '';
+    if (c.flag === '0') return `- ${path}\n  The rule rejects a document where this is TRUE: the reject example makes it\n  true, the accept example makes it false.${names}`;
+    if (c.flag === '1') return `- ${path}\n  The rule rejects a document where this is FALSE: the reject example makes\n  it false, the accept example makes it true.${names}`;
+    return `- ${path}\n  Informative only (it never rejects a document).${names}`;
+  });
+  return `
+
+THE RULE CHECKS A CONDITION ON THE WHOLE DOCUMENT: its path is true or false,
+not a set of nodes. Write the examples so that:
+${lines.join('\n')}`;
+}
+
 // T4: how each example is built, for the placements offered.
 function buildingInstructions(standard, placements, dita) {
   const kind = dita ? 'topic type' : 'schema';
@@ -211,6 +230,7 @@ export function buildRuleTestExamplesPrompt({
   schemaFacts = [],
   previousReview = null,
   matchExpressions = [],
+  conditions = [],
 }) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
@@ -287,6 +307,7 @@ ${
 - "label": a few words saying what the example shows.`;
 
   if (ruleDependsOnTitle(matchExpressions)) prompt += titleDependentInstructions();
+  if (conditions.length > 0) prompt += conditionInstructions(conditions);
 
   prompt += buildSchemaFactsBlock(standard, schemaFacts);
 

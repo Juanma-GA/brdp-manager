@@ -16,7 +16,7 @@
 //    silently skip the check.
 import { DOMParser } from '@xmldom/xmldom';
 import { readPublicTemplate } from './lib/readXlsx.mjs';
-import { runRuleOnFragment } from '../src/utils/ruleTestEngine.js';
+import { analyzeRule, ruleConditions, runRuleOnFragment } from '../src/utils/ruleTestEngine.js';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { brexToSchematron } from '../src/api/brexToSchematron.js';
 import { wrapRuleXmlFragment } from '../src/utils/ruleXmlFragment.js';
@@ -239,8 +239,8 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
   expect('malformed fragment', run(sor('0', '//x'), 'BREX-4.2', '<a><b></a>'), 'not_executable', { reason: /^The test fragment is not well-formed XML: / });
   expect('malformed rule', run('<structureObjectRule><objectPath>//x</structureObjectRule>', 'BREX-4.2', '<x/>'), 'not_executable', { reason: /^The rule is not well-formed XML: / });
   expect('no rule element', run('<objectUse>x</objectUse>', 'BREX-4.2', '<x/>'), 'not_executable', { reason: 'The rule contains no <structureObjectRule> to execute.' });
-  expect('path returning a boolean', run(sor('0', '//a and //b'), 'BREX-4.2', '<x/>'), 'not_executable',
-    { reason: "The rule's path does not select nodes (it returns a boolean), so there is nothing to judge." });
+  expect('path returning a number', run(sor('0', 'count(//a)'), 'BREX-4.2', '<x/>'), 'not_executable',
+    { reason: "The rule's path does not select nodes (it returns a number), so there is nothing to judge." });
   expect('absolute path on a fragment with another root', run(sor('0', '/dmodule/content//thead'), 'BREX-4.2', '<table><thead/></table>'), 'not_executable',
     { reason: "The rule's path starts at /dmodule, but this fragment's root element is <table>; it can only be judged on a fragment whose root is <dmodule>." });
   expect('path continuing after a predicate is not absolute', run(sor('0', "/dmodule/content[@a] /para"), 'BREX-4.2', DM('<para/>').replace('<content>', '<content a="1">')), 'rejected');
@@ -459,6 +459,52 @@ check('coherence compared both accepted and rejected verdicts', coherentStatuses
 check('coherence covered the template value rules', coherent >= 20, `only ${coherent} runs compared`);
 console.log(`Coherence: ${coherent} engine runs on rules with values replayed through the generated Schematron.`);
 
+// ─── 3b. Boolean paths, like s1kd-brexcheck (Plantillas, Part 4) ───────────
+// A path that returns true/false is a condition on the whole document:
+// flag 0 / objappl 0 rejects when it is true, flag 1 / objappl 1 when it is
+// false, flag 2 / no objappl never. No node is selected; the result says
+// whether the condition held (conditions).
+{
+  const cond = (r) => (r.conditions || []).map((c) => `${c.holds}`).join();
+  const r0t = expect('boolean flag 0, condition true', run(sor('0', '//a and //b', '', 'No a with b.'), 'BREX-4.2', DM('<a/><b/>')), 'rejected');
+  check('boolean flag 0: condition recorded, no node', cond(r0t) === 'true' && r0t.selectedNodePaths.length === 0 && r0t.violations[0].nodePaths.length === 0 && r0t.violations[0].condition === true && r0t.violations[0].message === 'No a with b.');
+  const r0f = expect('boolean flag 0, condition false', run(sor('0', '//a and //b'), 'BREX-4.2', DM('<a/>')), 'accepted');
+  check('boolean flag 0, false: condition recorded', cond(r0f) === 'false');
+  expect('boolean flag 1, condition false', run(sor('1', '//a or //b'), 'BREX-4.2', DM('<c/>')), 'rejected');
+  expect('boolean flag 1, condition true', run(sor('1', '//a or //b'), 'BREX-4.2', DM('<b/>')), 'accepted');
+  expect('boolean flag 1 still needs a whole document', run(sor('1', '//a or //b'), 'BREX-4.2', '<para/>'), 'not_executable', { reason: /whole data module/ });
+  expect('boolean flag 2 never rejects (true)', run(sor('2', '//a and //b'), 'BREX-4.2', DM('<a/><b/>')), 'accepted');
+  expect('boolean without flag (default 2) never rejects', run(sor(null, '//a'.concat(' and //b')), 'BREX-4.2', DM('<a/><b/>')), 'accepted');
+  expect('boolean with values: values ignored (s1kd-brexcheck)', run(sor('0', '//a and //b', ov('single', 'x')), 'BREX-4.2', DM('<a>x</a><b/>')), 'rejected');
+  expect('not(...) is a condition', run(sor('0', 'not(//title)'), 'BREX-4.2', DM('<para/>')), 'rejected');
+  expect('a comparison is a condition', run(sor('0', "count(//para) > 2"), 'BREX-4.2', DM('<para/><para/><para/>')), 'rejected');
+  // 3.0.1: objappl 0/1; no objappl never rejects.
+  const obr = (appl, path) => `<objrule><objpath${appl === null ? '' : ` objappl="${appl}"`}>${path}</objpath><objuse>u</objuse></objrule>`;
+  expect('3.0.1 boolean objappl 0, true', run(obr('0', '//a and //b'), 'BREX-3.0.1', DM('<a/><b/>')), 'rejected');
+  expect('3.0.1 boolean objappl 0, false', run(obr('0', '//a and //b'), 'BREX-3.0.1', DM('<a/>')), 'accepted');
+  expect('3.0.1 boolean objappl 1, false', run(obr('1', '//a or //b'), 'BREX-3.0.1', DM('<c/>')), 'rejected');
+  expect('3.0.1 boolean objappl 1, true', run(obr('1', '//a or //b'), 'BREX-3.0.1', DM('<a/>')), 'accepted');
+  expect('3.0.1 boolean without objappl never rejects', run(obr(null, '//a and //b'), 'BREX-3.0.1', DM('<a/><b/>')), 'accepted');
+  // "or" (condition) and "|" (node union) give the same verdict (S1-00316).
+  const S316 = (join) => sor('0', `//dmStatus/applicRef ${join} //pmStatus/applicRef`);
+  const withRef = '<dmodule><identAndStatusSection><dmStatus><applicRef applicIdentValue="a1"/></dmStatus></identAndStatusSection><content/></dmodule>';
+  const withApplic = '<dmodule><identAndStatusSection><dmStatus><applic><displayText><simplePara>All</simplePara></displayText></applic></dmStatus></identAndStatusSection><content/></dmodule>';
+  const orRef = run(S316('or'), 'BREX-4.2', withRef);
+  const barRef = run(S316('|'), 'BREX-4.2', withRef);
+  check('S1-00316 "or" and "|": same verdict with applicRef (rejected)', orRef.status === 'rejected' && barRef.status === 'rejected');
+  check('S1-00316 "|": the node is highlighted', barRef.selectedNodePaths.length === 1 && barRef.violations[0].nodePaths[0].endsWith('/applicRef[1]'), JSON.stringify(barRef.selectedNodePaths));
+  check('S1-00316 "or": a condition, no node', orRef.selectedNodePaths.length === 0 && cond(orRef) === 'true');
+  check('S1-00316 "or" and "|": same verdict with applic (accepted)', run(S316('or'), 'BREX-4.2', withApplic).status === 'accepted' && run(S316('|'), 'BREX-4.2', withApplic).status === 'accepted');
+  // analyzeRule: a condition is executable; a number is not.
+  check('analyzeRule: condition executable', analyzeRule(sor('0', '//a and //b'), 'BREX-4.2', { parseXml }).status === 'executable');
+  check('analyzeRule: number still not executable', analyzeRule(sor('0', 'count(//a)'), 'BREX-4.2', { parseXml }).reason?.code === 'path_not_nodes');
+  check('analyzeRule: an unparsable boolean stays an XPath error', analyzeRule(sor('0', '//a and (//b'), 'BREX-4.2', { parseXml }).reason?.code === 'xpath_error');
+  // ruleConditions: only the boolean parts, with their names.
+  const rc = ruleConditions(`<structureObjectRuleGroup>${sor('0', '//a and //b/@c')}${sor('0', '//d')}</structureObjectRuleGroup>`, 'BREX-4.2', { parseXml });
+  check('ruleConditions: one boolean part with its names', rc.length === 1 && rc[0].flag === '0' && rc[0].names.join() === '<a>,<b>,@c', JSON.stringify(rc));
+  check('ruleConditions: [] for Schematron and node rules', ruleConditions(sor('0', '//d'), 'BREX-4.2', { parseXml }).length === 0 && ruleConditions('<sch:pattern/>', 'SCH-DITA').length === 0);
+}
+
 // ─── 4. Reasons are codes (T3, Part 0) ──────────────────────────────────────
 // Every reason the engine gives is { code, params }, and every code has an
 // English and a Spanish text in the real i18n resources.
@@ -470,7 +516,7 @@ console.log(`Coherence: ${coherent} engine runs on rules with values replayed th
     ['doc()', run(sor('0', 'doc($u)//x'), 'BREX-4.2', '<x/>'), 'external_document', { fn: 'doc()' }],
     ['collection()', run(sor('0', "collection('c')//x"), 'BREX-4.2', '<x/>'), 'external_document', { fn: 'collection()' }],
     ['nonContextRule', run('<nonContextRule><simplePara>y</simplePara></nonContextRule>', 'BREX-4.2', '<x/>'), 'non_context_rule', {}],
-    ['path that is not a path', run(sor('0', '//a and //b'), 'BREX-4.2', '<x/>'), 'path_not_nodes', { kind: 'boolean' }],
+    ['path that is not a path', run(sor('0', 'count(//a)'), 'BREX-4.2', '<x/>'), 'path_not_nodes', { kind: 'number' }],
     ['XPath error', run(sor('0', '//para['), 'BREX-4.2', '<x/>'), 'xpath_error', null],
     ['allowedObjectFlag="1" outside a whole DM', run(sor('1', '//para/title'), 'BREX-4.2', '<levelledPara><para/></levelledPara>'), 'mandatory_whole_document', {}],
     ['unsupported valueForm', run(sor('2', '//@a', '<objectValue valueForm="list" valueAllowed="x"/>'), 'BREX-4.2', '<x a="1"/>'), 'unsupported_value_form', { form: 'list' }],
