@@ -315,3 +315,55 @@ async def test_register_review_keeps_the_mismatch_and_is_not_passed(client, edit
     history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
     entry = next(h for h in history if h["field_name"] == "rule_test")
     assert json.loads(entry["new_value"]) == {"result": "review", "reason": reason}
+
+
+async def test_keep_previous_leaves_the_passed_test_and_notes_the_attempt(client, editor_viewer_and_project):
+    """"Mantener la anterior": a new, not-passed result over a passed test of
+    the same rule is not recorded; the passed test stays and History notes
+    the attempt with the date of the test that was kept.
+    """
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    passed = (await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)).json()
+    reason = {"code": "test_incorrect", "params": {"permissive": True, "strict": False}}
+    res = await client.post(
+        url + "/test", json={"result": "failed", "reason": reason, "rule_hash": _hash(RULE), "keep_previous": True}, headers=headers
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["last_test_result"] == "passed"
+    assert body["last_test_reason"] is None
+    assert body["last_test_at"] == passed["last_test_at"]
+    history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
+    entries = [h for h in history if h["field_name"] == "rule_test"]
+    assert len(entries) == 2
+    latest = max(entries, key=lambda h: h["changed_at"])
+    value = json.loads(latest["new_value"])
+    assert value["result"] == "failed" and value["reason"] == reason and value["not_recorded"] is True
+    assert value["kept_test_at"].startswith(passed["last_test_at"][:19])
+    assert json.loads(latest["old_value"])["result"] == "passed"
+
+
+async def test_keep_previous_needs_a_passed_test_of_this_rule(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    reason = {"code": "test_no_runnable", "params": {}}
+    keep = {"result": "inconclusive", "reason": reason, "rule_hash": _hash(RULE), "keep_previous": True}
+    # Never tested: nothing to keep.
+    assert (await client.post(url + "/test", json=keep, headers=headers)).status_code == 409
+    # Last test failed: nothing passed to keep.
+    await client.post(url + "/test", json={"result": "failed", "reason": {"code": "test_incorrect", "params": {}}, "rule_hash": _hash(RULE)}, headers=headers)
+    assert (await client.post(url + "/test", json=keep, headers=headers)).status_code == 409
+    # A passed test is always recorded: keep_previous with passed is invalid.
+    res = await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "keep_previous": True}, headers=headers)
+    assert res.status_code == 422
+
+
+async def test_replacing_a_passed_test_without_keep_records_it(client, editor_viewer_and_project):
+    """"Registrar este resultado": recorded as today."""
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)
+    reason = {"code": "test_incorrect", "params": {"permissive": True, "strict": False}}
+    body = (await client.post(url + "/test", json={"result": "failed", "reason": reason, "rule_hash": _hash(RULE)}, headers=headers)).json()
+    assert body["last_test_result"] == "failed" and body["last_test_reason"] == reason

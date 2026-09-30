@@ -32,6 +32,7 @@ import {
 import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
 import { editExample, editedExamplesRecord, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
 import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
+import { passedTestToReplaceAt } from '../utils/ruleTestStatus.js';
 import { ruleDescriptionText, verdictToTestRecord } from '../utils/ruleTestReasons.js';
 
 async function fetchStructure(standard, schema) {
@@ -40,7 +41,13 @@ async function fetchStructure(standard, schema) {
   );
 }
 
-export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onResult }) {
+// `approval` (the saved rule's RuleApprovalOut, only when the viewer can
+// record): when its last test passed and a new result is not "passed", the
+// panel asks before replacing it ("No sobrescribir una prueba aprobada sin
+// preguntar") -- "Register this result" calls onResult, "Keep the previous
+// one" calls onKeepPrevious (History notes the attempt, nothing else
+// changes).
+export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onResult, approval = null, onKeepPrevious = null }) {
   // Known before any example: shown at the top from the start (T2b, Part 4).
   // T4: the standard tells an XPath 2.0 DITA project apart (XPath 3.x
   // syntax is a warning there).
@@ -70,11 +77,36 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // Latest callback, so a generation that lands later reports to it.
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
+  const onKeepPreviousRef = useRef(onKeepPrevious);
+  onKeepPreviousRef.current = onKeepPrevious;
+  const approvalRef = useRef(approval);
+  approvalRef.current = approval;
+  // The question before replacing a passed test: { record, at } | null;
+  // and what the user answered last: null | { kept: true, at }.
+  const [replaceQuestion, setReplaceQuestion] = useState(null);
+  const [replaceAnswer, setReplaceAnswer] = useState(null);
   // onResult may return (a promise of) whether the record was saved -- the
   // draft rule's caller does; a suggestion's keeps it until Accept.
   const report = (record) => {
-    if (record && onResultRef.current) return onResultRef.current(record);
-    return undefined;
+    if (!record || !onResultRef.current) return undefined;
+    const at = passedTestToReplaceAt(approvalRef.current, record);
+    if (at !== null) {
+      setReplaceQuestion({ record, at });
+      return undefined;
+    }
+    return onResultRef.current(record);
+  };
+  const answerReplaceQuestion = async (register) => {
+    const question = replaceQuestion;
+    if (!question) return;
+    setReplaceQuestion(null);
+    if (register) {
+      setReplaceAnswer(null);
+      await onResultRef.current?.(question.record);
+    } else {
+      const kept = await onKeepPreviousRef.current?.(question.record);
+      setReplaceAnswer(kept === false ? null : { kept: true, at: question.at });
+    }
   };
   // The test recorded for the current generation (its verdict as the LLM
   // wrote the examples), and whether a corrected test (hand edits that made
@@ -93,6 +125,8 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     generationRef.current = generation;
     setState({ status: 'loading' });
     setReview(null);
+    setReplaceQuestion(null);
+    setReplaceAnswer(null);
     recordedRef.current = null;
     editsRecordedRef.current = false;
     setEditNotice(null);
@@ -246,5 +280,8 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     review,
     reviewFailure,
     regenerateWithReview,
+    replaceQuestion,
+    replaceAnswer,
+    answerReplaceQuestion,
   };
 }

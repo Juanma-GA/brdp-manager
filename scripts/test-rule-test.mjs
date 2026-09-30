@@ -1892,5 +1892,29 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('review: History value parsed', parseRuleTestHistoryValue(JSON.stringify({ reason: rec.reason, result: 'review' })).result === 'review' && es('records.ruleTest.results.review') === 'Revisar');
 }
 
+// ---------------------------------------------------------------------------
+// No sobrescribir una prueba aprobada sin preguntar.
+{
+  const { passedTestToReplaceAt, parseRuleTestHistoryValue } = await import('../src/utils/ruleTestStatus.js');
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const ap = (fields) => ({ rule_xml: '<x/>', last_test_up_to_date: true, last_test_at: '2026-09-30T10:00:00Z', ...fields });
+  const failedRec = { result: 'failed', reason: { code: 'test_incorrect', params: { permissive: true, strict: false } } };
+  check('replace: passed → failed asks, with the passed date', passedTestToReplaceAt(ap({ last_test_result: 'passed' }), failedRec) === '2026-09-30T10:00:00Z');
+  for (const result of ['inconclusive', 'review', 'not_executable']) {
+    check(`replace: passed → ${result} asks`, passedTestToReplaceAt(ap({ last_test_result: 'passed' }), { result, reason: { code: 'x', params: {} } }) !== null);
+  }
+  check('replace: passed → passed never asks', passedTestToReplaceAt(ap({ last_test_result: 'passed' }), { result: 'passed', reason: null }) === null);
+  check('replace: last test failed → never asks', passedTestToReplaceAt(ap({ last_test_result: 'failed' }), failedRec) === null);
+  check('replace: outdated passed test (rule changed) → never asks', passedTestToReplaceAt(ap({ last_test_result: 'passed', last_test_up_to_date: false }), failedRec) === null);
+  check('replace: never tested / no approval → never asks', passedTestToReplaceAt(ap({ last_test_result: null }), failedRec) === null && passedTestToReplaceAt(null, failedRec) === null);
+  const kept = parseRuleTestHistoryValue(JSON.stringify({ result: 'failed', reason: failedRec.reason, not_recorded: true, kept_test_at: '2026-09-30T10:00:00+00:00' }));
+  check('replace: History value of a kept attempt', kept.notRecorded === true && kept.keptTestAt === '2026-09-30T10:00:00+00:00' && kept.result === 'failed');
+  check('replace: a normal History value is recorded', parseRuleTestHistoryValue(JSON.stringify({ result: 'failed', reason: failedRec.reason })).notRecorded === false);
+  check('replace: question text EN/ES', en('records.ruleTest.replaceQuestion.text', { date: 'Sep 30, 2026' }) === 'The previous test passed on Sep 30, 2026. Record this result and replace it?' && es('records.ruleTest.replaceQuestion.text', { date: '30 sept 2026' }) === 'La prueba anterior salió correcta el 30 sept 2026. ¿Registrar este resultado y sustituirla?');
+  check('replace: buttons ES', es('records.ruleTest.replaceQuestion.register') === 'Registrar este resultado' && es('records.ruleTest.replaceQuestion.keep') === 'Mantener la anterior');
+  check('replace: History text ES', es('records.ruleTest.results.notRecorded', { result: 'Fallida', date: '30 sept 2026' }) === 'Fallida — no registrado (se mantuvo la prueba del 30 sept 2026)');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

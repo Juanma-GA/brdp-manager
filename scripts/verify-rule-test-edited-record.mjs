@@ -10,7 +10,8 @@
 //  4. More edits (correct or not): nothing more recorded.
 //  5. Verify: the warning says the last test includes 1 example edited by
 //     hand; Cancel keeps the rule Draft.
-//  6. Regenerate: a normal record, with no edit mark.
+//  6. Regenerate: the last test passed, so the panel asks before replacing
+//     it; "Record this result" gives a normal record, with no edit mark.
 // Against the real app (Vite + FastAPI + Postgres); only the Mistral
 // TRANSPORT is mocked (mock-mistral-chat-server.mjs, marker SIBLINGLISTS).
 //
@@ -191,6 +192,12 @@ async function main() {
       await page.waitForTimeout(300);
       await verdict().waitFor({ timeout: 20000 });
     }
+    // The last test passed (with the edits): the new, not-passed result is
+    // only recorded after the question -- "Record this result".
+    const question = page.getByTestId("rule-test-replace-question");
+    await question.waitFor({ timeout: 10000 });
+    assert((await approval()).last_test_result === "passed", "regenerate: nothing recorded before answering the question");
+    await question.getByRole("button", { name: "Record this result" }).click();
     await page.waitForTimeout(900);
     const regen = await approval();
     assert(regen.last_test_result !== "passed" && !regen.last_test_edited_examples, `regenerate: normal record without edits (${regen.last_test_result})`);

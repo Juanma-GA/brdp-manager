@@ -32,7 +32,15 @@ export function parseRuleTestHistoryValue(value) {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== 'object' || typeof parsed.result !== 'string') return null;
     const edited = Array.isArray(parsed.edited_examples) ? parsed.edited_examples.filter((ex) => ex && typeof ex.xml === 'string') : [];
-    return { result: parsed.result, reason: parsed.reason || null, editedExamples: edited };
+    return {
+      result: parsed.result,
+      reason: parsed.reason || null,
+      editedExamples: edited,
+      // "Mantener la anterior": an attempt the user chose not to record,
+      // keeping the passed test of kept_test_at.
+      notRecorded: parsed.not_recorded === true,
+      keptTestAt: typeof parsed.kept_test_at === 'string' ? parsed.kept_test_at : null,
+    };
   } catch {
     return null;
   }
@@ -62,4 +70,16 @@ export function verifyWarning(approval, format, options = {}) {
   const analysis = analyzeRule(approval.rule_xml, format, options);
   if (analysis.status === 'not_executable') return { kind: 'not_executable', reason: analysis.reason, canTestNow: false };
   return { kind: status.kind, reason: null, canTestNow: true };
+}
+
+// "No sobrescribir una prueba aprobada sin preguntar": the date of the
+// recorded passed test that `record` (a new result for the same, unchanged
+// rule) would replace -- the panel asks before recording it. null when
+// there is nothing to ask: the new result passed too (recorded without
+// asking), the last test did not pass, or it is outdated (the rule changed;
+// a test of another rule is replaced as always).
+export function passedTestToReplaceAt(approval, record) {
+  if (!record || record.result === 'passed') return null;
+  const status = ruleTestStatus(approval);
+  return status.kind === 'passed' ? status.at || '' : null;
 }

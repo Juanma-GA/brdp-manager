@@ -75,6 +75,41 @@ function verdictView(t, verdict, standard) {
 
 const TONE_CLASS = { ok: 'ruleTestToneOk', bad: 'ruleTestToneBad', warn: 'ruleTestToneWarn' };
 
+function formatTestDate(value, language) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString(language, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// "No sobrescribir una prueba aprobada sin preguntar": the last recorded
+// test of this rule passed and this run gave another result -- ask before
+// replacing it. After "Keep the previous one", a note says it was kept.
+function ReplacePassedQuestion({ question, answer, onAnswer }) {
+  const { t, i18n } = useTranslation();
+  if (question) {
+    return (
+      <div className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} role="alertdialog" data-testid="rule-test-replace-question">
+        <p>{t('records.ruleTest.replaceQuestion.text', { date: formatTestDate(question.at, i18n.language) })}</p>
+        <div className={styles.suggestionActions}>
+          <button type="button" onClick={() => onAnswer(true)} data-testid="rule-test-replace-register">
+            {t('records.ruleTest.replaceQuestion.register')}
+          </button>
+          <button type="button" onClick={() => onAnswer(false)} data-testid="rule-test-replace-keep">
+            {t('records.ruleTest.replaceQuestion.keep')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (answer?.kept) {
+    return (
+      <p className={`${styles.ruleTestNote} ${styles.ruleTestToneOk}`} data-testid="rule-test-replace-kept">
+        {t('records.ruleTest.replaceQuestion.kept', { date: formatTestDate(answer.at, i18n.language) })}
+      </p>
+    );
+  }
+  return null;
+}
+
 // The example's XML, indented, with the nodes the rule selected highlighted
 // and (T2b) the application's skeleton dimmed next to the content written
 // for the test. The indentation is real spaces (a hanging indent keeps
@@ -444,12 +479,30 @@ export default function RuleTestPanel({
   vocabulary,
   onClose,
   onResult,
+  approval = null,
+  onKeepPrevious = null,
   recordsOnAccept = false,
   onSuggestCorrectedRule,
   correctedRuleBlockedReason = null,
 }) {
   const { t } = useTranslation();
-  const { state, analysis, description, verdict, editNotice, copyablePrompt, generate, regenerate, runAgain, review, reviewFailure, regenerateWithReview } = useRuleTest({
+  const {
+    state,
+    analysis,
+    description,
+    verdict,
+    editNotice,
+    copyablePrompt,
+    generate,
+    regenerate,
+    runAgain,
+    review,
+    reviewFailure,
+    regenerateWithReview,
+    replaceQuestion,
+    replaceAnswer,
+    answerReplaceQuestion,
+  } = useRuleTest({
     ruleXml,
     format,
     standard,
@@ -458,6 +511,8 @@ export default function RuleTestPanel({
     aiProvider,
     vocabulary,
     onResult,
+    approval,
+    onKeepPrevious,
   });
   const [copyStatus, setCopyStatus] = useState(null);
 
@@ -511,6 +566,8 @@ export default function RuleTestPanel({
         </p>
       ))}
 
+      {state.status !== 'ready' && <ReplacePassedQuestion question={replaceQuestion} answer={replaceAnswer} onAnswer={answerReplaceQuestion} />}
+
       <RuleDescription description={description} />
 
       {state.status === 'idle' && !notARule && !unreachable && (
@@ -534,6 +591,7 @@ export default function RuleTestPanel({
               {view.text}
             </p>
           )}
+          <ReplacePassedQuestion question={replaceQuestion} answer={replaceAnswer} onAnswer={answerReplaceQuestion} />
           {editNotice?.kind === 'not_saved' && (
             <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-edited-notice" data-kind="not_saved">
               {t('records.ruleTest.editedNotice')}

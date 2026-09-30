@@ -471,6 +471,7 @@ let slowNextArmed = false;
 // like /slow-next/-error-next; unarmed, Suggest Proposal keeps its
 // existing generic "MOCK-ANSWER: ..." fallback reply unchanged.
 let stepNextArmed = false;
+let invertNextArmed = false;
 // "Suggest: la sugerencia se queda en su BRDP" round (docs request):
 // content-independent error trigger, armed via POST /error-next
 // (one-shot, like /slow-next). ERROR_TEST above only fires if the
@@ -505,6 +506,12 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && req.url === "/error-next") {
     errorNextArmed = true;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.method === "POST" && req.url === "/invert-next") {
+    invertNextArmed = true;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -586,6 +593,20 @@ const server = http.createServer((req, res) => {
       reply = ruleTestReviewReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (isRuleTest(userText)) {
       reply = ruleTestReply(messages.find((m) => m.role === "system")?.content || "", messages);
+      // POST /invert-next: the next examples come back with accept and
+      // reject swapped, so a correct rule gets an "incorrect" verdict (a
+      // passed test followed by a failed one, for "do not replace a passed
+      // test without asking").
+      if (invertNextArmed && userText === "Write the test examples for this rule.") {
+        invertNextArmed = false;
+        try {
+          const data = JSON.parse(reply);
+          data.examples = data.examples.map((ex) => ({ ...ex, expected: ex.expected === "accept" ? "reject" : "accept" }));
+          reply = JSON.stringify(data);
+        } catch {
+          // not JSON (BROKENJSON): left as it is
+        }
+      }
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
     } else {

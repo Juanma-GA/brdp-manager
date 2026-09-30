@@ -231,7 +231,9 @@ async def propose_approval(
     return approval
 
 
-def _rule_test_history_value(result: str | None, reason: dict | None, edited_examples: list | None = None) -> str:
+def _rule_test_history_value(
+    result: str | None, reason: dict | None, edited_examples: list | None = None, kept_test_at: datetime | None = None
+) -> str:
     """The History value of a "rule_test" entry: the result and its reason
     as JSON codes (never a sentence), so the History panel translates it in
     the viewer's language. "" for "not tested" (a rule's first test). A
@@ -244,6 +246,11 @@ def _rule_test_history_value(result: str | None, reason: dict | None, edited_exa
     value = {"result": result, "reason": reason}
     if edited_examples:
         value["edited_examples"] = edited_examples
+    # A result the user chose not to record, keeping the passed test of
+    # that date ("Mantener la anterior").
+    if kept_test_at is not None:
+        value["not_recorded"] = True
+        value["kept_test_at"] = kept_test_at.isoformat()
     return json.dumps(value, sort_keys=True, ensure_ascii=False)
 
 
@@ -273,6 +280,11 @@ async def register_rule_test(
 
     Always adds a "rule_test" History entry, even with the same result as
     before (history.record_change(always=True)).
+
+    keep_previous ("Mantener la anterior"): the recorded test passed and the
+    user kept it over this new result -- the rule's test is left as it is
+    and History notes the attempt as not recorded (409 if there is no
+    passed test of this rule to keep).
     """
     await _get_owned_brdp(project_id, brdp_id, db)
     approval = await db.get(RuleApproval, (brdp_id, format))
@@ -291,6 +303,25 @@ async def register_rule_test(
     old_value = _rule_test_history_value(
         approval.last_test_result, approval.last_test_reason, approval.last_test_edited_examples
     )
+    if body.keep_previous:
+        # "Mantener la anterior": only over a passed test of this same rule.
+        if approval.last_test_result != "passed" or approval.last_test_rule_hash != body.rule_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="There is no passed test of this rule to keep",
+            )
+        record_change(
+            db,
+            brdp_id,
+            editor,
+            "rule_test",
+            old_value,
+            _rule_test_history_value(body.result, reason, kept_test_at=approval.last_test_at),
+            always=True,
+        )
+        await db.commit()
+        await db.refresh(approval)
+        return approval
     approval.last_test_result = body.result
     approval.last_test_reason = reason
     approval.last_test_at = datetime.now(timezone.utc)

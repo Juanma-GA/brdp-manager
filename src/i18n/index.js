@@ -469,6 +469,7 @@ const resources = {
             passedEdited_one: 'Passed with {{count}} example edited by hand',
             passedEdited_other: 'Passed with {{count}} examples edited by hand',
             withReason: '{{result}}: {{reason}}',
+            notRecorded: '{{result}} — not recorded (the test of {{date}} was kept)',
           },
           // T3 Part 2: the indicator in the Rule Status box.
           indicator: {
@@ -507,6 +508,13 @@ const resources = {
             cancel: 'Cancel',
           },
           recordError: 'The test result could not be recorded: {{error}}',
+          // Do not replace a passed test without asking.
+          replaceQuestion: {
+            text: 'The previous test passed on {{date}}. Record this result and replace it?',
+            register: 'Record this result',
+            keep: 'Keep the previous one',
+            kept: 'Not recorded: the test that passed on {{date}} was kept.',
+          },
         },
         assistant: {
           title: '✨ BRDP Assistant',
@@ -1274,6 +1282,7 @@ const resources = {
             passedEdited_one: 'Probada con {{count}} ejemplo editado a mano',
             passedEdited_other: 'Probada con {{count}} ejemplos editados a mano',
             withReason: '{{result}}: {{reason}}',
+            notRecorded: '{{result}} — no registrado (se mantuvo la prueba del {{date}})',
           },
           indicator: {
             passed: 'Probada ✓ ({{date}})',
@@ -1310,6 +1319,12 @@ const resources = {
             cancel: 'Cancelar',
           },
           recordError: 'No se pudo registrar el resultado de la prueba: {{error}}',
+          replaceQuestion: {
+            text: 'La prueba anterior salió correcta el {{date}}. ¿Registrar este resultado y sustituirla?',
+            register: 'Registrar este resultado',
+            keep: 'Mantener la anterior',
+            kept: 'No registrado: se mantuvo la prueba correcta del {{date}}.',
+          },
         },
         assistant: {
           title: '✨ Asistente de BRDP',

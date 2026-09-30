@@ -88,6 +88,11 @@ class RuleTestRegister(BaseModel):
     # SHA-256 hex of the rule_xml that was tested; must match the saved
     # rule_xml (otherwise the test was of another rule -- 409).
     rule_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # "Mantener la anterior": the last recorded test passed and the user
+    # chose to keep it over this new, not-passed result. Nothing on the
+    # rule changes; History notes the attempt as not recorded. Only for a
+    # result other than "passed" (a passed test is always recorded).
+    keep_previous: bool = False
 
     @field_validator("reason")
     @classmethod
@@ -103,6 +108,8 @@ class RuleTestRegister(BaseModel):
             raise ValueError("a passed test has no reason")
         if self.result != "passed" and self.reason is None:
             raise ValueError(f"a {self.result} test needs a reason")
+        if self.keep_previous and self.result == "passed":
+            raise ValueError("a passed test is always recorded; keep_previous is for another result")
         if self.edited_examples is not None:
             if self.result != "passed":
                 raise ValueError("only a passed test is recorded with edited examples")

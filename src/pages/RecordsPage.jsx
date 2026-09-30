@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { authFetchJson } from '../services/apiClient';
@@ -112,7 +113,13 @@ function formatRuleTestHistoryValue(t, value) {
   }
   const result = t(`records.ruleTest.results.${parsed.result}`, { defaultValue: parsed.result });
   const reason = formatRuleTestReason(parsed.reason, t);
-  return reason ? t('records.ruleTest.results.withReason', { result, reason }) : result;
+  const text = reason ? t('records.ruleTest.results.withReason', { result, reason }) : result;
+  // "Mantener la anterior": an attempt that was not recorded.
+  if (parsed.notRecorded) {
+    const date = parsed.keptTestAt ? new Date(parsed.keptTestAt).toLocaleDateString(i18n.language, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+    return t('records.ruleTest.results.notRecorded', { result: text, date });
+  }
+  return text;
 }
 
 // The full value on hover: the raw text, except a rule test (its codes
@@ -684,11 +691,13 @@ export default function RecordsPage() {
   // is shown next to the Rule Status indicator, never swallowed (HR7).
   // Returns whether it was saved (the panel's notice about a corrected
   // test with hand-edited examples depends on it).
-  const recordDraftRuleTest = async (brdpId, testedRuleXml, record) => {
+  // keepPrevious ("Mantener la anterior"): the result is not recorded, only
+  // noted in History (Part 2 of "resultado Revisar...").
+  const recordDraftRuleTest = async (brdpId, testedRuleXml, record, { keepPrevious = false } = {}) => {
     if (!canEdit || !ruleFormat) return false;
     setRuleTestRecordError(null);
     try {
-      await registerRuleTest(projectId, brdpId, ruleFormat, testedRuleXml, record);
+      await registerRuleTest(projectId, brdpId, ruleFormat, testedRuleXml, record, { keepPrevious });
       setApprovalsRefreshToken((n) => n + 1);
       setHistoryRefreshToken((n) => n + 1);
       return true;
@@ -1384,6 +1393,8 @@ export default function RecordsPage() {
                       vocabulary={vocabulary}
                       onClose={() => setDraftTestOpenFor(null)}
                       onResult={(record) => recordDraftRuleTest(selected.id, ruleApproval.rule_xml, record)}
+                      approval={canEdit ? ruleApproval : null}
+                      onKeepPrevious={(record) => recordDraftRuleTest(selected.id, ruleApproval.rule_xml, record, { keepPrevious: true })}
                       onSuggestCorrectedRule={(failed) =>
                         suggestions.suggestCorrectedRule(
                           failed,
