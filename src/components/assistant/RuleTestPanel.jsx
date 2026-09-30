@@ -34,6 +34,8 @@ function verdictView(t, verdict, standard) {
   switch (verdict.kind) {
     case 'correct':
       return { tone: 'ok', text: t('records.ruleTest.verdicts.correct') };
+    case 'review':
+      return { tone: 'warn', text: t('records.ruleTest.verdicts.review', { mismatch: verdict.mismatch }) };
     case 'incorrect':
       return {
         tone: 'bad',
@@ -528,7 +530,7 @@ export default function RuleTestPanel({
       {state.status === 'ready' && (
         <>
           {!ruleNotExecutable && (
-            <p className={`${styles.ruleTestVerdict} ${styles[TONE_CLASS[view.tone]]}`} data-testid="rule-test-verdict">
+            <p className={`${styles.ruleTestVerdict} ${styles[TONE_CLASS[view.tone]]}`} data-testid="rule-test-verdict" data-kind={verdict.kind}>
               {view.text}
             </p>
           )}
@@ -561,7 +563,7 @@ export default function RuleTestPanel({
               busy={!aiProvider}
             />
           )}
-          {state.proposalMismatch && (
+          {state.proposalMismatch && verdict?.kind !== 'review' && (
             <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-mismatch">
               ⚠ {t('records.ruleTest.proposalMismatch', { text: state.proposalMismatch })}
             </p>

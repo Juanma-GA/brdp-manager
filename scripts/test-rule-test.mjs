@@ -1852,5 +1852,45 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('ruleConditions: flag of each condition', ruleConditions(RF1, 'BREX-4.2', { parseXml })[0].flag === '1' && conds[0].flag === '0' && conds[0].schema === 'update');
 }
 
+// ---------------------------------------------------------------------------
+// Resultado "Revisar": the examples pass, but the LLM says the rule does not
+// seem to implement the Proposal (real case: "at most three substeps" with
+// //proceduralStep[count(proceduralStep) = 1]).
+{
+  const { verdictToTestRecord, formatRuleTestReason } = await import('../src/utils/ruleTestReasons.js');
+  const { editedExamplesRecord } = await import('../src/utils/ruleTest.js');
+  const { ruleTestStatus, verifyWarning, parseRuleTestHistoryValue } = await import('../src/utils/ruleTestStatus.js');
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const S42 = 'S1000D 4.2';
+  const R187 = readPublicTemplate('brdp-template-4-2.xlsx').find((row) => row.ID === 'BRDP-S1-00187')?.Rule;
+  const exs = [
+    { label: 'two substeps', expected: 'accept', schema: 'proced', content: '<proceduralStep><para>Remove the panel.</para><proceduralStep><para>Remove the screws.</para></proceduralStep><proceduralStep><para>Lift the panel.</para></proceduralStep></proceduralStep>' },
+    { label: 'one substep', expected: 'reject', schema: 'proced', content: '<proceduralStep><para>Remove the panel.</para><proceduralStep><para>Remove the screws.</para></proceduralStep></proceduralStep>' },
+  ];
+  const r = testRun(R187, exs, setupFor(S42, R187, ['proced']));
+  const analysis = analyzeRule(R187, 'BREX-4.2', { parseXml });
+  const mismatch = 'The Proposal allows at most three substeps; the rule only forbids a single one.';
+  const review = ruleTestVerdict(r.materialized, r.runs, analysis, mismatch);
+  check('review: "at most three substeps" vs count(...) = 1 → review with the note', review.kind === 'review' && review.mismatch === mismatch, JSON.stringify(review));
+  check('review: S1-00187 without a mismatch → correct, as today', ruleTestVerdict(r.materialized, r.runs, analysis, null).kind === 'correct');
+  check('review: blank mismatch → correct', ruleTestVerdict(r.materialized, r.runs, analysis, '   ').kind === 'correct');
+  const wrong = testRun(R187, exs.map((e) => ({ ...e, expected: e.expected === 'accept' ? 'reject' : 'accept' })), setupFor(S42, R187, ['proced']));
+  check('review: an incorrect verdict stays incorrect', ruleTestVerdict(wrong.materialized, wrong.runs, analysis, mismatch).kind === 'incorrect');
+  const rec = verdictToTestRecord(review);
+  check('review: recorded as review with the code', rec.result === 'review' && rec.reason.code === 'test_proposal_mismatch' && rec.reason.params.mismatch === mismatch, JSON.stringify(rec));
+  check('review: reason in EN/ES', formatRuleTestReason(rec.reason, en).startsWith('the examples pass, but the rule does not seem to implement the Proposal (The Proposal') && formatRuleTestReason(rec.reason, es).startsWith('los ejemplos pasan, pero la regla no parece implementar la Propuesta ('));
+  check('review: verdict text EN/ES', en('records.ruleTest.verdicts.review', { mismatch }).startsWith('Review: the examples pass') && es('records.ruleTest.verdicts.review', { mismatch }).startsWith('Revisar: los ejemplos pasan, pero la regla no parece implementar la Propuesta'));
+  check('review: edited examples never record passed', editedExamplesRecord({ recorded: { result: 'failed', reason: { code: 'x', params: {} } }, alreadyRecorded: false, examples: [{ label: 'a', xml: '<a/>', editedByUser: true }], verdict: review }) === null);
+  const ap = { rule_xml: R187, last_test_result: 'review', last_test_reason: rec.reason, last_test_up_to_date: true, last_test_at: '2026-09-30T10:00:00Z' };
+  check('review: indicator state', ruleTestStatus(ap).kind === 'review' && ruleTestStatus(ap).reason.code === 'test_proposal_mismatch');
+  check('review: indicator text EN/ES', en('records.ruleTest.indicator.review') === 'Review' && es('records.ruleTest.indicator.review') === 'Revisar');
+  const vw = verifyWarning(ap, 'BREX-4.2', { parseXml });
+  check('review: Verify warns with the reason and Test now', vw?.kind === 'review' && vw.canTestNow === true && vw.reason.code === 'test_proposal_mismatch');
+  check('review: Verify text ES', es('records.ruleTest.verifyDialog.review', { reason: formatRuleTestReason(rec.reason, es) }).startsWith('Hay que revisar la última prueba: los ejemplos pasan'));
+  check('review: outdated still wins', ruleTestStatus({ ...ap, last_test_up_to_date: false }).kind === 'outdated');
+  check('review: History value parsed', parseRuleTestHistoryValue(JSON.stringify({ reason: rec.reason, result: 'review' })).result === 'review' && es('records.ruleTest.results.review') === 'Revisar');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

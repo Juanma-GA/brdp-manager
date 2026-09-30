@@ -130,7 +130,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     const { proposalMismatch, examples, runs, correction } = result;
     setState({ status: 'ready', proposalMismatch, examples, runs, correction });
     if (!onDemand) {
-      const record = verdictToTestRecord(ruleTestVerdict(examples, runs, analysis));
+      const record = verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalMismatch));
       recordedRef.current = record;
       report(record);
     }
@@ -176,7 +176,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
           recorded: recordedRef.current,
           alreadyRecorded: editsRecordedRef.current,
           examples,
-          verdict: ruleTestVerdict(examples, runs, analysis),
+          verdict: ruleTestVerdict(examples, runs, analysis, state.proposalMismatch),
         });
     if (!record) {
       setEditNotice({ kind: 'not_saved' });
@@ -197,7 +197,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     setEditNotice({ kind: 'recorded', count: record.editedExamples.length });
   };
 
-  const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis) : null;
+  const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalMismatch) : null;
   const shownAnalysis = lateAnalysis || analysis;
 
   // T3b "Review with the assistant" (incorrect verdict only): the Proposal,

@@ -152,6 +152,8 @@ async def test_multi_part_reason_is_stored_as_given(client, editor_viewer_and_pr
         {"result": "passed", "reason": DOC_REASON},  # a passed test has no reason
         {"result": "failed"},  # a failed test needs one
         {"result": "not_executable"},
+        {"result": "review"},  # a review says why
+        {"result": "review", "reason": {"code": "test_proposal_mismatch", "params": {"mismatch": "x"}}, "edited_examples": [{"label": "a", "xml": "<a/>"}]},
         {"result": "maybe", "reason": DOC_REASON},  # unknown result
         {"result": "failed", "reason": {"code": "Not a code!", "params": {}}},  # a code, not a sentence
         {"result": "passed", "rule_hash": "abc"},  # not a SHA-256 hex digest
@@ -294,3 +296,22 @@ async def test_edited_examples_payload_is_validated(client, editor_viewer_and_pr
     _, url = await _brdp_with_rule(client, project, headers)
     res = await client.post(f"{url}/test", json={**payload, "rule_hash": _hash(RULE)}, headers=headers)
     assert res.status_code == 422
+
+
+async def test_register_review_keeps_the_mismatch_and_is_not_passed(client, editor_viewer_and_project):
+    """Test de reglas, "Revisar": the examples passed but the rule does not
+    seem to implement the Proposal -- its own result, never "passed", with
+    the LLM's note as the reason; History records it like any other test.
+    """
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    reason = {"code": "test_proposal_mismatch", "params": {"mismatch": "The Proposal allows up to three substeps; the rule forbids a single one."}}
+    res = await client.post(url + "/test", json={"result": "review", "reason": reason, "rule_hash": _hash(RULE)}, headers=headers)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["last_test_result"] == "review"
+    assert body["last_test_reason"] == reason
+    assert body["last_test_up_to_date"] is True
+    history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
+    entry = next(h for h in history if h["field_name"] == "rule_test")
+    assert json.loads(entry["new_value"]) == {"result": "review", "reason": reason}

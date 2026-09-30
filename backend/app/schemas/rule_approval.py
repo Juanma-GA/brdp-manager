@@ -37,13 +37,16 @@ def rule_xml_hash(rule_xml: str) -> str:
 
 # Test de reglas T3: the recorded result of the last "Test rule" run.
 #   passed         -- the engine agreed with every example (verdict correct)
+#   review         -- the examples passed, but the rule does not seem to
+#                     implement the Proposal (the LLM's proposalMismatch note);
+#                     never counted as passed
 #   failed         -- it accepted an example meant to violate the rule, or
 #                     rejected one meant to comply
 #   inconclusive   -- nothing selected, no accept+reject pair ran, or no
 #                     example passed validation
 #   not_executable -- the engine cannot run the rule (document(), a
 #                     nonContextRule, an XPath error...)
-RuleTestResult = Literal["passed", "failed", "inconclusive", "not_executable"]
+RuleTestResult = Literal["passed", "review", "failed", "inconclusive", "not_executable"]
 
 # A reason's serialized size cap: a code plus a few short params (an XPath
 # error message, a rule id per part). Generous, only there so the column

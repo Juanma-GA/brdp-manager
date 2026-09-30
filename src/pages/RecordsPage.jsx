@@ -141,6 +141,13 @@ function HistoryEditedExamples({ value }) {
   );
 }
 
+// A rule test recorded as "review" (the examples passed but the rule does
+// not seem to implement the Proposal) reads as an amber label in History,
+// like the indicator.
+function historyReviewTag(entry) {
+  return entry.field_name === 'rule_test' && parseRuleTestHistoryValue(entry.new_value)?.result === 'review';
+}
+
 function formatHistoryValue(t, fieldName, value) {
   if (fieldName === 'rule_test') return formatRuleTestHistoryValue(t, value);
   const prefix = HISTORY_TRANSLATED_FIELDS[fieldName];
@@ -2008,7 +2015,11 @@ export default function RecordsPage() {
                             {formatHistoryValue(t, h.field_name, h.old_value)}
                           </span>
                           <span className={styles.historyArrow}>→</span>
-                          <span className={styles.historyNew} title={historyValueTitle(t, h.field_name, h.new_value)}>
+                          <span
+                            className={`${styles.historyNew} ${historyReviewTag(h) ? `${styles.historyResultTag} ${styles.ruleTestToneWarn}` : ''}`}
+                            title={historyValueTitle(t, h.field_name, h.new_value)}
+                            data-testid={historyReviewTag(h) ? 'history-rule-test-review' : undefined}
+                          >
                             {formatHistoryValue(t, h.field_name, h.new_value)}
                           </span>
                         </div>

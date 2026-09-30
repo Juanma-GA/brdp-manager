@@ -338,7 +338,14 @@ export function rejectedByBrexReference(result) {
 //   { kind: 'inconclusive', why: 'nothing_selected' | 'missing_expectation' }
 //   { kind: 'incorrect', permissive, strict } -- which way the rule was wrong
 //   { kind: 'correct' }
-export function ruleTestVerdict(examples, runs, analysis = null) {
+// `proposalMismatch` (the LLM's indicative note that the rule does not seem
+// to implement the Proposal's decision): a verdict that would be "correct"
+// becomes { kind: 'review', mismatch } -- the examples pass, but they may
+// pass because the rule and the examples agree with each other, not with
+// the Proposal (real case: "at most three substeps" tested against
+// count(proceduralStep) = 1). Recorded as its own result, never "passed".
+// A failed or inconclusive verdict is left as it is.
+export function ruleTestVerdict(examples, runs, analysis = null, proposalMismatch = null) {
   if (analysis?.status === 'not_executable') return { kind: 'not_executable', reason: analysis.reason };
   const ran = runs.filter((r) => r.result);
   const notExecutable = ran.find((r) => r.result.status === 'not_executable');
@@ -367,6 +374,7 @@ export function ruleTestVerdict(examples, runs, analysis = null) {
     };
   }
   if (!ranExpectations.has('accept') || !ranExpectations.has('reject')) return { kind: 'inconclusive', why: 'missing_expectation' };
+  if (typeof proposalMismatch === 'string' && proposalMismatch.trim()) return { kind: 'review', mismatch: proposalMismatch.trim() };
   return { kind: 'correct' };
 }
 

@@ -7,7 +7,7 @@
 import { analyzeRule, RULE_TEST_FORMATS } from './ruleTestEngine.js';
 
 // The indicator state of a saved rule:
-//   { kind: 'not_tested' | 'outdated' | 'passed' | 'failed' | 'inconclusive' | 'not_executable',
+//   { kind: 'not_tested' | 'outdated' | 'passed' | 'review' | 'failed' | 'inconclusive' | 'not_executable',
 //     reason, at }
 // "outdated" wins over the recorded result: a result about another rule
 // says nothing about this one.
@@ -44,7 +44,7 @@ export function parseRuleTestHistoryValue(value) {
 //   { kind: 'passed_edited', editedCount, canTestNow: true }
 //                                         -- passed, but with examples edited by hand
 //   { kind: 'not_tested' | 'outdated', canTestNow: true }
-//   { kind: 'failed' | 'inconclusive', reason, canTestNow: true }
+//   { kind: 'review' | 'failed' | 'inconclusive', reason, canTestNow: true }
 //   { kind: 'not_executable', reason, canTestNow: false }
 // A rule never tested (or tested before it changed) that the engine cannot
 // run anyway gets the not_executable warning straight away, from
@@ -58,7 +58,7 @@ export function verifyWarning(approval, format, options = {}) {
     return status.editedCount > 0 ? { kind: 'passed_edited', reason: null, editedCount: status.editedCount, canTestNow: true } : null;
   }
   if (status.kind === 'not_executable') return { kind: 'not_executable', reason: status.reason, canTestNow: false };
-  if (status.kind === 'failed' || status.kind === 'inconclusive') return { kind: status.kind, reason: status.reason, canTestNow: true };
+  if (status.kind === 'review' || status.kind === 'failed' || status.kind === 'inconclusive') return { kind: status.kind, reason: status.reason, canTestNow: true };
   const analysis = analyzeRule(approval.rule_xml, format, options);
   if (analysis.status === 'not_executable') return { kind: 'not_executable', reason: analysis.reason, canTestNow: false };
   return { kind: status.kind, reason: null, canTestNow: true };

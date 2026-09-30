@@ -5,6 +5,7 @@ import { ruleTestStatus } from '../../utils/ruleTestStatus.js';
 
 const INDICATOR_TONE = {
   passed: 'ruleTestToneOk',
+  review: 'ruleTestToneWarn',
   failed: 'ruleTestToneBad',
   not_executable: 'ruleTestToneWarn',
   inconclusive: 'ruleTestToneWarn',
@@ -30,6 +31,7 @@ export function RuleTestIndicator({ approval }) {
       status.editedCount > 0
         ? t('records.ruleTest.indicator.passedEdited', { date, count: status.editedCount })
         : t('records.ruleTest.indicator.passed', { date }),
+    review: t('records.ruleTest.indicator.review'),
     failed: t('records.ruleTest.indicator.failed'),
     inconclusive: t('records.ruleTest.indicator.inconclusive'),
     not_executable: t('records.ruleTest.indicator.notExecutable', { reason }),
@@ -41,6 +43,7 @@ export function RuleTestIndicator({ approval }) {
       status.editedCount > 0
         ? t('records.ruleTest.indicator.passedEditedTitle', { date, count: status.editedCount })
         : t('records.ruleTest.indicator.passedTitle', { date }),
+    review: t('records.ruleTest.indicator.reviewTitle', { date, reason }),
     failed: t('records.ruleTest.indicator.failedTitle', { date, reason }),
     inconclusive: t('records.ruleTest.indicator.inconclusiveTitle', { date, reason }),
     not_executable: undefined,
@@ -68,6 +71,7 @@ export function VerifyWarningDialog({ warning, busy, onTestNow, onVerifyAnyway, 
   const message = {
     not_tested: t('records.ruleTest.verifyDialog.notTested'),
     outdated: t('records.ruleTest.verifyDialog.outdated'),
+    review: t('records.ruleTest.verifyDialog.review', { reason }),
     failed: t('records.ruleTest.verifyDialog.failed', { reason }),
     inconclusive: t('records.ruleTest.verifyDialog.inconclusive', { reason }),
     not_executable: t('records.ruleTest.verifyDialog.notExecutable', { reason }),

@@ -2358,6 +2358,30 @@
       ]
     },
     {
+      "id": "rule-test-4-2-review-substeps",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Resultado \"Revisar\" (real case): the Proposal allows at most three substeps, but the rule only forbids a step with exactly one. Examples written from the rule pass; the LLM must say the rule does not implement the Proposal (proposalMismatch), so the verdict is review, never correct.",
+      "brdp": {
+        "identifier": "BRDP-REVIEW-001",
+        "title": "Number of substeps in a step",
+        "definition": "Decide how many sub-steps a procedural step may have.",
+        "proposal": "A step shall have at most three substeps.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-REVIEW-001\"><objectPath allowedObjectFlag=\"0\">//proceduralStep[count(proceduralStep) = 1]</objectPath><objectUse>A step must not have a single substep.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_verdict_review",
+          "note": "the rule does not implement \"at most three\": the LLM fills proposalMismatch, so the verdict is review (never correct)"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-nested-randomlist",
       "type": "rule-test",
       "standard": "S1000D 4.2",

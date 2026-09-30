@@ -285,15 +285,24 @@ async function runCheck(check, answer, ctx = {}) {
     case "rule_test_verdict_correct": {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalMismatch);
       return { status: verdict.kind === "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+    }
+    case "rule_test_verdict_review": {
+      // "Revisar": a rule that does not implement the Proposal but whose
+      // examples pass -- the LLM's proposalMismatch turns "correct" into
+      // "review", as in the app.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalMismatch);
+      return { status: verdict.kind === "review" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_verdict_incorrect": {
       // T3b: a known WRONG rule -- examples written from the decision must
       // expose it.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalMismatch);
       return { status: verdict.kind === "incorrect" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_reject_examples_contain": {
@@ -715,7 +724,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
       apiFetch(`/api/schema-cards/structure?standard=${encodeURIComponent(standard)}&schema=${encodeURIComponent(schema)}`),
     parseXml: xmldomParse,
   });
-  const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis) : null;
+  const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalMismatch) : null;
   const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));
   return {
     systemPrompt: result.systemPrompt,

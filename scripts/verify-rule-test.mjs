@@ -351,8 +351,12 @@ async function main() {
     await select("BRDP-RT-MISM");
     await page.getByRole("button", { name: "Test rule" }).click();
     await waitVerdict();
-    const mism = await page.getByTestId("rule-test-mismatch").textContent();
-    assert(mism.includes("Indicative: This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."), `mismatch warning (${mism})`);
+    // "Revisar": the examples pass, so the mismatch turns the verdict into
+    // review (amber) and the separate indicative note is not repeated.
+    const mism = await verdict().textContent();
+    assert((await verdict().getAttribute("data-kind")) === "review", `mismatch: verdict is review (${mism})`);
+    assert(mism.startsWith("Review: the examples pass, but the rule does not seem to implement the Proposal.") && mism.includes("the Proposal is about CAGE codes; the rule checks <emphasis>"), `mismatch verdict text (${mism})`);
+    assert((await page.getByTestId("rule-test-mismatch").count()) === 0, "mismatch: note not repeated under a review verdict");
     const sys6 = (await lastRequest()).messages.find((m) => m.role === "system").content;
     assert(sys6.includes("written from the Proposal's DECISION") && sys6.includes("<dmRef>"), "prompt: examples from the decision, no text in references");
 

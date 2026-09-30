@@ -228,9 +228,13 @@ function ruleTestReply(systemPrompt, messages) {
   if (/BROKENJSON/.test(proposal)) {
     return '{"proposalMismatch": null, "examples": [ {"label": "cut", "expected": "accept", "content": "<para>';
   }
+  // "at most three substeps" (the real "Revisar" case): the rule only
+  // forbids exactly one substep.
   const mismatch = /MISMATCH/.test(proposal)
     ? "This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."
-    : null;
+    : /at most three substeps/i.test(proposal)
+      ? "The Proposal allows at most three substeps; the rule only rejects a step with exactly one substep, so four or more are accepted."
+      : null;
   const answer = (examples) => JSON.stringify({ proposalMismatch: mismatch, examples });
   if (/ALLINVALID/.test(proposal)) {
     const bad = "<sbSummary><levelledPara><para>Remove the panel.</para></levelledPara></sbSummary>";
