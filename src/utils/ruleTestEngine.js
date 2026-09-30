@@ -93,9 +93,13 @@
 // Beyond the table, a path is not executable when (reasons below): it reads
 // another file (document()/doc()/collection()/doc-available()/unparsed-text*);
 // it returns a number or a string (a true/false result is a condition, see
-// the table); or it starts at an absolute
-// root (/dmodule/…) that is not the fragment's root element — it could never
-// select anything there, and "accepted" would be a verdict nobody computed.
+// the table); or it is a node path every alternative of which ("a | b") is
+// anchored only at absolute roots (/dmodule/…, predicates included) that
+// are not the fragment's root element — it could never select anything
+// there, and "accepted" would be a verdict nobody computed. One alternative
+// that can look at the document is enough (the others select nothing), and
+// a condition is never refused for this: /ddn on a <dmodule> is false, as in
+// s1kd-brexcheck.
 // A path starting with "(" ("(/a | /b)/c") is a location path for both
 // (REF treated it as a no-op until T2).
 //
@@ -210,6 +214,55 @@ function absoluteRootNames(expression) {
   return names;
 }
 
+// The top-level alternatives of a path ("a | b" → ["a", "b"]), outside
+// literals, brackets and parentheses; a pair of parentheses around the
+// whole expression is looked through ("(//a | //b)").
+function topLevelAlternatives(expression) {
+  let text = expression.trim();
+  const wrapped = () => {
+    if (!text.startsWith('(') || !text.endsWith(')')) return false;
+    let depth = 0;
+    let quote = '';
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i];
+      if (quote) { if (ch === quote) quote = ''; continue; }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === '(') depth += 1;
+      if (ch === ')') { depth -= 1; if (depth === 0 && i < text.length - 1) return false; }
+    }
+    return true;
+  };
+  while (wrapped()) text = text.slice(1, -1).trim();
+  const parts = [];
+  let depth = 0;
+  let quote = '';
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) { if (ch === quote) quote = ''; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    if (ch === '(' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === ']') depth -= 1;
+    else if (ch === '|' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts.length > 1 ? parts.flatMap(topLevelAlternatives) : parts;
+}
+
+// The first foreign root name when EVERY alternative of a node path is
+// anchored only at roots other than `rootName` (each absolute path in it,
+// predicates included, starts at another root); null when at least one
+// alternative can look at this document.
+function foreignRootAlternatives(expression, rootName) {
+  let first = null;
+  for (const alternative of topLevelAlternatives(expression)) {
+    const names = absoluteRootNames(alternative);
+    if (!names.length || names.some((n) => n === rootName)) return null;
+    first = first || names[0];
+  }
+  return first;
+}
+
 function textOf(el) {
   return el ? String(el.textContent || '').replace(/\s+/g, ' ').trim() : '';
 }
@@ -271,12 +324,20 @@ function runPart(part, spec, doc, evaluate) {
   const matchers = childElements(part.element, spec.value).map((v) => buildValueMatcher(v, spec, evaluate));
   const hasValues = matchers.length > 0;
   const root = doc.documentElement;
-  for (const name of absoluteRootNames(expression)) {
-    if (name !== localName(root)) throw new NotExecutable(REASON.absoluteRoot(name, root.nodeName));
+  const evaluated = evaluate(expression, doc, null, 'path');
+  // A node path none of whose alternatives can look at this document (each
+  // one anchored at another root: /dmodule/content//thead on a <table>,
+  // //qty[/dmodule/content/proced] on a <proced>) never selects anything
+  // here, and "accepted" would be a verdict nobody worked out. One
+  // alternative that can is enough: the others simply select nothing
+  // (/pm/… | //dmStatus/… on a <dmodule>). A condition is never refused for
+  // this: /ddn on a <dmodule> is false, as in s1kd-brexcheck.
+  if (evaluated.condition === undefined) {
+    const foreign = foreignRootAlternatives(expression, localName(root));
+    if (foreign) throw new NotExecutable(REASON.absoluteRoot(foreign, root.nodeName));
   }
   if (flag === '1' && !WHOLE_DOCUMENT_ROOTS.has(localName(root))) throw new NotExecutable(REASON.mandatory());
 
-  const evaluated = evaluate(expression, doc, null, 'path');
   const message = () => textOf(childElements(part.element, spec.use)[0]);
   if (evaluated.condition !== undefined) {
     // s1kd-brexcheck: flag 0 rejects when true, flag 1 when false, flag 2

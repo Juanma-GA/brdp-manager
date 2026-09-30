@@ -566,6 +566,46 @@ console.log(`Coherence: ${coherent} engine runs on rules with values replayed th
   check('ruleConditions: [] for Schematron and node rules', ruleConditions(sor('0', '//d'), 'BREX-4.2', { parseXml }).length === 0 && ruleConditions('<sch:pattern/>', 'SCH-DITA').length === 0);
 }
 
+// ─── 3c. Absolute roots inside conditions and alternatives ─────────────────
+// A condition that names another document type's root (/ddn on a <dmodule>)
+// is simply false there, as in s1kd-brexcheck -- never "not executable".
+// A node path is refused only when EVERY alternative is anchored at another
+// root; one that can look at the document is enough.
+{
+  // BRDP-EXT-00029 of Official Default CMP ATA 4.2 (flag 1): the
+  // applicability of a data module or publication module must be stated
+  // (All, an assert, or an applicRef); a DDN or DML always passes.
+  const status = (el) => `(//${el}/applic/assert/@applicPropertyType or //${el}/applic//evaluate/assert/@applicPropertyType or //${el}/applicRef or //${el}/applic/displayText/simplePara[lower-case(.)[contains(.,'all')]])`;
+  const EXT29 = `<structureObjectRule id="BRDP-EXT-00029"><objectPath allowedObjectFlag="1">(/ddn or /dml or ${status('dmStatus').slice(1, -1)}) or ${status('pmStatus')}</objectPath><objectUse>The applicability must be stated.</objectUse></structureObjectRule>`;
+  const cond = (r) => (r.conditions || []).map((c) => `${c.holds}`).join();
+  const dmWith = (inner) => `<dmodule><identAndStatusSection><dmStatus>${inner}</dmStatus></identAndStatusSection><content><description><levelledPara><para>Text.</para></levelledPara></description></content></dmodule>`;
+  const text = (t) => `<applic><displayText><simplePara>${t}</simplePara></displayText></applic>`;
+  const r29 = (fragment) => run(EXT29, 'BREX-4.2', fragment);
+  const all = expect('EXT-00029: descript with "All" accepted', r29(dmWith(text('All'))), 'accepted');
+  check('EXT-00029: a condition that held, no not-executable part', cond(all) === 'true' && all.notExecutableParts.length === 0);
+  expect('EXT-00029: descript with "Some text" rejected', r29(dmWith(text('Some text'))), 'rejected');
+  expect('EXT-00029: descript with an assert accepted', r29(dmWith('<applic><assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"/></applic>')), 'accepted');
+  expect('EXT-00029: descript with an evaluate/assert accepted', r29(dmWith('<applic><evaluate andOr="or"><assert applicPropertyIdent="m" applicPropertyType="prodattr" applicPropertyValues="A"/></evaluate></applic>')), 'accepted');
+  expect('EXT-00029: descript with applicRef accepted', r29(dmWith('<applicRef applicIdentValue="a1"/>')), 'accepted');
+  expect('EXT-00029: a ddn accepted (/ddn is true)', r29('<ddn><identAndStatusSection/><ddnContent/></ddn>'), 'accepted');
+  expect('EXT-00029: a dml accepted (/dml is true)', r29('<dml><identAndStatusSection/><dmlContent/></dml>'), 'accepted');
+  const pmWith = (inner) => `<pm><identAndStatusSection><pmStatus>${inner}</pmStatus></identAndStatusSection><content><pmEntry/></content></pm>`;
+  expect('EXT-00029: a pm with pmStatus/applic "All" accepted', r29(pmWith(text('All'))), 'accepted');
+  expect('EXT-00029: a pm without any applicability rejected', r29(pmWith('')), 'rejected');
+  check('EXT-00029: analyzeRule executable', analyzeRule(EXT29, 'BREX-4.2', { parseXml }).status === 'executable');
+  // Node paths with alternatives.
+  const pmOrDm = sor('0', '/pm/identAndStatusSection/pmStatus/applicRef | //dmStatus/applicRef');
+  const mixed = expect('node path: one alternative with another root still runs', run(pmOrDm, 'BREX-4.2', dmWith('<applicRef applicIdentValue="a1"/>')), 'rejected');
+  check('node path: the dmodule alternative selected its node', mixed.selectedNodePaths.length === 1 && mixed.selectedNodePaths[0].endsWith('/applicRef[1]'), JSON.stringify(mixed.selectedNodePaths));
+  expect('node path: all alternatives with other roots → not executable', run(sor('0', '/pm//pmEntry | /ddn/ddnContent'), 'BREX-4.2', dmWith('')), 'not_executable',
+    { reason: "The rule's path starts at /pm, but this fragment's root element is <dmodule>; it can only be judged on a fragment whose root is <pm>." });
+  expect('node path: parenthesised alternatives, all foreign', run(sor('0', '(/pm//a | /ddn//b)'), 'BREX-4.2', dmWith('')), 'not_executable', { reason: /starts at \/pm/ });
+  expect('node path: a "|" inside a literal or predicate is not an alternative', run(sor('0', "/pm//a[@x = 'p|q' or b | c]"), 'BREX-4.2', dmWith('')), 'not_executable', { reason: /starts at \/pm/ });
+  expect('node path: /dmodule/content//x on a dmodule unchanged', run(sor('0', '/dmodule/content//para'), 'BREX-4.2', dmWith('')), 'rejected');
+  expect('node path: rule rooted only at /pm runs on a pm', run(sor('0', '/pm/content//pmEntry'), 'BREX-4.2', pmWith('')), 'rejected');
+  expect('node path: rule rooted only at /pm, pm without the node', run(sor('0', '/pm/content//dmRef'), 'BREX-4.2', pmWith('')), 'accepted');
+}
+
 // ─── 4. Reasons are codes (T3, Part 0) ──────────────────────────────────────
 // Every reason the engine gives is { code, params }, and every code has an
 // English and a Spanish text in the real i18n resources.
