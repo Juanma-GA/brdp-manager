@@ -251,6 +251,13 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           })}
         </p>
       )}
+      {example.relocated?.length > 0 && (
+        <p className={styles.ruleTestNote} data-testid="rule-test-relocated">
+          {t('records.ruleTest.relocated', {
+            moves: example.relocated.map((m) => `<${m.element}> → ${m.path.slice(0, -1).join('/')}`).join('; '),
+          })}
+        </p>
+      )}
       {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
       {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}
       {example.brexReferenceNormalized && (

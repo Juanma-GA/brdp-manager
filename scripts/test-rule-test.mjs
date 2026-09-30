@@ -1621,7 +1621,13 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const r19bad = run41(R19, [
     { label: 'straight in update', expected: 'reject', schema: 'update', content: '<insertObject><partSpec/></insertObject>', metadata: tool('00N') },
   ], ['update']);
-  check('EXT-00019: <insertObject> straight inside <update> is not valid (the real run)', r19bad.runs[0].validation.runnable === false);
+  // Ruta del esquema, Part 2: the real run's <insertObject> straight inside
+  // <update> has a single valid way (update/insertObjectGroup/insertObject),
+  // so the application now moves it there instead of sending it back.
+  check('EXT-00019: <insertObject> straight inside <update> moved by the app (the real run)',
+    r19bad.materialized[0].relocated?.[0]?.path.join('/') === 'update/insertObjectGroup/insertObject'
+      && r19bad.materialized[0].content === '<insertObjectGroup><insertObject><partSpec/></insertObject></insertObjectGroup>'
+      && r19bad.runs[0].validation.runnable === true, JSON.stringify({ c: r19bad.materialized[0].content, r: r19bad.materialized[0].relocated, s: r19bad.runs[0].validation.structure }));
   check('EXT-00019: examples written along the route are valid and give the right verdict', r19ok.runs.every((r) => r.validation.runnable) && statuses(r19ok) === 'accepted,rejected' && r19ok.verdict.kind === 'correct', statuses(r19ok));
 
   // 4.2

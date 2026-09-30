@@ -82,7 +82,9 @@ async def read_schema_structure(
     (root → insertion point, derived from the cards) and the schema's
     complete element graph, used to check each example's structure (every
     child allowed inside its parent, every attribute declared on its
-    element). Reference data, same posture as GET /api/schema-cards."""
+    element), and each element's content model (child order, required
+    children, text, required attributes) to build a valid chain down to an
+    element. Reference data, same posture as GET /api/schema-cards."""
     data = get_schema_structure(standard, schema)
     return SchemaStructureOut(
         standard=standard,
@@ -90,4 +92,5 @@ async def read_schema_structure(
         available=data["available"],
         skeleton=data["skeleton"],
         elements=data["elements"],
+        models=data["models"],
     )

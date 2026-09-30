@@ -75,6 +75,17 @@ class SchemaStructureElementOut(BaseModel):
     attributes: list[str]
 
 
+class ContentModelOut(BaseModel):
+    """One element's content model for the rule test's placement."""
+
+    order: list[str] = []
+    # A name, or several when a required choice leaves the pick open.
+    required: list[str | list[str]] = []
+    text: bool = False
+    # [[name, value or None], ...] -- its required attributes.
+    attributes: list[list[str | None]] = []
+
+
 class MetadataNodeOut(BaseModel):
     """One element of the minimal identification and status section."""
 
@@ -119,6 +130,9 @@ class SchemaStructureOut(BaseModel):
     available: bool
     skeleton: RuleTestSkeletonOut | None = None
     elements: dict[str, SchemaStructureElementOut] = {}
+    # Each element's content model (order, required children, text, required
+    # attributes) -- see rule_test_skeletons.schema_content_models.
+    models: dict[str, ContentModelOut] = {}
 
 
 class SchemaRelationSchemaOut(BaseModel):

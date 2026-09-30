@@ -52,7 +52,9 @@ Every link of every derived skeleton is re-checked against the cards by
 backend/tests/test_rule_test_skeletons.py.
 """
 import heapq
+import json
 from functools import lru_cache
+from pathlib import Path
 
 from app.services.schema_cards import (
     _CARDS_BY_FILE,
@@ -590,17 +592,104 @@ def get_element_schemas(standard: str, names: list[str]) -> dict[str, list[str]]
     return {name: [t for t in DITA_DOCUMENT_TYPES if name in graphs[t]] for name in names}
 
 
+# ─── Content models (ruta del esquema, identification and status section) ──
+# What the cards do not say: each element's children in the XSD's order, the
+# children a minimal valid instance must have, and whether it holds text --
+# backend/schema_cards/content-models-*.json, generated from the same XSDs
+# by backend/scripts/generate_content_models.py. The client builds with it a
+# valid chain of containers down to an element the rule checks
+# (dmStatus/dataRestrictions/restrictionInfo/copyright, with the required
+# restrictionInstructions/dataDistribution), for the prompt and to move a
+# misplaced element without the LLM.
+STANDARD_TO_CONTENT_MODELS_FILE = {
+    "S1000D 3.0.1": "content-models-3-0-1.json",
+    "S1000D 4.1": "content-models-4-1.json",
+    "S1000D 4.2": "content-models-4-2.json",
+    "DITA 1.3 Xpath2.0": "content-models-dita.json",
+    "DITA 1.3 Xpath3.0": "content-models-dita.json",
+}
+_CONTENT_MODELS_DIR = Path(__file__).resolve().parents[2] / "schema_cards"
+
+
+@lru_cache(maxsize=8)
+def _content_models_file(filename: str) -> dict:
+    path = _CONTENT_MODELS_DIR / filename
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8")).get("models", {})
+
+
+def _required_attribute_value(attr: dict) -> str | None:
+    value = METADATA_ATTRIBUTE_VALUES.get(attr["name"])
+    if value is None and attr.get("enum"):
+        value = attr["enum"][0]
+    if attr.get("enum") and value not in attr["enum"]:
+        value = attr["enum"][0]
+    return value
+
+
+@lru_cache(maxsize=256)
+def schema_content_models(standard: str, schema: str) -> dict[str, dict]:
+    """{element: {"order", "required", "text", "attributes"}} for every element
+    of one schema's graph: attributes = [[name, value or None]] of its
+    REQUIRED attributes (value from METADATA_ATTRIBUTE_VALUES or the enum's
+    first; None when neither gives one -- the client then never builds that
+    element on its own). Required slots and order are kept to the schema's
+    graph (a DITA topic type does not reach every DITA element). An element
+    whose model could not be resolved is left out."""
+    graph = schema_graph(standard, schema)
+    filename = STANDARD_TO_CONTENT_MODELS_FILE.get(standard)
+    data = _cards_for(standard)
+    if graph is None or not filename or data is None:
+        return {}
+    models = _content_models_file(filename)
+    key = "DITA 1.3" if is_dita_standard(standard) else schema
+    cards = data.get("cards", {})
+    out: dict[str, dict] = {}
+    for name in graph:
+        variant = next((v for v in models.get(name, []) if key in v.get("schemas", [])), None)
+        if variant is None or variant.get("resolved") is False:
+            continue
+        known = set(graph)
+        required = []
+        for slot in variant["required"]:
+            names = [n for n in (slot if isinstance(slot, list) else [slot]) if n in known]
+            if names:
+                required.append(names if len(names) > 1 else names[0])
+        card = _card_variant(cards, name, key)
+        attributes = [
+            [a["name"], _required_attribute_value(a)]
+            for a in (card or {}).get("attributes", [])
+            if a.get("required")
+        ]
+        out[name] = {
+            "order": [n for n in variant["order"] if n in known],
+            "required": required,
+            "text": bool(variant["text"]),
+            "attributes": attributes,
+        }
+    return out
+
+
 def get_schema_structure(standard: str, schema: str) -> dict:
     """The compact structure the Test rule panel needs for one schema: the
     derived skeleton plus every element's children and attribute names
     (names only -- no enums, no truncation: the structural check needs the
-    complete lists)."""
+    complete lists), and each element's content model (models: see
+    schema_content_models)."""
     graph = schema_graph(standard, schema)
     skeleton = derive_skeleton(standard, schema)
     if graph is None or skeleton is None:
-        return {"standard": standard, "schema": schema, "available": False, "skeleton": None, "elements": {}}
+        return {"standard": standard, "schema": schema, "available": False, "skeleton": None, "elements": {}, "models": {}}
     skeleton = {**skeleton, "metadata": derive_metadata_skeleton(standard, schema)}
-    return {"standard": standard, "schema": schema, "available": True, "skeleton": skeleton, "elements": graph}
+    return {
+        "standard": standard,
+        "schema": schema,
+        "available": True,
+        "skeleton": skeleton,
+        "elements": graph,
+        "models": schema_content_models(standard, schema),
+    }
 
 
 # Consolidation C2, Part 3: Ask's yes/no question "can <parent> contain

@@ -306,6 +306,17 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // ruleTestExamples/brex-3-0-1-mandatory-absolute (content//tgroup) and the
 // NEW case ruleTestExamples/brex-4-2-nested-randomlist (S1-00507,
 // //randomList//randomList). Every other prompt is unchanged.
+//
+// Ruta del esquema (identification and status section): a rule on an element
+// that is not directly inside any element of the minimal section now gets,
+// in its "metadata" instructions, the way down to it (and, with a single way,
+// where its first container goes and that container's minimum with every
+// required child; with several, every way, at most 3). Only NEW cases:
+// ruleTestExamples/brex-4-2-metadata-deep-copyright (Lufthansa S1-00065,
+// //copyright), brex-3-0-1-metadata-deep-copyright (status/datarest/inform),
+// brex-4-2-pm-metadata-deep-copyright (pmStatus) and
+// brex-4-2-metadata-several-ways (//dmStatus//externalPubRef). The 40
+// existing prompts are unchanged -- none of them has deep metadata.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

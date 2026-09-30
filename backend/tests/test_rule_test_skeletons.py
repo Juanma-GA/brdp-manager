@@ -19,6 +19,7 @@ from app.services.rule_test_skeletons import (
     derive_metadata_skeleton,
     derive_skeleton,
     get_element_schemas,
+    schema_content_models,
     schema_graph,
 )
 from app.services.schema_cards import _CARDS_BY_FILE, STANDARD_TO_SCHEMA_CARDS_FILE, get_document_schemas
@@ -337,3 +338,92 @@ async def test_structure_endpoint_serves_the_metadata_section(client):
         "/api/schema-cards/structure", params={"standard": "DITA 1.3 Xpath2.0", "schema": "task"}, headers=_headers(user)
     )
     assert res.json()["skeleton"]["metadata"] is None
+
+
+# ─── Content models (ruta del esquema) ──────────────────────────────────────
+# backend/schema_cards/content-models-*.json (generate_content_models.py):
+# child order, required children and text per element, served in the
+# structure so the client can build a valid chain down to an element.
+
+
+@pytest.mark.parametrize("standard", S1000D)
+def test_every_metadata_section_has_every_required_child_in_order(standard):
+    """The minimal sections are validated against the real XSD above; the
+    content models must agree with them: every required child (one of a
+    required choice) is there, and the children follow the model's order."""
+    for schema in get_document_schemas(standard):
+        metadata = derive_metadata_skeleton(standard, schema)
+        if metadata is None:
+            continue
+        models = schema_content_models(standard, schema)
+        for node in _nodes(metadata["tree"]):
+            model = models[node["name"]]
+            names = [c["name"] for c in node["children"]]
+            for slot in model["required"]:
+                options = slot if isinstance(slot, list) else [slot]
+                assert any(o in names for o in options), (standard, schema, node["name"], slot)
+            positions = [model["order"].index(n) for n in names]
+            assert positions == sorted(positions), (standard, schema, node["name"], names)
+            assert {a for a, _ in node["attributes"]} >= {a for a, _ in model["attributes"]}, (standard, schema, node["name"])
+
+
+def test_known_content_models():
+    m = schema_content_models("S1000D 4.2", "descript")
+    assert m["dmStatus"]["order"].index("dataRestrictions") == m["dmStatus"]["order"].index("security") + 2
+    assert m["dmStatus"]["required"] == [
+        "security", "responsiblePartnerCompany", "originator", ["applic", "applicRef"], "brexDmRef", "qualityAssurance",
+    ]
+    assert m["dataRestrictions"]["required"] == ["restrictionInstructions"]
+    assert m["restrictionInstructions"]["required"] == ["dataDistribution"]
+    assert m["restrictionInfo"]["required"] == []
+    assert m["copyright"]["required"] == ["copyrightPara"]
+    assert m["dataDistribution"]["text"] is True and m["dataRestrictions"]["text"] is False
+    assert ["issueNumber", "001"] in m["issueInfo"]["attributes"]
+    # 3.0.1: <copyright> lives in status/datarest/inform
+    m301 = schema_content_models("S1000D 3.0.1", "descript")
+    assert m301["datarest"]["required"] == ["instruct"] and m301["inform"]["required"] == ["copyright"]
+    assert "datarest" in m301["status"]["order"]
+    # DITA: one merged model, kept to the topic type's graph
+    task = schema_content_models("DITA 1.3 Xpath2.0", "task")
+    assert task["steps"]["required"] == ["step"]
+    assert schema_content_models("S1000D 5.0", "descript") == {}
+
+
+@pytest.mark.parametrize("standard,key,directory", [("S1000D 3.0.1", "3-0-1", "3.0.1"), ("S1000D 4.2", "4-2", "4.2")])
+def test_content_models_file_matches_the_xsds(standard, key, directory):
+    """The committed file is what the generator makes from the XSDs today."""
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "generate_content_models", Path(__file__).resolve().parents[1] / "scripts" / "generate_content_models.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    spec.loader.exec_module(module)
+    built = module.build_models(module.build_scopes(SOURCES / directory, "isolated"))
+    stored = json.loads((Path(__file__).resolve().parents[1] / "schema_cards" / f"content-models-{key}.json").read_text())
+    assert built["unresolved_count"] == 0
+    assert built["models"] == stored["models"]
+
+
+@pytest.mark.asyncio
+async def test_structure_endpoint_serves_the_content_models(client):
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "S1000D 4.2", "schema": "descript"}, headers=_headers(user)
+    )
+    models = res.json()["models"]
+    assert models["dataRestrictions"] == {
+        "order": ["restrictionInstructions", "restrictionInfo"],
+        "required": ["restrictionInstructions"],
+        "text": False,
+        "attributes": [],
+    }
+    assert models["dmStatus"]["required"][3] == ["applic", "applicRef"]
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "S1000D 5.0", "schema": "descript"}, headers=_headers(user)
+    )
+    assert res.json()["models"] == {}

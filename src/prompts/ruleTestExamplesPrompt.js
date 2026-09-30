@@ -87,7 +87,44 @@ function metadataLine(p, alsoContent = false) {
   your "metadata" is the WHOLE <${element}> of the example, written
   directly inside <${p.root}>. Start from this minimal, valid one and change
   only what the decision is about${where}
-${minimalSection(p)}`;
+${minimalSection(p)}${sectionRouteLines(p)}`;
+}
+
+// Ruta del esquema, Part 1: the elements the rule looks at in the section
+// that are not directly inside any of its elements (placeExample's
+// metadata.routes, schemaPlacement.js): the valid way down to each (every
+// way, at most 3, when there are several), where its first container goes
+// and, with a single way, that container with every required child. Nothing
+// when there are none: the prompt does not change.
+const indentBlock = (text, pad) => text.split('\n').map((line) => `${pad}${line}`).join('\n');
+function sectionRouteLines(p) {
+  const routes = p.metadata?.routes || [];
+  return routes
+    .map((r) => {
+      const ways = r.paths.map((path) => `
+    ${path.join('/')}`).join('');
+      if (r.several) {
+        return `
+  <${r.target}> is not directly inside any element of that section. Valid ways
+  down in this schema (use one of them):${ways}`;
+      }
+      const pos = r.position;
+      const where = pos.after
+        ? `right after <${pos.after}>`
+        : pos.before
+          ? `right before <${pos.before}>`
+          : 'as its first child';
+      const minimal = r.minimal
+        ? `,
+  with its required children (a minimum valid one; "…" is text you write):
+${indentBlock(r.minimal, '    ')}`
+        : '.';
+      return `
+  <${r.target}> is not directly inside any element of that section. The valid
+  way down in this schema:${ways}
+  <${pos.container}> goes inside <${pos.parent}>, ${where}${minimal}`;
+    })
+    .join('');
 }
 
 // Pending of the test rule (Part 1): the rule looks at <B> somewhere inside

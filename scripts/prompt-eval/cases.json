@@ -1243,6 +1243,56 @@
       ]
     },
     {
+      "id": "rule-test-4-2-copyright-deep-metadata",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Ruta del esquema: a rule on an element deep in the identification and status section (Lufthansa BRDP-S1-00065, //copyright). In 4.2 <copyright> is not allowed directly inside <dmStatus>: its only way is dmStatus/dataRestrictions/restrictionInfo/copyright, with the required restrictionInstructions/dataDistribution. The prompt gives that way and the minimum; an example that still puts <copyright> straight in <dmStatus> is moved by the application. The current notice must be accepted, one with the wrong year rejected.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-COPYRIGHT",
+        "title": "Use of the element <copyright> and source of copyright information",
+        "definition": "Decide whether and how to use the element <copyright>. Any copyright information must be obtained from the relevant authority.",
+        "proposal": "Projects creating their own documentation shall have the copyright incorporated: \"Copyright © 2024 by Lufthansa Technik AG.\"",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-COPYRIGHT\"><objectPath allowedObjectFlag=\"0\">//copyright[not(contains(., 'Copyright © 2024 by Lufthansa Technik AG'))]</objectPath><objectUse>The copyright notice must be the Lufthansa Technik AG one of 2024.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (its identification and status section included) passes the XML, vocabulary and structure checks -- <copyright> along its only way, placed by the LLM or moved by the application"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the current notice is accepted and the wrong year rejected"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<dataRestrictions\\b[^>]*>\\s*<restrictionInstructions\\b[^>]*>[\\s\\S]*?</restrictionInstructions>\\s*<restrictionInfo\\b[^>]*>\\s*<copyright\\b[^>]*>[\\s\\S]*?Copyright © (?!2024)\\d{4}",
+          "note": "every reject example has a notice with another year, in dmStatus/dataRestrictions/restrictionInfo/copyright after the required restrictionInstructions"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "dmStatus/dataRestrictions/restrictionInfo/copyright",
+          "note": "the prompt gives the way from the section down to <copyright>"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "<dataDistribution>…</dataDistribution>",
+          "note": "…with the required children of its containers"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-disassycodevariant-metadata",
       "type": "rule-test",
       "standard": "S1000D 4.2",

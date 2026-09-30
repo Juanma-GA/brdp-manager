@@ -355,6 +355,9 @@ const ruleStepTitle =
   '<structureObjectRule>\n  <objectPath allowedObjectFlag="0">//proceduralStep[not(title)]</objectPath>\n  <objectUse>Every procedural step needs a title.</objectUse>\n</structureObjectRule>';
 const ruleInfoCode =
   '<structureObjectRule id="BRDP-S1-00052"><objectPath allowedObjectFlag="2">//dmIdent/dmCode/@infoCode</objectPath><objectUse>Only the information codes 055 and 930 are used.</objectUse><objectValue valueForm="single" valueAllowed="055"/><objectValue valueForm="single" valueAllowed="930"/></structureObjectRule>';
+const ruleCopyright = `<structureObjectRule id="BRDP-S1-00065"><objectPath allowedObjectFlag="0">//copyright[not(contains(., 'Copyright © 2024 by Lufthansa Technik AG'))]</objectPath><objectUse>BRDP-S1-00065. The copyright notice must be the Lufthansa Technik AG one of 2024.</objectUse></structureObjectRule>`;
+const ruleCopyright301 = `<objrule><objpath objappl="0">//copyright[not(contains(., 'Copyright © 2024'))]</objpath><objuse>BRDP-S1-00065.</objuse></objrule>`;
+const ruleStatusExternalPubRef = '<structureObjectRule><objectPath allowedObjectFlag="0">//dmStatus//externalPubRef</objectPath><objectUse>No external publication is referenced from the status.</objectUse></structureObjectRule>';
 const ruleToolCirBoolean = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-1/xml_schema_flat/update.xsd"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//updateCode[attribute::infoCode="00N"] and (//zoneSpec or //partSpec or //partIdent or //zoneIdent)</objectPath><objectUse>Only toolSpec, toolIdent, figure, figureIdent elements can be used in the Data update file representing the tool CIR.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
 // Condiciones con raíz absoluta, y cabecera de pm/ddn/dml: BRDP-EXT-00029
 // of Official Default CMP ATA 4.2 (flag 1) -- descript and pm examples write
@@ -461,6 +464,62 @@ export const ruleTestExamplesCases = [
         format: 'BREX-4.2',
         ruleXml: ruleAssyCode,
         placements: placementsFor('S1000D 4.2', ruleAssyCode, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Ruta del esquema (BRDP-S1-00065, //copyright): <copyright> is not
+    // directly inside any element of the minimal section -- the prompt gives
+    // the way (dmStatus/dataRestrictions/restrictionInfo/copyright), where
+    // <dataRestrictions> goes and its minimum with the required children.
+    name: 'brex-4-2-metadata-deep-copyright',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-S1-00065', title: 'Use of the element <copyright> and source of copyright information', proposal: 'Projects creating their own documentation shall have the copyright incorporated: "Copyright © 2024 by Lufthansa Technik AG."' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleCopyright,
+        placements: placementsFor('S1000D 4.2', ruleCopyright, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // …3.0.1: <copyright> is somewhere else (status/datarest/inform).
+    name: 'brex-3-0-1-metadata-deep-copyright',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-S1-00065', title: 'Use of the element <copyright>', proposal: 'The copyright notice of 2024 shall be used.' },
+        standard: 'S1000D 3.0.1',
+        format: 'BREX-3.0.1',
+        ruleXml: ruleCopyright301,
+        placements: placementsFor('S1000D 3.0.1', ruleCopyright301, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // …and in a publication module, from its pmStatus.
+    name: 'brex-4-2-pm-metadata-deep-copyright',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-S1-00065', title: 'Use of the element <copyright>', proposal: 'The copyright notice of 2024 shall be used.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleCopyright,
+        placements: placementsFor('S1000D 4.2', ruleCopyright, [['pm', 'rule']]),
+      },
+    ],
+  },
+  {
+    // An element with several ways in the section (//dmStatus//externalPubRef):
+    // every way (at most 3), no minimum.
+    name: 'brex-4-2-metadata-several-ways',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'References in the status', proposal: 'External publications shall not be referenced from the status.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleStatusExternalPubRef,
+        placements: placementsFor('S1000D 4.2', ruleStatusExternalPubRef, [['descript', 'rule']]),
       },
     ],
   },

@@ -29,6 +29,7 @@ import {
   removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
 import { SKELETON_TEXT_SUFFIX, assembleExample, normalizeBrexReferenceCode } from './ruleTestSkeleton.js';
+import { relocateMisplacedElements } from './schemaPlacement.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
 // names (xsi:…, xlink:…) and namespace declarations are not schema
@@ -60,13 +61,36 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   const adjusted = { ...example, content, colspecsAdded: withColspecs.added, spannedEntriesRemoved: removedRows };
   const entry = schema ? setup.placements[schema] : null;
   if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
+  // Ruta del esquema, Part 2: an element the LLM put where the schema does
+  // not allow it is moved down the ONLY valid way from that parent, with the
+  // missing containers and their required children (schemaPlacement.js) --
+  // in the content (whose top level goes inside the insertion point) and in
+  // the identification and status section (inside the root). With more than
+  // one way nothing is moved and the example goes to the correction round.
+  const relocated = [];
+  if (entry.structure?.models) {
+    const inContent = relocateMisplacedElements(adjusted.content, entry.structure, entry.placement.insertion || null);
+    if (inContent.moved.length) {
+      adjusted.content = inContent.text;
+      relocated.push(...inContent.moved);
+    }
+    if (entry.placement.metadata?.insertion && example.metadata != null) {
+      const inSection = relocateMisplacedElements(example.metadata, entry.structure, entry.placement.root);
+      if (inSection.moved.length) {
+        adjusted.metadata = inSection.text;
+        relocated.push(...inSection.moved);
+      }
+    }
+  }
+  if (relocated.length) adjusted.relocated = relocated;
+  else delete adjusted.relocated;
   // Rule test on DM metadata: the rule looks at the identification and
   // status section, so the LLM had to write it; an example without it is
   // not run (its validation says so). Its brexDmRef follows the DM's own
   // code (ruleTestSkeleton.js, normalizeBrexReferenceCode) unless the rule
   // looks at the brexDmRef itself.
   const section = entry.placement.metadata;
-  let metadata = example.metadata;
+  let metadata = adjusted.metadata;
   if (section?.insertion && !setup.keepBrexReference && metadata != null) {
     const normalized = normalizeBrexReferenceCode(metadata, section.element);
     metadata = normalized.text;
@@ -80,7 +104,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     schema,
     schemaLocation: setup.schemaLocation,
     placement: entry.placement,
-    content,
+    content: adjusted.content,
     metadata,
   });
   const missingMetadata =

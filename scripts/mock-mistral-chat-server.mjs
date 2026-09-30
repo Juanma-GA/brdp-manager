@@ -215,6 +215,22 @@ function metadataReply(systemPrompt, rule, answer) {
     const type = (value) => base.replace("<dmStatus>", `<dmStatus issueType="${value}">`);
     return answer([ex("Issue 001, new", "accept", type("new")), ex("Issue 001, changed", "reject", type("changed"))]);
   }
+  // Ruta del esquema (BRDP-S1-00065, //copyright): with the way down in the
+  // prompt, the notice goes along it with the required children; with
+  // MISPLACED in the Proposal (or without the way), straight inside the
+  // status element right after <security> -- the real run's mistake, which
+  // the application now moves without the LLM.
+  if (/\/\/copyright\b/.test(rule)) {
+    const para = element === "idstatus" ? "para" : "copyrightPara";
+    const notice = (year) => `<copyright><${para}>Copyright © ${year} by Lufthansa Technik AG.</${para}></copyright>`;
+    const route = systemPrompt.match(/right after <security>,\n {2}with its required children[^\n]*\n((?: {4}.*\n)+)/);
+    const place = (year) => {
+      if (!route || systemPrompt.includes("MISPLACED")) return base.replace(/(<security [^>]*\/>)/, `$1\n    ${notice(year)}`);
+      const block = route[1].split("\n").map((l) => l.slice(4)).join("\n").replace(/<copyright>[\s\S]*<\/copyright>/, notice(year)).replace(/…/g, "Distribution statement A.");
+      return base.replace(/(<security [^>]*\/>)/, `$1\n${block}`);
+    };
+    return answer([ex("Current Lufthansa notice", "accept", place(2024)), ex("Notice with the wrong year", "reject", place(2023))]);
+  }
   if (/@infoCode/.test(rule)) {
     return answer([ex("Info code 055", "accept", ownCode("infoCode", "055")), ex("Info code 930", "accept", ownCode("infoCode", "930")), ex("Info code 040", "reject", ownCode("infoCode", "040"))]);
   }

@@ -27,6 +27,7 @@
 // context anchored at the document root (/*, /topic) makes the example the
 // whole document: the LLM writes the complete root element.
 import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js';
+import { sectionRoutes } from './schemaPlacement.js';
 import { extractRuleXPaths, extractXPathNames } from '../validation/schemaValidation.js';
 import { stripLiterals } from './ruleTestCommon.js';
 
@@ -657,7 +658,8 @@ function treeNames(node, out = new Set()) {
 // names in the predicates (targets.predicateNames) add the part they belong
 // to: a predicate on dmStatus/@issueType puts the section in the LLM's hands
 // even when the path selects content nodes.
-// → { metadata, content, contentAlternatives, unreachable, sectionMissing }
+// → { metadata, content, contentAlternatives, metadataAlternatives,
+//     unreachable, sectionMissing }
 // -- unreachable: the names the rule looks at when EVERY alternative is
 // unreachable (the examples can never contain what it checks), else null.
 // sectionMissing: a document whose identification and status section the
@@ -679,6 +681,7 @@ export function classifyRuleTargets(structure, targets) {
   let metadata = false;
   let content = false;
   const contentAlternatives = [];
+  const metadataAlternatives = [];
   const unreachableNames = [];
   let allUnreachable = true;
   const alternatives = targets?.alternatives || [];
@@ -717,7 +720,10 @@ export function classifyRuleTargets(structure, targets) {
       inMeta = Boolean(section) && carriers.some((o) => T.has(o) || (M.has(o) && !C.has(o)));
       inContent = carriers.some((o) => C.has(o));
     }
-    if (inMeta) metadata = true;
+    if (inMeta) {
+      metadata = true;
+      metadataAlternatives.push(alt);
+    }
     if (inContent) {
       content = true;
       contentAlternatives.push(alt);
@@ -735,7 +741,9 @@ export function classifyRuleTargets(structure, targets) {
   const sectionMissing = missingNames.length
     ? { element: missing.element, names: [...new Set(missingNames)], all: allMissing }
     : null;
-  if (sectionMissing?.all) return { metadata: false, content: false, contentAlternatives: [], unreachable: null, sectionMissing };
+  if (sectionMissing?.all) {
+    return { metadata: false, content: false, contentAlternatives: [], metadataAlternatives: [], unreachable: null, sectionMissing };
+  }
   // A predicate that reads the other part: an element only the section has
   // (dmStatus, updateCode, …) makes the LLM write the section too; an
   // element only the content has (zoneSpec, …), the content.
@@ -746,7 +754,7 @@ export function classifyRuleTargets(structure, targets) {
     alternatives.length > 0 && allUnreachable && !metadata && !content ? [...new Set(unreachableNames)] : null;
   // A rule nothing can be said about keeps the content placement.
   if (!metadata && !content && !unreachable) content = true;
-  return { metadata, content, contentAlternatives, unreachable, sectionMissing };
+  return { metadata, content, contentAlternatives, metadataAlternatives, unreachable, sectionMissing };
 }
 
 // The identification and status section of a document the application does
@@ -788,6 +796,47 @@ function isRootOnly(targets, root) {
       (a) => !a.opaque && !a.attribute && a.steps.length === 1 && a.steps[0] === root && a.absolutePrefix?.length === 1
     )
   );
+}
+
+// Ruta del esquema, Part 1: the way from the minimal identification and
+// status section down to the elements the rule looks at there, when they
+// are not directly inside one of its elements (schemaPlacement.js,
+// sectionRoutes) -- BRDP-S1-00065, //copyright: both examples put
+// <copyright> straight in <dmStatus> and the correction fixed none. The
+// names are the element steps of the alternatives about the section (the
+// steps before each one, when the rule names them, keep only the ways
+// through them) and the predicates' names only the section has. [] when
+// every one is already there or directly inside: the prompt does not change.
+function metadataRoutes(structure, targets, alternatives) {
+  const section = structure.skeleton.metadata;
+  const elements = structure.elements;
+  const names = [];
+  const requiredSteps = {};
+  for (const alt of alternatives || []) {
+    if (alt.opaque) continue;
+    alt.steps.forEach((step, i) => {
+      names.push(step);
+      if (i > 0 && !requiredSteps[step]) requiredSteps[step] = alt.steps.slice(0, i);
+    });
+  }
+  const stepRoutes = sectionRoutes(structure, section, names, requiredSteps);
+  // A predicate's name only adds a way when none of the steps' ways already
+  // reaches it (//copyright[… copyrightPara …]: the way to <copyright>, whose
+  // minimum already has its <copyrightPara>).
+  const inSection = reachableSet(elements, [section.element]);
+  const rest = reachableSet(elements, (elements[structure.skeleton.path[0]]?.children || []).filter((c) => c !== section.element));
+  const predicates = (targets?.predicateNames || []).filter((n) => inSection.has(n) && !rest.has(n) && !names.includes(n));
+  const covered = (route) =>
+    stepRoutes.some((r) => route.paths.every((p) => r.paths.some((q) => p.join('/').startsWith(`${q.join('/')}/`))));
+  const predicateRoutes = sectionRoutes(structure, section, predicates).filter((r) => !covered(r));
+  return [...stepRoutes, ...predicateRoutes];
+}
+
+function wholeDocumentMetadata(structure, targets, section) {
+  const metadata = { element: section.element, tree: section.tree, insertion: true };
+  const routes = metadataRoutes(structure, targets, (targets?.alternatives || []).filter((a) => !a.opaque));
+  if (routes.length) metadata.routes = routes;
+  return metadata;
 }
 
 // { path, insertion, root, allowedChildren, titled, metadata,
@@ -845,7 +894,7 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
       titled: (structure.skeleton.titled || []).includes(chain[0]) ? [chain[0]] : [],
       // The LLM writes the whole document; the prompt still gives it the
       // minimal identification and status section to start from.
-      metadata: section ? { element: section.element, tree: section.tree, insertion: true } : null,
+      metadata: section ? wholeDocumentMetadata(structure, targets, section) : null,
       contentInsertion: true,
       unreachable: null,
       sectionMissing: null,
@@ -854,6 +903,10 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   }
   const classes = classifyRuleTargets(structure, targets);
   const metadata = section ? { element: section.element, tree: section.tree, insertion: classes.metadata } : null;
+  if (metadata?.insertion) {
+    const routes = metadataRoutes(structure, targets, classes.metadataAlternatives);
+    if (routes.length) metadata.routes = routes;
+  }
   // What the content placement looks at: the alternatives about the content.
   const contentChecked = [
     ...new Set(classes.contentAlternatives.map((a) => a.checked).filter((name) => name && elements[name])),
