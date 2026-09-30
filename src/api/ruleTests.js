@@ -8,6 +8,12 @@ export function registerRuleTest(projectId, brdpId, format, testedRuleXml, recor
   return authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/approvals/${format}/test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ result: record.result, reason: record.reason, rule_hash: ruleXmlHash(testedRuleXml) }),
+    body: JSON.stringify({
+      result: record.result,
+      reason: record.reason,
+      rule_hash: ruleXmlHash(testedRuleXml),
+      // A test passed after editing examples by hand carries them.
+      ...(record.editedExamples?.length ? { edited_examples: record.editedExamples } : {}),
+    }),
   });
 }

@@ -30,7 +30,7 @@ import {
   RULE_TEST_REVIEW_USER_MESSAGE,
 } from '../prompts/ruleTestReviewPrompt.js';
 import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
-import { editExample, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
+import { editExample, editedExamplesRecord, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
 import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
 import { ruleDescriptionText, verdictToTestRecord } from '../utils/ruleTestReasons.js';
 
@@ -70,9 +70,20 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // Latest callback, so a generation that lands later reports to it.
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
+  // onResult may return (a promise of) whether the record was saved -- the
+  // draft rule's caller does; a suggestion's keeps it until Accept.
   const report = (record) => {
-    if (record && onResultRef.current) onResultRef.current(record);
+    if (record && onResultRef.current) return onResultRef.current(record);
+    return undefined;
   };
+  // The test recorded for the current generation (its verdict as the LLM
+  // wrote the examples), and whether a corrected test (hand edits that made
+  // it "Correct") was already recorded for it -- once per generation.
+  const recordedRef = useRef(null);
+  const editsRecordedRef = useRef(false);
+  // The notice about hand-edited examples, next to the verdict:
+  //   null | { kind: 'not_saved' } | { kind: 'recorded', count }
+  const [editNotice, setEditNotice] = useState(null);
 
   // `previousReview` (T3b): { explanation, mismatches } when the review
   // found the EXAMPLES at fault -- the new generation is told not to repeat
@@ -82,6 +93,9 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     generationRef.current = generation;
     setState({ status: 'loading' });
     setReview(null);
+    recordedRef.current = null;
+    editsRecordedRef.current = false;
+    setEditNotice(null);
     const result = await generateRuleTestExamples({
       ruleXml,
       format,
@@ -115,7 +129,11 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     setupRef.current = result.setup;
     const { proposalMismatch, examples, runs, correction } = result;
     setState({ status: 'ready', proposalMismatch, examples, runs, correction });
-    if (!onDemand) report(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis)));
+    if (!onDemand) {
+      const record = verdictToTestRecord(ruleTestVerdict(examples, runs, analysis));
+      recordedRef.current = record;
+      report(record);
+    }
   }, [ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, analysis, onDemand]);
 
   // Generate once when the panel opens (it is remounted for another rule),
@@ -138,17 +156,48 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // wrote (`generated`) and is marked `editedByUser` while its text differs
   // from it, so the panel says the verdict includes hand-edited examples and
   // is not recorded. A new generation (Regenerate) starts without marks.
-  const runAgain = (index, content, metadata) =>
-    setState((prev) => {
-      if (prev.status !== 'ready') return prev;
-      const example = editExample(prev.examples[index], content, metadata, setupRef.current);
-      const examples = prev.examples.map((ex, i) => (i === index ? example : ex));
-      const runs = prev.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary }) : r));
-      return { ...prev, examples, runs };
-    });
+  // Once per generation, hand edits that turn a recorded test that was not
+  // passed into "Correct" ARE recorded -- as passed, with the edited
+  // examples (editedExamplesRecord). Never for a rule that is not
+  // executable at all (its illustrative examples record nothing).
+  const runAgain = async (index, content, metadata) => {
+    if (state.status !== 'ready') return;
+    const example = editExample(state.examples[index], content, metadata, setupRef.current);
+    const examples = state.examples.map((ex, i) => (i === index ? example : ex));
+    const runs = state.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary }) : r));
+    setState({ ...state, examples, runs });
+    if (!examples.some((ex) => ex.editedByUser)) {
+      setEditNotice(null);
+      return;
+    }
+    const record = onDemand
+      ? null
+      : editedExamplesRecord({
+          recorded: recordedRef.current,
+          alreadyRecorded: editsRecordedRef.current,
+          examples,
+          verdict: ruleTestVerdict(examples, runs, analysis),
+        });
+    if (!record) {
+      setEditNotice({ kind: 'not_saved' });
+      return;
+    }
+    editsRecordedRef.current = true;
+    const generation = generationRef.current;
+    const saved = await report(record);
+    if (generationRef.current !== generation) return;
+    if (saved === false) {
+      // Not recorded (a viewer, or the request failed -- its error is shown
+      // by the caller): the next Correct edit may try again.
+      editsRecordedRef.current = false;
+      setEditNotice({ kind: 'not_saved' });
+      return;
+    }
+    recordedRef.current = record;
+    setEditNotice({ kind: 'recorded', count: record.editedExamples.length });
+  };
 
   const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis) : null;
-  const hasEditedExamples = state.status === 'ready' && state.examples.some((ex) => ex.editedByUser);
   const shownAnalysis = lateAnalysis || analysis;
 
   // T3b "Review with the assistant" (incorrect verdict only): the Proposal,
@@ -189,7 +238,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     analysis: shownAnalysis,
     description,
     verdict,
-    hasEditedExamples,
+    editNotice,
     copyablePrompt,
     generate,
     regenerate: generate,

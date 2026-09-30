@@ -63,9 +63,25 @@ class RuleTestReason(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+# An example edited by hand in the Test rule panel, as it was run: its
+# label and its complete XML (skeleton + content). Caps only there so the
+# column never stores an arbitrary payload.
+_MAX_EDITED_EXAMPLES = 20
+_MAX_EDITED_XML = 50000
+
+
+class RuleTestEditedExample(BaseModel):
+    label: str = Field(max_length=500)
+    xml: str = Field(min_length=1, max_length=_MAX_EDITED_XML)
+
+
 class RuleTestRegister(BaseModel):
     result: RuleTestResult
     reason: RuleTestReason | None = None
+    # A passed test reached by editing examples by hand after the recorded
+    # test was not passed (the panel records it once per generation). Only
+    # with result "passed"; never an empty list.
+    edited_examples: list[RuleTestEditedExample] | None = Field(default=None, max_length=_MAX_EDITED_EXAMPLES)
     # SHA-256 hex of the rule_xml that was tested; must match the saved
     # rule_xml (otherwise the test was of another rule -- 409).
     rule_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -84,6 +100,11 @@ class RuleTestRegister(BaseModel):
             raise ValueError("a passed test has no reason")
         if self.result != "passed" and self.reason is None:
             raise ValueError(f"a {self.result} test needs a reason")
+        if self.edited_examples is not None:
+            if self.result != "passed":
+                raise ValueError("only a passed test is recorded with edited examples")
+            if not self.edited_examples:
+                raise ValueError("edited_examples, when given, is not empty")
         return self
 
 
@@ -96,6 +117,7 @@ class RuleApprovalOut(BaseModel):
     last_test_reason: dict[str, Any] | None = None
     last_test_at: datetime | None = None
     last_test_rule_hash: str | None = None
+    last_test_edited_examples: list[dict[str, Any]] | None = None
 
     model_config = {"from_attributes": True}
 

@@ -229,6 +229,23 @@ export function editExample(current, content, metadata, setup, parseXml = parseX
   return materializeExample(edited, setup, parseXml);
 }
 
+// "Record the corrected test": the record to send when the user's hand
+// edits (Run again) turn the verdict into "Correct" while the test recorded
+// for this generation was not passed (failed, inconclusive, nothing
+// runnable -- or nothing recorded). Once per generation: after one such
+// record, later edits record nothing (`alreadyRecorded`). A recorded
+// "passed" stays as it is -- editing is then a what-if. Never for a verdict
+// that is not "Correct". → { result: 'passed', reason: null,
+// editedExamples: [{ label, xml }] } (xml: the complete example as it was
+// run) | null.
+export function editedExamplesRecord({ recorded, alreadyRecorded, examples, verdict }) {
+  if (alreadyRecorded || !verdict || verdict.kind !== 'correct') return null;
+  if (recorded && recorded.result === 'passed') return null;
+  const edited = (examples || []).filter((ex) => ex.editedByUser && ex.xml);
+  if (edited.length === 0) return null;
+  return { result: 'passed', reason: null, editedExamples: edited.map((ex) => ({ label: ex.label || '', xml: ex.xml })) };
+}
+
 // Pending of the test rule (Part 1): `nestings` (the placement's
 // nestingPaths) and `expected` -- in an example meant to be rejected, a
 // "<B> is not allowed inside <A>" problem on the way of a rule's A//B also

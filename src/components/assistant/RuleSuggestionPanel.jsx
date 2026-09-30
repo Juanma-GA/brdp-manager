@@ -226,6 +226,7 @@ export default function RuleSuggestionPanel({
           vocabulary={vocabulary}
           onClose={() => setTestOpen(false)}
           onResult={(record) => onTestResult?.(entry.text, record)}
+          recordsOnAccept
           onSuggestCorrectedRule={onSuggestCorrectedRule}
           correctedRuleBlockedReason={correctedRuleBlockedReason}
         />

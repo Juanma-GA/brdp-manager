@@ -224,3 +224,73 @@ async def test_approve_is_not_blocked_by_a_missing_or_failed_test(client, editor
         headers=headers,
     )
     assert (await client.post(url + "/approve", headers=headers)).status_code == 200
+
+
+# ─── A test passed with examples edited by hand ─────────────────────────────
+
+EDITED = [
+    {
+        "label": "Nested lists",
+        "xml": "<dmodule><content><description><levelledPara><para><randomList><listItem><para>A<randomList><listItem><para>B</para></listItem></randomList></para></listItem></randomList></para></levelledPara></description></content></dmodule>",
+    }
+]
+
+
+async def test_register_passed_with_edited_examples_stores_them(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    failed = {"result": "failed", "reason": {"code": "test_incorrect", "params": {"permissive": True, "strict": False}}, "rule_hash": _hash(RULE)}
+    assert (await client.post(f"{url}/test", json=failed, headers=headers)).status_code == 200
+    res = await client.post(f"{url}/test", json={"result": "passed", "rule_hash": _hash(RULE), "edited_examples": EDITED}, headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["last_test_result"] == "passed"
+    assert body["last_test_edited_examples"] == EDITED
+    assert body["last_test_up_to_date"] is True
+    # History: the entry carries the edited examples (their XML), the
+    # previous one (failed) does not.
+    history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
+    entries = [h for h in history if h["field_name"] == "rule_test"]
+    latest = max(entries, key=lambda h: h["changed_at"])
+    assert json.loads(latest["new_value"]) == {"result": "passed", "reason": None, "edited_examples": EDITED}
+    assert json.loads(latest["old_value"])["result"] == "failed"
+    assert "edited_examples" not in json.loads(latest["old_value"])
+
+
+async def test_a_new_test_without_edits_clears_the_edited_examples(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    await client.post(f"{url}/test", json={"result": "passed", "rule_hash": _hash(RULE), "edited_examples": EDITED}, headers=headers)
+    body = (await client.post(f"{url}/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)).json()
+    assert body["last_test_result"] == "passed"
+    assert body["last_test_edited_examples"] is None
+
+
+async def test_plain_passed_history_value_is_unchanged(client, editor_viewer_and_project):
+    # Without edits, the History value keeps the exact shape it had before.
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    await client.post(f"{url}/test", json={"result": "passed", "rule_hash": _hash(RULE)}, headers=headers)
+    history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
+    entry = next(h for h in history if h["field_name"] == "rule_test")
+    assert json.loads(entry["new_value"]) == {"result": "passed", "reason": None}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # only a passed test carries edited examples
+        {"result": "failed", "reason": {"code": "test_incorrect", "params": {}}, "edited_examples": EDITED},
+        # never an empty list
+        {"result": "passed", "edited_examples": []},
+        # an example without XML
+        {"result": "passed", "edited_examples": [{"label": "x", "xml": ""}]},
+        # too many
+        {"result": "passed", "edited_examples": EDITED * 21},
+    ],
+)
+async def test_edited_examples_payload_is_validated(client, editor_viewer_and_project, payload):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    res = await client.post(f"{url}/test", json={**payload, "rule_hash": _hash(RULE)}, headers=headers)
+    assert res.status_code == 422

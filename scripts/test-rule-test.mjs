@@ -1595,5 +1595,69 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('edited: exact ES notice', i18n.getFixedT('es')('records.ruleTest.editedNotice') === 'Este resultado incluye ejemplos editados a mano y no se guarda. Regenera los ejemplos para registrar un test.');
 }
 
+// ---------------------------------------------------------------------------
+// Registrar la prueba corregida con ejemplos editados.
+{
+  const { editedExamplesRecord } = await import('../src/utils/ruleTest.js');
+  const { ruleTestStatus, verifyWarning, parseRuleTestHistoryValue } = await import('../src/utils/ruleTestStatus.js');
+  const correct = { kind: 'correct' };
+  const incorrect = { kind: 'incorrect' };
+  const exs = [
+    { label: 'Accepted', xml: '<a/>', editedByUser: false },
+    { label: 'Nested lists', xml: '<dmodule><randomList/></dmodule>', editedByUser: true },
+  ];
+  const failedRec = { result: 'failed', reason: { code: 'test_incorrect', params: {} } };
+  const rec = editedExamplesRecord({ recorded: failedRec, alreadyRecorded: false, examples: exs, verdict: correct });
+  check('edited record: failed → correct → recorded as passed with the edited examples', rec && rec.result === 'passed' && rec.reason === null && rec.editedExamples.length === 1 && rec.editedExamples[0].label === 'Nested lists' && rec.editedExamples[0].xml === exs[1].xml, JSON.stringify(rec));
+  for (const kind of ['inconclusive', 'not_executable']) {
+    check(`edited record: last recorded ${kind} → recorded`, editedExamplesRecord({ recorded: { result: kind, reason: { code: 'x', params: {} } }, alreadyRecorded: false, examples: exs, verdict: correct })?.result === 'passed');
+  }
+  check('edited record: nothing recorded yet → recorded', editedExamplesRecord({ recorded: null, alreadyRecorded: false, examples: exs, verdict: correct })?.result === 'passed');
+  check('edited record: last recorded passed → nothing (what-if)', editedExamplesRecord({ recorded: { result: 'passed', reason: null }, alreadyRecorded: false, examples: exs, verdict: correct }) === null);
+  check('edited record: still failing → nothing', editedExamplesRecord({ recorded: failedRec, alreadyRecorded: false, examples: exs, verdict: incorrect }) === null);
+  check('edited record: inconclusive after edits → nothing', editedExamplesRecord({ recorded: failedRec, alreadyRecorded: false, examples: exs, verdict: { kind: 'inconclusive' } }) === null);
+  check('edited record: already recorded in this generation → nothing', editedExamplesRecord({ recorded: failedRec, alreadyRecorded: true, examples: exs, verdict: correct }) === null);
+  check('edited record: no example edited → nothing', editedExamplesRecord({ recorded: failedRec, alreadyRecorded: false, examples: exs.map((e) => ({ ...e, editedByUser: false })), verdict: correct }) === null);
+
+  const ap = (fields) => ({ rule_xml: '<structureObjectRule id="x"><objectPath allowedObjectFlag="0">//randomList//randomList</objectPath><objectUse>u</objectUse></structureObjectRule>', last_test_up_to_date: true, last_test_at: '2026-09-30T10:00:00Z', ...fields });
+  const withEdits = ap({ last_test_result: 'passed', last_test_edited_examples: [{ label: 'Nested lists', xml: '<x/>' }] });
+  check('edited status: passed with edits → editedCount 1', ruleTestStatus(withEdits).kind === 'passed' && ruleTestStatus(withEdits).editedCount === 1);
+  check('edited status: plain passed → editedCount 0', ruleTestStatus(ap({ last_test_result: 'passed' })).editedCount === 0);
+  check('edited status: outdated → no edit count', ruleTestStatus({ ...withEdits, last_test_up_to_date: false }).kind === 'outdated' && ruleTestStatus({ ...withEdits, last_test_up_to_date: false }).editedCount === 0);
+  const vw = verifyWarning(withEdits, 'BREX-4.2', { parseXml });
+  check('edited verify: passed with edits → warning passed_edited, Test now offered', vw?.kind === 'passed_edited' && vw.editedCount === 1 && vw.canTestNow === true);
+  check('edited verify: plain passed → no warning', verifyWarning(ap({ last_test_result: 'passed' }), 'BREX-4.2', { parseXml }) === null);
+
+  const hv = JSON.stringify({ result: 'passed', reason: null, edited_examples: [{ label: 'Nested lists', xml: '<x/>' }, { label: 'B', xml: '<y/>' }] });
+  const parsed = parseRuleTestHistoryValue(hv);
+  check('edited history: parsed with its examples', parsed.result === 'passed' && parsed.editedExamples.length === 2 && parsed.editedExamples[0].xml === '<x/>');
+  check('edited history: plain value → no examples', parseRuleTestHistoryValue(JSON.stringify({ result: 'failed', reason: { code: 'x', params: {} } })).editedExamples.length === 0);
+  check('edited history: not JSON → null', parseRuleTestHistoryValue('Passed') === null);
+
+  const es = i18n.getFixedT('es');
+  const en = i18n.getFixedT('en');
+  const texts = [
+    [es('records.ruleTest.indicator.passedEdited', { date: '30 sept 2026', count: 1 }), 'Probada ✓ (30 sept 2026) · 1 ejemplo editado a mano'],
+    [es('records.ruleTest.indicator.passedEdited', { date: '30 sept 2026', count: 2 }), 'Probada ✓ (30 sept 2026) · 2 ejemplos editados a mano'],
+    [en('records.ruleTest.indicator.passedEdited', { date: 'Sep 30, 2026', count: 1 }), 'Tested ✓ (Sep 30, 2026) · 1 example edited by hand'],
+    [en('records.ruleTest.indicator.passedEdited', { date: 'Sep 30, 2026', count: 3 }), 'Tested ✓ (Sep 30, 2026) · 3 examples edited by hand'],
+    [es('records.ruleTest.editedRecorded', { count: 1 }), 'Registrada como probada con 1 ejemplo editado a mano.'],
+    [es('records.ruleTest.editedRecorded', { count: 2 }), 'Registrada como probada con 2 ejemplos editados a mano.'],
+    [en('records.ruleTest.editedRecorded', { count: 2 }), 'Recorded as tested with 2 examples edited by hand.'],
+    [es('records.ruleTest.results.passedEdited', { count: 1 }), 'Probada con 1 ejemplo editado a mano'],
+    [es('records.ruleTest.results.passedEdited', { count: 2 }), 'Probada con 2 ejemplos editados a mano'],
+    [en('records.ruleTest.results.passedEdited', { count: 1 }), 'Passed with 1 example edited by hand'],
+  ];
+  for (const [got, want] of texts) check(`edited text: ${want}`, got === want, got);
+  check('edited text: Verify warning (ES) says the last test includes them', es('records.ruleTest.verifyDialog.passedEdited', { count: 2 }).includes('El último test incluye 2 ejemplos editados a mano'));
+  check('edited text: Verify warning (EN)', en('records.ruleTest.verifyDialog.passedEdited', { count: 1 }).includes('The last test includes 1 example edited by hand'));
+  for (const key of ['editedRecordedOnAccept', 'historyEditedExamples', 'indicator.passedEditedTitle']) {
+    for (const [lng, tt] of [['en', en], ['es', es]]) {
+      const v = tt(`records.ruleTest.${key}`, { count: 2, date: 'd' });
+      check(`edited text: ${key} (${lng}) translated`, !v.startsWith('records.') && v.includes('2'), v);
+    }
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

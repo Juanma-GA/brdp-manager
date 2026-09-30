@@ -412,8 +412,12 @@ function ReviewSection({ review, onReview, onRegenerate, onSuggestCorrected, cor
 // The panel: what cannot be tested first (T2b: known before any example),
 // then the verdict, the explanation and each example. Opened by
 // TestRuleButton; mounted with key={rule} so another rule starts afresh.
-// onResult({ result, reason }) receives the result to record (T3; see
-// useRuleTest for what is -- and is not -- recorded).
+// onResult({ result, reason, editedExamples? }) receives the result to
+// record (T3; see useRuleTest for what is -- and is not -- recorded) and may
+// return (a promise of) whether it was saved. recordsOnAccept: a
+// suggestion's test is recorded when the rule is accepted, so the notice
+// about a corrected test says so.
+
 // onSuggestCorrectedRule({ ruleXml, schemas, mismatches, diagnosis }) (T3b)
 // starts Suggest Rule with the failed test in its prompt; absent where the
 // panel cannot offer it, disabled with correctedRuleBlockedReason.
@@ -427,11 +431,12 @@ export default function RuleTestPanel({
   vocabulary,
   onClose,
   onResult,
+  recordsOnAccept = false,
   onSuggestCorrectedRule,
   correctedRuleBlockedReason = null,
 }) {
   const { t } = useTranslation();
-  const { state, analysis, description, verdict, hasEditedExamples, copyablePrompt, generate, regenerate, runAgain, review, reviewFailure, regenerateWithReview } = useRuleTest({
+  const { state, analysis, description, verdict, editNotice, copyablePrompt, generate, regenerate, runAgain, review, reviewFailure, regenerateWithReview } = useRuleTest({
     ruleXml,
     format,
     standard,
@@ -516,9 +521,14 @@ export default function RuleTestPanel({
               {view.text}
             </p>
           )}
-          {hasEditedExamples && (
-            <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-edited-notice">
+          {editNotice?.kind === 'not_saved' && (
+            <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-edited-notice" data-kind="not_saved">
               {t('records.ruleTest.editedNotice')}
+            </p>
+          )}
+          {editNotice?.kind === 'recorded' && (
+            <p className={`${styles.ruleTestNote} ${styles.ruleTestToneOk}`} data-testid="rule-test-edited-notice" data-kind="recorded">
+              {t(recordsOnAccept ? 'records.ruleTest.editedRecordedOnAccept' : 'records.ruleTest.editedRecorded', { count: editNotice.count })}
             </p>
           )}
           {verdict?.kind === 'incorrect' && (

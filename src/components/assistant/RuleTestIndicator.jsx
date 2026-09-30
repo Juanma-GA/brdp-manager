@@ -26,7 +26,10 @@ export function RuleTestIndicator({ approval }) {
   const date = formatDate(status.at, i18n.language);
   const reason = formatRuleTestReason(status.reason, t);
   const text = {
-    passed: t('records.ruleTest.indicator.passed', { date }),
+    passed:
+      status.editedCount > 0
+        ? t('records.ruleTest.indicator.passedEdited', { date, count: status.editedCount })
+        : t('records.ruleTest.indicator.passed', { date }),
     failed: t('records.ruleTest.indicator.failed'),
     inconclusive: t('records.ruleTest.indicator.inconclusive'),
     not_executable: t('records.ruleTest.indicator.notExecutable', { reason }),
@@ -34,7 +37,10 @@ export function RuleTestIndicator({ approval }) {
     outdated: t('records.ruleTest.indicator.outdated'),
   }[status.kind];
   const title = {
-    passed: t('records.ruleTest.indicator.passedTitle', { date }),
+    passed:
+      status.editedCount > 0
+        ? t('records.ruleTest.indicator.passedEditedTitle', { date, count: status.editedCount })
+        : t('records.ruleTest.indicator.passedTitle', { date }),
     failed: t('records.ruleTest.indicator.failedTitle', { date, reason }),
     inconclusive: t('records.ruleTest.indicator.inconclusiveTitle', { date, reason }),
     not_executable: undefined,
@@ -47,6 +53,7 @@ export function RuleTestIndicator({ approval }) {
       title={title}
       data-testid="rule-test-indicator"
       data-state={status.kind}
+      data-edited={status.editedCount || undefined}
     >
       {text}
     </p>
@@ -64,6 +71,7 @@ export function VerifyWarningDialog({ warning, busy, onTestNow, onVerifyAnyway, 
     failed: t('records.ruleTest.verifyDialog.failed', { reason }),
     inconclusive: t('records.ruleTest.verifyDialog.inconclusive', { reason }),
     not_executable: t('records.ruleTest.verifyDialog.notExecutable', { reason }),
+    passed_edited: t('records.ruleTest.verifyDialog.passedEdited', { count: warning.editedCount }),
   }[warning.kind];
   return (
     <div className={styles.modalOverlay} onClick={onCancel}>

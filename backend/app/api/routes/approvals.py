@@ -231,14 +231,20 @@ async def propose_approval(
     return approval
 
 
-def _rule_test_history_value(result: str | None, reason: dict | None) -> str:
+def _rule_test_history_value(result: str | None, reason: dict | None, edited_examples: list | None = None) -> str:
     """The History value of a "rule_test" entry: the result and its reason
     as JSON codes (never a sentence), so the History panel translates it in
-    the viewer's language. "" for "not tested" (a rule's first test).
+    the viewer's language. "" for "not tested" (a rule's first test). A
+    test passed with examples edited by hand also carries them
+    ("edited_examples": [{"label", "xml"}]), so History can show their XML;
+    without them the value is exactly as before.
     """
     if result is None:
         return ""
-    return json.dumps({"result": result, "reason": reason}, sort_keys=True, ensure_ascii=False)
+    value = {"result": result, "reason": reason}
+    if edited_examples:
+        value["edited_examples"] = edited_examples
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
 
 
 @router.post("/test", response_model=RuleApprovalOut)
@@ -259,8 +265,10 @@ async def register_rule_test(
     What is recorded is the verdict of the examples as the LLM wrote them
     and the application validated them (after the one correction round):
     editing an example and pressing "Run again" in the panel is a
-    what-if for the user and never changes the recorded result (see
-    useRuleTest.js). Editor only: a viewer can run Test rule (it writes
+    what-if for the user and never changes the recorded result -- except
+    once per generation, when the edits turn a recorded test that was not
+    passed into "Correct": that is recorded as passed with the edited
+    examples (edited_examples; see useRuleTest.js). Editor only: a viewer can run Test rule (it writes
     nothing), but only an editor's run is recorded.
 
     Always adds a "rule_test" History entry, even with the same result as
@@ -279,14 +287,18 @@ async def register_rule_test(
             detail="The tested rule is not the saved rule; test the saved rule again",
         )
     reason = body.reason.model_dump() if body.reason is not None else None
-    old_value = _rule_test_history_value(approval.last_test_result, approval.last_test_reason)
+    edited = [e.model_dump() for e in body.edited_examples] if body.edited_examples else None
+    old_value = _rule_test_history_value(
+        approval.last_test_result, approval.last_test_reason, approval.last_test_edited_examples
+    )
     approval.last_test_result = body.result
     approval.last_test_reason = reason
     approval.last_test_at = datetime.now(timezone.utc)
     approval.last_test_by = editor.id
     approval.last_test_rule_hash = body.rule_hash
+    approval.last_test_edited_examples = edited
     record_change(
-        db, brdp_id, editor, "rule_test", old_value, _rule_test_history_value(body.result, reason), always=True
+        db, brdp_id, editor, "rule_test", old_value, _rule_test_history_value(body.result, reason, edited), always=True
     )
     await db.commit()
     await db.refresh(approval)

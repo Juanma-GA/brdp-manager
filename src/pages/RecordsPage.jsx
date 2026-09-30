@@ -31,7 +31,7 @@ import RuleStatusStepper from '../components/RuleStatusStepper';
 import RuleTestPanel, { canTestRule, TestRuleButton } from '../components/assistant/RuleTestPanel';
 import { RuleTestIndicator, VerifyWarningDialog } from '../components/assistant/RuleTestIndicator';
 import { registerRuleTest } from '../api/ruleTests';
-import { verifyWarning } from '../utils/ruleTestStatus.js';
+import { parseRuleTestHistoryValue, verifyWarning } from '../utils/ruleTestStatus.js';
 import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
 import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
@@ -101,13 +101,14 @@ const HISTORY_MAX_CHARS = 160;
 
 // A "rule_test" History value (T3) is JSON codes, {"result", "reason"},
 // never a sentence: translated here, so it reads in the viewer's language.
+// A passed test reached by editing examples by hand says so, with the count
+// (its XML is shown under the entry: HistoryEditedExamples).
 function formatRuleTestHistoryValue(t, value) {
   if (!value) return t('records.ruleTest.indicator.notTested');
-  let parsed;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return value;
+  const parsed = parseRuleTestHistoryValue(value);
+  if (!parsed) return value;
+  if (parsed.result === 'passed' && parsed.editedExamples.length > 0) {
+    return t('records.ruleTest.results.passedEdited', { count: parsed.editedExamples.length });
   }
   const result = t(`records.ruleTest.results.${parsed.result}`, { defaultValue: parsed.result });
   const reason = formatRuleTestReason(parsed.reason, t);
@@ -119,6 +120,25 @@ function formatRuleTestHistoryValue(t, value) {
 function historyValueTitle(t, fieldName, value) {
   if (!value) return undefined;
   return fieldName === 'rule_test' ? formatRuleTestHistoryValue(t, value) : value;
+}
+
+// The examples edited by hand of a recorded rule test, as they were run --
+// collapsed under the History entry.
+function HistoryEditedExamples({ value }) {
+  const { t } = useTranslation();
+  const parsed = parseRuleTestHistoryValue(value);
+  if (!parsed || parsed.editedExamples.length === 0) return null;
+  return (
+    <details className={styles.historyEditedExamples} data-testid="history-edited-examples">
+      <summary>{t('records.ruleTest.historyEditedExamples', { count: parsed.editedExamples.length })}</summary>
+      {parsed.editedExamples.map((ex, i) => (
+        <div key={i} className={styles.historyEditedExample}>
+          {ex.label && <div className={styles.historyEditedExampleLabel}>{ex.label}</div>}
+          <pre className={styles.historyEditedExampleXml}>{ex.xml}</pre>
+        </div>
+      ))}
+    </details>
+  );
 }
 
 function formatHistoryValue(t, fieldName, value) {
@@ -655,15 +675,19 @@ export default function RecordsPage() {
   // Part 1). Editor only: a viewer can run the test, but only an editor's
   // run is recorded (the backend requires editor too). A failure to record
   // is shown next to the Rule Status indicator, never swallowed (HR7).
+  // Returns whether it was saved (the panel's notice about a corrected
+  // test with hand-edited examples depends on it).
   const recordDraftRuleTest = async (brdpId, testedRuleXml, record) => {
-    if (!canEdit || !ruleFormat) return;
+    if (!canEdit || !ruleFormat) return false;
     setRuleTestRecordError(null);
     try {
       await registerRuleTest(projectId, brdpId, ruleFormat, testedRuleXml, record);
       setApprovalsRefreshToken((n) => n + 1);
       setHistoryRefreshToken((n) => n + 1);
+      return true;
     } catch (err) {
       setRuleTestRecordError(err.message);
+      return false;
     }
   };
 
@@ -1988,6 +2012,7 @@ export default function RecordsPage() {
                             {formatHistoryValue(t, h.field_name, h.new_value)}
                           </span>
                         </div>
+                        {h.field_name === 'rule_test' && <HistoryEditedExamples value={h.new_value} />}
                         <div className={styles.historyMeta}>
                           {h.user_email || t('records.history.unknownUser')} ·{' '}
                           {new Date(h.changed_at).toLocaleString()}

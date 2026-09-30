@@ -123,6 +123,8 @@ function isRuleTest(text) {
 //                (the first real run); the correction round fixes it
 //   STUBBORN     same, but the correction keeps it broken
 //   MISMATCH     "proposalMismatch" filled in
+//   SIBLINGLISTS (//randomList//randomList) the reject example is two
+//                sibling lists, also after the correction round
 //   SPANNEDCELLS (C3b, //thead rule) both examples carry a table whose row 2
 //                repeats a cell a morerows above already covers (the real
 //                titled-context run at 297df74); the app removes it itself
@@ -365,7 +367,9 @@ function ruleTestReply(systemPrompt, messages) {
     const flat = "<randomList><listItem><para>Remove the access panel.</para></listItem><randomList><listItem><para>Remove the screws.</para></listItem></randomList></randomList>";
     const nested = "<randomList><listItem><para>Remove the access panel.<randomList><listItem><para>Remove the screws.</para></listItem></randomList></para></listItem></randomList>";
     const moved = "<randomList><listItem><para>Remove the access panel.</para></listItem></randomList><randomList><listItem><para>Remove the screws.</para></listItem></randomList>";
-    const reject = !correcting ? flat : /Keep the nesting/.test(lastUser) ? nested : moved;
+    // SIBLINGLISTS: the "nested" list is two sibling lists from the start
+    // (the real S1-00507 failure the user corrects by hand) and stays so.
+    const reject = /SIBLINGLISTS/.test(proposal) ? moved : !correcting ? flat : /Keep the nesting/.test(lastUser) ? nested : moved;
     return answer([
       { label: "One list", expected: "accept", schema: ruleSchema, content: single },
       { label: "List inside a list", expected: "reject", schema: ruleSchema, content: reject },

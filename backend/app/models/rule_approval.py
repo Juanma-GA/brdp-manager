@@ -43,3 +43,8 @@ class RuleApproval(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     last_test_rule_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # A passed test the user got to "Correct" by editing examples by hand
+    # after the recorded test had failed / was inconclusive / had nothing
+    # runnable: [{"label", "xml"}] -- each edited example as it was run.
+    # NULL for a test recorded from the examples as the LLM wrote them.
+    last_test_edited_examples: Mapped[list | None] = mapped_column(JSONB, nullable=True)
