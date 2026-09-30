@@ -2187,5 +2187,35 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
     && es('records.ruleTest.saved.edited', { count: 2 }).includes('2'), [en('records.ruleTest.saved.open', { date: '30/09/2026' }), es('records.ruleTest.saved.ruleChanged')].join(' | '));
 }
 
+// ---------------------------------------------------------------------------
+// Mensaje de fallo según la causa.
+{
+  const { verdictCause } = await import('../src/utils/ruleTest.js');
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const ok = { validation: { runnable: true }, result: { status: 'accepted' } };
+  const invalid = { validation: { runnable: false }, result: null };
+  check('cause: no example ran → the examples', verdictCause({ kind: 'no_runnable', bySchema: [] }, [invalid])?.cause === 'examples');
+  check('cause: nothing selected / missing expectation → the examples', verdictCause({ kind: 'inconclusive', why: 'nothing_selected' }, [ok])?.cause === 'examples' && verdictCause({ kind: 'inconclusive', why: 'missing_expectation' }, [ok, invalid])?.cause === 'examples');
+  check('cause: incorrect with an example that did not run → the examples', verdictCause({ kind: 'incorrect', permissive: true, strict: false }, [ok, invalid])?.cause === 'examples');
+  const rule = verdictCause({ kind: 'incorrect', permissive: true, strict: false }, [ok, ok]);
+  check('cause: incorrect with every example valid → the rule, which way', rule?.cause === 'rule' && rule.permissive && !rule.strict);
+  check('cause: correct, review and not executable have none', verdictCause({ kind: 'correct' }, [ok]) === null && verdictCause({ kind: 'review', mismatch: 'x' }, [ok]) === null && verdictCause({ kind: 'not_executable', reason: {} }, []) === null);
+  check('cause: texts ES', es('records.ruleTest.cause.examples') === 'Los ejemplos los genera la IA y a veces salen mal. Vuelve a generarlos.'
+    && es('records.ruleTest.cause.rulePermissive') === 'La regla aceptó un ejemplo que debía rechazar.'
+    && es('records.ruleTest.cause.ruleStrict') === 'La regla rechazó un ejemplo que debía aceptar.'
+    && es('records.ruleTest.cause.checkExample', { count: 1 }) === 'Revisa ese ejemplo: si es correcto, el problema está en la regla.');
+  check('cause: texts EN', en('records.ruleTest.cause.examples').startsWith('The examples are written by the AI') && en('records.ruleTest.cause.checkExample', { count: 2 }).startsWith('Check those examples'));
+  // The real S1-00187 run with expectations swapped: every example valid → the rule.
+  const S42 = 'S1000D 4.2';
+  const R187 = readPublicTemplate('brdp-template-4-2.xlsx').find((row) => row.ID === 'BRDP-S1-00187')?.Rule;
+  const swapped = testRun(R187, [
+    { label: 'two substeps', expected: 'reject', schema: 'proced', content: '<proceduralStep><para>A.</para><proceduralStep><para>B.</para></proceduralStep><proceduralStep><para>C.</para></proceduralStep></proceduralStep>' },
+    { label: 'one substep', expected: 'accept', schema: 'proced', content: '<proceduralStep><para>A.</para><proceduralStep><para>B.</para></proceduralStep></proceduralStep>' },
+  ], setupFor(S42, R187, ['proced']));
+  const c = verdictCause(swapped.verdict, swapped.runs);
+  check('cause: S1-00187 with swapped expectations → the rule, both ways', c?.cause === 'rule' && c.permissive && c.strict, JSON.stringify(c));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

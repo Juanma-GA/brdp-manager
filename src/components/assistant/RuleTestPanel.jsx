@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
+import VerdictCauseHint from './VerdictCauseHint';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
@@ -629,6 +630,7 @@ export default function RuleTestPanel({
               {view.text}
             </p>
           )}
+          {!ruleNotExecutable && <VerdictCauseHint verdict={verdict} runs={state.runs} />}
           <ReplacePassedQuestion question={replaceQuestion} answer={replaceAnswer} onAnswer={answerReplaceQuestion} />
           {editNotice?.kind === 'not_saved' && (
             <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-edited-notice" data-kind="not_saved">

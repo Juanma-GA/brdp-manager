@@ -383,6 +383,25 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalMismatc
   return { kind: 'correct' };
 }
 
+// The likely cause of a failed test, for the message under the verdict:
+//   { cause: 'examples' }  -- nothing could be judged (no example ran, the
+//                             rule selected nothing, an accept/reject pair is
+//                             missing) or the test is wrong while some
+//                             examples did not even run: the examples are
+//                             the AI's and are what to redo first
+//   { cause: 'rule', permissive, strict } -- every example ran and some gave
+//                             the wrong result: if that example is right, the
+//                             rule is wrong
+//   null                   -- correct, review (its own message) and not
+//                             executable (its own reason)
+export function verdictCause(verdict, runs = []) {
+  if (!verdict) return null;
+  if (verdict.kind === 'no_runnable' || verdict.kind === 'inconclusive') return { cause: 'examples' };
+  if (verdict.kind !== 'incorrect') return null;
+  if (runs.some((r) => !r?.validation?.runnable)) return { cause: 'examples' };
+  return { cause: 'rule', permissive: verdict.permissive === true, strict: verdict.strict === true };
+}
+
 // ─── Display ────────────────────────────────────────────────────────────────
 const escText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');

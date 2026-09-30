@@ -4,6 +4,7 @@ import styles from '../../pages/RecordsPage.module.css';
 import { runExample } from '../../utils/ruleTest.js';
 import { runSavedTest, savedExamplesDate } from '../../utils/ruleTestSaved.js';
 import { passedTestToReplaceAt } from '../../utils/ruleTestStatus.js';
+import VerdictCauseHint from './VerdictCauseHint';
 import { ExampleCard, ReplacePassedQuestion, TONE_CLASS, formatTestDate, verdictView } from './RuleTestPanel';
 
 // Guardar la prueba aprobada: the last passed test of the rule, read-only --
@@ -109,6 +110,7 @@ export default function SavedRuleTestPanel({ saved, format, standard, vocabulary
           <p className={`${styles.ruleTestVerdict} ${styles[TONE_CLASS[view.tone]]}`} data-testid="saved-rule-test-verdict" data-kind={current.verdict.kind}>
             {view.text}
           </p>
+          <VerdictCauseHint verdict={current.verdict} runs={current.runs} />
           {current.changed.length > 0 && (
             <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="saved-rule-test-changed-summary">
               {t('records.ruleTest.saved.changedSummary', {
