@@ -353,7 +353,7 @@ async def register_rule_test(
                 "rule_hash": body.rule_hash,
                 "proposal": body.passed_test.proposal,
                 "examples_from": examples_from.isoformat() if examples_from is not None else None,
-                "edited_count": len(edited) if edited else 0,
+                "edited_count": len(edited) if edited else body.passed_test.edited_count,
                 "examples": [e.model_dump(by_alias=True) for e in body.passed_test.examples],
             }
             if body.passed_test is not None

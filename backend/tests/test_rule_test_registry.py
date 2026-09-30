@@ -473,6 +473,17 @@ async def test_a_pass_on_saved_examples_keeps_their_date_and_notes_it_in_history
     assert json.loads(latest["new_value"])["examples_from"][:19] == first["at"][:19]
 
 
+async def test_a_pass_on_saved_edited_examples_keeps_saying_they_were_edited(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    payload = {**_passed_payload(examples_from="2026-09-01T10:00:00+00:00"), "edited_count": 2}
+    body = (await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": payload}, headers=headers)).json()
+    assert body["last_passed_test"]["edited_count"] == 2
+    bad = {**_passed_payload(), "edited_count": -1}
+    resp = await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": bad}, headers=headers)
+    assert resp.status_code == 422
+
+
 async def test_passed_test_payload_is_validated(client, editor_viewer_and_project):
     project, headers, _ = editor_viewer_and_project
     _, url = await _brdp_with_rule(client, project, headers)

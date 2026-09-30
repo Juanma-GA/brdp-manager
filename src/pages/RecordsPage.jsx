@@ -1466,12 +1466,22 @@ export default function RecordsPage() {
                   </div>
                   {savedTest && savedTestOpenFor === selected.id && (
                     <SavedRuleTestPanel
-                      key={`${selected.id}:${savedTest.at}`}
+                      key={selected.id}
                       saved={savedTest}
                       format={ruleFormat}
                       standard={project.standard}
                       vocabulary={vocabulary}
                       onClose={() => setSavedTestOpenFor(null)}
+                      rerun={
+                        ruleStateOf(ruleApproval) === 'draft'
+                          ? {
+                              ruleXml: ruleApproval.rule_xml,
+                              approval: canEdit ? ruleApproval : null,
+                              onRecord: (record) => recordDraftRuleTest(selected.id, ruleApproval.rule_xml, record),
+                              onKeepPrevious: (record) => recordDraftRuleTest(selected.id, ruleApproval.rule_xml, record, { keepPrevious: true }),
+                            }
+                          : null
+                      }
                     />
                   )}
                   {draftTestOpenFor === selected.id && ruleStateOf(ruleApproval) === 'draft' && aiProvider && canTestRule(ruleFormat) && (

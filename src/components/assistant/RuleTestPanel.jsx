@@ -192,7 +192,9 @@ function ColspecsAddedNote({ count }) {
 
 // readOnly (Guardar la prueba aprobada): a kept example -- no Edit, only
 // Copy XML.
-export function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain, readOnly = false, testIdPrefix = 'rule-test-example' }) {
+// previousResult ("Probar con los ejemplos guardados"): the result this
+// example gave in the kept test, when the current rule gives another.
+export function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain, readOnly = false, testIdPrefix = 'rule-test-example', previousResult = null }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(example.content);
@@ -240,6 +242,14 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           </span>
         )}
       </div>
+      {previousResult && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-result-changed">
+          {t('records.ruleTest.saved.resultChanged', {
+            before: t(`records.ruleTest.outcomes.${previousResult}`),
+            now: result && result.status !== 'not_executable' ? t(`records.ruleTest.outcomes.${result.status}`) : t('records.ruleTest.saved.notRun'),
+          })}
+        </p>
+      )}
       {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
       {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}
       {example.brexReferenceNormalized && (

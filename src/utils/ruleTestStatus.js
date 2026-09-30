@@ -89,8 +89,12 @@ export function verifyWarning(approval, format, options = {}) {
 // there is nothing to ask: the new result passed too (recorded without
 // asking), the last test did not pass, or it is outdated (the rule changed;
 // a test of another rule is replaced as always).
-export function passedTestToReplaceAt(approval, record) {
+// includeOutdated ("Probar con los ejemplos guardados"): the rule changed
+// since the passed test, and the saved examples are run to see whether the
+// new rule still passes them -- replacing that test is still asked.
+export function passedTestToReplaceAt(approval, record, { includeOutdated = false } = {}) {
   if (!record || record.result === 'passed') return null;
+  if (includeOutdated && approval?.last_test_result === 'passed') return approval.last_test_at || '';
   const status = ruleTestStatus(approval);
   return status.kind === 'passed' ? status.at || '' : null;
 }

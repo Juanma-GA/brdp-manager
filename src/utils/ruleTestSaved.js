@@ -7,6 +7,9 @@
 // - savedPassedTest: the kept test as the panel shows it, and whether the
 //   rule or the Proposal changed since.
 import { ruleXmlHash } from './ruleHash.js';
+import { runExample, ruleTestVerdict } from './ruleTest.js';
+import { analyzeRule } from './ruleTestEngine.js';
+import { verdictToTestRecord } from './ruleTestReasons.js';
 
 // The examples of a passed test, as they ran: only the examples the engine
 // ran (an example that failed validation is no evidence of anything).
@@ -75,4 +78,28 @@ export function savedPassedTest(approval, currentProposal = null) {
 // when it passed on saved examples).
 export function savedExamplesDate(saved) {
   return saved ? saved.examplesFrom || saved.at : null;
+}
+
+// "Probar con los ejemplos guardados": the CURRENT rule on the documents of
+// the kept test. Only the engine -- no LLM, immediate and deterministic.
+//   { examples, runs, verdict, changed, record }
+// changed: the indices of the examples whose result is not the one they
+// gave in the kept test (what the panel marks). record: what to register --
+// a pass keeps the same examples again, dated with the test they came from
+// (examples_from), and the Proposal they were written for.
+export function runSavedTest(saved, ruleXml, format, { vocabulary = null, parseXml } = {}) {
+  const opts = parseXml ? { vocabulary, parseXml } : { vocabulary };
+  const examples = saved.examples;
+  const runs = examples.map((ex) => runExample(ruleXml, format, ex, opts));
+  const analysis = analyzeRule(ruleXml, format, parseXml ? { parseXml } : {});
+  const verdict = ruleTestVerdict(examples, runs, analysis);
+  const changed = [];
+  runs.forEach((run, i) => {
+    if ((run.result?.status || null) !== examples[i].saved?.result) changed.push(i);
+  });
+  let record = withPassedTest(verdictToTestRecord(verdict), examples, runs, saved.proposal, savedExamplesDate(saved));
+  if (record.passedTest && saved.editedCount > 0) {
+    record = { ...record, passedTest: { ...record.passedTest, edited_count: saved.editedCount } };
+  }
+  return { examples, runs, verdict, changed, record };
 }

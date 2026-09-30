@@ -2154,6 +2154,32 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('saved: indicator knows a test on saved examples', ruleTestStatus(rerun).examplesFrom === '2026-09-01T10:00:00Z');
   check('saved: a kept test that is not the last one never labels the indicator', ruleTestStatus({ ...rerun, last_test_at: '2026-09-30T11:00:00+00:00' }).examplesFrom === null && ruleTestStatus({ ...rerun, last_test_result: 'failed' }).examplesFrom === null);
   check('saved: History value reads examples_from', parseRuleTestHistoryValue(JSON.stringify({ result: 'passed', reason: null, examples_from: '2026-09-01T10:00:00Z' })).examplesFrom === '2026-09-01T10:00:00Z' && parseRuleTestHistoryValue(JSON.stringify({ result: 'passed', reason: null })).examplesFrom === null);
+  // "Probar con los ejemplos guardados": the current rule on the kept documents.
+  const { runSavedTest } = await import('../src/utils/ruleTestSaved.js');
+  const { passedTestToReplaceAt } = await import('../src/utils/ruleTestStatus.js');
+  const same = runSavedTest(saved, R187, 'BREX-4.2', { vocabulary, parseXml });
+  check('rerun: same rule → correct, nothing changes, recorded as passed on the saved examples',
+    same.verdict.kind === 'correct' && same.changed.length === 0 && same.record.result === 'passed'
+      && same.record.passedTest.examples_from === at && same.record.passedTest.examples.length === 2
+      && same.record.passedTest.proposal === saved.proposal, JSON.stringify(same.record).slice(0, 300));
+  check('rerun: the kept documents are run as they are (byte for byte)', same.record.passedTest.examples.every((e, i) => e.xml === saved.examples[i].xml));
+  const R_GE2 = R187.replace('= 1', '&gt;= 2');
+  const changedRule = { ...approval, rule_xml: R_GE2, last_test_up_to_date: false };
+  const ge2 = runSavedTest(savedPassedTest(changedRule, payload.proposal), R_GE2, 'BREX-4.2', { vocabulary, parseXml });
+  check('rerun: count(proceduralStep) >= 2 → the accept example is now rejected, incorrect', ge2.verdict.kind === 'incorrect' && ge2.changed.includes(0) && ge2.runs[0].result.status === 'rejected' && ge2.record.result === 'failed', JSON.stringify(ge2.changed));
+  check('rerun: a failed rerun is never kept as a passed test', !ge2.record.passedTest);
+  check('rerun: replacing the (now outdated) passed test is asked', passedTestToReplaceAt(changedRule, ge2.record, { includeOutdated: true }) === at && passedTestToReplaceAt(changedRule, ge2.record) === null);
+  check('rerun: nothing to ask when the last test is not a pass, or when the rerun passes',
+    passedTestToReplaceAt({ ...changedRule, last_test_result: 'failed' }, ge2.record, { includeOutdated: true }) === null
+      && passedTestToReplaceAt(changedRule, same.record, { includeOutdated: true }) === null);
+  const back = runSavedTest(savedPassedTest({ ...approval, last_test_result: 'failed' }, payload.proposal), R187, 'BREX-4.2', { vocabulary, parseXml });
+  check('rerun: back to the original rule → passes again on the saved examples', back.verdict.kind === 'correct' && back.record.result === 'passed' && back.record.passedTest.examples_from === at);
+  const fromEarlier = runSavedTest({ ...saved, examplesFrom: '2026-09-01T10:00:00Z', editedCount: 1 }, R187, 'BREX-4.2', { vocabulary, parseXml });
+  check('rerun: examples from an earlier test keep that date and their edited count', fromEarlier.record.passedTest.examples_from === '2026-09-01T10:00:00Z' && fromEarlier.record.passedTest.edited_count === 1);
+  check('rerun: texts EN/ES', es('records.ruleTest.saved.rerun') === 'Probar con los ejemplos guardados' && en('records.ruleTest.saved.rerun') === 'Test with the saved examples'
+    && es('records.ruleTest.saved.resultChanged', { before: 'aceptado', now: 'rechazado' }) === 'Cambia de resultado: aceptado en la prueba aprobada, rechazado ahora.'
+    && es('records.ruleTest.saved.changedSummary', { count: 1, labels: 'two substeps' }) === '1 ejemplo cambia de resultado: two substeps.'
+    && es('records.ruleTest.saved.recordedPassed', { from: '01/09/2026' }) === 'Registrado: Probada ✓ (ejemplos de la prueba del 01/09/2026).');
   check('saved: texts EN/ES', en('records.ruleTest.saved.open', { date: '30/09/2026' }) === 'See approved test (30/09/2026)' && es('records.ruleTest.saved.open', { date: '30/09/2026' }) === 'Ver prueba aprobada (30/09/2026)'
     && es('records.ruleTest.saved.ruleChanged').startsWith('Probada con una versión anterior de la regla')
     && es('records.ruleTest.indicator.passedSavedExamples', { from: '01/09/2026' }) === 'Probada ✓ (ejemplos de la prueba del 01/09/2026)'

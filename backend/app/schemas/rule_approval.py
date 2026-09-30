@@ -110,6 +110,10 @@ class RuleTestPassedTest(BaseModel):
     # ("Probar con los ejemplos guardados"): the date of the test the
     # examples come from. None for examples generated for this test.
     examples_from: datetime | None = None
+    # How many of those examples were edited by hand in the test they come
+    # from (a re-run keeps saying so; the edited XML itself stays in that
+    # test's History entry).
+    edited_count: int = Field(default=0, ge=0, le=_MAX_PASSED_EXAMPLES)
 
 
 class RuleTestRegister(BaseModel):
