@@ -316,7 +316,9 @@ async function runCheck(check, answer, ctx = {}) {
     case "rule_test_reject_examples_contain": {
       // T3b: every example meant to be rejected carries `pattern` (e.g. the
       // attribute whose values the Proposal restricts -- never relying on
-      // its absence).
+      // its absence). ctx.ruleTest.examples are the FINAL examples, as the
+      // panel shows them: after the correction round (a corrected example
+      // replaces the first answer's), never the first answer.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       const re = new RegExp(check.pattern, flags);

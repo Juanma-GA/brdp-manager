@@ -2877,8 +2877,8 @@
         {
           "type": "rule_test_reject_examples_contain",
           "target": "metadata",
-          "pattern": "<(?:dm|pm)Status\\b[^>]*>[\\s\\S]*<applic>[\\s\\S]*<simplePara>(?![^<]*[Aa][Ll][Ll])",
-          "note": "every reject example states the applicability in its own status with a text that does not say All"
+          "pattern": "<(?:dm|pm)Status\\b[^>]*>(?:(?:(?!</(?:dm|pm)Status>)[\\s\\S])*?<applic\\b[^>]*>(?:(?!</applic>)[\\s\\S])*?<simplePara\\b[^>]*>(?![^<]*[Aa][Ll][Ll])|(?:(?!<applic(?:Ref)?\\b|</(?:dm|pm)Status>)[\\s\\S])*</(?:dm|pm)Status>)",
+          "note": "every reject example breaks the rule in its own dmStatus/pmStatus, either way: an <applic> whose text does not say All, or no <applic>/<applicRef> at all (checked on the final examples, after the correction round)"
         }
       ]
     }
