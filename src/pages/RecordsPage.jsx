@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
@@ -38,6 +38,10 @@ import { parseRuleTestHistoryValue, verifyWarning } from '../utils/ruleTestStatu
 import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
 import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
+import SchemaNavCard from '../components/assistant/SchemaNavCard';
+import { useSchemaNavigation } from '../hooks/useSchemaNavigation';
+import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
+import { schemaLinkTarget, targetKey } from '../utils/schemaNavigation.js';
 import { checkRuleFormat, nameIssues, ruleFormatIssues } from '../validation/schemaValidation.js';
 import styles from './RecordsPage.module.css';
 
@@ -610,6 +614,49 @@ export default function RecordsPage() {
     vocabulary,
     recomputeVocabResult,
   });
+  // "Nombres navegables en las respuestas de Ask sin IA": the floating
+  // schema card opened from a name in an answer taken from the schema. Its
+  // cache is emptied (and the card closed) on a BRDP or project change.
+  const schemaNav = useSchemaNavigation({
+    standard: project.standard,
+    resetKey: `${projectId}:${selected?.id ?? ''}`,
+    fetchCards: fetchSchemaCards,
+    fetchAttribute: fetchSchemaAttribute,
+  });
+  // A new answer (or none) takes away the link the card was opened from.
+  const closeSchemaNav = schemaNav.close;
+  const schemaNavOpen = schemaNav.isOpen;
+  useEffect(() => {
+    if (schemaNavOpen) closeSchemaNav();
+    // Only a change of the answer shown closes the card.
+  }, [ask.answer, ask.lastAsked]);
+  // In an answer taken from the schema, each `<x>`/`@y` that exists in the
+  // vocabulary as that kind is a link; anything else stays plain code.
+  // The renderer must keep its identity across renders: ReactMarkdown uses it
+  // as a component type, and a new one would remount the link the card is
+  // anchored to. The latest `open` is read through a ref.
+  const openSchemaNavRef = useRef(schemaNav.open);
+  openSchemaNavRef.current = schemaNav.open;
+  const schemaAnswerComponents = useMemo(
+    () => ({
+      code({ children, className }) {
+        const target = !className && typeof children === 'string' ? schemaLinkTarget(children, vocabulary) : null;
+        if (!target) return <code className={className}>{children}</code>;
+        return (
+          <button
+            type="button"
+            className={styles.schemaNameLink}
+            onClick={(e) => openSchemaNavRef.current(target, e.currentTarget)}
+            data-testid={`schema-link-${targetKey(target)}`}
+          >
+            <code>{children}</code>
+          </button>
+        );
+      },
+    }),
+    [vocabulary]
+  );
+
   const suggestions = useSuggestions({
     projectId,
     standard: project.standard,
@@ -1588,7 +1635,9 @@ export default function RecordsPage() {
                             {t('records.assistant.answerFromSchema', { standard: project.standard })}
                           </p>
                         )}
-                        <ReactMarkdown>{ask.answer}</ReactMarkdown>
+                        <ReactMarkdown components={ask.answerSource === 'schema' ? schemaAnswerComponents : undefined}>
+                          {ask.answer}
+                        </ReactMarkdown>
                       </div>
                     )}
                     {/* "Ask: comprobar los nombres de la respuesta": names the
@@ -1644,6 +1693,8 @@ export default function RecordsPage() {
                     )}
                   </div>
                 )}
+
+                <SchemaNavCard nav={schemaNav} standard={project.standard} />
 
                 <textarea
                   className={styles.textarea}
