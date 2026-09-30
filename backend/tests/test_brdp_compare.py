@@ -233,6 +233,22 @@ async def test_copying_a_rule_records_the_rule_and_a_copied_from_event(client, w
     assert value["brdp_id"] == str(world["brdps"]["same42"])
 
 
+async def test_a_copy_requested_as_approved_is_saved_as_draft(client, world):
+    url = f"/api/projects/{world['projects']['current']}/brdps/{world['brdps']['current']}/approvals/BREX-4.2"
+    res = await client.put(
+        url,
+        json={"rule_xml": RULE_42, "source": "copied", "status": "approved", "copied_from_brdp_id": str(world["brdps"]["same42"])},
+        headers=world["editor"],
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "pending_review"
+    assert res.json()["approved_at"] is None
+    history = await _history(client, world, world["editor"])
+    assert len([h for h in history if h["field_name"] == "rule_copied"]) == 1
+    status_changes = [h for h in history if h["field_name"] == "rule_status"]
+    assert status_changes and status_changes[0]["new_value"] == "draft"
+
+
 async def test_copying_from_a_brdp_the_user_cannot_see_is_404_and_saves_nothing(client, world):
     url = f"/api/projects/{world['projects']['current']}/brdps/{world['brdps']['current']}/approvals/BREX-4.2"
     res = await client.put(

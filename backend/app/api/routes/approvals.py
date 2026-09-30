@@ -227,7 +227,12 @@ async def propose_approval(
             "project_name": source_project.name,
             "standard": source_project.standard,
         }
-    status_value = "approved" if body.status == "approved" else "pending_review"
+    # A copied rule always starts as Draft, whatever the request says: it
+    # was verified in ANOTHER project, never in this one.
+    if copied_from is not None:
+        status_value = "pending_review"
+    else:
+        status_value = "approved" if body.status == "approved" else "pending_review"
     approval = await db.get(RuleApproval, (brdp_id, format))
     old_state = _rule_state(approval)
     old_rule_xml = approval.rule_xml if approval is not None else ""

@@ -1275,8 +1275,8 @@
         {
           "type": "rule_test_reject_examples_contain",
           "target": "metadata",
-          "pattern": "<dataRestrictions\\b[^>]*>\\s*<restrictionInstructions\\b[^>]*>[\\s\\S]*?</restrictionInstructions>\\s*<restrictionInfo\\b[^>]*>\\s*<copyright\\b[^>]*>[\\s\\S]*?Copyright © (?!2024)\\d{4}",
-          "note": "every reject example has a notice with another year, in dmStatus/dataRestrictions/restrictionInfo/copyright after the required restrictionInstructions"
+          "pattern": "<dataRestrictions\\b[^>]*>\\s*<restrictionInstructions\\b[^>]*>[\\s\\S]*?</restrictionInstructions>\\s*<restrictionInfo\\b[^>]*>\\s*<copyright\\b[^>]*>(?:(?!</copyright>)[\\s\\S])*?Copyright © (?!2024 by Lufthansa Technik AG)",
+          "note": "every reject example has a notice against the decision -- another year or another company -- inside dmStatus/dataRestrictions/restrictionInfo/copyright, after the required restrictionInstructions"
         },
         {
           "type": "contains",

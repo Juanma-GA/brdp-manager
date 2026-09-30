@@ -3,7 +3,7 @@
 // Status and the Refused reason -- askGeneric() previously sent only
 // identifier+definition and a one-line generic prompt), one turn of real
 // conversation chaining, a Clear button, resetting on BRDP switch, and the
-// optional "+ Compare with another BRDP" search across Records + the
+// optional "+ Ask comparing with another BRDP" search across Records + the
 // official catalog.
 //
 // This sandbox's outbound network cannot reach api.mistral.ai at all (a
@@ -204,7 +204,7 @@ async function main() {
     await page.getByRole("button", { name: "Clear" }).click();
 
     // ---- Compare: Records source ----
-    await page.getByRole("button", { name: "+ Compare with another BRDP" }).click();
+    await page.getByRole("button", { name: "+ Ask comparing with another BRDP" }).click();
     // .last(): getByPlaceholder matches case-insensitively, and the main
     // table search box above ("Search by ID or Title…") differs from this
     // one only by casing -- the compare box is the one further down the DOM.
@@ -233,10 +233,10 @@ async function main() {
     // Remove the chip
     await page.getByRole("button", { name: "Remove comparison" }).click();
     assert((await page.locator("text=/Comparing with:/").count()) === 0, "Removing the chip clears the comparison");
-    assert((await page.getByRole("button", { name: "+ Compare with another BRDP" }).count()) === 1, "The '+ Compare' link reappears after removing the chip");
+    assert((await page.getByRole("button", { name: "+ Ask comparing with another BRDP" }).count()) === 1, "The '+ Compare' link reappears after removing the chip");
 
     // ---- Compare: Catalog source (no Proposal/Rule Status -- catalog has none) ----
-    await page.getByRole("button", { name: "+ Compare with another BRDP" }).click();
+    await page.getByRole("button", { name: "+ Ask comparing with another BRDP" }).click();
     await page.getByPlaceholder("Search by ID or title…").last().fill("BRDP-CAT-ASKTEST-001");
     await page.waitForSelector('li:has-text("BRDP-CAT-ASKTEST-001")', { timeout: 5000 });
     const catalogResult = page.locator("li", { hasText: "BRDP-CAT-ASKTEST-001" });
@@ -266,7 +266,7 @@ async function main() {
     assert((await questionBox.inputValue()) === "", "Switching the selected BRDP clears the question box");
     assert((await page.locator("text=/MOCK-/").count()) === 0, "Switching the selected BRDP clears any rendered answer");
     assert((await page.locator("text=/Comparing with:/").count()) === 0, "Switching the selected BRDP clears the compare chip too");
-    assert((await page.getByRole("button", { name: "+ Compare with another BRDP" }).count()) === 1, "The compare link is back to its collapsed state after switching BRDP");
+    assert((await page.getByRole("button", { name: "+ Ask comparing with another BRDP" }).count()) === 1, "The compare link is back to its collapsed state after switching BRDP");
 
     console.log("\nALL CHECKS PASSED");
   } finally {

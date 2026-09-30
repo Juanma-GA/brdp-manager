@@ -317,6 +317,11 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // brex-4-2-pm-metadata-deep-copyright (pmStatus) and
 // brex-4-2-metadata-several-ways (//dmStatus//externalPubRef). The 40
 // existing prompts are unchanged -- none of them has deep metadata.
+//
+// "Ajustes tras Comparar dos BRDP": only a NEW case, ask/compare-other-project
+// (compareBrdp.source = 'other_project', so the 'Project "<name>"
+// (<standard>)' source label is covered). The 44 existing prompts are
+// unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 

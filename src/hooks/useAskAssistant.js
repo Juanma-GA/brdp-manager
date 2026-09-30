@@ -1,6 +1,6 @@
 // Prompt-refactor round: "Ask a Question" state/logic extracted out of
 // RecordsPage.jsx verbatim (no behavior change) -- question/answer/prev-
-// turn chaining, the "+ Compare with another BRDP" picker, and the real
+// turn chaining, the "+ Ask comparing with another BRDP" picker, and the real
 // schema facts fetched for the currently displayed exchange.
 import { useEffect, useRef, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
@@ -67,7 +67,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   // answer, so a repeated question still gets a fresh answer (all lists folded).
   const [schemaAnswerView, setSchemaAnswerView] = useState(null);
   const schemaAnswerSeqRef = useRef(0);
-  // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
+  // "+ Ask comparing with another BRDP": collapsed by default. compareBrdp holds
   // the chosen entry ({ source: 'records'|'catalog'|'other_project',
   // identifier, title, definition, and for 'records'/'other_project' also
   // proposal/validation/ruleState/ruleXml -- 'other_project' also carries

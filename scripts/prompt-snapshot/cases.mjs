@@ -106,6 +106,21 @@ const compareBrdpRecords = {
   ruleXml: '<sch:pattern id="cmp"/>',
 };
 
+// "Comparar dos BRDP": the same BRDP in another project the user can see,
+// with its project name and standard in the source label.
+const compareBrdpOtherProject = {
+  source: 'other_project',
+  projectName: 'Official Default 4.2',
+  standard: 'S1000D 4.2',
+  identifier: 'BRDP-S1-00010',
+  title: 'Compare title',
+  definition: 'Compare definition.',
+  proposal: 'Other project proposal.',
+  validation: 'Validated',
+  ruleState: 'draft',
+  ruleXml: '<structureObjectRule id="BRDP-S1-00010"><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>',
+};
+
 const compareBrdpCatalog = {
   source: 'catalog',
   identifier: 'BRDP-CAT-001',
@@ -183,6 +198,12 @@ export const askCases = [
       { available: true, notFound: ['@ncage'], wrongType: [] },
       [],
     ],
+  },
+  // "Ajustes tras Comparar dos BRDP": the other_project source, whose label
+  // is 'Project "<name>" (<standard>)'.
+  {
+    name: 'compare-other-project',
+    args: [brdpBase, ruleApprovalVerified, compareBrdpOtherProject, 'S1000D 4.2', vocabClean, []],
   },
 ];
 
