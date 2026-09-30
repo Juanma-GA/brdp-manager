@@ -244,12 +244,12 @@ function metadataReply(systemPrompt, rule, answer) {
     return answer([ex("Two-character variant", "accept", ownCode("disassyCodeVariant", "AB"), "Remove the panel."), ex("One-character variant", "reject", base, "Remove the panel.")]);
   }
   if (/@systemDiffCode/.test(rule)) {
-    // Plantillas 4.1/4.2, row 5: a value list (A, F) on the data module's
-    // own code and on any code it references.
+    // Plantillas 4.1/4.2, row 5: only A, on the data module's own code and
+    // on any code it references (F in a normal data module is rejected).
     const dmRef = (sdc) => `See <dmRef><dmRefIdent><dmCode modelIdentCode="EXAMPLE" systemDiffCode="${sdc}" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/></dmRefIdent></dmRef>.`;
     return answer([
       ex("Default system difference code A", "accept", ownCode("systemDiffCode", "A"), dmRef("A")),
-      ex("System difference code F", "accept", ownCode("systemDiffCode", "F"), dmRef("A")),
+      ex("System difference code F in a normal data module", "reject", ownCode("systemDiffCode", "F"), dmRef("A")),
       ex("Own code with B", "reject", ownCode("systemDiffCode", "B"), dmRef("A")),
       ex("Reference with C", "reject", ownCode("systemDiffCode", "A"), dmRef("C")),
     ]);

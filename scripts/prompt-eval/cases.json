@@ -2124,7 +2124,7 @@
       "id": "rule-test-template-4-1-system-diff-code",
       "type": "rule-test",
       "standard": "S1000D 4.1",
-      "description": "Template row 5, value list (objectValue): @systemDiffCode may only be A or F.",
+      "description": "Template row 5, value list (objectValue): @systemDiffCode may only be A (F, the S1000D/ATA BREX code, is rejected in a data module).",
       "templateRow": {
         "file": "brdp-template-4-1.xlsx",
         "id": "BRDP-S1-00334"
@@ -2149,13 +2149,13 @@
         {
           "type": "contains",
           "target": "description",
-          "pattern": "systemDiffCode[\\s\\S]*\\bA\\b[\\s\\S]*\\bF\\b",
-          "note": "the description lists the allowed values A and F"
+          "pattern": "systemDiffCode[\\s\\S]*can only take: A;",
+          "note": "the description gives A as the only allowed value"
         },
         {
           "type": "rule_test_reject_examples_contain",
-          "pattern": "systemDiffCode=[\"'](?![AF][\"'])",
-          "note": "every reject example has a systemDiffCode other than A or F (own code or reference)",
+          "pattern": "systemDiffCode=[\"'](?!A[\"'])",
+          "note": "every reject example has a systemDiffCode other than A (own code or reference)",
           "target": "all"
         }
       ]
@@ -2557,7 +2557,7 @@
       "id": "rule-test-template-4-2-system-diff-code",
       "type": "rule-test",
       "standard": "S1000D 4.2",
-      "description": "Template row 5, value list (objectValue): @systemDiffCode may only be A or F.",
+      "description": "Template row 5, value list (objectValue): @systemDiffCode may only be A (F, the S1000D/ATA BREX code, is rejected in a data module).",
       "templateRow": {
         "file": "brdp-template-4-2.xlsx",
         "id": "BRDP-S1-00334"
@@ -2582,13 +2582,13 @@
         {
           "type": "contains",
           "target": "description",
-          "pattern": "systemDiffCode[\\s\\S]*\\bA\\b[\\s\\S]*\\bF\\b",
-          "note": "the description lists the allowed values A and F"
+          "pattern": "systemDiffCode[\\s\\S]*can only take: A;",
+          "note": "the description gives A as the only allowed value"
         },
         {
           "type": "rule_test_reject_examples_contain",
-          "pattern": "systemDiffCode=[\"'](?![AF][\"'])",
-          "note": "every reject example has a systemDiffCode other than A or F (own code or reference)",
+          "pattern": "systemDiffCode=[\"'](?!A[\"'])",
+          "note": "every reject example has a systemDiffCode other than A (own code or reference)",
           "target": "all"
         }
       ]

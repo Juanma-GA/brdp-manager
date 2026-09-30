@@ -295,7 +295,8 @@ const TEMPLATE_CASES = {
     'BRDP-S1-00334': {
       bad: '<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" systemDiffCode="B"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>',
       good: '<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" systemDiffCode="A"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>',
-      alsoGood: ['<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" systemDiffCode="F"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>'],
+      // Only A is allowed: F (the S1000D/ATA BREX code) is rejected in a data module.
+      alsoBad: ['<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" systemDiffCode="F"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>'],
     },
     'BRDP-S1-00316': {
       bad: '<dmodule><identAndStatusSection><dmStatus><applicRef applicIdentValue="app-0001"/></dmStatus></identAndStatusSection><content/></dmodule>',
