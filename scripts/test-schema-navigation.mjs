@@ -17,10 +17,14 @@ import {
   cutNames,
   elementCardModel,
   goToStack,
+  moreMarker,
   openStack,
+  parseMoreMarker,
   pushStack,
   schemaLinkTarget,
+  schemaSuggestions,
   SCHEMA_NAV_LIST_MAX,
+  SCHEMA_SEARCH_MAX,
   targetLabel,
 } from '../src/utils/schemaNavigation.js';
 
@@ -223,6 +227,62 @@ const linksOf = (markdown, vocabulary) =>
   await noCards.load(para);
   await noCards.load(attr);
   check('standard without cards: unavailable, not loading', noCards.get(para).status === 'unavailable' && noCards.get(attr).status === 'unavailable');
+}
+
+// ─── "+N more" in the answers ───────────────────────────────────────────────
+{
+  check('marker round trip', parseMoreMarker(moreMarker(3)) === 3 && parseMoreMarker(' +more:0 ') === 0);
+  check('other code is not a marker', ['<para>', '@x', '+more:', '+more:a', 'more:1', '+23 more'].every((c) => parseMoreMarker(c) === null));
+  check('a marker is never a schema link', schemaLinkTarget(moreMarker(0), V42) === null);
+
+  const r = await answerStructuralQuestion({ question: '¿Qué elementos tienen @changeMark?', standard: S42, vocabulary: V42, fetchCards, fetchAttribute, fetchRelation });
+  const allOwners = new Set(FIX.attributes[S42].changeMark.map((o) => o.element));
+  check('@changeMark: turn text keeps the plain "+N más"', /\+\d+ más/.test(r.text) && parseMoreMarker(r.text) === null && !r.text.includes('+more:'));
+  check('@changeMark: several cut lists (common and "Además, en…")', r.cuts.length > 1, `${r.cuts.length} cuts`);
+  check('@changeMark: display has one marker per cut, no plain "+N más"', r.cuts.every((c) => r.display.includes(`\`${moreMarker(c.id)}\``)) && !/\+\d+ más/.test(r.display));
+  check('no two code spans touch (Markdown would read a double backtick)', !r.display.includes('``') && r.cuts.every((c) => r.display.includes(`\u2060\`${moreMarker(c.id)}\``)));
+  check('each cut has its own id', new Set(r.cuts.map((c) => c.id)).size === r.cuts.length && r.cuts.every((c, i) => c.id === i));
+  // Every owner appears in the display, shown or hidden: none is lost.
+  const shownInDisplay = new Set([...r.display.matchAll(/`<([^`>]+)>`/g)].map((m) => m[1]));
+  const hidden = new Set(r.cuts.flatMap((c) => c.hidden));
+  const union = new Set([...shownInDisplay, ...hidden]);
+  check('@changeMark: shown + hidden = all 672 owners', [...allOwners].every((n) => union.has(n)) && allOwners.size === 672, `${[...allOwners].filter((n) => !union.has(n)).length} missing`);
+  check('hidden names are elements, sorted, as the card cuts them', r.cuts.every((c) => c.kind === 'element' && c.hidden.join() === [...c.hidden].sort((a, b) => a.localeCompare(b)).join()));
+  // The turn text's "+N" numbers are the hidden counts.
+  const plusNumbers = [...r.text.matchAll(/\+(\d+) más/g)].map((m) => Number(m[1]));
+  check('turn text "+N" = hidden count of each cut', JSON.stringify(plusNumbers) === JSON.stringify(r.cuts.map((c) => c.hidden.length)));
+  // Each cut list shows exactly SCHEMA_NAV_LIST_MAX names before its marker (same cut as the card).
+  const firstLine = r.display.split('\n').find((l) => l.includes(moreMarker(0)));
+  const before = firstLine.slice(0, firstLine.indexOf(moreMarker(0)));
+  check('a cut list shows 20 names before its "+N more"', [...before.matchAll(/`<[^`>]+>`/g)].length === SCHEMA_NAV_LIST_MAX, firstLine.slice(0, 80));
+
+  const short = await answerStructuralQuestion({ question: '¿Qué elementos tienen @emphasisType?', standard: S42, vocabulary: V42, fetchCards, fetchAttribute, fetchRelation });
+  check('no cut list: display = text, no cuts', short.cuts.length === 0 && short.display === short.text);
+  const para = await answerStructuralQuestion({ question: '¿Dónde puede ir <para>?', standard: S42, vocabulary: V42, fetchCards, fetchAttribute, fetchRelation });
+  check('letter-grouped lists are never cut', para.cuts.length === 0 && para.display === para.text);
+}
+
+// ─── Schema search suggestions ──────────────────────────────────────────────
+{
+  const names = (r) => r.items.map((i) => (i.kind === 'attribute' ? `@${i.name}` : `<${i.name}>`));
+  const levell = schemaSuggestions('levell', V42);
+  check('prefix "levell" → <levelledPara> first', names(levell)[0] === '<levelledPara>' && levell.items.every((i) => i.name.toLowerCase().startsWith('levell')));
+  check('case-insensitive prefix', JSON.stringify(names(schemaSuggestions('LEVELL', V42))) === JSON.stringify(names(levell)));
+  check('"@emph" → @emphasisType, attributes only', names(schemaSuggestions('@emph', V42)).includes('@emphasisType') && schemaSuggestions('@emph', V42).items.every((i) => i.kind === 'attribute'));
+  check('"<emph" → elements only', schemaSuggestions('<emph', V42).items.every((i) => i.kind === 'element') && names(schemaSuggestions('<emph', V42))[0] === '<emphasis>');
+  check('"<levelledPara>" (closing >) still matches', names(schemaSuggestions('<levelledPara>', V42))[0] === '<levelledPara>');
+  const title = names(schemaSuggestions('title', V42));
+  check('"title" (element and attribute) → <title> and @title first', title[0] === '<title>' && title[1] === '@title', title.slice(0, 3).join());
+  const many = schemaSuggestions('a', V42);
+  check('at most 10 suggestions', SCHEMA_SEARCH_MAX === 10 && many.items.length === 10 && !many.noMatch);
+  const poke = schemaSuggestions('pokemon', V42);
+  check('"pokemon" → no suggestions, noMatch', poke.items.length === 0 && poke.noMatch === true);
+  check('"@para" gives only attributes (@parameter…), never <para>', schemaSuggestions('@para', V42).items.every((i) => i.kind === 'attribute' && i.name.startsWith('para')));
+  check('"<levelledPara" never gives attributes', schemaSuggestions('<levelledPara', V42).items.every((i) => i.kind === 'element'));
+  check('empty / "@" / "<" / spaces → nothing, no message', ['', '@', '<', '   '].every((q) => { const r = schemaSuggestions(q, V42); return r.items.length === 0 && !r.noMatch; }));
+  check('no vocabulary → nothing', schemaSuggestions('para', null).items.length === 0 && !schemaSuggestions('para', null).noMatch);
+  check('DITA: "p" includes <p>, "@outputc" → @outputclass', names(schemaSuggestions('p', VDITA))[0] === '<p>' && names(schemaSuggestions('@outputc', VDITA))[0] === '@outputclass');
+  check('an exact name comes before longer ones', names(schemaSuggestions('para', V42))[0] === '<para>');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

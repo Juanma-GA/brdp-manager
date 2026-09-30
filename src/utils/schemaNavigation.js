@@ -229,3 +229,55 @@ export function createCardStore({ standard, fetchCards, fetchAttribute, timeoutM
     },
   };
 }
+
+// ─── "+N more" in the answers ───────────────────────────────────────────────
+
+// The display version of an answer taken from the schema writes each cut
+// list's "+N more" as this inline code; the answer renderer turns it into a
+// button that expands the hidden names (utils/structuralAnswer.js's cutList).
+const MORE_MARKER_RE = /^\+more:(\d+)$/;
+export const moreMarker = (id) => `+more:${id}`;
+export function parseMoreMarker(codeText) {
+  const m = typeof codeText === 'string' ? MORE_MARKER_RE.exec(codeText.trim()) : null;
+  return m ? Number(m[1]) : null;
+}
+
+// ─── Schema search ──────────────────────────────────────────────────────────
+
+export const SCHEMA_SEARCH_MAX = 10;
+
+// Suggestions for the schema search box, from the same vocabulary that
+// decides which names are links: prefix match, case-insensitive; "@" at the
+// start keeps attributes only, "<" elements only (a closing ">" is ignored).
+// An exact name comes first, then alphabetical; a name that is both an
+// element and an attribute gives both, element first. At most `max`.
+// Returns { items: [{ kind, name }], query, noMatch } -- noMatch only when
+// something was typed and nothing matched.
+export function schemaSuggestions(input, vocabulary, max = SCHEMA_SEARCH_MAX) {
+  let text = String(input || '').trim();
+  let only = null;
+  if (text.startsWith('@')) {
+    only = 'attribute';
+    text = text.slice(1);
+  } else if (text.startsWith('<')) {
+    only = 'element';
+    text = text.slice(1).replace(/\/?>$/, '');
+  }
+  const query = text.trim().toLowerCase();
+  if (!query || !vocabulary) return { items: [], query, noMatch: false };
+  const found = [];
+  const collect = (names, kind) => {
+    for (const name of names) if (name.toLowerCase().startsWith(query)) found.push({ kind, name });
+  };
+  if (only !== 'attribute') collect(vocabulary.elements, 'element');
+  if (only !== 'element') collect(vocabulary.attributes, 'attribute');
+  found.sort((a, b) => {
+    const exactA = a.name.toLowerCase() === query ? 0 : 1;
+    const exactB = b.name.toLowerCase() === query ? 0 : 1;
+    if (exactA !== exactB) return exactA - exactB;
+    const byName = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.name.localeCompare(b.name);
+    if (byName) return byName;
+    return a.kind === b.kind ? 0 : a.kind === 'element' ? -1 : 1;
+  });
+  return { items: found.slice(0, max), query, noMatch: found.length === 0 };
+}

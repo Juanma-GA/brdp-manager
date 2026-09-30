@@ -39,9 +39,11 @@ import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
 import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
 import SchemaNavCard from '../components/assistant/SchemaNavCard';
+import SchemaSearch from '../components/assistant/SchemaSearch';
 import { useSchemaNavigation } from '../hooks/useSchemaNavigation';
 import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
-import { schemaLinkTarget, targetKey } from '../utils/schemaNavigation.js';
+import { parseMoreMarker, schemaLinkTarget } from '../utils/schemaNavigation.js';
+import { AnswerMoreNames, SchemaNameLink } from '../components/assistant/SchemaAnswerLinks';
 import { checkRuleFormat, nameIssues, ruleFormatIssues } from '../validation/schemaValidation.js';
 import styles from './RecordsPage.module.css';
 
@@ -631,31 +633,31 @@ export default function RecordsPage() {
     // Only a change of the answer shown closes the card.
   }, [ask.answer, ask.lastAsked]);
   // In an answer taken from the schema, each `<x>`/`@y` that exists in the
-  // vocabulary as that kind is a link; anything else stays plain code.
+  // vocabulary as that kind is a link; anything else stays plain code, and
+  // each cut list's "+N more" marker is a button that expands its names.
   // The renderer must keep its identity across renders: ReactMarkdown uses it
   // as a component type, and a new one would remount the link the card is
-  // anchored to. The latest `open` is read through a ref.
+  // anchored to. The latest `open` and the answer's cut lists are read
+  // through refs.
   const openSchemaNavRef = useRef(schemaNav.open);
   openSchemaNavRef.current = schemaNav.open;
-  const schemaAnswerComponents = useMemo(
-    () => ({
+  const schemaAnswerCutsRef = useRef([]);
+  schemaAnswerCutsRef.current = ask.schemaAnswerView?.cuts || [];
+  const schemaAnswerComponents = useMemo(() => {
+    const onOpen = (target, anchor) => openSchemaNavRef.current(target, anchor);
+    return {
       code({ children, className }) {
-        const target = !className && typeof children === 'string' ? schemaLinkTarget(children, vocabulary) : null;
-        if (!target) return <code className={className}>{children}</code>;
-        return (
-          <button
-            type="button"
-            className={styles.schemaNameLink}
-            onClick={(e) => openSchemaNavRef.current(target, e.currentTarget)}
-            data-testid={`schema-link-${targetKey(target)}`}
-          >
-            <code>{children}</code>
-          </button>
-        );
+        if (!className && typeof children === 'string') {
+          const cutId = parseMoreMarker(children);
+          const cut = cutId === null ? null : schemaAnswerCutsRef.current[cutId];
+          if (cut) return <AnswerMoreNames cut={cut} vocabulary={vocabulary} onOpen={onOpen} />;
+          const target = schemaLinkTarget(children, vocabulary);
+          if (target) return <SchemaNameLink target={target} onOpen={onOpen} />;
+        }
+        return <code className={className}>{children}</code>;
       },
-    }),
-    [vocabulary]
-  );
+    };
+  }, [vocabulary]);
 
   const suggestions = useSuggestions({
     projectId,
@@ -1605,7 +1607,18 @@ export default function RecordsPage() {
                   </div>
                 )}
 
-                <label className={styles.fieldLabel}>{t('records.assistant.askLabel')}</label>
+                {/* Ask header: the label and the schema search, which opens
+                    the same floating card as the names in an answer. Keyed
+                    by BRDP and project so a change empties it. */}
+                <div className={styles.askHeader}>
+                  <label className={styles.fieldLabel}>{t('records.assistant.askLabel')}</label>
+                  <SchemaSearch
+                    key={`${projectId}:${selected.id}`}
+                    vocabulary={vocabulary}
+                    standard={project.standard}
+                    onOpen={schemaNav.open}
+                  />
+                </div>
 
                 {/* The last exchange -- ask.question + ask.answer/error/loading --
                     always ABOVE the textarea (docs request: feel like a
@@ -1635,9 +1648,15 @@ export default function RecordsPage() {
                             {t('records.assistant.answerFromSchema', { standard: project.standard })}
                           </p>
                         )}
-                        <ReactMarkdown components={ask.answerSource === 'schema' ? schemaAnswerComponents : undefined}>
-                          {ask.answer}
-                        </ReactMarkdown>
+                        {/* Keyed by the text shown, so a new answer starts with
+                            every "+N more" folded again. */}
+                        {ask.answerSource === 'schema' && ask.schemaAnswerView ? (
+                          <ReactMarkdown key={ask.schemaAnswerView.seq} components={schemaAnswerComponents}>
+                            {ask.schemaAnswerView.display}
+                          </ReactMarkdown>
+                        ) : (
+                          <ReactMarkdown>{ask.answer}</ReactMarkdown>
+                        )}
                       </div>
                     )}
                     {/* "Ask: comprobar los nombres de la respuesta": names the

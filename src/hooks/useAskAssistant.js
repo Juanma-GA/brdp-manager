@@ -2,7 +2,7 @@
 // RecordsPage.jsx verbatim (no behavior change) -- question/answer/prev-
 // turn chaining, the "+ Compare with another BRDP" picker, and the real
 // schema facts fetched for the currently displayed exchange.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { ruleStateOf } from '../utils/ruleState';
@@ -60,6 +60,13 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   // structural question answered from the schema cards, without the LLM),
   // 'llm', or null while nothing is shown.
   const [answerSource, setAnswerSource] = useState(null);
+  // An answer taken from the schema, as the interface shows it: its lists'
+  // "+N more" are markers for `cuts` (the hidden names), which the answer
+  // renderer turns into buttons. `answer` stays the text the LLM receives as
+  // the previous turn. { seq, display, cuts } or null -- `seq` numbers every
+  // answer, so a repeated question still gets a fresh answer (all lists folded).
+  const [schemaAnswerView, setSchemaAnswerView] = useState(null);
+  const schemaAnswerSeqRef = useRef(0);
   // "+ Compare with another BRDP": collapsed by default. compareBrdp holds
   // the chosen entry ({ source: 'records'|'catalog', identifier, title,
   // definition, and for 'records' also proposal/validation/ruleState/
@@ -90,6 +97,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setExpandedSchemaFactNames(new Set());
     setAnswerNameCheck(null);
     setAnswerSource(null);
+    setSchemaAnswerView(null);
     setCompareOpen(false);
     setCompareQuery('');
     setCompareBrdp(null);
@@ -122,6 +130,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setExpandedSchemaFactNames(new Set());
     setAnswerNameCheck(null);
     setAnswerSource(null);
+    setSchemaAnswerView(null);
     try {
       const vocab = await recomputeVocabResult(selected);
       const schemaFacts = await fetchAskSchemaFacts(askedQuestion, selected);
@@ -144,6 +153,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
         if (structural) {
           setAnswer(structural.text);
           setAnswerSource('schema');
+          setSchemaAnswerView({ seq: ++schemaAnswerSeqRef.current, display: structural.display, cuts: structural.cuts });
           setPrevTurn({ question: askedQuestion, answer: structural.text });
           setQuestion('');
           return;
@@ -189,6 +199,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     setExpandedSchemaFactNames(new Set());
     setAnswerNameCheck(null);
     setAnswerSource(null);
+    setSchemaAnswerView(null);
   };
 
   const openCompareSearch = () => {
@@ -255,6 +266,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
     lastAskedSchemaFacts,
     answerNameCheck,
     answerSource,
+    schemaAnswerView,
     expandedSchemaFactNames,
     setExpandedSchemaFactNames,
     compareOpen,

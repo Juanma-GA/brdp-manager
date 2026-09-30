@@ -42,6 +42,7 @@
 // (scripts/run-prompt-eval.mjs) run the same code.
 import { extractContextCandidates, resolvePhraseCandidates } from '../validation/schemaValidation.js';
 import { summarizeSchemaFactEntry } from './schemaFactSummary.js';
+import { cutNames, moreMarker } from './schemaNavigation.js';
 
 const normalize = (text) =>
   String(text || '')
@@ -471,13 +472,25 @@ function valuesAnswer(name, owners, standard, ownerFilter, t) {
 // Imported helper schemas, never a document type (as the backend's
 // _NON_DOCUMENT_SCHEMAS).
 const NON_DOCUMENT_SCHEMAS = new Set(['dc', 'rdf', 'xlink', 'xcf']);
-const OWNERS_LIST_MAX = 20;
-
-// A list cut at `max` names with "+N more".
-function cutList(names, fmt, t, max = OWNERS_LIST_MAX) {
-  const sorted = [...names].sort((a, b) => a.localeCompare(b));
-  if (sorted.length <= max) return joinNames(sorted, fmt);
-  return `${joinNames(sorted.slice(0, max), fmt)} ${t.more(sorted.length - max)}`;
+// A list cut with "+N more": the same cut as the floating schema card
+// (utils/schemaNavigation.js's cutNames, 20 names). With `t.cuts` (the
+// display version of the answer, see answerStructuralQuestion) the "+N more"
+// is a marker the interface turns into a button that expands the rest; the
+// hidden names are kept in `t.cuts`, so none is lost.
+function cutList(names, fmt, t) {
+  const { shown, hidden } = cutNames(names);
+  if (!hidden) return joinNames(shown, fmt);
+  if (!t.cuts) return `${joinNames(shown, fmt)} ${t.more(hidden)}`;
+  const id = t.cuts.length;
+  t.cuts.push({
+    id,
+    kind: fmt === at ? 'attribute' : 'element',
+    hidden: cutNames(names, { expanded: true }).shown.slice(shown.length),
+  });
+  // U+2060 (word joiner, invisible and zero-width) keeps the marker's code
+  // span from touching the last name's: two adjacent `…``…` would read as
+  // one double-backtick delimiter in Markdown.
+  return `${joinNames(shown, fmt)}\u2060\`${moreMarker(id)}\``;
 }
 
 const chain = (path) => path.map(el).join(' → ');
@@ -548,8 +561,10 @@ function ownersAnswer(name, owners, t) {
 // (standard without cards). `data` = { card } for element kinds (the full
 // card entry, or null when the name is not an element) and { owners } for
 // values/attribute parents.
-export function buildStructuralAnswer(detection, data, { standard, vocabulary }) {
-  const t = T[detection.lang];
+// `cuts` (optional array): collect the cut lists and write a marker instead of
+// "+N more" (the display version; see answerStructuralQuestion).
+export function buildStructuralAnswer(detection, data, { standard, vocabulary, cuts = null }) {
+  const t = cuts ? { ...T[detection.lang], cuts } : T[detection.lang];
   const { kind, name, usedAs } = detection;
   if (kind === 'relation') return data.relation ? relationAnswer(detection, data.relation, data.card || null, t) : null;
   if (kind === 'attributeOwners') {
@@ -593,7 +608,7 @@ function needsOwners(detection, vocabulary) {
 }
 
 // The whole step, as Ask runs it: null when the question is not structural
-// (it goes to the LLM), else { detection, text }. `fetchCards(standard,
+// (it goes to the LLM), else { detection, text, display, cuts }. `fetchCards(standard,
 // names, { full })` → GET /api/schema-cards; `fetchAttribute(standard, name)`
 // → GET /api/schema-cards/attribute; `fetchRelation(standard, parent,
 // child)` → GET /api/schema-cards/relation. Fetch errors propagate: an answer
@@ -610,8 +625,7 @@ export async function answerStructuralQuestion({ question, standard, vocabulary,
       const res = await fetchCards(standard, [detection.parent], { full: true });
       if (res.available) data.card = res.cards[detection.parent] || null;
     }
-    const text = buildStructuralAnswer(detection, data, { standard, vocabulary });
-    return text ? { detection, text } : null;
+    return withDisplay(detection, data, { standard, vocabulary });
   }
   const exists = vocabulary.elements.has(detection.name) || vocabulary.attributes.has(detection.name);
   const data = {};
@@ -628,6 +642,17 @@ export async function answerStructuralQuestion({ question, standard, vocabulary,
       data.card = res.cards[detection.name] || null;
     }
   }
-  const text = buildStructuralAnswer(detection, data, { standard, vocabulary });
-  return text ? { detection, text } : null;
+  return withDisplay(detection, data, { standard, vocabulary });
+}
+
+// `text` is the answer as a turn (what the LLM receives as the previous turn
+// and what the eval checks): lists cut with "+N more". `display` is the same
+// answer for the interface, where each "+N more" is a marker for `cuts[id]`
+// (its hidden names) and becomes a button.
+function withDisplay(detection, data, opts) {
+  const text = buildStructuralAnswer(detection, data, opts);
+  if (!text) return null;
+  const cuts = [];
+  const display = buildStructuralAnswer(detection, data, { ...opts, cuts });
+  return { detection, text, display, cuts };
 }

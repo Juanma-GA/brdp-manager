@@ -1471,3 +1471,90 @@
   margin: 0;
   padding-left: 18px;
 }
+
+/* "Buscador del esquema" in the Ask header. */
+.askHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.schemaSearch {
+  position: relative;
+  flex: 0 1 220px;
+  min-width: 150px;
+  margin: 6px 0 4px;
+}
+
+.schemaSearchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.schemaSearchInput:focus {
+  outline: 2px solid #93c5fd;
+  outline-offset: 0;
+  border-color: #93c5fd;
+}
+
+.schemaSearchList {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  min-width: 220px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  border: 1px solid #c7ddf0;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.15);
+  font-size: 12.5px;
+}
+
+.schemaSearchOption,
+.schemaSearchOptionActive {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.schemaSearchOptionActive {
+  background: #eaf2fa;
+  color: #245c90;
+}
+
+.schemaSearchKind {
+  flex-shrink: 0;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.schemaSearchNoMatch {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 12px;
+}
