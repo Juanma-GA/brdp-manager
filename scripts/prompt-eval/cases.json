@@ -827,7 +827,7 @@
         {
           "type": "contains",
           "target": "xml",
-          "pattern": "allowedObjectFlag=\"0\"",
+          "pattern": "allowedObjectFlag=[\"']0[\"']",
           "note": "prohibition flag"
         },
         {
@@ -877,17 +877,17 @@
         {
           "type": "contains",
           "target": "xml",
-          "pattern": "allowedObjectFlag=\"2\""
+          "pattern": "allowedObjectFlag=[\"']2[\"']"
         },
         {
           "type": "contains",
           "target": "xml",
-          "pattern": "valueAllowed=\"em01\""
+          "pattern": "valueAllowed=[\"']em01[\"']"
         },
         {
           "type": "contains",
           "target": "xml",
-          "pattern": "valueAllowed=\"em02\""
+          "pattern": "valueAllowed=[\"']em02[\"']"
         }
       ]
     },
@@ -926,7 +926,7 @@
         {
           "type": "contains",
           "target": "xml",
-          "pattern": "objappl=\"0\""
+          "pattern": "objappl=[\"']0[\"']"
         },
         {
           "type": "contains",
@@ -1068,7 +1068,7 @@
         {
           "type": "contains",
           "target": "xml",
-          "pattern": "allowedObjectFlag=\"0\""
+          "pattern": "allowedObjectFlag=[\"']0[\"']"
         },
         {
           "type": "contains",
@@ -1231,7 +1231,7 @@
         {
           "type": "rule_test_reject_examples_contain",
           "target": "metadata",
-          "pattern": "<dmIdent>\\s*<dmCode[^>]*infoCode=\"(?!055\"|930\")",
+          "pattern": "<dmIdent\\b[^>]*>\\s*<dmCode\\b[^>]*infoCode=[\"'](?!055[\"']|930[\"'])",
           "note": "every reject example writes a non-allowed infoCode in the data module's own dmIdent/dmCode (in \"metadata\", never in a dmRef of the content)"
         },
         {
@@ -1636,7 +1636,7 @@
         {
           "type": "not_contains",
           "target": "reject_examples",
-          "pattern": "<table>\\s*<title>",
+          "pattern": "<table\\b[^>]*>\\s*<title\\b",
           "note": "the reject example never puts the title on the table itself (after the correction round)"
         }
       ]
@@ -2049,7 +2049,7 @@
         },
         {
           "type": "rule_test_reject_examples_contain",
-          "pattern": "changeType=\"delete\"",
+          "pattern": "changeType=[\"']delete[\"']",
           "note": "every reject example has deleted information with an id the reference points at"
         }
       ]
@@ -2083,7 +2083,7 @@
         {
           "type": "rule_test_reject_examples_contain",
           "target": "metadata",
-          "pattern": "<updateCode[^>]*infoCode=\"00N\"",
+          "pattern": "<updateCode\\b[^>]*infoCode=[\"']00N[\"']",
           "note": "every reject example is a tool CIR (its own updateCode, in \"metadata\")"
         },
         {
@@ -2123,7 +2123,7 @@
         {
           "type": "rule_test_reject_examples_contain",
           "target": "metadata",
-          "pattern": "<dmStatus[^>]*issueType=\"(?!changed\"|rinstate-changed\")",
+          "pattern": "<dmStatus\\b[^>]*issueType=[\"'](?!changed[\"']|rinstate-changed[\"'])",
           "note": "every reject example sets an issue type other than changed in the data module's own dmStatus"
         }
       ]
@@ -2157,7 +2157,7 @@
         {
           "type": "rule_test_reject_examples_contain",
           "target": "metadata",
-          "pattern": "issueNumber=\"001\"",
+          "pattern": "issueNumber=[\"']001[\"']",
           "note": "every reject example is an issue 001"
         }
       ]
@@ -2258,7 +2258,7 @@
         },
         {
           "type": "rule_test_reject_examples_contain",
-          "pattern": "<proceduralStep>[\\s\\S]*<proceduralStep>",
+          "pattern": "<proceduralStep[\\s>][\\s\\S]*<proceduralStep[\\s>]",
           "note": "every reject example nests a substep"
         }
       ]
