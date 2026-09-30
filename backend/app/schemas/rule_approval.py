@@ -14,7 +14,9 @@ from pydantic import BaseModel, Field, computed_field, field_validator, model_va
 #                     (docs request, Suggest Rule round) -- kept distinct
 #                     from "llm" so in-app and out-of-app generations can be
 #                     told apart later.
-RuleSource = Literal["llm", "manual", "external_llm"]
+#   "copied"       -- brought from another BRDP ("Comparar dos BRDP lado a
+#                     lado": "Usar esta Regla"), of this project or another.
+RuleSource = Literal["llm", "manual", "external_llm", "copied"]
 
 
 class RuleApprovalPropose(BaseModel):
@@ -24,6 +26,10 @@ class RuleApprovalPropose(BaseModel):
     # manually written/reviewed rule (v1 parity: DetailPanel's manual edit
     # mode saves directly as approved, nothing left to re-review).
     status: str = "pending_review"
+    # "Usar esta Regla": the BRDP the rule was copied from. History gets a
+    # "rule_copied" event naming its project and identifier (read from the
+    # database, never from the client); the user must be able to see it.
+    copied_from_brdp_id: uuid.UUID | None = None
 
 
 def rule_xml_hash(rule_xml: str) -> str:

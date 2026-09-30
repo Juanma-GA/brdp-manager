@@ -9,6 +9,7 @@ from app.api.routes.approvals import project_router as project_approvals_router
 from app.api.routes.approvals import router as approvals_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.brdp_catalog import router as brdp_catalog_router
+from app.api.routes.brdp_compare import router as brdp_compare_router
 from app.api.routes.brdp_import import router as brdp_import_router
 from app.api.routes.brdps import router as brdps_router
 from app.api.routes.config import router as config_router
@@ -46,6 +47,7 @@ app.include_router(config_router)
 app.include_router(brdp_catalog_router)
 app.include_router(brdp_import_router)
 app.include_router(brdps_router)
+app.include_router(brdp_compare_router)
 app.include_router(embedding_jobs_router)
 app.include_router(excel_router)
 app.include_router(notes_router)

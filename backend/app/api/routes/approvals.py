@@ -8,10 +8,10 @@ from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_project_role
+from app.api.deps import has_project_role, require_project_role
 from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
-from app.models import BRDP, RuleApproval, User
+from app.models import BRDP, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.rule_approval import (
     BulkRuleApprovalOut,
@@ -210,6 +210,23 @@ async def propose_approval(
     format_problem = _rule_format_problem(body.rule_xml, format)
     if format_problem is not None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=format_problem["message"])
+    copied_from = None
+    if body.copied_from_brdp_id is not None:
+        # "Usar esta Regla": the source must be an active BRDP the user can
+        # see -- 404 otherwise, never revealing a project they have no role in.
+        source_brdp = (
+            await db.execute(select(BRDP).where(BRDP.id == body.copied_from_brdp_id, ACTIVE_BRDP_FILTER))
+        ).scalar_one_or_none()
+        if source_brdp is None or not await has_project_role(editor, source_brdp.project_id, "viewer", db):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source BRDP not found")
+        source_project = await db.get(Project, source_brdp.project_id)
+        copied_from = {
+            "brdp_id": str(source_brdp.id),
+            "identifier": source_brdp.identifier,
+            "project_id": str(source_project.id),
+            "project_name": source_project.name,
+            "standard": source_project.standard,
+        }
     status_value = "approved" if body.status == "approved" else "pending_review"
     approval = await db.get(RuleApproval, (brdp_id, format))
     old_state = _rule_state(approval)
@@ -226,6 +243,11 @@ async def propose_approval(
     # Draft with another leaves the status unchanged, and would otherwise
     # leave no trace at all. record_change skips an unchanged text.
     record_change(db, brdp_id, editor, "rule", old_rule_xml, approval.rule_xml)
+    if copied_from is not None:
+        # An event, like "rule_test": recorded even when the text is the same.
+        record_change(
+            db, brdp_id, editor, "rule_copied", "", json.dumps(copied_from, sort_keys=True, ensure_ascii=False), always=True
+        )
     await db.commit()
     await db.refresh(approval)
     return approval
