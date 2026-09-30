@@ -43,3 +43,13 @@ export function readXlsxRows(source) {
 export function readPublicTemplate(file) {
   return readXlsxRows(fileURLToPath(new URL(`../../public/${file.replace(/^\//, '')}`, import.meta.url)));
 }
+
+// Rows retired from the curated 4.1/4.2 templates when they were rebuilt
+// with the 10 project decisions (scripts/rule-test-fixtures/
+// retired-template-rules.json): their real rules stay covered by the tests.
+// `file` filters by the template they came from; each row keeps ID, Title,
+// Definition, Proposal, Rule, plus file/format/standard.
+export function retiredTemplateRows(file = null) {
+  const doc = JSON.parse(fs.readFileSync(fileURLToPath(new URL('../rule-test-fixtures/retired-template-rules.json', import.meta.url)), 'utf8'));
+  return doc.rows.filter((r) => !file || r.file === file);
+}

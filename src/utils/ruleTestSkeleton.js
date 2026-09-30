@@ -810,7 +810,20 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   }
   const placed = whole(chain[index], chain.slice(0, index + 1), true);
   const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n]);
-  placed.routes = withRoutes ? contentRoutes(structure, placed.insertion, [...contentChecked, ...predicateNames], useNames) : null;
+  // The way down goes to where each content alternative ENTERS the example:
+  // its first named step below the insertion point (//title/internalRef
+  // checks <internalRef>, directly inside <para>, but the example needs it
+  // inside a <title> -- the way to that <title> is what is missing), or its
+  // checked element when it has no named step (//@x, //*[…]). Never a later
+  // step on its own: the shortest way to levelledPara/title's <title> alone
+  // would go through <figure>.
+  const entryNames = classes.contentAlternatives.map((a) => {
+    const entry = (a.steps || []).find((n) => elements[n] && !placed.path.includes(n));
+    return entry || a.checked;
+  }).filter((n) => n && elements[n]);
+  placed.routes = withRoutes
+    ? contentRoutes(structure, placed.insertion, [...new Set([...entryNames, ...predicateNames])], useNames)
+    : null;
   return placed;
 }
 

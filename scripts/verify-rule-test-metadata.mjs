@@ -19,7 +19,7 @@
 //
 //     node scripts/verify-rule-test-metadata.mjs
 import { chromium } from "playwright-core";
-import { readPublicTemplate } from "./lib/readXlsx.mjs";
+import { readPublicTemplate, retiredTemplateRows } from "./lib/readXlsx.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -163,7 +163,9 @@ async function main() {
   // Templates round: the curated 4.1 rules that need the section -- the data
   // update file's (EXT-00019, tool CIR) and a content path whose predicate
   // reads dmStatus (EXT-00014) -- with their real template rows.
-  const t41 = readPublicTemplate("brdp-template-4-1.xlsx");
+  // EXT-00019/00014 left the 4.1 template when it was rebuilt with the 10
+  // project decisions: their real rules come from the retired-rows fixture.
+  const t41 = [...readPublicTemplate("brdp-template-4-1.xlsx"), ...retiredTemplateRows("brdp-template-4-1.xlsx")];
   const row41 = (id) => t41.find((r) => r.ID === id);
   const p41 = await makeProject("Rule test metadata 4.1", "S1000D 4.1");
   const b19 = await makeBrdp(p41, { identifier: "BRDP-EXT-00019", title: row41("BRDP-EXT-00019").Title, proposal: row41("BRDP-EXT-00019").Proposal });

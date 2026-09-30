@@ -210,6 +210,17 @@ function metadataReply(systemPrompt, rule, answer) {
     // it follow the own code).
     return answer([ex("Two-character variant", "accept", ownCode("disassyCodeVariant", "AB"), "Remove the panel."), ex("One-character variant", "reject", base, "Remove the panel.")]);
   }
+  if (/@systemDiffCode/.test(rule)) {
+    // Plantillas 4.1/4.2, row 5: a value list (A, F) on the data module's
+    // own code and on any code it references.
+    const dmRef = (sdc) => `See <dmRef><dmRefIdent><dmCode modelIdentCode="EXAMPLE" systemDiffCode="${sdc}" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/></dmRefIdent></dmRef>.`;
+    return answer([
+      ex("Default system difference code A", "accept", ownCode("systemDiffCode", "A"), dmRef("A")),
+      ex("System difference code F", "accept", ownCode("systemDiffCode", "F"), dmRef("A")),
+      ex("Own code with B", "reject", ownCode("systemDiffCode", "B"), dmRef("A")),
+      ex("Reference with C", "reject", ownCode("systemDiffCode", "A"), dmRef("C")),
+    ]);
+  }
   if (/@assyCode/.test(rule)) {
     const dmRef = (assy) => `See <dmRef><dmRefIdent><dmCode modelIdentCode="EXAMPLE" systemDiffCode="A" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="${assy}" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/></dmRefIdent></dmRef>.`;
     return answer([ex("Two-character codes", "accept", base, dmRef("01")), ex("Four characters in a reference", "reject", base, dmRef("0301")), ex("Three characters in the own code", "reject", ownCode("assyCode", "001"), dmRef("01"))]);
@@ -370,6 +381,39 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Reference to live text", expected: "accept", schema: ruleSchema, content: 'See <internalRef internalRefId="fig-0001"/>; <changeInline changeType="delete" id="chg-0001">old text</changeInline>.' },
       { label: "Reference to deleted text", expected: "reject", schema: ruleSchema, content: 'See <internalRef internalRefId="chg-0001"/>; <changeInline changeType="delete" id="chg-0001">old text</changeInline>.' },
     ]);
+  }
+  // Plantillas 4.1/4.2: the rows of the rebuilt templates, written along
+  // the valid way down the prompt gives.
+  if (/\/\/parameter</.test(rule)) {
+    const media = (param) => `<para>The animation shows the pump in operation.</para><multimedia><title>Pump operation</title><multimediaObject infoEntityIdent="ICN-EXAMPLE-00001-A-00001-01">${param}</multimediaObject></multimedia>`;
+    return answer([
+      { label: "Animation without parameters", expected: "accept", schema: ruleSchema, content: media("") },
+      { label: "Animation with a parameter", expected: "reject", schema: ruleSchema, content: media('<parameter id="par-0001" parameterName="speed" parameterValue="slow"/>') },
+    ]);
+  }
+  if (/\/\/title\/internalRef/.test(rule)) {
+    const list = (title) => `Torque the bolts to the values in the list.<definitionList><title>${title}</title><definitionListItem><listItemTerm>M6 bolt</listItemTerm><listItemDefinition><para>10 N.m, see <internalRef internalRefId="fig-0001"/>.</para></listItemDefinition></definitionListItem></definitionList>`;
+    return answer([
+      { label: "Reference in the text", expected: "accept", schema: ruleSchema, content: list("Torque values") },
+      { label: "Reference in a title", expected: "reject", schema: ruleSchema, content: list('Torque values (<internalRef internalRefId="fig-0001"/>)') },
+    ]);
+  }
+  if (/supportEquipDescr\[not\(@id\)\]/.test(rule)) {
+    const rqmts = (attr) => `<preliminaryRqmts><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr${attr}><name>Hydraulic jack</name></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips></preliminaryRqmts><mainProcedure><proceduralStep><para>Lift the aircraft with the hydraulic jack.</para></proceduralStep></mainProcedure>`;
+    return answer([
+      { label: "Support equipment with an id", expected: "accept", schema: ruleSchema, content: rqmts(' id="seq-0001"') },
+      { label: "Support equipment without id", expected: "reject", schema: ruleSchema, content: rqmts("") },
+    ]);
+  }
+  if (/itemSeqNumber\[not\(partSegment\)\]/.test(rule)) {
+    const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+    const segment = "<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>";
+    const examples = [
+      { label: "Item with its part data", expected: "accept", schema: ruleSchema, content: csn(segment) },
+      { label: "Item with a part reference only", expected: "reject", schema: ruleSchema, content: csn('<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"/>') },
+    ];
+    if (otherSchema) examples.push({ label: "Description without parts data", expected: "accept", schema: otherSchema, content: "The pump is held by four bolts." });
+    return answer(examples);
   }
   if (/count\(proceduralStep\) = 1/.test(rule)) {
     const step = (n) => `<proceduralStep><para>Remove the panel.</para>${Array.from({ length: n }, (_, i) => `<proceduralStep><para>Substep ${i + 1}.</para></proceduralStep>`).join("")}</proceduralStep>`;

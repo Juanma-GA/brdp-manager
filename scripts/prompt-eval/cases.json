@@ -2257,13 +2257,13 @@
       ]
     },
     {
-      "id": "rule-test-template-4-2-random-list-prefix",
+      "id": "rule-test-template-4-2-parameter",
       "type": "rule-test",
       "standard": "S1000D 4.2",
-      "description": "Curated template rule with a second structureObjectRule added: listItemPrefix other than pf02 is rejected (absent = pf02, the default). The nonContextRule part is known not testable.",
+      "description": "Template row 1, prohibit an element: <parameter> must not be used anywhere.",
       "templateRow": {
         "file": "brdp-template-4-2.xlsx",
-        "id": "BRDP-S1-00507"
+        "id": "BRDP-S1-00133"
       },
       "checks": [
         {
@@ -2283,10 +2283,75 @@
           "note": "the engine agrees with every example on the curated rule, which is known to be correct"
         },
         {
-          "type": "contains",
-          "target": "description",
-          "pattern": "randomList",
-          "note": "the description covers the random list rules"
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<parameter[\\s>/]",
+          "note": "every reject example uses <parameter>"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-2-internalref-in-title",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Template row 2, prohibit in a context: <internalRef> inside a <title> is rejected; elsewhere it is allowed.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00095"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<title[\\s>][^]*?<internalRef[\\s>/][^]*?</title>",
+          "note": "every reject example has an <internalRef> inside a <title>"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-2-support-equip-id",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Template row 3, mandatory attribute: every <supportEquipDescr> must carry @id.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00150"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<supportEquipDescr(?![^>]*\\bid=)[\\s>/]",
+          "note": "every reject example has a <supportEquipDescr> without id"
         }
       ]
     },
@@ -2294,7 +2359,7 @@
       "id": "rule-test-template-4-2-assycode",
       "type": "rule-test",
       "standard": "S1000D 4.2",
-      "description": "Curated template rule rewritten by the stored-rules lint round: allowedObjectFlag=\"1\" on //@assyCode[matches(...)] only required ONE good code; now flag 0 on //@assyCode[string-length(.) != 2] (the Proposal says two characters, not digits), so any assyCode that is not two characters long is rejected, in the DM's own code or in a reference.",
+      "description": "Template row 4, attribute format: any assyCode that is not two characters long is rejected, in the DM's own code or in a reference.",
       "templateRow": {
         "file": "brdp-template-4-2.xlsx",
         "id": "BRDP-S1-00338"
@@ -2325,10 +2390,84 @@
       ]
     },
     {
+      "id": "rule-test-template-4-2-system-diff-code",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Template row 5, value list (objectValue): @systemDiffCode may only be A or F.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00334"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "systemDiffCode[\\s\\S]*\\bA\\b[\\s\\S]*\\bF\\b",
+          "note": "the description lists the allowed values A and F"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "systemDiffCode=[\"'](?![AF][\"'])",
+          "note": "every reject example has a systemDiffCode other than A or F (own code or reference)",
+          "target": "all"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-2-applic-in-status",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Template row 6, DM metadata: dmStatus/pmStatus use <applic>, never <applicRef>.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00316"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<applicRef[\\s>/]",
+          "note": "every reject example references the applicability in its own status section"
+        }
+      ]
+    },
+    {
       "id": "rule-test-template-4-2-single-substep",
       "type": "rule-test",
       "standard": "S1000D 4.2",
-      "description": "Curated template row that replaces S1-00070 (Lufthansa's own CAGE code): a <proceduralStep> with exactly one substep is rejected.",
+      "description": "Template row 7, child count: a <proceduralStep> with exactly one substep is rejected.",
       "templateRow": {
         "file": "brdp-template-4-2.xlsx",
         "id": "BRDP-S1-00187"
@@ -2354,6 +2493,111 @@
           "type": "rule_test_reject_examples_contain",
           "pattern": "<proceduralStep[\\s>][\\s\\S]*<proceduralStep[\\s>]",
           "note": "every reject example nests a substep"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-2-levels",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Template row 8, levels in two schemas plus a nonContextRule: at most five <proceduralStep>/<levelledPara> levels, no title on level five. The examples are split by schema (descript, proced).",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00120"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "examples are split by schema",
+          "note": "the rule is tested in two schemas"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-2-random-list-prefix",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Template row 9, two rules plus a nonContextRule: no nested random lists, listItemPrefix pf02 only (absent = pf02). The nonContextRule part is known not testable.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00507"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "randomList",
+          "note": "the description covers the random list rules"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-4-2-partsegment-ipd",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Template row 10, limited to one schema (ipd): every <itemSeqNumber> must contain <partSegment>. Rule corrected in this round: flag 1 only required ONE partSegment in the document.",
+      "templateRow": {
+        "file": "brdp-template-4-2.xlsx",
+        "id": "BRDP-S1-00219"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine agrees with every example on the curated rule, which is known to be correct"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<itemSeqNumber[\\s>](?:(?!</itemSeqNumber>)[\\s\\S])*</itemSeqNumber>",
+          "note": "every reject example has an <itemSeqNumber>"
+        },
+        {
+          "type": "rule_test_other_schema_accepted",
+          "note": "the example of another schema is accepted (the rule does not apply there)"
         }
       ]
     },

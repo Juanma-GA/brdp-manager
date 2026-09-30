@@ -314,8 +314,12 @@ async function runCheck(check, answer, ctx = {}) {
       const re = new RegExp(check.pattern, flags);
       const rejects = r.examples.filter((ex) => ex.expected === "reject");
       // "target": "metadata" -- the identification and status section the
-      // LLM wrote (rule test on DM metadata); the content otherwise.
-      const bad = rejects.filter((ex) => !re.test(check.target === "metadata" ? ex.metadata || "" : ex.content));
+      // LLM wrote (rule test on DM metadata); "all" -- the section and the
+      // content (a value that may be in the DM's own code or in a
+      // reference); the content otherwise.
+      const text = (ex) => (check.target === "metadata" ? ex.metadata || ""
+        : check.target === "all" ? `${ex.metadata || ""}\n${ex.content || ""}` : ex.content);
+      const bad = rejects.filter((ex) => !re.test(text(ex)));
       if (rejects.length === 0) return { status: "fail", detail: "no reject example" };
       return { status: bad.length ? "fail" : "pass", detail: bad.length ? `without /${check.pattern}/: ${bad.map((ex) => ex.label).join(", ")}` : `all ${rejects.length} reject example(s) match /${check.pattern}/` };
     }
@@ -800,7 +804,8 @@ async function main() {
     c.brdp = { identifier: row.ID, title: row.Title, definition: row.Definition, proposal: row.Proposal, validation: row["Proposal Status"] || "Validated" };
     c.rule = row.Rule;
   }
-  const selectedCases = args.only ? cases.filter((c) => c.id === args.only) : cases;
+  // --only takes one case id, or several separated by commas.
+  const selectedCases = args.only ? cases.filter((c) => args.only.split(",").includes(c.id)) : cases;
   if (selectedCases.length === 0) throw new Error(`No cases matched --only ${args.only}`);
 
   console.log(`Prompt eval: ${selectedCases.length} case(s), ${args.runs} run(s) each, against ${API}`);

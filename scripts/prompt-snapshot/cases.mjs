@@ -58,13 +58,14 @@ function groupPlacementsFor(standard, ruleXml, cards, documentSchemas) {
   }));
 }
 // Plantillas, Part 4: placed like prepareRuleTestSetup does -- with the
-// objectUse names and, for a schema whose skeleton does not reach <para>,
-// the valid way down (Part 3).
+// objectUse names and the valid way down (Part 3; since the templates
+// rebuild, in every S1000D schema, not only those whose skeleton does not
+// reach <para>).
 function appPlacementsFor(standard, ruleXml, roles) {
   const targets = ruleTargets(ruleXml);
   return roles.map(([schema, role]) => {
     const structure = realStructures[`${standard}|${schema}`];
-    return { schema, role, ...placeExample(structure, targets, { useNames: ruleUseNames(ruleXml), withRoutes: structure.skeleton?.derivation !== 'para' }) };
+    return { schema, role, ...placeExample(structure, targets, { useNames: ruleUseNames(ruleXml), withRoutes: true }) };
   });
 }
 const paraEntry = realCards['S1000D 4.2'].para;

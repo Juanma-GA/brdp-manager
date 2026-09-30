@@ -116,10 +116,15 @@ def test_loose_rule_and_context_blocks_keep_document_order_and_are_not_duplicate
 
 
 def test_real_template_brdp_s1_00006_keeps_its_three_context_blocks():
-    from app.services.rule_templates import load_template_rules
+    # S1-00006 left the 4.2 template when it was rebuilt with the 10 project
+    # decisions; its real rule is kept in the retired-rows fixture.
+    import json
+    from pathlib import Path
 
-    row = next(r for r in load_template_rules("S1000D 4.2") if r.identifier == "BRDP-S1-00006")
-    out = extract_format_rules(row.rule_xml, "BREX-4.2")
+    fixture = Path(__file__).resolve().parents[2] / "scripts" / "rule-test-fixtures" / "retired-template-rules.json"
+    rows = json.loads(fixture.read_text(encoding="utf-8"))["rows"]
+    rule_xml = next(r["Rule"] for r in rows if r["ID"] == "BRDP-S1-00006" and r["format"] == "BREX-4.2")
+    out = extract_format_rules(rule_xml, "BREX-4.2")
     for schema in ("condcrossreftable", "fault", "prdcrossreftable"):
         assert f'rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/{schema}.xsd"' in out
     assert out.count("<contextRules") == 3

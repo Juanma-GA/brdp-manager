@@ -41,7 +41,7 @@ import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, keepMatchedNodeProblem, missesRuleProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
 import { contentRoutes, metadataXml, normalizeBrexReferenceCode, ruleLooksAtBrexReference, ruleMatchExpressions, ruleUseNames, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
 import { formatRuleDescription, formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
-import { readPublicTemplate } from './lib/readXlsx.mjs';
+import { readPublicTemplate, retiredTemplateRows } from './lib/readXlsx.mjs';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
 
@@ -1027,7 +1027,8 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const S301 = 'S1000D 3.0.1';
   const descript = structureOf(S42, 'descript');
   const minimal = metadataXml(descript.skeleton.metadata.tree).xml;
-  const t42 = readPublicTemplate('brdp-template-4-2.xlsx');
+  // Current rows, or the real rules retired from the template (fixture).
+  const t42 = [...readPublicTemplate('brdp-template-4-2.xlsx'), ...retiredTemplateRows('brdp-template-4-2.xlsx')];
   const ruleOf = (id) => t42.find((r) => r.ID === id).Rule;
   // The minimal section with one change (the LLM starts from it).
   const docCode = /<dmCode ([^>]*)infoCode="040"/;
@@ -1426,7 +1427,10 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const vocab41 = vocabOf('schema-vocabulary-4-1.json');
   const t41 = readPublicTemplate('brdp-template-4-1.xlsx');
   const t42 = readPublicTemplate('brdp-template-4-2.xlsx');
-  const rule41 = (id) => t41.find((r) => r.ID === id)?.Rule;
+  // Real rules retired from the 4.1 template when it was rebuilt with the
+  // 10 project decisions (fixture): still exercised here.
+  const retired41 = retiredTemplateRows('brdp-template-4-1.xlsx');
+  const rule41 = (id) => (t41.find((r) => r.ID === id) ?? retired41.find((r) => r.ID === id))?.Rule;
   const rule42 = (id) => t42.find((r) => r.ID === id)?.Rule;
   check('templates: replaced 4.1 rows are gone', !rule41('BRDP-EXT-00027') && !rule41('BRDP-EXT-00044'));
   check('templates: replaced 4.2 row is gone', !rule42('BRDP-S1-00070') && Boolean(rule42('BRDP-S1-00187')));
@@ -1606,6 +1610,62 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     { label: 'pf07', expected: 'reject', schema: 'descript', content: list(' listItemPrefix="pf07"') },
   ], setupFor(S42, R507, ['descript']));
   check('S1-00507: listItemPrefix other than pf02 rejected, absent or pf02 accepted', statuses(r507) === 'accepted,accepted,rejected' && r507.verdict.kind === 'correct', statuses(r507));
+}
+
+// ─── Plantillas 4.1/4.2 como ejemplos útiles: the way down in every schema ──
+// The rebuilt templates' rows, run through the same placement, assembly,
+// validation and engine as the panel. The valid way down from the
+// insertion point is now given in every S1000D schema (it only was for
+// schemas whose skeleton does not reach <para>), to where each part of the
+// rule enters the example.
+{
+  const S42 = 'S1000D 4.2';
+  const t42 = readPublicTemplate('brdp-template-4-2.xlsx');
+  const rule = (id) => t42.find((r) => r.ID === id).Rule;
+  const route = (id, schema) => {
+    const r = rule(id);
+    const p = placeExample(structureOf(S42, schema), ruleTargets(r), { useNames: ruleUseNames(r), withRoutes: true });
+    return { insertion: p.insertion, steps: (p.routes?.steps || []).map((st) => `${st.parent}>${st.children.join('|')}`) };
+  };
+  const r133 = route('BRDP-S1-00133', 'descript');
+  check('templates: <parameter> reached through multimedia/multimediaObject', r133.insertion === 'levelledPara' && r133.steps.join(' ') === 'levelledPara>multimedia multimedia>multimediaObject multimediaObject>parameter', JSON.stringify(r133));
+  const r95 = route('BRDP-S1-00095', 'descript');
+  check('templates: //title/internalRef routes to the <title> (its entry), not only to <internalRef>', r95.steps.join(' ') === 'para>definitionList definitionList>title', JSON.stringify(r95));
+  const r150 = route('BRDP-S1-00150', 'proced');
+  check('templates: <supportEquipDescr> four levels below <procedure>', r150.insertion === 'procedure' && r150.steps.at(-1) === 'supportEquipDescrGroup>supportEquipDescr' && r150.steps.length === 4, JSON.stringify(r150));
+  const r120 = route('BRDP-S1-00120', 'descript');
+  check('templates: levelledPara/title gets no misleading way to a <figure> title', r120.steps.length === 0, JSON.stringify(r120));
+  const r187 = route('BRDP-S1-00187', 'proced');
+  check('templates: a checked element directly inside the insertion point → no way down', r187.steps.length === 0, JSON.stringify(r187));
+  const prep = await prepareRuleTestSetup({
+    ruleXml: rule('BRDP-S1-00133'), standard: S42, schemaLocation: 'flat',
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['descript'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S42, schema) }),
+  });
+  check('prepareRuleTestSetup: a para-derived schema gets the way down when it is needed', !!prep.promptPlacements[0]?.routes);
+
+  // Each row with a valid pair of examples, written along that way down.
+  const runRow = (id, schema, accept, reject) => {
+    const r = rule(id);
+    return testRun(r, [
+      { label: 'accept', expected: 'accept', schema, content: accept },
+      { label: 'reject', expected: 'reject', schema, content: reject },
+    ], setupFor(S42, r, [schema]));
+  };
+  const ok = (res) => res.runs.every((x) => x.validation.runnable) && res.runs.map((x) => x.result.status).join() === 'accepted,rejected' && res.verdict.kind === 'correct';
+  const why = (res) => JSON.stringify(res.runs.map((x) => [x.validation.structure, x.result?.status]));
+  const media = (param) => `<para>The animation shows the pump.</para><multimedia><title>Pump</title><multimediaObject infoEntityIdent="ICN-EXAMPLE-00001-A-00001-01">${param}</multimediaObject></multimedia>`;
+  const r133run = runRow('BRDP-S1-00133', 'descript', media(''), media('<parameter id="par-0001" parameterName="speed" parameterValue="slow"/>'));
+  check('templates S1-00133: <parameter> rejected', ok(r133run), why(r133run));
+  const list = (title) => `See the list.<definitionList><title>${title}</title><definitionListItem><listItemTerm>M6</listItemTerm><listItemDefinition><para>10 N.m</para></listItemDefinition></definitionListItem></definitionList>`;
+  const r95run = runRow('BRDP-S1-00095', 'descript', list('Torque values'), list('Torque values (<internalRef internalRefId="fig-0001"/>)'));
+  check('templates S1-00095: <internalRef> in a title rejected', ok(r95run), why(r95run));
+  const rq = (attr) => `<preliminaryRqmts><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr${attr}><name>Jack</name></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips></preliminaryRqmts><mainProcedure><proceduralStep><para>Lift.</para></proceduralStep></mainProcedure>`;
+  const r150run = runRow('BRDP-S1-00150', 'proced', rq(' id="seq-0001"'), rq(''));
+  check('templates S1-00150: <supportEquipDescr> without id rejected', ok(r150run), why(r150run));
+  const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+  const r219run = runRow('BRDP-S1-00219', 'ipd', csn('<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>'), csn('<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"/>'));
+  check('templates S1-00219: <itemSeqNumber> without <partSegment> rejected in ipd', ok(r219run), why(r219run));
 }
 
 // ─── Pending of the test rule: valid nesting for A//B, edited examples ─────

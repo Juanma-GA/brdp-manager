@@ -15,7 +15,7 @@
 //    missing from the table below fails the run, so a template change can't
 //    silently skip the check.
 import { DOMParser } from '@xmldom/xmldom';
-import { readPublicTemplate } from './lib/readXlsx.mjs';
+import { readPublicTemplate, retiredTemplateRows } from './lib/readXlsx.mjs';
 import { analyzeRule, ruleConditions, runRuleOnFragment } from '../src/utils/ruleTestEngine.js';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { brexToSchematron } from '../src/api/brexToSchematron.js';
@@ -102,6 +102,12 @@ const sor = (flag, path, values = '', use = 'use') =>
   `<structureObjectRule><objectPath${flag === null ? '' : ` allowedObjectFlag="${flag}"`}>${path}</objectPath><objectUse>${use}</objectUse>${values}</structureObjectRule>`;
 const ov = (form, allowed) => `<objectValue valueForm="${form}" valueAllowed="${allowed}"/>`;
 const DM = (body, attrs = '') => `<dmodule${attrs}><identAndStatusSection/><content>${body}</content></dmodule>`;
+// n nested <proceduralStep>/<levelledPara> levels; a <title> at level
+// `titleAt` (1-based) if given.
+const nestLevels = (el) => (n, titleAt = 0, level = 1) => (n < level ? ''
+  : `<${el}>${level === titleAt ? '<title>t</title>' : ''}<para>level ${level}</para>${nestLevels(el)(n, titleAt, level + 1)}</${el}>`);
+const nestSteps = nestLevels('proceduralStep');
+const nestParas = nestLevels('levelledPara');
 const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="${url}"`;
 
 // ─── 1. Own cases ───────────────────────────────────────────────────────────
@@ -275,9 +281,38 @@ const TEMPLATE_CASES = {
       // The Proposal says two CHARACTERS, not two digits.
       alsoGood: ['<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" assyCode="AB"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>'],
     },
-    'BRDP-S1-00065': {
-      bad: DM('<copyright><copyrightPara><emphasis>Copyright 2023</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),
-      good: DM('<copyright><copyrightPara><emphasis>Copyright (C) 2024</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),
+    // Plantillas 4.1/4.2 como ejemplos útiles: the 10 project decisions.
+    'BRDP-S1-00095': {
+      bad: '<levelledPara><title>Refer to <internalRef internalRefId="fig-0001"/></title><para>a</para></levelledPara>',
+      good: '<levelledPara><title>Removal</title><para>Refer to <internalRef internalRefId="fig-0001"/>.</para></levelledPara>',
+    },
+    'BRDP-S1-00150': {
+      schema: 'proced',
+      bad: '<preliminaryRqmts><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr><name>Hydraulic jack</name></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips></preliminaryRqmts>',
+      good: '<preliminaryRqmts><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr id="seq-0001"><name>Hydraulic jack</name></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips></preliminaryRqmts>',
+      alsoBad: ['<preliminaryRqmts><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr id="seq-0001"><name>Jack</name></supportEquipDescr><supportEquipDescr><name>Stand</name></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips></preliminaryRqmts>'],
+    },
+    'BRDP-S1-00334': {
+      bad: '<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" systemDiffCode="B"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>',
+      good: '<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" systemDiffCode="A"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>',
+      alsoGood: ['<dmodule><identAndStatusSection><dmAddress><dmIdent><dmCode modelIdentCode="BIKE" systemDiffCode="F"/></dmIdent></dmAddress></identAndStatusSection><content/></dmodule>'],
+    },
+    'BRDP-S1-00316': {
+      bad: '<dmodule><identAndStatusSection><dmStatus><applicRef applicIdentValue="app-0001"/></dmStatus></identAndStatusSection><content/></dmodule>',
+      good: '<dmodule><identAndStatusSection><dmStatus><applic><displayText><simplePara>All</simplePara></displayText></applic></dmStatus></identAndStatusSection><content/></dmodule>',
+      alsoBad: ['<pm><identAndStatusSection><pmStatus><applicRef applicIdentValue="app-0001"/></pmStatus></identAndStatusSection><content/></pm>'],
+    },
+    'BRDP-S1-00120': {
+      schema: 'proced',
+      bad: `<mainProcedure>${nestSteps(6)}</mainProcedure>`,
+      good: `<mainProcedure>${nestSteps(5)}</mainProcedure>`,
+      partial: NON_CONTEXT,
+      alsoBad: [
+        `<mainProcedure>${nestSteps(5, 5)}</mainProcedure>`,
+        `<description>${nestParas(6)}</description>`,
+        `<description>${nestParas(5, 5)}</description>`,
+      ],
+      alsoGood: [`<mainProcedure>${nestSteps(5, 4)}</mainProcedure>`, `<description>${nestParas(5, 4)}</description>`],
     },
     'BRDP-S1-00507': {
       bad: '<randomList><listItem><para>a</para><randomList><listItem><para>b</para></listItem></randomList></listItem></randomList>',
@@ -288,29 +323,19 @@ const TEMPLATE_CASES = {
       alsoBad: ['<randomList listItemPrefix="pf07"><listItem><para>a</para></listItem></randomList>'],
       alsoGood: ['<randomList listItemPrefix="pf02"><listItem><para>a</para></listItem></randomList>'],
     },
-    'BRDP-S1-00053': { bad: '<dmStatus issueType="revised"/>', good: '<dmStatus issueType="changed"/>' },
     // Templates round: replaces BRDP-S1-00070 (Lufthansa's own CAGE code).
     'BRDP-S1-00187': {
       schema: 'proced',
       bad: '<mainProcedure><proceduralStep><para>a</para><proceduralStep><para>only one</para></proceduralStep></proceduralStep></mainProcedure>',
       good: '<mainProcedure><proceduralStep><para>a</para><proceduralStep><para>b</para></proceduralStep><proceduralStep><para>c</para></proceduralStep></proceduralStep><proceduralStep><para>d</para></proceduralStep></mainProcedure>',
     },
+    // Rule corrected: flag 1 on //itemSeqNumber/partSegment only required
+    // ONE partSegment in the document; now every itemSeqNumber needs one.
     'BRDP-S1-00219': {
       schema: 'ipd',
       bad: DM('<catalogSeqNumber><itemSeqNumber><partRef/></itemSeqNumber></catalogSeqNumber>'),
       good: DM('<catalogSeqNumber><itemSeqNumber><partSegment/></itemSeqNumber></catalogSeqNumber>'),
-    },
-    'BRDP-EXT-00001': { notExecutable: NON_CONTEXT, fragment: '<para/>' },
-    'BRDP-S1-00006': {
-      schema: 'fault',
-      bad: DM('<faultIsolation/>', XSI('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd')),
-      goodSchema: 'proced',
-      good: DM('<procedure/>', XSI('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd')),
-    },
-    'BRDP-S1-00377': {
-      schema: 'comrep',
-      bad: '<commonRepository><applicRepository/></commonRepository>',
-      good: '<commonRepository><partRepository/><toolRepository/></commonRepository>',
+      alsoBad: [DM('<catalogSeqNumber><itemSeqNumber><partSegment/></itemSeqNumber><itemSeqNumber><partRef/></itemSeqNumber></catalogSeqNumber>')],
     },
   },
   'BREX-4.1': {
@@ -409,18 +434,35 @@ const TEMPLATE_CASES = {
   },
 };
 
-const TEMPLATE_FILES = { 'BREX-4.2': '4-2', 'BREX-4.1': '4-1', 'BREX-3.0.1': '3-0-1' };
-const notExecutableInTemplates = [];
-const neverRejects = [];
-for (const [format, suffix] of Object.entries(TEMPLATE_FILES)) {
-  const rows = readPublicTemplate(`brdp-template-${suffix}.xlsx`).filter((r) => r['Rule Status'] === 'Verified' && r.Rule);
-  const cases = TEMPLATE_CASES[format];
-  check(`${format} template: 10 Verified rules`, rows.length === 10, `got ${rows.length}`);
-  check(`${format} template: every rule has a case`, rows.every((r) => cases[r.ID]), rows.filter((r) => !cases[r.ID]).map((r) => r.ID).join(', '));
+// Rules retired from the 4.1/4.2 templates (scripts/rule-test-fixtures/
+// retired-template-rules.json): still real rules, still covered.
+const RETIRED_CASES = {
+  'BREX-4.2': {
+    'BRDP-S1-00065': {
+      bad: DM('<copyright><copyrightPara><emphasis>Copyright 2023</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),
+      good: DM('<copyright><copyrightPara><emphasis>Copyright (C) 2024</emphasis> Lufthansa Technik AG.</copyrightPara></copyright>'),
+    },
+    'BRDP-S1-00053': { bad: '<dmStatus issueType="revised"/>', good: '<dmStatus issueType="changed"/>' },
+    'BRDP-EXT-00001': { notExecutable: NON_CONTEXT, fragment: '<para/>' },
+    'BRDP-S1-00006': {
+      schema: 'fault',
+      bad: DM('<faultIsolation/>', XSI('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd')),
+      goodSchema: 'proced',
+      good: DM('<procedure/>', XSI('http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd')),
+    },
+    'BRDP-S1-00377': {
+      schema: 'comrep',
+      bad: '<commonRepository><applicRepository/></commonRepository>',
+      good: '<commonRepository><partRepository/><toolRepository/></commonRepository>',
+    },
+  },
+};
+
+function runTemplateCases(format, rows, cases, label = '') {
   for (const row of rows) {
     const c = cases[row.ID];
     if (!c) continue;
-    const name = `${format} ${row.ID}`;
+    const name = `${format}${label} ${row.ID}`;
     const schema = c.schema || null;
     if (c.notExecutable) {
       expect(`${name}, not executable`, run(row.Rule, format, c.fragment, schema), 'not_executable', { reason: c.notExecutable });
@@ -441,6 +483,21 @@ for (const [format, suffix] of Object.entries(TEMPLATE_FILES)) {
     (c.alsoGood || []).forEach((f, i) => expect(`${name}, complying fragment ${i + 2}`, run(row.Rule, format, f, schema), 'accepted', extra));
     if (c.partial) notExecutableInTemplates.push(`${format} ${row.ID} (part): ${c.partial}`);
   }
+}
+const TEMPLATE_FILES = { 'BREX-4.2': '4-2', 'BREX-4.1': '4-1', 'BREX-3.0.1': '3-0-1' };
+const notExecutableInTemplates = [];
+const neverRejects = [];
+for (const [format, suffix] of Object.entries(TEMPLATE_FILES)) {
+  const rows = readPublicTemplate(`brdp-template-${suffix}.xlsx`).filter((r) => r['Rule Status'] === 'Verified' && r.Rule);
+  const cases = TEMPLATE_CASES[format];
+  check(`${format} template: 10 Verified rules`, rows.length === 10, `got ${rows.length}`);
+  check(`${format} template: every rule has a case`, rows.every((r) => cases[r.ID]), rows.filter((r) => !cases[r.ID]).map((r) => r.ID).join(', '));
+  runTemplateCases(format, rows, cases);
+}
+for (const [format, cases] of Object.entries(RETIRED_CASES)) {
+  const rows = retiredTemplateRows().filter((r) => r.format === format);
+  check(`${format} retired rules: every rule has a case`, rows.length > 0 && rows.every((r) => cases[r.ID]), rows.filter((r) => !cases[r.ID]).map((r) => r.ID).join(', '));
+  runTemplateCases(format, rows, cases, ' (retired)');
 }
 
 // ─── 3. Engine and generated Schematron agree ───────────────────────────────

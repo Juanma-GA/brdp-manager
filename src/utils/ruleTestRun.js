@@ -68,7 +68,12 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     if (!structure.available) continue;
     const placement = placeExample(structure, schemaTargets, {
       useNames,
-      withRoutes: !String(standard).startsWith('DITA') && structure.skeleton?.derivation !== 'para',
+      // The valid way down from the insertion point, in every S1000D schema
+      // (contentRoutes gives nothing when every checked element goes
+      // directly inside it). Plantillas 4.1/4.2: <parameter> only inside
+      // <multimediaObject>, <supportEquipDescr> four levels below
+      // <procedure> -- the skeleton reaching <para> is not enough.
+      withRoutes: !String(standard).startsWith('DITA'),
     });
     placements[schema] = { structure, placement };
     promptPlacements.push({ schema, role, ...placement, ...(group ? { group } : {}) });
