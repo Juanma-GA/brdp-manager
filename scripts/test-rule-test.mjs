@@ -39,7 +39,7 @@ import { analyzeRule } from '../src/utils/ruleTestEngine.js';
 import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkExampleStructure, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
 import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, missesRuleProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
-import { metadataXml, normalizeBrexReferenceCode, ruleLooksAtBrexReference, ruleMatchExpressions, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
+import { contentRoutes, metadataXml, normalizeBrexReferenceCode, ruleLooksAtBrexReference, ruleMatchExpressions, ruleUseNames, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
 import { formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
 import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
@@ -1540,6 +1540,53 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     { label: 'part in parts CIR', expected: 'accept', schema: 'update', content: '<insertObjectGroup><insertObject><partSpec/></insertObject></insertObjectGroup>', metadata: tool('00E') },
   ], ['update']);
   check('EXT-00019: a part in the tool CIR rejected, in another CIR accepted', statuses(r19) === 'accepted,rejected,accepted' && r19.verdict.kind === 'correct', statuses(r19));
+
+  // Plantillas, Part 3: the real run had 0/3 valid update examples -- the
+  // LLM wrote the CIR elements straight inside <update>. The prompt now
+  // gets the valid way down from the insertion point and the cards of the
+  // elements involved (the rule's and the ones its objectUse names).
+  check('ruleUseNames: the words of objectUse', ruleUseNames(R19).includes('toolSpec') && ruleUseNames(R19).includes('figure'));
+  const p19r = placeExample(u41, ruleTargets(R19), { useNames: ruleUseNames(R19), withRoutes: true });
+  const steps19 = Object.fromEntries((p19r.routes?.steps || []).map((st) => [st.parent, st]));
+  check('EXT-00019 routes: from <update>', p19r.routes?.from === 'update', JSON.stringify(p19r.routes?.from));
+  check('EXT-00019 routes: update > insertObjectGroup > insertObject > partSpec/toolSpec',
+    steps19.update?.children.includes('insertObjectGroup') && steps19.insertObjectGroup?.children.includes('insertObject')
+      && steps19.insertObject?.children.includes('partSpec') && steps19.insertObject?.children.includes('toolSpec'));
+  check('EXT-00019 routes: insertObject lists its own attributes', steps19.insertObject?.attributes.includes('targetPath'));
+  check('EXT-00019 routes: deleteObject leads to the Ident elements', steps19.deleteObject?.children.includes('partIdent'));
+  const card = (name) => p19r.routes.cards.find((c) => c.name === name);
+  check('EXT-00019 cards: partSpec with partIdent and its real attributes', card('partSpec')?.children.some((c) => c.name === 'partIdent' && c.attributes.includes('partNumberValue')));
+  check('EXT-00019 cards: toolSpec (named in objectUse)', !!card('toolSpec') && card('toolSpec').children.some((c) => c.name === 'toolIdent'));
+  check('EXT-00019 cards: generic attributes never listed', !card('partSpec').children.some((c) => c.attributes.includes('changeMark')));
+  check('EXT-00019 routes: without withRoutes, none', placeExample(u41, ruleTargets(R19)).routes === null);
+  const prompt19 = buildRuleTestExamplesPrompt({ brdp: { identifier: 'BRDP-EXT-00019', title: 't', definition: 'd', proposal: 'p' }, standard: S41, format: 'BREX-4.1', ruleXml: R19, placements: [{ schema: 'update', role: 'rule', ...p19r }] });
+  check('EXT-00019 prompt: the valid way down and the cards', prompt19.includes('The valid way down in this schema') && prompt19.includes('<insertObjectGroup> > <insertObject>') && prompt19.includes('<partSpec>: children'));
+  check('contentRoutes: every checked name directly inside -> null', contentRoutes(u41, 'insertObject', ['partSpec', 'toolSpec']) === null);
+  check('contentRoutes: no insertion point -> null', contentRoutes(u41, null, ['partSpec']) === null);
+  // Which placements get routes (prepareRuleTestSetup): only S1000D schemas
+  // whose skeleton does not reach <para> -- the prompt of every other case
+  // (snapshot) stays the same.
+  const prep19 = await prepareRuleTestSetup({
+    ruleXml: R19, standard: S41, schemaLocation: 'flat',
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['update'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S41, schema) }),
+  });
+  check('prepareRuleTestSetup: EXT-00019 on update has routes', !!prep19.promptPlacements[0]?.routes);
+  const prepStep = await prepareRuleTestSetup({
+    ruleXml: '<structureObjectRule><objectPath allowedObjectFlag="0">//proceduralStep[count(proceduralStep) = 1]</objectPath><objectUse>x</objectUse></structureObjectRule>', standard: S42, schemaLocation: 'flat',
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['proced'] }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(S42, schema) }),
+  });
+  check('prepareRuleTestSetup: a para-derived schema gets no routes', prepStep.promptPlacements.every((pl) => pl.routes === null));
+  const r19ok = run41(R19, [
+    { label: 'tools', expected: 'accept', schema: 'update', content: '<insertObjectGroup><insertObject insertionOrder="1" targetPath="/"><toolSpec><toolIdent manufacturerCodeValue="K0001" toolNumber="T-100"/></toolSpec></insertObject></insertObjectGroup>', metadata: tool('00N') },
+    { label: 'part', expected: 'reject', schema: 'update', content: '<insertObjectGroup><insertObject insertionOrder="1" targetPath="/"><partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/></partSpec></insertObject></insertObjectGroup>', metadata: tool('00N') },
+  ], ['update']);
+  const r19bad = run41(R19, [
+    { label: 'straight in update', expected: 'reject', schema: 'update', content: '<insertObject><partSpec/></insertObject>', metadata: tool('00N') },
+  ], ['update']);
+  check('EXT-00019: <insertObject> straight inside <update> is not valid (the real run)', r19bad.runs[0].validation.runnable === false);
+  check('EXT-00019: examples written along the route are valid and give the right verdict', r19ok.runs.every((r) => r.validation.runnable) && statuses(r19ok) === 'accepted,rejected' && r19ok.verdict.kind === 'correct', statuses(r19ok));
 
   // 4.2
   const R187 = rule42('BRDP-S1-00187');

@@ -376,7 +376,9 @@ export function nestingPath(elements, from, to) {
   if (!elements[from] || !elements[to]) return null;
   const previous = new Map();
   let frontier = [from];
-  const seen = new Set();
+  // `from` is never re-entered (a cycle back to it would make the chain
+  // loop forever); from === to still works, the check is on the child.
+  const seen = new Set([from]);
   while (frontier.length) {
     const next = [];
     for (const name of frontier) {
@@ -421,6 +423,92 @@ export function nestingPaths(structure, targets) {
     }
   }
   return out;
+}
+
+// Ajustes tras la pasada real de las plantillas, Part 3: the elements a
+// rule checks can sit several levels below the insertion point -- in a
+// data update file, update/insertObjectGroup/insertObject/partSpec. The
+// prompt only listed what goes DIRECTLY inside <update>, so the LLM
+// guessed the rest (0 of 3 valid examples for EXT-00019 in the real run).
+// contentRoutes gives, from the schema's graph, the valid way down to each
+// of them: the containers on the way with the children that lead there
+// (and their own attributes), and a short card of the elements themselves.
+// Only when at least one element the rule checks is not a direct child of
+// the insertion point; otherwise null (the prompt does not change).
+// `names`: the rule's content-side names (checked + predicates) first,
+// then `extraNames` (elements its objectUse names, e.g. the ones a tool CIR
+// may contain), which join the route but never trigger it.
+const ROUTE_MAX_NAMES = 30;
+const ROUTE_MAX_CARDS = 6;
+const ROUTE_MAX_LIST = 12;
+// Attributes every S1000D element has (change marking, security,
+// applicability links): noise in a route, left out of it.
+const GENERIC_ATTRIBUTES = new Set([
+  'authorityDocument', 'authorityName', 'caveat', 'changeMark', 'changeType', 'commercialClassification',
+  'securityClassification', 'reasonForUpdateRefIds', 'id', 'applicRefId', 'derivativeClassificationRefId',
+  'controlAuthorityRefIds', 'crewRefCard', 'skillLevelCode',
+]);
+const specificAttributes = (el) =>
+  (el?.attributes || []).filter((a) => !GENERIC_ATTRIBUTES.has(a) && !a.includes(':')).sort();
+
+export function contentRoutes(structure, insertion, ruleNames, extraNames = []) {
+  const elements = structure.elements;
+  if (!insertion || !elements[insertion]) return null;
+  const direct = new Set(elements[insertion].children || []);
+  const pathOf = (name) => (name === insertion || direct.has(name) ? null : nestingPath(elements, insertion, name));
+  const ruleRoutes = [...new Set(ruleNames)].filter((n) => elements[n]).map((n) => [n, pathOf(n)]);
+  if (!ruleRoutes.some(([, path]) => path)) return null;
+  const all = [...ruleRoutes];
+  for (const n of new Set(extraNames)) {
+    if (elements[n] && !all.some(([m]) => m === n)) all.push([n, pathOf(n)]);
+  }
+  const routed = all.filter(([, path]) => path).slice(0, ROUTE_MAX_NAMES);
+  const edges = new Map();
+  for (const [, path] of routed) {
+    for (let i = 0; i + 1 < path.length; i += 1) {
+      if (!edges.has(path[i])) edges.set(path[i], new Set());
+      edges.get(path[i]).add(path[i + 1]);
+    }
+  }
+  const targetSet = new Set(routed.map(([n]) => n));
+  const steps = [...edges.entries()].map(([parent, children]) => ({
+    parent,
+    children: [...children].sort(),
+    attributes: targetSet.has(parent) ? [] : specificAttributes(elements[parent]),
+  }));
+  // Cards: half from the rule's own names (what a reject example needs),
+  // half from the others (what an accept example may use instead).
+  const ruleRouted = routed.filter(([n]) => ruleRoutes.some(([m]) => m === n));
+  const otherRouted = routed.filter(([n]) => !ruleRoutes.some(([m]) => m === n));
+  const half = Math.ceil(ROUTE_MAX_CARDS / 2);
+  const carded = [
+    ...ruleRouted.slice(0, otherRouted.length ? half : ROUTE_MAX_CARDS),
+    ...otherRouted.slice(0, ROUTE_MAX_CARDS),
+  ].slice(0, ROUTE_MAX_CARDS);
+  const cards = carded.map(([name]) => {
+    const children = [...(elements[name].children || [])].sort();
+    const attributes = specificAttributes(elements[name]);
+    return {
+      name,
+      // each child with its own attributes: <partSpec> > partIdent(@partNumberValue …)
+      children: children.slice(0, ROUTE_MAX_LIST).map((c) => ({ name: c, attributes: specificAttributes(elements[c]).slice(0, 6) })),
+      childrenOmitted: Math.max(0, children.length - ROUTE_MAX_LIST),
+      attributes: attributes.slice(0, ROUTE_MAX_LIST),
+      attributesOmitted: Math.max(0, attributes.length - ROUTE_MAX_LIST),
+    };
+  });
+  return { from: insertion, steps, cards };
+}
+
+// The element names the rule's objectUse / objuse text mentions (bare
+// words: "Only toolSpec, toolIdent, figure … can be used"); the caller
+// keeps those that are elements of the schema.
+export function ruleUseNames(ruleXml) {
+  const out = [];
+  for (const m of String(ruleXml || '').matchAll(/<(objectUse|objuse)\b[^>]*>([\s\S]*?)<\/\1>/g)) {
+    for (const w of m[2].replace(/&lt;|&gt;|&amp;/g, ' ').matchAll(/[A-Za-z][A-Za-z0-9-]*/g)) out.push(w[0]);
+  }
+  return [...new Set(out)];
 }
 
 function reachable(elements, from, target, maxDepth = 8) {
@@ -573,7 +661,11 @@ export function classifyRuleTargets(structure, targets) {
 // minimal one); null for other documents. contentInsertion: false when the
 // rule looks only at the metadata (the content is the bare skeleton).
 // unreachable: see classifyRuleTargets.
-export function placeExample(structure, targets) {
+// withRoutes (Part 3): give the valid way down to the checked elements
+// (contentRoutes) -- asked by prepareRuleTestSetup for the S1000D schemas
+// with no path to <para> (data update file, ipd, pm, dml…: structured data
+// an LLM does not know by heart), never for prose (a <para> or a DITA body).
+export function placeExample(structure, targets, { useNames = [], withRoutes = false } = {}) {
   const chain = structure.skeleton.path;
   const elements = structure.elements;
   const section = structure.skeleton.metadata || null;
@@ -639,7 +731,10 @@ export function placeExample(structure, targets) {
       break;
     }
   }
-  return whole(chain[index], chain.slice(0, index + 1), true);
+  const placed = whole(chain[index], chain.slice(0, index + 1), true);
+  const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n]);
+  placed.routes = withRoutes ? contentRoutes(structure, placed.insertion, [...contentChecked, ...predicateNames], useNames) : null;
+  return placed;
 }
 
 // ─── The complete fragment ──────────────────────────────────────────────────

@@ -92,6 +92,27 @@ function nestingLines(p) {
     .join('');
 }
 
+// Ajustes tras la pasada real de las plantillas, Part 3: the valid way
+// down from the insertion point to the elements the rule checks, when they
+// are not direct children of it (contentRoutes) -- the containers on the
+// way (with their own attributes) and a short card of the elements.
+function routeLines(p) {
+  const r = p.routes;
+  if (!r) return '';
+  const attrs = (list) => (list.length ? ` (${list.map((a) => `@${a}`).join(', ')})` : '');
+  const steps = r.steps.map((st) => `
+    <${st.parent}>${attrs(st.attributes)} > ${st.children.map((c) => `<${c}>`).join(', ')}`);
+  const cards = r.cards.map((c) => {
+    const children = c.children.map((ch) => `${ch.name}${attrs(ch.attributes)}`).join(', ');
+    const more = c.childrenOmitted ? `, +${c.childrenOmitted} more` : '';
+    return `
+    <${c.name}>: children ${children || 'none'}${more}; attributes ${c.attributes.length ? c.attributes.map((a) => `@${a}`).join(', ') : 'none besides the common ones'}`;
+  });
+  return `
+  The elements the rule looks at are not directly inside <${r.from}>. The valid way down in this ${p.kindLabel || 'schema'} (a container > what goes inside it):${steps.join('')}
+  What those elements contain (use only these names, never invented attributes):${cards.join('')}`;
+}
+
 function placementLine(p, dita) {
   const allowed = p.allowedChildren.length > 0 ? p.allowedChildren.join(', ') : 'text only';
   const kind = dita ? 'topic type' : 'schema';
@@ -124,7 +145,7 @@ ${metadataLine(p)}`;
       : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
   ${p.path.join('/')}.${titleLine}
-  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${nestingLines(p)}${
+  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''
   }`;

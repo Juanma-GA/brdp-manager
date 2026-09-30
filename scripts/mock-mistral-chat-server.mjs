@@ -161,8 +161,17 @@ function metadataReply(systemPrompt, rule, answer) {
   // data module that is not "changed" (section + content), issue 001 new.
   if (/updateCode/.test(rule)) {
     const cir = (code) => base.replace(/(<updateCode [^>]*?)infoCode="[^"]*"/, `$1infoCode="${code}"`);
-    const insert = (el) => `<insertObjectGroup><insertObject><${el}/></insertObject></insertObjectGroup>`;
-    return answer([ex("Tool in the tool CIR", "accept", cir("00N"), insert("toolSpec")), ex("Part in the tool CIR", "reject", cir("00N"), insert("partSpec")), ex("Part in the parts CIR", "accept", cir("00E"), insert("partSpec"))]);
+    // Plantillas, Part 3: like the real run, without the valid way down in
+    // the prompt the CIR elements go straight inside <update> (invalid);
+    // with it, along insertObjectGroup/insertObject with real attributes.
+    if (!systemPrompt.includes("The valid way down in this schema")) {
+      const bad = (el) => `<insertObject><${el}/></insertObject>`;
+      return answer([ex("Tool in the tool CIR", "accept", cir("00N"), bad("toolSpec")), ex("Part in the tool CIR", "reject", cir("00N"), bad("partSpec"))]);
+    }
+    const insert = (el) => `<insertObjectGroup><insertObject insertionOrder="1" targetPath="/">${el}</insertObject></insertObjectGroup>`;
+    const toolSpec = '<toolSpec><toolIdent manufacturerCodeValue="K0001" toolNumber="T-100"/></toolSpec>';
+    const partSpec = '<partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/></partSpec>';
+    return answer([ex("Tool in the tool CIR", "accept", cir("00N"), insert(toolSpec)), ex("Part in the tool CIR", "reject", cir("00N"), insert(partSpec)), ex("Part in the parts CIR", "accept", cir("00E"), insert(partSpec))]);
   }
   if (/changeMark/.test(rule) && /issueType/.test(rule)) {
     const type = (value) => base.replace("<dmStatus>", `<dmStatus issueType="${value}">`);

@@ -2091,6 +2091,12 @@
           "target": "prompt",
           "pattern": "<updateIdentAndStatusSection>",
           "note": "the prompt offers the minimal update identification and status section"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "The valid way down in this schema[\\s\\S]*<insertObjectGroup> > <insertObject>",
+          "note": "Plantillas, Part 3: the prompt gives the valid way down inside <update> (the real run had 0/3 valid examples)"
         }
       ]
     },
