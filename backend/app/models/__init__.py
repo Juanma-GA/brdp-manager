@@ -13,6 +13,7 @@ from app.models.note import Note
 from app.models.project import Project
 from app.models.refresh_token import RefreshToken
 from app.models.rule_approval import RuleApproval
+from app.models.rule_extract_job import RuleExtractCandidate, RuleExtractJob
 from app.models.suggestion_feedback import SuggestionFeedback
 from app.models.user import User
 from app.models.user_project_role import UserProjectRole
@@ -27,6 +28,8 @@ __all__ = [
     "Project",
     "RefreshToken",
     "RuleApproval",
+    "RuleExtractCandidate",
+    "RuleExtractJob",
     "SuggestionFeedback",
     "User",
     "UserProjectRole",

@@ -16,7 +16,8 @@ from pydantic import BaseModel, Field, computed_field, field_validator, model_va
 #                     told apart later.
 #   "copied"       -- brought from another BRDP ("Comparar dos BRDP lado a
 #                     lado": "Usar esta Regla"), of this project or another.
-RuleSource = Literal["llm", "manual", "external_llm", "copied"]
+#   "extracted"    -- read from an existing BREX/Schematron (AI Extract 1/2).
+RuleSource = Literal["llm", "manual", "external_llm", "copied", "extracted"]
 
 
 class RuleApprovalPropose(BaseModel):

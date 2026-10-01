@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     excel_import_max_uncompressed_bytes: int = 200 * 1024 * 1024
     excel_import_max_rows: int = 20000
 
+    # --- AI Extract (app/services/rule_extract.py) ---
+    # Largest BREX/Schematron accepted; over it, a 413 with the reason. The
+    # "CA" BREX (5,536 rules, the largest seen) is 2.8 MB.
+    rule_extract_max_bytes: int = 20 * 1024 * 1024
+
 
 @lru_cache
 def get_settings() -> Settings:
