@@ -38,6 +38,7 @@ import { parseRuleTestHistoryValue, verifyWarning } from '../utils/ruleTestStatu
 import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
 import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
+import { useNameFixHints } from '../hooks/useNameFixHints.js';
 import SchemaNavCard from '../components/assistant/SchemaNavCard';
 import BrdpCompareDialog from '../components/compare/BrdpCompareDialog';
 import SchemaSearch from '../components/assistant/SchemaSearch';
@@ -45,7 +46,7 @@ import { useSchemaNavigation } from '../hooks/useSchemaNavigation';
 import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
 import { parseMoreMarker, schemaLinkTarget } from '../utils/schemaNavigation.js';
 import { AnswerMoreNames, SchemaNameLink } from '../components/assistant/SchemaAnswerLinks';
-import { checkRuleFormat, nameIssues, ruleFormatIssues } from '../validation/schemaValidation.js';
+import { NAME_HINT_TEST_IDS, checkRuleFormat, checkRuleNames, nameIssues, ruleFormatIssues } from '../validation/schemaValidation.js';
 import styles from './RecordsPage.module.css';
 
 // The data-testids the verification scripts read on the Ask answer's
@@ -594,6 +595,9 @@ export default function RecordsPage() {
   // useSuggestions}.js. Same behavior as before the refactor, split by
   // concern instead of one giant effect.
   const { vocabulary, vocabResult, recomputeVocabResult } = useVocabularyCheck(project.standard, selected);
+  // "Sugerencias para erratas": near names / other standards after the
+  // red "not found" line of the selected BRDP.
+  const vocabNameHints = useNameFixHints(vocabResult && vocabResult.brdpId === selected?.id ? vocabResult : null, project.standard, vocabulary);
 
   const handleUpdate = async (brdpId, patch) => {
     await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, {
@@ -793,6 +797,12 @@ export default function RecordsPage() {
   const ruleDraftFormat =
     ruleEditing && ruleDraftText.trim() && checkWellFormed(ruleDraftText).valid ? checkRuleFormat(ruleDraftText, ruleFormat) : null;
   const ruleDraftBlocked = ruleEditing && (!ruleDraftText.trim() || (ruleDraftFormat && !ruleDraftFormat.ok));
+  // The names of the draft's XPath against the vocabulary, with the near
+  // names / other standards of the ones that do not exist: warning lines
+  // only, never block Save and never a one-click fix (the XML is edited by
+  // hand) -- the same lines Paste rule shows.
+  const ruleDraftNames = ruleEditing && ruleDraftText.trim() && vocabulary ? checkRuleNames(ruleDraftText, vocabulary) : null;
+  const ruleDraftNameHints = useNameFixHints(ruleDraftNames, project.standard, vocabulary);
 
   const doVerifyRule = async () => {
     setRuleBusy(true);
@@ -1193,7 +1203,7 @@ export default function RecordsPage() {
                   onGotIt={dismissNamingTipForSession}
                 />
               )}
-              <RenameSuggestions text={newBrdpTitle} vocabulary={vocabulary} onApply={setNewBrdpTitle} />
+              <RenameSuggestions standard={project.standard} text={newBrdpTitle} vocabulary={vocabulary} onApply={setNewBrdpTitle} />
 
               <label className={styles.fieldLabel}>{t('records.fieldDefinition')}</label>
               <textarea
@@ -1211,7 +1221,7 @@ export default function RecordsPage() {
                   onGotIt={dismissNamingTipForSession}
                 />
               )}
-              <RenameSuggestions text={newBrdpDefinition} vocabulary={vocabulary} onApply={setNewBrdpDefinition} />
+              <RenameSuggestions standard={project.standard} text={newBrdpDefinition} vocabulary={vocabulary} onApply={setNewBrdpDefinition} />
 
               <label className={styles.fieldLabel}>{t('records.fieldProposal')}</label>
               <textarea
@@ -1229,7 +1239,7 @@ export default function RecordsPage() {
                   onGotIt={dismissNamingTipForSession}
                 />
               )}
-              <RenameSuggestions text={newBrdpProposal} vocabulary={vocabulary} onApply={setNewBrdpProposal} />
+              <RenameSuggestions standard={project.standard} text={newBrdpProposal} vocabulary={vocabulary} onApply={setNewBrdpProposal} />
               <p className={styles.hint}>{t('records.vocabHint')}</p>
 
               <label className={styles.fieldLabel}>{t('records.fieldValidation')}</label>
@@ -1355,6 +1365,7 @@ export default function RecordsPage() {
               )}
               {canEdit && (
                 <RenameSuggestions
+                  standard={project.standard}
                   text={selected.title}
                   vocabulary={vocabulary}
                   onApply={(newText) => {
@@ -1383,6 +1394,7 @@ export default function RecordsPage() {
               )}
               {canEdit && (
                 <RenameSuggestions
+                  standard={project.standard}
                   text={selected.definition}
                   vocabulary={vocabulary}
                   onApply={(newText) => {
@@ -1411,6 +1423,7 @@ export default function RecordsPage() {
               )}
               {canEdit && (
                 <RenameSuggestions
+                  standard={project.standard}
                   text={selected.proposal}
                   vocabulary={vocabulary}
                   onApply={(newText) => {
@@ -1489,6 +1502,10 @@ export default function RecordsPage() {
                   <SchemaIssueLines
                     issues={ruleFormatIssues(ruleDraftFormat)}
                     testIds={Object.fromEntries(ruleFormatIssues(ruleDraftFormat).map((i) => [i.code, 'rule-editor-format-error']))}
+                  />
+                  <SchemaIssueLines
+                    issues={nameIssues(ruleDraftNames, 'rule', { standard: project.standard, hints: ruleDraftNameHints })}
+                    testIds={NAME_HINT_TEST_IDS}
                   />
                   {ruleSaveError && (
                     <p className={styles.ruleErrorText} role="alert">
@@ -1653,7 +1670,10 @@ export default function RecordsPage() {
                         {t('records.assistant.vocabCheckUnavailable', { standard: project.standard })}
                       </p>
                     )}
-                    <SchemaIssueLines issues={nameIssues(vocabResult, 'brdp', { standard: project.standard })} />
+                    <SchemaIssueLines
+                      issues={nameIssues(vocabResult, 'brdp', { standard: project.standard, hints: vocabNameHints })}
+                      testIds={NAME_HINT_TEST_IDS}
+                    />
                   </div>
                 )}
 

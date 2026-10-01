@@ -229,7 +229,7 @@ async function main() {
     await page.waitForSelector("text=/This BRDP mentions names not found in the S1000D 4.2 schema/", { timeout: 5000 });
     await resetMock();
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this well scoped?");
-    await page.getByRole("button", { name: "Ask" }).click();
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     const reqAsk = await lastMockRequest();
     const sysAsk = reqAsk.messages.find((m) => m.role === "system").content;

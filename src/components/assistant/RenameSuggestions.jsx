@@ -2,9 +2,11 @@ import { useTranslation } from 'react-i18next';
 import {
   applyRenameSuggestion,
   extractContextCandidates,
+  renameMarkedName,
   resolveDanglingElementSuggestions,
   resolvePhraseCandidates,
 } from '../../validation/schemaValidation.js';
+import { useNameFixSuggestions } from '../../hooks/useNameFixHints.js';
 import styles from '../../pages/RecordsPage.module.css';
 
 // Follow-up round ("consejo de nombres sin falsos positivos"): pure
@@ -46,12 +48,31 @@ function renameSuggestionsFor(text, vocabulary) {
 // it rewrites `text` (wrapping the first bare occurrence) via the passed
 // setter, which for the BRDP detail panel is a combined local-state-plus-
 // save (see the title/definition/proposal fields in RecordsPage.jsx).
-export default function RenameSuggestions({ text, vocabulary, onApply }) {
+//
+// "Sugerencias para erratas" round, Part 1: also one chip per near name of
+// a MARKED name that does not exist (`<emphasys>` -> `<emphasis>`,
+// `@emphasistype` -> `@emphasisType`); applying it renames every marked
+// occurrence (renameMarkedName). Those come first: they fix a typo the red
+// notice is already pointing at.
+export default function RenameSuggestions({ text, vocabulary, standard, onApply }) {
   const { t } = useTranslation();
+  const fixes = useNameFixSuggestions(text, standard, vocabulary);
   const suggestions = renameSuggestionsFor(text, vocabulary);
-  if (suggestions.length === 0) return null;
+  if (suggestions.length === 0 && fixes.length === 0) return null;
+  const show = (s) => (s.type === 'element' ? `<${s.name}>` : `@${s.name}`);
   return (
     <div className={styles.renameSuggestions}>
+      {fixes.map((s) => (
+        <button
+          key={`fix:${s.from}:${s.type}:${s.name}`}
+          type="button"
+          className={styles.linkButton}
+          data-testid="name-fix-suggestion"
+          onClick={() => onApply(renameMarkedName(text, s.from, s.name, s.type))}
+        >
+          {t('records.didYouMean', { suggestion: show(s) })}
+        </button>
+      ))}
       {suggestions.map((s) => (
         <button
           key={`${s.type}:${s.name}`}

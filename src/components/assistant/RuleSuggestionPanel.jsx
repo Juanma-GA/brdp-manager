@@ -4,8 +4,9 @@ import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
 import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
 import { finalRuleXml, validateRuleXml } from '../../hooks/useSuggestions';
-import { extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
+import { NAME_HINT_TEST_IDS, extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
 import SchemaIssueLines from './SchemaIssueLines';
+import { useNameFixHints } from '../../hooks/useNameFixHints.js';
 import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
 
 // Part 5 (Suggest Rule part 2): with schemas chosen, an element of the
@@ -54,6 +55,9 @@ const RULE_FORMAT_TEST_IDS = Object.fromEntries(
 export function RuleValidationWarnings({ validation, standard }) {
   const { t } = useTranslation();
   const { wellFormed, wellFormedError, invalidXPaths, names } = validation;
+  // Near names / other standards for the rule's names: a line only, no
+  // one-click fix (the XML is corrected by hand).
+  const hints = useNameFixHints(names, standard);
   return (
     <>
       {!wellFormed && (
@@ -62,8 +66,8 @@ export function RuleValidationWarnings({ validation, standard }) {
         </p>
       )}
       <SchemaIssueLines
-        issues={[...ruleFormatIssues(validation.ruleFormat), ...xpathIssues(invalidXPaths), ...nameIssues(names, 'rule', { standard })]}
-        testIds={RULE_FORMAT_TEST_IDS}
+        issues={[...ruleFormatIssues(validation.ruleFormat), ...xpathIssues(invalidXPaths), ...nameIssues(names, 'rule', { standard, hints })]}
+        testIds={{ ...RULE_FORMAT_TEST_IDS, ...NAME_HINT_TEST_IDS }}
       />
     </>
   );

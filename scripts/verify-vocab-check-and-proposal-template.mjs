@@ -242,7 +242,7 @@ async function main() {
 
     await resetMock();
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this decision point well scoped?");
-    await page.getByRole("button", { name: "Ask" }).click();
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     await page.waitForSelector("text=/This BRDP mentions names not found in the DITA 1.3 Xpath2.0 schema/", { timeout: 5000 });
     const bannerLocator = page.locator("text=/This BRDP mentions names not found in the DITA 1.3 Xpath2.0 schema/").first();
@@ -269,7 +269,10 @@ async function main() {
     // disables any Suggest button any more -- the red banner is
     // sufficient on its own.
     const states1 = await suggestButtonsDisabled();
-    assert(states1.every((d) => !d), "all 3 Suggest buttons remain ENABLED on BRDP-VOCAB-01 despite the notFound <pokemon>");
+    const titles1 = await Promise.all(
+      ["Definition", "Proposal", "Rule"].map((k) => page.getByRole("button", { name: `Suggest ${k}`, exact: true }).getAttribute("title"))
+    );
+    assert(states1.every((d) => !d), `all 3 Suggest buttons remain ENABLED on BRDP-VOCAB-01 despite the notFound <pokemon> (disabled: ${states1}, titles: ${titles1})`);
 
     // ==== Suggest Definition: "never rename" line, no unknown-names block
     // on a CLEAN BRDP (BRDP-VOCAB-04, zero vocab candidates) ====
@@ -352,7 +355,7 @@ async function main() {
     );
     await resetMock();
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "In what chapter is this defined?");
-    await page.getByRole("button", { name: "Ask" }).click();
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     const reqAskS1000D = await lastMockRequest();
     const sysAskS1000D = reqAskS1000D.messages.find((m) => m.role === "system").content;
@@ -417,7 +420,7 @@ async function main() {
     await openRecords(`Vocab Verify S ${suffix}`, "BRDP-VOCAB-LABEL");
     await resetMock();
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this well scoped?");
-    await page.getByRole("button", { name: "Ask" }).click();
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     await page.waitForSelector("text=/is not an element in S1000D 4.2/", { timeout: 5000 });
     const wrongTypeLocator = page.locator("text=/is not an element in S1000D 4.2/").first();
@@ -449,7 +452,7 @@ async function main() {
     await openRecords(`Vocab Verify S0 ${suffix}`, "BRDP-VOCAB-S0-01");
     await resetMock();
     await page.fill('textarea[placeholder="Ask about this BRDP…"]', "Is this well scoped?");
-    await page.getByRole("button", { name: "Ask" }).click();
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     assert(
       (await page.locator("text=Schema vocabulary check not available for S1000D 5.0.").count()) > 0,

@@ -88,6 +88,10 @@ const _vocabularyCache = new Map();
 export async function loadSchemaVocabulary(standard) {
   const file = STANDARD_TO_VOCABULARY_FILE[standard];
   if (!file) return null;
+  return loadVocabularyFile(file);
+}
+
+async function loadVocabularyFile(file) {
   if (_vocabularyCache.has(file)) return _vocabularyCache.get(file);
   const res = await fetch(`/${file}?v=` + Date.now());
   if (!res.ok) throw new Error(`Could not load ${file}`);
@@ -95,6 +99,44 @@ export async function loadSchemaVocabulary(standard) {
   const parsed = { elements: new Set(json.elements || []), attributes: new Set(json.attributes || []) };
   _vocabularyCache.set(file, parsed);
   return parsed;
+}
+
+// "Sugerencias para erratas y nombres de otro estándar", Part 2: the
+// vocabularies of the OTHER standards, one per file (the two DITA flavors
+// share one vocabulary, so they are one "DITA 1.3" entry), in this order.
+// Loaded only when a marked name does not exist in the project's own
+// standard (useNameFixHints), never when the page opens.
+export const VOCABULARY_FILE_LABELS = [
+  ['schema-vocabulary-3-0-1.json', 'S1000D 3.0.1'],
+  ['schema-vocabulary-4-1.json', 'S1000D 4.1'],
+  ['schema-vocabulary-4-2.json', 'S1000D 4.2'],
+  ['schema-vocabulary-dita.json', 'DITA 1.3'],
+];
+
+// The label of the project's standard in the other-standard message
+// ("DITA 1.3" for both DITA flavors, the standard itself otherwise).
+export function vocabularyLabel(standard) {
+  const file = STANDARD_TO_VOCABULARY_FILE[standard];
+  const entry = VOCABULARY_FILE_LABELS.find(([f]) => f === file);
+  return entry ? entry[1] : standard;
+}
+
+// [{ label, vocabulary }] for every vocabulary file except the project's.
+// A file that cannot be loaded is left out (its standard just never
+// appears in the message); the plain "not found" still shows.
+export async function loadOtherStandardVocabularies(standard) {
+  const own = STANDARD_TO_VOCABULARY_FILE[standard];
+  const entries = await Promise.all(
+    VOCABULARY_FILE_LABELS.filter(([file]) => file !== own).map(async ([file, label]) => {
+      try {
+        return { label, vocabulary: await loadVocabularyFile(file) };
+      } catch (err) {
+        console.error(`Could not load ${file}`, err);
+        return null;
+      }
+    })
+  );
+  return entries.filter(Boolean);
 }
 
 // Deterministic context extraction -- the ONLY extraction path.
@@ -404,12 +446,21 @@ const SKIP_WORDS = new Set([
 // immediately after a candidate, never elsewhere in the sentence.
 const LIST_CONTINUATION_WORDS = new Set(['y', 'o', 'ni', 'and', 'or']);
 
+// Each word knows whether it is written as markup (`<x`, `</x`, `@x`, or
+// followed by `>`), which ends a list (see extractPhraseCandidates).
 function tokenize(text) {
   const out = [];
   let m;
   WORD_RE.lastIndex = 0;
   while ((m = WORD_RE.exec(text))) {
-    out.push(m[0] === ',' ? { type: 'comma' } : { type: 'word', value: m[0] });
+    if (m[0] === ',') {
+      out.push({ type: 'comma' });
+      continue;
+    }
+    const before = text[m.index - 1];
+    const after = text[m.index + m[0].length];
+    const marked = before === '<' || before === '@' || (before === '/' && text[m.index - 2] === '<') || after === '>';
+    out.push({ type: 'word', value: m[0], marked });
   }
   return out;
 }
@@ -450,9 +501,14 @@ function extractPhraseCandidates(text) {
 
     candidates.push({ name: tokens[j].value, type });
     let k = j + 1;
+    let previousMarked = tokens[j].marked;
     // List continuation: comma or a list conjunction, then (skipping
     // SKIP_WORDS again) another word -- repeat until the pattern breaks.
-    while (true) {
+    // "Sugerencias para erratas" round, Part 3: only after an UNMARKED
+    // word. A marked name (`<copyright>`, `@x`) is the name the trigger
+    // was about, so the list ends there -- "the element <copyright> and
+    // source of copyright information" never captures "source".
+    while (!previousMarked) {
       let k2 = k;
       let isContinuator = false;
       if (tokens[k2] && tokens[k2].type === 'comma') {
@@ -466,6 +522,7 @@ function extractPhraseCandidates(text) {
       k2 = skipSkipWords(tokens, k2);
       if (k2 >= tokens.length || tokens[k2].type !== 'word' || TRIGGER_WORDS.has(tokens[k2].value.toLowerCase())) break;
       candidates.push({ name: tokens[k2].value, type });
+      previousMarked = tokens[k2].marked;
       k = k2 + 1;
     }
     i = k - 1; // avoid rescanning consumed list words as fresh triggers
@@ -494,10 +551,11 @@ function extractCamelCaseCandidates(text) {
 //   that name. Only applies to explicit markup (camelCase's kind is
 //   genuinely unknown, so it is never wrong-kind-checked).
 export function checkAgainstVocabulary(contextCandidates, vocabulary) {
-  if (!vocabulary) return { available: false, notFound: [], wrongType: [] };
+  if (!vocabulary) return { available: false, notFound: [], wrongType: [], typedNotFound: [] };
 
   const notFound = new Map();
   const wrongType = new Map();
+  const typedNotFound = new Map();
 
   const considerTyped = (name, type) => {
     const vocabSet = type === 'element' ? vocabulary.elements : vocabulary.attributes;
@@ -511,6 +569,7 @@ export function checkAgainstVocabulary(contextCandidates, vocabulary) {
     }
     const display = type === 'element' ? `<${name}>` : `@${name}`;
     if (!notFound.has(name)) notFound.set(name, display);
+    if (!typedNotFound.has(`${type}:${name}`)) typedNotFound.set(`${type}:${name}`, { name, type });
   };
 
   const considerCamelCase = (name) => {
@@ -530,7 +589,184 @@ export function checkAgainstVocabulary(contextCandidates, vocabulary) {
     available: true,
     notFound: [...notFound.values()].sort(),
     wrongType: [...wrongType.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    // The marked names of notFound (`<x>`, `@x`, half-typed `<x`; never a
+    // camelCase word) with their kind, for nameFixHints below.
+    typedNotFound: [...typedNotFound.values()]
+      .filter(({ name }) => !wrongType.has(name))
+      // same order as notFound: by display (`<x>` before `@x`)
+      .sort((a, b) => {
+        const show = (n) => (n.type === 'element' ? `<${n.name}>` : `@${n.name}`);
+        return show(a) < show(b) ? -1 : show(a) > show(b) ? 1 : 0;
+      }),
   };
+}
+
+// ═══ 3b. Typos and names of another standard ══════════════════════════════
+//
+// "Sugerencias para erratas y nombres de otro estándar". Only for MARKED
+// names that do not exist (checkAgainstVocabulary's typedNotFound: `<x>`,
+// `@x`, a half-typed `<x`/`x>`; in a rule, every name of its XPath) -- never
+// for a loose word of the text. No AI. For each name, in this order:
+//   1. the same name with other capitals in the project's standard
+//      (`@emphasistype` -> `@emphasisType`): only those are suggested --
+//      it is the same name, a farther one would be noise;
+//   2. the exact name in another standard (`<levelledPara>` in 3.0.1 ->
+//      "exists in S1000D 4.1 and 4.2"): only says where the name comes
+//      from, never proposes an equivalent. Checked BEFORE the near names
+//      of step 3: a name that exists as written elsewhere was written on
+//      purpose, and a neighbour by spelling would be the wrong fix
+//      (`<para>` in DITA is S1000D, not a typo of `<param>`/`<part>`);
+//   3. near names of the same kind in the project's standard: an edit
+//      distance (case-insensitive, an adjacent transposition counts as one
+//      edit -- "tabel" -> "table") of at most 2, at most 1 for names of up
+//      to 5 letters, and 0 (capitals only) for names of 1-2 letters (a
+//      single edit is half of such a name: `<ab>` -> `<sb>` is no
+//      suggestion). At most 3, nearest first; when more than 3 tie at the
+//      nearest distance, none (there is no telling which one was meant).
+// otherVocabularies === null means "not loaded yet": then only step 1 is
+// answered and `needsOtherVocabularies` says the caller has to load them.
+
+const NAME_FIX_MAX = 3;
+
+function maxNameDistance(name) {
+  if (name.length <= 2) return 0;
+  if (name.length <= 5) return 1;
+  return 2;
+}
+
+// Optimal string alignment distance (Levenshtein + adjacent transposition),
+// giving up as soon as it is over `limit`.
+function editDistance(a, b, limit) {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let prev2 = null;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2] + 1);
+      cur.push(v);
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > limit) return limit + 1;
+    prev2 = prev;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+// The names of `vocabulary` (same kind) that differ from `name` only in
+// capitals, and the near ones (step 3 above), each sorted.
+export function similarSchemaNames(name, type, vocabulary) {
+  if (!vocabulary) return { caseOnly: [], near: [] };
+  const pool = type === 'attribute' ? vocabulary.attributes : vocabulary.elements;
+  const lower = name.toLowerCase();
+  const limit = maxNameDistance(name);
+  const caseOnly = [];
+  const ranked = [];
+  for (const candidate of pool) {
+    if (candidate === name) continue;
+    const candidateLower = candidate.toLowerCase();
+    if (candidateLower === lower) {
+      caseOnly.push(candidate);
+      continue;
+    }
+    if (limit === 0) continue;
+    const d = editDistance(lower, candidateLower, limit);
+    if (d <= limit) ranked.push({ candidate, d });
+  }
+  ranked.sort((a, b) => a.d - b.d || a.candidate.localeCompare(b.candidate));
+  let near = [];
+  if (ranked.length > 0) {
+    const tiedAtNearest = ranked.filter((r) => r.d === ranked[0].d).length;
+    if (tiedAtNearest <= NAME_FIX_MAX) near = ranked.slice(0, NAME_FIX_MAX).map((r) => r.candidate);
+  }
+  return { caseOnly: caseOnly.sort().slice(0, NAME_FIX_MAX), near };
+}
+
+// The labels of the other standards whose vocabulary has `name` as the
+// same kind, exactly as written.
+export function standardsWithName(name, type, otherVocabularies) {
+  return (otherVocabularies || [])
+    .filter(({ vocabulary }) => (type === 'attribute' ? vocabulary.attributes : vocabulary.elements).has(name))
+    .map(({ label }) => label);
+}
+
+// { hints, needsOtherVocabularies }: one hint per name of `typedNotFound`
+// that has something to say -- { name, type, similar: [names],
+// otherStandards: [labels] }.
+export function nameFixHints(typedNotFound, vocabulary, otherVocabularies) {
+  const hints = [];
+  let needsOtherVocabularies = false;
+  for (const { name, type } of typedNotFound || []) {
+    const { caseOnly, near } = similarSchemaNames(name, type, vocabulary);
+    if (caseOnly.length > 0) {
+      hints.push({ name, type, similar: caseOnly, otherStandards: [] });
+      continue;
+    }
+    if (otherVocabularies === null || otherVocabularies === undefined) {
+      needsOtherVocabularies = true;
+      continue;
+    }
+    const otherStandards = standardsWithName(name, type, otherVocabularies);
+    if (otherStandards.length > 0) hints.push({ name, type, similar: [], otherStandards });
+    else if (near.length > 0) hints.push({ name, type, similar: near, otherStandards: [] });
+  }
+  return { hints, needsOtherVocabularies };
+}
+
+// The "Did you mean" chips of one text field: one per near/capitals name of
+// a marked name that does not exist ({ from, name, type }, applied with
+// renameMarkedName). An other-standard name never gets a chip.
+export function nameFixSuggestions(text, vocabulary, otherVocabularies) {
+  if (!vocabulary) return [];
+  const checked = checkAgainstVocabulary(extractContextCandidates(text || ''), vocabulary);
+  const out = [];
+  for (const hint of nameFixHints(checked.typedNotFound, vocabulary, otherVocabularies).hints) {
+    for (const name of hint.similar) out.push({ from: hint.name, name, type: hint.type });
+  }
+  return out;
+}
+
+// Whether a text has a marked name whose hint depends on the other
+// standards' vocabularies -- the only case in which they get loaded.
+export function textNeedsOtherVocabularies(text, vocabulary) {
+  if (!vocabulary) return false;
+  const checked = checkAgainstVocabulary(extractContextCandidates(text || ''), vocabulary);
+  return nameFixHints(checked.typedNotFound, vocabulary, null).needsOtherVocabularies;
+}
+
+// Replaces every marked occurrence of `from` with `name`: `<from>`,
+// `</from>`, `<from attr…>`, a half-typed `<from`/`from>` (`type`
+// 'element'), or `@from` ('attribute'). Loose words are never touched.
+export function renameMarkedName(text, from, name, type) {
+  const source = text || '';
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const end = '(?![\\p{L}\\p{N}_.-])';
+  if (type === 'attribute') return source.replace(new RegExp(`@${escaped}${end}`, 'gu'), `@${name}`);
+  return source
+    .replace(new RegExp(`(<\\/?)${escaped}${end}`, 'gu'), `$1${name}`)
+    .replace(new RegExp(`(?<![<\\p{L}\\p{N}_.-])${escaped}>`, 'gu'), `${name}>`);
+}
+
+// Joins standard labels, the shared family said once: "S1000D 4.1 y 4.2",
+// "S1000D 3.0.1, 4.1 y DITA 1.3". `and` is the translated conjunction.
+export function formatStandardList(labels, and) {
+  let family = null;
+  const items = labels.map((label) => {
+    const [head, ...rest] = label.split(' ');
+    const item = head === family && rest.length > 0 ? rest.join(' ') : label;
+    family = head;
+    return item;
+  });
+  return joinList(items, and);
+}
+
+function joinList(items, word) {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`;
 }
 
 // Formats one wrongType entry into the exact sentence shape the encargo
@@ -1538,11 +1774,15 @@ export function ruleFormatIssues(result) {
 export const SCHEMA_ISSUE_KEYS = {
   brdp: {
     names_not_found: 'records.assistant.vocabUnknownNames',
+    name_did_you_mean: 'records.assistant.nameDidYouMean',
+    name_other_standard: 'records.assistant.nameInOtherStandard',
     wrong_type_as_element: 'records.assistant.vocabWrongTypeAsElement',
     wrong_type_as_attribute: 'records.assistant.vocabWrongTypeAsAttribute',
   },
   rule: {
     names_not_found: 'records.assistant.ruleNamesNotFound',
+    name_did_you_mean: 'records.assistant.nameDidYouMean',
+    name_other_standard: 'records.assistant.nameInOtherStandard',
     wrong_type_as_element: 'records.assistant.vocabWrongTypeAsElement',
     wrong_type_as_attribute: 'records.assistant.vocabWrongTypeAsAttribute',
     invalid_xpath: 'records.assistant.ruleInvalidXPath',
@@ -1574,15 +1814,32 @@ export const SCHEMA_ISSUE_KEYS = {
   },
 };
 
+// data-testids of the hint lines that follow a "not found" line.
+export const NAME_HINT_TEST_IDS = { name_did_you_mean: 'name-did-you-mean', name_other_standard: 'name-other-standard' };
+
 // A vocabulary result ({ available, notFound, wrongType } from
 // checkAgainstVocabulary / checkRuleNames / checkAnswerNames) as issues.
 // 'example' lists every wrong-type name in one issue, as its panel always
-// did; the other sources give one issue per name.
-export function nameIssues(result, source, { standard } = {}) {
+// did; the other sources give one issue per name. `hints` (nameFixHints,
+// only for 'brdp' and 'rule') add one line per marked name after the
+// "not found" line, which stays as it was.
+export function nameIssues(result, source, { standard, hints = [] } = {}) {
   if (!result?.available) return [];
   const issues = [];
   if (result.notFound.length > 0) {
     issues.push({ source, code: 'names_not_found', params: { standard, names: result.notFound.join(', ') } });
+  }
+  for (const hint of hints) {
+    const show = (n) => (hint.type === 'attribute' ? `@${n}` : `<${n}>`);
+    if (hint.similar.length > 0) {
+      issues.push({ source, code: 'name_did_you_mean', params: { name: show(hint.name), suggestions: hint.similar.map(show) } });
+    } else if (hint.otherStandards.length > 0) {
+      issues.push({
+        source,
+        code: 'name_other_standard',
+        params: { name: show(hint.name), standard: vocabularyLabel(standard), standards: hint.otherStandards },
+      });
+    }
   }
   if (source === 'example') {
     if (result.wrongType.length > 0) {
@@ -1610,7 +1867,11 @@ export function xpathIssues(expressions) {
 // shows as the code itself, never as nothing (HR7).
 export function formatSchemaIssue(issue, t) {
   const key = SCHEMA_ISSUE_KEYS[issue.source]?.[issue.code];
-  return key ? t(key, issue.params) : issue.code;
+  if (!key) return issue.code;
+  const params = { ...issue.params };
+  if (Array.isArray(params.suggestions)) params.suggestions = joinList(params.suggestions, t('records.assistant.listOr'));
+  if (Array.isArray(params.standards)) params.standards = formatStandardList(params.standards, t('records.assistant.listAnd'));
+  return t(key, params);
 }
 
 // A stable React key for an issue.

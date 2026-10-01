@@ -72,6 +72,7 @@ export function useVocabularyCheck(standard, selected) {
       available: checked.available,
       notFound: checked.notFound,
       wrongType: checked.wrongType,
+      typedNotFound: checked.typedNotFound,
     };
     setVocabResult(result);
     return result;
