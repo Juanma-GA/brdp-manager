@@ -68,9 +68,15 @@
 // |                                | matches(string(.), '^(pattern)$')                                | changed in T2) |
 // | valueTailoring                 | ignored (it says whether projects may tailor the values, not how | REF    |
 // |                                | to check them)                                                   |        |
-// | Context blocks                 | rules in contextRules@rulesContext / contextrules@context apply  | XSD, TPL, |
-// |                                | only when the fragment's schema equals schemaNameFromContext()   | REF (xsi) |
-// |                                | of the URL (flat or master); an empty attribute = general.       |        |
+// | Context blocks                 | as s1kd-brexcheck (//contextRules[not(@rulesContext) or          | s1kd-brexcheck, |
+// |                                | @rulesContext=$schema]): a block WITHOUT the attribute is        | XSD, TPL, |
+// |                                | general; rules in contextRules@rulesContext / contextrules@      | REF (xsi) |
+// |                                | context apply only when the fragment's schema equals             |        |
+// |                                | schemaNameFromContext() of the URL (flat, master or the project's|        |
+// |                                | pattern). An EMPTY attribute (rulesContext="") is NOT general: it|        |
+// |                                | equals no schema, so its rules apply nowhere -- not executable,  |        |
+// |                                | reason empty_schema_context (Generate never writes one: it puts  |        |
+// |                                | such rules in the general block, without the attribute).         |        |
 // |                                | Fragment schema: the fragmentSchema argument, else the root's    |        |
 // |                                | xsi:noNamespaceSchemaLocation (what REF tests). A fragment of    |        |
 // |                                | another schema, with no part left to run: accepted (the rule    | REF (its |
@@ -171,6 +177,7 @@ const REASON = {
   notNodes: (kind) => reason('path_not_nodes', { kind }),
   absoluteRoot: (name, root) => reason('absolute_root', { name, root }),
   schemaUnknown: (schema) => reason('schema_unknown', { schema }),
+  emptyContext: (element, attr) => reason('empty_schema_context', { element, attr }),
   missingValue: (element, attr) => reason('missing_value', { element, attr }),
   badRange: (text) => reason('bad_range', { text }),
   mixedRange: (from, to) => reason('mixed_range', { from, to }),
@@ -408,30 +415,35 @@ function makeEvaluator(doc) {
 
 // The rule parts, in document order: every rule element (with the schema of
 // its context block, if any) and every nonContextRule (4.x element, 3.0.1
-// comment).
+// comment). A part inside a context block whose scope attribute is present
+// but empty carries emptyContext: true -- s1kd-brexcheck never applies it
+// (see the table: rulesContext="" equals no schema).
 function collectParts(ruleRoot, spec, schemaLocation = null) {
   const parts = [];
-  const walk = (node, schema) => {
+  const walk = (node, schema, emptyContext) => {
     for (let n = node.firstChild; n; n = n.nextSibling) {
       if (n.nodeType === 8 && !spec.nonContext && /^\s*nonContextRule\b/.test(n.data)) {
         const id = /id="([^"]*)"/.exec(n.data);
-        parts.push({ kind: 'nonContext', ruleId: id ? id[1] : null });
+        parts.push({ kind: 'nonContext', ruleId: id ? id[1] : null, emptyContext });
       }
       if (n.nodeType !== 1) continue;
       if (n.nodeName === spec.rule) {
         const ref = childElements(n, 'brDecisionRef')[0];
-        parts.push({ kind: 'rule', element: n, schema, ruleId: n.getAttribute('id') || ref?.getAttribute('brDecisionIdentNumber') || null });
+        parts.push({ kind: 'rule', element: n, schema, emptyContext, ruleId: n.getAttribute('id') || ref?.getAttribute('brDecisionIdentNumber') || null });
       } else if (spec.nonContext && n.nodeName === spec.nonContext) {
-        parts.push({ kind: 'nonContext', ruleId: n.getAttribute('id') || null });
+        parts.push({ kind: 'nonContext', ruleId: n.getAttribute('id') || null, emptyContext });
       } else if (n.nodeName === spec.context) {
+        // hasAttribute, not getAttribute: xmldom gives "" for a missing one.
         const url = (n.getAttribute(spec.contextAttr) || '').trim();
-        walk(n, url ? schemaNameFromContext(url, schemaLocation) : schema);
+        if (url) walk(n, schemaNameFromContext(url, schemaLocation), false);
+        else if (n.hasAttribute(spec.contextAttr)) walk(n, null, true);
+        else walk(n, schema, emptyContext);
       } else {
-        walk(n, schema);
+        walk(n, schema, emptyContext);
       }
     }
   };
-  walk(ruleRoot, null);
+  walk(ruleRoot, null, false);
   parts.forEach((p, i) => { if (!p.ruleId) p.ruleId = `rule ${i + 1}`; });
   return parts;
 }
@@ -477,6 +489,7 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
   let ran = 0;
   for (const part of parts) {
     try {
+      if (part.emptyContext) throw new NotExecutable(REASON.emptyContext(spec.context, spec.contextAttr));
       if (part.kind === 'nonContext') throw new NotExecutable(REASON.nonContext());
       if (part.schema && !schema) throw new NotExecutable(REASON.schemaUnknown(part.schema));
       if (part.schema && part.schema !== schema) { outOfScope.push(part.schema); continue; }
@@ -548,6 +561,7 @@ export function analyzeRule(ruleXml, format, options = {}) {
   const notRun = [];
   for (const part of parts) {
     try {
+      if (part.emptyContext) throw new NotExecutable(REASON.emptyContext(spec.context, spec.contextAttr));
       if (part.kind === 'nonContext') throw new NotExecutable(REASON.nonContext());
       const { expression } = partBasics(part, spec);
       const root = absoluteRootNames(expression)[0] || 'dmodule';
@@ -686,6 +700,7 @@ function conditionNames(path) {
 }
 
 function describePart(part, spec, parseXml) {
+  if (part.emptyContext) return { code: 'describe_not_executable', params: { reason: REASON.emptyContext(spec.context, spec.contextAttr) } };
   if (part.kind === 'nonContext') return { code: 'describe_non_context', params: {} };
   let basics;
   let condition;
@@ -784,7 +799,7 @@ export function ruleConditions(ruleXml, format, options = {}) {
   }
   const out = [];
   for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
-    if (part.kind !== 'rule') continue;
+    if (part.kind !== 'rule' || part.emptyContext) continue;
     try {
       const { expression, flag } = partBasics(part, spec);
       if (isConditionPath(expression, parseXml)) out.push({ ruleId: part.ruleId, path: expression, flag, names: conditionNames(expression), schema: part.schema });

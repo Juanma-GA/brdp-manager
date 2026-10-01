@@ -1,7 +1,7 @@
 import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
 import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
-import { rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
+import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache301 = null;
 
@@ -537,5 +537,9 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
 
   const { valid, error } = checkWellFormed(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls };
+  // Safety net (HR7): never expected -- the general block has no scope
+  // attribute -- but reported if an empty one ever reaches the output.
+  const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
+
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls, emptyContextBlocks };
 }

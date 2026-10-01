@@ -523,6 +523,25 @@ export function rewriteRuleSchemaUrls(ruleXml, format, standard, location = DEFA
   return { xml: out, rewritten, unrecognized };
 }
 
+// Safety net after Generate (HR7): the context blocks of a generated BREX
+// whose scope attribute is present but empty -- <contextRules rulesContext="">
+// (4.x) / <contextrules context=""> (3.0.1). s1kd-brexcheck applies a block
+// only when it has no scope attribute or the attribute is the DM's schema, so
+// an empty one applies nowhere; the generators write the general block
+// without the attribute and fold such stored blocks into it, so this should
+// always be 0. Comments are ignored.
+export function countEmptySchemaContextBlocks(xml) {
+  const text = String(xml ?? '').replace(/<!--[\s\S]*?-->/g, '');
+  const re = /<(?:[\w.-]+:)?(contextRules|contextrules)\b([^>]*)>/g;
+  let count = 0;
+  for (const m of text.matchAll(re)) {
+    const attr = m[1] === 'contextRules' ? 'rulesContext' : 'context';
+    const a = new RegExp(`\\s${attr}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(m[2]);
+    if (a && !(a[1] ?? a[2]).trim()) count += 1;
+  }
+  return count;
+}
+
 // The BREX DM's own xsi:noNamespaceSchemaLocation (brex.xsd) in the
 // project's form -- the first <dmodule> start tag of a generated document.
 export function setDmoduleSchemaLocation(xml, url) {

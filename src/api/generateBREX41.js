@@ -1,7 +1,7 @@
 import { extractXML, checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
 import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
-import { rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
+import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache41 = null;
 
@@ -178,8 +178,9 @@ function assembleChunks41(baseXml, additionalRules) {
   // them clean): complete context blocks whole, and every loose
   // structureObjectRule / nonContextRule wherever it sits, so a legacy
   // wrapper (<rules>, a bare <structureObjectRuleGroup>) never hides one.
-  // A <contextRules> with an empty rulesContext is not a block (it would be
-  // the generic container), only a wrapper.
+  // A <contextRules> with an empty rulesContext is not a block, only a
+  // wrapper: its rules go into the general <contextRules> (no attribute,
+  // see buildEmptyDocument41).
   const contextRulesBlocks = [];
   const structureRules = [];
   const nonContextRules = [];
@@ -501,7 +502,7 @@ ${openingTag}
 </identAndStatusSection>
 <content>
 <brex>
-<contextRules rulesContext="">
+<contextRules>
 <structureObjectRuleGroup>
 </structureObjectRuleGroup>
 </contextRules>
@@ -597,5 +598,9 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
 
   const { valid, error } = checkWellFormed(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls };
+  // Safety net (HR7): never expected -- the general block has no scope
+  // attribute -- but reported if an empty one ever reaches the output.
+  const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
+
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls, emptyContextBlocks };
 }

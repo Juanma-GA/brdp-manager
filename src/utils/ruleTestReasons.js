@@ -15,6 +15,8 @@
 //     no_rule_element {element}, empty_path {element},
 //     invalid_flag {attr, value, allowed}, path_not_nodes {kind},
 //     absolute_root {name, root}, schema_unknown {schema},
+//     empty_schema_context {element, attr} (a context block with an empty
+//     rulesContext/context: s1kd-brexcheck applies it to no schema),
 //     missing_value {element, attr}, bad_range {text},
 //     mixed_range {from, to};
 //   Schematron engine (T4): extension_function {name},
@@ -43,7 +45,7 @@ export const ENGINE_REASON_CODES = [
   'unsupported_format', 'fragment_not_well_formed', 'rule_not_well_formed', 'no_rule_element', 'empty_path',
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
-  'rule_format', 'unreachable_target', 'section_unavailable',
+  'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context',
 ];
 export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch'];
 

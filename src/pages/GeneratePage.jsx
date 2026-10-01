@@ -396,6 +396,15 @@ export default function GeneratePage() {
 
           {result.xml && result.schemaUrls && <SchemaUrlReport report={result.schemaUrls} />}
 
+          {result.xml && result.emptyContextBlocks > 0 && (
+            <details className={styles.xsdSection} open data-testid="empty-context-blocks">
+              <summary className={styles.badgePending}>
+                ⚠ {t('generate.emptyContextBlocks', { count: result.emptyContextBlocks })}
+              </summary>
+              <p className={styles.hint}>{t('generate.emptyContextBlocksHint')}</p>
+            </details>
+          )}
+
           {result.xml ? (
             <>
               <pre className={styles.xmlOutput}>{result.xml}</pre>

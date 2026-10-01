@@ -577,8 +577,10 @@ export default function RuleTestPanel({
   const showResults = verdict && verdict.kind !== 'not_executable';
   const ruleNotExecutable = analysis.status === 'not_executable';
   // C3, Part 1d: XML that is not a rule of its format has nothing to
-  // illustrate either -- no "Show illustrative examples".
-  const notARule = analysis.reason?.code === 'rule_format';
+  // illustrate either -- no "Show illustrative examples". Same for a rule
+  // whose every part sits in a context block with an empty rulesContext: it
+  // applies to no schema, so no example could ever run it.
+  const notARule = analysis.reason?.code === 'rule_format' || analysis.reason?.code === 'empty_schema_context';
   // Rule test on DM metadata, Part 3: nothing to illustrate either -- the
   // examples cannot contain what the rule looks at.
   const unreachable = Boolean(analysis.unreachable);

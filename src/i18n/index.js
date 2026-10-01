@@ -546,6 +546,7 @@ const resources = {
             valueKinds: { boolean: 'a boolean', number: 'a number', value: 'a value' },
             absolute_root: "The rule's path starts at /{{name}}, but this fragment's root element is <{{root}}>; it can only be judged on a fragment whose root is <{{name}}>.",
             schema_unknown: 'This rule applies only to the {{schema}} schema, and the fragment\'s schema is not known.',
+            empty_schema_context: 'The rule is inside a <{{element}}> with an empty {{attr}}. A BREX validator such as s1kd-brexcheck applies a block only when it has no {{attr}} or when {{attr}} is the document\'s schema, so these rules would apply to no schema. Remove the empty {{attr}} to make them general (Generate already puts them in the general block).',
             missing_value: 'An <{{element}}> has no {{attr}} to compare with.',
             bad_range: "Range '{{text}}' is not in the form from~to.",
             mixed_range: "Range '{{from}}~{{to}}' mixes a number and text; Generate compares it as text and flags it, so the test gives no verdict.",
@@ -914,6 +915,10 @@ const resources = {
         schemaUrlsRewritten_one: 'Schema URLs written in the project\'s form ({{location}}) in {{count}} rule',
         schemaUrlsRewritten_other: 'Schema URLs written in the project\'s form ({{location}}) in {{count}} rules',
         schemaUrlsRewrittenHint: 'Only in this output: the stored rules are not changed.',
+        emptyContextBlocks_one: 'The BREX has {{count}} context block with an empty schema attribute',
+        emptyContextBlocks_other: 'The BREX has {{count}} context blocks with an empty schema attribute',
+        emptyContextBlocksHint:
+          'A BREX validator such as s1kd-brexcheck applies a block only when it has no rulesContext (context in 3.0.1) or when it is the data module\'s schema, so the rules in these blocks would apply to no schema. This should never happen: report it.',
         schemaUrlsUnrecognized_one: '{{count}} rule has schema URLs that were left as written',
         schemaUrlsUnrecognized_other: '{{count}} rules have schema URLs that were left as written',
         schemaUrlsUnrecognizedHint:
@@ -1548,6 +1553,7 @@ const resources = {
             valueKinds: { boolean: 'un booleano', number: 'un número', value: 'un valor' },
             absolute_root: 'La ruta de la regla empieza en /{{name}}, pero el elemento raíz de este fragmento es <{{root}}>; solo se puede juzgar sobre un fragmento cuya raíz sea <{{name}}>.',
             schema_unknown: 'Esta regla solo se aplica al esquema {{schema}} y no se conoce el esquema del fragmento.',
+            empty_schema_context: 'La regla está dentro de un <{{element}}> con el {{attr}} vacío. Un validador de BREX como s1kd-brexcheck solo aplica un bloque si no tiene {{attr}} o si {{attr}} es el esquema del documento, así que estas reglas no se aplicarían a ningún esquema. Quita el {{attr}} vacío para que sean generales (Generate ya las pone en el bloque general).',
             missing_value: 'Un <{{element}}> no tiene {{attr}} con el que comparar.',
             bad_range: "El rango '{{text}}' no tiene la forma desde~hasta.",
             mixed_range: "El rango '{{from}}~{{to}}' mezcla un número y un texto; Generate lo compara como texto y lo marca, así que la prueba no da veredicto.",
@@ -1911,6 +1917,10 @@ const resources = {
         schemaUrlsRewritten_one: 'URL de esquema escritas con la forma del proyecto ({{location}}) en {{count}} regla',
         schemaUrlsRewritten_other: 'URL de esquema escritas con la forma del proyecto ({{location}}) en {{count}} reglas',
         schemaUrlsRewrittenHint: 'Solo en esta salida: las reglas guardadas no cambian.',
+        emptyContextBlocks_one: 'El BREX tiene {{count}} bloque de contexto con el atributo de esquema vacío',
+        emptyContextBlocks_other: 'El BREX tiene {{count}} bloques de contexto con el atributo de esquema vacío',
+        emptyContextBlocksHint:
+          'Un validador de BREX como s1kd-brexcheck solo aplica un bloque si no tiene rulesContext (context en 3.0.1) o si es el esquema del módulo de datos, así que las reglas de estos bloques no se aplicarían a ningún esquema. No debería ocurrir nunca: avísalo.',
         schemaUrlsUnrecognized_one: '{{count}} regla tiene URL de esquema que se han dejado como estaban',
         schemaUrlsUnrecognized_other: '{{count}} reglas tienen URL de esquema que se han dejado como estaban',
         schemaUrlsUnrecognizedHint:

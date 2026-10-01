@@ -1,7 +1,7 @@
 import { getApprovalsForFormat } from "./approvals.js";
 import { wrapRuleXmlFragment } from "../utils/ruleXmlFragment.js";
 import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
-import { rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
+import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache = null;
 
@@ -304,10 +304,12 @@ function assembleChunks(baseDoc, approvedRules) {
     // normalize_rule_wrappers.py use to store rules clean): complete
     // <contextRules rulesContext="..."> blocks whole (nothing inside them
     // taken again as a loose rule), and every structureObjectRule /
-    // nonContextRule wherever it sits. rulesContext="" (empty) is
-    // buildEmptyDocument()'s own generic container, so a <contextRules>
-    // with an empty or missing rulesContext is only a wrapper, never a
-    // block. Each piece is parsed on its own.
+    // nonContextRule wherever it sits. A <contextRules> with an empty or
+    // missing rulesContext is only a wrapper, never a block: its rules go
+    // into buildEmptyDocument()'s own general <contextRules> (no attribute
+    // -- s1kd-brexcheck applies a block only if it has no rulesContext or
+    // it equals the DM's schema, so rulesContext="" would apply nowhere).
+    // Each piece is parsed on its own.
     for (const piece of splitRuleXmlPieces(xml, 'BREX-4.2')) {
       if (piece.kind === 'comment') continue;
       const node = parseRuleFragment(id, piece.text).firstElementChild;
@@ -319,7 +321,7 @@ function assembleChunks(baseDoc, approvedRules) {
 
   if (!structureNodes.length && !nonContextNodes.length && !contextRulesNodes.length) return baseDoc;
 
-  const genericContextRules = baseDoc.querySelector('contextRules[rulesContext=""]');
+  const genericContextRules = baseDoc.querySelector('contextRules:not([rulesContext])');
   const group = genericContextRules.querySelector('structureObjectRuleGroup');
 
   // Loose structureObjectRule nodes go into the generic group, inserted
@@ -649,7 +651,7 @@ ${openingTag}
 </identAndStatusSection>
 <content>
 <brex>
-<contextRules rulesContext="">
+<contextRules>
 <structureObjectRuleGroup>
 </structureObjectRuleGroup>
 </contextRules>
@@ -768,5 +770,9 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
 
   const { valid, error } = checkWellFormed(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls };
+  // Safety net (HR7): never expected -- the general block has no scope
+  // attribute -- but reported if an empty one ever reaches the output.
+  const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
+
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls, emptyContextBlocks };
 }

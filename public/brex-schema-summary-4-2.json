@@ -104,7 +104,7 @@
     "contextRules": {
       "attributes_optional": ["rulesContext"],
       "children_optional": ["structureObjectRuleGroup"],
-      "note": "rulesContext = empty string for rules applying to all DM types"
+      "note": "Omit rulesContext for rules applying to all DM types (an empty rulesContext matches no schema)"
     },
     "structureObjectRuleGroup": {
       "children_required": ["structureObjectRule"],
