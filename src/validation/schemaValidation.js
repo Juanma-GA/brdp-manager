@@ -155,7 +155,7 @@ export async function loadOtherStandardVocabularies(standard) {
 //   properly marked up elsewhere in the same text (already present in
 //   `elements`/`attributes`).
 export function extractContextCandidates(text) {
-  const source = text || '';
+  const source = maskPrefixedNames(text || '');
   const elements = new Set();
   const attributes = new Set();
 
@@ -202,6 +202,31 @@ export function extractContextCandidates(text) {
   }
 
   return { elements: [...elements], attributes: [...attributes], camelCase, phraseCandidates, danglingElements };
+}
+
+// Names with a namespace prefix ("@xsi:noNamespaceSchemaLocation",
+// "<xsl:template>", "@xlink:href", "</sch:rule>", a bare "xsi:type") are
+// recognised WHOLE and never checked: the vocabulary only has local names
+// without a prefix, so the old extraction stopped at the colon and warned
+// about "@xsi" and about the local part as a camelCase word
+// ("noNamespaceSchemaLocation") -- real case BRDP-EXT-02772 (SOPTE, 3.0.1).
+// Each prefixed name, with the markup that introduces it ("@", "<", "</"),
+// is blanked out (same length, so nothing else moves) before any other
+// extraction runs; the rule checker (extractXPathNames) and the Ask answer
+// check already skip prefixed names the same way. A name WITHOUT a prefix
+// is untouched: "@xsi" or "noNamespaceSchemaLocation" on their own still
+// warn as before.
+const PREFIXED_NAME_RE = /(?:@|<\/?)?[\p{L}_][\p{L}\p{N}_.-]*:[\p{L}_][\p{L}\p{N}_.-]*/gu;
+
+function maskPrefixedNames(text) {
+  return text.replace(PREFIXED_NAME_RE, (m, offset) => {
+    // "word:" inside a URL ("http://…") never matches: the colon is followed
+    // by "/", not a letter. A prefixed name glued to a preceding letter or
+    // digit is part of something else; leave it alone.
+    const before = offset > 0 ? text[offset - 1] : undefined;
+    if (m[0] !== '@' && m[0] !== '<' && isLetterOrDigit(before)) return m;
+    return ' '.repeat(m.length);
+  });
 }
 
 // "Falsos avisos del marcado a medias" round: the previous version only

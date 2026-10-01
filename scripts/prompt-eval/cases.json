@@ -1293,6 +1293,98 @@
       ]
     },
     {
+      "id": "rule-test-4-2-attribute-only-material-usage",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Attribute-only rule (Lufthansa BRDP-S1-00151, //@materialUsage): the test schema must carry the attribute -- proced, with <supportEquipDescr>, <supplyDescr> or <spareDescr> inside <preliminaryRqmts> -- never descript, where no element has it.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-MATERIALUSAGE",
+        "title": "Use of the attribute @materialUsage",
+        "definition": "Decide whether the attribute @materialUsage is used on support equipment, supplies and spares.",
+        "proposal": "The attribute @materialUsage is not used.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-MATERIALUSAGE\"><objectPath allowedObjectFlag=\"0\">//@materialUsage</objectPath><objectUse>The attribute @materialUsage must not be used.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule judges the examples as they expect"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "\"schema\": \"proced\"",
+          "note": "the examples use proced, where an element carries the attribute"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "<preliminaryRqmts> > <reqSpares>, <reqSupplies>, <reqSupportEquips>",
+          "note": "the prompt gives the way down to the carriers"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<(?:supportEquipDescr|supplyDescr|spareDescr)\\b[^>]*\\bmaterialUsage=[\"']",
+          "note": "every reject example sets @materialUsage on a support equipment, supply or spare"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-attribute-only-time-limit-category",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Attribute-only rule (Lufthansa BRDP-S1-00563, //@timeLimitCategoryValue): only schedul has it (on <timeLimitCategory>, inside <timeLimitInfo>), so the examples go there.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-TIMELIMITCAT",
+        "title": "Time limit category",
+        "definition": "Decide which time limit categories are used.",
+        "proposal": "Only hard time limits (category 1) are used.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-TIMELIMITCAT\"><objectPath allowedObjectFlag=\"2\">//@timeLimitCategoryValue</objectPath><objectUse>Only time limit category 1 is used.</objectUse><objectValue valueForm=\"single\" valueAllowed=\"1\"/></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule judges the examples as they expect"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "\"schema\": \"schedul\"",
+          "note": "the examples use schedul, the only schema with the attribute"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<timeLimitCategory\\b[^>]*\\btimeLimitCategoryValue=[\"'](?!1[\"'])",
+          "note": "every reject example has a category other than 1"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-disassycodevariant-metadata",
       "type": "rule-test",
       "standard": "S1000D 4.2",

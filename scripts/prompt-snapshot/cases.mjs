@@ -406,6 +406,7 @@ const ruleAssyCode =
   '<structureObjectRule id="BRDP-S1-00338"><objectPath allowedObjectFlag="0">//@assyCode[string-length(.) != 2]</objectPath><objectUse>The assembly code has two characters.</objectUse></structureObjectRule>';
 const ruleLevels =
   '<structureObjectRule id="BRDP-S1-00120"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor-or-self::proceduralStep) &gt; 5] | //levelledPara[count(ancestor-or-self::levelledPara) &gt; 5]</objectPath><objectUse>No more than five levels.</objectUse></structureObjectRule>\n<structureObjectRule id="BRDP-S1-00120-b"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor-or-self::proceduralStep) = 5]/title | //levelledPara[count(ancestor-or-self::levelledPara) = 5]/title</objectPath><objectUse>The fifth level has no title.</objectUse></structureObjectRule>';
+const ruleMaterialUsage = '<structureObjectRule id="BRDP-S1-00151"><objectPath allowedObjectFlag="0">//@materialUsage</objectPath><objectUse>The attribute @materialUsage must not be used.</objectUse></structureObjectRule>';
 export const ruleTestExamplesCases = [
   {
     name: 'brex-4-2-general-flag0-with-facts',
@@ -639,6 +640,22 @@ export const ruleTestExamplesCases = [
         format: 'BREX-4.2',
         ruleXml: ruleStepTitle,
         placements: placementsFor('S1000D 4.2', ruleStepTitle, [['proced', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Attribute-only rule (Lufthansa S1-00151, //@materialUsage): the test
+    // schema is one where an element carries the attribute (proced, the
+    // first by preference), and the content goes inside <procedure> with
+    // the way down to the carriers through <preliminaryRqmts>.
+    name: 'brex-4-2-attribute-only-material-usage',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, title: 'Material usage', proposal: 'The attribute @materialUsage is not used.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleMaterialUsage,
+        placements: appPlacementsFor('S1000D 4.2', ruleMaterialUsage, [['proced', 'rule']]),
       },
     ],
   },

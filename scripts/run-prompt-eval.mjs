@@ -750,6 +750,8 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
       apiFetch(`/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(names.join(","))}`),
     fetchStructure: (standard, schema) =>
       apiFetch(`/api/schema-cards/structure?standard=${encodeURIComponent(standard)}&schema=${encodeURIComponent(schema)}`),
+    fetchSchemaAttribute: (standard, name) =>
+      apiFetch(`/api/schema-cards/attribute?standard=${encodeURIComponent(standard)}&name=${encodeURIComponent(name)}`),
     parseXml: xmldomParse,
   });
   const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalMismatch) : null;

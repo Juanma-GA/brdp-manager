@@ -56,28 +56,34 @@ const DITA_FORMAT_DEF = { approvalsFormat: 'SCH-DITA', xsdFormat: null, run: gen
 // when the page loads (not only at Generate time), so the live checkbox
 // counters below can use it immediately too.
 function useProjectApprovals(projectId, format) {
-  const [approvalsByBrdpId, setApprovalsByBrdpId] = useState(new Map());
+  // status: 'loading' | 'ready' | 'error'. Generate waits for 'ready': with
+  // thousands of rules (SOPTE, 2818) the export takes a moment, and a click
+  // before it arrived used to generate a BREX with every rule left out as
+  // "pending approval" -- silently (HR7). A failed load is shown, never
+  // treated as "no approved rules".
+  const [state, setState] = useState({ map: new Map(), status: 'loading', error: null });
 
   useEffect(() => {
     if (!format) {
-      setApprovalsByBrdpId(new Map());
+      setState({ map: new Map(), status: 'ready', error: null });
       return;
     }
     let cancelled = false;
+    setState({ map: new Map(), status: 'loading', error: null });
     authFetchJson(`/api/projects/${projectId}/approvals/${encodeURIComponent(format)}/export`)
       .then((rows) => {
-        if (!cancelled) setApprovalsByBrdpId(new Map(rows.map((r) => [r.brdp_id, r])));
+        if (!cancelled) setState({ map: new Map(rows.map((r) => [r.brdp_id, r])), status: 'ready', error: null });
       })
       .catch((err) => {
         console.error(`Failed to fetch bulk approvals for format ${format}:`, err);
-        if (!cancelled) setApprovalsByBrdpId(new Map());
+        if (!cancelled) setState({ map: new Map(), status: 'error', error: err.message });
       });
     return () => {
       cancelled = true;
     };
   }, [projectId, format]);
 
-  return approvalsByBrdpId;
+  return state;
 }
 
 // XSD validation needs a real auth header (v2's /api/validate-brex is
@@ -153,7 +159,8 @@ export default function GeneratePage() {
   // both the live counter below AND handleGenerate() itself reuse this
   // same state, so toggling either checkbox updates the counter instantly
   // with no network round trip.
-  const approvalsByBrdpId = useProjectApprovals(projectId, formatDef?.approvalsFormat);
+  const approvals = useProjectApprovals(projectId, formatDef?.approvalsFormat);
+  const approvalsByBrdpId = approvals.map;
 
   useEffect(() => {
     authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => {
@@ -334,12 +341,20 @@ export default function GeneratePage() {
         <button
           className={styles.generateBtn}
           onClick={handleGenerate}
-          disabled={generating || isLoading || !isImplemented || !isConfigComplete}
+          disabled={generating || isLoading || approvals.status !== 'ready' || !isImplemented || !isConfigComplete}
         >
           {generating && <span className={styles.spinner} aria-hidden="true" />}
           {generating ? t('generate.generating') : result ? t('generate.regenerateButton') : t('generate.generateButton')}
         </button>
         {generating && <p className={styles.hint}>{t('generate.generatingHint')}</p>}
+        {approvals.status === 'loading' && formatDef && (
+          <p className={styles.hint} data-testid="generate-rules-loading">{t('generate.rulesLoading')}</p>
+        )}
+        {approvals.status === 'error' && (
+          <p className={styles.warning} role="alert" data-testid="generate-rules-error">
+            ⚠ {t('generate.rulesLoadFailed', { message: approvals.error })}
+          </p>
+        )}
       </div>
 
       {result && (

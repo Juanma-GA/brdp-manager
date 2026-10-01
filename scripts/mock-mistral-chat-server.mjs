@@ -324,6 +324,23 @@ function ruleTestReply(systemPrompt, messages) {
     }
     return answer(examples);
   }
+  // Attribute-only rules (S1-00151 //@materialUsage, S1-00563
+  // //@timeLimitCategoryValue): the carriers along the way the prompt gives
+  // -- inside <preliminaryRqmts> in proced, <timeLimitInfo> in schedul.
+  if (/^[^<]*<structureObjectRule[^>]*>\s*<objectPath[^>]*>\/\/@materialUsage</.test(rule)) {
+    const equip = (attr) => `<preliminaryRqmts><reqCondGroup><noConds/></reqCondGroup><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr${attr}><name>Torque wrench</name><reqQuantity>1</reqQuantity></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips><reqSupplies><noSupplies/></reqSupplies><reqSpares><noSpares/></reqSpares><reqSafety><noSafety/></reqSafety></preliminaryRqmts><mainProcedure><proceduralStep><para>Tighten the nut.</para></proceduralStep></mainProcedure>`;
+    return answer([
+      { label: "Support equipment without material usage", expected: "accept", schema: ruleSchema, content: equip("") },
+      { label: "Support equipment with material usage", expected: "reject", schema: ruleSchema, content: equip(' materialUsage="mu01"') },
+    ]);
+  }
+  if (/\/\/@timeLimitCategoryValue/.test(rule)) {
+    const limit = (value) => `<timeLimitInfo timeLimitIdent="tl-001"><equipGroup><equip><name>Main landing gear</name></equip></equipGroup><timeLimitCategory timeLimitCategoryValue="${value}"/><timeLimit><limitType limitUnitType="lt01"><threshold thresholdUnitOfMeasure="th06"><thresholdValue>6000</thresholdValue></threshold></limitType></timeLimit></timeLimitInfo>`;
+    return answer([
+      { label: "Hard time limit (category 1)", expected: "accept", schema: ruleSchema, content: limit("1") },
+      { label: "Soft time limit (category 2)", expected: "reject", schema: ruleSchema, content: limit("2") },
+    ]);
+  }
   const metadata = metadataReply(systemPrompt, rule, answer);
   if (metadata) return metadata;
   // T4, DITA Schematron: the topic type the prompt offers; the examples

@@ -6,6 +6,9 @@
 //                   real /api/llm-proxy), at RULE_TEST_TEMPERATURE
 //   fetchSchemaCards(standard, names) → GET /api/schema-cards response
 //   fetchStructure(standard, schema) → GET /api/schema-cards/structure response
+//   fetchSchemaAttribute(standard, name) → GET /api/schema-cards/attribute
+//                   response (optional: which schemas carry the attribute of
+//                   an attribute-only rule, //@materialUsage)
 //   parseXml(text) → Document (browser default: DOMParser)
 // Steps (T2b): the schema(s) and skeleton the examples are built on, the
 // prompt, the LLM's answer, the checks of each example, ONE automatic
@@ -23,7 +26,7 @@ import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 const MAX_SCHEMA_FACTS = 6;
 
 // The schemas the examples use and where each takes the LLM's content.
-export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure }) {
+export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute }) {
   const contextSchemas = contextSchemasOfRule(ruleXml, schemaLocation).schemas;
   const targets = ruleTargets(ruleXml);
   const useNames = ruleUseNames(ruleXml);
@@ -52,7 +55,8 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     // no facts
   }
   const schemaFacts = factNames.filter((n) => cards[n]).map((name) => ({ name, entry: cards[name] }));
-  const { testSchema, otherSchema, groups } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, targets });
+  const attributeSchemas = await attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, elementSchemas);
+  const { testSchema, otherSchema, groups } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets });
   const placements = {};
   const promptPlacements = [];
   // Parts of the rule that look only inside the identification and status
@@ -116,6 +120,37 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       ? { code: 'unreachable_target', params: { names: [...new Set(rulePlacements.flatMap((p) => p.unreachable))].join(', ') } }
       : null;
   return { contextSchemas, schemaFacts, promptPlacements, unreachable, untested, setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) } };
+}
+
+// For each attribute-only alternative of the rule (//@materialUsage), the
+// schemas that have an element carrying the attribute -- read from the
+// attribute owners (GET /api/schema-cards/attribute), which list the
+// schemas of each carrier's card variant. S1000D only: the DITA cards are
+// one merged schema, and the topic type of each carrier would need another
+// lookup (an attribute-only Schematron context is not a real case). A
+// failed lookup leaves that attribute out: the choice is then what it was
+// before, never "not executable" because of a network error.
+async function attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, elementSchemas) {
+  if (!fetchSchemaAttribute || elementSchemas) return null;
+  const names = [
+    ...new Set(
+      targets.alternatives
+        .filter((a) => !a.opaque && a.attribute && a.steps.length === 0 && !a.absolutePrefix)
+        .map((a) => a.attribute)
+    ),
+  ];
+  if (names.length === 0) return null;
+  const out = {};
+  for (const name of names) {
+    try {
+      const res = await fetchSchemaAttribute(standard, name);
+      if (!res?.available) continue;
+      out[name] = [...new Set((res.owners || []).flatMap((o) => o.schemas || []))];
+    } catch {
+      // not narrowed
+    }
+  }
+  return out;
 }
 
 // T4b: an example meant to be rejected in which the rule selects nothing
@@ -273,6 +308,7 @@ export async function generateRuleTestExamples({
   ask,
   fetchSchemaCards,
   fetchStructure,
+  fetchSchemaAttribute,
   parseXml = parseXmlDocument,
   isCurrent = () => true,
   onPrompt,
@@ -281,7 +317,7 @@ export async function generateRuleTestExamples({
   let systemPrompt = null;
   const responses = [];
   try {
-    const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure });
+    const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute });
     if (!isCurrent()) return null;
     if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup, untested: prepared.untested };
     // The schemas whose examples the application builds whole (rootOnly):

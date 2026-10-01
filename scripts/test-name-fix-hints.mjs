@@ -189,5 +189,28 @@ check('unmarked first item, then marked second still captures the first', eq(
   ['table'],
 ));
 
+// ── Names with a namespace prefix are never checked ──────────────────────
+{
+  const v301 = V['3-0-1'];
+  const ext02772 = 'The @xsi:noNamespaceSchemaLocation of each DM shall be one of the S1000D 3.0.1 schemas. Check @xsi:noNamespaceSchemaLocation on <dmodule>.';
+  const c = extractContextCandidates(ext02772);
+  check('prefix: @xsi:noNamespaceSchemaLocation not extracted', !c.attributes.includes('xsi') && !c.camelCase.includes('noNamespaceSchemaLocation'), JSON.stringify(c));
+  const r = checkAgainstVocabulary(c, v301);
+  check('prefix: BRDP-EXT-02772 text has no warning', r.notFound.length === 0 && r.wrongType.length === 0, JSON.stringify(r));
+  const others42 = checkAgainstVocabulary(extractContextCandidates('Use @xlink:href, <xsl:template match="x"> and </xsl:template>; also <sch:rule and xsl:value-of>.'), V['4-2']);
+  check('prefix: @xlink:href, <xsl:template>, half-typed prefixed names: no warning', others42.notFound.length === 0, JSON.stringify(others42));
+  check('prefix: no chips for prefixed names', hintsFor('4-2', 'Use @xlink:href and <xsl:template>.').length === 0);
+  const bare = checkAgainstVocabulary(extractContextCandidates('Only @xsi is set.'), v301);
+  check('no prefix: @xsi alone still warns', eq(bare.notFound, ['@xsi']), JSON.stringify(bare));
+  const local = checkAgainstVocabulary(extractContextCandidates('The noNamespaceSchemaLocation attribute is set.'), v301);
+  check('no prefix: noNamespaceSchemaLocation alone still warns', local.notFound.some((n) => n.includes('noNamespaceSchemaLocation')), JSON.stringify(local));
+  const mixed = 'The @xsi:noNamespaceSchemaLocation is checked; <emphasys> is not allowed.';
+  const mixedCheck = checkAgainstVocabulary(extractContextCandidates(mixed), V['4-2']);
+  check('prefix + typo: only <emphasys> warns', eq(mixedCheck.notFound, ['<emphasys>']), JSON.stringify(mixedCheck));
+  const mixedHints = hintsFor('4-2', mixed);
+  check('prefix + typo: Did you mean <emphasis>', mixedHints.length === 1 && JSON.stringify(mixedHints).includes('emphasis'), JSON.stringify(mixedHints));
+  check('prefix: URLs are not prefixed names', eq(extractContextCandidates('See http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/proced.xsd and <para>').elements, ['para']));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

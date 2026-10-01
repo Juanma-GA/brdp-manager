@@ -12,7 +12,8 @@
    fit .page (the common case), but it's what keeps the resize edge case
    safe: if the viewport ever gets shorter than .card's own natural height
    (.card never shrinks -- see its own comment), the page scrolls instead
-   of silently clipping content with no way to reach it.
+   of silently clipping content with no way to reach it. It is also what
+   scrolls when a long Generate report sits above the XML (see .outputCard).
 */
 .page {
   padding: 24px;
@@ -172,10 +173,14 @@
    above doesn't use, exactly like RecordsPage.module.css's .tableWrap.
    display: flex + flex-direction: column turns outputMeta/xsdSection/
    xmlOutput/outputActions below into ITS OWN flex items, so xmlOutput
-   (the only one with flex: 1) is what actually grows/scrolls -- the
-   badges above it and the Copy/Download buttons below stay pinned at
-   their natural size. overflow: hidden keeps the rounded corners clean
-   the same way .tableWrap's does.
+   (the only one that grows) takes the space left -- the badges above it
+   and the Copy/Download buttons below stay at their natural size.
+   flex-shrink: 0 (not min-height: 0 + overflow: hidden, as before): with a
+   long report above the XML (2818 rules with their schema URLs rewritten,
+   SOPTE) the card used to be squeezed to the page's height and clip the
+   XML and the buttons with no way to reach them. Now the card is never
+   smaller than its content, and .page scrolls down to the end of the
+   report, the XML and the buttons.
 */
 .outputCard {
   max-width: 900px;
@@ -184,11 +189,9 @@
   border-radius: 10px;
   background: #fff;
   padding: 18px;
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .outputMeta {
@@ -236,24 +239,29 @@
   flex-shrink: 0;
 }
 
+/* Every list of the report (XSD issues, vocabulary warnings, schema URLs
+   rewritten / unrecognized / mixed) has a maximum height and its own
+   scroll: a block with thousands of rules never pushes the XML and the
+   buttons out of reach. The <details> around it can still be folded. */
 .errorList {
   margin: 6px 0 0;
   padding-left: 18px;
   font-size: 12px;
   color: #991b1b;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 .errorList li {
   margin-bottom: 4px;
 }
 
-/* Was max-height: 420px (an arbitrary fixed number, unrelated to the real
-   viewport) -- flex: 1 + min-height: 0 make it fill whatever height
-   .outputCard actually has left instead, so a short viewport never needs
-   a page-level scroll to reach Regenerate/the form above, and a tall one
-   isn't wasted on a fixed 420px box when more of a long result could be
-   shown. overflow: auto (unchanged) is what scrolls when the real result
-   still doesn't fit even at that height.
+/* Fills the height the card has left (flex-grow), but never less than
+   its min-height: height 0 + flex-basis auto keeps the XML's own
+   length out of the card's size (a 2818-rule BREX would otherwise make the
+   page as long as the XML), and min-height keeps the box usable when a long
+   report takes the rest of the page -- the page then scrolls and this box
+   keeps its own vertical and horizontal scroll (overflow: auto + pre).
 */
 .xmlOutput {
   background: #f8fafc;
@@ -262,8 +270,9 @@
   padding: 14px;
   font-size: 12px;
   font-family: 'Menlo', 'Consolas', monospace;
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  height: 0;
+  min-height: 320px;
   overflow: auto;
   white-space: pre;
   color: #111827;

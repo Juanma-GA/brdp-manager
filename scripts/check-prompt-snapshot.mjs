@@ -181,6 +181,14 @@
 // of Part 3) and brex-4-2-boolean-condition-applicref-or (S1-00316 written
 // with "or"). Both carry the "THE RULE CHECKS A CONDITION ON THE WHOLE
 // DOCUMENT" block; a node path gets the same prompt as before.
+//
+// Attribute-only rules: new case
+// ruleTestExamples/brex-4-2-attribute-only-material-usage (Lufthansa
+// S1-00151, //@materialUsage): the test schema is proced (an element there
+// carries the attribute) with the content inside <procedure> and the way
+// down to <supportEquipDescr>/<supplyDescr>/<spareDescr> through
+// <preliminaryRqmts>. The 45 earlier cases are unchanged (no attribute-only
+// rule among them).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

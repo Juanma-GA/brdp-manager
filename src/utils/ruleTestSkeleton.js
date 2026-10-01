@@ -404,12 +404,29 @@ function byPreference(schemas, documentSchemas = []) {
 // element steps): [{ schema, alternatives, checked }], at least two groups
 // -- each tested with its own examples; the whole rule still runs on every
 // example. Otherwise null, and the single schema as before.
-export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, targets }) {
+//
+// `attributeSchemas` ({ attribute: [schemas that have an element carrying
+// it] }, from the attribute owners): an alternative that is only an
+// attribute (//@materialUsage) used to fit ANY schema, so it got descript,
+// where @materialUsage does not exist -- "not executable" for BRDP-S1-00151.
+// Now the chosen schema must also have a carrier of every such attribute,
+// and the groups place an attribute-only alternative by its own carriers.
+// An attribute that no schema carries (//@pokemon), or one not looked up,
+// does not narrow anything: the placement then says it is unreachable, as
+// before. An alternative with element steps (//supportEquipDescr/@x) does
+// not change.
+export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, attributeSchemas = null, targets }) {
   const known = (name) => Boolean(cards[name]) || Boolean(elementSchemas?.[name]?.length);
   const required = [...new Set([...(targets?.checked || []), ...(targets?.absolutePrefixes || []).map((p) => p[0])])]
     .filter(known);
   const order = (list) => byPreference(list, documentSchemas);
-  const fitting = order(schemasHavingAll(required, cards, documentSchemas, elementSchemas));
+  const carriersOf = attributeOnlySchemas(attributeSchemas, documentSchemas);
+  const attributeOnly = (targets?.alternatives || []).map(carriersOf).filter(Boolean);
+  const fitting = order(
+    schemasHavingAll(required, cards, documentSchemas, elementSchemas).filter((schema) =>
+      attributeOnly.every((schemas) => schemas.includes(schema))
+    )
+  );
   if (contextSchemas.length > 0) {
     const taken = new Set(contextSchemas);
     const others = fitting.filter((s) => !taken.has(s));
@@ -417,18 +434,30 @@ export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], c
     return { testSchema: contextSchemas[0], otherSchema: others[0] || fallback[0] || null, groups: null };
   }
   const fallback = order(documentSchemas);
-  const groups = schemaGroups(targets, fitting[0] || null, { known, order, cards, documentSchemas, elementSchemas });
+  const groups = schemaGroups(targets, fitting[0] || null, { known, order, cards, documentSchemas, elementSchemas, carriersOf });
   if (groups) return { testSchema: groups[0].schema, otherSchema: null, groups };
   return { testSchema: fitting[0] || fallback[0] || null, otherSchema: null, groups: null };
 }
 
-function schemaGroups(targets, common, { known, order, cards, documentSchemas, elementSchemas }) {
+// The schemas that carry the attribute of an attribute-only alternative
+// (//@x, no element step, no absolute root), or null when the alternative
+// is not one, the attribute was not looked up, or no schema carries it.
+function attributeOnlySchemas(attributeSchemas, documentSchemas) {
+  return (alt) => {
+    if (!attributeSchemas || alt.opaque || !alt.attribute || alt.steps.length > 0 || alt.absolutePrefix) return null;
+    const schemas = (attributeSchemas[alt.attribute] || []).filter((s) => documentSchemas.includes(s));
+    return schemas.length > 0 ? schemas : null;
+  };
+}
+
+function schemaGroups(targets, common, { known, order, cards, documentSchemas, elementSchemas, carriersOf }) {
   const bySchema = new Map();
   for (const alt of targets?.alternatives || []) {
     if (alt.opaque) continue;
+    const carriers = carriersOf(alt);
     const names = [...new Set([...alt.steps, ...(alt.absolutePrefix ? [alt.absolutePrefix[0]] : [])])].filter(known);
-    if (names.length === 0) continue;
-    const preferred = order(schemasHavingAll(names, cards, documentSchemas, elementSchemas))[0];
+    if (names.length === 0 && !carriers) continue;
+    const preferred = order(carriers || schemasHavingAll(names, cards, documentSchemas, elementSchemas))[0];
     if (!preferred) continue;
     if (!bySchema.has(preferred)) bySchema.set(preferred, []);
     bySchema.get(preferred).push(alt);
@@ -537,7 +566,12 @@ const GENERIC_ATTRIBUTES = new Set([
 const specificAttributes = (el) =>
   (el?.attributes || []).filter((a) => !GENERIC_ATTRIBUTES.has(a) && !a.includes(':')).sort();
 
-export function contentRoutes(structure, insertion, ruleNames, extraNames = []) {
+// ruleAttributes: the attributes an attribute-only part of the rule checks
+// (//@systemDiffCode). They go first in each card's attribute list, so the
+// list's cut (ROUTE_MAX_LIST) never hides the very attribute the examples
+// must use (<dmCode> has 13 specific attributes; @systemDiffCode was the
+// 13th).
+export function contentRoutes(structure, insertion, ruleNames, extraNames = [], ruleAttributes = []) {
   const elements = structure.elements;
   if (!insertion || !elements[insertion]) return null;
   const direct = new Set(elements[insertion].children || []);
@@ -571,13 +605,14 @@ export function contentRoutes(structure, insertion, ruleNames, extraNames = []) 
     ...ruleRouted.slice(0, otherRouted.length ? half : ROUTE_MAX_CARDS),
     ...otherRouted.slice(0, ROUTE_MAX_CARDS),
   ].slice(0, ROUTE_MAX_CARDS);
+  const first = (list) => [...list.filter((a) => ruleAttributes.includes(a)), ...list.filter((a) => !ruleAttributes.includes(a))];
   const cards = carded.map(([name]) => {
     const children = [...(elements[name].children || [])].sort();
-    const attributes = specificAttributes(elements[name]);
+    const attributes = first(specificAttributes(elements[name]));
     return {
       name,
       // each child with its own attributes: <partSpec> > partIdent(@partNumberValue …)
-      children: children.slice(0, ROUTE_MAX_LIST).map((c) => ({ name: c, attributes: specificAttributes(elements[c]).slice(0, 6) })),
+      children: children.slice(0, ROUTE_MAX_LIST).map((c) => ({ name: c, attributes: first(specificAttributes(elements[c])).slice(0, 6) })),
       childrenOmitted: Math.max(0, children.length - ROUTE_MAX_LIST),
       attributes: attributes.slice(0, ROUTE_MAX_LIST),
       attributesOmitted: Math.max(0, attributes.length - ROUTE_MAX_LIST),
@@ -859,6 +894,10 @@ function wholeDocumentMetadata(structure, targets, section) {
 // (contentRoutes) -- asked by prepareRuleTestSetup for the S1000D schemas
 // with no path to <para> (data update file, ipd, pm, dml…: structured data
 // an LLM does not know by heart), never for prose (a <para> or a DITA body).
+// How many carriers of an attribute-only alternative get a way down in
+// the prompt (the nearest ones from the insertion point).
+const ATTRIBUTE_CARRIER_ROUTES = 3;
+
 export function placeExample(structure, targets, { useNames = [], withRoutes = false } = {}) {
   const chain = structure.skeleton.path;
   const elements = structure.elements;
@@ -944,9 +983,25 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     if (prefix.length > common) limit = Math.min(limit, common);
   }
 
+  // A content alternative with only an attribute (//@materialUsage,
+  // BRDP-S1-00151) checks no element: what the example needs is SOME
+  // element of this schema that carries the attribute (in proced,
+  // <supportEquipDescr>, <supplyDescr> or <spareDescr>, inside
+  // <preliminaryRqmts>, not under <mainProcedure>). The insertion point is
+  // the deepest one from which one of its carriers can be reached.
+  const carrierSets = classes.contentAlternatives
+    .filter((a) => !a.opaque && a.attribute && (a.steps || []).length === 0)
+    .map((a) => Object.keys(elements).filter((n) => (elements[n].attributes || []).includes(a.attribute)))
+    .filter((set) => set.length > 0);
+  const attributeOnlyChecked = classes.contentAlternatives
+    .filter((a) => !a.opaque && a.attribute && (a.steps || []).length === 0)
+    .map((a) => a.attribute);
   let index = limit - 1;
   for (let i = limit - 1; i >= 0; i -= 1) {
-    if (contentChecked.every((name) => reachable(elements, chain[i], name))) {
+    if (
+      contentChecked.every((name) => reachable(elements, chain[i], name))
+      && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
+    ) {
       index = i;
       break;
     }
@@ -964,8 +1019,19 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     const entry = (a.steps || []).find((n) => elements[n] && !placed.path.includes(n));
     return entry || a.checked;
   }).filter((n) => n && elements[n]);
+  // An attribute-only alternative enters through its carriers: the
+  // nearest ones (up to ATTRIBUTE_CARRIER_ROUTES) get a way down.
+  for (const set of carrierSets) {
+    const nearest = set
+      .map((name) => [name, name === placed.insertion ? null : nestingPath(elements, placed.insertion, name)])
+      .filter(([, path]) => path)
+      .sort((a, b) => a[1].length - b[1].length || a[0].localeCompare(b[0]))
+      .slice(0, ATTRIBUTE_CARRIER_ROUTES)
+      .map(([name]) => name);
+    entryNames.push(...nearest);
+  }
   placed.routes = withRoutes
-    ? contentRoutes(structure, placed.insertion, [...new Set([...entryNames, ...predicateNames])], useNames)
+    ? contentRoutes(structure, placed.insertion, [...new Set([...entryNames, ...predicateNames])], useNames, attributeOnlyChecked)
     : null;
   return placed;
 }

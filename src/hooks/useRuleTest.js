@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
-import { fetchSchemaCards } from '../api/schemaFacts.js';
+import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
 import i18n from '../i18n';
 import { RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
 import { buildCopyableTestPrompt } from '../prompts/ruleTestExamplesPrompt.js';
@@ -147,6 +147,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
         ).content,
       fetchSchemaCards,
       fetchStructure,
+      fetchSchemaAttribute,
       isCurrent: () => generationRef.current === generation,
       onPrompt: (systemPrompt) => setCopyablePrompt(buildCopyableTestPrompt(systemPrompt)),
       previousReview: previousReview?.mismatches ? previousReview : null,

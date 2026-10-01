@@ -2251,5 +2251,157 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('cause: S1-00187 with swapped expectations → the rule, both ways', c?.cause === 'rule' && c.permissive && c.strict, JSON.stringify(c));
 }
 
+// ─── Attribute-only rules: the test schema must carry the attribute ─────────
+// BRDP-S1-00151 (//@materialUsage): no element is checked, so the schema
+// used to be the first by preference (descript), where no element carries
+// @materialUsage. The schema now has to carry it, and the insertion point
+// is where one of its carriers can be reached.
+{
+  const cardsOf = (file) => JSON.parse(fs.readFileSync(new URL(`../backend/schema_cards/schema-cards-${file}.json`, import.meta.url))).cards;
+  const docsOf = (cards) => [...new Set(Object.values(cards).flatMap((vs) => vs.flatMap((v) => v.schemas)))]
+    .filter((sc) => !['dc', 'rdf', 'xlink', 'xcf'].includes(sc))
+    .sort();
+  // The same fetchers the panel uses, answered from the real cards (the
+  // attribute owners are what GET /api/schema-cards/attribute serves).
+  const fetchersFor = (standard, file) => {
+    const cards = cardsOf(file);
+    const docs = docsOf(cards);
+    const attributeCalls = [];
+    return {
+      cards,
+      docs,
+      attributeCalls,
+      fetchSchemaCards: async (_s, names) => ({
+        cards: Object.fromEntries(names.filter((n) => cards[n]).map((n) => [n, { variants: cards[n] }])),
+        document_schemas: docs,
+      }),
+      fetchStructure: async (_s, schema) => {
+        const st = structureOf(standard, schema);
+        return st ? { available: true, ...st } : { available: false };
+      },
+      fetchSchemaAttribute: async (_s, name) => {
+        attributeCalls.push(name);
+        const owners = [];
+        for (const [element, vs] of Object.entries(cards)) {
+          for (const v of vs) {
+            const a = (v.attributes || []).find((x) => x.name === name);
+            if (a) owners.push({ element, schemas: v.schemas, required: a.required, enum: a.enum });
+          }
+        }
+        return { available: true, owners };
+      },
+    };
+  };
+  const brex = (path, extra = '', flag = 0, id = 'BRDP-TEST-ATTR') => `<structureObjectRule id="${id}"><objectPath allowedObjectFlag="${flag}">${path}</objectPath><objectUse>Attribute rule.</objectUse>${extra}</structureObjectRule>`;
+  const carriersOf = (cards, docs, name) => {
+    const out = new Set();
+    for (const vs of Object.values(cards)) for (const v of vs) if ((v.attributes || []).some((a) => a.name === name)) v.schemas.forEach((sc) => docs.includes(sc) && out.add(sc));
+    return [...out];
+  };
+  const choose = (f, path, attrs) => chooseTestSchemas({
+    documentSchemas: f.docs,
+    cards: {},
+    targets: ruleTargets(brex(path)),
+    attributeSchemas: Object.fromEntries(attrs.map((a) => [a, carriersOf(f.cards, f.docs, a)])),
+  });
+
+  for (const [standard, file] of [['S1000D 4.2', '4-2'], ['S1000D 4.1', '4-1']]) {
+    const f = fetchersFor(standard, file);
+    check(`${standard}: //@materialUsage → proced`, choose(f, '//@materialUsage', ['materialUsage']).testSchema === 'proced');
+    check(`${standard}: //@timeLimitCategoryValue → schedul (the only schema with it)`, choose(f, '//@timeLimitCategoryValue', ['timeLimitCategoryValue']).testSchema === 'schedul');
+    check(`${standard}: //@modelIdentCode → still descript`, choose(f, '//@modelIdentCode', ['modelIdentCode']).testSchema === 'descript');
+    check(`${standard}: without owners → as before (descript)`, chooseTestSchemas({ documentSchemas: f.docs, cards: {}, targets: ruleTargets(brex('//@materialUsage')) }).testSchema === 'descript');
+    const two = choose(f, '//@indenture | //@timeLimitCategoryValue', ['indenture', 'timeLimitCategoryValue']);
+    check(`${standard}: //@indenture | //@timeLimitCategoryValue → two groups (ipd, schedul)`, JSON.stringify(two.groups?.map((g) => g.schema)) === '["ipd","schedul"]', JSON.stringify(two));
+    const shared = choose(f, '//@materialUsage | //@timeLimitCategoryValue', ['materialUsage', 'timeLimitCategoryValue']);
+    check(`${standard}: two attributes with a schema in common → one schema, no groups`, shared.groups === null && shared.testSchema === 'schedul', JSON.stringify(shared));
+    const mixed = chooseTestSchemas({ documentSchemas: f.docs, cards: Object.fromEntries(['supportEquipDescr'].map((n) => [n, { variants: f.cards[n] }])), targets: ruleTargets(brex('//supportEquipDescr/@materialUsage')), attributeSchemas: {} });
+    check(`${standard}: //supportEquipDescr/@materialUsage → proced, unchanged`, mixed.testSchema === 'proced' && mixed.groups === null);
+
+    const prep = await prepareRuleTestSetup({ ruleXml: brex('//@materialUsage'), standard, schemaLocation: 'flat', ...f });
+    const pp = prep.promptPlacements;
+    check(`${standard}: //@materialUsage placed in proced at <procedure>`, pp.length === 1 && pp[0].schema === 'proced' && pp[0].insertion === 'procedure' && prep.unreachable === null, JSON.stringify(pp.map((x) => [x.schema, x.insertion])));
+    const routeChildren = (pp[0].routes?.steps || []).flatMap((st) => st.children);
+    check(`${standard}: way down to the carriers through <preliminaryRqmts>`, ['preliminaryRqmts', 'supportEquipDescr', 'supplyDescr', 'spareDescr'].every((n) => routeChildren.includes(n)), JSON.stringify(pp[0].routes));
+    check(`${standard}: attribute owners asked once`, JSON.stringify(f.attributeCalls) === '["materialUsage"]');
+    const same = await prepareRuleTestSetup({ ruleXml: brex('//supportEquipDescr/@materialUsage'), standard, schemaLocation: 'flat', ...f });
+    check(`${standard}: element + attribute rule never asks the owners, still proced`, same.promptPlacements[0].schema === 'proced' && JSON.stringify(f.attributeCalls) === '["materialUsage"]');
+    const pk = await prepareRuleTestSetup({ ruleXml: brex('//@pokemon'), standard, schemaLocation: 'flat', ...f });
+    check(`${standard}: //@pokemon → not executable as today`, pk.unreachable?.code === 'unreachable_target' && pk.unreachable.params.names === '@pokemon');
+    const failing = { ...f, fetchSchemaAttribute: async () => { throw new Error('network down'); } };
+    const fp = await prepareRuleTestSetup({ ruleXml: brex('//@materialUsage'), standard, schemaLocation: 'flat', ...failing });
+    check(`${standard}: owners lookup fails → today's choice (descript)`, fp.promptPlacements[0].schema === 'descript');
+    const tl = await prepareRuleTestSetup({ ruleXml: brex('//@timeLimitCategoryValue'), standard, schemaLocation: 'flat', ...f });
+    check(`${standard}: //@timeLimitCategoryValue placed in schedul`, tl.promptPlacements[0].schema === 'schedul' && tl.unreachable === null, JSON.stringify(tl.promptPlacements.map((x) => [x.schema, x.insertion])));
+  }
+
+  // Template row S1-00334 (//@systemDiffCode, attribute-only): descript
+  // stays (every schema has <dmCode>), the content gets the way down to the
+  // <dmCode> of a <dmRef>, and its card lists @systemDiffCode first -- the
+  // 12-attribute cut used to hide it (13th alphabetically).
+  {
+    const f = fetchersFor('S1000D 4.2', '4-2');
+    const R334 = readPublicTemplate('brdp-template-4-2.xlsx').find((row) => row.ID === 'BRDP-S1-00334').Rule;
+    const prep = await prepareRuleTestSetup({ ruleXml: R334, standard: 'S1000D 4.2', schemaLocation: 'flat', ...f });
+    const pc = prep.promptPlacements[0];
+    const dmCodeCard = pc.routes?.cards?.find((c) => c.name === 'dmCode');
+    check('S1-00334: still descript, way down to <dmCode>', pc.schema === 'descript' && Boolean(dmCodeCard), JSON.stringify(pc.routes));
+    check('S1-00334: @systemDiffCode first in the <dmCode> card', dmCodeCard?.attributes[0] === 'systemDiffCode', JSON.stringify(dmCodeCard?.attributes));
+  }
+
+  // 3.0.1 has no @materialUsage: its attribute-only case is //@man (on
+  // <person>, in fault/proced/process/schedul) → proced, not descript.
+  {
+    const S301 = 'S1000D 3.0.1';
+    const f = fetchersFor(S301, '3-0-1');
+    const rule = '<objrule><objpath objappl="0">//@man</objpath><objuse>No man attribute.</objuse></objrule>';
+    const c = chooseTestSchemas({ documentSchemas: f.docs, cards: {}, targets: ruleTargets(rule), attributeSchemas: { man: carriersOf(f.cards, f.docs, 'man') } });
+    check('3.0.1: //@man → proced', c.testSchema === 'proced' && c.groups === null);
+    const prep = await prepareRuleTestSetup({ ruleXml: rule, standard: S301, schemaLocation: 'flat', ...f });
+    check('3.0.1: //@man placed in proced, reachable', prep.promptPlacements[0].schema === 'proced' && prep.unreachable === null, JSON.stringify(prep.promptPlacements.map((x) => [x.schema, x.insertion])));
+  }
+
+  // S1-00151 end to end (4.2): the LLM writes the carriers inside
+  // <preliminaryRqmts>, the examples are valid and the verdict is correct.
+  {
+    const S42 = 'S1000D 4.2';
+    const f = fetchersFor(S42, '4-2');
+    const R151 = brex('//@materialUsage', '', 0, 'BRDP-S1-00151');
+    const equip = (attr) => `<preliminaryRqmts><reqCondGroup><noConds/></reqCondGroup><reqPersons><person man="A"/></reqPersons><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr${attr}><name>Torque wrench</name><reqQuantity>1</reqQuantity></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips><reqSupplies><noSupplies/></reqSupplies><reqSpares><noSpares/></reqSpares><reqSafety><noSafety/></reqSafety></preliminaryRqmts><mainProcedure><proceduralStep><para>Tighten the nut.</para></proceduralStep></mainProcedure><closeRqmts><reqCondGroup><noConds/></reqCondGroup></closeRqmts>`;
+    const examples = [
+      { label: 'no material usage', expected: 'accept', schema: 'proced', content: equip('') },
+      { label: 'material usage set', expected: 'reject', schema: 'proced', content: equip(' materialUsage="mu01"') },
+    ];
+    let asked = null;
+    const g = await generateRuleTestExamples({
+      ruleXml: R151, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat',
+      brdp: { identifier: 'BRDP-S1-00151', title: 'Material usage', definition: 'Use of @materialUsage.', proposal: 'The attribute @materialUsage is not used.' },
+      vocabulary, parseXml,
+      ask: async (_m, sys) => { asked = sys; return JSON.stringify({ proposalMismatch: null, examples }); },
+      fetchSchemaCards: f.fetchSchemaCards, fetchStructure: f.fetchStructure, fetchSchemaAttribute: f.fetchSchemaAttribute,
+    });
+    check('S1-00151: prompt uses proced at <procedure> with the way down', asked.includes('"schema": "proced"') && asked.includes('your content goes directly inside <procedure>') && asked.includes('<preliminaryRqmts> > <reqSpares>, <reqSupplies>, <reqSupportEquips>'), asked.slice(0, 400));
+    check('S1-00151: both examples valid, no correction round', g.status === 'ready' && g.correction === null && g.runs.every((r) => r.validation.runnable), JSON.stringify(g.runs.map((r) => r.validation.structure)));
+    check('S1-00151: accepted / rejected, verdict correct', g.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && ruleTestVerdict(g.examples, g.runs, analyzeRule(R151, 'BREX-4.2', { parseXml })).kind === 'correct', JSON.stringify(g.runs.map((r) => r.result?.status)));
+    // S1-00563 (//@timeLimitCategoryValue): only in schedul, on
+    // <timeLimitCategory> inside <timeLimitInfo>.
+    const R563 = brex('//@timeLimitCategoryValue', '<objectValue valueForm="single" valueAllowed="1"/>', 2, 'BRDP-S1-00563');
+    const limit = (value) => `<timeLimitInfo timeLimitIdent="tl-001"><equipGroup><equip><name>Main landing gear</name></equip></equipGroup><timeLimitCategory timeLimitCategoryValue="${value}"/><timeLimit><limitType limitUnitType="lt01"><threshold thresholdUnitOfMeasure="th06"><thresholdValue>6000</thresholdValue></threshold></limitType></timeLimit></timeLimitInfo>`;
+    let asked563 = null;
+    const g563 = await generateRuleTestExamples({
+      ruleXml: R563, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat',
+      brdp: { identifier: 'BRDP-S1-00563', title: 'Time limit category', definition: 'Use of the time limit category.', proposal: 'Only hard time limits (category 1) are used.' },
+      vocabulary, parseXml,
+      ask: async (_m, sys) => { asked563 = sys; return JSON.stringify({ proposalMismatch: null, examples: [
+        { label: 'category 1', expected: 'accept', schema: 'schedul', content: limit('1') },
+        { label: 'category 2', expected: 'reject', schema: 'schedul', content: limit('2') },
+      ] }); },
+      fetchSchemaCards: f.fetchSchemaCards, fetchStructure: f.fetchStructure, fetchSchemaAttribute: f.fetchSchemaAttribute,
+    });
+    check('S1-00563: prompt uses schedul at <maintPlanning> with the way to <timeLimitCategory>', asked563.includes('"schema": "schedul"') && asked563.includes('<timeLimitInfo> (@timeLimitIdent) > <timeLimitCategory>'), asked563.slice(0, 300));
+    check('S1-00563: valid, accepted / rejected, verdict correct', g563.runs.every((r) => r.validation.runnable) && g563.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && ruleTestVerdict(g563.examples, g563.runs, analyzeRule(R563, 'BREX-4.2', { parseXml })).kind === 'correct', JSON.stringify(g563.runs.map((r) => [r.validation.structure, r.result?.status])));
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
