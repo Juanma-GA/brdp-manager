@@ -90,7 +90,7 @@ import { distinctSchemaNames, loadSchemaCards, parentsPresentedAsChildren, strip
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
 import { importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
-import { draftCandidates } from "../src/utils/ruleExtractDraft.js";
+import { candidatesToDraft, draftCandidates } from "../src/utils/ruleExtractDraft.js";
 import { UNFILLED_MARKER_RE } from "../src/utils/proposalMarkers.js";
 import {
   STANDARD_TO_VOCABULARY_FILE,
@@ -242,6 +242,17 @@ async function runCheck(check, answer, ctx = {}) {
           ? extractRuleXPaths(ctx.xml || "").join("\n")
           : answer;
   switch (check.type) {
+    case "equals": {
+      // Exact text (AI Extract's literal texts, taken from the file).
+      const ok = target === check.value;
+      return { status: ok ? "pass" : "fail", detail: ok ? "exactly as expected" : `got: ${JSON.stringify(target).slice(0, 200)}` };
+    }
+    case "extract_literal": {
+      // The candidate needed nothing from the AI (its texts come from the
+      // file and the catalog) and no LLM call was made.
+      const ok = ctx.extract?.draft_status === "not_needed" && !ctx.llmCalled;
+      return { status: ok ? "pass" : "fail", detail: ok ? "no LLM call: texts from the file / catalog" : `draft ${ctx.extract?.draft_status}, LLM called: ${!!ctx.llmCalled}` };
+    }
     case "extract_drafted": {
       const ok = ctx.extract?.draft_status === "drafted";
       return { status: ok ? "pass" : "fail", detail: ok ? "written from a valid JSON answer" : `not written: ${ctx.extract?.error || ctx.extract?.draft_status}` };
@@ -848,23 +859,45 @@ async function runExtractCase(project, aiProvider, _createdBrdp, testCase) {
   const candidate = candidates.find((c) => c.origin_identifier === testCase.origin);
   if (!candidate) throw new Error(`${testCase.origin} not among the candidates`);
   // The classification the case wants (an empty project with or without the
-  // standard's catalog loaded classifies an S1 identifier differently).
-  const target = { ...candidate, ...(testCase.classification ? { classification: testCase.classification } : {}), draft_status: "pending" };
-  if (testCase.classification === "catalog") Object.assign(target, testCase.catalog || {});
+  // standard's catalog loaded classifies an S1 identifier differently). As a
+  // catalog BRDP: Title/Definition from the case's catalog, the Proposal
+  // from the file when the file has it (set_texts in the backend) -- then
+  // nothing is left for the AI and no LLM call is made.
+  let target = { ...candidate };
+  if (testCase.classification === "catalog") {
+    const literal = candidate.literal?.proposal;
+    target = {
+      ...target,
+      classification: "catalog",
+      ...(testCase.catalog || {}),
+      proposal: literal || "",
+      text_sources: { title: "catalog", definition: "catalog", proposal: literal ? "file" : null },
+      ai_fields: literal ? [] : ["proposal"],
+      draft_status: literal ? "not_needed" : "pending",
+    };
+  } else if (testCase.classification && testCase.classification !== candidate.classification) {
+    throw new Error(`${testCase.origin} is ${candidate.classification}, the case expects ${testCase.classification}`);
+  }
   let systemPrompt = "";
-  const [result] = await draftCandidates([target], {
-    standard: testCase.standard,
-    ruleFormat: STANDARD_TO_RULE_FORMAT[testCase.standard],
-    ask: async ({ system, user }) => {
-      systemPrompt = system;
-      return sendMessagesToLlm(aiProvider, system, [{ role: "user", content: user }], SUGGEST_TEMPERATURE, EXTRACT_MAX_TOKENS);
-    },
-  });
+  let llmCalled = false;
+  const toDraft = candidatesToDraft([target]);
+  const [result] = toDraft.length
+    ? await draftCandidates(toDraft, {
+        standard: testCase.standard,
+        ruleFormat: STANDARD_TO_RULE_FORMAT[testCase.standard],
+        ask: async ({ system, user }) => {
+          systemPrompt = system;
+          llmCalled = true;
+          return sendMessagesToLlm(aiProvider, system, [{ role: "user", content: user }], SUGGEST_TEMPERATURE, EXTRACT_MAX_TOKENS);
+        },
+      })
+    : [{ key: target.key, draft_status: target.draft_status }];
+  const extract = { title: target.title, definition: target.definition, proposal: target.proposal, ...result };
   return {
     systemPrompt,
-    userMessage: "Write the texts for these BRDPs.",
-    answer: result.proposal || "",
-    checkContext: { standard: testCase.standard, systemPrompt, extract: result },
+    userMessage: llmCalled ? "Write the texts for these BRDPs." : "",
+    answer: extract.proposal || "",
+    checkContext: { standard: testCase.standard, systemPrompt, extract, llmCalled },
   };
 }
 

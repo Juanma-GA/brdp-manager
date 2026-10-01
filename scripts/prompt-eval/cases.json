@@ -1336,8 +1336,8 @@
         },
         {
           "type": "rule_test_reject_examples_contain",
-          "pattern": "<(?:supportEquipDescr|supplyDescr|spareDescr)\\b[^>]*\\bmaterialUsage=[\"']",
-          "note": "every reject example sets @materialUsage on a support equipment, supply or spare"
+          "pattern": "\\bmaterialUsage=[\"']",
+          "note": "every reject example sets @materialUsage (the decision prohibits it on every element)"
         }
       ]
     },
@@ -3073,7 +3073,7 @@
       "id": "extract-prohibition-with-noncontext-s1-00117",
       "type": "extract-from-rules",
       "standard": "S1000D 4.2",
-      "description": "AI Extract: S1-00117 has a rule (//caption prohibited) and a nonContextRule whose decision text says 'Captions shall not be used.' The Proposal follows the decision text.",
+      "description": "AI Extract: S1-00117 has a rule (//caption prohibited) and a nonContextRule whose decision text says 'Decision made by Project. Captions shall not be used.' Its rule is both pieces and its Proposal is that text, literally, from the file -- no LLM call (as a catalog BRDP, Title/Definition from the catalog).",
       "file": "scripts/prompt-eval/fixtures/lufthansa-extract-sample.xml",
       "origin": "BRDP-S1-00117",
       "classification": "catalog",
@@ -3083,29 +3083,13 @@
       },
       "checks": [
         {
-          "type": "extract_drafted"
+          "type": "extract_literal",
+          "note": "nothing for the AI: no LLM call"
         },
         {
-          "type": "contains",
-          "pattern": "caption",
-          "flags": "i"
-        },
-        {
-          "type": "contains",
-          "pattern": "(shall|must) not be used|not (be )?(used|allowed)|prohibited",
-          "flags": "i",
-          "note": "states the prohibition"
-        },
-        {
-          "type": "no_placeholders"
-        },
-        {
-          "type": "not_contains_any",
-          "patterns": [
-            "objectPath",
-            "allowedObjectFlag",
-            "nonContextRule"
-          ]
+          "type": "equals",
+          "value": "Captions shall not be used.",
+          "note": "the Proposal is the file's decision text, without 'Decision made by Project.'"
         }
       ]
     },
@@ -3113,44 +3097,25 @@
       "id": "extract-decision-without-rule-s1-00037",
       "type": "extract-from-rules",
       "standard": "S1000D 4.2",
-      "description": "AI Extract: S1-00037 as a decision with no executable rule (only its nonContextRule: 'LOEDM is not being used. The LOEP is part of the final PDF delivery...'). Written as a new EXT: title, definition and proposal from the decision text alone.",
+      "description": "AI Extract: S1-00037 (in the sample file only its nonContextRule: 'Decision made by Project. LOEDM is not being used. The LOEP is part of the final PDF delivery, but not available as a physical DM.'). As a catalog BRDP its Proposal is that text, literally -- checked by code, no LLM call. (With real Mistral every run added 'The project shall use LOEP', which the file does not say, and two lost the second sentence.)",
       "file": "scripts/prompt-eval/fixtures/lufthansa-extract-sample.xml",
       "origin": "BRDP-S1-00037",
-      "classification": "new_ext",
+      "classification": "catalog",
       "checks": [
         {
-          "type": "extract_drafted"
+          "type": "extract_literal",
+          "note": "nothing for the AI: no LLM call"
         },
         {
-          "type": "contains",
-          "pattern": "LOEDM",
-          "note": "the decision text's subject"
-        },
-        {
-          "type": "contains",
-          "pattern": "LOEP"
-        },
-        {
-          "type": "no_placeholders"
-        },
-        {
-          "type": "contains",
-          "target": "definition",
-          "pattern": "^Decide",
-          "flags": "i",
-          "note": "the definition is a decision point, not the answer"
-        },
-        {
-          "type": "not_contains",
-          "target": "title",
-          "pattern": "\\.$",
-          "note": "a title without a final period"
-        },
-        {
-          "type": "manual",
-          "note": "the proposal says LOEDM is not used and the LOEP is only part of the PDF delivery -- nothing invented"
+          "type": "equals",
+          "value": "LOEDM is not being used. The LOEP is part of the final PDF delivery, but not available as a physical DM.",
+          "note": "exactly the file's decision text"
         }
-      ]
+      ],
+      "catalog": {
+        "title": "List of effective pages and data modules",
+        "definition": "Decide whether the use of LOEP or LOEDM."
+      }
     }
   ]
 }

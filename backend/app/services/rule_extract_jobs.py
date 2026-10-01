@@ -18,10 +18,20 @@ Classification is done by code -- the AI never decides it:
                   catalog, a non-BRDP identifier such as BREX-S1-…, no
                   identifier): the next free EXT number; the original
                   identifier stays as the origin.
+  default_rule    a rule of the standard's default BREX (BREX-S1-nnnnn and,
+                  in general, BREX-<spec>-nnnnn): unchecked, a project BREX
+                  normally inherits it; imported with its own identifier
+                  when checked.
   empty           "Sin contenido": only a nonContextRule saying the decision
                   does not exist in this issue / is not to be taken into
                   account. Unchecked; its base classification is kept so it
                   can still be imported.
+Texts (set_texts): each of Title / Definition / Proposal comes from the
+project (an existing BRDP), the catalog (Title and Definition of "catalog"),
+the file (the nonContextRule's paragraphs, rule_extract.literal_texts) or
+the AI -- the AI writes only the fields left (ai_fields); a candidate with
+none left is never sent to it. text_sources says where each one came from
+(also "manual" once edited by hand).
 A possible duplicate is a warning, never a classification: for new_ext the
 origin text is embedded and compared with the project's embedded BRDPs; at or
 above similar.py's MIN_SIMILARITY the candidate says "Parecida a BRDP-…".
@@ -61,7 +71,7 @@ from app.models import BRDP, BRDPCatalog, BRDPHistory, Project, RuleApproval, Ru
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.services.embeddings import EmbeddingUnavailable, compute_embeddings_batch, truncate_for_embedding_input
 from app.services.history import record_change
-from app.services.rule_extract import BIG_CANDIDATE_RULES, STANDARD_ISSUE, RulesFile, build_candidates
+from app.services.rule_extract import BIG_CANDIDATE_RULES, DEFAULT_RULE_RE, STANDARD_ISSUE, RulesFile, build_candidates
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 from app.services.rule_wrappers import unwrap_rule_xml
 
@@ -87,12 +97,67 @@ SPECIFICATIONS = {
 # the S1000D one).
 _OWN_CODES = {"S1000D": {"S1"}, "DITA": {"D1", "S1"}}
 
-CLASSIFICATIONS = ("same", "changed", "catalog", "other_spec", "new_ext", "empty")
-_DRAFTED_CLASSES = {"new_ext", "catalog", "other_spec"}
+CLASSIFICATIONS = ("same", "changed", "catalog", "other_spec", "default_rule", "new_ext", "empty")
+TEXT_FIELDS = ("title", "definition", "proposal")
+TEXT_SOURCES = ("project", "catalog", "file", "ai", "manual")
 
 
 def _own_codes(standard: str) -> set[str]:
     return _OWN_CODES["DITA" if standard.startswith("DITA") else "S1000D"]
+
+
+def default_rule_specification(identifier: str | None) -> str | None:
+    """BREX-S1-00001 → "S1000D", else None."""
+    m = DEFAULT_RULE_RE.match(identifier or "")
+    return SPECIFICATIONS.get(m.group(1), m.group(1)) if m else None
+
+
+def set_texts(c: dict, keep_written: bool = False) -> None:
+    """Title / Definition / Proposal, text_sources, ai_fields and
+    draft_status for the candidate's current classification, in place.
+    Fixed sources first: the project's texts for an existing BRDP; the
+    catalog's Title and Definition for "catalog"; the file's literal
+    Definition and Proposal otherwise. What is left is for the AI. With
+    keep_written (a reclassification), text already written by the AI or by
+    hand is kept where the AI would write it, and hand edits are kept
+    always."""
+    classification = c.get("classification")
+    if classification == "empty":
+        classification = c.get("base_classification")
+    fixed: dict[str, tuple[str, str]] = {}
+    if classification in ("same", "changed"):
+        for f, v in (c.get("project_texts") or {}).items():
+            fixed[f] = (v or "", "project")
+    else:
+        catalog = c.get("catalog_texts") or {}
+        if classification == "catalog" and catalog:
+            fixed["title"] = (catalog.get("title") or "", "catalog")
+            fixed["definition"] = (catalog.get("definition") or "", "catalog")
+        literal = c.get("literal") or {}
+        if literal.get("definition") and "definition" not in fixed:
+            fixed["definition"] = (literal["definition"], "file")
+        if literal.get("proposal"):
+            fixed["proposal"] = (literal["proposal"], "file")
+    sources = dict(c.get("text_sources") or {})
+    ai_fields = []
+    for f in TEXT_FIELDS:
+        written = keep_written and bool(c.get(f))
+        if written and sources.get(f) == "manual":
+            continue
+        if f in fixed:
+            c[f], sources[f] = fixed[f]
+            continue
+        ai_fields.append(f)
+        if not (written and sources.get(f) == "ai"):
+            c[f], sources[f] = "", None
+    c["text_sources"] = sources
+    c["ai_fields"] = ai_fields
+    if not ai_fields:
+        c["draft_status"] = "not_needed"
+    elif all(c.get(f) for f in ai_fields):
+        c["draft_status"] = c["draft_status"] if c.get("draft_status") in ("drafted", "manual") else "drafted"
+    else:
+        c["draft_status"] = "pending"
 
 
 def other_specification(identifier: str | None, standard: str) -> str | None:
@@ -271,6 +336,8 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         origin = c["origin_identifier"]
         importable_rule = c["rule_xml"] if c["rule_xml"] and not c.get("rule_problem") else ""
         c.update({"title": "", "definition": "", "proposal": "", "draft_status": "pending", "existing_rule_xml": None})
+        if origin and origin in catalog:
+            c["catalog_texts"] = {"title": catalog[origin].title, "definition": catalog[origin].definition}
         brdp = match(origin)
         if brdp is not None:
             approval = approvals.get(brdp.id)
@@ -285,15 +352,25 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
                     c["warnings"].append(
                         {"code": "no_rule_to_import", "params": {}, "message": "There is no rule to import, nothing would change."}
                     )
-            c["title"], c["definition"], c["proposal"] = brdp.title, brdp.definition, brdp.proposal
+            c["project_texts"] = {"title": brdp.title, "definition": brdp.definition, "proposal": brdp.proposal}
             c["identifier"] = brdp.identifier
-            c["draft_status"] = "not_needed"
             options = [base, "new_ext"]
         elif origin and origin in catalog:
             base = "catalog"
             c["identifier"] = origin
-            c["title"], c["definition"] = catalog[origin].title, catalog[origin].definition
             options = ["catalog", "new_ext"]
+        elif default_rule_specification(origin):
+            base = "default_rule"
+            c["specification"] = default_rule_specification(origin)
+            c["identifier"] = origin
+            c["warnings"].append(
+                {
+                    "code": "default_rule",
+                    "params": {"specification": c["specification"]},
+                    "message": "A rule of the standard's default BREX; a project BREX normally inherits it.",
+                }
+            )
+            options = ["default_rule", "new_ext"]
         elif other_specification(origin, project.standard):
             base = "other_spec"
             c["specification"] = other_specification(origin, project.standard)
@@ -313,7 +390,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             c["identifier"] = None
             options = ["new_ext"]
         c["base_classification"] = base
-        classification = "empty" if c.get("no_content") and base in ("catalog", "new_ext", "other_spec") else base
+        classification = "empty" if c.get("no_content") and base in ("catalog", "new_ext", "other_spec", "default_rule") else base
         if classification == "empty":
             options = ["empty"] + options
         if classification == "new_ext":
@@ -323,6 +400,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         c["options"] = list(dict.fromkeys(options))
         c["selected"] = classification in ("new_ext", "catalog", "other_spec", "changed")
         c["own_specification"] = own_spec
+        set_texts(c)
 
 
 def _similarity_text(c: dict) -> str:
@@ -516,13 +594,15 @@ def candidate_out(row: RuleExtractCandidate) -> dict:
     return data
 
 
-EDITABLE_FIELDS = ("title", "definition", "proposal", "draft_status", "selected", "classification")
+EDITABLE_FIELDS = ("classification", "title", "definition", "proposal", "draft_status", "selected")
 DRAFT_STATUSES = ("pending", "drafted", "failed", "manual", "not_needed")
 
 
 def apply_edit(data: dict, edit: dict) -> dict:
     """Validated update of one candidate's editable fields. Raises
-    ValueError with the reason."""
+    ValueError with the reason. A new classification sets the texts again
+    (set_texts); a text saved with draft_status "drafted" is the AI's, any
+    other text edit is by hand."""
     out = dict(data)
     for field in EDITABLE_FIELDS:
         if field not in edit or edit[field] is None:
@@ -531,6 +611,17 @@ def apply_edit(data: dict, edit: dict) -> dict:
         if field == "classification":
             if value not in out.get("options", []):
                 raise ValueError(f"{out['key']}: classification {value!r} is not possible for this candidate")
+            if value != out.get("classification"):
+                out["classification"] = value
+                set_texts(out, keep_written=True)
+            continue
+        if field in TEXT_FIELDS:
+            if not isinstance(value, str):
+                raise ValueError(f"{out['key']}: {field} must be text")
+            sources = dict(out.get("text_sources") or {})
+            if value != out.get(field):
+                sources[field] = "ai" if edit.get("draft_status") == "drafted" else "manual"
+            out["text_sources"] = sources
         elif field == "draft_status":
             if value not in DRAFT_STATUSES:
                 raise ValueError(f"{out['key']}: unknown draft status {value!r}")

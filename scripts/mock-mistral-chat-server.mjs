@@ -75,7 +75,8 @@ function extractReply(systemPrompt) {
   const items = blocks.map((block) => {
     const key = (block.match(/^BRDP key=(\S+)/) || [])[1];
     const origin = (block.match(/Identifier in the source file: (\S+)/) || [])[1] || key;
-    const writeAll = /Write: title, definition, proposal/.test(block);
+    const write = ((block.match(/\n {2}Write: ([^\n]*)/) || [])[1] || "proposal").split(/,\s*/);
+    const writeAll = write.includes("title");
     const decisionBlock = (block.match(/Decision text in the file[^\n]*\n((?: {2}> .*\n?)+)/) || [])[1] || "";
     const decisionLines = decisionBlock.split("\n").map((l) => l.replace(/^ {2}> /, "")).filter(Boolean);
     const decision = (decisionLines.find((l) => /Decision made by|shall|must|debe/.test(l)) || decisionLines[0] || "").replace(/^Decision made by \w+\.\s*/, "");
@@ -87,8 +88,8 @@ function extractReply(systemPrompt) {
     return {
       key,
       title: writeAll ? (spanish ? `Título MOCK de ${origin}` : `Mock title of ${origin}`) : "",
-      definition: writeAll ? (spanish ? `Decidir sobre ${origin}.` : `Decide on ${origin}.`) : "",
-      proposal,
+      definition: write.includes("definition") ? (spanish ? `Decidir sobre ${origin}.` : `Decide on ${origin}.`) : "",
+      proposal: write.includes("proposal") ? proposal : "",
     };
   });
   return JSON.stringify({ items });

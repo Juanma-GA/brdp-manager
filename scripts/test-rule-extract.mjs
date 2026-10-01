@@ -26,13 +26,24 @@ const fresh = (id, extra = {}) => ({ ...fixture[id], classification: 'new_ext', 
 
 // ── Prompt ────────────────────────────────────────────────────────────────
 {
-  const prompt = buildExtractFromRulesPrompt({ standard: 'S1000D 4.2', ruleFormat: 'BREX-4.2', candidates: [catalog('BRDP-S1-00117'), fresh('BREX-S1-00242')] });
+  // The fixture's candidates carry the backend's set_texts: S1-00117 (new
+  // EXT with a nonContextRule) asks only the Title; S1-00052 (catalog, only
+  // executable rules) only the Proposal; BREX-S1-00242 (default BREX rule) all.
+  const prompt = buildExtractFromRulesPrompt({
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    candidates: [fixture['BRDP-S1-00117'], fixture['BRDP-S1-00052'], fixture['BREX-S1-00242']],
+  });
   check('prompt names the standard', prompt.includes('uses S1000D 4.2.'));
   check('no placeholders asked', prompt.includes('No placeholders, no brackets to fill in'));
-  check('catalog texts given, not rewritten', prompt.includes('Title (official, do not rewrite): T BRDP-S1-00117'));
-  check('catalog: only the proposal', /BRDP-S1-00117[\s\S]*?Write: proposal\n/.test(prompt));
-  check('new EXT: title, definition and proposal', /BREX-S1-00242[\s\S]*?Write: title, definition, proposal/.test(prompt));
-  check('decision text of the nonContextRule is the main source', prompt.includes('> Decision made by Project. Captions shall not be used.'));
+  check('literal texts given, not rewritten', prompt.includes('Proposal (from the file, do not rewrite): Captions shall not be used.')
+    && prompt.includes('Definition (from the file, do not rewrite): Decide whether inline captions affect'));
+  check('literal texts: only the title', /BRDP-S1-00117[\s\S]*?Write: title\n/.test(prompt));
+  check('catalog texts given, not rewritten', prompt.includes('Title (official, do not rewrite): Information codes'));
+  check('catalog: only the proposal', /BRDP-S1-00052[\s\S]*?Write: proposal\n/.test(prompt));
+  check('default BREX rule: title, definition and proposal', /BREX-S1-00242[\s\S]*?Write: title, definition, proposal/.test(prompt));
+  check('default BREX rule named as such', prompt.includes('This is a rule of the S1000D default BREX, not a project decision'));
+  check('decision text shown, not as the Proposal source when given', prompt.includes('Decision text in the file (nonContextRule):\n'));
   check('rule summary instead of XML', prompt.includes('- //caption — prohibited') && !prompt.includes('<structureObjectRule'));
   check('values of an objectValue rule listed', /\/\/@updateReasonType — allowed[^\n]*values: urt01, urt02/.test(prompt));
 }
@@ -74,20 +85,24 @@ const fresh = (id, extra = {}) => ({ ...fixture[id], classification: 'new_ext', 
   check('fenced JSON parsed', ok.items.get('a')?.proposal === 'P.');
   check('unknown keys ignored', !ok.items.has('zzz'));
   check('missing key absent', !ok.items.has('b'));
-  for (const [name, text] of [
+  for (const [name, text, fields] of [
     ['not JSON', 'Sorry, I cannot.'],
     ['invalid JSON', '{"items": [}'],
     ['no items', '{"foo": 1}'],
     ['no proposal', '{"items":[{"key":"a","proposal":""}]}'],
+    ['a field asked left empty', '{"items":[{"key":"a","title":"","proposal":"P"}]}', new Map([['a', ['title', 'proposal']]])],
   ]) {
     let threw = false;
     try {
-      parseExtractFromRulesResponse(text, ['a']);
+      parseExtractFromRulesResponse(text, ['a'], fields);
     } catch {
       threw = true;
     }
     check(`rejects ${name}`, threw);
   }
+  // Only the title asked: an empty proposal is fine.
+  const titleOnly = parseExtractFromRulesResponse('{"items":[{"key":"a","title":"T","definition":"","proposal":""}]}', ['a'], new Map([['a', ['title']]]));
+  check('title-only item accepted', titleOnly.items.get('a')?.title === 'T');
 }
 
 // ── Drafting in batches ────────────────────────────────────────────────────
@@ -153,12 +168,28 @@ const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), 
 }
 {
   // A catalog candidate never gets a title/definition from the AI.
-  const [r] = await draftCandidates([catalog('BRDP-S1-00117', { key: 'cat' })], {
+  const [r] = await draftCandidates([{ ...fixture['BRDP-S1-00052'], key: 'cat' }], {
     standard: 'S1000D 4.2',
     ruleFormat: 'BREX-4.2',
-    ask: async () => JSON.stringify({ items: [{ key: 'cat', title: 'WRONG', definition: 'WRONG', proposal: 'Captions shall not be used.' }] }),
+    ask: async () => JSON.stringify({ items: [{ key: 'cat', title: 'WRONG', definition: 'WRONG', proposal: 'Information codes shall be…' }] }),
   });
-  check('catalog keeps its own title/definition', !('title' in r) && !('definition' in r) && r.proposal === 'Captions shall not be used.');
+  check('catalog keeps its own title/definition', !('title' in r) && !('definition' in r) && r.proposal === 'Information codes shall be…');
+}
+{
+  // Literal Definition and Proposal: the AI's answer only gives the Title,
+  // and nothing else it writes is taken.
+  const [r] = await draftCandidates([{ ...fixture['BRDP-S1-00117'], key: 'lit' }], {
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    ask: async () => JSON.stringify({ items: [{ key: 'lit', title: 'Inline captions', definition: 'WRONG', proposal: 'WRONG' }] }),
+  });
+  check('literal texts: only the title taken', r.title === 'Inline captions' && !('definition' in r) && !('proposal' in r) && r.draft_status === 'drafted');
+}
+{
+  // Real Lufthansa candidates with literal texts in a catalog project: nothing
+  // left for the AI, never sent.
+  const literal = { ...fixture['BRDP-S1-00037'], classification: 'catalog', ai_fields: [], draft_status: 'not_needed' };
+  check('nothing to write → not sent', candidatesToDraft([literal]).length === 0);
 }
 {
   const list = [
@@ -168,8 +199,11 @@ const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), 
     { key: 'd', classification: 'other_spec', draft_status: 'pending' },
     { key: 'e', classification: 'empty', draft_status: 'pending' },
     { key: 'f', classification: 'catalog', draft_status: 'manual' },
+    { key: 'g', classification: 'default_rule', draft_status: 'pending', selected: false },
+    { key: 'h', classification: 'default_rule', draft_status: 'pending', selected: true },
+    { key: 'i', classification: 'new_ext', draft_status: 'pending', ai_fields: [] },
   ];
-  check('only pending candidates of the written classes', candidatesToDraft(list).map((c) => c.key).join(',') === 'a,d');
+  check('only pending candidates of the written classes', candidatesToDraft(list).map((c) => c.key).join(',') === 'a,d,h');
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);

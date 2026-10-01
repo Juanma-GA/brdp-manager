@@ -19,6 +19,7 @@ import { authFetch, authFetchJson } from '../../services/apiClient';
 import { sendMessage } from '../../api/llmAPI.js';
 import { EXTRACT_MAX_TOKENS, SUGGEST_TEMPERATURE } from '../../prompts/shared.js';
 import { candidatesToDraft, draftCandidates } from '../../utils/ruleExtractDraft.js';
+import { aiFieldsOf } from '../../prompts/extractFromRulesPrompt.js';
 import { diffRuleLines, normalizeRuleXml } from '../../utils/brdpCompare.js';
 import {
   checkAgainstVocabulary,
@@ -33,9 +34,12 @@ import styles from './RuleExtractSection.module.css';
 
 export const EXTRACT_PAGE_SIZE = 25;
 const POLL_MS = 1000;
-const DRAFT_CLASSES = new Set(['new_ext', 'catalog', 'other_spec']);
-const WRITES_TITLE = new Set(['new_ext', 'other_spec']);
-const CLASS_FILTERS = ['all', 'new_ext', 'catalog', 'other_spec', 'changed', 'same', 'empty', 'warnings'];
+const DRAFT_CLASSES = new Set(['new_ext', 'catalog', 'other_spec', 'default_rule']);
+const WRITES_TITLE = new Set(['new_ext', 'other_spec', 'default_rule']);
+const CLASS_FILTERS = ['all', 'new_ext', 'catalog', 'other_spec', 'default_rule', 'changed', 'same', 'empty', 'warnings'];
+// Where each text comes from (rule_extract_jobs.set_texts): the file, the
+// catalog, the AI, a hand edit, or the project for an existing BRDP.
+const SOURCE_TAGS = new Set(['file', 'catalog', 'ai', 'manual', 'project']);
 
 async function detailOf(res) {
   try {
@@ -47,7 +51,9 @@ async function detailOf(res) {
 }
 
 function classLabel(t, c, classification = c.classification) {
-  if (classification === 'other_spec') return t('config.ruleExtract.classes.other_spec', { spec: c.specification || '' });
+  if (classification === 'other_spec' || classification === 'default_rule') {
+    return t(`config.ruleExtract.classes.${classification}`, { spec: c.specification || '' });
+  }
   return t(`config.ruleExtract.classes.${classification}`);
 }
 
@@ -78,6 +84,8 @@ function warningText(t, w) {
       return t('config.ruleExtract.warnings.issue_not_stated', { assumed: p.assumed });
     case 'schematron_globals':
       return t('config.ruleExtract.warnings.schematron_globals', { element: p.element, count: p.count });
+    case 'default_rule':
+      return t('config.ruleExtract.warnings.default_rule', { specification: p.specification });
     case 'similarity_unavailable':
       return t('config.ruleExtract.warnings.similarity_unavailable', { reason: p.reason });
     default:
@@ -92,9 +100,22 @@ function vocabularyLines(t, c, vocabulary, standard) {
   return nameIssues(result, 'brdp', { standard }).map((issue) => formatSchemaIssue(issue, t));
 }
 
+function SourceTag({ c, field, t }) {
+  const source = c.text_sources?.[field];
+  if (!SOURCE_TAGS.has(source) || !c[field]) return null;
+  return (
+    <div className={styles.sourceTag} data-testid={`rule-extract-source-${field}`} data-source={source}>
+      {t(`config.ruleExtract.sources.${source}`)}
+    </div>
+  );
+}
+
 function RuleCell({ c, t }) {
-  if (!c.rule_count) return <span className={styles.muted}>{t('config.ruleExtract.noRule')}</span>;
-  const label = t('config.ruleExtract.ruleCount', { count: c.rule_count });
+  if (!c.rule_count && !c.noncontext_count) return <span className={styles.muted}>{t('config.ruleExtract.noRule')}</span>;
+  const label = [
+    ...(c.rule_count ? [t('config.ruleExtract.ruleCount', { count: c.rule_count })] : []),
+    ...(c.noncontext_count ? [t('config.ruleExtract.noncontextCount', { count: c.noncontext_count })] : []),
+  ].join(' + ');
   return (
     <details className={styles.ruleDetails}>
       <summary data-testid="rule-extract-rule-summary">{label}</summary>
@@ -502,13 +523,14 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                 {pageRows.map((c) => {
                   const editTexts = DRAFT_CLASSES.has(c.classification);
                   const editTitle = WRITES_TITLE.has(c.classification);
+                  const editDefinition = editTexts && c.text_sources?.definition !== 'catalog';
                   const lines = [
                     ...(c.rule_problem ? [t('config.ruleExtract.invalidRule', { reason: c.rule_problem.message })] : []),
                     ...c.warnings.map((w) => warningText(t, w)),
                     ...(c.draft_status === 'failed' ? [t('config.ruleExtract.draftFailed')] : []),
                     ...vocabularyLines(t, c, vocabulary, standard),
                   ];
-                  const needsDraft = editTexts && (c.draft_status === 'pending' || c.draft_status === 'failed');
+                  const needsDraft = editTexts && aiFieldsOf(c).length > 0 && (c.draft_status === 'pending' || c.draft_status === 'failed');
                   return (
                     <tr key={c.key} data-testid="rule-extract-row" data-key={c.key} data-origin={c.origin_identifier || ''}>
                       <td>
@@ -516,19 +538,21 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                           type="checkbox"
                           checked={!!c.selected}
                           data-testid="rule-extract-select"
-                          onChange={(e) => patch([{ key: c.key, selected: e.target.checked }])}
+                          onChange={async (e) => {
+                            const selected = e.target.checked;
+                            await patch([{ key: c.key, selected }]);
+                            // A default-BREX rule is only written once checked.
+                            if (selected && c.classification === 'default_rule' && candidatesToDraft([{ ...c, selected }]).length) {
+                              runDrafting([{ ...c, selected }]);
+                            }
+                          }}
                         />
                       </td>
                       <td>
                         <select
                           value={c.classification}
                           data-testid="rule-extract-class"
-                          onChange={(e) => {
-                            const next = e.target.value;
-                            const edit = { key: c.key, classification: next };
-                            if (DRAFT_CLASSES.has(next) && (!c.proposal || (WRITES_TITLE.has(next) && !c.title))) edit.draft_status = 'pending';
-                            patch([edit]);
-                          }}
+                          onChange={(e) => patch([{ key: c.key, classification: e.target.value }])}
                         >
                           {c.options.map((o) => (
                             <option key={o} value={o}>
@@ -551,13 +575,15 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                         ) : (
                           <span>{c.title}</span>
                         )}
+                        <SourceTag c={c} field="title" t={t} />
                       </td>
                       <td>
-                        {editTitle ? (
+                        {editDefinition ? (
                           <EditableText value={c.definition} rows={3} testId="rule-extract-definition" onSave={(v) => patch([{ key: c.key, definition: v, draft_status: 'manual' }])} />
                         ) : (
                           <span className={styles.clamp}>{c.definition}</span>
                         )}
+                        <SourceTag c={c} field="definition" t={t} />
                       </td>
                       <td>
                         {editTexts ? (
@@ -565,6 +591,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                         ) : (
                           <span className={styles.clamp}>{c.proposal}</span>
                         )}
+                        <SourceTag c={c} field="proposal" t={t} />
                         {needsDraft && aiProvider && !drafting && (
                           <button type="button" className={styles.linkButton} data-testid="rule-extract-draft-one" onClick={() => runDrafting([{ ...c, draft_status: 'pending' }])}>
                             {t('config.ruleExtract.draftOne')}

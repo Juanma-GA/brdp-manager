@@ -6,7 +6,11 @@
 //     Records (Proposal Pending, rule Draft, history with the source), and
 //     a re-import that finds everything already there ("same");
 //   - the "CA" BREX (5,536 rules) into another empty 4.2 project, timed;
-//   - a 3.0.1 BREX refused in a 4.2 project; the screen in EN and ES.
+//   - a 3.0.1 BREX refused in a 4.2 project; the screen in EN and ES;
+//   - nonContextRules: part of the rule, their paragraphs taken literally
+//     (no AI), and the whole Lufthansa BREX imported, approved and generated
+//     again with its 469 nonContextRules;
+//   - BREX-S1-… of the "CA" BREX: "Default rule of S1000D", unchecked.
 // Needs the 4.2 catalog of the repo loaded:
 //     cd backend && .venv/bin/python scripts/seed_extract_catalog_42.py   (cleanup afterwards)
 //
@@ -117,9 +121,29 @@ async function main() {
 
     let r = await showRowOf(page, "BRDP-S1-00117");
     assert((await r.getByTestId("rule-extract-class").inputValue()) === "catalog", "S1-00117 is From catalog");
-    assert((await r.getByTestId("rule-extract-proposal").inputValue()).includes("Captions shall not be used"), "S1-00117 Proposal written from its nonContextRule decision text");
+    assert((await r.getByTestId("rule-extract-proposal").inputValue()) === "Captions shall not be used.", "S1-00117 Proposal = its nonContextRule decision text, literally");
+    assert((await r.getByTestId("rule-extract-source-proposal").innerText()) === "from the file", "S1-00117 Proposal tagged 'from the file'");
+    assert((await r.getByTestId("rule-extract-source-title").innerText()) === "from the catalog", "S1-00117 Title tagged 'from the catalog'");
+    assert((await r.getByTestId("rule-extract-rule-summary").innerText()).trim() === "1 rule + 1 nonContextRule", "S1-00117 rule = the rule + its nonContextRule");
     await r.getByTestId("rule-extract-rule-summary").click();
-    assert((await r.innerText()).includes("//caption"), "S1-00117 rule visible when expanded");
+    assert((await r.innerText()).includes("//caption") && (await r.innerText()).includes("<nonContextRule>"), "S1-00117 rule visible when expanded, with its nonContextRule");
+    await r.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, "rule-extract-literal-s1-00117.png") });
+    {
+      const job = await api(`/api/projects/${lh.id}/ai-extract/jobs/active`);
+      const all = (await api(`/api/projects/${lh.id}/ai-extract/jobs/${job.id}/candidates`)).candidates;
+      const by = Object.fromEntries(all.map((c) => [c.origin_identifier, c]));
+      const s1 = by["BRDP-S1-00001"];
+      assert(s1.proposal === "Decision made by TDWG." && s1.text_sources.proposal === "file" && s1.noncontext_count === 1 && s1.rule_count === 0,
+        "S1-00001 (only a nonContextRule): its rule is that nonContextRule, Proposal 'Decision made by TDWG.' from the file");
+      const s52 = by["BRDP-S1-00052"];
+      assert(s52.text_sources.proposal === "ai" && /^MOCK-PROPOSAL/.test(s52.proposal), "S1-00052 (only executable rules): Proposal written by the AI", s52.proposal);
+      const literal = all.filter((c) => c.text_sources?.proposal === "file").length;
+      const sentToAi = all.filter((c) => (c.ai_fields || []).length > 0).length;
+      const catalogLiteral = all.filter((c) => c.classification === "catalog" && c.text_sources?.proposal === "file").length;
+      console.log(`       ${literal} candidates with a literal Proposal; ${catalogLiteral} catalog ones need nothing from the AI; ${sentToAi} sent to the AI (of ${all.length})`);
+      assert(literal === 469 && sentToAi < all.length, "the 469 nonContextRule candidates have a literal Proposal; fewer sent to the AI");
+    }
 
     await page.goto(`${BASE_URL}/projects/${lh.id}/config`);
     await page.getByTestId("rule-extract-table").waitFor();
@@ -192,7 +216,45 @@ async function main() {
     assert([...picked, ext.origin_identifier].every((o) => byOrigin[o].classification === "same" && !byOrigin[o].selected), "re-import: the 4 imported are 'Already exists (same)', unchecked");
     assert(byOrigin[ext.origin_identifier].identifier === extBrdp.identifier, "the new EXT is found again by its source ID, not given another number");
 
+    // ── The whole Lufthansa BREX: import, approve, Generate ───────────────
+    console.log("\nLufthansa BREX → import everything, approve, Generate BREX 4.2");
+    const full = await createProject("AI Extract LH full", "S1000D 4.2");
+    projects.push(full);
+    await api(`/api/projects/${full.id}/config`, {
+      method: "PUT",
+      body: JSON.stringify({ project_config: { ...(full.project_config || {}), projectName: full.name, modelIdentCode: "LHTSTD" } }),
+    });
+    await openConfig(page, full.id);
+    await upload(page, LUFTHANSA);
+    await waitReviewDrafted(page);
+    const fullJob = await api(`/api/projects/${full.id}/ai-extract/jobs/active`);
+    const fullCands = (await api(`/api/projects/${full.id}/ai-extract/jobs/${fullJob.id}/candidates`)).candidates;
+    const applied = await api(`/api/projects/${full.id}/ai-extract/jobs/${fullJob.id}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ keys: fullCands.map((c) => c.key) }),
+    });
+    assert(applied.created === 502 && applied.invalid_rule === 0, "all 502 imported, every rule valid", JSON.stringify(applied).slice(0, 200));
+    const fullBrdps = await api(`/api/projects/${full.id}/brdps`);
+    await Promise.all(fullBrdps.map((b) => api(`/api/projects/${full.id}/brdps/${b.id}/approvals/BREX-4.2/approve`, { method: "POST" })));
+    await page.goto(`${BASE_URL}/projects/${full.id}/generate`);
+    const genBtn = page.locator('button:has-text("Generate")').first();
+    await genBtn.waitFor({ timeout: 20000 });
+    await page.waitForFunction(() => !document.body.innerText.includes("Loading the project's rules"), null, { timeout: 60000 });
+    // The imported BRDPs are Pending: include them (their rules are approved).
+    await page.getByLabel("Only include Validated BRDPs").uncheck();
+    await genBtn.click();
+    await page.waitForSelector("pre", { timeout: 120000 });
+    await page.waitForSelector("text=/Valid against XSD schema|XSD validation issue|XSD validation failed/", { timeout: 120000 });
+    const generated = await page.locator("pre").innerText();
+    const ncr = (generated.match(/<nonContextRule>/g) || []).length;
+    assert(ncr === 469, `the generated BREX has the 469 nonContextRules (${ncr})`);
+    assert((generated.match(/<structureObjectRule>/g) || []).length === 61, "and the 61 structureObjectRules");
+    assert(generated.includes("<simplePara>Decision made by Project. Captions shall not be used.</simplePara>"), "S1-00117's nonContextRule written back as it was");
+    assert(await page.locator("text=Valid against XSD schema").isVisible(), "the generated BREX is valid against the XSD");
+    await page.screenshot({ path: path.join(SHOTS, "rule-extract-generate-noncontext.png") });
+
     // ── 3.0.1 BREX in a 4.2 project ────────────────────────────────────────
+    await openConfig(page, lh.id);
     const tmp301 = path.join(os.tmpdir(), "brex-301-sample.xml");
     fs.writeFileSync(
       tmp301,
@@ -208,6 +270,7 @@ async function main() {
     await page.getByTestId("rule-extract-table").waitFor();
     const es = await page.getByTestId("rule-extract-section").innerText();
     assert(es.includes("Importar desde BREX / Schematron") && es.includes("Ya existe (igual)"), "ES: section title and classifications");
+    assert(es.includes("del fichero") || es.includes("del proyecto"), "ES: text sources");
     await page.getByTestId("rule-extract-table").scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(SHOTS, "rule-extract-review-es.png") });
     await page.locator("header select, nav select").first().selectOption("en");
@@ -247,6 +310,23 @@ async function main() {
     await page.getByTestId("rule-extract-filter").selectOption("other_spec");
     const s2row = row(page, "BRDP-S2-00002");
     assert((await s2row.getByTestId("rule-extract-class").locator("option:checked").innerText()).includes("Other specification (S2000M)"), "shown as 'Other specification (S2000M)'");
+    // BREX-S1-…: default rules of S1000D, unchecked, with the note.
+    const defaults = caCands.filter((c) => c.origin_identifier.startsWith("BREX-S1-"));
+    assert(defaults.length === 243 && defaults.every((c) => c.classification === "default_rule" && !c.selected), "243 BREX-S1-… as 'Default rule of S1000D', unchecked");
+    assert(defaults.every((c) => c.draft_status === "pending"), "unchecked default rules are not sent to the AI");
+    await page.goto(`${BASE_URL}/projects/${ca.id}/config`);
+    await page.getByTestId("rule-extract-filter").selectOption("default_rule");
+    const b1 = row(page, "BREX-S1-00001");
+    assert((await b1.getByTestId("rule-extract-class").locator("option:checked").innerText()) === "Default rule of S1000D", "shown as 'Default rule of S1000D'");
+    assert((await b1.getByTestId("rule-extract-warnings").innerText()).includes("default BREX; a project BREX normally inherits it"), "with the note");
+    assert(!(await b1.getByTestId("rule-extract-select").isChecked()), "unchecked");
+    await b1.getByTestId("rule-extract-select").check();
+    await page.getByTestId("rule-extract-drafting").waitFor({ state: "detached", timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    const b1After = (await api(`/api/projects/${ca.id}/ai-extract/jobs/${caJob.id}/candidates`)).candidates.find((c) => c.origin_identifier === "BREX-S1-00001");
+    assert(b1After.selected && b1After.draft_status === "drafted" && b1After.title, "checked → its texts written by the AI");
+    await b1.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, "rule-extract-default-rule.png") });
     // Import the 4,500-rule candidate: kept whole.
     await api(`/api/projects/${ca.id}/ai-extract/jobs/${caJob.id}/candidates`, {
       method: "PATCH",

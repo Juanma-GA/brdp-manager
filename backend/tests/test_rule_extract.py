@@ -29,8 +29,15 @@ from app.db.base import async_session_factory
 from app.main import app
 from app.models import BRDP, BRDPCatalog, BRDPHistory, Project, RuleApproval, RuleExtractCandidate, User, UserProjectRole
 from app.services import rule_formats
-from app.services.rule_extract import RuleExtractFileError, build_candidates, read_rules_file
-from app.services.rule_extract_jobs import check_similar, normalize_rule, other_specification
+from app.services.rule_extract import RuleExtractFileError, build_candidates, literal_texts, read_rules_file
+from app.services.rule_extract_jobs import (
+    check_similar,
+    default_rule_specification,
+    normalize_rule,
+    other_specification,
+    set_texts,
+)
+from app.services.rule_wrappers import split_rule_pieces
 
 FIXTURES = Path(__file__).parent / "fixtures" / "brex"
 LUFTHANSA = FIXTURES / "DMC-LHTSTD-A-00-00-00-000A-022A-D_001-00_SX-US.xml"
@@ -73,17 +80,36 @@ def test_lufthansa_brex_groups_by_the_identifier_in_the_text():
     assert s6["rule_xml"].startswith("<structureObjectRule>")
     assert s6["rule_xml"].count('<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/') == 3
     assert s6["rule_problem"] is None
-    # Rule plus nonContextRule: one candidate, the decision text kept apart.
+    # Rule plus nonContextRule: one candidate, both pieces in its rule (the
+    # nonContextRule after the executable rule, as written), and the
+    # decision text literal: no AI needed for Definition and Proposal.
     s117 = ids["BRDP-S1-00117"]
-    assert s117["rule_count"] == 1 and "//caption" in s117["rule_xml"]
-    assert "nonContextRule" not in s117["rule_xml"]
-    assert s117["decision_texts"][0].startswith("Decide whether inline captions affect")
+    assert (s117["rule_count"], s117["noncontext_count"]) == (1, 1)
+    assert s117["rule_xml"].startswith("<structureObjectRule>") and "//caption" in s117["rule_xml"]
+    assert s117["rule_xml"].endswith("</nonContextRule>")
+    assert [p["kind"] for p in split_rule_pieces(s117["rule_xml"], "BREX-4.2")] == ["rule", "noncontext"]
+    assert s117["literal"] == {
+        "definition": "Decide whether inline captions affect the text line spacing and how this is defined",
+        "proposal": "Captions shall not be used.",
+    }
     s37 = ids["BRDP-S1-00037"]
-    assert s37["rule_count"] == 1 and s37["decision_texts"]
-    # nonContextRule only: candidate without rule.
+    assert s37["literal"]["proposal"] == (
+        "LOEDM is not being used. The LOEP is part of the final PDF delivery, but not available as a physical DM."
+    )
+    # nonContextRule only: that nonContextRule is its rule; a bare TDWG
+    # decision is the Proposal as it is.
     s1 = ids["BRDP-S1-00001"]
-    assert s1["rule_count"] == 0 and s1["rule_xml"] == ""
-    assert s1["decision_texts"][0] == 'Decide whether and when to use the alpha characters "I" and "O".'
+    assert (s1["rule_count"], s1["noncontext_count"]) == (0, 1)
+    assert s1["rule_xml"].startswith("<nonContextRule>") and s1["rule_problem"] is None
+    assert s1["literal"] == {"definition": 'Decide whether and when to use the alpha characters "I" and "O".', "proposal": "Decision made by TDWG."}
+    # All 469 nonContextRules are in some candidate's rule, and all 469 give
+    # a literal Proposal (300 "Decision made by Project. …", 169 TDWG).
+    assert sum(c["noncontext_count"] for c in candidates) == 469
+    assert sum(len([p for p in split_rule_pieces(c["rule_xml"], "BREX-4.2") if p["kind"] == "noncontext"]) for c in candidates) == 469
+    literal = [c for c in candidates if c["literal"]["proposal"]]
+    assert len(literal) == 469 and all(c["literal"]["definition"] for c in literal)
+    assert sum(1 for c in literal if c["literal"]["proposal"] == "Decision made by TDWG.") == 169
+    assert not any(c["literal"]["proposal"].startswith("Decision made by Project") for c in literal)
     # The rule text is the file's own, without the root's xmlns, and with the
     # line endings XML normalizes (the file is CRLF).
     assert b"\r\n" in LUFTHANSA.read_bytes()
@@ -114,9 +140,12 @@ def test_ca_brex_brdecisionref_big_candidate_other_version_and_ids():
     assert "S1000D_4-1" in s7["rule_xml"]
     assert {"code": "other_version_urls"}.items() <= next(w for w in s7["warnings"] if w["code"] == "other_version_urls").items()
     assert next(w for w in s7["warnings"] if w["code"] == "other_version_urls")["params"] == {"versions": ["4.1"], "project": "4.2"}
-    # BREX-S1-… numbers are kept as the origin and flagged.
+    # BREX-S1-… numbers are kept as the origin; default-BREX rules, not
+    # "not a BRDP identifier" (their own classification, see below).
     assert sum(1 for c in candidates if c["origin_identifier"].startswith("BREX-S1-")) == 243
-    assert any(w["code"] == "not_brdp_identifier" for w in ids["BREX-S1-00001"]["warnings"])
+    assert not any(w["code"] == "not_brdp_identifier" for w in ids["BREX-S1-00001"]["warnings"])
+    # No nonContextRule in the "CA" BREX: nothing literal, the AI writes.
+    assert not any(c["literal"]["proposal"] for c in candidates)
     assert ids["BRDP-S2-00002"]["rule_count"] == 301
 
 
@@ -127,6 +156,58 @@ def test_other_specification_names():
     assert other_specification("BRDP-EXT-00010", "S1000D 4.2") is None
     assert other_specification("BREX-S1-00001", "S1000D 4.2") is None
     assert other_specification("BRDP-S1-00010", "DITA 1.3 Xpath2.0") is None
+    assert default_rule_specification("BREX-S1-00001") == "S1000D"
+    assert default_rule_specification("BREX-S2-00010") == "S2000M"
+    assert default_rule_specification("BRDP-S1-00001") is None
+
+
+def test_literal_texts_from_the_noncontext_paragraphs():
+    # Two paragraphs: Definition + Proposal, "Decision made by Project." dropped.
+    assert literal_texts([["Decide X.", "Decision made by Project. X shall be used."]]) == {
+        "definition": "Decide X.", "proposal": "X shall be used."}
+    # A bare decision paragraph stays as it is.
+    assert literal_texts([["Decide X.", "Decision made by TDWG."]])["proposal"] == "Decision made by TDWG."
+    assert literal_texts([["Decide X.", "Decision made by Project."]])["proposal"] == "Decision made by Project."
+    # More paragraphs: all of them after the first, one per line.
+    assert literal_texts([["Decide X.", "Decision made by Project. A.", "B."]])["proposal"] == "A.\nB."
+    # One paragraph: it is the Proposal; Title and Definition from elsewhere.
+    assert literal_texts([["Only text."]]) == {"definition": None, "proposal": "Only text."}
+    # The identifier alone in the first paragraph: no Definition.
+    assert literal_texts([["", "Decision made by Project. Y."]]) == {"definition": None, "proposal": "Y."}
+    assert literal_texts([]) == {"definition": None, "proposal": None}
+
+
+def test_set_texts_sources_and_ai_fields():
+    lit = {"definition": "File def.", "proposal": "File proposal."}
+    # New EXT with literal texts: only the Title is for the AI.
+    c = {"classification": "new_ext", "literal": lit}
+    set_texts(c)
+    assert (c["definition"], c["proposal"]) == ("File def.", "File proposal.")
+    assert c["text_sources"] == {"title": None, "definition": "file", "proposal": "file"}
+    assert (c["ai_fields"], c["draft_status"]) == (["title"], "pending")
+    # Catalog: Title/Definition from the catalog, Proposal from the file: no AI.
+    c = {"classification": "catalog", "literal": lit, "catalog_texts": {"title": "Cat T", "definition": "Cat D"}}
+    set_texts(c)
+    assert (c["title"], c["definition"], c["proposal"]) == ("Cat T", "Cat D", "File proposal.")
+    assert c["text_sources"] == {"title": "catalog", "definition": "catalog", "proposal": "file"}
+    assert (c["ai_fields"], c["draft_status"]) == ([], "not_needed")
+    # Only executable rules, no decision text: the AI writes the Proposal.
+    c = {"classification": "catalog", "literal": {"definition": None, "proposal": None}, "catalog_texts": {"title": "T", "definition": "D"}}
+    set_texts(c)
+    assert (c["ai_fields"], c["draft_status"]) == (["proposal"], "pending")
+    # One paragraph: the Proposal; Title and Definition from the AI.
+    c = {"classification": "new_ext", "literal": {"definition": None, "proposal": "P."}}
+    set_texts(c)
+    assert c["ai_fields"] == ["title", "definition"]
+    # Reclassified: the AI's title kept where the AI writes; a hand edit kept always.
+    c = {"classification": "catalog", "literal": lit, "catalog_texts": {"title": "Cat T", "definition": "Cat D"},
+         "title": "AI title", "definition": "x", "proposal": "Hand proposal",
+         "text_sources": {"title": "ai", "definition": "ai", "proposal": "manual"}}
+    c["classification"] = "new_ext"
+    set_texts(c, keep_written=True)
+    assert (c["title"], c["definition"], c["proposal"]) == ("AI title", "File def.", "Hand proposal")
+    assert c["text_sources"] == {"title": "ai", "definition": "file", "proposal": "manual"}
+    assert c["draft_status"] == "drafted"
 
 
 def test_brex_4_1_and_empty_rules_context():
@@ -170,8 +251,13 @@ def test_brex_3_0_1_objrule_context_and_noncontext_comment():
     assert [w["code"] for w in ids["BRDP-S1-00133"]["warnings"]] == ["empty_context"]
     assert ids["BRDP-S1-00187"]["rule_xml"].startswith('<contextrules context="http://www.s1000d.org/S1000D_3-0-1/')
     assert "<structrules>" in ids["BRDP-S1-00187"]["rule_xml"]
+    # The 3.0.1 nonContextRule (a comment) is the candidate's rule, and its
+    # single text the Proposal.
     assert ids["BRDP-S1-00004"]["rule_count"] == 0
+    assert ids["BRDP-S1-00004"]["rule_xml"] == '<!-- nonContextRule id="BRDP-S1-00004": Decide which information sets to use. -->'
+    assert ids["BRDP-S1-00004"]["rule_problem"] is None
     assert ids["BRDP-S1-00004"]["decision_texts"] == ["Decide which information sets to use."]
+    assert ids["BRDP-S1-00004"]["literal"] == {"definition": None, "proposal": "Decide which information sets to use."}
 
 
 def test_dita_schematron_ids_from_pattern_assert_and_message():
@@ -490,14 +576,25 @@ async def test_ca_brex_end_to_end_in_a_42_project(client, project_users, monkeyp
     s7 = by["BRDP-S1-00007"]
     assert s7["big"] is True and s7["rule_xml"] is None and len(s7["rule_preview"]) == 20 and s7["rule_count"] == 4500
     assert by["BRDP-S2-00002"]["classification"] == "other_spec"
-    assert by["BREX-S1-00001"]["classification"] == "new_ext"
+    # BREX-S1-… : rules of S1000D's default BREX, unchecked, with the note.
+    default = [c for c in cands if c["origin_identifier"].startswith("BREX-S1-")]
+    assert len(default) == 243
+    assert all(c["classification"] == "default_rule" and c["selected"] is False for c in default)
+    b1 = by["BREX-S1-00001"]
+    assert (b1["specification"], b1["identifier"], b1["options"]) == ("S1000D", "BREX-S1-00001", ["default_rule", "new_ext"])
+    assert [w["code"] for w in b1["warnings"]] == ["default_rule"]
+    assert b1["ai_fields"] == ["title", "definition", "proposal"]
     url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [s7["key"]]})
-    assert res.status_code == 200 and res.json()["created"] == 1
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [s7["key"], b1["key"]]})
+    assert res.status_code == 200 and res.json()["created"] == 2
+    created = {c["key"]: c["identifier"] for c in res.json()["created_identifiers"]}
+    assert created[b1["key"]] == "BREX-S1-00001"
     async with async_session_factory() as session:
-        brdp = (await session.execute(select(BRDP).where(BRDP.project_id == project.id))).scalar_one()
-        approval = await session.get(RuleApproval, (brdp.id, "BREX-4.2"))
+        brdps = {b.identifier: b for b in (await session.execute(select(BRDP).where(BRDP.project_id == project.id))).scalars()}
+        approval = await session.get(RuleApproval, (brdps[created[s7["key"]]].id, "BREX-4.2"))
         assert approval.rule_xml.count("<structureObjectRule>") == 4500
+        # Checked by the user: imported with its own identifier.
+        assert await session.get(RuleApproval, (brdps["BREX-S1-00001"].id, "BREX-4.2")) is not None
 
 
 async def test_similar_warning_for_new_ext(project_users):
@@ -561,3 +658,124 @@ async def test_similar_check_runs_inside_the_job(client, project_users):
     finally:
         app.dependency_overrides.pop(get_httpx_transport, None)
     assert [w["code"] for w in cands[0]["warnings"]] == ["similar_to"]
+
+
+async def test_lufthansa_round_trip_keeps_every_noncontext_rule(client, project_users):
+    """The whole Lufthansa BREX imported: the 469 nonContextRules are in the
+    stored rules (Generate writes them back into <nonContextRules>), the
+    literal texts are the BRDPs' Definition/Proposal, and a re-import finds
+    everything "same"."""
+    project, editor, _ = project_users
+    job, cands = await _extract(client, project.id, editor, LUFTHANSA.read_bytes(), LUFTHANSA.name)
+    by = _by_id(cands)
+    # Literal texts: nothing for the AI but the Title of a new EXT.
+    s117 = by["BRDP-S1-00117"]
+    assert (s117["proposal"], s117["text_sources"]["proposal"]) == ("Captions shall not be used.", "file")
+    assert s117["text_sources"]["definition"] == "file" and s117["ai_fields"] == ["title"]
+    assert sum(1 for c in cands if c["text_sources"].get("proposal") == "file") == 469
+    assert sum(1 for c in cands if "proposal" in c["ai_fields"]) == 33
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands]})
+    assert res.status_code == 200 and res.json()["created"] == 502 and res.json()["invalid_rule"] == 0
+    created = {c["key"]: c["identifier"] for c in res.json()["created_identifiers"]}
+    async with async_session_factory() as session:
+        rows = (
+            await session.execute(
+                select(BRDP.identifier, BRDP.definition, BRDP.proposal, RuleApproval.rule_xml)
+                .join(RuleApproval, RuleApproval.brdp_id == BRDP.id)
+                .where(BRDP.project_id == project.id)
+            )
+        ).all()
+    assert len(rows) == 502
+    pieces = [p for r in rows for p in split_rule_pieces(r.rule_xml, "BREX-4.2")]
+    assert sum(1 for p in pieces if p["kind"] == "noncontext") == 469
+    assert sum(r.rule_xml.count("<structureObjectRule>") for r in rows) == sum(c["rule_count"] for c in cands) == 61
+    stored = {r.identifier: r for r in rows}[created[s117["key"]]]
+    assert stored.proposal == "Captions shall not be used."
+    assert stored.definition.startswith("Decide whether inline captions affect")
+    # Re-import: everything "same".
+    _, cands2 = await _extract(client, project.id, editor, LUFTHANSA.read_bytes(), LUFTHANSA.name)
+    assert {c["classification"] for c in cands2} == {"same"}
+
+
+async def test_reimport_of_a_rule_saved_before_noncontext_rules_were_kept(client, project_users):
+    """A BRDP imported before this change (rule without its nonContextRule,
+    or no rule at all) is "changed" now; one with the same rule is "same"."""
+    project, editor, _ = project_users
+    content = (
+        "<contextRules>" + _rule("BRDP-S1-00117", "//caption") + _rule("BRDP-S1-00070", "//originator") + "</contextRules>"
+        "<nonContextRules>"
+        "<nonContextRule><simplePara>BRDP-S1-00117. Decide captions.</simplePara><simplePara>Decision made by Project. Captions shall not be used.</simplePara></nonContextRule>"
+        "<nonContextRule><simplePara>BRDP-S1-00001. Decide I and O.</simplePara><simplePara>Decision made by TDWG.</simplePara></nonContextRule>"
+        "</nonContextRules>"
+    )
+    await _seed(project.id, "BRDP-S1-00117", _rule("BRDP-S1-00117", "//caption"))
+    await _seed(project.id, "BRDP-S1-00001")
+    await _seed(project.id, "BRDP-S1-00070", _rule("BRDP-S1-00070", "//originator"))
+    _, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+    by = _by_id(cands)
+    assert by["BRDP-S1-00117"]["classification"] == "changed"
+    assert by["BRDP-S1-00001"]["classification"] == "changed"
+    assert by["BRDP-S1-00070"]["classification"] == "same"
+    # An existing BRDP keeps its texts: they are the project's.
+    assert by["BRDP-S1-00117"]["text_sources"] == {"title": "project", "definition": "project", "proposal": "project"}
+
+
+async def test_reclassifying_sets_the_texts_again(client, project_users, synthetic_standard):
+    project, editor, _ = project_users
+    async with async_session_factory() as session:
+        session.add(BRDPCatalog(standard=synthetic_standard, identifier="BRDP-S1-00117", title="Cat T", definition="Cat D"))
+        await session.commit()
+    content = (
+        "<contextRules>" + _rule("BRDP-S1-00117", "//caption") + "</contextRules>"
+        "<nonContextRules><nonContextRule><simplePara>BRDP-S1-00117. Decide captions.</simplePara>"
+        "<simplePara>Decision made by Project. Captions shall not be used.</simplePara></nonContextRule></nonContextRules>"
+    )
+    job, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+    [c] = cands
+    assert (c["classification"], c["title"], c["definition"], c["proposal"]) == ("catalog", "Cat T", "Cat D", "Captions shall not be used.")
+    assert (c["ai_fields"], c["draft_status"]) == ([], "not_needed")
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}/candidates"
+    res = await client.patch(url, headers=editor, json={"items": [{"key": c["key"], "classification": "new_ext"}]})
+    [c] = res.json()["candidates"]
+    assert (c["title"], c["definition"], c["proposal"]) == ("", "Decide captions.", "Captions shall not be used.")
+    assert (c["ai_fields"], c["draft_status"]) == (["title"], "pending")
+    # The AI's title, then a hand edit of the Proposal: sources follow.
+    await client.patch(url, headers=editor, json={"items": [{"key": c["key"], "title": "Captions", "draft_status": "drafted"}]})
+    res = await client.patch(url, headers=editor, json={"items": [{"key": c["key"], "proposal": "No captions.", "draft_status": "manual"}]})
+    [c] = res.json()["candidates"]
+    assert c["text_sources"] == {"title": "ai", "definition": "file", "proposal": "manual"}
+
+
+async def test_parse_errors_always_have_a_reason(client, project_users, monkeypatch):
+    """HR7: an unexpected error answers with a reason, never a bare 500; a
+    missing table (the migration not applied) says so."""
+    from sqlalchemy.exc import ProgrammingError
+
+    from app.api.routes import rule_extract as route
+
+    project, editor, _ = project_users
+
+    def boom(*_a, **_k):
+        raise RuntimeError("something odd")
+
+    monkeypatch.setattr(route, "read_rules_file", boom)
+    res = await _upload(client, project.id, editor, _brex("4.2", ""))
+    assert res.status_code == 500
+    assert res.json()["detail"] == "Unexpected error (RuntimeError): something odd"
+
+    class UndefinedTableError(Exception):
+        pass
+
+    async def missing_table(*_a, **_k):
+        raise ProgrammingError("SELECT … FROM rule_extract_jobs", {}, UndefinedTableError('relation "rule_extract_jobs" does not exist'))
+
+    monkeypatch.setattr(route, "read_rules_file", read_rules_file)
+    monkeypatch.setattr(route, "get_running_job", missing_table)
+    res = await _upload(client, project.id, editor, _brex("4.2", ""))
+    assert res.status_code == 503
+    assert "migration has not been applied" in res.json()["detail"] and "alembic upgrade head" in res.json()["detail"]
+    # The page's first call (the latest extraction) too.
+    monkeypatch.setattr(route, "get_most_recent_job", missing_table)
+    res = await client.get(f"/api/projects/{project.id}/ai-extract/jobs/active", headers=editor)
+    assert res.status_code == 503 and "migration" in res.json()["detail"]

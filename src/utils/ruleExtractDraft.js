@@ -8,36 +8,41 @@
 // if it fails again, its candidates come back "failed" (left to write by
 // hand -- HR7: never invented, never silently empty). A candidate the
 // answer leaves out is "failed" too, without retrying the whole batch.
-import { buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../prompts/extractFromRulesPrompt.js';
+import { aiFieldsOf, buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../prompts/extractFromRulesPrompt.js';
 
 export const DRAFT_BATCH_SIZE = 10;
 export const DRAFT_CONCURRENCY = 3;
-const DRAFTED_CLASSES = new Set(['new_ext', 'catalog', 'other_spec']);
+const DRAFTED_CLASSES = new Set(['new_ext', 'catalog', 'other_spec', 'default_rule']);
 
-// The candidates that still need texts: the classes the AI writes for,
-// not written yet (by the AI or by hand).
+// The candidates that still need texts: the classes the AI writes for, with
+// something left to write (texts in the file or the catalog are never
+// sent), not written yet (by the AI or by hand). A default-BREX rule is
+// only written once checked: 243 of them come unchecked in a BREX that
+// carries the default rules.
 export function candidatesToDraft(candidates) {
-  return candidates.filter((c) => DRAFTED_CLASSES.has(c.classification) && (c.draft_status === 'pending' || !c.draft_status));
+  return candidates.filter(
+    (c) =>
+      DRAFTED_CLASSES.has(c.classification) &&
+      (c.classification !== 'default_rule' || c.selected) &&
+      aiFieldsOf(c).length > 0 &&
+      (c.draft_status === 'pending' || !c.draft_status)
+  );
 }
 
 async function draftBatch(batch, { standard, ruleFormat, ask }) {
   const system = buildExtractFromRulesPrompt({ standard, ruleFormat, candidates: batch });
   const keys = batch.map((c) => c.key);
+  const fieldsByKey = new Map(batch.map((c) => [c.key, aiFieldsOf(c)]));
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const text = await ask({ system, user: EXTRACT_USER_MESSAGE });
-      const { items } = parseExtractFromRulesResponse(text, keys);
+      const { items } = parseExtractFromRulesResponse(text, keys, fieldsByKey);
       return batch.map((c) => {
         const item = items.get(c.key);
         if (!item) return { key: c.key, draft_status: 'failed', error: 'missing from the answer' };
-        const writeAll = c.classification === 'new_ext' || c.classification === 'other_spec';
-        return {
-          key: c.key,
-          proposal: item.proposal,
-          ...(writeAll ? { title: item.title, definition: item.definition } : {}),
-          draft_status: 'drafted',
-        };
+        const written = Object.fromEntries(fieldsByKey.get(c.key).map((f) => [f, item[f]]));
+        return { key: c.key, ...written, draft_status: 'drafted' };
       });
     } catch (err) {
       lastError = err;

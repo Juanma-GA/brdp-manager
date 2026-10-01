@@ -14,12 +14,21 @@
 Nothing is written to the project's BRDPs until /apply. See
 app/services/rule_extract.py (reading) and rule_extract_jobs.py
 (classification, job, import).
+
+Every endpoint answers an unexpected error with a reason (HR7), never a bare
+500: _ReadableErrorRoute turns it into {"detail": "..."}; a missing table
+(the migration not applied) says so.
 """
+import logging
 import uuid
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_httpx_transport, require_project_role
@@ -45,7 +54,42 @@ from app.services.rule_extract_jobs import (
 )
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 
-router = APIRouter(prefix="/api/projects/{project_id}/ai-extract", tags=["ai-extract"])
+logger = logging.getLogger(__name__)
+
+
+def readable_error(exc: Exception) -> tuple[int, str]:
+    """(status, reason) for an error nobody expected."""
+    orig = getattr(exc, "orig", None)
+    text = f"{type(orig).__name__ if orig is not None else ''} {orig if orig is not None else exc}"
+    if isinstance(exc, ProgrammingError) and ("UndefinedTable" in text or ("relation" in text and "does not exist" in text)):
+        return (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The database is missing the AI Extract tables (rule_extract_jobs): the migration has not been applied. "
+            "Run `alembic upgrade head` in backend/ and restart the server.",
+        )
+    if isinstance(exc, DBAPIError):
+        return status.HTTP_500_INTERNAL_SERVER_ERROR, f"Database error: {str(orig or exc).strip().splitlines()[0]}"
+    return status.HTTP_500_INTERNAL_SERVER_ERROR, f"Unexpected error ({type(exc).__name__}): {exc}"
+
+
+class _ReadableErrorRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def readable(request: Request):
+            try:
+                return await handler(request)
+            except (HTTPException, RequestValidationError):
+                raise
+            except Exception as exc:  # noqa: BLE001 -- HR7: answered with a reason
+                logger.exception("AI Extract: %s %s failed", request.method, request.url.path)
+                code, detail = readable_error(exc)
+                return JSONResponse(status_code=code, content={"detail": detail})
+
+        return readable
+
+
+router = APIRouter(prefix="/api/projects/{project_id}/ai-extract", tags=["ai-extract"], route_class=_ReadableErrorRoute)
 
 
 async def _project(project_id: uuid.UUID, db: AsyncSession) -> Project:

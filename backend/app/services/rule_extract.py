@@ -36,8 +36,17 @@ ones as they are, the ones of a context block inside one block per context
 check is reported and the candidate imports without it. A context block
 whose scope attribute is empty (rulesContext="", an old Lufthansa BREX) is
 read as general, with a warning: no BREX validator applies such a block.
-nonContextRule texts are not part of the rule: they are the decision text
-(the main source for the Proposal).
+A nonContextRule (3.0.1: its comment) is part of the candidate's rule too,
+after the executable rules, exactly as written: Generate writes it back into
+<nonContextRules>, so importing a BREX and generating it again keeps it. A
+candidate with only nonContextRules has them as its rule.
+
+Its paragraphs are also the decision text. When the file already says it,
+nothing is asked of the AI (literal_texts): with two or more paragraphs the
+first one (without the identifier) is the Definition and the rest the
+Proposal ("Decision made by Project." dropped when text follows it; a bare
+"Decision made by TDWG." stays as it is); a single paragraph is the
+Proposal.
 """
 
 from __future__ import annotations
@@ -104,10 +113,16 @@ FORMAT_LABEL = {
     "SCH-DITA": "Schematron (DITA)",
 }
 
+# A rule of a specification's default BREX (the "CA" BREX numbers them
+# BREX-S1-00001…BREX-S1-00243): not a project decision.
+DEFAULT_RULE_RE = re.compile(r"^BREX-([A-Z]\d)-\d+$")
 _ID_RE = re.compile(r"(?<![A-Za-z0-9])(?:p-)?(BRDP-[A-Z0-9]+-\d{5})")
 _ID_PREFIX_RE = re.compile(r"^\s*(BRDP-[A-Z0-9]+-\d{5})(?![0-9])")
 _ISSUE_URL_RE = re.compile(r"S1000D_(\d)-(\d)(?:-(\d))?")
 _NO_CONTENT_RE = re.compile(r"does not exist in S1000D|not to take into account", re.IGNORECASE)
+# "Decision made by Project." in front of the decision itself: dropped from
+# the Proposal only when text follows it.
+_PROJECT_DECISION_RE = re.compile(r"^Decision made by (?:the )?Project\s*[.:]\s*(?=\S)", re.IGNORECASE)
 
 # Same token scan as rule_wrappers.py (comments, CDATA, PIs and tags with
 # their attributes).
@@ -465,14 +480,31 @@ def _block(file_format: str, context: str, rules: list[str]) -> str:
     return f'<contextRules rulesContext="{context}">\n<structureObjectRuleGroup>\n{body}\n</structureObjectRuleGroup>\n</contextRules>'
 
 
-def _assemble_rule(file_format: str, rules: list[_Piece]) -> str:
+def _assemble_rule(file_format: str, rules: list[_Piece], noncontext: list[_Piece] | None = None) -> str:
+    """General rules as they are, one block per context, then the
+    nonContextRules (3.0.1: their comments) as they are written."""
     general = [p.text for p in rules if p.context is None]
     by_context: dict[str, list[str]] = {}
     for p in rules:
         if p.context is not None:
             by_context.setdefault(p.context, []).append(p.text)
     parts = list(general) + [_block(file_format, ctx, texts) for ctx, texts in by_context.items()]
+    parts += [p.text for p in noncontext or []]
     return "\n".join(parts)
+
+
+def literal_texts(paragraph_groups: list[list[str]]) -> dict:
+    """Definition and Proposal written in the file, from the first
+    nonContextRule that has text (its paragraphs, the identifier already
+    stripped). → {"definition": str | None, "proposal": str | None}."""
+    for paras in paragraph_groups:
+        if not any(paras):
+            continue
+        if len(paras) >= 2:
+            proposal = "\n".join(_PROJECT_DECISION_RE.sub("", p, count=1) for p in paras[1:] if p)
+            return {"definition": paras[0] or None, "proposal": proposal or None}
+        return {"definition": None, "proposal": paras[0]}
+    return {"definition": None, "proposal": None}
 
 
 _XPATH_NS = {
@@ -548,8 +580,9 @@ def _summary(file_format: str, rules: list[_Piece], infos: list[dict]) -> dict:
 def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dict], list[dict]]:
     """→ (candidates, file warnings). Each candidate:
     {key, origin_identifier, rule_xml, rule_count, rule_preview, rule_problem,
-     decision_texts, object_uses, origin_rules_xml? (not kept: rule_xml is
-     the rules as written), summary, warnings, no_content}"""
+     noncontext_count, decision_texts, literal, object_uses, summary,
+     warnings, no_content}. rule_xml is the rules as written (executable
+     ones, then nonContextRules); rule_count counts the executable ones."""
     pieces, warnings = _scan_pieces(rf)
     groups: dict[str, dict] = {}
     order: list[dict] = []
@@ -557,7 +590,10 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
         info = _parse_piece(piece, rf.file_format)
         identifier = _identifier_of(info, rf.file_format)
         if identifier is None or identifier not in groups:
-            group = {"identifier": identifier, "rules": [], "infos": [], "noncontext": [], "errors": []}
+            group = {
+                "identifier": identifier, "rules": [], "infos": [], "noncontext": [], "noncontext_pieces": [],
+                "paragraphs": [], "pieces": [], "errors": [],
+            }
             order.append(group)
             if identifier is not None:
                 groups[identifier] = group
@@ -565,8 +601,12 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
             group = groups[identifier]
         if info.get("error"):
             group["errors"].append(info["error"])
+        group["pieces"].append(piece)
         if piece.kind == "noncontext":
-            group["noncontext"].extend(_strip_id_prefix(t, identifier) for t in info.get("texts", []) if t)
+            paras = [_strip_id_prefix(t, identifier) for t in info.get("texts", [])]
+            group["paragraphs"].append(paras)
+            group["noncontext"].extend(p for p in paras if p)
+            group["noncontext_pieces"].append(piece)
         else:
             group["rules"].append(piece)
             group["infos"].append(info)
@@ -575,11 +615,12 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
     for index, group in enumerate(order, start=1):
         identifier = group["identifier"]
         rules, infos = group["rules"], group["infos"]
+        noncontext = group["noncontext_pieces"]
         cand_warnings: list[dict] = []
         rule_xml = ""
         rule_problem = None
-        if rules:
-            rule_xml = _assemble_rule(rf.file_format, rules)
+        if rules or noncontext:
+            rule_xml = _assemble_rule(rf.file_format, rules, noncontext)
             rule_xml = unwrap_rule_xml(rule_xml, rf.file_format)[0]
             if group["errors"]:
                 rule_problem = {"code": "not_parsed", "message": f"A rule could not be read: {group['errors'][0]}"}
@@ -618,7 +659,7 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
                         "message": f"Uses schema URLs of S1000D {', '.join(versions)}; in {project_issue} data modules it would not apply.",
                     }
                 )
-        if identifier is not None and not identifier.startswith("BRDP-"):
+        if identifier is not None and not identifier.startswith("BRDP-") and not DEFAULT_RULE_RE.match(identifier):
             cand_warnings.append(
                 {
                     "code": "not_brdp_identifier",
@@ -636,9 +677,11 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
                 "origin_identifier": identifier,
                 "rule_xml": rule_xml,
                 "rule_count": len(rules),
-                "rule_preview": [p.text for p in rules[:PREVIEW_RULES]],
+                "noncontext_count": len(noncontext),
+                "rule_preview": [p.text for p in group["pieces"][:PREVIEW_RULES]],
                 "rule_problem": rule_problem,
                 "decision_texts": group["noncontext"],
+                "literal": literal_texts(group["paragraphs"]),
                 "object_uses": object_uses[:20],
                 "summary": _summary(rf.file_format, rules, infos) if rules else None,
                 "warnings": cand_warnings,

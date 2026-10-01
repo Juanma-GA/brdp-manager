@@ -163,3 +163,11 @@
   max-height: 360px;
   overflow: auto;
 }
+
+/* Where the text came from: the file, the catalog, the AI, a hand edit. */
+.sourceTag {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 11px;
+  font-style: italic;
+}

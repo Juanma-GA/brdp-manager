@@ -800,57 +800,20 @@ suggestRuleCases.push({
   ],
 });
 
-// AI Extract (1/2): real candidates read from the two BREX fixtures
-// (backend/scripts/dump_rule_extract_fixture.py → extract-candidates.json),
-// classified as an empty 4.2 project whose catalog has the S1 identifiers
-// would classify them.
+// AI Extract: real candidates read from the two BREX fixtures, classified
+// and given their texts by the backend's own set_texts
+// (backend/scripts/dump_rule_extract_fixture.py → extract-candidates.json):
+// a candidate is only sent with what the file and the catalog do not give.
 const extractCandidates = JSON.parse(
   readFileSync(new URL('../rule-test-fixtures/extract-candidates.json', import.meta.url), 'utf-8')
 );
-const asCatalog = (id, title, definition) => ({ ...extractCandidates[id], classification: 'catalog', title, definition });
-const asNew = (id, extra = {}) => ({ ...extractCandidates[id], classification: 'new_ext', title: '', definition: '', ...extra });
+const extractArgs = (...ids) => [{ standard: 'S1000D 4.2', ruleFormat: 'BREX-4.2', candidates: ids.map((id) => extractCandidates[id]) }];
 export const extractFromRulesCases = [
-  {
-    name: 'lufthansa-value-list-and-noncontext',
-    args: [
-      {
-        standard: 'S1000D 4.2',
-        ruleFormat: 'BREX-4.2',
-        candidates: [
-          asCatalog('BRDP-S1-00052', 'Information codes', 'Decide on which information codes apply to the project.'),
-          asCatalog('BRDP-S1-00117', 'Caption line spacing', 'Decide whether inline captions affect the text line spacing.'),
-        ],
-      },
-    ],
-  },
-  {
-    name: 'lufthansa-decision-only-and-contexts',
-    args: [
-      {
-        standard: 'S1000D 4.2',
-        ruleFormat: 'BREX-4.2',
-        candidates: [
-          asCatalog('BRDP-S1-00037', 'Use of information code 00S', 'Decide whether to use information code 00S.'),
-          asCatalog('BRDP-S1-00006', 'Schemas', 'Decide which schemas to use.'),
-        ],
-      },
-    ],
-  },
-  {
-    name: 'ca-big-candidate-summary-only',
-    args: [{ standard: 'S1000D 4.2', ruleFormat: 'BREX-4.2', candidates: [asCatalog('BRDP-S1-00007', 'Optional elements', 'Decide whether and how to use each optional element.')] }],
-  },
-  {
-    name: 'ca-other-spec-and-brex-number',
-    args: [
-      {
-        standard: 'S1000D 4.2',
-        ruleFormat: 'BREX-4.2',
-        candidates: [
-          asNew('BRDP-S2-00002', { classification: 'other_spec', specification: 'S2000M' }),
-          asNew('BREX-S1-00242'),
-        ],
-      },
-    ],
-  },
+  // Catalog, only executable rules: the AI writes the Proposal.
+  { name: 'lufthansa-value-list-and-contexts', args: extractArgs('BRDP-S1-00052', 'BRDP-S1-00006') },
+  // New EXT with a nonContextRule: Definition and Proposal from the file,
+  // only the Title asked.
+  { name: 'lufthansa-literal-texts-title-only', args: extractArgs('BRDP-S1-00117', 'BRDP-S1-00037', 'BRDP-S1-00001') },
+  { name: 'ca-big-candidate-summary-only', args: extractArgs('BRDP-S1-00007') },
+  { name: 'ca-other-spec-and-default-rule', args: extractArgs('BRDP-S2-00002', 'BREX-S1-00242') },
 ];
