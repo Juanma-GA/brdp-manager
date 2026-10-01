@@ -84,8 +84,11 @@ def test_lufthansa_brex_groups_by_the_identifier_in_the_text():
     s1 = ids["BRDP-S1-00001"]
     assert s1["rule_count"] == 0 and s1["rule_xml"] == ""
     assert s1["decision_texts"][0] == 'Decide whether and when to use the alpha characters "I" and "O".'
-    # The rule text is the file's own, without the root's xmlns.
+    # The rule text is the file's own, without the root's xmlns, and with the
+    # line endings XML normalizes (the file is CRLF).
+    assert b"\r\n" in LUFTHANSA.read_bytes()
     assert "xmlns" not in ids["BRDP-S1-00052"]["rule_xml"]
+    assert not any("\r" in c["rule_xml"] for c in candidates)
     # Boolean objectPath, like the lint.
     assert [w["code"] for w in ids["BRDP-S1-00316"]["warnings"]] == ["boolean_path"]
     assert all(c["rule_problem"] is None for c in candidates)
@@ -445,9 +448,12 @@ async def test_classification_and_import(client, project_users, synthetic_standa
     by2 = _by_id(cands2)
     for origin in ("BRDP-S1-00133", "BRDP-S1-00065", "BRDP-S1-00070", "BRDP-S2-00002"):
         assert by2[origin]["classification"] == "same", origin
-    # The EXT of the file is not in the project under that number: a new EXT
-    # again (its origin is kept in the history, not as its identifier).
-    assert by2["BRDP-EXT-00014"]["classification"] == "new_ext"
+    # The EXT of the file became BRDP-EXT-00004 (and S1-99999, missing from
+    # the catalog, BRDP-EXT-00005): found again through the origin kept in
+    # their history, so a re-import is "same", never another EXT.
+    assert (by2["BRDP-EXT-00014"]["classification"], by2["BRDP-EXT-00014"]["identifier"]) == ("same", "BRDP-EXT-00004")
+    assert (by2["BRDP-S1-99999"]["classification"], by2["BRDP-S1-99999"]["identifier"]) == ("same", "BRDP-EXT-00005")
+    assert all(c["classification"] in ("same", "empty") for c in cands2)
     # A new file replaces the previous candidates.
     async with async_session_factory() as session:
         assert (await session.execute(select(RuleExtractCandidate).where(RuleExtractCandidate.job_id == uuid.UUID(job["id"])))).first() is None

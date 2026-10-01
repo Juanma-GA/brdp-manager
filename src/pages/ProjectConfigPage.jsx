@@ -19,6 +19,7 @@ import {
   useInvalidateImportJob,
 } from '../hooks/useImportJob';
 import Button, { useButtonSuccessFlash } from '../components/Button';
+import RuleExtractSection from '../components/extract/RuleExtractSection';
 import styles from './ProjectConfigPage.module.css';
 
 // Plain English labels, NOT run through i18n -- Export to Excel has never
@@ -868,6 +869,15 @@ export default function ProjectConfigPage() {
         dataVersion={dataVersion}
         onDataChanged={bumpDataVersion}
       />
+      {STANDARD_TO_RULE_FORMAT[project.standard] && (
+        <RuleExtractSection
+          projectId={projectId}
+          standard={project.standard}
+          ruleFormat={STANDARD_TO_RULE_FORMAT[project.standard]}
+          canEdit={canEdit}
+          onDataChanged={bumpDataVersion}
+        />
+      )}
       <ResetDataSection projectId={projectId} canEdit={canEdit} onDataChanged={bumpDataVersion} />
     </div>
   );

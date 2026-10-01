@@ -1,0 +1,165 @@
+.progress {
+  width: 100%;
+  max-width: 480px;
+  height: 10px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12.5px;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.table th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+
+.colCheck {
+  width: 28px;
+}
+
+.colClass {
+  width: 150px;
+}
+
+.colId {
+  width: 130px;
+}
+
+.colRule {
+  width: 18%;
+}
+
+.colWarnings {
+  width: 17%;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  resize: vertical;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.muted {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ruleDetails summary {
+  cursor: pointer;
+  color: #2563eb;
+}
+
+.rulePre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 4px;
+  margin: 4px 0;
+}
+
+.diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.diff th {
+  font-weight: 600;
+  text-align: left;
+}
+
+.diff td {
+  vertical-align: top;
+  width: 50%;
+}
+
+.diff pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.diff_removed td:first-child,
+.diff_changed td:first-child {
+  background: #fef2f2;
+}
+
+.diff_added td:last-child,
+.diff_changed td:last-child {
+  background: #f0fdf4;
+}
+
+.warnings {
+  margin: 0;
+  padding-left: 16px;
+  color: #b45309;
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 4px;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+  font-size: 13px;
+}
+
+.rulePreviewList {
+  max-height: 360px;
+  overflow: auto;
+}

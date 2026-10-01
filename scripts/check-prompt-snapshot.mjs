@@ -23,6 +23,10 @@
 // brex-4-2-proced-insertion-mainprocedure (insertion point other than
 // <para>). The 19 other prompts are unchanged.
 //
+// AI Extract (1/2): new group extractFromRules (4 cases, real candidates
+// read from the two BREX fixtures by backend/scripts/
+// dump_rule_extract_fixture.py). No other prompt changes.
+//
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a
 // few rounds back) means expected-prompts.json is stale by design, not
@@ -331,19 +335,21 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // (<standard>)' source label is covered). The 44 existing prompts are
 // unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
-import { askCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
+import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';
+import { askCases, extractFromRulesCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXPECTED_PATH = path.join(__dirname, 'prompt-snapshot', 'expected-prompts.json');
 
 function buildActual() {
-  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {} };
+  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {}, extractFromRules: {} };
   for (const c of askCases) actual.ask[c.name] = buildAskSystemPrompt(...c.args);
   for (const c of suggestDefinitionCases) actual.suggestDefinition[c.name] = buildSuggestDefinitionPrompt(...c.args);
   for (const c of suggestProposalCases) actual.suggestProposal[c.name] = buildSuggestProposalPrompt(...c.args);
   for (const c of suggestRuleCases) actual.suggestRule[c.name] = buildSuggestRulePrompt(...c.args);
   for (const c of ruleTestExamplesCases) actual.ruleTestExamples[c.name] = buildRuleTestExamplesPrompt(...c.args);
   for (const c of ruleTestReviewCases) actual.ruleTestReview[c.name] = buildRuleTestReviewPrompt(...c.args);
+  for (const c of extractFromRulesCases) actual.extractFromRules[c.name] = buildExtractFromRulesPrompt(...c.args);
   return actual;
 }
 

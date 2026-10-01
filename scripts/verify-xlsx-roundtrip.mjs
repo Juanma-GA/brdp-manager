@@ -159,7 +159,7 @@ async function main() {
     // A finished import job's panel takes the section's place until closed.
     const close = page.locator('button:has-text("Close")');
     if (await close.count()) await close.first().click();
-    await page.locator('input[type="file"]').setInputFiles(file);
+    await page.locator('input[type="file"][accept=".xlsx"]').setInputFiles(file);
     await page.waitForSelector('button:has-text("Apply import")', { timeout: 20000 });
     return page.locator("body").innerText();
   };
@@ -350,7 +350,7 @@ async function main() {
     await openConfig(generic);
     const fake = path.join(tmp, "not-a-workbook.xlsx");
     fs.writeFileSync(fake, "ID,Title\nBRDP-X,y\n");
-    await page.locator('input[type="file"]').setInputFiles(fake);
+    await page.locator('input[type="file"][accept=".xlsx"]').setInputFiles(fake);
     await page.waitForSelector("text=not an .xlsx workbook", { timeout: 10000 }).catch(() => {});
     const refused = await page.locator("body").innerText();
     assert(refused.includes("The file is not an .xlsx workbook"), "the page shows the reason from the server (422)");

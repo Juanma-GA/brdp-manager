@@ -57,7 +57,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.routes.approvals import _rule_state, _wrap_rule_xml_fragment
 from app.api.routes.similar import MIN_SIMILARITY
 from app.db.base import async_session_factory
-from app.models import BRDP, BRDPCatalog, Project, RuleApproval, RuleExtractCandidate, RuleExtractJob, User
+from app.models import BRDP, BRDPCatalog, BRDPHistory, Project, RuleApproval, RuleExtractCandidate, RuleExtractJob, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.services.embeddings import EmbeddingUnavailable, compute_embeddings_batch, truncate_for_embedding_input
 from app.services.history import record_change
@@ -196,6 +196,34 @@ async def _active_identifiers(project_id: uuid.UUID, db: AsyncSession) -> dict[s
     return {b.identifier: b for b in rows}
 
 
+async def _extracted_origins(project_id: uuid.UUID, existing: dict[str, BRDP], db: AsyncSession) -> dict[str, BRDP]:
+    """Origin identifier → the active BRDP created or updated from it by an
+    earlier extraction (its "extracted_from" history event; the latest
+    wins). A candidate whose origin became a new EXT number (BRDP-EXT-00014
+    in the file → BRDP-EXT-00004 in the project; an S1 identifier missing
+    from the catalog) is then found again on a re-import, instead of
+    becoming yet another EXT."""
+    by_id = {b.id: b for b in existing.values()}
+    if not by_id:
+        return {}
+    rows = (
+        await db.execute(
+            select(BRDPHistory.brdp_id, BRDPHistory.new_value)
+            .where(BRDPHistory.brdp_id.in_(list(by_id)), BRDPHistory.field_name == "extracted_from")
+            .order_by(BRDPHistory.changed_at)
+        )
+    ).all()
+    out: dict[str, BRDP] = {}
+    for brdp_id, value in rows:
+        try:
+            origin = json.loads(value).get("origin_identifier")
+        except (ValueError, AttributeError):
+            continue
+        if origin:
+            out[origin] = by_id[brdp_id]
+    return out
+
+
 def _next_ext_numbers(identifiers) -> int:
     highest = 0
     for identifier in identifiers:
@@ -220,8 +248,15 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             )
         ).scalars().all()
         catalog = {r.identifier: r for r in rows}
+    extracted = await _extracted_origins(project.id, existing, db)
+
+    def match(origin):
+        if not origin:
+            return None
+        return existing.get(origin) or extracted.get(origin)
+
     approvals = {}
-    existing_ids = [existing[i].id for i in origin_ids if i in existing]
+    existing_ids = [match(i).id for i in origin_ids if match(i) is not None]
     if rule_format and existing_ids:
         rows = (
             await db.execute(
@@ -236,8 +271,8 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         origin = c["origin_identifier"]
         importable_rule = c["rule_xml"] if c["rule_xml"] and not c.get("rule_problem") else ""
         c.update({"title": "", "definition": "", "proposal": "", "draft_status": "pending", "existing_rule_xml": None})
-        if origin and origin in existing:
-            brdp = existing[origin]
+        brdp = match(origin)
+        if brdp is not None:
             approval = approvals.get(brdp.id)
             stored = approval.rule_xml if approval is not None else ""
             c["existing_rule_xml"] = stored
@@ -251,7 +286,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
                         {"code": "no_rule_to_import", "params": {}, "message": "There is no rule to import, nothing would change."}
                     )
             c["title"], c["definition"], c["proposal"] = brdp.title, brdp.definition, brdp.proposal
-            c["identifier"] = origin
+            c["identifier"] = brdp.identifier
             c["draft_status"] = "not_needed"
             options = [base, "new_ext"]
         elif origin and origin in catalog:
@@ -544,9 +579,9 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
             omit(c, "same" if classification == "same" else "no content")
             continue
         if classification == "changed":
-            brdp = existing.get(origin)
+            brdp = existing.get(c.get("identifier") or origin)
             if brdp is None:
-                omit(c, f"{origin} is no longer in the project")
+                omit(c, f"{c.get('identifier') or origin} is no longer in the project")
                 continue
             if not rule_xml:
                 omit(c, "no rule to import")

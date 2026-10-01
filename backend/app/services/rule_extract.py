@@ -61,7 +61,40 @@ PREVIEW_RULES = 20
 # lists this many; the rest are counted).
 DETAILED_RULES = 30
 MAX_VALUES_PER_RULE = 30
-MAX_PATH_CHARS = 300
+# A path or test longer than this is cut in the summary, with the number of
+# characters left out (never silently -- HR7). A long path is usually a list
+# of values written as predicates (Lufthansa's S1-00052: ~100 information
+# codes in 10,000 characters); those values are listed apart, in full
+# (_compared_values), so the cut path loses nothing the AI needs.
+MAX_PATH_CHARS = 400
+MAX_COMPARED_VALUES = 400
+_COMPARISON_RE = re.compile(r"(@?[A-Za-z_][\w:.-]*|\.)\s*(!=|=)\s*(\"[^\"]*\"|'[^']*')")
+
+
+def _compared_values(path: str | None) -> list[dict]:
+    """The literal values a path compares names with, grouped by name and
+    operator, in order of appearance: //dmCode/@infoCode="000" or
+    //dmCode/@infoCode="002" → [{"name": "@infoCode", "op": "=",
+    "values": ["000", "002"], "more": 0}]."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for m in _COMPARISON_RE.finditer(path or ""):
+        name = m.group(1).rsplit("/", 1)[-1]
+        values = groups.setdefault((name, m.group(2)), [])
+        value = m.group(3)[1:-1]
+        if value not in values:
+            values.append(value)
+    return [
+        {"name": name, "op": op, "values": values[:MAX_COMPARED_VALUES], "more": max(0, len(values) - MAX_COMPARED_VALUES)}
+        for (name, op), values in groups.items()
+        if len(values) >= 2
+    ]
+
+
+def _clip_path(text: str | None) -> str:
+    flat = re.sub(r"\s+", " ", text or "").strip()
+    if len(flat) <= MAX_PATH_CHARS:
+        return flat
+    return f"{flat[:MAX_PATH_CHARS]} … [{len(flat) - MAX_PATH_CHARS} more characters]"
 
 STANDARD_ISSUE = {"S1000D 3.0.1": "3.0.1", "S1000D 4.1": "4.1", "S1000D 4.2": "4.2"}
 FORMAT_LABEL = {
@@ -133,10 +166,12 @@ def _decode(data: bytes, encoding: str | None) -> str:
         if not enc:
             continue
         try:
-            return data.decode(enc).lstrip("﻿")
+            # XML normalizes line endings to \n; the rules are taken from the
+            # text, so it is done here (a CRLF file must not store \r).
+            return data.decode(enc).lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n")
         except (LookupError, UnicodeDecodeError):
             continue
-    return data.decode("utf-8", errors="replace").lstrip("﻿")
+    return data.decode("utf-8", errors="replace").lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def read_rules_file(data: bytes, rule_format: str | None, standard: str) -> RulesFile:
@@ -474,7 +509,7 @@ def _summary(file_format: str, rules: list[_Piece], infos: list[dict]) -> dict:
     if file_format == "SCH-DITA":
         asserts = [a for info in infos for a in info.get("asserts", [])]
         detailed = [
-            {"context": a["context"], "kind": a["kind"], "test": a["test"][:MAX_PATH_CHARS], "role": a["role"], "message": a["message"]}
+            {"context": a["context"], "kind": a["kind"], "test": _clip_path(a["test"]), "role": a["role"], "message": a["message"]}
             for a in asserts[:DETAILED_RULES]
         ]
         return {"count": count, "asserts": len(asserts), "rules": detailed, "rules_more": max(0, len(asserts) - DETAILED_RULES)}
@@ -489,14 +524,15 @@ def _summary(file_format: str, rules: list[_Piece], infos: list[dict]) -> dict:
         "count": count,
         "flags": dict(flags),
         "path_kinds": dict(kinds),
-        "first_paths": [re.sub(r"\s+", " ", (i.get("path") or "")).strip()[:MAX_PATH_CHARS] for i in infos[:10]],
+        "first_paths": [_clip_path(i.get("path")) for i in infos[:10]],
         "most_repeated_use": {"text": most_use[0], "count": most_use[1]} if most_use else None,
         "schemas": sorted({_schema_of_context(p.context) for p in rules if p.context}),
     }
     if count <= BIG_CANDIDATE_RULES:
         summary["rules"] = [
             {
-                "path": re.sub(r"\s+", " ", (info.get("path") or "")).strip()[:MAX_PATH_CHARS],
+                "path": _clip_path(info.get("path")),
+                "compared": _compared_values(info.get("path")),
                 "flag": info.get("flag"),
                 "use": info.get("use") or "",
                 "values": [v["value"] for v in info.get("values", [])[:MAX_VALUES_PER_RULE]],

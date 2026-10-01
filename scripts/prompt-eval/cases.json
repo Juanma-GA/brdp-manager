@@ -3023,6 +3023,134 @@
           "note": "every reject example breaks the rule in its own dmStatus/pmStatus, either way: an <applic> whose text does not say All, or no <applic>/<applicRef> at all (checked on the final examples, after the correction round)"
         }
       ]
+    },
+    {
+      "id": "extract-value-list-s1-00052",
+      "type": "extract-from-rules",
+      "standard": "S1000D 4.2",
+      "description": "AI Extract: Lufthansa's S1-00052 (two rules listing the allowed and the prohibited information codes as path predicates, no decision text). The Proposal states the allowed codes, including 055 and 930, without placeholders.",
+      "file": "scripts/prompt-eval/fixtures/lufthansa-extract-sample.xml",
+      "origin": "BRDP-S1-00052",
+      "classification": "catalog",
+      "catalog": {
+        "title": "Information codes",
+        "definition": "Decide on which information codes apply to the project."
+      },
+      "checks": [
+        {
+          "type": "extract_drafted"
+        },
+        {
+          "type": "contains",
+          "pattern": "\\b055\\b",
+          "note": "the allowed code 055 is named"
+        },
+        {
+          "type": "contains",
+          "pattern": "\\b930\\b",
+          "note": "the allowed code 930 is named"
+        },
+        {
+          "type": "no_placeholders",
+          "note": "the decision is known: no [VALUE: ...] or [LIST: ...]"
+        },
+        {
+          "type": "not_contains_any",
+          "patterns": [
+            "objectPath",
+            "allowedObjectFlag",
+            "XPath"
+          ],
+          "note": "never the rule syntax"
+        },
+        {
+          "type": "language",
+          "expect": "en"
+        }
+      ]
+    },
+    {
+      "id": "extract-prohibition-with-noncontext-s1-00117",
+      "type": "extract-from-rules",
+      "standard": "S1000D 4.2",
+      "description": "AI Extract: S1-00117 has a rule (//caption prohibited) and a nonContextRule whose decision text says 'Captions shall not be used.' The Proposal follows the decision text.",
+      "file": "scripts/prompt-eval/fixtures/lufthansa-extract-sample.xml",
+      "origin": "BRDP-S1-00117",
+      "classification": "catalog",
+      "catalog": {
+        "title": "Inline captions and line spacing",
+        "definition": "Decide whether inline captions affect the text line spacing and how this is defined."
+      },
+      "checks": [
+        {
+          "type": "extract_drafted"
+        },
+        {
+          "type": "contains",
+          "pattern": "caption",
+          "flags": "i"
+        },
+        {
+          "type": "contains",
+          "pattern": "(shall|must) not be used|not (be )?(used|allowed)|prohibited",
+          "flags": "i",
+          "note": "states the prohibition"
+        },
+        {
+          "type": "no_placeholders"
+        },
+        {
+          "type": "not_contains_any",
+          "patterns": [
+            "objectPath",
+            "allowedObjectFlag",
+            "nonContextRule"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "extract-decision-without-rule-s1-00037",
+      "type": "extract-from-rules",
+      "standard": "S1000D 4.2",
+      "description": "AI Extract: S1-00037 as a decision with no executable rule (only its nonContextRule: 'LOEDM is not being used. The LOEP is part of the final PDF delivery...'). Written as a new EXT: title, definition and proposal from the decision text alone.",
+      "file": "scripts/prompt-eval/fixtures/lufthansa-extract-sample.xml",
+      "origin": "BRDP-S1-00037",
+      "classification": "new_ext",
+      "checks": [
+        {
+          "type": "extract_drafted"
+        },
+        {
+          "type": "contains",
+          "pattern": "LOEDM",
+          "note": "the decision text's subject"
+        },
+        {
+          "type": "contains",
+          "pattern": "LOEP"
+        },
+        {
+          "type": "no_placeholders"
+        },
+        {
+          "type": "contains",
+          "target": "definition",
+          "pattern": "^Decide",
+          "flags": "i",
+          "note": "the definition is a decision point, not the answer"
+        },
+        {
+          "type": "not_contains",
+          "target": "title",
+          "pattern": "\\.$",
+          "note": "a title without a final period"
+        },
+        {
+          "type": "manual",
+          "note": "the proposal says LOEDM is not used and the LOEP is only part of the PDF delivery -- nothing invented"
+        }
+      ]
     }
   ]
 }

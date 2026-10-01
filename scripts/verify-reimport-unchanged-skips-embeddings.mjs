@@ -111,7 +111,7 @@ async function main() {
 
     // ---- 1. First import: no embedding calls at all ----
     await page.waitForSelector("text=Import BRDPs from Excel", { timeout: 10000 });
-    await page.locator('input[type="file"]').setInputFiles(absXlsxPath);
+    await page.locator('input[type="file"][accept=".xlsx"]').setInputFiles(absXlsxPath);
     await page.waitForSelector('button:has-text("Apply import")', { timeout: 15000 });
     await page.click('button:has-text("Apply import")');
     await page.waitForSelector("text=Import complete", { timeout: 60000 });
@@ -138,7 +138,7 @@ async function main() {
 
     // ---- 2. Reimport the EXACT same file: must be a no-op ----
     await page.waitForSelector("text=Import BRDPs from Excel", { timeout: 10000 });
-    await page.locator('input[type="file"]').setInputFiles(absXlsxPath);
+    await page.locator('input[type="file"][accept=".xlsx"]').setInputFiles(absXlsxPath);
     await page.waitForSelector('button:has-text("Apply import")', { timeout: 15000 });
 
     const summaryText = await page.locator("p", { hasText: /ready to import/i }).first().innerText();

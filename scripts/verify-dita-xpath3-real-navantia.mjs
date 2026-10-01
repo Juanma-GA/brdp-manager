@@ -101,7 +101,7 @@ async function main() {
 
     // ---- Import the REAL Navantia Xpath3.0 file ----
     await page.waitForSelector("text=Import BRDPs from Excel", { timeout: 10000 });
-    await page.locator('input[type="file"]').setInputFiles(absXlsxPath);
+    await page.locator('input[type="file"][accept=".xlsx"]').setInputFiles(absXlsxPath);
     await page.waitForSelector('button:has-text("Apply import")', { timeout: 15000 });
     await page.click('button:has-text("Apply import")');
     const proceedBtn = page.locator('button:has-text("Proceed")');

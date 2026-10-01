@@ -55,7 +55,7 @@ import {
   buildSuggestRulePrompt,
   parseSuggestRuleResponse,
 } from "../src/prompts/suggestRulePrompt.js";
-import { ASK_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { ASK_TEMPERATURE, EXTRACT_MAX_TOKENS, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
 import { isTruncatedAnswer, truncatedAnswerError } from "../src/api/llmTruncation.js";
 
 // The default output limit of every other use (llmAPI.js DEFAULT_MAX_TOKENS;
@@ -90,6 +90,8 @@ import { distinctSchemaNames, loadSchemaCards, parentsPresentedAsChildren, strip
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
 import { importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
+import { draftCandidates } from "../src/utils/ruleExtractDraft.js";
+import { UNFILLED_MARKER_RE } from "../src/utils/proposalMarkers.js";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
@@ -217,8 +219,14 @@ async function runCheck(check, answer, ctx = {}) {
   // T4b: "reject_examples" = the final content of the rule-test examples
   // meant to be rejected (after the correction round), one per line.
   // "prompt" = the system prompt the case sent (rule test on DM metadata).
+  // AI Extract: "title" / "definition" = the texts written for the
+  // candidate (the answer is its proposal).
   const target =
-    check.target === "prompt"
+    check.target === "title"
+      ? ctx.extract?.title ?? ""
+      : check.target === "definition"
+      ? ctx.extract?.definition ?? ""
+      : check.target === "prompt"
       ? ctx.systemPrompt ?? ""
       : check.target === "description"
       ? ctx.description ?? ""
@@ -234,6 +242,14 @@ async function runCheck(check, answer, ctx = {}) {
           ? extractRuleXPaths(ctx.xml || "").join("\n")
           : answer;
   switch (check.type) {
+    case "extract_drafted": {
+      const ok = ctx.extract?.draft_status === "drafted";
+      return { status: ok ? "pass" : "fail", detail: ok ? "written from a valid JSON answer" : `not written: ${ctx.extract?.error || ctx.extract?.draft_status}` };
+    }
+    case "no_placeholders": {
+      const hit = target.match(new RegExp(UNFILLED_MARKER_RE.source, UNFILLED_MARKER_RE.flags.replace("g", "")));
+      return { status: hit ? "fail" : "pass", detail: hit ? `placeholder left: ${hit[0]}` : "no placeholder" };
+    }
     case "xml_well_formed": {
       const r = await xmlWellFormed(ctx.xml);
       return { status: r.ok ? "pass" : "fail", detail: r.ok ? "well-formed" : r.error };
@@ -804,7 +820,56 @@ async function runRuleReviewCase(project, aiProvider, createdBrdp, testCase) {
   };
 }
 
+// AI Extract (1/2): the file goes through the real endpoint (parse +
+// classification in the background job), then the same batch drafter as
+// the page (src/utils/ruleExtractDraft.js) writes the texts of the case's
+// candidate. The answer checked is its proposal; "title"/"definition"
+// targets read the other two.
+async function runExtractCase(project, aiProvider, _createdBrdp, testCase) {
+  const data = fs.readFileSync(path.join(REPO_ROOT, testCase.file));
+  const form = new FormData();
+  form.append("file", new Blob([data], { type: "application/xml" }), path.basename(testCase.file));
+  const res = await fetch(`${API}/api/projects/${project.id}/ai-extract/parse`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`parse -> ${res.status}: ${await res.text()}`);
+  const { job_id: jobId } = await res.json();
+  const deadline = Date.now() + 5 * 60 * 1000;
+  for (;;) {
+    const job = await apiFetch(`/api/projects/${project.id}/ai-extract/jobs/${jobId}`);
+    if (job.status === "completed") break;
+    if (job.status === "failed") throw new Error(`extraction failed: ${job.error}`);
+    if (Date.now() > deadline) throw new Error("extraction did not finish within 5 minutes");
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const { candidates } = await apiFetch(`/api/projects/${project.id}/ai-extract/jobs/${jobId}/candidates`);
+  const candidate = candidates.find((c) => c.origin_identifier === testCase.origin);
+  if (!candidate) throw new Error(`${testCase.origin} not among the candidates`);
+  // The classification the case wants (an empty project with or without the
+  // standard's catalog loaded classifies an S1 identifier differently).
+  const target = { ...candidate, ...(testCase.classification ? { classification: testCase.classification } : {}), draft_status: "pending" };
+  if (testCase.classification === "catalog") Object.assign(target, testCase.catalog || {});
+  let systemPrompt = "";
+  const [result] = await draftCandidates([target], {
+    standard: testCase.standard,
+    ruleFormat: STANDARD_TO_RULE_FORMAT[testCase.standard],
+    ask: async ({ system, user }) => {
+      systemPrompt = system;
+      return sendMessagesToLlm(aiProvider, system, [{ role: "user", content: user }], SUGGEST_TEMPERATURE, EXTRACT_MAX_TOKENS);
+    },
+  });
+  return {
+    systemPrompt,
+    userMessage: "Write the texts for these BRDPs.",
+    answer: result.proposal || "",
+    checkContext: { standard: testCase.standard, systemPrompt, extract: result },
+  };
+}
+
 async function runCaseOnce(project, aiProvider, createdBrdp, testCase) {
+  if (testCase.type === "extract-from-rules") return runExtractCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "rule-test") return runRuleTestCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "rule-review") return runRuleReviewCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-rule") return runSuggestRuleCase(project, aiProvider, createdBrdp, testCase);
@@ -871,8 +936,9 @@ async function main() {
           });
         }
       }
-      const created = await createBrdp(project.id, testCase.brdp);
-      brdpByCase.set(testCase.id, created);
+      // An extract-from-rules case has no BRDP of its own: its candidates
+      // come from the file.
+      if (testCase.brdp) brdpByCase.set(testCase.id, await createBrdp(project.id, testCase.brdp));
     }
 
     for (const [standard, project] of projectByStandard) {
@@ -959,7 +1025,7 @@ function buildReportHeader(meta, runs) {
     model: meta.aiProvider.model,
     commit: meta.gitInfo.commit,
     uncommittedChanges: meta.gitInfo.dirty,
-    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE },
+    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE, "extract-from-rules": SUGGEST_TEMPERATURE },
     runs,
     generatedAt: meta.generatedAt,
     // C3: only some cases were run (--only / --cases).
@@ -978,7 +1044,7 @@ function writeReport(results, runs, meta) {
   lines.push(`- Provider: ${header.provider} / ${header.model}`);
   lines.push(`- Commit: ${header.commit}${header.uncommittedChanges ? " (+ uncommitted changes)" : ""}`);
   lines.push(
-    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}`
+    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}, extract-from-rules=${header.temperatures["extract-from-rules"]}`
   );
   lines.push(`- Runs per case: ${header.runs}`);
   lines.push(`- Generated: ${header.generatedAt}`);

@@ -160,7 +160,7 @@ async function main() {
 
       await page.goto(`${BASE_URL}/projects/${reimportProject.id}/config`);
       await page.waitForSelector("text=Import BRDPs from Excel", { timeout: 10000 });
-      await page.locator('input[type="file"]').setInputFiles(downloadedPaths[standard]);
+      await page.locator('input[type="file"][accept=".xlsx"]').setInputFiles(downloadedPaths[standard]);
       await page.waitForSelector('button:has-text("Apply import")', { timeout: 15000 });
       await page.click('button:has-text("Apply import")');
       const proceedBtn = page.locator('button:has-text("Proceed")');

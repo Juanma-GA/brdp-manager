@@ -146,7 +146,7 @@ async function main() {
 
     // ---- 2. Import the real Navantia xlsx via the real Data Management UI ----
     await page.waitForSelector("text=Import BRDPs from Excel", { timeout: 10000 });
-    const fileInput = page.locator('input[type="file"]');
+    const fileInput = page.locator('input[type="file"][accept=".xlsx"]');
     await fileInput.setInputFiles(absXlsxPath);
 
     await page.waitForSelector('button:has-text("Apply import")', { timeout: 15000 });
@@ -344,7 +344,8 @@ async function main() {
     assert(!xmlOnlyValidated.includes(edgeBrdp.id), "Verified-but-not-Validated BRDP is excluded ENTIRELY (no rule, no comment) while 'Only include Validated' is checked");
 
     await onlyValidatedCb.uncheck();
-    await page.click('button:has-text("Regenerate")');
+    // Changing an option clears the result, so the button reads "Generate" again.
+    await page.getByRole("button", { name: /^(Re)?generate$/i }).click();
     await page.waitForSelector("pre", { timeout: 30000 });
     const xmlAllRows = await page.locator("pre").innerText();
     assert(xmlAllRows.includes(edgeRule), "once 'Only include Validated' is unchecked, the Verified-but-not-Validated BRDP's approved rule IS included, verbatim, as a real pattern");

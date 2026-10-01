@@ -63,6 +63,37 @@ function isSuggestRule(text) {
   return text === "Write the rule for this BRDP.";
 }
 
+// AI Extract (1/2): "Write the texts for these BRDPs." -- one item per
+// "BRDP key=…" block of the prompt. The proposal is built from the block's
+// decision text (or its first rule), so the review table shows something
+// recognisable; the texts are in Spanish when the decision text is.
+// EXTRACT_BROKEN in a decision text → an answer that is not JSON (every
+// time, so the batch ends "not written").
+function extractReply(systemPrompt) {
+  if (/EXTRACT_BROKEN/.test(systemPrompt)) return "Sorry, here are the texts: {not json";
+  const blocks = systemPrompt.split(/\n(?=BRDP key=)/).slice(1);
+  const items = blocks.map((block) => {
+    const key = (block.match(/^BRDP key=(\S+)/) || [])[1];
+    const origin = (block.match(/Identifier in the source file: (\S+)/) || [])[1] || key;
+    const writeAll = /Write: title, definition, proposal/.test(block);
+    const decisionBlock = (block.match(/Decision text in the file[^\n]*\n((?: {2}> .*\n?)+)/) || [])[1] || "";
+    const decisionLines = decisionBlock.split("\n").map((l) => l.replace(/^ {2}> /, "")).filter(Boolean);
+    const decision = (decisionLines.find((l) => /Decision made by|shall|must|debe/.test(l)) || decisionLines[0] || "").replace(/^Decision made by \w+\.\s*/, "");
+    const firstRule = (block.match(/\n {2}- (\/\/?[^ ]+)/) || [])[1] || "";
+    const spanish = /\b(Decidir|debe|deben|el|la|los|las)\b/.test(decision);
+    const proposal = spanish
+      ? `MOCK-PROPUESTA ${origin}: ${decision || "se aplicará la regla"}.`
+      : `MOCK-PROPOSAL ${origin}: ${decision || (firstRule ? `${firstRule} shall be used as the rule enforces` : "the rule shall apply")}.`;
+    return {
+      key,
+      title: writeAll ? (spanish ? `Título MOCK de ${origin}` : `Mock title of ${origin}`) : "",
+      definition: writeAll ? (spanish ? `Decidir sobre ${origin}.` : `Decide on ${origin}.`) : "",
+      proposal,
+    };
+  });
+  return JSON.stringify({ items });
+}
+
 function suggestRuleReply(systemPrompt) {
   const id = (systemPrompt.match(/\nBRDP:\nID: (.*)/) || [])[1] || "BRDP-MOCK";
   const proposal = (systemPrompt.match(/\nProposal: (.*)\s*$/) || [])[1] || "";
@@ -740,6 +771,8 @@ const server = http.createServer((req, res) => {
       reply =
         "MOCK-LONG-DEFINITION: This decision point governs the applicability and scope of the allowedObjectFlag attribute across every structureObjectRule and nonContextRule in the data module, including split-rule variants, and must be evaluated consistently for every objectPath regardless of dmCode context or system differences. " +
         "Alsounabrokenverylongsingletokenwithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    } else if (userText === "Write the texts for these BRDPs.") {
+      reply = extractReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (isSuggestRule(userText)) {
       reply = suggestRuleReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (isRuleTestReview(userText)) {

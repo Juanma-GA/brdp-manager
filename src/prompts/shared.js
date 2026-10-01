@@ -42,6 +42,10 @@ export const RULE_TEST_REVIEW_TEMPERATURE = 0.3;
 // prose or one rule, far below it.
 export const RULE_TEST_MAX_TOKENS = 16000;
 
+// AI Extract (1/2): a batch of 10 BRDPs answers with title, definition and
+// proposal for each (~2-3k tokens); twice that leaves room for long texts.
+export const EXTRACT_MAX_TOKENS = 8000;
+
 // A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
 // examples with inline function expressions run well past this) -- rather
 // than risk silently blowing max_tokens/context on a huge prompt (HR7:

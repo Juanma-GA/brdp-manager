@@ -150,11 +150,26 @@ function formatRuleCopiedValue(value) {
   }
 }
 
+// AI Extract: the "extracted_from" event's value is JSON ({ file,
+// origin_identifier }); it reads as "<file> (source ID <id>)".
+function formatExtractedFromValue(t, value) {
+  if (!value) return '—';
+  try {
+    const parsed = JSON.parse(value);
+    return parsed.origin_identifier
+      ? t('records.history.extractedFromValue', { file: parsed.file, origin: parsed.origin_identifier })
+      : t('records.history.extractedFromValueNoId', { file: parsed.file });
+  } catch {
+    return value;
+  }
+}
+
 // The full value on hover: the raw text, except a rule test (its codes
 // would read as JSON), which shows its translated text.
 function historyValueTitle(t, fieldName, value) {
   if (!value) return undefined;
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
+  if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   return fieldName === 'rule_test' ? formatRuleTestHistoryValue(t, value) : value;
 }
 
@@ -180,7 +195,7 @@ function HistoryEditedExamples({ value }) {
 // long Definition) or it carries examples edited by hand (their XML).
 function isLongHistoryEntry(entry) {
   if (entry.field_name === 'rule_test') return (parseRuleTestHistoryValue(entry.new_value)?.editedExamples.length || 0) > 0;
-  if (HISTORY_TRANSLATED_FIELDS[entry.field_name] || entry.field_name === 'rule_copied') return false;
+  if (HISTORY_TRANSLATED_FIELDS[entry.field_name] || entry.field_name === 'rule_copied' || entry.field_name === 'extracted_from') return false;
   return [entry.old_value, entry.new_value].some((v) => historyText(entry.field_name, v).length > HISTORY_MAX_CHARS);
 }
 
@@ -192,7 +207,7 @@ function historyText(fieldName, value) {
 // The whole value of an expanded entry: the text as it was saved (a rule
 // keeps its line breaks and indentation).
 function fullHistoryValue(t, fieldName, value) {
-  if (fieldName === 'rule_test' || fieldName === 'rule_copied' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
+  if (fieldName === 'rule_test' || fieldName === 'rule_copied' || fieldName === 'extracted_from' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
   return value || '—';
 }
 
@@ -227,6 +242,7 @@ function historyReviewTag(entry) {
 function formatHistoryValue(t, fieldName, value) {
   if (fieldName === 'rule_test') return formatRuleTestHistoryValue(t, value);
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
+  if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   const prefix = HISTORY_TRANSLATED_FIELDS[fieldName];
   if (prefix) return t(`${prefix}.${value}`, { defaultValue: value });
   if (!value) return '—';
