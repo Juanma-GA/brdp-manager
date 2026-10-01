@@ -1,7 +1,8 @@
 // Configurable schema location (flat / master / custom pattern) -- the single
 // URL generator, recognition in the three forms, pattern validation,
 // Generate's rewriting of rule schema URLs (context blocks, allowed values,
-// unrecognized values reported), the BREX DM's own brex.xsd, the Schematron
+// unrecognized values reported, lists that mix forms on purpose left alone),
+// the BREX DM's own brex.xsd, the Schematron
 // export, and a rule test with context blocks in a custom-pattern project.
 // Run: node scripts/test-schema-location.mjs
 import fs from 'node:fs';
@@ -212,6 +213,95 @@ const summary = (file) => JSON.parse(fs.readFileSync(new URL(`../public/${file}`
   const out = await generateBREX301([{ id: 'a', identifier: 'BRDP-301', validation: 'Validated' }], { modelIdentCode: 'ABC', schemaLocation: 'master' }, { approvals: approvals([{ brdp_id: 'a', rule_xml: rule301 }]), schemaSummary: summary('brex-schema-summary-3-0-1.json') });
   check('3.0.1 master Generate: context in master form', out.valid && out.xml.includes('context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd"'), out.error);
   check('3.0.1 master Generate: brex.xsd in master form', /xsi:noNamespaceSchemaLocation="http:\/\/www\.s1000d\.org\/S1000D_3-0-1\/xml_schema_master\/dm\/brexSchema\.xsd"/.test(out.xml));
+}
+
+// ─── Lists that mix forms on purpose are left alone ─────────────────────────
+// BRDP-EXT-02772 of SOPTE allows each DM schema both in flat and in master
+// form (17 + 17). Its real text is not in this repository: the rule below has
+// that shape -- the same 17 schemas, each in both forms.
+{
+  const FLAT301 = (s) => schemaContextUrl(S301, s, 'flat');
+  const MASTER301 = (s) => schemaContextUrl(S301, s, 'master');
+  const SOPTE_SCHEMAS = ['appliccrossreftable', 'brex', 'checklist', 'comrep', 'condcrossreftable', 'container', 'crew', 'descript', 'fault', 'frontmatter', 'ipd', 'prdcrossreftable', 'proced', 'process', 'schedul', 'techrep', 'wrngdata'];
+  const objvals = (urls) => urls.map((u) => `<objval valtype="single" val1="${u}"/>`).join('');
+  const mixedValues = objvals([...SOPTE_SCHEMAS.map(FLAT301), ...SOPTE_SCHEMAS.map(MASTER301)]);
+  const ext02772 = `<objrule id="BRDP-EXT-02772"><objpath>//@xsi:noNamespaceSchemaLocation</objpath><objuse>Only the S1000D 3.0.1 DM schemas, flat or master.</objuse>${mixedValues}</objrule>`;
+  check('EXT-02772 shape: 34 values', (ext02772.match(/val1="/g) || []).length === 34);
+
+  const r = rewriteRuleSchemaUrls(ext02772, 'BREX-3.0.1', S301, 'master');
+  check('mixed flat+master in a Master project: values untouched', r.xml === ext02772 && r.rewritten.length === 0, JSON.stringify(r.rewritten.slice(0, 2)));
+  check('mixed: reported with its forms and value count', r.mixedForms?.forms.join() === 'flat,master' && r.mixedForms.count === 34, JSON.stringify(r.mixedForms));
+  check('mixed: nothing unrecognized', r.unrecognized.length === 0);
+  const rFlat = rewriteRuleSchemaUrls(ext02772, 'BREX-3.0.1', S301, 'flat');
+  check('mixed in a Flat project: untouched too', rFlat.xml === ext02772 && rFlat.mixedForms?.count === 34);
+  const rCustom = rewriteRuleSchemaUrls(ext02772, 'BREX-3.0.1', S301, REL);
+  check('mixed in a Custom project: untouched too', rCustom.xml === ext02772 && rCustom.mixedForms !== null);
+
+  // Contexts are still rewritten in a mixed rule.
+  const inContext = `<contextrules context="${FLAT301('descript')}"><structrules>${ext02772}</structrules></contextrules>`;
+  const c = rewriteRuleSchemaUrls(inContext, 'BREX-3.0.1', S301, 'master');
+  check('mixed: context still rewritten, values untouched',
+    c.rewritten.length === 1 && c.rewritten[0].where === 'context' && c.xml.includes(`context="${MASTER301('descript')}"`) && c.xml.includes(mixedValues) && c.mixedForms?.count === 34,
+    JSON.stringify(c.rewritten));
+
+  // One form only -> rewritten as before (master project, all flat).
+  const allFlat = `<objrule id="F"><objpath>//@xsi:noNamespaceSchemaLocation</objpath><objuse>u</objuse>${objvals(SOPTE_SCHEMAS.map(FLAT301))}</objrule>`;
+  const f = rewriteRuleSchemaUrls(allFlat, 'BREX-3.0.1', S301, 'master');
+  check('all flat in a Master project: all 17 rewritten, not mixed', f.rewritten.length === 17 && f.mixedForms === null && !f.xml.includes('xml_schema_flat'));
+  // Already in the project's form: nothing to do, not mixed.
+  const allMaster = `<objrule id="M"><objpath>//@xsi:noNamespaceSchemaLocation</objpath><objuse>u</objuse>${objvals(SOPTE_SCHEMAS.map(MASTER301))}</objrule>`;
+  const am = rewriteRuleSchemaUrls(allMaster, 'BREX-3.0.1', S301, 'master');
+  check('all master in a Master project: nothing rewritten, not mixed', am.rewritten.length === 0 && am.mixedForms === null && am.xml === allMaster);
+
+  // Unrecognized values never count as a form; still reported.
+  const withUrn = allFlat.replace('</objrule>', '<objval valtype="single" val1="urn:csdb:proced.xsd"/></objrule>');
+  const u = rewriteRuleSchemaUrls(withUrn, 'BREX-3.0.1', S301, 'master');
+  check('flat + unrecognized: flat rewritten, urn reported, not mixed', u.rewritten.length === 17 && u.unrecognized.length === 1 && u.mixedForms === null);
+  const mixedUrn = ext02772.replace('</objrule>', '<objval valtype="single" val1="urn:csdb:proced.xsd"/></objrule>');
+  const mu = rewriteRuleSchemaUrls(mixedUrn, 'BREX-3.0.1', S301, 'master');
+  check('mixed + unrecognized: untouched, both reported', mu.xml === mixedUrn && mu.mixedForms?.count === 34 && mu.unrecognized.length === 1);
+
+  // Custom pattern + flat in a Custom project: mixed (the pattern is its own form).
+  const s6 = S00006.replace(FLAT42('proced'), '../schemas/proced.xsd');
+  const s6m = rewriteRuleSchemaUrls(s6, 'BREX-4.2', S42, REL);
+  check('S1-00006 with one value already in the pattern: mixed custom+flat, values untouched',
+    s6m.mixedForms?.forms.join() === 'flat,custom' && s6m.rewritten.every((x) => x.where === 'context') && s6m.rewritten.length === s6Contexts,
+    JSON.stringify(s6m.mixedForms));
+  // Comments never count: a commented-out master URL does not make S1-00006 mixed.
+  const s6c = `<!-- was: valueAllowed="http://www.s1000d.org/S1000D_4-2/xml_schema_master/dm/procedSchema.xsd" -->\n${S00006}`;
+  check('a master URL in a comment does not make a rule mixed', rewriteRuleSchemaUrls(s6c, 'BREX-4.2', S42, LOCAL).mixedForms === null);
+
+  // Generate 3.0.1 in a Master project: EXT-02772 kept as written and listed
+  // in `mixed`; a single-form rule beside it still rewritten.
+  const brdps = [
+    { id: 'm', identifier: 'BRDP-EXT-02772', validation: 'Validated' },
+    { id: 'f', identifier: 'BRDP-ALLFLAT', validation: 'Validated' },
+  ];
+  const stored = [
+    { brdp_id: 'm', rule_xml: inContext },
+    { brdp_id: 'f', rule_xml: allFlat.replace('id="F"', 'id="BRDP-ALLFLAT"') },
+  ];
+  const out = await generateBREX301(brdps, { modelIdentCode: 'ABC', schemaLocation: 'master' }, { approvals: approvals(stored), schemaSummary: summary('brex-schema-summary-3-0-1.json') });
+  check('Generate 3.0.1 master: valid', out.valid, out.error);
+  check('Generate: EXT-02772 values kept as written (17 flat + 17 master)', SOPTE_SCHEMAS.every((s) => out.xml.includes(`val1="${FLAT301(s)}"`) && out.xml.includes(`val1="${MASTER301(s)}"`)));
+  check('Generate: EXT-02772 context in master form', out.xml.includes(`context="${MASTER301('descript')}"`));
+  check('Generate: report lists EXT-02772 as mixed', out.schemaUrls.mixed.map((x) => x.identifier).join() === 'BRDP-EXT-02772' && out.schemaUrls.mixed[0].forms.join() === 'flat,master' && out.schemaUrls.mixed[0].count === 34, JSON.stringify(out.schemaUrls.mixed));
+  check('Generate: EXT-02772 rewritten only in its context', out.schemaUrls.rewritten.find((x) => x.identifier === 'BRDP-EXT-02772')?.values.every((v) => v.where === 'context'));
+  check('Generate: the single-form rule beside it still rewritten', out.schemaUrls.rewritten.find((x) => x.identifier === 'BRDP-ALLFLAT')?.values.length === 17);
+  const sch = await generateBREXSch(brdps, { modelIdentCode: 'ABC', schemaLocation: 'master' }, { baseGenerator: generateBREX301, approvals: approvals(stored), schemaSummary: summary('brex-schema-summary-3-0-1.json') });
+  check('Schematron export carries the mixed list', sch.schemaUrls.mixed?.length === 1);
+
+  // The generated BREX still allows both forms (s1kd-brexcheck selection):
+  // EXT-02772 as a general rule, on DMs of every form.
+  const { brexcheckErrors } = await import('./lib/brexcheckEmulation.mjs');
+  const general = await generateBREX301([brdps[0]], { modelIdentCode: 'ABC', schemaLocation: 'master' }, { approvals: approvals([{ brdp_id: 'm', rule_xml: ext02772 }]), schemaSummary: summary('brex-schema-summary-3-0-1.json') });
+  check('general EXT-02772: valid, values untouched, listed as mixed', general.valid && general.xml.includes(mixedValues) && general.schemaUrls.mixed.length === 1 && general.schemaUrls.rewritten.length === 0, general.error);
+  const brexDoc = parseXml(general.xml);
+  const dm = (url) => parseXml(`<dmodule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="${url}"><content/></dmodule>`);
+  const errorIds = (url) => brexcheckErrors(brexDoc, dm(url)).map((e) => e.id);
+  check('generated BREX: a flat proced DM is allowed', !errorIds(FLAT301('proced')).includes('BRDP-EXT-02772'));
+  check('generated BREX: a master proced DM is allowed', !errorIds(MASTER301('proced')).includes('BRDP-EXT-02772'));
+  check('generated BREX: any other URL is an error', errorIds('http://example.com/proced.xsd').includes('BRDP-EXT-02772'));
 }
 
 // ─── Rule test in a custom-pattern project ──────────────────────────────────

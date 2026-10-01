@@ -923,6 +923,12 @@ const resources = {
         schemaUrlsUnrecognized_other: '{{count}} rules have schema URLs that were left as written',
         schemaUrlsUnrecognizedHint:
           'They are not flat, master or the project\'s pattern, so the application cannot tell which schema they name. Check them: a context block only applies to DMs whose schema URL is exactly this one.',
+        schemaUrlsMixed_one: '{{count}} rule mixes schema URL forms; it was left as written',
+        schemaUrlsMixed_other: '{{count}} rules mix schema URL forms; they were left as written',
+        schemaUrlsMixedHint:
+          'These rules allow schema URLs in more than one form (for example flat and master), on purpose. Rewriting them to the project\'s form would leave duplicate values and the rule would stop allowing one of the forms, so their allowed values are kept as written. Their context blocks are still written in the project\'s form.',
+        schemaUrlsMixedRule: 'mixes schema URL forms ({{forms}}, {{values}}); left as written',
+        schemaUrlForm: { flat: 'flat', master: 'master', custom: 'custom pattern' },
         schemaUrlValueCount_one: '{{count}} value',
         schemaUrlValueCount_other: '{{count}} values',
         schemaUrlWhere: { context: 'context', value: 'allowed value' },
@@ -1925,6 +1931,12 @@ const resources = {
         schemaUrlsUnrecognized_other: '{{count}} reglas tienen URL de esquema que se han dejado como estaban',
         schemaUrlsUnrecognizedHint:
           'No son flat, master ni el patrón del proyecto, así que la aplicación no sabe qué esquema nombran. Revísalas: un bloque de contexto solo se aplica a los DM cuya URL de esquema sea exactamente esa.',
+        schemaUrlsMixed_one: '{{count}} regla mezcla formas de URL de esquema; se ha dejado como estaba',
+        schemaUrlsMixed_other: '{{count}} reglas mezclan formas de URL de esquema; se han dejado como estaban',
+        schemaUrlsMixedHint:
+          'Estas reglas admiten a propósito URL de esquema en más de una forma (por ejemplo flat y master). Reescribirlas a la forma del proyecto dejaría valores duplicados y la regla dejaría de admitir una de las formas, así que sus valores permitidos se dejan como estaban. Sus bloques de contexto sí se escriben con la forma del proyecto.',
+        schemaUrlsMixedRule: 'mezcla formas de URL de esquema ({{forms}}, {{values}}); se ha dejado como estaba',
+        schemaUrlForm: { flat: 'flat', master: 'master', custom: 'patrón personalizado' },
         schemaUrlValueCount_one: '{{count}} valor',
         schemaUrlValueCount_other: '{{count}} valores',
         schemaUrlWhere: { context: 'contexto', value: 'valor permitido' },

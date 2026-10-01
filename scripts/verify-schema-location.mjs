@@ -12,7 +12,11 @@
 // and lists it in the report, leaves an unrecognized rulesContext as written
 // and warns about it, and the stored rules are unchanged; the BREX validates
 // against the XSD (the app's check and xmllint). Also: a 4.2 project with
-// "master" stored (old data) shows Flat; 3.0.1 still offers Master.
+// "master" stored (old data) shows Flat; 3.0.1 still offers Master. And a
+// 3.0.1 Master project whose rule allows each DM schema in flat AND master
+// form (shape of BRDP-EXT-02772): Generate leaves its values as written and
+// lists it in amber ("mixes schema URL forms"), in EN and ES, while a
+// flat-only rule beside it is still rewritten.
 //
 // Preconditions: uvicorn with MISTRAL_ENDPOINT=http://localhost:8902 and
 // MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks, Vite on 5173,
@@ -89,13 +93,13 @@ async function main() {
     throw new Error("embedding job did not finish");
   }
   const getRule = (project, brdp) => api(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/BREX-4.2`).then((r) => r.json());
-  async function putApproved(project, brdp, ruleXml) {
-    const put = await api(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/BREX-4.2`, {
+  async function putApproved(project, brdp, ruleXml, format = "BREX-4.2") {
+    const put = await api(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${format}`, {
       method: "PUT",
       body: JSON.stringify({ rule_xml: ruleXml, source: "manual" }),
     });
     if (!put.ok) throw new Error(`PUT rule ${brdp.identifier}: ${put.status} ${await put.text()}`);
-    const ok = await api(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/BREX-4.2/approve`, { method: "POST" });
+    const ok = await api(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${format}/approve`, { method: "POST" });
     if (!ok.ok) throw new Error(`approve ${brdp.identifier}: ${ok.status}`);
   }
 
@@ -114,6 +118,24 @@ async function main() {
   execFileSync("psql", ["-h", "localhost", "-U", "brdp", "brdp_manager", "-c",
     `UPDATE projects SET project_config = project_config || '{"schemaLocation":"master"}' WHERE id = '${pOld.id}'`], { env: { ...process.env, PGPASSWORD: "brdp" } });
   const p301 = await makeProject("Schema location 3.0.1", "S1000D 3.0.1");
+  // Part 4: a 3.0.1 Master project with a rule that allows each DM schema in
+  // flat AND master form (shape of BRDP-EXT-02772 of SOPTE: 17 + 17), and a
+  // rule with flat URLs only beside it.
+  const FLAT301 = (s) => `http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/${s}.xsd`;
+  const MASTER301 = (s) => `http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/${s}Schema.xsd`;
+  const SOPTE_SCHEMAS = ["appliccrossreftable", "brex", "checklist", "comrep", "condcrossreftable", "container", "crew", "descript", "fault", "frontmatter", "ipd", "prdcrossreftable", "proced", "process", "schedul", "techrep", "wrngdata"];
+  const objvals = (urls) => urls.map((u) => `\n  <objval valtype="single" val1="${u}"/>`).join("");
+  const MIXED_RULE = `<objrule id="BRDP-EXT-02772">\n  <objpath>//@xsi:noNamespaceSchemaLocation</objpath>\n  <objuse>Only the S1000D 3.0.1 DM schemas, flat or master.</objuse>${objvals([...SOPTE_SCHEMAS.map(FLAT301), ...SOPTE_SCHEMAS.map(MASTER301)])}\n</objrule>`;
+  const FLAT_ONLY_RULE = `<objrule id="BRDP-SL-FLAT">\n  <objpath>//@xsi:noNamespaceSchemaLocation</objpath>\n  <objuse>Only the descriptive and procedural schemas.</objuse>${objvals([FLAT301("descript"), FLAT301("proced")])}\n</objrule>`;
+  const pMaster = await makeProject("Schema location 3.0.1 master mixed", "S1000D 3.0.1");
+  await api(`/api/projects/${pMaster.id}/config`, {
+    method: "PUT",
+    body: JSON.stringify({ project_config: { projectName: pMaster.name, modelIdentCode: "SCHLOC", schemaLocation: "master" } }),
+  });
+  const mixedBrdp = await makeBrdp(pMaster, { identifier: "BRDP-EXT-02772", title: "Schemas allowed", proposal: "Only the S1000D 3.0.1 DM schemas are used, flat or master." });
+  const flatBrdp = await makeBrdp(pMaster, { identifier: "BRDP-SL-FLAT", title: "Schemas", proposal: "Only descript and proced." });
+  await putApproved(pMaster, mixedBrdp, MIXED_RULE, "BREX-3.0.1");
+  await putApproved(pMaster, flatBrdp, FLAT_ONLY_RULE, "BREX-3.0.1");
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 1300 } })).newPage();
@@ -261,6 +283,51 @@ async function main() {
     assert(sch.includes("@xsi:noNamespaceSchemaLocation = '../schemas/proced.xsd'"), "Schematron: condition uses the pattern path");
     assert(!sch.includes("xml_schema_flat"), "Schematron: no flat URL left");
     assert((await page.getByTestId("schema-urls-unrecognized").count()) === 1, "Schematron: same report");
+
+    // 7. Part 4: Generate in the 3.0.1 Master project -- the mixed list is
+    // left as written and listed in amber; the flat-only rule is rewritten.
+    await page.goto(`${BASE_URL}/projects/${pMaster.id}/generate`);
+    const btn301 = page.locator('button:has-text("Generate")').first();
+    await btn301.waitFor({ timeout: 10000 });
+    await btn301.click();
+    await page.waitForSelector("pre", { timeout: 30000 });
+    await page.waitForSelector("text=/Valid against XSD schema|XSD validation issue|XSD validation failed/", { timeout: 60000 });
+    const xml301 = await page.locator("pre").innerText();
+    assert(SOPTE_SCHEMAS.every((s) => xml301.includes(`val1="${FLAT301(s)}"`) && xml301.includes(`val1="${MASTER301(s)}"`)), "3.0.1 Master Generate: EXT-02772 keeps its 17 flat + 17 master values");
+    assert((xml301.match(/val1="[^"]*"/g) || []).length === 34 + 2, "3.0.1 Master Generate: no value duplicated or lost (36 values in all)");
+    const flatBlock = (/<objrule id="BRDP-SL-FLAT">[\s\S]*?<\/objrule>/.exec(xml301) || [""])[0];
+    assert(flatBlock.includes(`val1="${MASTER301("descript")}"`) && flatBlock.includes(`val1="${MASTER301("proced")}"`) && !flatBlock.includes("xml_schema_flat"), "3.0.1 Master Generate: the flat-only rule is rewritten to master");
+    assert(await page.locator("text=Valid against XSD schema").isVisible(), "3.0.1 Master Generate: valid against the XSD (app check)");
+    const mixed = page.getByTestId("schema-urls-mixed");
+    const mixedText = await mixed.textContent();
+    assert(mixedText.includes("1 rule mixes schema URL forms; it was left as written") && mixedText.includes("BRDP-EXT-02772") && mixedText.includes("mixes schema URL forms (flat, master, 34 values); left as written"), `amber report lists EXT-02772 (${mixedText.slice(0, 200)})`);
+    assert(!mixedText.includes("BRDP-SL-FLAT"), "the flat-only rule is not listed as mixed");
+    const summaryClass = await mixed.locator("summary").getAttribute("class");
+    assert(/badgePending/.test(summaryClass || ""), `mixed report uses the amber badge (${summaryClass})`);
+    assert(await mixed.evaluate((d) => d.open), "mixed report is open");
+    const rew301 = page.getByTestId("schema-urls-rewritten");
+    await rew301.locator("summary").click();
+    const rew301Text = await rew301.textContent();
+    assert(rew301Text.includes("BRDP-SL-FLAT") && !rew301Text.includes("BRDP-EXT-02772"), `rewritten report lists only the flat-only rule (${rew301Text.slice(0, 160)})`);
+    await mixed.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, "schema-location-mixed-forms.png"), fullPage: true });
+    const file301 = path.join(os.tmpdir(), `schema-location-301-${suffix}.xml`);
+    fs.writeFileSync(file301, xml301);
+    let lint301 = "valid";
+    try {
+      execFileSync("xmllint", ["--noout", "--schema", path.join(ROOT, "sources/S3.0.1/brex.xsd"), file301], { stdio: "pipe" });
+    } catch (err) {
+      lint301 = String(err.stderr || err.message).slice(0, 600);
+    }
+    assert(lint301 === "valid", `xmllint against S3.0.1/brex.xsd (${lint301})`);
+    await language("es");
+    await page.waitForTimeout(300);
+    const mixedEs = await page.getByTestId("schema-urls-mixed").textContent();
+    assert(mixedEs.includes("1 regla mezcla formas de URL de esquema; se ha dejado como estaba") && mixedEs.includes("mezcla formas de URL de esquema (flat, master, 34 valores); se ha dejado como estaba"), `ES mixed report (${mixedEs.slice(0, 200)})`);
+    await page.screenshot({ path: path.join(SHOTS, "schema-location-mixed-forms-es.png"), fullPage: true });
+    await language("en");
+    const storedMixed = await api(`/api/projects/${pMaster.id}/brdps/${mixedBrdp.id}/approvals/BREX-3.0.1`).then((r) => r.json());
+    assert(storedMixed.rule_xml === MIXED_RULE, "stored EXT-02772 unchanged");
   } finally {
     await browser.close();
     for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" });

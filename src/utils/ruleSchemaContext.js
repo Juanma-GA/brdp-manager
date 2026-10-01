@@ -140,19 +140,27 @@ function patternRegex(pattern) {
 // null. A URL of another issue, another host or another pattern is not
 // recognized (Generate leaves it as written and reports it).
 export function recognizeSchemaUrl(value, standard, location = DEFAULT_SCHEMA_LOCATION) {
+  return recognizeSchemaUrlForm(value, standard, location)?.schema ?? null;
+}
+
+// Same recognition, also saying WHICH form the URL is written in: "custom"
+// (the project's current pattern, checked first), "flat" or "master".
+// Generate uses the form to leave alone a rule whose allowed values mix forms
+// on purpose (see rewriteRuleSchemaUrls).
+export function recognizeSchemaUrlForm(value, standard, location = DEFAULT_SCHEMA_LOCATION) {
   const text = String(value ?? '').trim();
   if (!text) return null;
   if (isCustomSchemaLocation(location)) {
     const m = patternRegex(location).exec(text);
-    if (m) return m[1];
+    if (m) return { schema: m[1], form: 'custom' };
   }
   const issue = SCHEMA_CONTEXT_ISSUE[standard];
   if (!issue) return null;
   const base = escapeRe(`http://www.s1000d.org/S1000D_${issue}`);
   const flat = new RegExp(`^${base}/xml_schema_flat/${SCHEMA_NAME_RE}\\.xsd$`).exec(text);
-  if (flat) return flat[1];
+  if (flat) return { schema: flat[1], form: 'flat' };
   const master = new RegExp(`^${base}/xml_schema_master/([A-Za-z0-9_-]+)/${SCHEMA_NAME_RE}Schema\\.xsd$`).exec(text);
-  if (master && master[1] === (MASTER_SCHEMA_FOLDER[master[2]] || 'dm')) return master[2];
+  if (master && master[1] === (MASTER_SCHEMA_FOLDER[master[2]] || 'dm')) return { schema: master[2], form: 'master' };
   return null;
 }
 
@@ -459,9 +467,20 @@ export function checkRuleSchemaCoverage(elementNames, schemas, coverageByName) {
 // name. Never changed silently (HR7): a context that isn't recognized, and an
 // allowed value that isn't recognized in a rule that checks
 // @xsi:noNamespaceSchemaLocation (or that ends in .xsd), is left as written
-// and reported in `unrecognized`. Comments are never touched. Returns
-// { xml, rewritten: [{ where, from, to }], unrecognized: [{ where, value }] };
-// `where` is "context" | "value".
+// and reported in `unrecognized`. Comments are never touched.
+//
+// Lists that mix forms on purpose are left alone: the allowed values of a
+// rule are rewritten only when all its RECOGNIZED value URLs are in one form
+// (flat, master or the custom pattern). A rule that allows, say, both the
+// flat and the master URL of each schema (BRDP-EXT-02772 of SOPTE: 17 + 17)
+// would otherwise end up with every value twice and stop allowing one of the
+// forms; its values are kept as written and reported in `mixedForms`
+// ({ forms, count }). Unrecognized values never count as a form. Contexts are
+// always rewritten -- a context block must match the data modules exactly.
+//
+// Returns { xml, rewritten: [{ where, from, to }], unrecognized: [{ where,
+// value }], mixedForms: null | { forms: [...], count } }; `where` is
+// "context" | "value".
 const SCHEMA_URL_ATTRS = {
   'BREX-4.2': { context: { element: 'contextRules', attrs: ['rulesContext'] }, value: { element: 'objectValue', attrs: ['valueAllowed'] } },
   'BREX-4.1': { context: { element: 'contextRules', attrs: ['rulesContext'] }, value: { element: 'objectValue', attrs: ['valueAllowed'] } },
@@ -485,16 +504,35 @@ export function rewriteRuleSchemaUrls(ruleXml, format, standard, location = DEFA
   const spec = SCHEMA_URL_ATTRS[format];
   const rewritten = [];
   const unrecognized = [];
-  if (!spec || !supportsSchemaContext(standard)) return { xml, rewritten, unrecognized };
-  const checksSchemaLocation = /noNamespaceSchemaLocation/.test(xml.replace(/<!--[\s\S]*?-->/g, ''));
+  if (!spec || !supportsSchemaContext(standard)) return { xml, rewritten, unrecognized, mixedForms: null };
+  const uncommented = xml.replace(/<!--[\s\S]*?-->/g, '');
+  const checksSchemaLocation = /noNamespaceSchemaLocation/.test(uncommented);
+  const attrRe = (attrs) => new RegExp(String.raw`(\s(${attrs.join('|')})\s*=\s*)(["'])([^"']*)\3`, 'g');
+
+  // First pass: the forms of the recognized allowed values.
+  const valueForms = new Set();
+  let valueCount = 0;
+  const valueTagRe = new RegExp(String.raw`<${spec.value.element}\b[^>]*>`, 'g');
+  for (const tag of uncommented.match(valueTagRe) || []) {
+    for (const m of tag.matchAll(attrRe(spec.value.attrs))) {
+      const recognized = recognizeSchemaUrlForm(decodeAttr(m[4]), standard, location);
+      if (recognized) {
+        valueForms.add(recognized.form);
+        valueCount += 1;
+      }
+    }
+  }
+  const mixedForms =
+    valueForms.size > 1 ? { forms: ['flat', 'master', 'custom'].filter((f) => valueForms.has(f)), count: valueCount } : null;
 
   const rewriteTag = (tag, where, attrs) =>
     tag.replace(
-      new RegExp(String.raw`(\s(${attrs.join('|')})\s*=\s*)(["'])([^"']*)\3`, 'g'),
+      attrRe(attrs),
       (full, pre, _name, quote, raw) => {
         const value = decodeAttr(raw);
         if (!value.trim()) return full;
         const schema = recognizeSchemaUrl(value, standard, location);
+        if (schema && where === 'value' && mixedForms) return full;
         if (!schema) {
           if (where === 'context' || checksSchemaLocation || /\.xsd\s*$/i.test(value)) unrecognized.push({ where, value });
           return full;
@@ -520,7 +558,7 @@ export function rewriteRuleSchemaUrls(ruleXml, format, standard, location = DEFA
           )
     )
     .join('');
-  return { xml: out, rewritten, unrecognized };
+  return { xml: out, rewritten, unrecognized, mixedForms };
 }
 
 // Safety net after Generate (HR7): the context blocks of a generated BREX
@@ -558,11 +596,13 @@ export function setDmoduleSchemaLocation(xml, url) {
 export function rewriteApprovedRulesSchemaUrls(rules, format, standard, location = DEFAULT_SCHEMA_LOCATION) {
   const rewritten = [];
   const unrecognized = [];
+  const mixed = [];
   const out = rules.map((rule) => {
     const r = rewriteRuleSchemaUrls(rule.xml, format, standard, location);
     if (r.rewritten.length) rewritten.push({ identifier: rule.identifier, values: r.rewritten });
     if (r.unrecognized.length) unrecognized.push({ identifier: rule.identifier, values: r.unrecognized });
+    if (r.mixedForms) mixed.push({ identifier: rule.identifier, ...r.mixedForms });
     return { ...rule, xml: r.xml };
   });
-  return { rules: out, schemaUrls: { location, rewritten, unrecognized } };
+  return { rules: out, schemaUrls: { location, rewritten, unrecognized, mixed } };
 }

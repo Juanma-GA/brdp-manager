@@ -424,11 +424,12 @@ export default function GeneratePage() {
 
 // Generate rewrites the schema URLs of the rules to the project's current
 // "Schema location" (output only) -- what it rewrote, and what it left as
-// written because it could not recognize it (HR7: never silently).
+// written because it could not recognize it or because the rule mixes schema
+// URL forms on purpose (HR7: never silently).
 function SchemaUrlReport({ report }) {
   const { t } = useTranslation();
-  const { location, rewritten = [], unrecognized = [] } = report;
-  if (rewritten.length === 0 && unrecognized.length === 0) return null;
+  const { location, rewritten = [], unrecognized = [], mixed = [] } = report;
+  if (rewritten.length === 0 && unrecognized.length === 0 && mixed.length === 0) return null;
   const locationName =
     location === 'flat' || location === 'master'
       ? t(`generate.schemaLocationName.${location}`)
@@ -452,6 +453,25 @@ function SchemaUrlReport({ report }) {
                     </li>
                   ))}
                 </ul>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {mixed.length > 0 && (
+        <details className={styles.xsdSection} open data-testid="schema-urls-mixed">
+          <summary className={styles.badgePending}>
+            ⚠ {t('generate.schemaUrlsMixed', { count: mixed.length })}
+          </summary>
+          <p className={styles.hint}>{t('generate.schemaUrlsMixedHint')}</p>
+          <ul className={styles.errorList}>
+            {mixed.map((r) => (
+              <li key={r.identifier}>
+                <strong>{r.identifier}</strong> —{' '}
+                {t('generate.schemaUrlsMixedRule', {
+                  forms: r.forms.map((f) => t(`generate.schemaUrlForm.${f}`)).join(', '),
+                  values: t('generate.schemaUrlValueCount', { count: r.count }),
+                })}
               </li>
             ))}
           </ul>

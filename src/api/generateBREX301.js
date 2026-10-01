@@ -504,7 +504,7 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
   // recognized as schema URLs are rewritten, the rest is reported
   // (src/utils/ruleSchemaContext.js, rewriteRuleSchemaUrls).
   const schemaLocation = schemaLocationOf(projectConfig, 'S1000D 3.0.1');
-  let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [] };
+  let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [], mixed: [] };
   const schemaRewrite = (list) => {
     const r = rewriteApprovedRulesSchemaUrls(
       list.map((b) => ({ id: b.id, identifier: b.identifier || b.id, xml: approvalById.get(b.id).rule_xml })),
