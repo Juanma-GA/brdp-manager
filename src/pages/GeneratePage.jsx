@@ -394,6 +394,8 @@ export default function GeneratePage() {
             </details>
           )}
 
+          {result.xml && result.schemaUrls && <SchemaUrlReport report={result.schemaUrls} />}
+
           {result.xml ? (
             <>
               <pre className={styles.xmlOutput}>{result.xml}</pre>
@@ -408,5 +410,66 @@ export default function GeneratePage() {
         </div>
       )}
     </div>
+  );
+}
+
+// Generate rewrites the schema URLs of the rules to the project's current
+// "Schema location" (output only) -- what it rewrote, and what it left as
+// written because it could not recognize it (HR7: never silently).
+function SchemaUrlReport({ report }) {
+  const { t } = useTranslation();
+  const { location, rewritten = [], unrecognized = [] } = report;
+  if (rewritten.length === 0 && unrecognized.length === 0) return null;
+  const locationName =
+    location === 'flat' || location === 'master'
+      ? t(`generate.schemaLocationName.${location}`)
+      : t('generate.schemaLocationName.custom', { pattern: location });
+  return (
+    <>
+      {rewritten.length > 0 && (
+        <details className={styles.xsdSection} data-testid="schema-urls-rewritten">
+          <summary className={styles.badgeOk}>
+            {t('generate.schemaUrlsRewritten', { count: rewritten.length, location: locationName })}
+          </summary>
+          <p className={styles.hint}>{t('generate.schemaUrlsRewrittenHint')}</p>
+          <ul className={styles.errorList}>
+            {rewritten.map((r) => (
+              <li key={r.identifier}>
+                <strong>{r.identifier}</strong> — {t('generate.schemaUrlValueCount', { count: r.values.length })}
+                <ul>
+                  {r.values.map((v, i) => (
+                    <li key={i}>
+                      {t(`generate.schemaUrlWhere.${v.where}`)}: <code>{v.from}</code> → <code>{v.to}</code>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {unrecognized.length > 0 && (
+        <details className={styles.xsdSection} open data-testid="schema-urls-unrecognized">
+          <summary className={styles.badgePending}>
+            ⚠ {t('generate.schemaUrlsUnrecognized', { count: unrecognized.length })}
+          </summary>
+          <p className={styles.hint}>{t('generate.schemaUrlsUnrecognizedHint')}</p>
+          <ul className={styles.errorList}>
+            {unrecognized.map((r) => (
+              <li key={r.identifier}>
+                <strong>{r.identifier}</strong>
+                <ul>
+                  {r.values.map((v, i) => (
+                    <li key={i}>
+                      {t(`generate.schemaUrlWhere.${v.where}`)}: <code>{v.value}</code>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </>
   );
 }

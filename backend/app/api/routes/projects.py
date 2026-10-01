@@ -9,6 +9,7 @@ from app.db.base import get_db
 from app.models import BRDP, BRDPCatalog, Project, User, UserProjectRole
 from app.repositories.brdp_repository import compute_status_counts
 from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut, ProjectRename
+from app.services.schema_location import schema_location_problem
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -132,6 +133,9 @@ async def create_project(
     value the caller does supply in body.project_config wins over the default.
     """
     project_config = {**_DEFAULT_PROJECT_CONFIG, **body.project_config}
+    problem = schema_location_problem(body.standard, project_config)
+    if problem:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problem)
     project = Project(name=body.name, standard=body.standard, project_config=project_config)
     db.add(project)
     await db.flush()  # assigns project.id, needed below, before the real commit
@@ -183,6 +187,11 @@ async def update_project_config(
     project = await db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    # Same rules as the configuration page (src/utils/ruleSchemaContext.js):
+    # a schema location the app could not use is never stored.
+    problem = schema_location_problem(project.standard, body.project_config)
+    if problem:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problem)
     project.project_config = body.project_config
     await db.commit()
     await db.refresh(project)

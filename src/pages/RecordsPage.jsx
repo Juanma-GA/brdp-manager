@@ -686,7 +686,7 @@ export default function RecordsPage() {
   const suggestions = useSuggestions({
     projectId,
     standard: project.standard,
-    schemaLocation: schemaLocationOf(project.project_config),
+    schemaLocation: schemaLocationOf(project.project_config, project.standard),
     selected,
     aiProvider,
     vocabulary,
@@ -1586,6 +1586,7 @@ export default function RecordsPage() {
                       saved={savedTest}
                       format={ruleFormat}
                       standard={project.standard}
+                      schemaLocation={schemaLocationOf(project.project_config, project.standard)}
                       vocabulary={vocabulary}
                       onClose={() => setSavedTestOpenFor(null)}
                       rerun={
@@ -1606,7 +1607,7 @@ export default function RecordsPage() {
                       ruleXml={ruleApproval.rule_xml}
                       format={ruleFormat}
                       standard={project.standard}
-                      schemaLocation={schemaLocationOf(project.project_config)}
+                      schemaLocation={schemaLocationOf(project.project_config, project.standard)}
                       brdp={selected}
                       aiProvider={aiProvider}
                       vocabulary={vocabulary}

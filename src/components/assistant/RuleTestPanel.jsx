@@ -663,7 +663,7 @@ export default function RuleTestPanel({
                 (() =>
                   onSuggestCorrectedRule({
                     ruleXml,
-                    schemas: contextSchemasOfRule(ruleXml).schemas,
+                    schemas: contextSchemasOfRule(ruleXml, schemaLocation).schemas,
                     mismatches: review.mismatches,
                     diagnosis: review.explanation,
                   }))

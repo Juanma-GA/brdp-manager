@@ -55,7 +55,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   const analysis = useMemo(() => analyzeRule(ruleXml, format, { standard }), [ruleXml, format, standard]);
   // T3b: what the rule checks, read from its XML -- shown in place of an
   // explanation by the LLM, and the ground truth the review is given.
-  const description = useMemo(() => describeRule(ruleXml, format), [ruleXml, format]);
+  const description = useMemo(() => describeRule(ruleXml, format, { schemaLocation }), [ruleXml, format, schemaLocation]);
   // "Ejemplos bajo demanda en reglas no ejecutables": when the WHOLE rule
   // cannot be executed, the examples could only illustrate it (and a real
   // run produced broken ones) -- they are not generated until the user
@@ -201,7 +201,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     if (state.status !== 'ready') return;
     const example = editExample(state.examples[index], content, metadata, setupRef.current);
     const examples = state.examples.map((ex, i) => (i === index ? example : ex));
-    const runs = state.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary }) : r));
+    const runs = state.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary, schemaLocation }) : r));
     setState({ ...state, examples, runs });
     if (!examples.some((ex) => ex.editedByUser)) {
       setEditNotice(null);

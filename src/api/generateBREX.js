@@ -1,6 +1,7 @@
 import { getApprovalsForFormat } from "./approvals.js";
 import { wrapRuleXmlFragment } from "../utils/ruleXmlFragment.js";
 import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache = null;
 
@@ -722,10 +723,27 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
     else unapprovedBRDPs.push(brdp);
   }
 
+  // Schema URLs follow the project's CURRENT "Schema location" (output only;
+  // the stored rules are never changed): context blocks and allowed values
+  // recognized as schema URLs are rewritten, the rest is reported
+  // (src/utils/ruleSchemaContext.js, rewriteRuleSchemaUrls).
+  const schemaLocation = schemaLocationOf(projectConfig, 'S1000D 4.2');
+  let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [] };
+  const schemaRewrite = (list) => {
+    const r = rewriteApprovedRulesSchemaUrls(
+      list.map((b) => ({ id: b.id, identifier: b.identifier || b.id, xml: approvalById.get(b.id).rule_xml })),
+      'BREX-4.2',
+      'S1000D 4.2',
+      schemaLocation
+    );
+    schemaUrls = r.schemaUrls;
+    return r.rules;
+  };
+
   let finalXml = buildEmptyDocument(projectConfig, schemaSummary);
 
   if (approvedBRDPs.length > 0) {
-    const approvedRules = approvedBRDPs.map((b) => ({ id: b.id, xml: approvalById.get(b.id).rule_xml }));
+    const approvedRules = schemaRewrite(approvedBRDPs).map((r) => ({ id: r.id, xml: r.xml }));
     const baseDoc = new DOMParser().parseFromString(finalXml, 'application/xml');
     assembleChunks(baseDoc, approvedRules);
     finalXml = serializeDocument(baseDoc);
@@ -746,8 +764,9 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
   // is already correct by construction in buildEmptyDocument, so this is a
   // safety net, not a correction of LLM output.
   finalXml = finalizeDocument(finalXml, projectConfig, schemaSummary);
+  finalXml = setDmoduleSchemaLocation(finalXml, schemaContextUrl('S1000D 4.2', 'brex', schemaLocation));
 
   const { valid, error } = checkWellFormed(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length };
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls };
 }

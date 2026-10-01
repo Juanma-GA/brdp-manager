@@ -1,6 +1,7 @@
 import { extractXML, checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
 import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache41 = null;
 
@@ -558,10 +559,27 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
     else unapprovedBRDPs.push(brdp);
   }
 
+  // Schema URLs follow the project's CURRENT "Schema location" (output only;
+  // the stored rules are never changed): context blocks and allowed values
+  // recognized as schema URLs are rewritten, the rest is reported
+  // (src/utils/ruleSchemaContext.js, rewriteRuleSchemaUrls).
+  const schemaLocation = schemaLocationOf(projectConfig, 'S1000D 4.1');
+  let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [] };
+  const schemaRewrite = (list) => {
+    const r = rewriteApprovedRulesSchemaUrls(
+      list.map((b) => ({ id: b.id, identifier: b.identifier || b.id, xml: approvalById.get(b.id).rule_xml })),
+      'BREX-4.1',
+      'S1000D 4.1',
+      schemaLocation
+    );
+    schemaUrls = r.schemaUrls;
+    return r.rules;
+  };
+
   let finalXml = buildEmptyDocument41(projectConfig, schemaSummary);
 
   if (approvedBRDPs.length > 0) {
-    const approvedXml = approvedBRDPs.map((b) => approvalById.get(b.id).rule_xml).join('\n');
+    const approvedXml = schemaRewrite(approvedBRDPs).map((r) => r.xml).join('\n');
     finalXml = assembleChunks41(finalXml, approvedXml);
   }
 
@@ -575,8 +593,9 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
   }
 
   finalXml = finalizeDocument41(finalXml, projectConfig, schemaSummary);
+  finalXml = setDmoduleSchemaLocation(finalXml, schemaContextUrl('S1000D 4.1', 'brex', schemaLocation));
 
   const { valid, error } = checkWellFormed(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length };
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls };
 }

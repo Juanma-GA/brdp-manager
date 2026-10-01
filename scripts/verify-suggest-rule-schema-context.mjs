@@ -415,7 +415,10 @@ async function main() {
     const genericMIdx = xml.indexOf("<contextrules>");
     const descMIdx = xml.indexOf('context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd"');
     assert(descMIdx > 0 && (genericMIdx === -1 || genericMIdx < descMIdx), "3.0.1 master: block placed after the generic contextrules (if any)");
-    assert(xml.includes("xml_schema_flat/brex.xsd") && !xml.includes("xml_schema_master/dm/brexSchema.xsd"), "3.0.1 master: the BREX's own schema URL is unchanged");
+    // Since "Ubicación del esquema configurable": the BREX's own brex.xsd
+    // follows the project's schema location too (master: dm/brexSchema.xsd,
+    // as in the real 3.0.1 master list of BRDP-A1-00100).
+    assert(/<dmodule\b[^>]*xsi:noNamespaceSchemaLocation="http:\/\/www\.s1000d\.org\/S1000D_3-0-1\/xml_schema_master\/dm\/brexSchema\.xsd"/.test(xml) && !xml.includes("xml_schema_flat/brex.xsd"), "3.0.1 master: the BREX's own schema URL in master form");
     assert(xmllint(xml, "S1000D 3.0.1") === "valid", `3.0.1 master: xmllint valid (${xmllint(xml, "S1000D 3.0.1")})`);
     await checkPendingComments(pMaster, xml, ["BRDP-SC-M-NEXT", "BRDP-SC-M-PEND"]);
     await page.screenshot({ path: "/tmp/schema-ctx-generate-master.png", fullPage: true });

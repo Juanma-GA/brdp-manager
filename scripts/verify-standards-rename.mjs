@@ -201,9 +201,12 @@ async function main() {
     assert(brexBadgeOk > 0, "BREX output reports well-formed XML");
     await page.screenshot({ path: "/tmp/verify-2-brex-4-2-output.png", fullPage: true });
 
-    // Switch to Schematron -- same page, no reload -- and regenerate.
+    // Switch to Schematron -- same page, no reload -- and generate again
+    // (switching the output clears the previous result, so the button reads
+    // "Generate" again, not "Regenerate").
     await page.click('button:has-text("Schematron (XPath 2.0)")');
-    await page.click('button:has-text("Regenerate")');
+    await page.locator("pre").waitFor({ state: "detached", timeout: 10000 });
+    await page.click('button:has-text("Generate")');
     await page.waitForSelector("pre", { timeout: 30000 });
     const schOutput = await page.locator("pre").innerText();
     assert(schOutput.includes("<sch:schema"), "Schematron output is a real <sch:schema> document");

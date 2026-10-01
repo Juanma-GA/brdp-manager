@@ -5,7 +5,13 @@ import { authFetch, authFetchJson } from '../services/apiClient';
 import { CURATED_TEMPLATE_BY_STANDARD } from '../utils/excelUtils';
 import { ruleStateOf } from '../utils/ruleState';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
-import { SCHEMA_LOCATIONS, schemaLocationOf, supportsSchemaContext } from '../utils/ruleSchemaContext.js';
+import {
+  schemaContextUrl,
+  schemaLocationOf,
+  schemaLocationOptions,
+  supportsSchemaContext,
+  validateSchemaPattern,
+} from '../utils/ruleSchemaContext.js';
 import {
   useActiveImportJob,
   useDismissImportJob,
@@ -707,15 +713,37 @@ export default function ProjectConfigPage() {
 
   // A failed save (or a failed reload of what was saved) is shown next to
   // the button, never swallowed (HR7).
+  // Schema location (S1000D only): the option shown is one this standard
+  // offers -- "master" stored on a 4.x project reads as flat --, and a custom
+  // pattern must be valid before anything is saved (the reason is shown
+  // under the field; the backend refuses an invalid one too).
+  const hasSchemaLocation = supportsSchemaContext(project.standard);
+  const locationOptions = schemaLocationOptions(project.standard);
+  const selectedLocation = locationOptions.includes(values.schemaLocation) ? values.schemaLocation : 'flat';
+  const patternError =
+    hasSchemaLocation && selectedLocation === 'custom' ? validateSchemaPattern(values.schemaLocationPattern) : null;
+  const previewLocation =
+    selectedLocation === 'custom'
+      ? patternError
+        ? null
+        : String(values.schemaLocationPattern).trim()
+      : schemaLocationOf({ schemaLocation: selectedLocation }, project.standard);
+
   const handleSave = async (e) => {
     e.preventDefault();
+    if (patternError) return;
     setIsSaving(true);
     setSaveError(null);
+    const toSave = { ...values };
+    if (hasSchemaLocation) {
+      toSave.schemaLocation = selectedLocation;
+      if (selectedLocation === 'custom') toSave.schemaLocationPattern = String(values.schemaLocationPattern).trim();
+    }
     try {
       await authFetchJson(`/api/projects/${projectId}/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_config: values }),
+        body: JSON.stringify({ project_config: toSave }),
       });
     } catch (err) {
       setSaveError(t('config.saveError', { error: err.message }));
@@ -758,7 +786,7 @@ export default function ProjectConfigPage() {
               {f.hintKey && <span className={styles.hint}>{t(`config.fields.${f.hintKey}`)}</span>}
             </div>
           ))}
-          {supportsSchemaContext(project.standard) && (
+          {hasSchemaLocation && (
             <div className={styles.field}>
               <label className={styles.label} htmlFor="cfg-schemaLocation">
                 {t('config.fields.schemaLocation')}
@@ -766,23 +794,62 @@ export default function ProjectConfigPage() {
               <select
                 id="cfg-schemaLocation"
                 className={styles.input}
-                value={schemaLocationOf(values)}
+                value={selectedLocation}
                 onChange={(e) => handleChange('schemaLocation', e.target.value)}
                 disabled={!canEdit}
               >
-                {SCHEMA_LOCATIONS.map((loc) => (
+                {locationOptions.map((loc) => (
                   <option key={loc} value={loc}>
                     {t(`config.fields.schemaLocationOptions.${loc}`)}
                   </option>
                 ))}
               </select>
               <span className={styles.hint}>{t('config.fields.schemaLocationHint')}</span>
+              {selectedLocation === 'custom' && (
+                <>
+                  <label className={styles.label} htmlFor="cfg-schemaLocationPattern">
+                    {t('config.fields.schemaLocationPattern')}
+                  </label>
+                  <input
+                    id="cfg-schemaLocationPattern"
+                    className={styles.input}
+                    value={values.schemaLocationPattern || ''}
+                    placeholder="../schemas/{schema}.xsd"
+                    onChange={(e) => handleChange('schemaLocationPattern', e.target.value)}
+                    disabled={!canEdit}
+                    aria-invalid={patternError ? 'true' : 'false'}
+                  />
+                  <span className={styles.hint}>{t('config.fields.schemaLocationPatternHint')}</span>
+                  {patternError && (
+                    <span className={styles.saveError} role="alert" data-testid="schema-pattern-error">
+                      {t(`config.fields.schemaPatternErrors.${patternError.code}`, patternError.params)}
+                    </span>
+                  )}
+                </>
+              )}
+              {previewLocation && (
+                <div className={styles.hint} data-testid="schema-location-preview">
+                  {t('config.fields.schemaLocationPreview')}:
+                  {['proced', 'descript'].map((schema) => (
+                    <div key={schema}>
+                      <code>{schemaContextUrl(project.standard, schema, previewLocation)}</code>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {canEdit && (
-          <Button type="submit" busy={isSaving} busyLabel={t('config.saving')} success={saved} data-testid="config-save">
+          <Button
+            type="submit"
+            busy={isSaving}
+            busyLabel={t('config.saving')}
+            success={saved}
+            disabled={!!patternError}
+            data-testid="config-save"
+          >
             {t('config.save')}
           </Button>
         )}

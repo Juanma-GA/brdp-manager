@@ -409,7 +409,7 @@ function makeEvaluator(doc) {
 // The rule parts, in document order: every rule element (with the schema of
 // its context block, if any) and every nonContextRule (4.x element, 3.0.1
 // comment).
-function collectParts(ruleRoot, spec) {
+function collectParts(ruleRoot, spec, schemaLocation = null) {
   const parts = [];
   const walk = (node, schema) => {
     for (let n = node.firstChild; n; n = n.nextSibling) {
@@ -425,7 +425,7 @@ function collectParts(ruleRoot, spec) {
         parts.push({ kind: 'nonContext', ruleId: n.getAttribute('id') || null });
       } else if (n.nodeName === spec.context) {
         const url = (n.getAttribute(spec.contextAttr) || '').trim();
-        walk(n, url ? schemaNameFromContext(url) : schema);
+        walk(n, url ? schemaNameFromContext(url, schemaLocation) : schema);
       } else {
         walk(n, schema);
       }
@@ -460,13 +460,13 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
     return notExecutable(REASON.ruleXml(err.message));
   }
 
-  const parts = collectParts(ruleDoc.documentElement, spec);
+  const parts = collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null);
   if (!parts.length) return notExecutable(REASON.noRule(spec.rule));
 
   const xsi = doc.documentElement.getAttributeNS
     ? doc.documentElement.getAttributeNS(KNOWN_NAMESPACES.xsi, 'noNamespaceSchemaLocation')
     : null;
-  const schema = fragmentSchema || (xsi ? schemaNameFromContext(xsi) : null);
+  const schema = fragmentSchema || (xsi ? schemaNameFromContext(xsi, options.schemaLocation || null) : null);
   const evaluate = makeEvaluator(doc);
 
   const violations = [];
@@ -542,7 +542,7 @@ export function analyzeRule(ruleXml, format, options = {}) {
   } catch (err) {
     return none(REASON.ruleXml(err.message));
   }
-  const parts = collectParts(ruleDoc.documentElement, spec);
+  const parts = collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null);
   if (!parts.length) return none(REASON.noRule(spec.rule));
 
   const notRun = [];
@@ -747,7 +747,7 @@ export function describeRule(ruleXml, format, options = {}) {
     return { available: false };
   }
   const statements = [];
-  for (const part of collectParts(ruleDoc.documentElement, spec)) {
+  for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
     const statement = describePart(part, spec, parseXml);
     const key = JSON.stringify(statement);
     const same = statements.find((s) => s.key === key && (s.schemas.length > 0) === Boolean(part.schema));
@@ -783,7 +783,7 @@ export function ruleConditions(ruleXml, format, options = {}) {
     return [];
   }
   const out = [];
-  for (const part of collectParts(ruleDoc.documentElement, spec)) {
+  for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
     if (part.kind !== 'rule') continue;
     try {
       const { expression, flag } = partBasics(part, spec);
@@ -845,7 +845,7 @@ export function ruleStructure(ruleXml, format, options = {}) {
   } catch {
     return { available: false };
   }
-  const parts = collectParts(ruleDoc.documentElement, spec).map((part) => {
+  const parts = collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null).map((part) => {
     if (part.kind === 'nonContext') return { ruleId: part.ruleId, kind: 'nonContext', schema: part.schema || null, path: '', flag: null, values: [] };
     const pathEl = childElements(part.element, spec.path)[0];
     const rawFlag = pathEl ? pathEl.getAttribute(spec.flagAttr) : null;

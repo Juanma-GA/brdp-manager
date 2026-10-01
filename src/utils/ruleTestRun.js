@@ -24,7 +24,7 @@ const MAX_SCHEMA_FACTS = 6;
 
 // The schemas the examples use and where each takes the LLM's content.
 export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure }) {
-  const contextSchemas = contextSchemasOfRule(ruleXml).schemas;
+  const contextSchemas = contextSchemasOfRule(ruleXml, schemaLocation).schemas;
   const targets = ruleTargets(ruleXml);
   const useNames = ruleUseNames(ruleXml);
   const factNames = extractRuleNames(ruleXml).elements.slice(0, MAX_SCHEMA_FACTS);

@@ -76,6 +76,15 @@ import { answerStructuralQuestion } from "../src/utils/structuralAnswer.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
+
+// A case's "schemaLocation" read like the project's configuration would be.
+function caseSchemaLocation(testCase) {
+  const value = testCase.schemaLocation;
+  const config = typeof value === "string" && value.includes("{schema}")
+    ? { schemaLocation: "custom", schemaLocationPattern: value }
+    : { schemaLocation: value };
+  return schemaLocationOf(config, testCase.standard);
+}
 import { validateXML } from "xmllint-wasm";
 import { distinctSchemaNames, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
@@ -680,9 +689,10 @@ async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
   const answer = await sendToLlm(aiProvider, systemPrompt, SUGGEST_RULE_USER_MESSAGE, SUGGEST_TEMPERATURE);
   const parsed = parseSuggestRuleResponse(answer);
   const xml = parsed.xml ?? "";
-  // Optional "schemaLocation" on the case ("flat" | "master", default flat) --
-  // the project's Schema location setting, i.e. the context URL form.
-  const location = schemaLocationOf({ schemaLocation: testCase.schemaLocation });
+  // Optional "schemaLocation" on the case ("flat" | "master" | a custom
+  // pattern with {schema}, default flat) -- the project's Schema location
+  // setting, i.e. the context URL form.
+  const location = caseSchemaLocation(testCase);
   const finalRule = xml ? wrapRuleInSchemaContexts(xml, similar.format, testCase.standard, schemas, location) : "";
   return {
     systemPrompt,
@@ -723,7 +733,7 @@ async function sendMessagesToLlm(aiProvider, systemPrompt, messages, temperature
 
 async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
   const format = STANDARD_TO_RULE_FORMAT[testCase.standard];
-  const location = schemaLocationOf({ schemaLocation: testCase.schemaLocation });
+  const location = caseSchemaLocation(testCase);
   const schemas = testCase.schemas || [];
   const ruleXml = schemas.length ? wrapRuleInSchemaContexts(testCase.rule, format, testCase.standard, schemas, location) : testCase.rule;
   const vocabulary = loadSchemaVocabulary(testCase.standard);
@@ -775,7 +785,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
 // case's fixed mismatched examples -- at RULE_TEST_REVIEW_TEMPERATURE.
 async function runRuleReviewCase(project, aiProvider, createdBrdp, testCase) {
   const format = STANDARD_TO_RULE_FORMAT[testCase.standard];
-  const location = schemaLocationOf({ schemaLocation: testCase.schemaLocation });
+  const location = caseSchemaLocation(testCase);
   const schemas = testCase.schemas || [];
   const ruleXml = schemas.length ? wrapRuleInSchemaContexts(testCase.rule, format, testCase.standard, schemas, location) : testCase.rule;
   const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));

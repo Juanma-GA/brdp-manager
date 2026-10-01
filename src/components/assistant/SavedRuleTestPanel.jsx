@@ -22,11 +22,11 @@ import { ExampleCard, ReplacePassedQuestion, TONE_CLASS, formatTestDate, verdict
 // replacing a passed test.
 //   rerun: { ruleXml, approval (editor) | null, onRecord(record) -> bool,
 //            onKeepPrevious(record) -> bool } | null
-export default function SavedRuleTestPanel({ saved, format, standard, vocabulary, onClose, rerun = null }) {
+export default function SavedRuleTestPanel({ saved, format, standard, schemaLocation = null, vocabulary, onClose, rerun = null }) {
   const { t, i18n } = useTranslation();
   const keptRuns = useMemo(
-    () => saved.examples.map((ex) => runExample(saved.ruleXml, format, ex, { vocabulary })),
-    [saved, format, vocabulary]
+    () => saved.examples.map((ex) => runExample(saved.ruleXml, format, ex, { vocabulary, schemaLocation })),
+    [saved, format, vocabulary, schemaLocation]
   );
   const date = formatTestDate(saved.at, i18n.language);
   const examplesDate = savedExamplesDate(saved);
@@ -45,7 +45,7 @@ export default function SavedRuleTestPanel({ saved, format, standard, vocabulary
     setRecorded(ok ? rec : null);
   };
   const runOnSaved = () => {
-    const result = runSavedTest(saved, rerun.ruleXml, format, { vocabulary });
+    const result = runSavedTest(saved, rerun.ruleXml, format, { vocabulary, schemaLocation });
     setLastRun({ ...result, ruleXml: rerun.ruleXml, examplesDate });
     setQuestion(null);
     setAnswer(null);

@@ -10,38 +10,57 @@
 // it never gets a schema choice.
 
 // Context URL per standard and per project "Schema location" (project
-// configuration, S1000D only, stored as project_config.schemaLocation; absent
-// = "flat", the default). A context block only applies to a data module whose
+// configuration, S1000D only, stored as project_config.schemaLocation
+// "flat" | "master" | "custom", with the custom pattern in
+// project_config.schemaLocationPattern; absent = "flat", the default). A context block only applies to a data module whose
 // own schema URL is exactly the one written here, so it must match the form
 // the project's DMs use.
 //
 //   flat:   http://www.s1000d.org/S1000D_{issue}/xml_schema_flat/{schema}.xsd
 //   master: http://www.s1000d.org/S1000D_{issue}/xml_schema_master/{folder}/{schema}Schema.xsd
+//   custom: a pattern of the project's own, with {schema} once
+//           (file:///C:/CSDB/schemas/{schema}.xsd, ../schemas/{schema}.xsd,
+//           {schema}_v42.xsd) -- for CSDBs whose DMs point at local or
+//           relative copies of the schemas.
+//
+// Options per standard (SCHEMA_LOCATION_OPTIONS): 3.0.1 flat / master /
+// custom; 4.1 and 4.2 flat / custom -- S1000D publishes no master schema set
+// for 4.x, so a 4.x project with "master" stored (older data) is read as flat
+// (schemaLocationOf), and saving its configuration stores flat.
 //
 // Origin of each form:
 //   flat, 4.2   -- real rulesContext values in public/brdp-template-4-2.xlsx
-//                  (BRDP-S1-00006, -00219, -00377).
-//   flat, 4.1   -- real rulesContext values in public/brdp-template-4-1.xlsx
-//                  (BRDP-EXT-00001, -00007, -00012, -00013, -00019).
+//                  (BRDP-S1-00219) and Lufthansa's BRDP-S1-00006 valueAllowed.
+//   flat, 4.1   -- real rulesContext values in public/brdp-template-4-1.xlsx.
 //   flat, 3.0.1 -- the same URL scheme the 3.0.1 BREX few-shot uses for
 //                  xsi:noNamespaceSchemaLocation (public/brex-schema-summary-3-0-1.json).
-//   master      -- sources/SchemasS1000D holds only the flat set (no master
-//                  files in this repo); the master names come from a real
-//                  3.0.1 project list of approved schema locations
-//                  (public/brex-schema-summary-sch.json, BRDP-A1-00100) and a
-//                  real 3.0.1 project DM (…/xml_schema_master/dm/descriptSchema.xsd).
-//                  Data module schemas live under dm/; the four non-DM
-//                  schemas have their own folder: comment/commentSchema.xsd,
-//                  ddn/ddnSchema.xsd, dml/dmlSchema.xsd, pm/pmSchema.xsd.
-//                  The same folder layout is assumed for 4.1 and 4.2 (no
-//                  master file of those issues is available to confirm it).
-export const SCHEMA_LOCATIONS = ['flat', 'master'];
+//   master      -- 3.0.1 only. sources/SchemasS1000D holds only the flat set;
+//                  the master names come from a real 3.0.1 project list of
+//                  approved schema locations (public/brex-schema-summary-sch.json,
+//                  BRDP-A1-00100) and a real 3.0.1 project DM
+//                  (…/xml_schema_master/dm/descriptSchema.xsd). Data module
+//                  schemas live under dm/; the four non-DM schemas have their
+//                  own folder: comment/commentSchema.xsd, ddn/ddnSchema.xsd,
+//                  dml/dmlSchema.xsd, pm/pmSchema.xsd.
+//
+// The project's setting travels through the app as ONE string ("location"):
+// "flat", "master", or the custom pattern itself (a pattern always contains
+// {schema}, so it can never be mistaken for the other two). Being a plain
+// string keeps it a stable React dependency.
+export const SCHEMA_LOCATIONS = ['flat', 'master', 'custom'];
 export const DEFAULT_SCHEMA_LOCATION = 'flat';
+export const SCHEMA_PLACEHOLDER = '{schema}';
 
 export const SCHEMA_CONTEXT_ISSUE = {
   'S1000D 4.2': '4-2',
   'S1000D 4.1': '4-1',
   'S1000D 3.0.1': '3-0-1',
+};
+
+export const SCHEMA_LOCATION_OPTIONS = {
+  'S1000D 4.2': ['flat', 'custom'],
+  'S1000D 4.1': ['flat', 'custom'],
+  'S1000D 3.0.1': ['flat', 'master', 'custom'],
 };
 
 // Master folder of the schemas that aren't data modules; every other schema
@@ -52,13 +71,53 @@ export function supportsSchemaContext(standard) {
   return Object.prototype.hasOwnProperty.call(SCHEMA_CONTEXT_ISSUE, standard);
 }
 
-// The project's schema location ("flat" | "master") from its project_config.
-export function schemaLocationOf(projectConfig) {
-  const value = projectConfig?.schemaLocation;
-  return SCHEMA_LOCATIONS.includes(value) ? value : DEFAULT_SCHEMA_LOCATION;
+export function schemaLocationOptions(standard) {
+  return SCHEMA_LOCATION_OPTIONS[standard] || [];
 }
 
+export function isCustomSchemaLocation(location) {
+  return typeof location === 'string' && location.includes(SCHEMA_PLACEHOLDER);
+}
+
+// Validation of a custom pattern (Project Configuration; the backend applies
+// the same rules on save, backend/app/api/routes/projects.py). Returns null
+// when valid, else { code, params } -- shown in EN/ES via
+// config.fields.schemaPatternErrors.<code>:
+//   empty, missing_placeholder, repeated_placeholder, line_break,
+//   forbidden_char { char } (" < & would break the XML attribute it is
+//   written into; ' and > are written as-is, inside "…").
+export function validateSchemaPattern(pattern) {
+  const value = String(pattern ?? '');
+  if (!value.trim()) return { code: 'empty', params: {} };
+  if (/[\r\n]/.test(value)) return { code: 'line_break', params: {} };
+  const bad = /["<&]/.exec(value);
+  if (bad) return { code: 'forbidden_char', params: { char: bad[0] } };
+  const count = value.split(SCHEMA_PLACEHOLDER).length - 1;
+  if (count === 0) return { code: 'missing_placeholder', params: {} };
+  if (count > 1) return { code: 'repeated_placeholder', params: {} };
+  return null;
+}
+
+// The project's schema location from its project_config (+ its standard):
+// "flat" | "master" | the custom pattern. Absent or unknown -> flat; "master"
+// on a standard that has no master option (4.x) -> flat; "custom" with an
+// invalid pattern (only possible by editing the database by hand: the
+// configuration page and the backend refuse to save one) -> flat.
+export function schemaLocationOf(projectConfig, standard) {
+  const value = projectConfig?.schemaLocation;
+  const options = standard ? schemaLocationOptions(standard) : SCHEMA_LOCATIONS;
+  if (value === 'custom') {
+    const pattern = projectConfig?.schemaLocationPattern;
+    return options.includes('custom') && !validateSchemaPattern(pattern) ? pattern.trim() : DEFAULT_SCHEMA_LOCATION;
+  }
+  return options.includes(value) ? value : DEFAULT_SCHEMA_LOCATION;
+}
+
+// The single generator of a schema URL for the project's setting: context
+// blocks of accepted rules, xsi:noNamespaceSchemaLocation of rule-test
+// examples, the BREX DM's own brex.xsd, and the URLs Generate rewrites.
 export function schemaContextUrl(standard, schema, location = DEFAULT_SCHEMA_LOCATION) {
+  if (isCustomSchemaLocation(location)) return location.replace(SCHEMA_PLACEHOLDER, schema);
   const base = `http://www.s1000d.org/S1000D_${SCHEMA_CONTEXT_ISSUE[standard]}`;
   if (location === 'master') {
     return `${base}/xml_schema_master/${MASTER_SCHEMA_FOLDER[schema] || 'dm'}/${schema}Schema.xsd`;
@@ -66,10 +125,47 @@ export function schemaContextUrl(standard, schema, location = DEFAULT_SCHEMA_LOC
   return `${base}/xml_schema_flat/${schema}.xsd`;
 }
 
-// A context URL/value -> the schema name, in either form
-// ("…/xml_schema_flat/fault.xsd" and "…/xml_schema_master/dm/faultSchema.xsd"
-// -> "fault"); a value that isn't a .xsd reference is returned as written.
-export function schemaNameFromContext(value) {
+const SCHEMA_NAME_RE = '([A-Za-z0-9_-]+)';
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function patternRegex(pattern) {
+  const [before, after] = pattern.split(SCHEMA_PLACEHOLDER);
+  return new RegExp(`^${escapeRe(before)}${SCHEMA_NAME_RE}${escapeRe(after)}$`);
+}
+
+// Strict recognition (Generate's rewriting): the schema name when `value` is
+// a schema URL of this standard in one of the three forms -- flat or master
+// of the project's own issue, or the CURRENT custom pattern (matched as a
+// whole, so "{schema}_v42.xsd" turns proced_v42.xsd into "proced") --, else
+// null. A URL of another issue, another host or another pattern is not
+// recognized (Generate leaves it as written and reports it).
+export function recognizeSchemaUrl(value, standard, location = DEFAULT_SCHEMA_LOCATION) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  if (isCustomSchemaLocation(location)) {
+    const m = patternRegex(location).exec(text);
+    if (m) return m[1];
+  }
+  const issue = SCHEMA_CONTEXT_ISSUE[standard];
+  if (!issue) return null;
+  const base = escapeRe(`http://www.s1000d.org/S1000D_${issue}`);
+  const flat = new RegExp(`^${base}/xml_schema_flat/${SCHEMA_NAME_RE}\\.xsd$`).exec(text);
+  if (flat) return flat[1];
+  const master = new RegExp(`^${base}/xml_schema_master/([A-Za-z0-9_-]+)/${SCHEMA_NAME_RE}Schema\\.xsd$`).exec(text);
+  if (master && master[1] === (MASTER_SCHEMA_FOLDER[master[2]] || 'dm')) return master[2];
+  return null;
+}
+
+// Lenient recognition (rule test engine, precedent labels, comparison): the
+// custom pattern first when one is given, then any "…/<name>.xsd" or
+// "…/<name>Schema.xsd" ("…/xml_schema_flat/fault.xsd" and
+// "…/xml_schema_master/dm/faultSchema.xsd" -> "fault"); a value that isn't a
+// .xsd reference is returned as written.
+export function schemaNameFromContext(value, location = null) {
+  if (isCustomSchemaLocation(location)) {
+    const m = patternRegex(location).exec(String(value ?? '').trim());
+    if (m) return m[1];
+  }
   const m = /([A-Za-z0-9_-]+)\.xsd\s*$/.exec(value || '');
   if (!m) return (value || '').trim();
   const master = /(.+)Schema$/.exec(m[1]);
@@ -318,7 +414,7 @@ export function hasSchemaContextBlock(ruleXml) {
 const CONTEXT_BLOCK_RE =
   /<(contextRules|contextrules)\b([^>]*)>[\s\S]*?<\/\1\s*>/g;
 
-export function contextSchemasOfRule(ruleXml) {
+export function contextSchemasOfRule(ruleXml, location = null) {
   const text = (ruleXml || '').replace(/<!--[\s\S]*?-->/g, '');
   const schemas = [];
   let rest = text;
@@ -326,7 +422,7 @@ export function contextSchemasOfRule(ruleXml) {
     const attr = m[1] === 'contextRules' ? 'rulesContext' : 'context';
     const value = new RegExp(String.raw`\b${attr}\s*=\s*(["'])([^"']*)\1`).exec(m[2]);
     if (!value || !value[2].trim()) continue;
-    const name = schemaNameFromContext(value[2]);
+    const name = schemaNameFromContext(value[2], location);
     if (!schemas.includes(name)) schemas.push(name);
     rest = rest.replace(m[0], '');
   }
@@ -347,4 +443,107 @@ export function checkRuleSchemaCoverage(elementNames, schemas, coverageByName) {
     if (missing.length > 0) problems.push({ schema, missing });
   }
   return problems;
+}
+
+// ---------------------------------------------------------------------------
+// Generate (output only, never the stored rule): every schema URL a rule
+// carries is rewritten to the project's CURRENT setting, so a rule accepted
+// with flat URLs follows the project when it moves to a custom pattern.
+// Rewritten, per format:
+//   - the context of a context block: 4.x contextRules/@rulesContext,
+//     3.0.1 contextrules/@context;
+//   - each allowed value: 4.x objectValue/@valueAllowed, 3.0.1 objval/@val1
+//     and @val2 (BRDP-S1-00006 lists the 9 allowed DM schema URLs there).
+// A value is rewritten only when recognizeSchemaUrl() knows it (flat or
+// master of the project's issue, or the current pattern), keeping the schema
+// name. Never changed silently (HR7): a context that isn't recognized, and an
+// allowed value that isn't recognized in a rule that checks
+// @xsi:noNamespaceSchemaLocation (or that ends in .xsd), is left as written
+// and reported in `unrecognized`. Comments are never touched. Returns
+// { xml, rewritten: [{ where, from, to }], unrecognized: [{ where, value }] };
+// `where` is "context" | "value".
+const SCHEMA_URL_ATTRS = {
+  'BREX-4.2': { context: { element: 'contextRules', attrs: ['rulesContext'] }, value: { element: 'objectValue', attrs: ['valueAllowed'] } },
+  'BREX-4.1': { context: { element: 'contextRules', attrs: ['rulesContext'] }, value: { element: 'objectValue', attrs: ['valueAllowed'] } },
+  'BREX-3.0.1': { context: { element: 'contextrules', attrs: ['context'] }, value: { element: 'objval', attrs: ['val1', 'val2'] } },
+};
+
+const decodeAttr = (v) =>
+  v.replace(/&(lt|gt|quot|apos|amp|#\d+|#x[0-9a-fA-F]+);/g, (m, e) => {
+    if (e === 'lt') return '<';
+    if (e === 'gt') return '>';
+    if (e === 'quot') return '"';
+    if (e === 'apos') return "'";
+    if (e === 'amp') return '&';
+    return String.fromCodePoint(e[1] === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10));
+  });
+const encodeAttr = (v, quote) =>
+  v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(quote === '"' ? /"/g : /'/g, quote === '"' ? '&quot;' : '&apos;');
+
+export function rewriteRuleSchemaUrls(ruleXml, format, standard, location = DEFAULT_SCHEMA_LOCATION) {
+  const xml = String(ruleXml ?? '');
+  const spec = SCHEMA_URL_ATTRS[format];
+  const rewritten = [];
+  const unrecognized = [];
+  if (!spec || !supportsSchemaContext(standard)) return { xml, rewritten, unrecognized };
+  const checksSchemaLocation = /noNamespaceSchemaLocation/.test(xml.replace(/<!--[\s\S]*?-->/g, ''));
+
+  const rewriteTag = (tag, where, attrs) =>
+    tag.replace(
+      new RegExp(String.raw`(\s(${attrs.join('|')})\s*=\s*)(["'])([^"']*)\3`, 'g'),
+      (full, pre, _name, quote, raw) => {
+        const value = decodeAttr(raw);
+        if (!value.trim()) return full;
+        const schema = recognizeSchemaUrl(value, standard, location);
+        if (!schema) {
+          if (where === 'context' || checksSchemaLocation || /\.xsd\s*$/i.test(value)) unrecognized.push({ where, value });
+          return full;
+        }
+        const url = schemaContextUrl(standard, schema, location);
+        if (url === value.trim()) return full;
+        rewritten.push({ where, from: value, to: url });
+        return `${pre}${quote}${encodeAttr(url, quote)}${quote}`;
+      }
+    );
+
+  const tagRe = new RegExp(String.raw`<(${spec.context.element}|${spec.value.element})\b[^>]*>`, 'g');
+  // Comments are kept byte for byte: only the text between them is scanned.
+  const out = xml
+    .split(/(<!--[\s\S]*?-->)/)
+    .map((segment) =>
+      segment.startsWith('<!--')
+        ? segment
+        : segment.replace(tagRe, (tag, name) =>
+            name === spec.context.element
+              ? rewriteTag(tag, 'context', spec.context.attrs)
+              : rewriteTag(tag, 'value', spec.value.attrs)
+          )
+    )
+    .join('');
+  return { xml: out, rewritten, unrecognized };
+}
+
+// The BREX DM's own xsi:noNamespaceSchemaLocation (brex.xsd) in the
+// project's form -- the first <dmodule> start tag of a generated document.
+export function setDmoduleSchemaLocation(xml, url) {
+  return String(xml).replace(/<dmodule\b[^>]*>/, (tag) =>
+    /\sxsi:noNamespaceSchemaLocation\s*=/.test(tag)
+      ? tag.replace(/(\sxsi:noNamespaceSchemaLocation\s*=\s*)(["'])[^"']*\2/, (_, pre, q) => `${pre}${q}${encodeAttr(url, q)}${q}`)
+      : tag
+  );
+}
+
+// Generate: rewriteRuleSchemaUrls() over every approved rule, with the
+// per-rule report the Generate page shows (identifier of each BRDP whose
+// values were rewritten, and of each whose values were left as written).
+export function rewriteApprovedRulesSchemaUrls(rules, format, standard, location = DEFAULT_SCHEMA_LOCATION) {
+  const rewritten = [];
+  const unrecognized = [];
+  const out = rules.map((rule) => {
+    const r = rewriteRuleSchemaUrls(rule.xml, format, standard, location);
+    if (r.rewritten.length) rewritten.push({ identifier: rule.identifier, values: r.rewritten });
+    if (r.unrecognized.length) unrecognized.push({ identifier: rule.identifier, values: r.unrecognized });
+    return { ...rule, xml: r.xml };
+  });
+  return { rules: out, schemaUrls: { location, rewritten, unrecognized } };
 }

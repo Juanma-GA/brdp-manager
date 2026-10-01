@@ -87,8 +87,8 @@ export function savedExamplesDate(saved) {
 // gave in the kept test (what the panel marks). record: what to register --
 // a pass keeps the same examples again, dated with the test they came from
 // (examples_from), and the Proposal they were written for.
-export function runSavedTest(saved, ruleXml, format, { vocabulary = null, parseXml } = {}) {
-  const opts = parseXml ? { vocabulary, parseXml } : { vocabulary };
+export function runSavedTest(saved, ruleXml, format, { vocabulary = null, parseXml, schemaLocation = null } = {}) {
+  const opts = parseXml ? { vocabulary, parseXml, schemaLocation } : { vocabulary, schemaLocation };
   const examples = saved.examples;
   const runs = examples.map((ex) => runExample(ruleXml, format, ex, opts));
   const analysis = analyzeRule(ruleXml, format, parseXml ? { parseXml } : {});

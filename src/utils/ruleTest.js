@@ -115,6 +115,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     xml,
     skeletonNodePaths,
     structure: entry.structure,
+    schemaLocation: setup.schemaLocation || null,
     insertion: entry.placement.insertion,
     metadataElement: section?.insertion && entry.placement.path.length > 0 ? section.element : null,
     contentInsertion: entry.placement.contentInsertion !== false,
@@ -326,14 +327,20 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
 // One example → { validation, result (engine output) | null, matches }.
 // matches: true/false when the rule ran and gave a verdict, null otherwise.
 // A materialized example (T2b) is validated against its schema's structure.
-export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument } = {}) {
+// schemaLocation: the project's setting (ruleSchemaContext.js), so a context
+// block written with a custom pattern is recognized; the example's own one
+// (materializeExample) wins.
+export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument, schemaLocation = null } = {}) {
   const unknownSchema = example.unmaterialized ? example.schema || '(none)' : null;
   const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, {
     unknownSchema,
     missingMetadata: example.missingMetadata || null,
   });
   if (!validation.runnable) return { validation, result: null, matches: null };
-  const result = runRuleOnFragment(ruleXml, format, example.xml, example.schema || null, { parseXml });
+  const result = runRuleOnFragment(ruleXml, format, example.xml, example.schema || null, {
+    parseXml,
+    schemaLocation: example.schemaLocation || schemaLocation,
+  });
   const expectedStatus = example.expected === 'reject' ? 'rejected' : 'accepted';
   const matches = result.status === 'not_executable' ? null : result.status === expectedStatus;
   return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result) };
