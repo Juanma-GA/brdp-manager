@@ -652,7 +652,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                         {editTitle ? (
                           <EditableText value={c.title} testId="rule-extract-title" onSave={(v) => patch([{ key: c.key, title: v, draft_status: 'manual' }])} />
                         ) : (
-                          <span>{c.title}</span>
+                          <span data-testid="rule-extract-title-text">{c.title}</span>
                         )}
                         <SourceTag c={c} field="title" t={t} />
                       </td>

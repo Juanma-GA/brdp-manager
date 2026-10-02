@@ -294,7 +294,7 @@ async function main() {
       assert(JSON.stringify(ids) === JSON.stringify(list.slice(0, ids.length).map((c) => c.identifier)), "third click: file order", ids.slice(0, 3).join(","));
     }
     await page.getByTestId("rule-extract-sort-title").click();
-    const titles = await page.getByTestId("rule-extract-row").evaluateAll((rows) => rows.map((r) => r.querySelector('[data-testid="rule-extract-title"]')?.value ?? r.children[3].innerText.split("\n")[0]));
+    const titles = await page.getByTestId("rule-extract-row").evaluateAll((rows) => rows.map((r) => r.querySelector('[data-testid="rule-extract-title"]')?.value ?? r.querySelector('[data-testid="rule-extract-title-text"]').textContent));
     assert(JSON.stringify(titles) === JSON.stringify([...titles].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))), "Title header: ascending");
     await page.getByTestId("rule-extract-sort-title").click();
     await page.getByTestId("rule-extract-sort-title").click();
