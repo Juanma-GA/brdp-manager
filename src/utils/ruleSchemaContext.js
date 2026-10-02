@@ -465,9 +465,12 @@ export function checkRuleSchemaCoverage(elementNames, schemas, coverageByName) {
 // A value is rewritten only when recognizeSchemaUrl() knows it (flat or
 // master of the project's issue, or the current pattern), keeping the schema
 // name. Never changed silently (HR7): a context that isn't recognized, and an
-// allowed value that isn't recognized in a rule that checks
-// @xsi:noNamespaceSchemaLocation (or that ends in .xsd), is left as written
-// and reported in `unrecognized`. Comments are never touched.
+// allowed value that isn't recognized in a rule whose objectPath / objpath
+// TARGETS @xsi:noNamespaceSchemaLocation (its last step, in any of its
+// alternatives -- not the attribute merely tested in a predicate, as in
+// BRDP-S1-00146 of the CA BREX), or that ends in .xsd, is left as written and
+// reported in `unrecognized`. Decided rule by rule inside the fragment.
+// Comments are never touched.
 //
 // Lists that mix forms on purpose are left alone: the allowed values of a
 // rule are rewritten only when all its RECOGNIZED value URLs are in one form
@@ -499,15 +502,69 @@ const decodeAttr = (v) =>
 const encodeAttr = (v, quote) =>
   v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(quote === '"' ? /"/g : /'/g, quote === '"' ? '&quot;' : '&apos;');
 
+// True when the XPath selects @xsi:noNamespaceSchemaLocation: the last step
+// of one of its top-level alternatives (a | b) is that attribute (any prefix,
+// or attribute::). Predicates and string literals are ignored, so
+// //dmodule[@xsi:noNamespaceSchemaLocation = '…']//para does not count.
+export function pathTargetsSchemaLocation(path) {
+  const text = String(path ?? '');
+  let flat = '';
+  let depth = 0;
+  let quote = null;
+  for (const ch of text) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      if (!depth) flat += '_';
+      continue;
+    }
+    if (ch === '[') depth += 1;
+    else if (ch === ']') depth = Math.max(0, depth - 1);
+    else if (!depth) flat += ch;
+  }
+  // Top-level alternatives: split on | outside parentheses.
+  const alternatives = [];
+  let paren = 0;
+  let current = '';
+  for (const ch of flat) {
+    if (ch === '(') paren += 1;
+    else if (ch === ')') paren = Math.max(0, paren - 1);
+    if (ch === '|' && paren === 0) {
+      alternatives.push(current);
+      current = '';
+    } else current += ch;
+  }
+  alternatives.push(current);
+  const target = /(?:@|attribute::)\s*(?:[\w.-]+:)?noNamespaceSchemaLocation\s*\)*\s*$/;
+  return alternatives.some((alt) => target.test(alt.replace(/^\s*\(+/, '').trim()));
+}
+
+const RULE_ELEMENTS = { 'BREX-4.2': ['structureObjectRule', 'objectPath'], 'BREX-4.1': ['structureObjectRule', 'objectPath'], 'BREX-3.0.1': ['objrule', 'objpath'] };
+
 export function rewriteRuleSchemaUrls(ruleXml, format, standard, location = DEFAULT_SCHEMA_LOCATION) {
   const xml = String(ruleXml ?? '');
   const spec = SCHEMA_URL_ATTRS[format];
   const rewritten = [];
   const unrecognized = [];
   if (!spec || !supportsSchemaContext(standard)) return { xml, rewritten, unrecognized, mixedForms: null };
-  const uncommented = xml.replace(/<!--[\s\S]*?-->/g, '');
-  const checksSchemaLocation = /noNamespaceSchemaLocation/.test(uncommented);
+  // Comments blanked to the same length, so offsets match the original text.
+  const uncommented = xml.replace(/<!--[\s\S]*?-->/g, (c) => ' '.repeat(c.length));
   const attrRe = (attrs) => new RegExp(String.raw`(\s(${attrs.join('|')})\s*=\s*)(["'])([^"']*)\3`, 'g');
+
+  // The rules of the fragment, each with whether its path targets
+  // @xsi:noNamespaceSchemaLocation.
+  const [ruleName, pathName] = RULE_ELEMENTS[format];
+  const ruleSpans = [];
+  const ruleRe = new RegExp(String.raw`<${ruleName}\b[^>]*>([\s\S]*?)</${ruleName}>`, 'g');
+  const pathRe = new RegExp(String.raw`<${pathName}\b[^>]*>([\s\S]*?)</${pathName}>`);
+  for (const m of uncommented.matchAll(ruleRe)) {
+    const p = pathRe.exec(m[1]);
+    ruleSpans.push({ start: m.index, end: m.index + m[0].length, targets: !!p && pathTargetsSchemaLocation(decodeAttr(p[1])) });
+  }
+  const targetsAt = (offset) => ruleSpans.some((s) => s.targets && offset >= s.start && offset < s.end);
 
   // First pass: the forms of the recognized allowed values.
   const valueForms = new Set();
@@ -525,7 +582,7 @@ export function rewriteRuleSchemaUrls(ruleXml, format, standard, location = DEFA
   const mixedForms =
     valueForms.size > 1 ? { forms: ['flat', 'master', 'custom'].filter((f) => valueForms.has(f)), count: valueCount } : null;
 
-  const rewriteTag = (tag, where, attrs) =>
+  const rewriteTag = (tag, where, attrs, checksSchemaLocation) =>
     tag.replace(
       attrRe(attrs),
       (full, pre, _name, quote, raw) => {
@@ -544,20 +601,22 @@ export function rewriteRuleSchemaUrls(ruleXml, format, standard, location = DEFA
       }
     );
 
+  // Tags found in the comment-blanked text are identical in the original
+  // (a tag is never inside a comment there), so they are replaced by offset;
+  // comments are kept byte for byte.
   const tagRe = new RegExp(String.raw`<(${spec.context.element}|${spec.value.element})\b[^>]*>`, 'g');
-  // Comments are kept byte for byte: only the text between them is scanned.
-  const out = xml
-    .split(/(<!--[\s\S]*?-->)/)
-    .map((segment) =>
-      segment.startsWith('<!--')
-        ? segment
-        : segment.replace(tagRe, (tag, name) =>
-            name === spec.context.element
-              ? rewriteTag(tag, 'context', spec.context.attrs)
-              : rewriteTag(tag, 'value', spec.value.attrs)
-          )
-    )
-    .join('');
+  let out = '';
+  let cursor = 0;
+  for (const m of uncommented.matchAll(tagRe)) {
+    const tag = m[0];
+    const replaced =
+      m[1] === spec.context.element
+        ? rewriteTag(tag, 'context', spec.context.attrs, false)
+        : rewriteTag(tag, 'value', spec.value.attrs, targetsAt(m.index));
+    out += xml.slice(cursor, m.index) + replaced;
+    cursor = m.index + tag.length;
+  }
+  out += xml.slice(cursor);
   return { xml: out, rewritten, unrecognized, mixedForms };
 }
 

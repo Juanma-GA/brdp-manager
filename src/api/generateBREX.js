@@ -1,7 +1,7 @@
 import { ruleEnters } from '../utils/generatePlan.js';
 import { getApprovalsForFormat } from "./approvals.js";
 import { wrapRuleXmlFragment } from "../utils/ruleXmlFragment.js";
-import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
 import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache = null;
@@ -289,6 +289,7 @@ function assembleChunks(baseDoc, approvedRules) {
   const structureNodes = [];
   const nonContextNodes = [];
   const contextRulesNodes = [];
+  const contextBlockTexts = [];
 
   for (const { id, xml } of approvedRules) {
     if (!xml || !xml.trim()) continue;
@@ -314,10 +315,20 @@ function assembleChunks(baseDoc, approvedRules) {
     for (const piece of splitRuleXmlPieces(xml, 'BREX-4.2')) {
       if (piece.kind === 'comment') continue;
       const node = parseRuleFragment(id, piece.text).firstElementChild;
-      if (piece.kind === 'block') contextRulesNodes.push(node);
+      if (piece.kind === 'block') contextBlockTexts.push({ id, text: piece.text });
       else if (piece.kind === 'rule') structureNodes.push(node);
       else nonContextNodes.push(node);
     }
+  }
+
+  // One block per schema: blocks with the same rulesContext (already in the
+  // project's "Schema location" form) are joined, in BRDP order, where the
+  // first of them was (mergeContextBlocks, src/utils/ruleWrappers.js).
+  // Each merged block is parsed again; a block's own text was already
+  // checked above, so a failure here can only come from the merge.
+  const blockTexts = mergeContextBlocks(contextBlockTexts.map((b) => b.text), 'BREX-4.2');
+  for (const text of blockTexts) {
+    contextRulesNodes.push(parseRuleFragment('merged context block', text).firstElementChild);
   }
 
   if (!structureNodes.length && !nonContextNodes.length && !contextRulesNodes.length) return baseDoc;
@@ -337,12 +348,12 @@ function assembleChunks(baseDoc, approvedRules) {
   const brexEl = baseDoc.querySelector('brex');
   const brexTrailingNode = brexEl.lastChild;
 
-  // Any <contextRules rulesContext="..."> blocks extracted above go as
-  // their own siblings, each intact and never merged even if two BRDPs
-  // share the same rulesContext value -- brex4.2.xsd permits repeated
-  // <contextRules> under <brex> (maxOccurs="unbounded"), confirmed
-  // directly against the schema, so grouping by rulesContext is neither
-  // required nor attempted. They must come AFTER the generic
+  // The <contextRules rulesContext="..."> blocks, already merged into one
+  // per schema above. brex4.2.xsd would permit repeated blocks for the same
+  // schema (maxOccurs="unbounded"), but a real BREX has one per schema and
+  // the round trip original -> AI Extract -> Generate must give that back
+  // (Lufthansa: one proced block with 4 rules, not 4 blocks of 1). They
+  // must come AFTER the generic
   // <contextRules> and BEFORE nonContextRules: brexElemType's sequence is
   // contextRules* then nonContextRules? (also confirmed against the
   // schema) -- nonContextRules can never precede a contextRules sibling.

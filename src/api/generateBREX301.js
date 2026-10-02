@@ -1,7 +1,7 @@
 import { ruleEnters } from '../utils/generatePlan.js';
 import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
-import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
 import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache301 = null;
@@ -194,13 +194,17 @@ function assembleChunks301(baseXml, additionalRules) {
     else if (piece.kind === 'rule') pieces.push(piece.text);
     else if (piece.kind === 'noncontext') pieces.push(sanitizeNonContextComments301(piece.text));
   }
-  const contextRulesSiblings = contextRulesBlocks.length ? '\n' + contextRulesBlocks.join('\n') : '';
+  // One block per schema: blocks with the same context (already in the
+  // project's "Schema location" form) are joined in BRDP order where the
+  // first one was (mergeContextBlocks, src/utils/ruleWrappers.js).
+  const mergedBlocks = mergeContextBlocks(contextRulesBlocks, 'BREX-3.0.1');
+  const contextRulesSiblings = mergedBlocks.length ? '\n' + mergedBlocks.join('\n') : '';
   if (!pieces.length && !contextRulesBlocks.length) return baseXml;
 
   // Insertar las piezas sueltas justo antes de </structrules> para
   // preservar todo lo que ya hay dentro, luego los bloques con contexto
   // como hermanos justo después del </contextrules> genérico que ya
-  // cerró (nunca fusionados entre sí, aunque compartan el mismo context).
+  // cerró (uno por esquema, ya unidos arriba).
   const idx = baseXml.lastIndexOf('</structrules>');
   if (idx !== -1) {
     let assembled = baseXml.slice(0, idx) + (pieces.length ? pieces.join('\n') + '\n' : '') + baseXml.slice(idx);

@@ -309,7 +309,11 @@ async function main() {
     const genericIdx = xml.indexOf("<contextRules>");
     const procIdx = xml.indexOf('rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd"');
     assert(procIdx > 0 && (genericIdx === -1 || genericIdx < procIdx), "4.2: context blocks placed after the generic contextRules (if any)");
-    assert((xml.match(/xml_schema_flat\/proced\.xsd/g) || []).length === 2 && xml.includes("xml_schema_flat/descript.xsd"), "4.2: all three blocks (proced x2, descript) present");
+    // One block per schema: the two proced rules share one proced block.
+    {
+      const procBlocks = [...xml.matchAll(/<contextRules rulesContext="http:\/\/www\.s1000d\.org\/S1000D_4-2\/xml_schema_flat\/proced\.xsd">([\s\S]*?)<\/contextRules>/g)];
+      assert(procBlocks.length === 1 && (procBlocks[0][1].match(/<structureObjectRule\b/g) || []).length === 2 && xml.includes("xml_schema_flat/descript.xsd"), "4.2: one proced block with its 2 rules, and the descript block");
+    }
     const nonCtx = xml.indexOf("<nonContextRules");
     assert(nonCtx === -1 || nonCtx > xml.lastIndexOf("</contextRules>"), "4.2: no nonContextRules before a contextRules sibling");
     assert(xmllint(xml, "S1000D 4.2") === "valid", `4.2: xmllint --schema brex4.2.xsd valid (${xmllint(xml, "S1000D 4.2")})`);

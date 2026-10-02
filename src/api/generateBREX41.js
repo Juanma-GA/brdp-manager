@@ -1,7 +1,7 @@
 import { ruleEnters } from '../utils/generatePlan.js';
 import { extractXML, checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
-import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
 import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache41 = null;
@@ -258,11 +258,15 @@ function assembleChunks41(baseXml, additionalRules) {
     nonContextBlock = existingMatch ? `\n${existingMatch[0]}` : '';
   }
 
-  // contextRules with a real rulesContext go as siblings, intact, never
-  // merged (brex4.1.xsd permits repeated <contextRules>) -- must come
-  // after the generic <contextRules> and before nonContextBlock (schema
-  // sequence is contextRules* then nonContextRules?).
-  const contextRulesSiblings = contextRulesBlocks.length ? '\n' + contextRulesBlocks.join('\n') : '';
+  // contextRules with a real rulesContext go as siblings, one per schema:
+  // blocks with the same rulesContext (already in the project's "Schema
+  // location" form) are joined in BRDP order where the first one was
+  // (mergeContextBlocks, src/utils/ruleWrappers.js; see assembleChunks()
+  // in generateBREX.js). They must come after the generic <contextRules>
+  // and before nonContextBlock (schema sequence is contextRules* then
+  // nonContextRules?).
+  const mergedBlocks = mergeContextBlocks(contextRulesBlocks, 'BREX-4.1');
+  const contextRulesSiblings = mergedBlocks.length ? '\n' + mergedBlocks.join('\n') : '';
 
   // Ensamblar footer correcto
   const footer = `\n</structureObjectRuleGroup>\n</contextRules>${contextRulesSiblings}${nonContextBlock}\n</brex>\n</content>\n</dmodule>`;
