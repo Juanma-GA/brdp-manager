@@ -429,37 +429,35 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
 
 
 def _ids_inside_rule(rule_xml: str, origin: str | None) -> list[str]:
-    """The identifiers inside the rule that carry the origin identifier
-    (p-BRDP-EXT-00005, BRDP-EXT-00007a), in order, without repeats."""
+    """The identifiers inside the rule's attributes that carry the origin
+    identifier (id="p-BRDP-EXT-00005", id="BRDP-EXT-00007a",
+    brDecisionIdentNumber="…"), in order, without repeats. Text (an
+    objectUse starting "BRDP-S1-00036. …") is not an identifier."""
     if not origin or not rule_xml:
         return []
     text = re.sub(r"<!--[\s\S]*?-->", "", rule_xml)
     found: list[str] = []
-    pos = text.find(origin)
-    while pos != -1 and len(found) < 5:
-        start, end = pos, pos + len(origin)
-        while start > 0 and (text[start - 1].isalnum() or text[start - 1] in "_.-"):
-            start -= 1
-        while end < len(text) and (text[end].isalnum() or text[end] in "_.-"):
-            end += 1
-        if text[start:end] not in found:
-            found.append(text[start:end])
-        pos = text.find(origin, end)
+    for m in re.finditer(r"\s[\w:.-]+\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", text):
+        value = (m.group(1) if m.group(1) is not None else m.group(2)).strip()
+        if origin in value and len(value) <= len(origin) + 12 and value not in found:
+            found.append(value)
+            if len(found) == 5:
+                break
     return found
 
 
 def _renumber_warning(c: dict) -> None:
     """Adds (or removes) the warning that the identifiers inside the rule
-    are still the file's, when the candidate is imported under another
-    identifier than its origin."""
+    are still the file's, when an EXT identifier of the file is imported
+    under another EXT number (it was taken in the project)."""
     c["warnings"] = [w for w in c.get("warnings", []) if w.get("code") != "rule_ids_from_file"]
     origin = c.get("origin_identifier")
     classification = c.get("classification")
     if classification == "empty":
         classification = c.get("base_classification")
-    if classification != "new_ext":
+    if classification != "new_ext" or not _EXT_RE.match(origin or ""):
         return
-    if origin and c.get("identifier") and c["identifier"] != origin and c.get("rule_ids"):
+    if c.get("identifier") and c["identifier"] != origin and c.get("rule_ids"):
         c["warnings"].append(
             {
                 "code": "rule_ids_from_file",

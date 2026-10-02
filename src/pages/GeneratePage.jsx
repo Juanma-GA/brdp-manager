@@ -7,7 +7,7 @@ import { generateBREX41 } from '../api/generateBREX41.js';
 import { generateBREX301 } from '../api/generateBREX301.js';
 import { generateBREXSch } from '../api/generateBREXSch.js';
 import { generateSchematronDITA } from '../api/generateSchematronDITA.js';
-import { ruleStateOf } from '../utils/ruleState';
+import { planGeneration, omittedByReason } from '../utils/generatePlan.js';
 import styles from './GeneratePage.module.css';
 
 // Same format ids generateBREX*.js already default to internally (see
@@ -174,16 +174,13 @@ export default function GeneratePage() {
     setXsdValidation(null);
   }, [onlyValidated, onlyVerified, outputKind]);
 
-  // Proposal Status AND Rule Status, each only applied if its own
-  // checkbox is on (docs request: two independent AND conditions, not a
-  // single combined toggle) -- reuses ruleStateOf() (src/utils/ruleState.js,
-  // already shared with RecordsPage/Export to Excel) rather than a third
-  // copy of the same "absence of an approval row = todo" rule.
-  const includedCount = brdps.filter((b) => {
-    if (onlyValidated && b.validation?.toLowerCase().trim() !== 'validated') return false;
-    if (onlyVerified && ruleStateOf(approvalsByBrdpId.get(b.id) ?? null) !== 'verified') return false;
-    return true;
-  }).length;
+  // Which rules go in, and why the others do not -- the same function the
+  // generators use (src/utils/generatePlan.js), so the counter is always
+  // what enters the document: Proposal Validated (first box) AND rule
+  // Verified, or also Draft when the second box is unchecked. A BRDP with
+  // no rule never enters as a rule, whatever the boxes say.
+  const plan = planGeneration(brdps, approvalsByBrdpId, { onlyValidated, includeDrafts: !onlyVerified });
+  const includedCount = plan.included.length;
   // Single source of truth for "which project_config field identifies this
   // project" per standard -- DITA 1.3's Project Configuration page only
   // ever shows/saves projectName (generateSchematronDITA.js reads nothing
@@ -213,13 +210,18 @@ export default function GeneratePage() {
     setXsdValidation(null);
     const generationId = ++generationRef.current;
 
+    // What goes in and why the rest does not, shown above the output (HR7).
+    const report = { drafts: plan.drafts, omitted: omittedByReason(plan) };
+    if (plan.included.length === 0) {
+      setResult({ xml: null, noRules: true, report });
+      setGenerating(false);
+      return;
+    }
+
     try {
-      // The engine itself is unconditional here (docs request: don't
-      // change it) -- only an 'approved' (Verified) rule ever becomes
-      // real rule content; anything else falls to a traceability comment
-      // regardless of onlyVerified. onlyVerified only ever affects the
-      // live counter above, giving an honest preview of what the engine
-      // will actually do, never the generation call itself.
+      // includeDrafts: Draft rules go in too when "Only include Verified
+      // XML rules" is unchecked (they used to be left out whatever the box
+      // said -- the box only moved the counter).
       // standard: only generateSchematronDITA.js reads this (to pick
       // "xslt2"/"xslt3" for the assembled document's queryBinding and to
       // gate the XPath-3.0-only vocabulary) -- harmless extra key for the
@@ -227,10 +229,11 @@ export default function GeneratePage() {
       // need from this options object.
       const output = await formatDef.run(brdps, project.project_config, {
         onlyValidated,
+        includeDrafts: !onlyVerified,
         approvals: approvalsByBrdpId,
         standard: project.standard,
       });
-      setResult(output);
+      setResult({ ...output, report });
 
       if (output?.xml && formatDef.xsdFormat) {
         setXsdValidation({ status: 'validating' });
@@ -243,11 +246,11 @@ export default function GeneratePage() {
           });
       }
     } catch (err) {
-      setResult({ xml: null, valid: false, error: err.message, brdpCount: 0 });
+      setResult({ xml: null, valid: false, error: err.message, brdpCount: 0, report });
     } finally {
       setGenerating(false);
     }
-  }, [brdps, project.project_config, project.standard, onlyValidated, formatDef, approvalsByBrdpId]);
+  }, [brdps, project.project_config, project.standard, onlyValidated, onlyVerified, formatDef, approvalsByBrdpId, plan]);
 
   const handleCopy = () => {
     if (!result?.xml) return;
@@ -357,16 +360,25 @@ export default function GeneratePage() {
         )}
       </div>
 
-      {result && (
+      {result?.noRules && (
         <div className={styles.outputCard}>
+          <NoRulesReport report={result.report} />
+        </div>
+      )}
+
+      {result && !result.noRules && (
+        <div className={styles.outputCard}>
+          {result.report && <InclusionReport report={result.report} />}
           <div className={styles.outputMeta}>
             <span className={result.valid ? styles.badgeOk : styles.badgeError}>
               {result.valid
                 ? `✓ ${t('generate.wellFormed')}`
                 : `✗ ${t('generate.xmlError', { error: result.error || (result.errors || []).join('; ') })}`}
             </span>
-            {result.brdpCount > 0 && (
-              <span className={styles.countInfo}>{t('generate.rulesIncluded', { count: result.brdpCount })}</span>
+            {result.ruleCount != null && (
+              <span className={styles.countInfo} data-testid="generate-rules-included">
+                {t('generate.rulesIncluded', { count: result.ruleCount })}
+              </span>
             )}
           </div>
 
@@ -433,6 +445,74 @@ export default function GeneratePage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// A folded list of BRDP identifiers.
+function IdentifierList({ brdps }) {
+  return (
+    <ul className={styles.errorList}>
+      {brdps.map((b) => (
+        <li key={b.id}>{b.identifier}</li>
+      ))}
+    </ul>
+  );
+}
+
+// What went in that was not Verified (amber, on top), and what was left out
+// and why, with the box that would change it.
+function InclusionReport({ report }) {
+  const { t } = useTranslation();
+  const { drafts, omitted } = report;
+  const groups = [
+    { key: 'draft', label: 'omittedDraft', hint: 'omittedDraftHint' },
+    { key: 'not_validated', label: 'omittedNotValidated', hint: 'omittedNotValidatedHint' },
+    { key: 'no_rule', label: 'omittedNoRule', hint: 'omittedNoRuleHint' },
+  ].filter((g) => omitted[g.key].length > 0);
+  return (
+    <>
+      {drafts.length > 0 && (
+        <details className={styles.xsdSection} data-testid="generate-drafts-included">
+          <summary className={styles.badgePending}>⚠ {t('generate.draftsIncluded', { count: drafts.length })}</summary>
+          <p className={styles.hint}>{t('generate.draftsIncludedHint')}</p>
+          <IdentifierList brdps={drafts} />
+        </details>
+      )}
+      {groups.map((g) => (
+        <details key={g.key} className={styles.xsdSection} data-testid={`generate-omitted-${g.key}`}>
+          <summary className={g.key === 'no_rule' ? styles.countInfo : styles.badgePending}>
+            {g.key === 'no_rule' ? '' : '⚠ '}
+            {t(`generate.${g.label}`, { count: omitted[g.key].length })}
+          </summary>
+          <p className={styles.hint}>{t(`generate.${g.hint}`)}</p>
+          <IdentifierList brdps={omitted[g.key]} />
+        </details>
+      ))}
+    </>
+  );
+}
+
+// Nothing to generate with these boxes: why, and which box changes it.
+function NoRulesReport({ report }) {
+  const { t } = useTranslation();
+  const { omitted } = report;
+  const lines = [
+    ['draft', 'omittedDraft', 'omittedDraftHint'],
+    ['not_validated', 'omittedNotValidated', 'omittedNotValidatedHint'],
+    ['no_rule', 'omittedNoRule', 'omittedNoRuleHint'],
+  ].filter(([key]) => omitted[key].length > 0);
+  return (
+    <div className={styles.xsdSection} role="alert" data-testid="generate-no-rules">
+      <p className={styles.badgePending}>⚠ {t('generate.noRulesIncluded')}</p>
+      <p className={styles.hint}>{t('generate.noRulesIncludedHint')}</p>
+      <ul className={styles.errorList}>
+        {lines.map(([key, label, hint]) => (
+          <li key={key} data-testid={`generate-no-rules-${key}`}>
+            {t(`generate.${label}`, { count: omitted[key].length })}. {t(`generate.${hint}`)}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

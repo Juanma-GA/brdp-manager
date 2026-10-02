@@ -3116,6 +3116,74 @@
         "title": "List of effective pages and data modules",
         "definition": "Decide whether the use of LOEP or LOEDM."
       }
+    },
+    {
+      "id": "extract-schematron-title-from-comment-ext-00002",
+      "type": "extract-from-rules",
+      "standard": "DITA 1.3 Xpath2.0",
+      "description": "AI Extract from a real Schematron (Navantia's xpath2 file): EXT-00002 keeps its number, its Title comes from the comment before the pattern ('BRDP-EXT-00002 — Valores permitidos para NCAGE'), not from the AI; the AI writes the Definition and the Proposal from the assert message, in Spanish, without placeholders: five alphanumeric characters in capitals, or '-' when unknown.",
+      "file": "backend/tests/fixtures/schematron/BRDP-D1_schematron-xpath2.sch",
+      "origin": "BRDP-EXT-00002",
+      "classification": "new_ext",
+      "checks": [
+        {
+          "type": "extract_drafted"
+        },
+        {
+          "type": "equals",
+          "target": "title",
+          "value": "Valores permitidos para NCAGE",
+          "note": "the Title is the comment's, never rewritten"
+        },
+        {
+          "type": "contains",
+          "pattern": "NCAGE",
+          "note": "names the NCAGE column"
+        },
+        {
+          "type": "contains_any",
+          "patterns": [
+            "\\b5\\b",
+            "\\bcinco\\b"
+          ],
+          "flags": "i",
+          "note": "the five characters"
+        },
+        {
+          "type": "contains_any",
+          "patterns": [
+            "\"-\"",
+            "«-»",
+            "'-'",
+            "guion"
+          ],
+          "flags": "i",
+          "note": "the '-' for an unknown value"
+        },
+        {
+          "type": "no_placeholders"
+        },
+        {
+          "type": "language",
+          "expect": "es"
+        },
+        {
+          "type": "language",
+          "target": "definition",
+          "expect": "es"
+        },
+        {
+          "type": "not_contains_any",
+          "patterns": [
+            "Schematron",
+            "XPath",
+            "<assert",
+            "test="
+          ],
+          "flags": "i",
+          "note": "never mentions the rule syntax"
+        }
+      ]
     }
   ]
 }

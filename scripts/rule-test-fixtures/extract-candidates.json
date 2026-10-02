@@ -7,6 +7,7 @@
   "rule_problem": null,
   "decision_texts": [],
   "literal": {
+   "title": null,
    "definition": null,
    "proposal": null
   },
@@ -633,6 +634,7 @@
    "Decision made by Project. Captions shall not be used."
   ],
   "literal": {
+   "title": null,
    "definition": "Decide whether inline captions affect the text line spacing and how this is defined",
    "proposal": "Captions shall not be used."
   },
@@ -697,6 +699,7 @@
    "Decision made by Project. LOEDM is not being used. The LOEP is part of the final PDF delivery, but not available as a physical DM."
   ],
   "literal": {
+   "title": null,
    "definition": "Decide whether the use of LOEP or LOEDM.",
    "proposal": "LOEDM is not being used. The LOEP is part of the final PDF delivery, but not available as a physical DM."
   },
@@ -761,6 +764,7 @@
    "Decision made by TDWG."
   ],
   "literal": {
+   "title": null,
    "definition": "Decide whether and when to use the alpha characters \"I\" and \"O\".",
    "proposal": "Decision made by TDWG."
   },
@@ -792,6 +796,7 @@
   "rule_problem": null,
   "decision_texts": [],
   "literal": {
+   "title": null,
    "definition": null,
    "proposal": null
   },
@@ -905,6 +910,7 @@
   "rule_problem": null,
   "decision_texts": [],
   "literal": {
+   "title": null,
    "definition": null,
    "proposal": null
   },
@@ -978,6 +984,7 @@
   "rule_problem": null,
   "decision_texts": [],
   "literal": {
+   "title": null,
    "definition": null,
    "proposal": null
   },
@@ -1038,6 +1045,7 @@
   "rule_problem": null,
   "decision_texts": [],
   "literal": {
+   "title": null,
    "definition": null,
    "proposal": null
   },
@@ -1095,6 +1103,54 @@
   },
   "ai_fields": [
    "title",
+   "definition",
+   "proposal"
+  ],
+  "draft_status": "pending"
+ },
+ "BRDP-D1_schematron-xpath2/BRDP-EXT-00002": {
+  "key": "c00002",
+  "origin_identifier": "BRDP-EXT-00002",
+  "rule_count": 1,
+  "noncontext_count": 0,
+  "rule_problem": null,
+  "decision_texts": [],
+  "literal": {
+   "title": "Valores permitidos para NCAGE",
+   "definition": null,
+   "proposal": null
+  },
+  "object_uses": [
+   "En tablas con columna \"NCAGE\", cada fila debe contener exactamente 5 caracteres alfanuméricos en mayúsculas (A-Z, 0-9) o \"-\" (solo si el dato es desconocido). Filas con la columna \"Part\" vacía están exentas."
+  ],
+  "summary": {
+   "count": 1,
+   "asserts": 1,
+   "rules": [
+    {
+     "context": "table[tgroup/thead/row/entry[normalize-space(.) = 'NCAGE']]/tgroup/tbody/row",
+     "kind": "assert",
+     "test": "$part = '' or $ncage = '-' or matches($ncage, '^[A-Z0-9]{5}$')",
+     "role": "error",
+     "message": "En tablas con columna \"NCAGE\", cada fila debe contener exactamente 5 caracteres alfanuméricos en mayúsculas (A-Z, 0-9) o \"-\" (solo si el dato es desconocido). Filas con la columna \"Part\" vacía están exentas."
+    }
+   ],
+   "rules_more": 0
+  },
+  "warnings": [],
+  "no_content": false,
+  "classification": "new_ext",
+  "base_classification": "new_ext",
+  "specification": null,
+  "title": "Valores permitidos para NCAGE",
+  "definition": "",
+  "proposal": "",
+  "text_sources": {
+   "title": "file",
+   "definition": null,
+   "proposal": null
+  },
+  "ai_fields": [
    "definition",
    "proposal"
   ],

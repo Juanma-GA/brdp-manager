@@ -800,7 +800,8 @@ suggestRuleCases.push({
   ],
 });
 
-// AI Extract: real candidates read from the two BREX fixtures, classified
+// AI Extract: real candidates read from the two BREX fixtures (and one from
+// the Schematron xpath2 fixture), classified
 // and given their texts by the backend's own set_texts
 // (backend/scripts/dump_rule_extract_fixture.py → extract-candidates.json):
 // a candidate is only sent with what the file and the catalog do not give.
@@ -816,4 +817,11 @@ export const extractFromRulesCases = [
   { name: 'lufthansa-literal-texts-title-only', args: extractArgs('BRDP-S1-00117', 'BRDP-S1-00037', 'BRDP-S1-00001') },
   { name: 'ca-big-candidate-summary-only', args: extractArgs('BRDP-S1-00007') },
   { name: 'ca-other-spec-and-default-rule', args: extractArgs('BRDP-S2-00002', 'BREX-S1-00242') },
+  // Schematron: the Title comes from the comment before the pattern
+  // ("BRDP-EXT-00002 — Valores permitidos para NCAGE"); the AI writes the
+  // Definition and the Proposal from the assert message.
+  {
+    name: 'schematron-xpath2-title-from-comment',
+    args: [{ standard: 'DITA 1.3 Xpath2.0', ruleFormat: 'SCH-DITA', candidates: [extractCandidates['BRDP-D1_schematron-xpath2/BRDP-EXT-00002']] }],
+  },
 ];

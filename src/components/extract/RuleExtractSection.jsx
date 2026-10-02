@@ -83,7 +83,13 @@ function warningText(t, w) {
     case 'issue_not_stated':
       return t('config.ruleExtract.warnings.issue_not_stated', { assumed: p.assumed });
     case 'schematron_globals':
-      return t('config.ruleExtract.warnings.schematron_globals', { element: p.element, count: p.count });
+      return t('config.ruleExtract.warnings.schematron_globals', { element: p.element, count: p.count, names: (p.names || []).join(', ') });
+    case 'comment_without_rule':
+      return t('config.ruleExtract.warnings.comment_without_rule', { identifier: p.identifier });
+    case 'undeclared_variable':
+      return t('config.ruleExtract.warnings.undeclared_variable', { names: (p.names || []).map((n) => `$${n}`).join(', ') });
+    case 'rule_ids_from_file':
+      return t('config.ruleExtract.warnings.rule_ids_from_file', { identifier: p.identifier, ids: (p.ids || []).join(', ') });
     case 'default_rule':
       return t('config.ruleExtract.warnings.default_rule', { specification: p.specification });
     case 'similarity_unavailable':
@@ -91,6 +97,24 @@ function warningText(t, w) {
     default:
       return w.message || w.code;
   }
+}
+
+// Search: ID (also the source ID) and title, without case or accents.
+function normalizeSearch(text) {
+  return (text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function matchesSearch(c, query) {
+  if (!query) return true;
+  return [c.identifier, c.origin_identifier, c.title].some((v) => normalizeSearch(v).includes(query));
+}
+
+// Sort by ID or Title; null keeps the file order.
+function sortRows(rows, sort) {
+  if (!sort) return rows;
+  const value = (c) => (sort.key === 'id' ? c.identifier || c.origin_identifier || '' : c.title || '');
+  const factor = sort.dir === 'desc' ? -1 : 1;
+  return [...rows].sort((a, b) => factor * value(a).localeCompare(value(b), undefined, { numeric: true, sensitivity: 'base' }));
 }
 
 function vocabularyLines(t, c, vocabulary, standard) {
@@ -190,6 +214,9 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   const [aiProvider, setAiProvider] = useState(undefined);
   const [vocabulary, setVocabulary] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState(null); // { key: 'id' | 'title', dir: 'asc' | 'desc' } | null
+  const [importAs, setImportAs] = useState('pending');
   const [page, setPage] = useState(0);
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState(null);
@@ -348,14 +375,15 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   };
 
   const apply = async () => {
+    const keys = candidates.filter((c) => c.selected).map((c) => c.key);
+    if (importAs === 'in_force' && !window.confirm(t('config.ruleExtract.confirmInForce', { count: keys.length }))) return;
     setApplying(true);
     setError(null);
     try {
-      const keys = candidates.filter((c) => c.selected).map((c) => c.key);
       const result = await authFetchJson(`${base}/jobs/${job.id}/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keys }),
+        body: JSON.stringify({ keys, import_as: importAs }),
       });
       setApplyResult(result);
       setJob((j) => ({ ...j, applied_at: new Date().toISOString(), apply_result: result }));
@@ -367,15 +395,26 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     }
   };
 
+  // The rows shown: the classification filter AND the search, sorted;
+  // "Select all shown" / "Clear all shown" act on exactly these.
   const visible = useMemo(() => {
     if (!candidates) return [];
-    if (filter === 'all') return candidates;
-    if (filter === 'warnings') return candidates.filter((c) => c.warnings.length || c.rule_problem || c.draft_status === 'failed');
-    return candidates.filter((c) => c.classification === filter);
-  }, [candidates, filter]);
+    const query = normalizeSearch(search.trim());
+    const byFilter =
+      filter === 'all'
+        ? candidates
+        : filter === 'warnings'
+        ? candidates.filter((c) => c.warnings.length || c.rule_problem || c.draft_status === 'failed')
+        : candidates.filter((c) => c.classification === filter);
+    return sortRows(byFilter.filter((c) => matchesSearch(c, query)), sort);
+  }, [candidates, filter, search, sort]);
   const pages = Math.max(1, Math.ceil(visible.length / EXTRACT_PAGE_SIZE));
   const pageRows = visible.slice(page * EXTRACT_PAGE_SIZE, (page + 1) * EXTRACT_PAGE_SIZE);
-  useEffect(() => setPage(0), [filter]);
+  useEffect(() => setPage(0), [filter, search, sort]);
+  const cycleSort = (key) =>
+    setSort((s) => (s?.key !== key ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null));
+  const sortMark = (key) => (sort?.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const ariaSort = (key) => (sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
 
   const counts = useMemo(() => {
     const out = {};
@@ -446,7 +485,18 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
             <li>{t('config.ruleExtract.resultUpdated', { count: applyResult.updated })}</li>
             <li>{t('config.ruleExtract.resultOmitted', { count: applyResult.omitted })}</li>
             <li>{t('config.ruleExtract.resultInvalidRule', { count: applyResult.invalid_rule })}</li>
+            {applyResult.import_as === 'in_force' && <li data-testid="rule-extract-result-in-force">{t('config.ruleExtract.resultInForce')}</li>}
           </ul>
+          {applyResult.kept_pending > 0 && (
+            <ul className={pageStyles.warningList} data-testid="rule-extract-result-kept-pending">
+              <li>
+                {t('config.ruleExtract.resultKeptPending', {
+                  count: applyResult.kept_pending,
+                  ids: (applyResult.kept_pending_detail || []).map((k) => k.identifier).join(', '),
+                })}
+              </li>
+            </ul>
+          )}
           {applyResult.omitted_detail?.filter((o) => o.reason !== 'same' && o.reason !== 'no content').length > 0 && (
             <ul className={pageStyles.warningList}>
               {applyResult.omitted_detail
@@ -497,6 +547,18 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                 ))}
               </select>
             </label>
+            <input
+              type="search"
+              className={styles.search}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('config.ruleExtract.search')}
+              aria-label={t('config.ruleExtract.search')}
+              data-testid="rule-extract-search"
+            />
+            <span className={styles.muted} data-testid="rule-extract-shown">
+              {t('config.ruleExtract.shownOf', { shown: visible.length, total: candidates.length })}
+            </span>
             <button type="button" className={pageStyles.secondaryButton} onClick={() => patch(visible.map((c) => ({ key: c.key, selected: true })))}>
               {t('config.ruleExtract.selectAll')}
             </button>
@@ -511,8 +573,18 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                 <tr>
                   <th className={styles.colCheck} />
                   <th className={styles.colClass}>{t('config.ruleExtract.colClass')}</th>
-                  <th className={styles.colId}>{t('config.ruleExtract.colId')}</th>
-                  <th>{t('config.ruleExtract.colTitle')}</th>
+                  <th className={styles.colId} aria-sort={ariaSort('id')}>
+                    <button type="button" className={styles.sortButton} title={t('config.ruleExtract.sortHint')} onClick={() => cycleSort('id')} data-testid="rule-extract-sort-id">
+                      {t('config.ruleExtract.colId')}
+                      {sortMark('id')}
+                    </button>
+                  </th>
+                  <th aria-sort={ariaSort('title')}>
+                    <button type="button" className={styles.sortButton} title={t('config.ruleExtract.sortHint')} onClick={() => cycleSort('title')} data-testid="rule-extract-sort-title">
+                      {t('config.ruleExtract.colTitle')}
+                      {sortMark('title')}
+                    </button>
+                  </th>
                   <th>{t('config.ruleExtract.colDefinition')}</th>
                   <th>{t('config.ruleExtract.colProposal')}</th>
                   <th className={styles.colRule}>{t('config.ruleExtract.colRule')}</th>
@@ -626,9 +698,21 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
             </button>
           </div>
 
-          <Button onClick={apply} busy={applying} busyLabel={t('config.ruleExtract.importing')} disabled={selectedCount === 0 || !!drafting} data-testid="rule-extract-apply">
-            {t('config.ruleExtract.importSelected', { count: selectedCount })}
-          </Button>
+          <div className={styles.applyBar}>
+            <label>
+              {t('config.ruleExtract.importAs')}{' '}
+              <select value={importAs} onChange={(e) => setImportAs(e.target.value)} data-testid="rule-extract-import-as">
+                <option value="pending">{t('config.ruleExtract.importAsPending')}</option>
+                <option value="in_force">{t('config.ruleExtract.importAsInForce')}</option>
+              </select>
+            </label>
+            <Button onClick={apply} busy={applying} busyLabel={t('config.ruleExtract.importing')} disabled={selectedCount === 0 || !!drafting} data-testid="rule-extract-apply">
+              {t('config.ruleExtract.importSelected', { count: selectedCount })}
+            </Button>
+          </div>
+          <p className={pageStyles.hint} data-testid="rule-extract-import-as-hint">
+            {t(importAs === 'in_force' ? 'config.ruleExtract.importAsHintInForce' : 'config.ruleExtract.importAsHintPending')}
+          </p>
           {drafting && <p className={pageStyles.hint}>{t('config.ruleExtract.waitDrafting')}</p>}
         </div>
       )}

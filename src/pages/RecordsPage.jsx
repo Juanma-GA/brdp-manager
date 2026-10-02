@@ -151,14 +151,17 @@ function formatRuleCopiedValue(value) {
 }
 
 // AI Extract: the "extracted_from" event's value is JSON ({ file,
-// origin_identifier }); it reads as "<file> (source ID <id>)".
+// origin_identifier, in_force? }); it reads as "<file> (source ID <id>)",
+// or "validated and verified on import from <file> …" when it was imported
+// as already in force.
 function formatExtractedFromValue(t, value) {
   if (!value) return '—';
   try {
     const parsed = JSON.parse(value);
+    const key = parsed.in_force ? 'extractedFromValueInForce' : 'extractedFromValue';
     return parsed.origin_identifier
-      ? t('records.history.extractedFromValue', { file: parsed.file, origin: parsed.origin_identifier })
-      : t('records.history.extractedFromValueNoId', { file: parsed.file });
+      ? t(`records.history.${key}`, { file: parsed.file, origin: parsed.origin_identifier })
+      : t(`records.history.${key}NoId`, { file: parsed.file });
   } catch {
     return value;
   }

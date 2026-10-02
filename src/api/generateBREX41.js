@@ -1,3 +1,4 @@
+import { ruleEnters } from '../utils/generatePlan.js';
 import { extractXML, checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
 import { splitRuleXmlPieces } from "../utils/ruleWrappers.js";
@@ -526,6 +527,7 @@ function pruneEmptyContainers41(xml) {
 export async function generateBREX41(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,
+    includeDrafts = false,
     approvals: approvalsOverride,
     approvalsFormat = 'BREX-4.1',
     schemaSummary: schemaSummaryOverride,
@@ -556,7 +558,7 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
   const approvedBRDPs = [];
   const unapprovedBRDPs = [];
   for (const brdp of targetBRDPs) {
-    if (approvalById.get(brdp.id)?.status === 'approved') approvedBRDPs.push(brdp);
+    if (ruleEnters(approvalById.get(brdp.id), includeDrafts)) approvedBRDPs.push(brdp);
     else unapprovedBRDPs.push(brdp);
   }
 
@@ -602,5 +604,5 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
   // attribute -- but reported if an empty one ever reaches the output.
   const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, schemaUrls, emptyContextBlocks };
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks };
 }

@@ -19,9 +19,10 @@
 // committed).
 //
 // Verifies:
-//   1. 5 real approved rules sharing byte-identical valor/colPart/colDe/cab
-//      definitions, and 4 sharing docFicha/docs -> each ends up declared
-//      EXACTLY ONCE in the generated document, with its real content intact.
+//   1. 5 real approved rules sharing byte-identical valor/colPart/colDe
+//      functions, and 4 sharing docFicha -> each function ends up declared
+//      EXACTLY ONCE in the generated document, with its real content intact;
+//      cab / docs (they read the context node) stay in each rule.
 //   2. Every original assert/report id and test expression survives
 //      untouched (dedup never touches anything but the sch:let elements).
 //   3. A genuine name collision (same sch:let name, different value across
@@ -81,7 +82,7 @@ function docFichaRule(id) {
 }
 
 function collisionRule(id, value) {
-  return `<sch:pattern id="p-${id}"><sch:rule context="topic"><sch:let name="marker" value="${value}"/><sch:assert role="warning" id="${id}" test="$marker != ''">Collision test for ${id}.</sch:assert></sch:rule></sch:pattern>`;
+  return `<sch:pattern id="p-${id}"><sch:rule context="topic"><sch:let name="marker" value="${value}"/><sch:assert role="warning" id="${id}" test="$marker() != 0">Collision test for ${id}.</sch:assert></sch:rule></sch:pattern>`;
 }
 
 function soloRule(id) {
@@ -154,8 +155,10 @@ async function main() {
     for (const id of docFichaRows) await createApprovedBRDP(auth, projectId, id, docFichaRule(id));
 
     // ---- Genuine name collision: same name "marker", different value ----
-    await createApprovedBRDP(auth, projectId, "BRDP-EXT-COLLIDE-A", collisionRule("BRDP-EXT-COLLIDE-A", "1 + 1"));
-    await createApprovedBRDP(auth, projectId, "BRDP-EXT-COLLIDE-B", collisionRule("BRDP-EXT-COLLIDE-B", "2 + 2"));
+    // (functions: the shareable kind -- a rule-level let that is not a
+    // function stays in its rule anyway, so it never collides with anything)
+    await createApprovedBRDP(auth, projectId, "BRDP-EXT-COLLIDE-A", collisionRule("BRDP-EXT-COLLIDE-A", "function() as xs:integer { 1 + 1 }"));
+    await createApprovedBRDP(auth, projectId, "BRDP-EXT-COLLIDE-B", collisionRule("BRDP-EXT-COLLIDE-B", "function() as xs:integer { 2 + 2 }"));
 
     // ---- Solo, never-repeated let -- must stay completely untouched ----
     await createApprovedBRDP(auth, projectId, "BRDP-EXT-SOLO", soloRule("BRDP-EXT-SOLO"));
@@ -175,9 +178,12 @@ async function main() {
     assert(countOf("valor") === 1, `"valor" appears exactly once in the real generated document (got ${countOf("valor")})`);
     assert(countOf("colPart") === 1, `"colPart" appears exactly once (got ${countOf("colPart")})`);
     assert(countOf("colDe") === 1, `"colDe" appears exactly once (got ${countOf("colDe")})`);
-    assert(countOf("cab") === 1, `"cab" appears exactly once (got ${countOf("cab")})`);
+    // cab / docs read the context node (ancestor::…, //topicref from the
+    // rule's map): a schema-level copy would be evaluated against the
+    // document root and give another value, so each rule keeps its own.
+    assert(countOf("cab") === 5, `"cab" (reads the context node) stays in each of its 5 rules (got ${countOf("cab")})`);
     assert(countOf("docFicha") === 1, `"docFicha" appears exactly once (got ${countOf("docFicha")})`);
-    assert(countOf("docs") === 1, `"docs" appears exactly once (got ${countOf("docs")})`);
+    assert(countOf("docs") === 4, `"docs" (reads the context node) stays in each of its 4 rules (got ${countOf("docs")})`);
     assert(xml.includes(VALOR_DEF), "the real shared valor definition is present verbatim, exactly once");
     assert(xml.includes(DOCFICHA_DEF), "the real shared docFicha definition is present verbatim, exactly once");
 
@@ -188,7 +194,7 @@ async function main() {
 
     // ---- Collision: NEVER merged, both copies survive with their own value ----
     assert(countOf("marker") === 2, `colliding "marker" let is NEVER merged -- both copies survive (got ${countOf("marker")})`);
-    assert(xml.includes('value="1 + 1"') && xml.includes('value="2 + 2"'), "both distinct colliding values are present, untouched");
+    assert(xml.includes('value="function() as xs:integer { 1 + 1 }"') && xml.includes('value="function() as xs:integer { 2 + 2 }"'), "both distinct colliding values are present, untouched");
     const warningsToggle = page.locator("text=/vocabulary warning/i");
     assert((await warningsToggle.count()) > 0, "a warnings panel is shown (collision warning uses the same UI surface as vocabulary warnings)");
     await page.click("text=/vocabulary warning/i");

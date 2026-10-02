@@ -1,4 +1,5 @@
 import { extractXML, pendingApprovalComment } from "./generateBREX.js";
+import { ruleEnters } from "../utils/generatePlan.js";
 import { _isSafePattern } from "./brexToSchematron.js";
 import { getApprovalsForFormat } from "./approvals.js";
 
@@ -332,7 +333,7 @@ export async function generateSingleRule(brdp, schemaSummary, callLLM, queryBind
 // DITA -- this header assembly is the only deterministic step in the whole
 // pipeline, so it carries more weight than its BREX counterpart) =====
 
-function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding = "xslt2", sharedLets = []) {
+function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding = "xslt2", sharedLets = [], namespaces = []) {
   const header = (schemaSummary && schemaSummary.sch_header) || {};
   // Declares BOTH the sch: prefix AND the same URI as the default namespace
   // (legal XML -- an element can be in scope for a prefix and the default
@@ -387,23 +388,21 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryB
   // assembled raw LLM chunk output directly; the main path is 100%
   // deterministic now (see generateSchematronDITA()'s own docstring), so
   // there is nothing left here for it to defend against.
-  // sharedLets (DITA 1.3 Xpath3.0 only -- see dedupeSharedLets() below):
-  // hoisted (name, value) sch:let pairs that were duplicated across two or
-  // more approved rules' own copies, now declared exactly once here.
-  // Placed right after the title and before the first pattern -- the
-  // closest equivalent in this assembled document to "after the sch:ns
-  // declarations, before the first sch:pattern" in a hand-written file
-  // (this document has no sch:ns declarations of its own to anchor to,
-  // since each block already carries its own inline xmlns:xs etc.).
-  // ISO Schematron scopes a schema-level sch:let to the WHOLE document, so
-  // every rule that used to declare its own copy can still reference it by
-  // the same $name -- nothing downstream of assembly needs to change.
+  // sharedLets (see dedupeSharedLets() below): sch:let pairs repeated
+  // across the approved rules, now declared once, after the sch:ns
+  // declarations (namespaces, collectNamespaces() below) and before the
+  // first pattern. ISO Schematron scopes a schema-level sch:let to the
+  // whole document, so every rule that declared its own copy still
+  // reaches it by the same $name.
   const sharedLetsXml = sharedLets.map((l) => `  <sch:let name="${l.name}" value="${l.value}"/>`);
+  // sch:ns before the lets (ISO order: title, ns*, p*, let*, …, pattern*).
+  const namespacesXml = namespaces.map((n) => `  <sch:ns prefix="${n.prefix}" uri="${n.uri}"/>`);
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     open,
     title,
+    ...namespacesXml,
     ...sharedLetsXml,
     ...blocks,
     close,
@@ -550,8 +549,11 @@ function checkRulesAndChecks(xml) {
 }
 
 function checkPlaceholders(xml) {
+  // Outside comments: a rule's own explanatory comment is free text ("la
+  // regla SUSPENDE TODO", in a real imported Schematron), never a leftover.
   const markers = ["TODO", "FIXME", "{{", "PROJECT_TITLE}}"];
-  return markers.filter((marker) => xml.includes(marker));
+  const code = xml.replace(/<!--[\s\S]*?-->/g, "");
+  return markers.filter((marker) => code.includes(marker));
 }
 
 // Non-blocking lint: flags element/attribute-shaped tokens in context/test
@@ -893,101 +895,176 @@ function checkWellFormedSchematron(xml, schemaSummary, queryBinding = "xslt2") {
   return { valid: errors.length === 0, errors, vocabularyWarnings };
 }
 
-// ===== Shared <sch:let> deduplication (DITA 1.3 Xpath3.0 only) =====
-// Confirmed real problem in the Navantia Xpath3.0 project: each approved
-// Rule is a self-contained <sch:pattern> (STRICT RULE 2 -- one BRDP, one
-// pattern, one rule), so a project-wide shared helper function (valor,
-// colDe, colPart, docFicha, etc -- declared via a top-level sch:let whose
-// value is an inline XPath 3.0 function-item expression, see
-// XPATH3_ONLY_VOCAB's "function" entry) ends up with its OWN declaration
-// repeated in every single rule that calls it, instead of being declared
-// once for the whole document: valor/colDe/colPart repeated 5 times each,
-// docFicha 4 times, other helpers repeated twice -- 62 sch:let total where
-// a hand-written document would have each helper exactly once. This is
-// functionally harmless (ISO Schematron scopes a rule-level sch:let to
-// that rule only, so duplicate copies never conflict with each other) but
-// far from how the document would look if authored by hand.
-// XPath 2.0 has no equivalent: inline function-item expressions
-// ("function($x as type) as type {...}") do not exist in 2.0's grammar at
-// all, so there is nothing to hoist for an Xpath2.0 project -- this only
-// ever runs for queryBinding === "xslt3" (see generateSchematronDITA()'s
-// call site below, which skips it entirely otherwise).
-const RULE_RE_G = new RegExp(`<${SCH}rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}rule>`, "g");
+// ===== Shared <sch:let> deduplication and namespace declarations =====
+// Each approved Rule is a self-contained <sch:pattern> (one BRDP, one
+// pattern), so a helper shared by several rules ends up declared once per
+// rule: a rule imported from a Schematron file (AI Extract) carries a copy
+// of every global sch:let it uses, as pattern-level lets, and the Navantia
+// Xpath3.0 rules written by hand declared their helper functions (valor,
+// colDe, colPart, docFicha…) inside each sch:rule -- 62 sch:let where a
+// hand-written document has each helper once. Repeated copies are declared
+// once here, at schema level (a rule-level function only when repeated).
+//
+// Only what means the same at schema level is moved:
+//   - a pattern-level sch:let (ISO Schematron evaluates it with the
+//     document as context, exactly like a schema-level one), even when only
+//     one rule has it;
+//   - a rule-level sch:let whose value is an inline function
+//     ("function($x as …) … { … }", XPath 3.0): a function has no context
+//     item, so it is the same wherever it is declared.
+// A rule-level let that reads the context node (cab = ancestor::tgroup[1]/…,
+// part = $valor(., …)) is evaluated once per node of its rule and is never
+// moved: at schema level it would be evaluated against the document root
+// and give another value (fixed bug -- the previous version moved any
+// rule-level let repeated with the same value, cab and part included).
+// A moved let may only reference other moved lets (a schema-level let
+// cannot see a pattern's or a rule's); the moved ones are written in an
+// order where each comes after the ones it uses.
+// Same name with different values: never merged, every copy stays where it
+// is, and a warning names it. Runs for both XPath 2.0 and 3.0 projects.
+const PATTERN_RE_G = new RegExp(`<${SCH}pattern\\b(${ATTR_LIST})\\s*(?:/>|>([\\s\\S]*?)</${SCH}pattern>)`, "g");
+const RULE_START_RE = new RegExp(`<${SCH}rule\\b`);
 const LET_RE_G = new RegExp(`\\s*<${SCH}let\\b(${ATTR_LIST})\\s*/>`, "g");
+const VAR_RE_G = /\$([A-Za-z_][\w.-]*)/g;
+const BOUND_RE_G = /\$([A-Za-z_][\w.-]*)\s*(?::=|\b(?:in|as)\b)/g;
 
-// blocks: the array of already-assembled per-BRDP strings (a verbatim
-// approved <sch:pattern>...</sch:pattern>, or a traceability comment --
-// comments never contain a sch:rule, so they pass through untouched, no
-// special-casing needed). Returns the same shape blocks came in, plus the
-// hoisted { name, value } pairs to render once at document level, plus any
-// non-blocking name-collision warnings.
+function isFunctionValue(value) {
+  return /^\s*function\s*\(/.test(value);
+}
+
+// Variables an expression reads and does not bind itself.
+function freeVariables(value) {
+  const bound = new Set([...value.matchAll(BOUND_RE_G)].map((m) => m[1]));
+  return new Set([...value.matchAll(VAR_RE_G)].map((m) => m[1]).filter((n) => !bound.has(n)));
+}
+
+// The lets of a block, each with whether it is pattern-level.
+function blockLets(block) {
+  const out = [];
+  for (const pm of block.matchAll(PATTERN_RE_G)) {
+    const body = pm[2] || "";
+    const cut = body.search(RULE_START_RE);
+    const head = cut === -1 ? body : body.slice(0, cut);
+    const rest = cut === -1 ? "" : body.slice(cut);
+    for (const lm of head.matchAll(LET_RE_G)) out.push({ attrs: lm[1], patternLevel: true });
+    for (const lm of rest.matchAll(LET_RE_G)) out.push({ attrs: lm[1], patternLevel: false });
+  }
+  return out;
+}
+
+// blocks: the assembled per-BRDP strings (a verbatim approved
+// <sch:pattern>…, or a comment -- no pattern, passes through untouched).
+// → { blocks, sharedLets: [{name, value}], warnings }.
 function dedupeSharedLets(blocks) {
-  // Pass 1: collect every first-level sch:let (name, value) pair, grouped
-  // by name, counting each DISTINCT rule that declares it -- "first-level"
-  // here means "a direct child of some sch:rule" (STRICT RULE 2 means one
-  // rule per block for generated/approved content, so scanning ruleBody
-  // rather than the whole block also naturally excludes anything that
-  // might otherwise appear outside a rule).
-  const byName = new Map(); // name -> Map(exact value string -> occurrence count)
+  const byName = new Map(); // name -> Map(value -> count), movable copies only
+  const order = [];
+  const patternLevelNames = new Set();
   for (const block of blocks) {
-    for (const rm of block.matchAll(RULE_RE_G)) {
-      const ruleBody = rm[2];
-      for (const lm of ruleBody.matchAll(LET_RE_G)) {
-        const name = getAttr(lm[1], "name");
-        const value = getAttr(lm[1], "value");
-        if (!name || value == null) continue;
-        if (!byName.has(name)) byName.set(name, new Map());
-        const valueCounts = byName.get(name);
-        valueCounts.set(value, (valueCounts.get(value) || 0) + 1);
+    for (const { attrs, patternLevel } of blockLets(block)) {
+      const name = getAttr(attrs, "name");
+      const value = getAttr(attrs, "value");
+      if (!name || value == null) continue;
+      if (patternLevel) patternLevelNames.add(name);
+      if (!patternLevel && !isFunctionValue(value)) continue;
+      if (!byName.has(name)) {
+        byName.set(name, new Map());
+        order.push(name);
       }
+      const counts = byName.get(name);
+      counts.set(value, (counts.get(value) || 0) + 1);
     }
   }
 
-  // Pass 2: a name with exactly one distinct value used more than once is a
-  // clean shared candidate, hoisted verbatim (grouped by "(name, value) --
-  // same name AND same exact content", never normalized/trimmed -- the
-  // same anti-pattern already fixed once in _normSpace(), collapsing
-  // whitespace that is significant inside a literal, is not repeated
-  // here). A name with MORE THAN ONE distinct value across rules is a
-  // genuine collision -- NEVER merged (fusing different content under the
-  // same name would silently change what one of the rules actually does),
-  // each copy stays exactly where it was, and a non-blocking warning flags
-  // the coincidence for manual review.
-  const sharedValueByName = new Map(); // name -> the one value to hoist
   const warnings = [];
-  for (const [name, valueCounts] of byName) {
-    if (valueCounts.size > 1) {
+  const shared = new Map(); // name -> value
+  for (const name of order) {
+    const counts = byName.get(name);
+    if (counts.size > 1) {
       warnings.push(
-        `Shared sch:let name '${name}' is declared with ${valueCounts.size} different values across approved rules -- none were merged, each kept in its own rule; verify this isn't a real authoring mistake.`
+        `Shared sch:let name '${name}' is declared with ${counts.size} different values across approved rules -- none were merged, each kept in its own rule; verify this isn't a real authoring mistake.`
       );
       continue;
     }
-    const [[value, count]] = valueCounts;
-    if (count > 1) sharedValueByName.set(name, value);
+    const [[value, count]] = counts;
+    // A pattern-level let goes up even when only one rule has it (same
+    // meaning at schema level): the document then declares every function
+    // in one place, as a hand-written one does, and imports back the same.
+    if (count > 1 || patternLevelNames.has(name)) shared.set(name, value);
   }
-
-  if (sharedValueByName.size === 0) {
-    return { blocks, sharedLets: [], warnings };
+  // A moved let may only use other moved lets.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [name, value] of shared) {
+      if ([...freeVariables(value)].some((v) => !shared.has(v))) {
+        shared.delete(name);
+        changed = true;
+      }
+    }
   }
+  if (shared.size === 0) return { blocks, sharedLets: [], warnings };
 
-  // Pass 3: strip every hoisted (name, value) sch:let from every rule that
-  // had it. The removal criterion (exact name+value match against the
-  // hoist set) doesn't depend on which specific rule an occurrence sits
-  // in, so a single whole-block regex pass is sufficient and never needs
-  // to reconstruct the surrounding <sch:rule>/</sch:rule> tags (which
-  // would otherwise have to account for the sch:/unprefixed variance SCH
-  // already handles elsewhere) -- nothing else in a block (the assert/
-  // report, message text, other sch:let entries) is touched.
+  const isShared = (attrs) => {
+    const name = getAttr(attrs, "name");
+    const value = getAttr(attrs, "value");
+    return !!name && shared.get(name) === value;
+  };
   const newBlocks = blocks.map((block) =>
-    block.replace(LET_RE_G, (fullMatch, attrs) => {
-      const name = getAttr(attrs, "name");
-      const value = getAttr(attrs, "value");
-      return name && sharedValueByName.get(name) === value ? "" : fullMatch;
+    block.replace(PATTERN_RE_G, (full, attrs, body) => {
+      if (body == null) return full;
+      const cut = body.search(RULE_START_RE);
+      const head = cut === -1 ? body : body.slice(0, cut);
+      const rest = cut === -1 ? "" : body.slice(cut);
+      const newHead = head.replace(LET_RE_G, (m, a) => (isShared(a) ? "" : m));
+      const newRest = rest.replace(LET_RE_G, (m, a) => (isShared(a) && isFunctionValue(getAttr(a, "value") || "") ? "" : m));
+      // Rebuilt by position, never with String.replace(body, …): XPath is
+      // full of "$" ($valor, $'…) that a replacement string reads as
+      // substitution patterns.
+      const at = full.lastIndexOf(body);
+      return full.slice(0, at) + newHead + newRest + full.slice(at + body.length);
     })
   );
 
-  const sharedLets = [...sharedValueByName.entries()].map(([name, value]) => ({ name, value }));
+  // Each after the ones it uses (first-seen order otherwise).
+  const sharedLets = [];
+  const placed = new Set();
+  const place = (name, path = new Set()) => {
+    if (placed.has(name) || path.has(name)) return;
+    path.add(name);
+    for (const dep of freeVariables(shared.get(name))) if (shared.has(dep)) place(dep, path);
+    placed.add(name);
+    sharedLets.push({ name, value: shared.get(name) });
+  };
+  for (const name of order) if (shared.has(name)) place(name);
   return { blocks: newBlocks, sharedLets, warnings };
+}
+
+// Namespace prefixes the rules declare on their <sch:pattern> (xmlns:xs for
+// a function typed "as xs:string", copied from the file's global sch:ns by
+// AI Extract): declared once for the whole document as <sch:ns>, which is
+// what a Schematron processor reads for the prefixes of its XPath.
+// Same prefix with different URIs: the first is declared, and a warning
+// names the conflict.
+const XMLNS_RE_G = /\sxmlns:([A-Za-z_][\w.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+const PATTERN_START_RE_G = new RegExp(`<${SCH}pattern\\b(${ATTR_LIST})\\s*/?>`, "g");
+
+function collectNamespaces(blocks) {
+  const byPrefix = new Map();
+  const warnings = [];
+  for (const block of blocks) {
+    for (const pm of block.matchAll(PATTERN_START_RE_G)) {
+      for (const xm of pm[1].matchAll(XMLNS_RE_G)) {
+        const prefix = xm[1];
+        const uri = xm[2] ?? xm[3];
+        if (prefix === "sch" || prefix === "xml") continue;
+        if (!byPrefix.has(prefix)) byPrefix.set(prefix, uri);
+        else if (byPrefix.get(prefix) !== uri) {
+          warnings.push(`Namespace prefix '${prefix}' is declared with different URIs across approved rules; '${byPrefix.get(prefix)}' is used.`);
+        }
+      }
+    }
+  }
+  return { namespaces: [...byPrefix].map(([prefix, uri]) => ({ prefix, uri })), warnings: [...new Set(warnings)] };
 }
 
 // ===== Main entry point =====
@@ -1017,6 +1094,7 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     approvalsFormat = FORMAT_ID,
     schemaSummary: schemaSummaryOverride,
     standard,
+    includeDrafts = false,
   } = options;
   const queryBinding = queryBindingForStandard(standard);
 
@@ -1039,9 +1117,11 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     : await fetchApprovalsMap(approvalsFormat);
 
   let blocks = [];
+  let ruleCount = 0;
   for (const brdp of targetBRDPs) {
     const approvalEntry = approvalById.get(brdp.id);
-    if (approvalEntry && approvalEntry.status === "approved") {
+    if (ruleEnters(approvalEntry, includeDrafts)) {
+      ruleCount += 1;
       blocks.push(buildDeterministicBlockFromFewShot(approvalEntry));
     } else {
       // Same comment as the BREX generators (pendingApprovalComment in
@@ -1050,20 +1130,15 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     }
   }
 
-  // Shared sch:let deduplication (see dedupeSharedLets() above): Xpath3.0
-  // only -- Xpath2.0 has no inline function-item expressions to share
-  // across rules in the first place, so there is nothing to hoist and
-  // running this unconditionally would just be a no-op pass every time.
-  let sharedLets = [];
-  let dedupWarnings = [];
-  if (queryBinding === "xslt3") {
-    const deduped = dedupeSharedLets(blocks);
-    blocks = deduped.blocks;
-    sharedLets = deduped.sharedLets;
-    dedupWarnings = deduped.warnings;
-  }
+  // Repeated sch:let declared once, and the rules' namespace prefixes
+  // declared once (see dedupeSharedLets() / collectNamespaces() above).
+  const deduped = dedupeSharedLets(blocks);
+  blocks = deduped.blocks;
+  const sharedLets = deduped.sharedLets;
+  const { namespaces, warnings: nsWarnings } = collectNamespaces(blocks);
+  const dedupWarnings = [...deduped.warnings, ...nsWarnings];
 
-  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding, sharedLets);
+  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding, sharedLets, namespaces);
   const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary, queryBinding);
 
   return {
@@ -1077,7 +1152,8 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     // human look, never blocks generation or download" semantics.
     vocabularyWarnings: [...vocabularyWarnings, ...dedupWarnings],
     brdpCount: targetBRDPs.length,
+    ruleCount,
   };
 }
 
-export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument, queryBindingForStandard, dedupeSharedLets };
+export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument, queryBindingForStandard, dedupeSharedLets, collectNamespaces };

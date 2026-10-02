@@ -171,3 +171,32 @@
   font-size: 11px;
   font-style: italic;
 }
+
+/* Search by ID or title, next to the "Show" filter (like BRDP Records). */
+.search {
+  min-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+/* Sortable header (ID, Title): looks like the header text. */
+.sortButton {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.applyBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
