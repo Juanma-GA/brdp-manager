@@ -394,7 +394,11 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryB
   // first pattern. ISO Schematron scopes a schema-level sch:let to the
   // whole document, so every rule that declared its own copy still
   // reaches it by the same $name.
-  const sharedLetsXml = sharedLets.map((l) => `  <sch:let name="${l.name}" value="${l.value}"/>`);
+  // Each with its comment right before it, once (a global function's
+  // comment, carried in by AI Extract).
+  const sharedLetsXml = sharedLets.map(
+    (l) => (l.comment ? `  ${l.comment}\n` : "") + `  <sch:let name="${l.name}" value="${l.value}"/>`
+  );
   // sch:ns before the lets (ISO order: title, ns*, p*, let*, …, pattern*).
   const namespacesXml = namespaces.map((n) => `  <sch:ns prefix="${n.prefix}" uri="${n.uri}"/>`);
 
@@ -924,7 +928,11 @@ function checkWellFormedSchematron(xml, schemaSummary, queryBinding = "xslt2") {
 // is, and a warning names it. Runs for both XPath 2.0 and 3.0 projects.
 const PATTERN_RE_G = new RegExp(`<${SCH}pattern\\b(${ATTR_LIST})\\s*(?:/>|>([\\s\\S]*?)</${SCH}pattern>)`, "g");
 const RULE_START_RE = new RegExp(`<${SCH}rule\\b`);
-const LET_RE_G = new RegExp(`\\s*<${SCH}let\\b(${ATTR_LIST})\\s*/>`, "g");
+// A sch:let with the comment right before it, when there is one (only
+// whitespace in between): AI Extract writes a global function's comment
+// there, and it moves with the function (written once, right before it).
+// The comment body never runs past its own "-->".
+const LET_RE_G = new RegExp(`(\\s*<!--((?:(?!-->)[\\s\\S])*)-->)?\\s*<${SCH}let\\b(${ATTR_LIST})\\s*/>`, "g");
 const VAR_RE_G = /\$([A-Za-z_][\w.-]*)/g;
 const BOUND_RE_G = /\$([A-Za-z_][\w.-]*)\s*(?::=|\b(?:in|as)\b)/g;
 
@@ -946,26 +954,31 @@ function blockLets(block) {
     const cut = body.search(RULE_START_RE);
     const head = cut === -1 ? body : body.slice(0, cut);
     const rest = cut === -1 ? "" : body.slice(cut);
-    for (const lm of head.matchAll(LET_RE_G)) out.push({ attrs: lm[1], patternLevel: true });
-    for (const lm of rest.matchAll(LET_RE_G)) out.push({ attrs: lm[1], patternLevel: false });
+    for (const lm of head.matchAll(LET_RE_G)) out.push({ attrs: lm[3], comment: lm[1] ? lm[1].trim() : null, patternLevel: true });
+    for (const lm of rest.matchAll(LET_RE_G)) out.push({ attrs: lm[3], comment: lm[1] ? lm[1].trim() : null, patternLevel: false });
   }
   return out;
 }
 
 // blocks: the assembled per-BRDP strings (a verbatim approved
 // <sch:pattern>…, or a comment -- no pattern, passes through untouched).
-// → { blocks, sharedLets: [{name, value}], warnings }.
+// → { blocks, sharedLets: [{name, value, comment}], warnings }. comment: the
+// comment that was right before a copy of the let (the first one found), or
+// null; written once, right before the shared declaration.
 function dedupeSharedLets(blocks) {
   const byName = new Map(); // name -> Map(value -> count), movable copies only
   const order = [];
   const patternLevelNames = new Set();
+  const comments = new Map(); // `${name}\u0001${value}` -> comment
   for (const block of blocks) {
-    for (const { attrs, patternLevel } of blockLets(block)) {
+    for (const { attrs, comment, patternLevel } of blockLets(block)) {
       const name = getAttr(attrs, "name");
       const value = getAttr(attrs, "value");
       if (!name || value == null) continue;
       if (patternLevel) patternLevelNames.add(name);
       if (!patternLevel && !isFunctionValue(value)) continue;
+      const key = `${name}\u0001${value}`;
+      if (comment && !comments.has(key)) comments.set(key, comment);
       if (!byName.has(name)) {
         byName.set(name, new Map());
         order.push(name);
@@ -1015,8 +1028,9 @@ function dedupeSharedLets(blocks) {
       const cut = body.search(RULE_START_RE);
       const head = cut === -1 ? body : body.slice(0, cut);
       const rest = cut === -1 ? "" : body.slice(cut);
-      const newHead = head.replace(LET_RE_G, (m, a) => (isShared(a) ? "" : m));
-      const newRest = rest.replace(LET_RE_G, (m, a) => (isShared(a) && isFunctionValue(getAttr(a, "value") || "") ? "" : m));
+      // A moved let takes the comment right before it along (LET_RE_G).
+      const newHead = head.replace(LET_RE_G, (m, _c, _b, a) => (isShared(a) ? "" : m));
+      const newRest = rest.replace(LET_RE_G, (m, _c, _b, a) => (isShared(a) && isFunctionValue(getAttr(a, "value") || "") ? "" : m));
       // Rebuilt by position, never with String.replace(body, …): XPath is
       // full of "$" ($valor, $'…) that a replacement string reads as
       // substitution patterns.
@@ -1033,7 +1047,8 @@ function dedupeSharedLets(blocks) {
     path.add(name);
     for (const dep of freeVariables(shared.get(name))) if (shared.has(dep)) place(dep, path);
     placed.add(name);
-    sharedLets.push({ name, value: shared.get(name) });
+    const value = shared.get(name);
+    sharedLets.push({ name, value, comment: comments.get(`${name}\u0001${value}`) ?? null });
   };
   for (const name of order) if (shared.has(name)) place(name);
   return { blocks: newBlocks, sharedLets, warnings };

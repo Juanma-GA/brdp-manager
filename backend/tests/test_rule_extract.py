@@ -886,6 +886,59 @@ def test_xpath3_schematron_each_rule_carries_the_global_functions_it_uses():
     assert ids["BRDP-EXT-00004"]["literal"]["title"] == "El escalón de mantenimiento de la planificación coincide con el del procedimiento."
 
 
+def _function_comments(text):
+    """{function name: the comment right before its global sch:let} of the
+    real xpath3 file."""
+    import re
+
+    text = text.replace("\r\n", "\n")
+    return {
+        m.group(2): m.group(1)
+        for m in re.finditer(r'(<!--(?:(?!-->)[\s\S])*-->)\s*<sch:let name="(\w+)"', text)
+        if m.group(2) in _GLOBAL_FUNCTIONS
+    }
+
+
+def test_xpath3_schematron_function_comments_travel_with_their_functions():
+    comments = _function_comments(XPATH3.read_text(encoding="utf-8"))
+    # The fixture: 9 functions, each with its comment.
+    assert sorted(comments) == sorted(_GLOBAL_FUNCTIONS)
+    rf = read_rules_file(XPATH3.read_bytes(), "SCH-DITA", "DITA 1.3 Xpath3.0")
+    candidates, _ = build_candidates(rf, None)
+    for c in candidates:
+        x = c["rule_xml"]
+        for name in _let_names(x):
+            if name not in _GLOBAL_FUNCTIONS:
+                continue
+            # Each copy of a function has its comment right before it, once.
+            at = x.index(f'<sch:let name="{name}"')
+            before = x[:at].rstrip()
+            assert before.endswith(comments[name]), (c["origin_identifier"], name)
+            assert x.count(comments[name]) == 1
+        # The two header blocks of the file are never kept.
+        assert "QUÉ ES ESTE FICHERO" not in x and "FUNCIONES COMPARTIDAS" not in x
+
+
+def test_global_let_comment_only_when_right_before_it():
+    text = XPATH3.read_text(encoding="utf-8").replace("\r\n", "\n")
+    comments = _function_comments(text)
+    # colDe: its comment removed, so the one before it is the section header
+    # (==== FUNCIONES COMPARTIDAS ====), which is not kept: no comment.
+    text = text.replace(comments["colDe"] + "\n", "", 1)
+    # colPart: an element between its comment and the function -- the
+    # comment stays behind.
+    text = text.replace(comments["colPart"], comments["colPart"] + '\n  <sch:let name="separa" value="1"/>', 1)
+    # valor: a comment about a rule (starts with a BRDP id) is not its comment.
+    text = text.replace(comments["valor"], "<!-- BRDP-EXT-00009 — otra regla -->", 1)
+    rf = read_rules_file(text.encode("utf-8"), "SCH-DITA", "DITA 1.3 Xpath3.0")
+    candidates, _ = build_candidates(rf, None)
+    x1 = _by_id(candidates)["BRDP-EXT-00001"]["rule_xml"]
+    for name in ("colDe", "colPart", "valor"):
+        at = x1.index(f'<sch:let name="{name}"')
+        assert not x1[:at].rstrip().endswith("-->"), name
+    assert comments["colPart"] not in x1 and "FUNCIONES COMPARTIDAS" not in x1 and "otra regla" not in x1
+
+
 def test_schematron_undeclared_variable_and_unused_globals():
     text = XPATH3.read_text(encoding="utf-8")
     # $valor declared nowhere (renamed), and an extra global nobody uses.

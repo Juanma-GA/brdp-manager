@@ -9,6 +9,10 @@
 // by backend/scripts/dump_schematron_extract_rules.py from
 // backend/tests/fixtures/schematron/ with the same code as the import.
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { extractRules } from './lib/extractRules.mjs';
+import { normalizeRuleXml } from '../src/utils/brdpCompare.js';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { planGeneration, omittedByReason, ruleEnters } from '../src/utils/generatePlan.js';
 import { isXPathSyntaxValid } from '../src/validation/schemaValidation.js';
@@ -166,6 +170,33 @@ for (const [flavor, standard, binding] of [
     // A rule-level let that reads the context node stays in its rule.
     check('xpath3: cab never moved', !head.includes('name="cab"') && (xml.match(/name="cab"/g) || []).length === 5);
     check('xpath3: no warnings about shared names', !(out.vocabularyWarnings || []).some((w) => w.startsWith('Shared sch:let')), (out.vocabularyWarnings || []).join(' | '));
+    // Each function's comment (the one right before it in the file) travels
+    // with it: written once, right before the function, never in a pattern.
+    const source = fs.readFileSync(new URL('../backend/tests/fixtures/schematron/BRDP-D1_schematron-xpath3.sch', import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
+    for (const name of FUNCTIONS) {
+      const m = source.match(new RegExp(`(<!--(?:(?!-->)[\\s\\S])*-->)\\s*<sch:let name="${name}"`));
+      const comment = m ? m[1] : null;
+      check(`xpath3: ${name} has its comment in the file`, !!comment);
+      if (!comment) continue;
+      const count = xml.split(comment).length - 1;
+      const at = xml.indexOf(comment);
+      const right = at >= 0 && new RegExp(`^\\s*<sch:let name="${name}"`).test(xml.slice(at + comment.length));
+      check(`xpath3: ${name}'s comment once, right before it`, count === 1 && right, `count ${count}`);
+    }
+    // The two header blocks of the file are not kept.
+    check('xpath3: file header blocks not kept', !xml.includes('QUÉ ES ESTE FICHERO') && !xml.includes('FUNCIONES COMPARTIDAS'));
+    // Imported again from the generated document: the same rules.
+    const tmp = path.join(os.tmpdir(), `roundtrip-xpath3-${process.pid}.sch`);
+    fs.writeFileSync(tmp, xml);
+    try {
+      const again = extractRules(tmp, 'SCH-DITA', 'DITA 1.3 Xpath3.0');
+      const norm = (x) => normalizeRuleXml(x, { parseXml: (t) => new DOMParser().parseFromString(t, 'text/xml') }).text;
+      const before = new Map(fixture.xpath3.map((r) => [r.identifier, norm(r.rule_xml)]));
+      const changed = again.candidates.filter((c) => before.get(c.identifier) !== norm(c.rule_xml)).map((c) => c.identifier);
+      check('xpath3: generated document imports back as the same rules', again.candidates.length === fixture.xpath3.length && changed.length === 0, changed.join(', '));
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
   } else {
     check('xpath2: nothing moved (no pattern-level or function lets)', !xml.slice(0, xml.indexOf('<pattern')).includes('let name='));
     check('xpath2: 00007 written as its three patterns', ['p-BRDP-EXT-00007a', 'p-BRDP-EXT-00007"', 'p-BRDP-EXT-00007b'].every((s) => xml.includes(s)));

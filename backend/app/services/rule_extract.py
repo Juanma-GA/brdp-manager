@@ -46,9 +46,12 @@ on its own: each pattern gets a copy of the global sch:let it uses, directly
 or through another global ($textoNota uses $nodoConref), first inside the
 pattern, each after the ones it uses (alphabetical otherwise: the same
 order whatever the file), and an xmlns declaration for each global sch:ns
-prefix its XPath uses (xs: of a typed inline function). Generate hoists
-the repeated copies back to one declaration (generateSchematronDITA.js,
-dedupeSharedLets) and declares each prefix once. A variable used and
+prefix its XPath uses (xs: of a typed inline function). The comment right
+before a global sch:let (not a section header "<!-- ==== … -->" of the
+file, not one about a rule) travels with it, right before each copy.
+Generate hoists the repeated copies back to one declaration, its comment
+once right before it (generateSchematronDITA.js, dedupeSharedLets), and
+declares each prefix once. A variable used and
 declared nowhere in the file is a candidate warning; a global that no rule
 uses is the only "schematron_globals" file warning. The comment block right
 before a pattern is stored with it, in front of it (a section header that
@@ -177,7 +180,7 @@ class _SchGlobals:
     sch:schema), in file order, and its comments that start with a BRDP
     identifier (to find the ones that have no rule in the file)."""
 
-    lets: list[dict] = field(default_factory=list)  # {name, value, text}
+    lets: list[dict] = field(default_factory=list)  # {name, value, text, comment}
     ns: list[dict] = field(default_factory=list)  # {prefix, uri}
     id_comments: list[str] = field(default_factory=list)
 
@@ -394,7 +397,12 @@ def _scan_pieces(rf: RulesFile) -> tuple[list[_Piece], _SchGlobals]:
                 lead, pending_comments = pending_comments, []
                 if local == "let":
                     globals_.lets.append(
-                        {"name": _attr(attrs, "name") or "", "value": _attr(attrs, "value") or "", "text": m.group(0)}
+                        {
+                            "name": _attr(attrs, "name") or "",
+                            "value": _attr(attrs, "value") or "",
+                            "text": m.group(0),
+                            "comment": _let_comment(lead),
+                        }
                     )
                 elif local == "ns":
                     globals_.ns.append({"prefix": _attr(attrs, "prefix") or "", "uri": _attr(attrs, "uri") or ""})
@@ -455,6 +463,29 @@ def comment_title(raw: str) -> tuple[str, str, str] | None:
     return (m.group(1), m.group(2), title) if title else None
 
 
+def _is_header_comment(raw: str) -> bool:
+    """A section header of the file (its first line is a separator,
+    <!-- ===== … ===== -->), not the comment of one function."""
+    body = raw[4:-3] if raw.startswith("<!--") else raw
+    first = next((line for line in body.split("\n") if line.strip()), "")
+    return bool(_SEPARATOR_LINE_RE.match(first))
+
+
+def _let_comment(lead: list[str]) -> str | None:
+    """The comment of a global sch:let: the one right before it (only
+    whitespace in between; an element in between ends the block, see
+    _scan_pieces), unless it is a section header of the file or starts with
+    a BRDP identifier (that one is about a rule). Travels with the function
+    into every pattern that uses it, and Generate writes it once, right
+    before the function."""
+    if not lead:
+        return None
+    raw = lead[-1]
+    if _is_header_comment(raw) or _COMMENT_ID_RE.match(_comment_body(raw)):
+        return None
+    return raw
+
+
 def _lead_comments(lead: list[str], identifier: str | None) -> list[str]:
     """The comments of the block right before a pattern that belong to it:
     the last one (unless it is about another BRDP), and the earlier ones
@@ -500,10 +531,13 @@ def _uses_prefix(expressions: str, prefix: str) -> bool:
     return bool(prefix) and re.search(r"(?<![\w.-])" + re.escape(prefix) + r":[A-Za-z_]", expressions) is not None
 
 
-def _insert_into_pattern(pattern: str, lets: list[str], declarations: list[tuple[str, str]]) -> str:
-    """The pattern with the given global sch:let as its first lets (after a
-    title / p if it has them) and xmlns declarations for the prefixes its
-    XPath uses, as written in the file otherwise."""
+def _insert_into_pattern(
+    pattern: str, lets: list[tuple[str | None, str]], declarations: list[tuple[str, str]]
+) -> str:
+    """The pattern with the given global sch:let -- (comment, text), the
+    comment written right before its function when it has one -- as its
+    first lets (after a title / p if it has them) and xmlns declarations for
+    the prefixes its XPath uses, as written in the file otherwise."""
     m = re.match(r"<[^>]*?(/?)>", pattern)
     if m is None:
         return pattern
@@ -542,7 +576,9 @@ def _insert_into_pattern(pattern: str, lets: list[str], declarations: list[tuple
                     end = u.end()
                     break
         pos = scan = end
-    inserted = "".join(f"\n{indent}{text}" for text in lets)
+    inserted = "".join(
+        (f"\n{indent}{comment}" if comment else "") + f"\n{indent}{text}" for comment, text in lets
+    )
     return start_tag + body[:pos] + inserted + body[pos:]
 
 
@@ -596,7 +632,9 @@ def schematron_rules_with_globals(pieces: list[_Piece], globals_: _SchGlobals, i
         declarations = [(n["prefix"], n["uri"]) for n in globals_.ns if _uses_prefix(all_expr, n["prefix"])]
         used_lets |= needed
         used_ns |= {p for p, _ in declarations}
-        pattern = _insert_into_pattern(piece.text, [by_name[n]["text"] for n in ordered], declarations)
+        pattern = _insert_into_pattern(
+            piece.text, [(by_name[n].get("comment"), by_name[n]["text"]) for n in ordered], declarations
+        )
         lead = _lead_comments(piece.lead, identifier)
         texts.append("\n".join(lead + [pattern]))
     return texts, undeclared, used_lets, used_ns

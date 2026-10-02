@@ -3,8 +3,9 @@
 // against the real backend and Postgres (LLM and embeddings through the local
 // simulators, as in every other verify script):
 //   - BRDP-D1_schematron-xpath3.sch into an empty DITA 1.3 Xpath3.0 project:
-//     7 candidates, each rule with the global functions it uses, imported
-//     "Already in force", generated (each function and sch:ns once), and the
+//     7 candidates, each rule with the global functions it uses (and each
+//     function's comment), imported "Already in force", generated (each
+//     function, its comment and sch:ns once), and the
 //     generated document imported back: everything "Already exists (same)";
 //   - BRDP-D1_schematron-xpath2.sch into an empty DITA 1.3 Xpath2.0 project:
 //     the file's EXT numbers kept (00004 is only a comment: file warning),
@@ -15,7 +16,8 @@
 //   - Lufthansa's BREX: search (ID, source ID, title, accents) and sort,
 //     "select / clear all shown" on the filtered rows only, imported
 //     "Pending review" and generated with the boxes unchecked (61 rules +
-//     469 nonContextRule, all Draft) and checked (nothing, and why);
+//     469 nonContextRule, all Draft; one context block per schema) and
+//     checked (nothing, and why);
 //     imported "Already in force" in another project and generated with the
 //     boxes checked; 4 rules sent back to Draft and left out, listed;
 //   - EN and ES.
@@ -172,6 +174,17 @@ async function main() {
     assert((await page.getByTestId("generate-drafts-included").count()) === 0, "no Draft warning");
     for (const f of FUNCTIONS) assert(g.xml.split(`<sch:let name="${f}"`).length - 1 === 1, `generated: ${f} declared once`);
     assert((g.xml.match(/<sch:ns prefix="xs"/g) || []).length === 1, "generated: sch:ns xs once");
+    {
+      // Each function's comment (right before it in the file) written once,
+      // right before the function; the file's two header blocks not kept.
+      const source = fs.readFileSync(XPATH3, "utf8").replace(/\r\n?/g, "\n");
+      for (const f of FUNCTIONS) {
+        const m = source.match(new RegExp(`(<!--(?:(?!-->)[\\s\\S])*-->)\\s*<sch:let name="${f}"`));
+        const at = m ? g.xml.indexOf(m[1]) : -1;
+        assert(!!m && g.xml.split(m[1]).length - 1 === 1 && /^\s*<sch:let name="/.test(g.xml.slice(at + m[1].length)) && g.xml.slice(at + m[1].length).trimStart().startsWith(`<sch:let name="${f}"`), `generated: ${f}'s comment once, right before it`);
+      }
+      assert(!g.xml.includes("QUÉ ES ESTE FICHERO") && !g.xml.includes("FUNCIONES COMPARTIDAS"), "generated: the file's header blocks are not kept");
+    }
     assert(g.xml.includes('queryBinding="xslt3"'), "generated: queryBinding xslt3");
     await page.screenshot({ path: path.join(SHOTS, "ai-extract-xpath3-generated.png") });
     const generated3 = path.join(SHOTS, "BRDP-D1-generated-xpath3.sch");
@@ -301,6 +314,16 @@ async function main() {
     g = await generate(page, lh.id, { onlyValidated: false, onlyVerified: false });
     assert(/^502 BRDPs will be included/.test(g.counter), "Lufthansa pending, boxes unchecked: 502 included", g.counter);
     assert((g.xml.match(/<structureObjectRule\b/g) || []).length === 61 && (g.xml.match(/<nonContextRule\b/g) || []).length === 469, "61 structureObjectRule + 469 nonContextRule in the BREX");
+    {
+      // One context block per schema: general 40, ddn 2, condcrossreftable 1,
+      // fault 1, prdcrossreftable 1, proced 4, ipd 3, pm 1, comrep 8.
+      const blocks = [...g.xml.matchAll(/<contextRules\b([^>]*)>([\s\S]*?)<\/contextRules>/g)].map((b) => {
+        const ctx = /rulesContext="([^"]*)"/.exec(b[1]);
+        return `${ctx ? ctx[1].replace(/^.*\//, "").replace(/\.xsd$/, "") : "general"} ${(b[2].match(/<structureObjectRule\b/g) || []).length}`;
+      });
+      assert(blocks.join(", ") === "general 40, ddn 2, condcrossreftable 1, fault 1, prdcrossreftable 1, proced 4, ipd 3, pm 1, comrep 8", "one context block per schema, with its rules", blocks.join(", "));
+      assert((await page.getByTestId("schema-urls-unrecognized").count()) === 0, "no schema URL warning");
+    }
     assert((await page.getByTestId("generate-drafts-included").locator("summary").innerText()).includes("502 Draft rules included"), "amber: 502 Draft rules included");
     g = await generate(page, lh.id, { onlyValidated: true, onlyVerified: true });
     assert((await page.getByTestId("generate-no-rules").innerText()).includes("No rule has been included"), "boxes checked: No rule has been included, with the reason");
