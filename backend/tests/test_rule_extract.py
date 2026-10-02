@@ -89,6 +89,7 @@ def test_lufthansa_brex_groups_by_the_identifier_in_the_text():
     assert s117["rule_xml"].endswith("</nonContextRule>")
     assert [p["kind"] for p in split_rule_pieces(s117["rule_xml"], "BREX-4.2")] == ["rule", "noncontext"]
     assert s117["literal"] == {
+        "title": None,
         "definition": "Decide whether inline captions affect the text line spacing and how this is defined",
         "proposal": "Captions shall not be used.",
     }
@@ -101,7 +102,7 @@ def test_lufthansa_brex_groups_by_the_identifier_in_the_text():
     s1 = ids["BRDP-S1-00001"]
     assert (s1["rule_count"], s1["noncontext_count"]) == (0, 1)
     assert s1["rule_xml"].startswith("<nonContextRule>") and s1["rule_problem"] is None
-    assert s1["literal"] == {"definition": 'Decide whether and when to use the alpha characters "I" and "O".', "proposal": "Decision made by TDWG."}
+    assert s1["literal"] == {"title": None, "definition": 'Decide whether and when to use the alpha characters "I" and "O".', "proposal": "Decision made by TDWG."}
     # All 469 nonContextRules are in some candidate's rule, and all 469 give
     # a literal Proposal (300 "Decision made by Project. …", 169 TDWG).
     assert sum(c["noncontext_count"] for c in candidates) == 469
@@ -163,7 +164,7 @@ def test_other_specification_names():
 
 def test_literal_texts_from_the_noncontext_paragraphs():
     # Two paragraphs: Definition + Proposal, "Decision made by Project." dropped.
-    assert literal_texts([["Decide X.", "Decision made by Project. X shall be used."]]) == {
+    assert literal_texts([["Decide X.", "Decision made by Project. X shall be used."]]) == {"title": None,
         "definition": "Decide X.", "proposal": "X shall be used."}
     # A bare decision paragraph stays as it is.
     assert literal_texts([["Decide X.", "Decision made by TDWG."]])["proposal"] == "Decision made by TDWG."
@@ -171,10 +172,10 @@ def test_literal_texts_from_the_noncontext_paragraphs():
     # More paragraphs: all of them after the first, one per line.
     assert literal_texts([["Decide X.", "Decision made by Project. A.", "B."]])["proposal"] == "A.\nB."
     # One paragraph: it is the Proposal; Title and Definition from elsewhere.
-    assert literal_texts([["Only text."]]) == {"definition": None, "proposal": "Only text."}
+    assert literal_texts([["Only text."]]) == {"title": None, "definition": None, "proposal": "Only text."}
     # The identifier alone in the first paragraph: no Definition.
-    assert literal_texts([["", "Decision made by Project. Y."]]) == {"definition": None, "proposal": "Y."}
-    assert literal_texts([]) == {"definition": None, "proposal": None}
+    assert literal_texts([["", "Decision made by Project. Y."]]) == {"title": None, "definition": None, "proposal": "Y."}
+    assert literal_texts([]) == {"title": None, "definition": None, "proposal": None}
 
 
 def test_set_texts_sources_and_ai_fields():
@@ -257,7 +258,7 @@ def test_brex_3_0_1_objrule_context_and_noncontext_comment():
     assert ids["BRDP-S1-00004"]["rule_xml"] == '<!-- nonContextRule id="BRDP-S1-00004": Decide which information sets to use. -->'
     assert ids["BRDP-S1-00004"]["rule_problem"] is None
     assert ids["BRDP-S1-00004"]["decision_texts"] == ["Decide which information sets to use."]
-    assert ids["BRDP-S1-00004"]["literal"] == {"definition": None, "proposal": "Decide which information sets to use."}
+    assert ids["BRDP-S1-00004"]["literal"] == {"title": None, "definition": None, "proposal": "Decide which information sets to use."}
 
 
 def test_dita_schematron_ids_from_pattern_assert_and_message():
@@ -473,10 +474,11 @@ async def test_classification_and_import(client, project_users, synthetic_standa
     assert by["BRDP-S1-00065"]["existing_rule_xml"] == _rule("BRDP-S1-00065", "//copyright")
     assert by["BRDP-S1-00070"]["classification"] == "same"
     assert by["BRDP-EXT-00014"]["classification"] == "new_ext"
-    # Next free EXT number (the project has EXT-00003), in file order.
-    assert by["BRDP-EXT-00014"]["identifier"] == "BRDP-EXT-00004"
+    # A free EXT number of the file keeps its number; a new one is the next
+    # after the project's (EXT-00003) AND the file's (EXT-00014).
+    assert by["BRDP-EXT-00014"]["identifier"] == "BRDP-EXT-00014"
     assert by["BRDP-S1-99999"]["classification"] == "new_ext"
-    assert by["BRDP-S1-99999"]["identifier"] == "BRDP-EXT-00005"
+    assert by["BRDP-S1-99999"]["identifier"] == "BRDP-EXT-00015"
     assert any(w["code"] == "not_in_catalog" for w in by["BRDP-S1-99999"]["warnings"])
     assert by["BRDP-S2-00002"]["classification"] == "other_spec"
     assert by["BRDP-S2-00002"]["specification"] == "S2000M"
@@ -510,7 +512,7 @@ async def test_classification_and_import(client, project_users, synthetic_standa
 
     async with async_session_factory() as session:
         brdps = {b.identifier: b for b in (await session.execute(select(BRDP).where(BRDP.project_id == project.id))).scalars()}
-        ext4 = brdps["BRDP-EXT-00004"]
+        ext4 = brdps["BRDP-EXT-00014"]
         assert (ext4.title, ext4.proposal, ext4.validation) == ("Footnotes", "Footnotes shall not be used.", "Pending")
         approval = await session.get(RuleApproval, (ext4.id, "BREX-4.2"))
         assert (approval.status, approval.source) == ("pending_review", "extracted")
@@ -534,11 +536,11 @@ async def test_classification_and_import(client, project_users, synthetic_standa
     by2 = _by_id(cands2)
     for origin in ("BRDP-S1-00133", "BRDP-S1-00065", "BRDP-S1-00070", "BRDP-S2-00002"):
         assert by2[origin]["classification"] == "same", origin
-    # The EXT of the file became BRDP-EXT-00004 (and S1-99999, missing from
-    # the catalog, BRDP-EXT-00005): found again through the origin kept in
-    # their history, so a re-import is "same", never another EXT.
-    assert (by2["BRDP-EXT-00014"]["classification"], by2["BRDP-EXT-00014"]["identifier"]) == ("same", "BRDP-EXT-00004")
-    assert (by2["BRDP-S1-99999"]["classification"], by2["BRDP-S1-99999"]["identifier"]) == ("same", "BRDP-EXT-00005")
+    # S1-99999, missing from the catalog, became BRDP-EXT-00015: found
+    # again through the origin kept in its history, so a re-import is
+    # "same", never another EXT.
+    assert (by2["BRDP-EXT-00014"]["classification"], by2["BRDP-EXT-00014"]["identifier"]) == ("same", "BRDP-EXT-00014")
+    assert (by2["BRDP-S1-99999"]["classification"], by2["BRDP-S1-99999"]["identifier"]) == ("same", "BRDP-EXT-00015")
     assert all(c["classification"] in ("same", "empty") for c in cands2)
     # A new file replaces the previous candidates.
     async with async_session_factory() as session:
@@ -779,3 +781,319 @@ async def test_parse_errors_always_have_a_reason(client, project_users, monkeypa
     monkeypatch.setattr(route, "get_most_recent_job", missing_table)
     res = await client.get(f"/api/projects/{project.id}/ai-extract/jobs/active", headers=editor)
     assert res.status_code == 503 and "migration" in res.json()["detail"]
+
+
+# ── Real Schematron files (tests/fixtures/schematron/) ────────────────────
+#
+# BRDP-D1_schematron-xpath2.sch: queryBinding xslt2, no prefix, 6 BRDPs
+# (00001-00003, 00005-00007; 00004 only named in a comment), 00007 written as
+# three patterns (00007a, 00007, 00007b), each with its own comment, and the
+# @@URI-CARPETA-DOSIER@@ placeholder. BRDP-D1_schematron-xpath3.sch:
+# xslt3, sch: prefix, 7 BRDPs, 9 global sch:let holding inline functions
+# (textoNota and esAdvertencia call nodoConref) and one global sch:ns (xs).
+
+SCH = Path(__file__).parent / "fixtures" / "schematron"
+XPATH2 = SCH / "BRDP-D1_schematron-xpath2.sch"
+XPATH3 = SCH / "BRDP-D1_schematron-xpath3.sch"
+_GLOBAL_FUNCTIONS = ["colDe", "colContiene", "colPart", "valor", "docFicha", "nodoConref", "textoNota", "esAdvertencia", "conrefRoto"]
+
+
+def _let_names(rule_xml):
+    import re
+
+    return re.findall(r'<(?:sch:)?let name="(\w+)"', rule_xml)
+
+
+def test_xpath2_schematron_comments_titles_and_ids():
+    rf = read_rules_file(XPATH2.read_bytes(), "SCH-DITA", "DITA 1.3 Xpath2.0")
+    candidates, warnings = build_candidates(rf, None)
+    assert [c["origin_identifier"] for c in candidates] == [
+        "BRDP-EXT-00001", "BRDP-EXT-00002", "BRDP-EXT-00003", "BRDP-EXT-00005", "BRDP-EXT-00006", "BRDP-EXT-00007",
+    ]
+    assert all(c["rule_problem"] is None and c["warnings"] == [] for c in candidates)
+    # Only file warning: 00004 is named in a comment but has no rule here.
+    assert warnings == [
+        {
+            "code": "comment_without_rule",
+            "params": {"identifier": "BRDP-EXT-00004"},
+            "message": "BRDP-EXT-00004 is mentioned in a comment, but has no rule in this file.",
+        }
+    ]
+    ids = _by_id(candidates)
+    assert ids["BRDP-EXT-00001"]["literal"]["title"] == "Campo cantidad repuestos no vacío"
+    assert ids["BRDP-EXT-00006"]["literal"]["title"] == 'Valores permitidos para Figuras y Marcas tras la fila "Repuestos"'
+    # The comment before the pattern is stored with the rule, in front of it;
+    # the file's header comment ("Cuatro cosas…") is not.
+    r1 = ids["BRDP-EXT-00001"]["rule_xml"]
+    assert r1.startswith("<!-- BRDP-EXT-00001 — Campo cantidad repuestos no vacío -->\n<pattern id=\"p-BRDP-EXT-00001\">")
+    assert "Cuatro cosas" not in r1
+    # 00005's comment block starts after 00004's comment (another BRDP).
+    assert ids["BRDP-EXT-00005"]["rule_xml"].startswith("<!-- BRDP-EXT-00005 — Valores permitidos para NOC")
+    # 00007: one candidate with its three patterns, each after its comment;
+    # the section header (BRDP-EXT-00007 — …) goes with 00007a and gives the
+    # title.
+    c7 = ids["BRDP-EXT-00007"]
+    assert c7["rule_count"] == 3
+    assert c7["literal"]["title"] == "Toda advertencia del procedimiento, recogida en PRECAUCIONES DE SEGURIDAD."
+    x = c7["rule_xml"]
+    positions = [x.index(s) for s in (
+        "BRDP-EXT-00007 — Toda advertencia", "BRDP-EXT-00007a — EL CENTINELA", '<pattern id="p-BRDP-EXT-00007a">',
+        "BRDP-EXT-00007 — La comparacion", '<pattern id="p-BRDP-EXT-00007">',
+        "BRDP-EXT-00007b — LA ADVERTENCIA", '<pattern id="p-BRDP-EXT-00007b">',
+    )]
+    assert positions == sorted(positions)
+    # The placeholder replaced outside the app stays literal.
+    assert x.count("'@@URI-CARPETA-DOSIER@@'") == 3
+    # Proposal still for the AI: the title is the only fixed text.
+    set_texts(c7)
+    assert c7["title"] == c7["literal"]["title"] and c7["text_sources"]["title"] == "file"
+    assert c7["ai_fields"] == ["definition", "proposal"]
+
+
+def test_xpath3_schematron_each_rule_carries_the_global_functions_it_uses():
+    rf = read_rules_file(XPATH3.read_bytes(), "SCH-DITA", "DITA 1.3 Xpath3.0")
+    assert rf.warnings == []
+    candidates, warnings = build_candidates(rf, None)
+    # Every global sch:let and the sch:ns is used by some rule: no warning.
+    assert warnings == []
+    ids = _by_id(candidates)
+    assert list(ids) == [f"BRDP-EXT-0000{n}" for n in range(1, 8)]
+    lets = {i: [n for n in _let_names(c["rule_xml"]) if n in _GLOBAL_FUNCTIONS] for i, c in ids.items()}
+    assert lets["BRDP-EXT-00001"] == ["colDe", "colPart", "valor"]
+    assert lets["BRDP-EXT-00006"] == ["colDe", "colContiene", "colPart", "valor"]
+    assert lets["BRDP-EXT-00004"] == ["docFicha"]
+    # textoNota and esAdvertencia call nodoConref: it comes along, before them.
+    assert lets["BRDP-EXT-00007"] == ["docFicha", "nodoConref", "textoNota", "esAdvertencia", "conrefRoto"]
+    assert set().union(*map(set, lets.values())) == set(_GLOBAL_FUNCTIONS)
+    for c in candidates:
+        x = c["rule_xml"]
+        assert c["rule_problem"] is None, c["origin_identifier"]
+        # The functions are typed xs:…: the pattern declares the prefix.
+        assert 'xmlns:xs="http://www.w3.org/2001/XMLSchema"' in x.split(">", 1)[0] + x[x.index("<sch:pattern"):].split(">", 1)[0]
+        # The copied let is the file's text, as written.
+        assert '<sch:let name="valor"\n           value="function($fila as element(), $col as xs:string) as xs:string {' in x or "valor" not in lets[c["origin_identifier"]]
+        assert not any(w["code"] == "undeclared_variable" for w in c["warnings"])
+    # The lets go first inside the pattern, before its rule.
+    x1 = ids["BRDP-EXT-00001"]["rule_xml"]
+    assert x1.index('<sch:let name="colDe"') < x1.index("<sch:rule ")
+    assert ids["BRDP-EXT-00004"]["literal"]["title"] == "El escalón de mantenimiento de la planificación coincide con el del procedimiento."
+
+
+def test_schematron_undeclared_variable_and_unused_globals():
+    text = XPATH3.read_text(encoding="utf-8")
+    # $valor declared nowhere (renamed), and an extra global nobody uses.
+    text = text.replace('<sch:let name="valor"', '<sch:let name="valorRenombrado"', 1)
+    text = text.replace('<sch:ns prefix="xs"', '<sch:let name="sinUso" value="1"/>\n  <sch:ns prefix="xs"', 1)
+    rf = read_rules_file(text.encode("utf-8"), "SCH-DITA", "DITA 1.3 Xpath3.0")
+    candidates, warnings = build_candidates(rf, None)
+    ids = _by_id(candidates)
+    w1 = [w for w in ids["BRDP-EXT-00001"]["warnings"] if w["code"] == "undeclared_variable"]
+    assert w1 == [{"code": "undeclared_variable", "params": {"names": ["valor"]}, "message": "Uses $valor, which is not declared in the file."}]
+    assert not ids["BRDP-EXT-00007"]["warnings"]
+    assert warnings == [
+        {
+            "code": "schematron_globals",
+            "params": {"element": "sch:let", "count": 2, "names": ["sinUso", "valorRenombrado"]},
+            "message": "The Schematron has 2 global sch:let that no rule uses; they are not imported.",
+        }
+    ]
+
+
+def test_xpath3_schematron_is_refused_in_an_xpath2_project():
+    with pytest.raises(RuleExtractFileError) as exc:
+        read_rules_file(XPATH3.read_bytes(), "SCH-DITA", "DITA 1.3 Xpath2.0")
+    assert str(exc.value) == (
+        'This Schematron uses queryBinding="xslt3" (XPath 3.0); this project is DITA 1.3 Xpath2.0, which runs XPath 2.0.'
+    )
+
+
+def test_schematron_value_of_never_reaches_the_message_text():
+    rf = read_rules_file(XPATH3.read_bytes(), "SCH-DITA", "DITA 1.3 Xpath3.0")
+    c6 = _by_id(build_candidates(rf, None)[0])["BRDP-EXT-00006"]
+    messages = [r["message"] for r in c6["summary"]["rules"]]
+    assert any(m.endswith('Valor leído: "…".') for m in messages)
+    assert not any("value-of" in m or "$docTec" in m for m in messages)
+
+
+async def _dita(project_id, standard):
+    async with async_session_factory() as session:
+        project = await session.get(Project, project_id)
+        project.standard = standard
+        await session.commit()
+
+
+async def _project_brdps(project_id):
+    async with async_session_factory() as session:
+        rows = (await session.execute(select(BRDP).where(BRDP.project_id == project_id))).scalars().all()
+        out = {}
+        for b in rows:
+            approval = await session.get(RuleApproval, (b.id, "SCH-DITA"))
+            out[b.identifier] = (b, approval)
+        return out
+
+
+async def test_xpath2_schematron_in_an_empty_project_keeps_its_ids_and_round_trips(client, project_users):
+    project, editor, _ = project_users
+    await _dita(project.id, "DITA 1.3 Xpath2.0")
+    job, cands = await _extract(client, project.id, editor, XPATH2.read_bytes(), "BRDP-D1_schematron-xpath2.sch")
+    assert [w["code"] for w in job["warnings"]] == ["comment_without_rule"]
+    # Free EXT numbers of the file are kept, never shifted.
+    assert [(c["classification"], c["identifier"]) for c in cands] == [
+        ("new_ext", f"BRDP-EXT-0000{n}") for n in (1, 2, 3, 5, 6, 7)
+    ]
+    assert all(not any(w["code"] == "rule_ids_from_file" for w in c["warnings"]) for c in cands)
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands], "import_as": "in_force"})
+    assert res.status_code == 200, res.text
+    result = res.json()
+    assert (result["created"], result["kept_pending"], result["import_as"]) == (6, 0, "in_force")
+    brdps = await _project_brdps(project.id)
+    assert sorted(brdps) == [f"BRDP-EXT-0000{n}" for n in (1, 2, 3, 5, 6, 7)]
+    b1, a1 = brdps["BRDP-EXT-00001"]
+    assert (b1.title, b1.validation) == ("Campo cantidad repuestos no vacío", "Validated")
+    assert (a1.status, a1.source) == ("approved", "extracted") and a1.approved_at is not None
+    async with async_session_factory() as session:
+        hist = {h.field_name: h for h in (await session.execute(select(BRDPHistory).where(BRDPHistory.brdp_id == b1.id))).scalars()}
+    assert (hist["rule_status"].old_value, hist["rule_status"].new_value) == ("todo", "verified")
+    assert json.loads(hist["extracted_from"].new_value) == {
+        "file": "BRDP-D1_schematron-xpath2.sch", "origin_identifier": "BRDP-EXT-00001", "in_force": True,
+    }
+    # Re-importing the same file: every candidate is "same".
+    _, cands2 = await _extract(client, project.id, editor, XPATH2.read_bytes(), "BRDP-D1_schematron-xpath2.sch")
+    assert [c["classification"] for c in cands2] == ["same"] * 6
+
+
+async def test_xpath3_schematron_imports_as_pending_review(client, project_users):
+    project, editor, _ = project_users
+    await _dita(project.id, "DITA 1.3 Xpath3.0")
+    job, cands = await _extract(client, project.id, editor, XPATH3.read_bytes(), "BRDP-D1_schematron-xpath3.sch")
+    assert job["warnings"] == []
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands]})
+    assert res.status_code == 200 and res.json()["import_as"] == "pending"
+    brdps = await _project_brdps(project.id)
+    assert len(brdps) == 7
+    for identifier, (b, a) in brdps.items():
+        assert (b.validation, a.status) == ("Pending", "pending_review"), identifier
+    assert _let_names(brdps["BRDP-EXT-00007"][1].rule_xml)[:5] == ["docFicha", "nodoConref", "textoNota", "esAdvertencia", "conrefRoto"]
+    assert 'xmlns:xs="http://www.w3.org/2001/XMLSchema"' in brdps["BRDP-EXT-00001"][1].rule_xml
+
+
+async def test_ext_numbers_of_the_file(client, project_users):
+    """A free EXT number keeps its number; an occupied one with another rule
+    is "changed"; reclassified as a new EXT it takes the next free number
+    and warns that the ids inside the rule are still the file's; a rule
+    with no identifier takes the next number after the file's own."""
+    project, editor, _ = project_users
+    await _seed(project.id, "BRDP-EXT-00005", _rule("BRDP-EXT-00005", "//para"))
+    content = (
+        "<contextRules>"
+        + '<structureObjectRule id="BRDP-EXT-00002"><objectPath allowedObjectFlag="0">//a</objectPath><objectUse>A.</objectUse></structureObjectRule>'
+        + '<structureObjectRule id="p-BRDP-EXT-00005"><objectPath allowedObjectFlag="0">//b</objectPath><objectUse>B.</objectUse></structureObjectRule>'
+        + '<structureObjectRule><objectPath allowedObjectFlag="0">//c</objectPath><objectUse>No identifier.</objectUse></structureObjectRule>'
+        + '<structureObjectRule id="BRDP-EXT-00009"><objectPath allowedObjectFlag="0">//d</objectPath><objectUse>D.</objectUse></structureObjectRule>'
+        + "</contextRules>"
+    )
+    job, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+    got = [(c["origin_identifier"], c["classification"], c["identifier"]) for c in cands]
+    assert got == [
+        ("BRDP-EXT-00002", "new_ext", "BRDP-EXT-00002"),
+        ("BRDP-EXT-00005", "changed", "BRDP-EXT-00005"),
+        # After the project's (00005) and the file's (00009): 00010.
+        (None, "new_ext", "BRDP-EXT-00010"),
+        ("BRDP-EXT-00009", "new_ext", "BRDP-EXT-00009"),
+    ]
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    k5 = cands[1]["key"]
+    res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [{"key": k5, "classification": "new_ext"}]})
+    assert res.status_code == 200, res.text
+    [c5] = res.json()["candidates"]
+    assert c5["identifier"] == "BRDP-EXT-00011"
+    [w] = [w for w in c5["warnings"] if w["code"] == "rule_ids_from_file"]
+    assert w["params"] == {"identifier": "BRDP-EXT-00011", "origin": "BRDP-EXT-00005", "ids": ["p-BRDP-EXT-00005"]}
+    # Back to "changed": its identifier again, no warning.
+    res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [{"key": k5, "classification": "changed"}]})
+    [c5] = res.json()["candidates"]
+    assert c5["identifier"] == "BRDP-EXT-00005" and not any(w["code"] == "rule_ids_from_file" for w in c5["warnings"])
+    res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [{"key": k5, "classification": "new_ext"}]})
+    assert res.json()["candidates"][0]["identifier"] == "BRDP-EXT-00011"
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands]})
+    assert res.status_code == 200, res.text
+    created = {c["key"]: c["identifier"] for c in res.json()["created_identifiers"]}
+    assert [created[c["key"]] for c in cands] == ["BRDP-EXT-00002", "BRDP-EXT-00011", "BRDP-EXT-00010", "BRDP-EXT-00009"]
+    async with async_session_factory() as session:
+        ids = set((await session.execute(select(BRDP.identifier).where(BRDP.project_id == project.id))).scalars())
+    assert ids == {"BRDP-EXT-00002", "BRDP-EXT-00005", "BRDP-EXT-00009", "BRDP-EXT-00010", "BRDP-EXT-00011"}
+
+
+async def test_in_force_import(client, project_users):
+    """"Ya en vigor": Validated + Verified for valid rules; a candidate whose
+    rule is not valid stays Pending without rule; a changed rule is
+    Verified and the existing Proposal is untouched."""
+    project, editor, _ = project_users
+    await _seed(project.id, "BRDP-EXT-00001", _rule("BRDP-EXT-00001", "//para"), proposal="Kept proposal", validation="Refused")
+    content = (
+        "<contextRules>"
+        + _rule("BRDP-EXT-00001", "//footnote")
+        + _rule("BRDP-EXT-00002", "//caption")
+        + '<structureObjectRule id="BRDP-EXT-00003"><objectPath allowedObjectFlag="0">//a</objectPath>'
+        "<objectUse>Decision by &co;.</objectUse></structureObjectRule>"
+        + "</contextRules>"
+    )
+    data = _brex("4.2", content).replace(b"?>\n", b'?>\n<!DOCTYPE dmodule [<!ENTITY co "Company">]>', 1)
+    job, cands = await _extract(client, project.id, editor, data)
+    by = _by_id(cands)
+    # A rule that does not parse on its own has no identifier to read: a new EXT.
+    [bad] = [c for c in cands if c["rule_problem"]]
+    assert bad["rule_problem"]["code"] == "not_parsed" and bad["identifier"] == "BRDP-EXT-00003"
+    by["BRDP-EXT-00003"] = bad
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    assert (await client.post(f"{url}/apply", headers=editor, json={"keys": [cands[0]["key"]], "import_as": "live"})).status_code == 422
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands], "import_as": "in_force"})
+    assert res.status_code == 200, res.text
+    result = res.json()
+    assert (result["created"], result["updated"], result["kept_pending"], result["invalid_rule"]) == (2, 1, 1, 1)
+    assert result["kept_pending_detail"] == [{"key": by["BRDP-EXT-00003"]["key"], "identifier": "BRDP-EXT-00003"}]
+    async with async_session_factory() as session:
+        brdps = {b.identifier: b for b in (await session.execute(select(BRDP).where(BRDP.project_id == project.id))).scalars()}
+        b1 = brdps["BRDP-EXT-00001"]
+        assert (b1.proposal, b1.validation) == ("Kept proposal", "Refused")
+        a1 = await session.get(RuleApproval, (b1.id, "BREX-4.2"))
+        assert a1.status == "approved" and "//footnote" in a1.rule_xml
+        assert brdps["BRDP-EXT-00002"].validation == "Validated"
+        assert (await session.get(RuleApproval, (brdps["BRDP-EXT-00002"].id, "BREX-4.2"))).status == "approved"
+        assert brdps["BRDP-EXT-00003"].validation == "Pending"
+        assert await session.get(RuleApproval, (brdps["BRDP-EXT-00003"].id, "BREX-4.2")) is None
+        events = {
+            b: json.loads(h.new_value)
+            for b, h in [
+                (identifier, (await session.execute(select(BRDPHistory).where(BRDPHistory.brdp_id == brdps[identifier].id, BRDPHistory.field_name == "extracted_from"))).scalar_one())
+                for identifier in ("BRDP-EXT-00001", "BRDP-EXT-00002", "BRDP-EXT-00003")
+            ]
+        }
+    assert events["BRDP-EXT-00001"].get("in_force") is True
+    assert events["BRDP-EXT-00002"].get("in_force") is True
+    assert "in_force" not in events["BRDP-EXT-00003"]
+
+
+async def test_lufthansa_in_force_import_is_all_verified(client, project_users):
+    """The whole Lufthansa BREX "Ya en vigor": the 502 BRDPs Validated with
+    their rule Verified (61 structureObjectRule + 469 nonContextRule), so a
+    Generate with "only verified rules" takes all of them."""
+    project, editor, _ = project_users
+    job, cands = await _extract(client, project.id, editor, LUFTHANSA.read_bytes(), LUFTHANSA.name)
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands], "import_as": "in_force"})
+    assert res.status_code == 200, res.text
+    assert (res.json()["created"], res.json()["kept_pending"]) == (502, 0)
+    async with async_session_factory() as session:
+        rows = (
+            await session.execute(
+                select(BRDP.validation, RuleApproval.status, RuleApproval.rule_xml)
+                .join(RuleApproval, RuleApproval.brdp_id == BRDP.id)
+                .where(BRDP.project_id == project.id)
+            )
+        ).all()
+    assert {(r.validation, r.status) for r in rows} == {("Validated", "approved")}
+    assert sum(r.rule_xml.count("<structureObjectRule>") for r in rows) == 61
+    assert sum(1 for r in rows for p in split_rule_pieces(r.rule_xml, "BREX-4.2") if p["kind"] == "noncontext") == 469

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -46,3 +47,8 @@ class RuleExtractCandidateEdits(BaseModel):
 
 class RuleExtractApplyRequest(BaseModel):
     keys: list[str] = Field(default_factory=list, max_length=20000)
+    # "pending": Proposal Pending + rule Draft (review them here).
+    # "in_force": the file is a BREX/Schematron already in use -- Proposal
+    # Validated + rule Verified, for the candidates whose rule passes the
+    # format check (the others stay Pending/Draft).
+    import_as: Literal["pending", "in_force"] = "pending"

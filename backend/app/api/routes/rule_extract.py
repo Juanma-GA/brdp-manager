@@ -50,6 +50,7 @@ from app.services.rule_extract_jobs import (
     create_job,
     get_most_recent_job,
     get_running_job,
+    next_ext_allocator,
     run_extract_job,
 )
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
@@ -195,9 +196,12 @@ async def edit_candidates(
     missing = set(edits) - {r.key for r in rows}
     if missing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown candidates: {', '.join(sorted(missing))}")
+    allocate = None
+    if any(e.get("classification") for e in edits.values()):
+        allocate = await next_ext_allocator(job, db)
     try:
         for row in rows:
-            row.data = apply_edit(row.data, edits[row.key])
+            row.data = apply_edit(row.data, edits[row.key], allocate)
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
@@ -220,4 +224,4 @@ async def apply_candidates(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="These candidates were already imported")
     if not body.keys:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No candidate selected")
-    return await apply_job(job, body.keys, editor, db)
+    return await apply_job(job, body.keys, editor, db, import_as=body.import_as)

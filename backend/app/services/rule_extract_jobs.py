@@ -16,8 +16,13 @@ Classification is done by code -- the AI never decides it:
   new_ext         anything else (an EXT identifier not in the project, an
                   identifier of the own specification missing from the
                   catalog, a non-BRDP identifier such as BREX-S1-…, no
-                  identifier): the next free EXT number; the original
-                  identifier stays as the origin.
+                  identifier). An EXT number of the file that is free in
+                  the project keeps its number; the rest get the next free
+                  number after the project's AND the file's own numbers.
+                  The original identifier stays as the origin. A candidate
+                  reclassified as new_ext (an occupied EXT number whose rule
+                  changed) gets the next free number and the warning that
+                  the identifiers inside its rule are still the file's.
   default_rule    a rule of the standard's default BREX (BREX-S1-nnnnn and,
                   in general, BREX-<spec>-nnnnn): unchecked, a project BREX
                   normally inherits it; imported with its own identifier
@@ -47,8 +52,12 @@ of the app, under the prompt snapshot and the eval set), and each batch is
 saved here (PATCH), so leaving the page and coming back resumes it.
 
 Import (apply) is one transaction, synchronous: no AI and no external call,
-a few thousand inserts. new_ext numbers are assigned again at import time,
-against the identifiers active then.
+a few thousand inserts. new_ext numbers are checked again at import time,
+against the identifiers active then. "import_as": "pending" (Proposal
+Pending, rule Draft) or "in_force" (the file is already in use: Proposal
+Validated and rule Verified for the candidates whose rule passes the format
+check; the others stay Pending/Draft and are counted). Validated BRDPs join
+the embeddings queue like any other.
 """
 
 from __future__ import annotations
@@ -134,6 +143,8 @@ def set_texts(c: dict, keep_written: bool = False) -> None:
             fixed["title"] = (catalog.get("title") or "", "catalog")
             fixed["definition"] = (catalog.get("definition") or "", "catalog")
         literal = c.get("literal") or {}
+        if literal.get("title") and "title" not in fixed:
+            fixed["title"] = (literal["title"], "file")
         if literal.get("definition") and "definition" not in fixed:
             fixed["definition"] = (literal["definition"], "file")
         if literal.get("proposal"):
@@ -330,7 +341,10 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         ).scalars().all()
         approvals = {r.brdp_id: r for r in rows}
 
-    next_ext = _next_ext_numbers(existing) + 1
+    # EXT numbers written in the file are kept when free in the project; a
+    # candidate that needs a new number gets the next one after both the
+    # project's and the file's (never one the file itself uses).
+    next_ext = max(_next_ext_numbers(existing), _next_ext_numbers(origin_ids)) + 1
     own_spec = "DITA" if project.standard.startswith("DITA") else "S1000D"
     for c in candidates:
         origin = c["origin_identifier"]
@@ -354,6 +368,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
                     )
             c["project_texts"] = {"title": brdp.title, "definition": brdp.definition, "proposal": brdp.proposal}
             c["identifier"] = brdp.identifier
+            c["option_identifiers"] = {base: brdp.identifier}
             options = [base, "new_ext"]
         elif origin and origin in catalog:
             base = "catalog"
@@ -378,6 +393,9 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             options = ["other_spec", "new_ext"]
         else:
             base = "new_ext"
+            # A free EXT number of the file keeps its number.
+            if _EXT_RE.match(origin or ""):
+                c["option_identifiers"] = {"new_ext": origin}
             m = _OFFICIAL_RE.match(origin or "")
             if m and m.group(1) + m.group(2) in _own_codes(project.standard):
                 c["warnings"].append(
@@ -393,14 +411,62 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         classification = "empty" if c.get("no_content") and base in ("catalog", "new_ext", "other_spec", "default_rule") else base
         if classification == "empty":
             options = ["empty"] + options
-        if classification == "new_ext":
-            c["identifier"] = f"BRDP-EXT-{next_ext:05d}"
+        identifiers = c.setdefault("option_identifiers", {})
+        if base not in identifiers and c.get("identifier"):
+            identifiers[base] = c["identifier"]
+        if base == "new_ext" and "new_ext" not in identifiers:
+            identifiers["new_ext"] = f"BRDP-EXT-{next_ext:05d}"
             next_ext += 1
+        if base == "new_ext":
+            c["identifier"] = identifiers["new_ext"]
+        c["rule_ids"] = _ids_inside_rule(c.get("rule_xml") or "", origin)
         c["classification"] = classification
+        _renumber_warning(c)
         c["options"] = list(dict.fromkeys(options))
         c["selected"] = classification in ("new_ext", "catalog", "other_spec", "changed")
         c["own_specification"] = own_spec
         set_texts(c)
+
+
+def _ids_inside_rule(rule_xml: str, origin: str | None) -> list[str]:
+    """The identifiers inside the rule that carry the origin identifier
+    (p-BRDP-EXT-00005, BRDP-EXT-00007a), in order, without repeats."""
+    if not origin or not rule_xml:
+        return []
+    text = re.sub(r"<!--[\s\S]*?-->", "", rule_xml)
+    found: list[str] = []
+    pos = text.find(origin)
+    while pos != -1 and len(found) < 5:
+        start, end = pos, pos + len(origin)
+        while start > 0 and (text[start - 1].isalnum() or text[start - 1] in "_.-"):
+            start -= 1
+        while end < len(text) and (text[end].isalnum() or text[end] in "_.-"):
+            end += 1
+        if text[start:end] not in found:
+            found.append(text[start:end])
+        pos = text.find(origin, end)
+    return found
+
+
+def _renumber_warning(c: dict) -> None:
+    """Adds (or removes) the warning that the identifiers inside the rule
+    are still the file's, when the candidate is imported under another
+    identifier than its origin."""
+    c["warnings"] = [w for w in c.get("warnings", []) if w.get("code") != "rule_ids_from_file"]
+    origin = c.get("origin_identifier")
+    classification = c.get("classification")
+    if classification == "empty":
+        classification = c.get("base_classification")
+    if classification != "new_ext":
+        return
+    if origin and c.get("identifier") and c["identifier"] != origin and c.get("rule_ids"):
+        c["warnings"].append(
+            {
+                "code": "rule_ids_from_file",
+                "params": {"identifier": c["identifier"], "origin": origin, "ids": c["rule_ids"]},
+                "message": f"Imported as {c['identifier']}; the identifiers inside the rule are still the file's ({', '.join(c['rule_ids'])}).",
+            }
+        )
 
 
 def _similarity_text(c: dict) -> str:
@@ -598,11 +664,13 @@ EDITABLE_FIELDS = ("classification", "title", "definition", "proposal", "draft_s
 DRAFT_STATUSES = ("pending", "drafted", "failed", "manual", "not_needed")
 
 
-def apply_edit(data: dict, edit: dict) -> dict:
+def apply_edit(data: dict, edit: dict, new_ext_identifier=None) -> dict:
     """Validated update of one candidate's editable fields. Raises
     ValueError with the reason. A new classification sets the texts again
-    (set_texts); a text saved with draft_status "drafted" is the AI's, any
-    other text edit is by hand."""
+    (set_texts) and the identifier it would be imported with: the one of
+    that option, or, the first time it becomes a new EXT, the next free
+    number (new_ext_identifier(), from the route). A text saved with
+    draft_status "drafted" is the AI's, any other text edit is by hand."""
     out = dict(data)
     for field in EDITABLE_FIELDS:
         if field not in edit or edit[field] is None:
@@ -613,6 +681,14 @@ def apply_edit(data: dict, edit: dict) -> dict:
                 raise ValueError(f"{out['key']}: classification {value!r} is not possible for this candidate")
             if value != out.get("classification"):
                 out["classification"] = value
+                identifiers = dict(out.get("option_identifiers") or {})
+                target = out.get("base_classification") if value == "empty" else value
+                if target not in identifiers and target == "new_ext" and new_ext_identifier is not None:
+                    identifiers["new_ext"] = new_ext_identifier()
+                out["option_identifiers"] = identifiers
+                if identifiers.get(target):
+                    out["identifier"] = identifiers[target]
+                _renumber_warning(out)
                 set_texts(out, keep_written=True)
             continue
         if field in TEXT_FIELDS:
@@ -633,17 +709,58 @@ def apply_edit(data: dict, edit: dict) -> dict:
     return out
 
 
+async def next_ext_allocator(job: RuleExtractJob, db: AsyncSession):
+    """A function giving, on each call, the next free EXT number for a
+    candidate reclassified as a new EXT: after the project's numbers and
+    every number the extraction already uses (the file's and the ones
+    proposed to its candidates)."""
+    existing = await _active_identifiers(job.project_id, db)
+    rows = (await db.execute(select(RuleExtractCandidate.data).where(RuleExtractCandidate.job_id == job.id))).scalars().all()
+    used = list(existing)
+    for data in rows:
+        used.append(data.get("origin_identifier") or "")
+        used.extend((data.get("option_identifiers") or {}).values())
+    counter = [_next_ext_numbers(used)]
+
+    def allocate() -> str:
+        counter[0] += 1
+        return f"BRDP-EXT-{counter[0]:05d}"
+
+    return allocate
+
+
 # ── Import ────────────────────────────────────────────────────────────────
 
 
-def _history_event(filename: str, origin: str | None) -> str:
-    return json.dumps({"file": filename, "origin_identifier": origin}, sort_keys=True, ensure_ascii=False)
+def _history_event(filename: str, origin: str | None, in_force: bool = False) -> str:
+    event = {"file": filename, "origin_identifier": origin}
+    if in_force:
+        event["in_force"] = True
+    return json.dumps(event, sort_keys=True, ensure_ascii=False)
 
 
-async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncSession) -> dict:
+IMPORT_AS = ("pending", "in_force")
+
+
+async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncSession, import_as: str = "pending") -> dict:
     """Imports the selected candidates in one transaction. Re-checks against
     the project as it is now: an identifier taken meanwhile is omitted with
-    its reason, never overwritten; new EXT numbers are assigned now."""
+    its reason, never overwritten.
+
+    New EXT identifiers: the one shown for the candidate (the file's own
+    number when it was free, or the next free one) if it is still free now;
+    otherwise the next free number after the project's, the file's and the
+    ones being imported.
+
+    import_as "pending": Proposal Pending, rule Draft. "in_force" (the file
+    is a BREX/Schematron already in use): Proposal Validated and rule
+    Verified, but only for the candidates whose rule passes the format
+    check; the others stay Pending/Draft and are counted
+    (kept_pending). For an existing BRDP ("changed") only the rule changes,
+    Verified; its Proposal and Proposal Status are never touched."""
+    if import_as not in IMPORT_AS:
+        raise ValueError(f"import_as must be one of {IMPORT_AS}")
+    in_force = import_as == "in_force"
     project = await db.get(Project, job.project_id)
     rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
     rows = (
@@ -654,13 +771,33 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
         )
     ).scalars().all()
     existing = await _active_identifiers(project.id, db)
-    next_ext = _next_ext_numbers(existing) + 1
-    result = {"created": 0, "updated": 0, "omitted": 0, "invalid_rule": 0, "omitted_detail": [], "created_identifiers": []}
+    all_data = (await db.execute(select(RuleExtractCandidate.data).where(RuleExtractCandidate.job_id == job.id))).scalars().all()
+    file_numbers = [d.get("origin_identifier") or "" for d in all_data] + [d.get("identifier") or "" for d in all_data]
+    next_ext = [max(_next_ext_numbers(existing), _next_ext_numbers(file_numbers))]
+    taken: set[str] = set()
+    result = {
+        "import_as": import_as, "created": 0, "updated": 0, "omitted": 0, "invalid_rule": 0, "kept_pending": 0,
+        "omitted_detail": [], "created_identifiers": [], "kept_pending_detail": [],
+    }
 
     def omit(c: dict, reason: str) -> None:
         result["omitted"] += 1
         result["omitted_detail"].append({"key": c["key"], "origin_identifier": c.get("origin_identifier"), "reason": reason})
 
+    def new_ext(shown: str | None) -> str:
+        if shown and _EXT_RE.match(shown) and shown not in existing and shown not in taken:
+            return shown
+        while True:
+            next_ext[0] += 1
+            identifier = f"BRDP-EXT-{next_ext[0]:05d}"
+            if identifier not in existing and identifier not in taken:
+                return identifier
+
+    def kept_pending(c: dict, identifier: str) -> None:
+        result["kept_pending"] += 1
+        result["kept_pending_detail"].append({"key": c["key"], "identifier": identifier})
+
+    now = datetime.now(timezone.utc)
     for row in rows:
         c = row.data
         classification = c.get("classification")
@@ -669,6 +806,7 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
         if classification in ("same", "empty"):
             omit(c, "same" if classification == "same" else "no content")
             continue
+        verified = in_force and bool(rule_xml) and bool(rule_format)
         if classification == "changed":
             brdp = existing.get(c.get("identifier") or origin)
             if brdp is None:
@@ -685,21 +823,21 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
                 db.add(approval)
             approval.rule_xml = rule_xml
             approval.source = "extracted"
-            approval.status = "pending_review"
-            approval.approved_at = None
-            record_change(db, brdp.id, user, "rule_status", old_state, "draft")
+            approval.status = "approved" if verified else "pending_review"
+            approval.approved_at = now if verified else None
+            record_change(db, brdp.id, user, "rule_status", old_state, "verified" if verified else "draft")
             record_change(db, brdp.id, user, "rule", old_xml, rule_xml)
-            record_change(db, brdp.id, user, "extracted_from", "", _history_event(job.filename, origin), always=True)
+            record_change(db, brdp.id, user, "extracted_from", "", _history_event(job.filename, origin, verified), always=True)
             result["updated"] += 1
             continue
         if classification == "new_ext":
-            identifier = f"BRDP-EXT-{next_ext:05d}"
-            next_ext += 1
+            identifier = new_ext(c.get("identifier"))
         else:
             identifier = origin
-            if not identifier or identifier in existing:
+            if not identifier or identifier in existing or identifier in taken:
                 omit(c, f"{identifier} already exists in the project")
                 continue
+        taken.add(identifier)
         title, definition = c.get("title") or "", c.get("definition") or ""
         if classification == "catalog":
             entry = (
@@ -715,23 +853,28 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
             title=title,
             definition=definition,
             proposal=c.get("proposal") or "",
-            validation="Pending",
+            validation="Validated" if verified else "Pending",
         )
         db.add(brdp)
         await db.flush()
         existing[identifier] = brdp
         if rule_xml and rule_format:
-            db.add(RuleApproval(brdp_id=brdp.id, format=rule_format, rule_xml=rule_xml, source="extracted", status="pending_review"))
-            record_change(db, brdp.id, user, "rule_status", "todo", "draft")
+            db.add(
+                RuleApproval(
+                    brdp_id=brdp.id, format=rule_format, rule_xml=rule_xml, source="extracted",
+                    status="approved" if verified else "pending_review", approved_at=now if verified else None,
+                )
+            )
+            record_change(db, brdp.id, user, "rule_status", "todo", "verified" if verified else "draft")
             record_change(db, brdp.id, user, "rule", "", rule_xml)
         elif c.get("rule_problem"):
             result["invalid_rule"] += 1
-        record_change(db, brdp.id, user, "extracted_from", "", _history_event(job.filename, origin), always=True)
+        if in_force and not verified:
+            kept_pending(c, identifier)
+        record_change(db, brdp.id, user, "extracted_from", "", _history_event(job.filename, origin, verified), always=True)
         result["created"] += 1
         result["created_identifiers"].append({"key": c["key"], "identifier": identifier})
     job.apply_result = {k: v for k, v in result.items()}
     job.applied_at = datetime.now(timezone.utc)
     await db.commit()
     return result
-
-

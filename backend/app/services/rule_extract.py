@@ -41,7 +41,25 @@ after the executable rules, exactly as written: Generate writes it back into
 <nonContextRules>, so importing a BREX and generating it again keeps it. A
 candidate with only nonContextRules has them as its rule.
 
-Its paragraphs are also the decision text. When the file already says it,
+A Schematron rule is its sch:pattern, and travels with what it needs to run
+on its own: each pattern gets a copy of the global sch:let it uses, directly
+or through another global ($textoNota uses $nodoConref), first inside the
+pattern and in file order, and an xmlns declaration for each global sch:ns
+prefix its XPath uses (xs: of a typed inline function). Generate hoists
+the repeated copies back to one declaration (generateSchematronDITA.js,
+dedupeSharedLets) and declares each prefix once. A variable used and
+declared nowhere in the file is a candidate warning; a global that no rule
+uses is the only "schematron_globals" file warning. The comment block right
+before a pattern is stored with it, in front of it (a section header that
+starts with the same identifier is part of it; a file header without
+identifier further up is not). A comment "<ID> — <text>" (or " - ", ": ")
+gives the candidate's Title (comment_title), so the AI does not write it; a
+comment starting with an identifier that has no rule in the file is a file
+warning ("comment_without_rule"). A sch:value-of inside a message is never
+sent as text ("…"). A Schematron for XPath 3.0 (queryBinding xslt3) in an
+XPath 2.0 project is refused; the other way round is a warning.
+
+The nonContextRule's paragraphs are also the decision text. When the file already says it,
 nothing is asked of the AI (literal_texts): with two or more paragraphs the
 first one (without the identifier) is the Definition and the rest the
 Proposal ("Decision made by Project." dropped when text follows it; a bare
@@ -147,6 +165,20 @@ class _Piece:
     text: str
     context: str | None = None  # raw (still escaped) scope attribute; None = general
     empty_context: bool = False
+    # Schematron: the comment block written right before the pattern (raw
+    # comments, as in the file), stored with the rule before the pattern.
+    lead: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _SchGlobals:
+    """Global sch:let / sch:ns of a Schematron (direct children of
+    sch:schema), in file order, and its comments that start with a BRDP
+    identifier (to find the ones that have no rule in the file)."""
+
+    lets: list[dict] = field(default_factory=list)  # {name, value, text}
+    ns: list[dict] = field(default_factory=list)  # {prefix, uri}
+    id_comments: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -235,6 +267,12 @@ def read_rules_file(data: bytes, rule_format: str | None, standard: str) -> Rule
             raise RuleExtractFileError(f"This is a Schematron; this project's rules are {project_label}.")
         binding = (root.get("queryBinding") or "").strip().lower()
         expected = "xslt3" if standard == "DITA 1.3 Xpath3.0" else "xslt2"
+        if binding == "xslt3" and expected == "xslt2":
+            # XPath 3.0 (inline functions, let…return, "!") does not run on
+            # an XPath 2.0 project's processor: refused, not warned.
+            raise RuleExtractFileError(
+                f"This Schematron uses queryBinding=\"xslt3\" (XPath 3.0); this project is {standard}, which runs XPath 2.0."
+            )
         if binding and binding != expected:
             warnings.append(
                 {
@@ -296,12 +334,13 @@ def _body_start(text: str, root: str) -> int:
     return m.start() if m else pos
 
 
-def _scan_pieces(rf: RulesFile) -> tuple[list[_Piece], list[dict]]:
+def _scan_pieces(rf: RulesFile) -> tuple[list[_Piece], _SchGlobals]:
     """Every rule and nonContextRule of the file, in document order, with
-    the context block it sits in. Also returns file-level warnings (global
-    sch:let / sch:ns of a Schematron)."""
+    the context block it sits in. For a Schematron, also its global sch:let
+    / sch:ns and, for each pattern, the comment block right before it."""
     text = rf.text
-    if rf.file_format == "SCH-DITA":
+    is_sch = rf.file_format == "SCH-DITA"
+    if is_sch:
         rule_tags = {"pattern": "rule"}
         blocks: dict[str, str] = {}
         comment_rules = False
@@ -315,15 +354,22 @@ def _scan_pieces(rf: RulesFile) -> tuple[list[_Piece], list[dict]]:
         comment_rules = False
 
     pieces: list[_Piece] = []
-    warnings: list[dict] = []
+    globals_ = _SchGlobals()
     stack: list[tuple[str, str | None]] = []  # (local name, scope attribute if a context block)
     kept: tuple[str, int, int] | None = None  # (kind, start, depth)
     kept_context: tuple[str | None, bool] = (None, False)
-    globals_counter: Counter = Counter()
-    in_rules_area = rf.file_format == "SCH-DITA"
+    kept_lead: list[str] = []
+    # Schematron: comments written since the last element directly inside
+    # sch:schema (whitespace between them does not break the block).
+    pending_comments: list[str] = []
+    in_rules_area = is_sch
     for m in _TOKEN_RE.finditer(text, _body_start(text, rf.root)):
         comment, closing, name, attrs, self_closing = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
         if name is None:
+            if comment is not None and is_sch and kept is None and len(stack) == 1:
+                pending_comments.append(m.group(0))
+                if _COMMENT_ID_RE.match(_comment_body(m.group(0))):
+                    globals_.id_comments.append(m.group(0))
             if (
                 comment is not None
                 and comment_rules
@@ -338,13 +384,21 @@ def _scan_pieces(rf: RulesFile) -> tuple[list[_Piece], list[dict]]:
             if stack:
                 stack.pop()
             if kept is not None and len(stack) == kept[2]:
-                pieces.append(_Piece(kept[0], text[kept[1] : m.end()], kept_context[0], kept_context[1]))
+                pieces.append(_Piece(kept[0], text[kept[1] : m.end()], kept_context[0], kept_context[1], kept_lead))
                 kept = None
             continue
         if kept is None:
             inside = in_rules_area or any(s[0] == "brex" for s in stack)
-            if rf.file_format == "SCH-DITA" and len(stack) == 1 and local in ("let", "ns"):
-                globals_counter[local] += 1
+            if is_sch and len(stack) == 1:
+                lead, pending_comments = pending_comments, []
+                if local == "let":
+                    globals_.lets.append(
+                        {"name": _attr(attrs, "name") or "", "value": _attr(attrs, "value") or "", "text": m.group(0)}
+                    )
+                elif local == "ns":
+                    globals_.ns.append({"prefix": _attr(attrs, "prefix") or "", "uri": _attr(attrs, "uri") or ""})
+            else:
+                lead = []
             if inside and local in rule_tags:
                 context, empty = None, False
                 for s in reversed(stack):
@@ -355,26 +409,192 @@ def _scan_pieces(rf: RulesFile) -> tuple[list[_Piece], list[dict]]:
                             empty = True
                         break
                 if self_closing:
-                    pieces.append(_Piece(rule_tags[local], m.group(0), context, empty))
+                    pieces.append(_Piece(rule_tags[local], m.group(0), context, empty, lead))
                     continue
                 kept = (rule_tags[local], m.start(), len(stack))
                 kept_context = (context, empty)
+                kept_lead = lead
         if not self_closing:
             scope = _attr(attrs, blocks[local]) if local in blocks else None
             stack.append((local, scope))
-    for name, count in globals_counter.items():
-        warnings.append(
-            {
-                "code": "schematron_globals",
-                "params": {"element": f"sch:{name}", "count": count},
-                "message": f"The Schematron has {count} global sch:{name}; they are not part of any imported rule.",
-            }
-        )
-    return pieces, warnings
+    return pieces, globals_
+
+
+# ── Schematron: comments, title and global sch:let / sch:ns ──────────────
+
+# A comment that starts (after separator lines of = - * # ~) with a BRDP
+# identifier, optionally followed by a letter (BRDP-EXT-00007a).
+_COMMENT_ID_RE = re.compile(r"(BRDP-[A-Z0-9]+-\d{5})([a-z]?)(?![\w-])")
+# "<ID> — <title>", "<ID> - <title>", "<ID>: <title>" (also an en dash).
+_COMMENT_TITLE_RE = re.compile(r"(BRDP-[A-Z0-9]+-\d{5})([a-z]?)(?:\s+[—–-]|\s*[—–]|\s*:)\s+(\S[\s\S]*)")
+_SEPARATOR_LINE_RE = re.compile(r"^\s*[=\-*#~_]{3,}\s*$")
+
+
+def _comment_body(raw: str) -> str:
+    """A comment's text without its delimiters and its separator lines
+    (==== …) at the start and the end."""
+    body = raw[4:-3] if raw.startswith("<!--") else raw
+    lines = body.split("\n")
+    while lines and (not lines[0].strip() or _SEPARATOR_LINE_RE.match(lines[0])):
+        lines.pop(0)
+    while lines and (not lines[-1].strip() or _SEPARATOR_LINE_RE.match(lines[-1])):
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
+def comment_title(raw: str) -> tuple[str, str, str] | None:
+    """(identifier, suffix letter, title) of a comment that starts
+    "<ID> — <title>": the title is its first paragraph (up to a blank line),
+    whitespace collapsed. None otherwise."""
+    m = _COMMENT_TITLE_RE.match(_comment_body(raw))
+    if not m:
+        return None
+    first = re.split(r"\n\s*\n", m.group(3), maxsplit=1)[0]
+    title = re.sub(r"\s+", " ", first).strip()
+    return (m.group(1), m.group(2), title) if title else None
+
+
+def _lead_comments(lead: list[str], identifier: str | None) -> list[str]:
+    """The comments of the block right before a pattern that belong to it:
+    the last one (unless it is about another BRDP), and the earlier ones
+    while they start with the pattern's own identifier (BRDP-EXT-00007 as a
+    section header before BRDP-EXT-00007a). A file header comment without
+    identifier further up is not part of it."""
+    out: list[str] = []
+    for index, raw in enumerate(reversed(lead)):
+        m = _COMMENT_ID_RE.match(_comment_body(raw))
+        if m is not None and identifier is not None and m.group(1) == identifier:
+            out.append(raw)
+        elif index == 0 and m is None:
+            out.append(raw)
+        else:
+            break
+    return list(reversed(out))
+
+
+_VAR_RE = re.compile(r"\$([A-Za-z_][\w.-]*)")
+# Names bound inside an expression: for/some/every $x in, let $x :=, a
+# function parameter "$x as type".
+_BOUND_RE = re.compile(r"\$([A-Za-z_][\w.-]*)\s*(?::=|\b(?:in|as)\b)")
+_ATTR_VALUE_RE = re.compile(r"\s[\w:.-]+\s*=\s*(?:\"([^\"]*)\"|'([^']*)')")
+_LOCAL_LET_RE = re.compile(r"<(?:[\w.-]+:)?let\b[^>]*?\bname\s*=\s*(?:\"([^\"]*)\"|'([^']*)')")
+
+
+def _expressions(xml: str) -> str:
+    """The attribute values of a piece of XML (where XPath lives), comments
+    left out, joined."""
+    no_comments = re.sub(r"<!--[\s\S]*?-->", "", xml)
+    out = []
+    for tag in re.finditer(r"<[A-Za-z_][^<>]*>", no_comments):
+        out.extend(a or b for a, b in _ATTR_VALUE_RE.findall(tag.group(0)))
+    return "\n".join(out)
+
+
+def _variable_use(expressions: str) -> tuple[set[str], set[str]]:
+    """(variables referenced, variables bound inside the expressions)."""
+    return set(_VAR_RE.findall(expressions)), set(_BOUND_RE.findall(expressions))
+
+
+def _uses_prefix(expressions: str, prefix: str) -> bool:
+    return bool(prefix) and re.search(r"(?<![\w.-])" + re.escape(prefix) + r":[A-Za-z_]", expressions) is not None
+
+
+def _insert_into_pattern(pattern: str, lets: list[str], declarations: list[tuple[str, str]]) -> str:
+    """The pattern with the given global sch:let as its first lets (after a
+    title / p if it has them) and xmlns declarations for the prefixes its
+    XPath uses, as written in the file otherwise."""
+    m = re.match(r"<[^>]*?(/?)>", pattern)
+    if m is None:
+        return pattern
+    start_tag = m.group(0)
+    extra = "".join(
+        f' xmlns:{prefix}="{uri}"' for prefix, uri in declarations if f"xmlns:{prefix}=" not in start_tag
+    )
+    if extra:
+        cut = len(start_tag) - (2 if m.group(1) else 1)
+        start_tag = start_tag[:cut].rstrip() + extra + start_tag[cut:]
+    body = pattern[m.end() :]
+    if not lets:
+        return start_tag + body
+    indent_m = re.search(r"\n([ \t]*)<", body)
+    indent = indent_m.group(1) if indent_m else "  "
+    # After a leading <title> / <p> (the pattern's content model puts the
+    # lets after them), else right after the start tag.
+    pos = scan = 0
+    while True:
+        t = _TOKEN_RE.search(body, scan)
+        if t is None or t.group(3) is None and t.group(1) is None:
+            break
+        if t.group(3) is None:  # a comment between them
+            scan = t.end()
+            continue
+        if t.group(2) or _local(t.group(3)) not in ("title", "p"):
+            break
+        end = t.end()
+        if not t.group(5):
+            depth = 1
+            for u in _TOKEN_RE.finditer(body, t.end()):
+                if u.group(3) is None or u.group(5):
+                    continue
+                depth += -1 if u.group(2) else 1
+                if depth == 0:
+                    end = u.end()
+                    break
+        pos = scan = end
+    inserted = "".join(f"\n{indent}{text}" for text in lets)
+    return start_tag + body[:pos] + inserted + body[pos:]
+
+
+def schematron_rules_with_globals(pieces: list[_Piece], globals_: _SchGlobals, identifier: str | None):
+    """→ (texts, undeclared, used_lets, used_ns): each pattern of a
+    candidate with the global sch:let it uses, directly or through another
+    global ($textoNota uses $nodoConref), copied in, in file order, and an
+    xmlns declaration for each global sch:ns prefix its XPath uses; its
+    comment block in front. undeclared: variables used that are declared
+    nowhere in the file."""
+    by_name = {g["name"]: g for g in globals_.lets if g["name"]}
+    order = {g["name"]: i for i, g in enumerate(globals_.lets)}
+    texts, undeclared, used_lets, used_ns = [], set(), set(), set()
+    for piece in pieces:
+        expr = _expressions(piece.text)
+        refs, bound = _variable_use(expr)
+        local_lets = {a or b for a, b in _LOCAL_LET_RE.findall(re.sub(r"<!--[\s\S]*?-->", "", piece.text))}
+        needed: set[str] = set()
+        queue = [r for r in refs if r in by_name and r not in local_lets]
+        while queue:
+            name = queue.pop()
+            if name in needed:
+                continue
+            needed.add(name)
+            g_refs, g_bound = _variable_use(by_name[name]["value"])
+            for r in g_refs - g_bound:
+                if r in by_name:
+                    queue.append(r)
+                else:
+                    undeclared.add(r)
+        undeclared |= refs - bound - local_lets - set(by_name)
+        ordered = sorted(needed, key=order.get)
+        all_expr = expr + "\n" + "\n".join(by_name[n]["value"] for n in ordered)
+        declarations = [(n["prefix"], n["uri"]) for n in globals_.ns if _uses_prefix(all_expr, n["prefix"])]
+        used_lets |= needed
+        used_ns |= {p for p, _ in declarations}
+        pattern = _insert_into_pattern(piece.text, [by_name[n]["text"] for n in ordered], declarations)
+        lead = _lead_comments(piece.lead, identifier)
+        texts.append("\n".join(lead + [pattern]))
+    return texts, undeclared, used_lets, used_ns
 
 
 def _text(el) -> str:
     return re.sub(r"\s+", " ", "".join(el.itertext())).strip() if el is not None else ""
+
+
+def _message_text(check) -> str:
+    """An assert/report message as text: a sch:value-of / sch:name (a value
+    computed when validating) becomes "…", never its expression."""
+    for child in list(check.iter()):
+        if child is not check and isinstance(child.tag, str) and etree.QName(child).localname in ("value-of", "name"):
+            child.tail = "…" + (child.tail or "")
+    return _text(check)
 
 
 def _find(el, local: str):
@@ -418,7 +638,7 @@ def _parse_piece(piece: _Piece, file_format: str) -> dict:
                         "context": rule.get("context") or "",
                         "test": check.get("test") or "",
                         "role": check.get("role") or "",
-                        "message": _text(check),
+                        "message": _message_text(check),
                     }
                 )
         info["asserts"] = asserts
@@ -493,18 +713,23 @@ def _assemble_rule(file_format: str, rules: list[_Piece], noncontext: list[_Piec
     return "\n".join(parts)
 
 
-def literal_texts(paragraph_groups: list[list[str]]) -> dict:
-    """Definition and Proposal written in the file, from the first
-    nonContextRule that has text (its paragraphs, the identifier already
-    stripped). → {"definition": str | None, "proposal": str | None}."""
+def literal_texts(paragraph_groups: list[list[str]], title: str | None = None) -> dict:
+    """Title, Definition and Proposal written in the file: the Definition
+    and Proposal from the first nonContextRule that has text (its
+    paragraphs, the identifier already stripped); the Title from a
+    Schematron comment "<ID> — <title>" (comment_title).
+    → {"title", "definition", "proposal"}, each str | None."""
+    out = {"title": title or None, "definition": None, "proposal": None}
     for paras in paragraph_groups:
         if not any(paras):
             continue
         if len(paras) >= 2:
             proposal = "\n".join(_PROJECT_DECISION_RE.sub("", p, count=1) for p in paras[1:] if p)
-            return {"definition": paras[0] or None, "proposal": proposal or None}
-        return {"definition": None, "proposal": paras[0]}
-    return {"definition": None, "proposal": None}
+            out.update(definition=paras[0] or None, proposal=proposal or None)
+        else:
+            out["proposal"] = paras[0]
+        break
+    return out
 
 
 _XPATH_NS = {
@@ -583,7 +808,9 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
      noncontext_count, decision_texts, literal, object_uses, summary,
      warnings, no_content}. rule_xml is the rules as written (executable
      ones, then nonContextRules); rule_count counts the executable ones."""
-    pieces, warnings = _scan_pieces(rf)
+    pieces, globals_ = _scan_pieces(rf)
+    warnings: list[dict] = []
+    is_sch = rf.file_format == "SCH-DITA"
     groups: dict[str, dict] = {}
     order: list[dict] = []
     for piece in pieces:
@@ -612,6 +839,8 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
             group["infos"].append(info)
 
     candidates = []
+    used_lets: set[str] = set()
+    used_ns: set[str] = set()
     for index, group in enumerate(order, start=1):
         identifier = group["identifier"]
         rules, infos = group["rules"], group["infos"]
@@ -619,8 +848,30 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
         cand_warnings: list[dict] = []
         rule_xml = ""
         rule_problem = None
-        if rules or noncontext:
+        title = None
+        preview = [p.text for p in group["pieces"][:PREVIEW_RULES]]
+        if is_sch and rules:
+            texts, undeclared, lets, ns = schematron_rules_with_globals(rules, globals_, identifier)
+            used_lets |= lets
+            used_ns |= ns
+            rule_xml = "\n".join(texts)
+            preview = texts[:PREVIEW_RULES]
+            if undeclared:
+                names = sorted(undeclared)
+                cand_warnings.append(
+                    {
+                        "code": "undeclared_variable",
+                        "params": {"names": names},
+                        "message": f"Uses {', '.join('$' + n for n in names)}, which is not declared in the file.",
+                    }
+                )
+            titles = [comment_title(c) for p in rules for c in _lead_comments(p.lead, identifier)]
+            titles = [t for t in titles if t and t[0] == identifier]
+            exact = [t for t in titles if not t[1]]
+            title = (exact or titles or [(None, None, None)])[0][2]
+        elif rules or noncontext:
             rule_xml = _assemble_rule(rf.file_format, rules, noncontext)
+        if rule_xml:
             rule_xml = unwrap_rule_xml(rule_xml, rf.file_format)[0]
             if group["errors"]:
                 rule_problem = {"code": "not_parsed", "message": f"A rule could not be read: {group['errors'][0]}"}
@@ -678,14 +929,38 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
                 "rule_xml": rule_xml,
                 "rule_count": len(rules),
                 "noncontext_count": len(noncontext),
-                "rule_preview": [p.text for p in group["pieces"][:PREVIEW_RULES]],
+                "rule_preview": preview,
                 "rule_problem": rule_problem,
                 "decision_texts": group["noncontext"],
-                "literal": literal_texts(group["paragraphs"]),
+                "literal": literal_texts(group["paragraphs"], title),
                 "object_uses": object_uses[:20],
                 "summary": _summary(rf.file_format, rules, infos) if rules else None,
                 "warnings": cand_warnings,
                 "no_content": no_content,
             }
         )
+    if is_sch:
+        with_rule = {c["origin_identifier"] for c in candidates if c["origin_identifier"]}
+        for raw in globals_.id_comments:
+            m = _COMMENT_ID_RE.match(_comment_body(raw))
+            if m and m.group(1) not in with_rule:
+                with_rule.add(m.group(1))
+                warnings.append(
+                    {
+                        "code": "comment_without_rule",
+                        "params": {"identifier": m.group(1)},
+                        "message": f"{m.group(1)} is mentioned in a comment, but has no rule in this file.",
+                    }
+                )
+        unused_lets = [g["name"] for g in globals_.lets if g["name"] not in used_lets]
+        unused_ns = [n["prefix"] for n in globals_.ns if n["prefix"] not in used_ns]
+        for element, names in (("sch:let", unused_lets), ("sch:ns", unused_ns)):
+            if names:
+                warnings.append(
+                    {
+                        "code": "schematron_globals",
+                        "params": {"element": element, "count": len(names), "names": names},
+                        "message": f"The Schematron has {len(names)} global {element} that no rule uses; they are not imported.",
+                    }
+                )
     return candidates, warnings
