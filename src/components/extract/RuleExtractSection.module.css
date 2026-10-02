@@ -21,6 +21,9 @@
 
 .table {
   width: 100%;
+  /* Below this, the table scrolls sideways inside .tableWrap instead of
+     squeezing Title / Definition / Proposal to nothing. */
+  min-width: 1100px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 12.5px;
@@ -44,12 +47,34 @@
   width: 28px;
 }
 
+/* Classification drop-down with the ID under it. Wide enough for the
+   longest classification in EN and ES ("Otra especificación (S2000M)",
+   "Regla por defecto de S1000D", "Already exists (changes)");
+   scripts/verify-rule-extract-columns.mjs measures it. */
 .colClass {
-  width: 150px;
+  width: 232px;
 }
 
-.colId {
-  width: 130px;
+/* Every drop-down fills its cell: same width on every row, never wider than
+   the column. Selects do not inherit the font by default. */
+.classSelect {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+/* The identifier (and its "source: …" line) on its own line, whole. */
+.identifier {
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.identifierLine {
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .colRule {

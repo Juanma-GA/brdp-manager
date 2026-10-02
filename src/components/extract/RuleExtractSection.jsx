@@ -572,8 +572,10 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
               <thead>
                 <tr>
                   <th className={styles.colCheck} />
-                  <th className={styles.colClass}>{t('config.ruleExtract.colClass')}</th>
-                  <th className={styles.colId} aria-sort={ariaSort('id')}>
+                  {/* Classification and ID share one column: the drop-down on top,
+                      the identifier on its own line under it, so they never overlap. */}
+                  <th className={styles.colClass} aria-sort={ariaSort('id')}>
+                    <div>{t('config.ruleExtract.colClass')}</div>
                     <button type="button" className={styles.sortButton} title={t('config.ruleExtract.sortHint')} onClick={() => cycleSort('id')} data-testid="rule-extract-sort-id">
                       {t('config.ruleExtract.colId')}
                       {sortMark('id')}
@@ -622,6 +624,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                       </td>
                       <td>
                         <select
+                          className={styles.classSelect}
                           value={c.classification}
                           data-testid="rule-extract-class"
                           onChange={(e) => patch([{ key: c.key, classification: e.target.value }])}
@@ -632,13 +635,17 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                             </option>
                           ))}
                         </select>
-                      </td>
-                      <td className={styles.mono}>
-                        <div data-testid="rule-extract-identifier">
-                          {c.classification === 'new_ext' ? c.identifier || t('config.ruleExtract.extOnImport') : c.identifier}
+                        <div className={styles.identifier} data-testid="rule-extract-identifier">
+                          {c.classification === 'new_ext' && !c.identifier ? (
+                            <span className={styles.muted}>{t('config.ruleExtract.extOnImport')}</span>
+                          ) : (
+                            c.identifier
+                          )}
                         </div>
                         {c.origin_identifier && c.origin_identifier !== c.identifier && (
-                          <div className={styles.muted}>{t('config.ruleExtract.origin', { id: c.origin_identifier })}</div>
+                          <div className={`${styles.muted} ${styles.identifierLine}`} data-testid="rule-extract-origin">
+                            {t('config.ruleExtract.origin', { id: c.origin_identifier })}
+                          </div>
                         )}
                       </td>
                       <td>
