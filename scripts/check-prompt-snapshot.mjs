@@ -27,6 +27,14 @@
 // read from the two BREX fixtures by backend/scripts/
 // dump_rule_extract_fixture.py). No other prompt changes.
 //
+// AI Extract, "Propuesta del fichero": a BREX candidate whose rules all
+// share one objectUse has it as its Proposal (from the file), so the AI
+// is asked only for what is left. Changed on purpose: the three BREX cases
+// of extractFromRules -- S1-00052 and S1-00007 now new EXT with the
+// Proposal given (Title and Definition asked; an objectUse equal to the
+// given Proposal is not repeated), S2-00002 and BREX-S1-00242 asked only
+// Title and Definition. Nothing else changes.
+//
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a
 // few rounds back) means expected-prompts.json is stale by design, not

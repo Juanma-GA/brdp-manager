@@ -48,11 +48,12 @@
 }
 
 /* Classification drop-down with the ID under it. Wide enough for the
-   longest classification in EN and ES ("Otra especificación (S2000M)",
-   "Regla por defecto de S1000D", "Already exists (changes)");
+   longest classification in EN and ES ("De catálogo (S1000D 4.1), marcada"
+   / "From catalog (S1000D 4.1), marked", 223 px, plus "Otra especificación
+   (S2000M)", "Regla por defecto de S1000D");
    scripts/verify-rule-extract-columns.mjs measures it. */
 .colClass {
-  width: 232px;
+  width: 252px;
 }
 
 /* Every drop-down fills its cell: same width on every row, never wider than
@@ -224,4 +225,23 @@
   align-items: center;
   gap: 12px;
   font-size: 13px;
+}
+
+/* Rows with texts still to write / that failed, with "Continue writing" /
+   "Retry the failed" (shown when no writing is running). */
+.resume {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  align-items: center;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+/* Why "Import selected" is disabled: same red as the other blocking
+   messages of the page. */
+.blocked {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #b91c1c;
 }

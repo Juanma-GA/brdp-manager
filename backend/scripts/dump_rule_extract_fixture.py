@@ -23,7 +23,10 @@ OUT = ROOT / "scripts" / "rule-test-fixtures" / "extract-candidates.json"
 
 # identifier → (classification, catalog texts). S1-00117, S1-00037 and
 # S1-00001 have a nonContextRule: as new EXT only their Title is left for
-# the AI. S1-00052 and S1-00007 have only executable rules.
+# the AI. S1-00052 and S1-00007 have only executable rules sharing one
+# objectUse, which is their Proposal: as new EXT the AI writes Title and
+# Definition. S1-00006's objectUses only say who decided ("Decision by
+# Company."): as catalog, the AI writes the Proposal.
 # File → (rule format, standard, {identifier: …}). A Schematron candidate is
 # keyed "<file stem>/<identifier>" (its EXT numbers repeat across files).
 FILES = {
@@ -34,14 +37,14 @@ FILES = {
 }
 PICK = {
     "brex/DMC-LHTSTD-A-00-00-00-000A-022A-D_001-00_SX-US.xml": {
-        "BRDP-S1-00052": ("catalog", ("Information codes", "Decide on which information codes apply to the project.")),
+        "BRDP-S1-00052": ("new_ext", None),
         "BRDP-S1-00117": ("new_ext", None),
         "BRDP-S1-00037": ("new_ext", None),
         "BRDP-S1-00001": ("new_ext", None),
         "BRDP-S1-00006": ("catalog", ("Schemas", "Decide which schemas to use.")),
     },
     "brex/DMC-CAAA00000000AAA022AD-001-00-SX-ZZ.xml": {
-        "BRDP-S1-00007": ("catalog", ("Optional elements", "Decide whether and how to use each optional element.")),
+        "BRDP-S1-00007": ("new_ext", None),
         "BRDP-S2-00002": ("other_spec", None),
         "BREX-S1-00242": ("default_rule", None),
     },

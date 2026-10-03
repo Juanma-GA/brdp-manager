@@ -151,7 +151,8 @@ function formatRuleCopiedValue(value) {
 }
 
 // AI Extract: the "extracted_from" event's value is JSON ({ file,
-// origin_identifier, in_force? }); it reads as "<file> (source ID <id>)",
+// origin_identifier, in_force?, catalog_edition?, catalog_standard? }); it
+// reads as "<file> (source ID <id>)",
 // or "validated and verified on import from <file> …" when it was imported
 // as already in force.
 function formatExtractedFromValue(t, value) {
@@ -159,9 +160,13 @@ function formatExtractedFromValue(t, value) {
   try {
     const parsed = JSON.parse(value);
     const key = parsed.in_force ? 'extractedFromValueInForce' : 'extractedFromValue';
-    return parsed.origin_identifier
+    const text = parsed.origin_identifier
       ? t(`records.history.${key}`, { file: parsed.file, origin: parsed.origin_identifier })
       : t(`records.history.${key}NoId`, { file: parsed.file });
+    // Taken from another edition's catalog: "…; S1000D 4.1 catalog, not in S1000D 4.2".
+    return parsed.catalog_edition
+      ? `${text}; ${t('records.history.extractedFromCatalogEdition', { edition: parsed.catalog_edition, standard: parsed.catalog_standard })}`
+      : text;
   } catch {
     return value;
   }

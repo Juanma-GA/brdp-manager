@@ -12,7 +12,9 @@
 //     clientWidth); the page itself never scrolls sideways (the table does,
 //     inside its own box, when it does not fit).
 // Needs the backend, Vite and the Mistral chat simulator running (the AI
-// writes the texts of the new rows first), as in verify-rule-extract.mjs.
+// writes the texts of the new rows first), as in verify-rule-extract.mjs,
+// and the 4.2 and (stand-in) 4.1 catalogs loaded so the "From catalog
+// (S1000D 4.1)" labels appear (seed_extract_catalog_42.py / _41.py).
 //
 //     node scripts/verify-rule-extract-columns.mjs [--shots-only]
 import os from "node:os";
@@ -51,8 +53,14 @@ async function api(p, options = {}) {
 
 // Every label a classification drop-down can show, in the current language.
 const ALL_LABELS = {
-  en: ["New EXT", "From catalog", "Other specification (S2000M)", "Already exists (changes)", "Already exists (same)", "Default rule of S1000D", "No content"],
-  es: ["Nueva EXT", "De catálogo", "Otra especificación (S2000M)", "Ya existe (cambia)", "Ya existe (igual)", "Regla por defecto de S1000D", "Sin contenido"],
+  en: [
+    "New EXT", "From catalog", "From catalog (S1000D 4.1)", "From catalog (S1000D 4.1), marked", "Other specification (S2000M)",
+    "Already exists (changes)", "Already exists (same)", "Default rule of S1000D", "No content",
+  ],
+  es: [
+    "Nueva EXT", "De catálogo", "De catálogo (S1000D 4.1)", "De catálogo (S1000D 4.1), marcada", "Otra especificación (S2000M)",
+    "Ya existe (cambia)", "Ya existe (igual)", "Regla por defecto de S1000D", "Sin contenido",
+  ],
 };
 
 // Layout of the first columns of the rows on the current page.

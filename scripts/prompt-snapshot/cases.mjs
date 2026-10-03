@@ -810,11 +810,14 @@ const extractCandidates = JSON.parse(
 );
 const extractArgs = (...ids) => [{ standard: 'S1000D 4.2', ruleFormat: 'BREX-4.2', candidates: ids.map((id) => extractCandidates[id]) }];
 export const extractFromRulesCases = [
-  // Catalog, only executable rules: the AI writes the Proposal.
+  // S1-00052 (new EXT): its Proposal is the one objectUse its rules share,
+  // given; the AI writes Title and Definition. S1-00006 (catalog): its
+  // objectUses only say who decided, so the AI writes the Proposal.
   { name: 'lufthansa-value-list-and-contexts', args: extractArgs('BRDP-S1-00052', 'BRDP-S1-00006') },
   // New EXT with a nonContextRule: Definition and Proposal from the file,
   // only the Title asked.
   { name: 'lufthansa-literal-texts-title-only', args: extractArgs('BRDP-S1-00117', 'BRDP-S1-00037', 'BRDP-S1-00001') },
+  // 4,500 rules, one objectUse (the Proposal, given): summary only.
   { name: 'ca-big-candidate-summary-only', args: extractArgs('BRDP-S1-00007') },
   { name: 'ca-other-spec-and-default-rule', args: extractArgs('BRDP-S2-00002', 'BREX-S1-00242') },
   // Schematron: the Title comes from the comment before the pattern

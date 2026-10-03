@@ -10,7 +10,9 @@
 //   - nonContextRules: part of the rule, their paragraphs taken literally
 //     (no AI), and the whole Lufthansa BREX imported, approved and generated
 //     again with its 469 nonContextRules;
-//   - BREX-S1-… of the "CA" BREX: "Default rule of S1000D", unchecked.
+//   - BREX-S1-… of the "CA" BREX: "Default rule of S1000D", unchecked, its
+//     Title and Definition written by the AI anyway (its Proposal is its
+//     objectUse).
 // Needs the 4.2 catalog of the repo loaded:
 //     cd backend && .venv/bin/python scripts/seed_extract_catalog_42.py   (cleanup afterwards)
 //
@@ -137,12 +139,15 @@ async function main() {
       assert(s1.proposal === "Decision made by TDWG." && s1.text_sources.proposal === "file" && s1.noncontext_count === 1 && s1.rule_count === 0,
         "S1-00001 (only a nonContextRule): its rule is that nonContextRule, Proposal 'Decision made by TDWG.' from the file");
       const s52 = by["BRDP-S1-00052"];
-      assert(s52.text_sources.proposal === "ai" && /^MOCK-PROPOSAL/.test(s52.proposal), "S1-00052 (only executable rules): Proposal written by the AI", s52.proposal);
+      assert(s52.text_sources.proposal === "file" && s52.proposal === "Allowed LHT infocodes, including 055 and 930 which are not allowed in ATA CMP.",
+        "S1-00052 (no nonContextRule): its one objectUse (without 'Decision by Company.') is the Proposal, from the file", s52.proposal);
+      const s2 = by["BRDP-S1-00002"];
+      assert(s2.text_sources.proposal === "ai" && /^MOCK-PROPOSAL/.test(s2.proposal), "S1-00002 (objectUse only 'Decision by Company.'): Proposal written by the AI", s2.proposal);
       const literal = all.filter((c) => c.text_sources?.proposal === "file").length;
       const sentToAi = all.filter((c) => (c.ai_fields || []).length > 0).length;
       const catalogLiteral = all.filter((c) => c.classification === "catalog" && c.text_sources?.proposal === "file").length;
       console.log(`       ${literal} candidates with a literal Proposal; ${catalogLiteral} catalog ones need nothing from the AI; ${sentToAi} sent to the AI (of ${all.length})`);
-      assert(literal === 469 && sentToAi < all.length, "the 469 nonContextRule candidates have a literal Proposal; fewer sent to the AI");
+      assert(literal === 470 && sentToAi < all.length, "470 candidates have a literal Proposal (469 nonContextRule + S1-00052); fewer sent to the AI");
     }
 
     await page.goto(`${BASE_URL}/projects/${lh.id}/config`);
@@ -180,7 +185,7 @@ async function main() {
     await page.getByTestId("rule-extract-apply").click();
     await page.getByTestId("rule-extract-result").waitFor();
     const result = await page.getByTestId("rule-extract-result").innerText();
-    assert(result.includes("Created: 4"), "summary: 4 created", result);
+    assert(result.includes("Checked 4 · Created 4 · Updated 0 · Omitted 0"), "summary: checked 4 · created 4", result);
     await page.getByTestId("rule-extract-section").screenshot({ path: path.join(SHOTS, "rule-extract-lufthansa-result.png") });
 
     const brdps = await api(`/api/projects/${lh.id}/brdps`);
@@ -313,18 +318,20 @@ async function main() {
     // BREX-S1-…: default rules of S1000D, unchecked, with the note.
     const defaults = caCands.filter((c) => c.origin_identifier.startsWith("BREX-S1-"));
     assert(defaults.length === 243 && defaults.every((c) => c.classification === "default_rule" && !c.selected), "243 BREX-S1-… as 'Default rule of S1000D', unchecked");
-    assert(defaults.every((c) => c.draft_status === "pending"), "unchecked default rules are not sent to the AI");
+    assert(defaults.every((c) => c.draft_status === "drafted" && c.title && c.definition && c.text_sources.proposal === "file"),
+      "unchecked default rules get their Title and Definition from the AI anyway; their Proposal is their objectUse");
     await page.goto(`${BASE_URL}/projects/${ca.id}/config`);
     await page.getByTestId("rule-extract-filter").selectOption("default_rule");
     const b1 = row(page, "BREX-S1-00001");
     assert((await b1.getByTestId("rule-extract-class").locator("option:checked").innerText()) === "Default rule of S1000D", "shown as 'Default rule of S1000D'");
     assert((await b1.getByTestId("rule-extract-warnings").innerText()).includes("default BREX; a project BREX normally inherits it"), "with the note");
     assert(!(await b1.getByTestId("rule-extract-select").isChecked()), "unchecked");
+    const callsBefore = (await (await fetch("http://localhost:8902/extract-calls")).json()).calls;
     await b1.getByTestId("rule-extract-select").check();
-    await page.getByTestId("rule-extract-drafting").waitFor({ state: "detached", timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(1500);
     const b1After = (await api(`/api/projects/${ca.id}/ai-extract/jobs/${caJob.id}/candidates`)).candidates.find((c) => c.origin_identifier === "BREX-S1-00001");
-    assert(b1After.selected && b1After.draft_status === "drafted" && b1After.title, "checked → its texts written by the AI");
+    const callsAfter = (await (await fetch("http://localhost:8902/extract-calls")).json()).calls;
+    assert(b1After.selected && b1After.draft_status === "drafted" && b1After.title && callsAfter === callsBefore, "checked → already written, no new AI call");
     await b1.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(SHOTS, "rule-extract-default-rule.png") });
     // Import the 4,500-rule candidate: kept whole.

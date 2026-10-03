@@ -3028,7 +3028,7 @@
       "id": "extract-value-list-s1-00052",
       "type": "extract-from-rules",
       "standard": "S1000D 4.2",
-      "description": "AI Extract: Lufthansa's S1-00052 (two rules listing the allowed and the prohibited information codes as path predicates, no decision text). The Proposal states the allowed codes, including 055 and 930, without placeholders.",
+      "description": "AI Extract: Lufthansa's S1-00052 (two rules, no decision text). Its objectUses are 'Decision by Company.' and 'Allowed LHT infocodes, including 055 and 930 which are not allowed in ATA CMP.': once who decided is dropped there is one text, which is the Proposal, literally, from the file -- checked by code, no LLM call (as a catalog BRDP, Title/Definition from the catalog).",
       "file": "scripts/prompt-eval/fixtures/lufthansa-extract-sample.xml",
       "origin": "BRDP-S1-00052",
       "classification": "catalog",
@@ -3038,34 +3038,84 @@
       },
       "checks": [
         {
+          "type": "extract_literal",
+          "note": "nothing for the AI: no LLM call"
+        },
+        {
+          "type": "equals",
+          "value": "Allowed LHT infocodes, including 055 and 930 which are not allowed in ATA CMP.",
+          "note": "the Proposal is the objectUse every rule shares, without 'Decision by Company.'"
+        }
+      ]
+    },
+    {
+      "id": "extract-default-rule-title-definition-brex-s1-00001",
+      "type": "extract-from-rules",
+      "standard": "S1000D 4.2",
+      "description": "AI Extract: BREX-S1-00001 of the 'CA' BREX, a rule of S1000D's default BREX (a DMRL must not reference comments or other DMLs). Its Proposal is its objectUse, literally ('A DMRL must not contain comments or other data management lists (Chap 4.5, Para 2.1).'); the AI writes only the Title and the Definition, in English, as a decision point, without the rule syntax. Drafted even though the row comes unchecked.",
+      "file": "backend/tests/fixtures/brex/DMC-CAAA00000000AAA022AD-001-00-SX-ZZ.xml",
+      "origin": "BREX-S1-00001",
+      "classification": "default_rule",
+      "checks": [
+        {
           "type": "extract_drafted"
         },
         {
-          "type": "contains",
-          "pattern": "\\b055\\b",
-          "note": "the allowed code 055 is named"
+          "type": "equals",
+          "value": "A DMRL must not contain comments or other data management lists (Chap 4.5, Para 2.1).",
+          "note": "the Proposal is the file's objectUse, never rewritten"
         },
         {
-          "type": "contains",
-          "pattern": "\\b930\\b",
-          "note": "the allowed code 930 is named"
+          "type": "contains_any",
+          "target": "title",
+          "patterns": [
+            "DMRL",
+            "data management requirement",
+            "data management list",
+            "DML"
+          ],
+          "flags": "i",
+          "note": "the Title names the DMRL / DML"
         },
         {
-          "type": "no_placeholders",
-          "note": "the decision is known: no [VALUE: ...] or [LIST: ...]"
+          "type": "contains_any",
+          "target": "definition",
+          "patterns": [
+            "^Decide\\b"
+          ],
+          "note": "phrased as a decision point"
+        },
+        {
+          "type": "language",
+          "target": "title",
+          "expect": "en"
+        },
+        {
+          "type": "language",
+          "target": "definition",
+          "expect": "en"
         },
         {
           "type": "not_contains_any",
+          "target": "title",
           "patterns": [
             "objectPath",
             "allowedObjectFlag",
             "XPath"
           ],
+          "flags": "i",
           "note": "never the rule syntax"
         },
         {
-          "type": "language",
-          "expect": "en"
+          "type": "not_contains_any",
+          "target": "definition",
+          "patterns": [
+            "objectPath",
+            "allowedObjectFlag",
+            "XPath"
+          ],
+          "flags": "i",
+          "note": "never the rule syntax"
         }
       ]
     },

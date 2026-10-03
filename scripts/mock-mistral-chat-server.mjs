@@ -661,7 +661,44 @@ function realSize(reply) {
   return JSON.stringify(data, null, 2);
 }
 
+// AI Extract drafting, for interrupting and resuming it in the browser:
+//   POST /extract-delay {"ms": N}  every "Write the texts…" answer waits N ms
+//                                  (until /reset or ms 0);
+//   POST /extract-broken {"on": true|false}  every such answer is not JSON
+//                                  (its batches end "failed").
+let extractDelayMs = 0;
+let extractBroken = false;
+let extractCalls = 0;
+
+function readJsonBody(req) {
+  return new Promise((resolve) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(body || "{}"));
+      } catch {
+        resolve({});
+      }
+    });
+  });
+}
+
 const server = http.createServer((req, res) => {
+  if (req.method === "POST" && (req.url === "/extract-delay" || req.url === "/extract-broken")) {
+    readJsonBody(req).then((body) => {
+      if (req.url === "/extract-delay") extractDelayMs = Number(body.ms) || 0;
+      else extractBroken = !!body.on;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, extractDelayMs, extractBroken }));
+    });
+    return;
+  }
+  if (req.method === "GET" && req.url === "/extract-calls") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ calls: extractCalls }));
+    return;
+  }
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(lastRequest));
@@ -670,6 +707,9 @@ const server = http.createServer((req, res) => {
   if (req.method === "POST" && req.url === "/reset") {
     lastRequest = null;
     slowNextArmed = false;
+    extractDelayMs = 0;
+    extractBroken = false;
+    extractCalls = 0;
     errorNextArmed = false;
     stepNextArmed = false;
     truncateNextArmed = false;
@@ -773,7 +813,8 @@ const server = http.createServer((req, res) => {
         "MOCK-LONG-DEFINITION: This decision point governs the applicability and scope of the allowedObjectFlag attribute across every structureObjectRule and nonContextRule in the data module, including split-rule variants, and must be evaluated consistently for every objectPath regardless of dmCode context or system differences. " +
         "Alsounabrokenverylongsingletokenwithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     } else if (userText === "Write the texts for these BRDPs.") {
-      reply = extractReply(messages.find((m) => m.role === "system")?.content || "");
+      extractCalls += 1;
+      reply = extractBroken ? "Sorry, here are the texts: {not json" : extractReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (isSuggestRule(userText)) {
       reply = suggestRuleReply(messages.find((m) => m.role === "system")?.content || "");
     } else if (isRuleTestReview(userText)) {
@@ -821,7 +862,9 @@ const server = http.createServer((req, res) => {
       if (finishReason === "length") console.log(`chat call -- answer cut at ${reply.length} chars (max_tokens ${parsed.max_tokens})`);
       res.end(JSON.stringify({ choices: [{ message: { content: reply }, finish_reason: finishReason }] }));
     };
-    if (slowNextArmed) {
+    if (extractDelayMs && userText === "Write the texts for these BRDPs.") {
+      setTimeout(send, extractDelayMs);
+    } else if (slowNextArmed) {
       slowNextArmed = false; // one-shot -- doesn't affect the next unrelated call
       console.log(`chat call -- delaying ${SLOW_RESPONSE_DELAY_MS}ms (armed via /slow-next)`);
       setTimeout(send, SLOW_RESPONSE_DELAY_MS);

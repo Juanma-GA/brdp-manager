@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { authFetch, authFetchJson } from '../../services/apiClient';
 import { sendMessage } from '../../api/llmAPI.js';
 import { EXTRACT_MAX_TOKENS, SUGGEST_TEMPERATURE } from '../../prompts/shared.js';
-import { candidatesToDraft, draftCandidates } from '../../utils/ruleExtractDraft.js';
+import { candidatesToDraft, draftCandidates, DRAFTED_CLASSES, extractTextState } from '../../utils/ruleExtractDraft.js';
 import { aiFieldsOf } from '../../prompts/extractFromRulesPrompt.js';
 import { diffRuleLines, normalizeRuleXml } from '../../utils/brdpCompare.js';
 import {
@@ -34,9 +34,30 @@ import styles from './RuleExtractSection.module.css';
 
 export const EXTRACT_PAGE_SIZE = 25;
 const POLL_MS = 1000;
-const DRAFT_CLASSES = new Set(['new_ext', 'catalog', 'other_spec', 'default_rule']);
+const DRAFT_CLASSES = DRAFTED_CLASSES;
 const WRITES_TITLE = new Set(['new_ext', 'other_spec', 'default_rule']);
-const CLASS_FILTERS = ['all', 'new_ext', 'catalog', 'other_spec', 'default_rule', 'changed', 'same', 'empty', 'warnings'];
+const CLASS_FILTERS = [
+  'all', 'new_ext', 'catalog', 'catalog_edition', 'catalog_edition_marked', 'other_spec', 'default_rule', 'changed', 'same', 'empty',
+  'warnings', 'blocking',
+];
+const TEXT_KEYS = ['title', 'definition', 'proposal'];
+// Which fields of a row a save owns, so its answer (or its failure) never
+// touches what another save changed meanwhile: a batch of AI texts never
+// undoes a check made while it was on its way, and a check never undoes
+// texts. A classification change rewrites texts, identifier and warnings
+// on the server (set_texts), so it owns them too.
+function ownedFields(edit) {
+  const owned = new Set(Object.keys(edit).filter((k) => k !== 'key'));
+  if (TEXT_KEYS.some((k) => owned.has(k)) || owned.has('draft_status')) {
+    ['text_sources', 'draft_status'].forEach((k) => owned.add(k));
+  }
+  if (owned.has('classification')) {
+    [...TEXT_KEYS, 'text_sources', 'ai_fields', 'draft_status', 'identifier', 'option_identifiers', 'warnings', 'base_classification'].forEach((k) =>
+      owned.add(k)
+    );
+  }
+  return owned;
+}
 // Where each text comes from (rule_extract_jobs.set_texts): the file, the
 // catalog, the AI, a hand edit, or the project for an existing BRDP.
 const SOURCE_TAGS = new Set(['file', 'catalog', 'ai', 'manual', 'project']);
@@ -53,6 +74,9 @@ async function detailOf(res) {
 function classLabel(t, c, classification = c.classification) {
   if (classification === 'other_spec' || classification === 'default_rule') {
     return t(`config.ruleExtract.classes.${classification}`, { spec: c.specification || '' });
+  }
+  if (classification === 'catalog_edition' || classification === 'catalog_edition_marked') {
+    return t(`config.ruleExtract.classes.${classification}`, { edition: c.catalog_edition || '' });
   }
   return t(`config.ruleExtract.classes.${classification}`);
 }
@@ -74,6 +98,8 @@ function warningText(t, w) {
       return t('config.ruleExtract.warnings.no_rule_to_import');
     case 'not_in_catalog':
       return t('config.ruleExtract.warnings.not_in_catalog', { identifier: p.identifier, standard: p.standard });
+    case 'catalog_other_edition':
+      return t('config.ruleExtract.warnings.catalog_other_edition', { identifier: p.identifier, standard: p.standard, edition: p.edition });
     case 'similar_to':
       return t('config.ruleExtract.warnings.similar_to', { identifier: p.identifier, similarity: p.similarity });
     case 'external_entities':
@@ -129,7 +155,9 @@ function SourceTag({ c, field, t }) {
   if (!SOURCE_TAGS.has(source) || !c[field]) return null;
   return (
     <div className={styles.sourceTag} data-testid={`rule-extract-source-${field}`} data-source={source}>
-      {t(`config.ruleExtract.sources.${source}`)}
+      {source === 'catalog' && c.catalog_edition && /^catalog_edition/.test(c.classification)
+        ? t('config.ruleExtract.sources.catalogEdition', { edition: c.catalog_edition })
+        : t(`config.ruleExtract.sources.${source}`)}
     </div>
   );
 }
@@ -278,16 +306,24 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     return () => clearInterval(timer);
   }, [job, base, loadCandidates]);
 
-  // Edits show at once (HR20) and are saved on the server; if the save
-  // fails, the rows go back to what they were and the error is shown.
+  // Edits show at once (HR20) and are saved on the server. Only the fields
+  // a save owns (ownedFields) are taken from its answer, and only those go
+  // back to what they were if it fails -- so overlapping saves (AI batches,
+  // checks, a bulk classification) never undo each other, and a failed
+  // batch leaves its rows "pending" without touching their check. Returns
+  // true when saved.
   const patch = useCallback(
     async (items) => {
       const edits = new Map(items.map((i) => [i.key, i]));
-      let before = null;
-      setCandidates((list) => {
-        before = list;
-        return list.map((c) => (edits.has(c.key) ? { ...c, ...edits.get(c.key) } : c));
-      });
+      const owned = new Map(items.map((i) => [i.key, ownedFields(i)]));
+      const previous = new Map();
+      setCandidates((list) =>
+        list.map((c) => {
+          if (!edits.has(c.key)) return c;
+          previous.set(c.key, Object.fromEntries([...owned.get(c.key)].map((k) => [k, c[k]])));
+          return { ...c, ...edits.get(c.key) };
+        })
+      );
       try {
         const data = await authFetchJson(`${base}/jobs/${job.id}/candidates`, {
           method: 'PATCH',
@@ -295,13 +331,19 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
           body: JSON.stringify({ items }),
         });
         const byKey = new Map(data.candidates.map((c) => [c.key, c]));
-        setCandidates((list) => list.map((c) => byKey.get(c.key) || c));
+        setCandidates((list) =>
+          list.map((c) => {
+            const server = byKey.get(c.key);
+            if (!server) return c;
+            const fields = owned.get(c.key);
+            return { ...c, ...Object.fromEntries(Object.keys(server).filter((k) => fields.has(k)).map((k) => [k, server[k]])) };
+          })
+        );
+        return true;
       } catch (err) {
-        if (before) {
-          const old = new Map(before.map((c) => [c.key, c]));
-          setCandidates((list) => list.map((c) => (edits.has(c.key) ? old.get(c.key) || c : c)));
-        }
+        setCandidates((list) => list.map((c) => (previous.has(c.key) ? { ...c, ...previous.get(c.key) } : c)));
         setError(t('config.ruleExtract.saveFailed', { error: err.message }));
+        return false;
       }
     },
     [base, job, t]
@@ -318,10 +360,14 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     [aiProvider]
   );
 
+  // Writes the given rows (checked ones first: candidatesToDraft), saving
+  // each batch at once. A batch whose save fails goes back to "pending" (its
+  // rows are counted in the warning and "Continue writing" picks them up).
   const runDrafting = useCallback(
     async (targets) => {
       if (!targets.length || draftingRef.current || !aiProvider) return;
       draftingRef.current = true;
+      stopRef.current = false;
       let done = 0;
       setDrafting({ done, total: targets.length });
       try {
@@ -347,7 +393,8 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   );
 
   // Write what is missing as soon as the candidates are there (also when
-  // coming back to an extraction left half-written).
+  // coming back to an extraction left half-written, or after a server
+  // restart): every row with texts left, checked or not, checked first.
   useEffect(() => {
     if (!candidates || !canEdit || !aiProvider || job?.applied_at) return;
     runDrafting(candidatesToDraft(candidates));
@@ -380,12 +427,29 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     setApplying(true);
     setError(null);
     try {
-      const result = await authFetchJson(`${base}/jobs/${job.id}/apply`, {
+      const res = await authFetch(`${base}/jobs/${job.id}/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keys, import_as: importAs }),
       });
-      setApplyResult(result);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const d = body.detail;
+        if (d && typeof d === 'object' && d.code === 'texts_incomplete') {
+          throw new Error(t('config.ruleExtract.applyRefusedTexts', { pending: d.pending.length, failed: d.failed.length, ids: [...d.pending, ...d.failed].join(', ') }));
+        }
+        if (d && typeof d === 'object' && d.code === 'count_mismatch') {
+          throw new Error(t('config.ruleExtract.applyRefusedCount', { ids: (d.missing || []).join(', ') }));
+        }
+        throw new Error(typeof d === 'string' ? d : d?.message || res.statusText);
+      }
+      const result = await res.json();
+      // Checked = created + updated + omitted, or a visible error naming
+      // the rows that went nowhere (the server checks the same before
+      // committing).
+      const handled = new Set([...result.created_identifiers, ...(result.updated_identifiers || []), ...result.omitted_detail].map((r) => r.key));
+      const missing = candidates.filter((c) => c.selected && !handled.has(c.key)).map((c) => c.identifier || c.origin_identifier || c.key);
+      setApplyResult({ ...result, selected: result.selected ?? keys.length, missing });
       setJob((j) => ({ ...j, applied_at: new Date().toISOString(), apply_result: result }));
       onDataChanged?.();
     } catch (err) {
@@ -393,6 +457,13 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     } finally {
       setApplying(false);
     }
+  };
+
+  // "Classify the shown rows as…": the options valid for every shown row.
+  const classifyShown = async (classification) => {
+    if (!classification) return;
+    const items = visible.filter((c) => c.classification !== classification).map((c) => ({ key: c.key, classification }));
+    if (items.length) await patch(items);
   };
 
   // The rows shown: the classification filter AND the search, sorted;
@@ -405,6 +476,8 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
         ? candidates
         : filter === 'warnings'
         ? candidates.filter((c) => c.warnings.length || c.rule_problem || c.draft_status === 'failed')
+        : filter === 'blocking'
+        ? candidates.filter((c) => c.selected && extractTextState(c) !== 'complete')
         : candidates.filter((c) => c.classification === filter);
     return sortRows(byFilter.filter((c) => matchesSearch(c, query)), sort);
   }, [candidates, filter, search, sort]);
@@ -416,12 +489,39 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   const sortMark = (key) => (sort?.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
   const ariaSort = (key) => (sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
 
+  // A classification's name for the counts and the filter: with its
+  // specification / edition when every row of it shares one ("From catalog
+  // (S1000D 4.1)"), without it otherwise.
+  const groupLabel = (k) => {
+    const rows = (candidates || []).filter((c) => c.classification === k || c.options?.includes(k));
+    const one = (field) => (rows.length && rows.every((c) => c[field] === rows[0][field]) ? rows[0][field] : '');
+    return classLabel(t, { specification: one('specification'), catalog_edition: one('catalog_edition') }, k).replace(/\s*\(\)/, '');
+  };
   const counts = useMemo(() => {
     const out = {};
     for (const c of candidates || []) out[c.classification] = (out[c.classification] || 0) + 1;
     return out;
   }, [candidates]);
   const selectedCount = (candidates || []).filter((c) => c.selected).length;
+  // From the rows' data, never from memory: survives a reload or a server
+  // restart. Checked rows with texts pending / failed block the import;
+  // unchecked ones never do.
+  const textCounts = useMemo(() => {
+    const out = { pending: 0, failed: 0, blockingPending: 0, blockingFailed: 0 };
+    for (const c of candidates || []) {
+      const state = extractTextState(c);
+      if (state === 'complete') continue;
+      out[state] += 1;
+      if (c.selected) out[state === 'pending' ? 'blockingPending' : 'blockingFailed'] += 1;
+    }
+    return out;
+  }, [candidates]);
+  const importBlocked = textCounts.blockingPending + textCounts.blockingFailed > 0;
+  // Options valid for every shown row (bulk classify).
+  const commonOptions = useMemo(() => {
+    if (!visible.length) return [];
+    return visible[0].options.filter((o) => visible.every((c) => c.options.includes(o)));
+  }, [visible]);
 
   if (!canEdit) return null;
 
@@ -480,10 +580,20 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
       {applyResult && (
         <div data-testid="rule-extract-result">
           <h3 className={pageStyles.subsectionHeading}>{t('config.ruleExtract.resultTitle', { file: job?.filename })}</h3>
+          <p data-testid="rule-extract-result-summary">
+            {t('config.ruleExtract.resultSummary', {
+              selected: applyResult.selected ?? applyResult.created + applyResult.updated + applyResult.omitted,
+              created: applyResult.created,
+              updated: applyResult.updated,
+              omitted: applyResult.omitted,
+            })}
+          </p>
+          {applyResult.missing?.length > 0 && (
+            <ul className={pageStyles.errorList} data-testid="rule-extract-result-missing">
+              <li>{t('config.ruleExtract.resultMissing', { count: applyResult.missing.length, ids: applyResult.missing.join(', ') })}</li>
+            </ul>
+          )}
           <ul className={pageStyles.summaryList}>
-            <li>{t('config.ruleExtract.resultCreated', { count: applyResult.created })}</li>
-            <li>{t('config.ruleExtract.resultUpdated', { count: applyResult.updated })}</li>
-            <li>{t('config.ruleExtract.resultOmitted', { count: applyResult.omitted })}</li>
             <li>{t('config.ruleExtract.resultInvalidRule', { count: applyResult.invalid_rule })}</li>
             {applyResult.import_as === 'in_force' && <li data-testid="rule-extract-result-in-force">{t('config.ruleExtract.resultInForce')}</li>}
           </ul>
@@ -497,14 +607,22 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
               </li>
             </ul>
           )}
-          {applyResult.omitted_detail?.filter((o) => o.reason !== 'same' && o.reason !== 'no content').length > 0 && (
-            <ul className={pageStyles.warningList}>
-              {applyResult.omitted_detail
-                .filter((o) => o.reason !== 'same' && o.reason !== 'no content')
-                .map((o) => (
-                  <li key={o.key}>{`${o.origin_identifier || o.key}: ${o.reason}`}</li>
+          {applyResult.omitted_detail?.length > 0 && (
+            <details data-testid="rule-extract-result-omitted">
+              <summary>{t('config.ruleExtract.resultOmittedTitle', { count: applyResult.omitted })}</summary>
+              <ul className={pageStyles.warningList}>
+                {applyResult.omitted_detail.map((o) => (
+                  <li key={o.key}>
+                    {`${o.identifier || o.origin_identifier || o.key}: `}
+                    {o.reason === 'same'
+                      ? t('config.ruleExtract.omitReasons.same')
+                      : o.reason === 'no content'
+                      ? t('config.ruleExtract.omitReasons.noContent')
+                      : o.reason}
+                  </li>
                 ))}
-            </ul>
+              </ul>
+            </details>
           )}
         </div>
       )}
@@ -514,7 +632,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
           <p className={pageStyles.hint} data-testid="rule-extract-counts">
             {t('config.ruleExtract.counts', { count: candidates.length, file: job.filename })}{' '}
             {Object.entries(counts)
-              .map(([k, n]) => `${classLabel(t, { specification: '' }, k).replace(/\s*\(\)$/, '')}: ${n}`)
+              .map(([k, n]) => `${groupLabel(k)}: ${n}`)
               .join(' · ')}
             {job.finished_at && (
               <span data-testid="rule-extract-elapsed">
@@ -533,6 +651,40 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
             </div>
           )}
           {aiProvider === null && <p className={pageStyles.hint}>{t('config.ruleExtract.noAi')}</p>}
+          {!drafting && (textCounts.pending > 0 || textCounts.failed > 0) && (
+            <div className={styles.resume} data-testid="rule-extract-resume">
+              {textCounts.pending > 0 && (
+                <span>
+                  <span data-testid="rule-extract-pending-count">{t('config.ruleExtract.pendingRows', { count: textCounts.pending })}</span>{' '}
+                  <button
+                    type="button"
+                    className={pageStyles.secondaryButton}
+                    disabled={!aiProvider}
+                    title={!aiProvider ? t('config.ruleExtract.noAi') : undefined}
+                    onClick={() => runDrafting(candidatesToDraft(candidates))}
+                    data-testid="rule-extract-continue"
+                  >
+                    {t('config.ruleExtract.continueDrafting')}
+                  </button>
+                </span>
+              )}
+              {textCounts.failed > 0 && (
+                <span>
+                  <span data-testid="rule-extract-failed-count">{t('config.ruleExtract.failedRows', { count: textCounts.failed })}</span>{' '}
+                  <button
+                    type="button"
+                    className={pageStyles.secondaryButton}
+                    disabled={!aiProvider}
+                    title={!aiProvider ? t('config.ruleExtract.noAi') : undefined}
+                    onClick={() => runDrafting(candidatesToDraft(candidates.filter((c) => extractTextState(c) === 'failed'), { includeFailed: true }))}
+                    data-testid="rule-extract-retry-failed"
+                  >
+                    {t('config.ruleExtract.retryFailed', { count: textCounts.failed })}
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
 
           <div className={styles.toolbar}>
             <label>
@@ -542,7 +694,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                   <option key={f} value={f}>
                     {f === 'all' || f === 'warnings'
                       ? t(`config.ruleExtract.filters.${f}`)
-                      : classLabel(t, { specification: '' }, f).replace(/\s*\(\)$/, '')}
+                      : groupLabel(f)}
                   </option>
                 ))}
               </select>
@@ -565,6 +717,22 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
             <button type="button" className={pageStyles.secondaryButton} onClick={() => patch(visible.map((c) => ({ key: c.key, selected: false })))}>
               {t('config.ruleExtract.selectNone')}
             </button>
+            <label title={commonOptions.length ? undefined : t('config.ruleExtract.classifyShownNone')}>
+              {t('config.ruleExtract.classifyShown')}{' '}
+              <select
+                value=""
+                disabled={!commonOptions.length}
+                onChange={(e) => classifyShown(e.target.value)}
+                data-testid="rule-extract-classify-shown"
+              >
+                <option value="">…</option>
+                {commonOptions.map((o) => (
+                  <option key={o} value={o}>
+                    {classLabel(t, visible[0], o)}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           <div className={styles.tableWrap}>
@@ -612,14 +780,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                           type="checkbox"
                           checked={!!c.selected}
                           data-testid="rule-extract-select"
-                          onChange={async (e) => {
-                            const selected = e.target.checked;
-                            await patch([{ key: c.key, selected }]);
-                            // A default-BREX rule is only written once checked.
-                            if (selected && c.classification === 'default_rule' && candidatesToDraft([{ ...c, selected }]).length) {
-                              runDrafting([{ ...c, selected }]);
-                            }
-                          }}
+                          onChange={(e) => patch([{ key: c.key, selected: e.target.checked }])}
                         />
                       </td>
                       <td>
@@ -713,10 +874,24 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                 <option value="in_force">{t('config.ruleExtract.importAsInForce')}</option>
               </select>
             </label>
-            <Button onClick={apply} busy={applying} busyLabel={t('config.ruleExtract.importing')} disabled={selectedCount === 0 || !!drafting} data-testid="rule-extract-apply">
+            <Button
+              onClick={apply}
+              busy={applying}
+              busyLabel={t('config.ruleExtract.importing')}
+              disabled={selectedCount === 0 || !!drafting || importBlocked}
+              data-testid="rule-extract-apply"
+            >
               {t('config.ruleExtract.importSelected', { count: selectedCount })}
             </Button>
           </div>
+          {importBlocked && (
+            <p className={styles.blocked} data-testid="rule-extract-blocked">
+              {t('config.ruleExtract.importBlocked', { pending: textCounts.blockingPending, failed: textCounts.blockingFailed })}{' '}
+              <button type="button" className={styles.linkButton} onClick={() => setFilter('blocking')} data-testid="rule-extract-show-blocking">
+                {t('config.ruleExtract.showBlocking')}
+              </button>
+            </p>
+          )}
           <p className={pageStyles.hint} data-testid="rule-extract-import-as-hint">
             {t(importAs === 'in_force' ? 'config.ruleExtract.importAsHintInForce' : 'config.ruleExtract.importAsHintPending')}
           </p>

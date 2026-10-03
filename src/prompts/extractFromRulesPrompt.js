@@ -3,7 +3,8 @@
 // candidate's ai_fields (backend/app/services/rule_extract_jobs.py's
 // set_texts):
 //   - the Proposal, when the file has no decision text (a nonContextRule's
-//     paragraphs are taken literally, never rewritten) -- the normative
+//     paragraphs, or the one objectUse every rule shares, are taken
+//     literally, never rewritten) -- the normative
 //     sentence of the decision, WITHOUT placeholders (the decision is
 //     already taken: it is in the file);
 //   - Title, and Definition when the file has none, for "Nueva EXT", "Otra
@@ -119,9 +120,12 @@ function candidateBlock(c, ruleFormat) {
     );
     for (const t of c.decision_texts) lines.push(`  > ${t}`);
   }
-  if (c.object_uses?.length) {
+  // An objectUse that is already the given Proposal (every rule says it) is
+  // not repeated.
+  const uses = (c.object_uses || []).filter((t) => fields.includes('proposal') || t.replace(/\s+/g, ' ').trim() !== (c.proposal || '').trim());
+  if (uses.length) {
     lines.push('  Rule explanations in the file (objectUse / messages):');
-    for (const t of c.object_uses.slice(0, 8)) lines.push(`  > ${t}`);
+    for (const t of uses.slice(0, 8)) lines.push(`  > ${t}`);
   }
   lines.push('  What the rules check (summary made by the application):');
   lines.push(...ruleLines(c.summary, ruleFormat));

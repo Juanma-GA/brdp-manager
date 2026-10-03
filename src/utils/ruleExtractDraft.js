@@ -12,21 +12,37 @@ import { aiFieldsOf, buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExt
 
 export const DRAFT_BATCH_SIZE = 10;
 export const DRAFT_CONCURRENCY = 3;
-const DRAFTED_CLASSES = new Set(['new_ext', 'catalog', 'other_spec', 'default_rule']);
+export const DRAFTED_CLASSES = new Set(['new_ext', 'catalog', 'catalog_edition', 'catalog_edition_marked', 'other_spec', 'default_rule']);
+
+// Same rule as the backend's text_state (rule_extract_jobs.py): from the
+// candidate's data alone, so it survives a page reload or a server restart.
+//   'complete' -- nothing left to write, or every field the AI writes has
+//                 text (by the AI or by hand);
+//   'failed'   -- the AI could not write it (retry, write by hand, uncheck);
+//   'pending'  -- not written yet.
+// An existing BRDP (same / changed) and "No content" are always complete.
+export function extractTextState(c) {
+  if (['same', 'changed', 'empty'].includes(c.classification)) return 'complete';
+  if (aiFieldsOf(c).every((f) => (c[f] || '').trim())) return 'complete';
+  return c.draft_status === 'failed' ? 'failed' : 'pending';
+}
 
 // The candidates that still need texts: the classes the AI writes for, with
 // something left to write (texts in the file or the catalog are never
-// sent), not written yet (by the AI or by hand). A default-BREX rule is
-// only written once checked: 243 of them come unchecked in a BREX that
-// carries the default rules.
-export function candidatesToDraft(candidates) {
-  return candidates.filter(
-    (c) =>
-      DRAFTED_CLASSES.has(c.classification) &&
-      (c.classification !== 'default_rule' || c.selected) &&
-      aiFieldsOf(c).length > 0 &&
-      (c.draft_status === 'pending' || !c.draft_status)
-  );
+// sent), not written yet (by the AI or by hand) -- checked or not: an
+// unchecked row (a default-BREX rule) gets its texts too, so checking it
+// later never waits for the AI and the import never has a row without
+// texts. The checked rows come first, in file order, then the unchecked
+// ones. includeFailed: also the rows whose texts failed ("Retry the failed").
+export function candidatesToDraft(candidates, { includeFailed = false } = {}) {
+  const todo = candidates.filter((c) => {
+    if (!DRAFTED_CLASSES.has(c.classification) || aiFieldsOf(c).length === 0) return false;
+    // A row with a field written by hand and another still empty is drafted
+    // too: the backend never lets the AI overwrite a hand-written text.
+    const state = extractTextState(c);
+    return state === 'pending' || (includeFailed && state === 'failed');
+  });
+  return [...todo.filter((c) => c.selected), ...todo.filter((c) => !c.selected)];
 }
 
 async function draftBatch(batch, { standard, ruleFormat, ask }) {

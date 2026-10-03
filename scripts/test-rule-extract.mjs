@@ -7,7 +7,7 @@
 //     node scripts/test-rule-extract.mjs
 import { readFileSync } from 'node:fs';
 import { buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../src/prompts/extractFromRulesPrompt.js';
-import { candidatesToDraft, draftCandidates } from '../src/utils/ruleExtractDraft.js';
+import { candidatesToDraft, draftCandidates, extractTextState } from '../src/utils/ruleExtractDraft.js';
 import { LLM_TRUNCATED } from '../src/api/llmTruncation.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./rule-test-fixtures/extract-candidates.json', import.meta.url), 'utf-8'));
@@ -27,21 +27,26 @@ const fresh = (id, extra = {}) => ({ ...fixture[id], classification: 'new_ext', 
 // ── Prompt ────────────────────────────────────────────────────────────────
 {
   // The fixture's candidates carry the backend's set_texts: S1-00117 (new
-  // EXT with a nonContextRule) asks only the Title; S1-00052 (catalog, only
-  // executable rules) only the Proposal; BREX-S1-00242 (default BREX rule) all.
+  // EXT with a nonContextRule) asks only the Title; S1-00006 (catalog, its
+  // objectUses only say who decided) only the Proposal; S1-00052 (new EXT,
+  // one objectUse shared by its rules = the Proposal) and BREX-S1-00242
+  // (default BREX rule, same) Title and Definition.
   const prompt = buildExtractFromRulesPrompt({
     standard: 'S1000D 4.2',
     ruleFormat: 'BREX-4.2',
-    candidates: [fixture['BRDP-S1-00117'], fixture['BRDP-S1-00052'], fixture['BREX-S1-00242']],
+    candidates: [fixture['BRDP-S1-00117'], fixture['BRDP-S1-00006'], fixture['BRDP-S1-00052'], fixture['BREX-S1-00242']],
   });
   check('prompt names the standard', prompt.includes('uses S1000D 4.2.'));
   check('no placeholders asked', prompt.includes('No placeholders, no brackets to fill in'));
   check('literal texts given, not rewritten', prompt.includes('Proposal (from the file, do not rewrite): Captions shall not be used.')
     && prompt.includes('Definition (from the file, do not rewrite): Decide whether inline captions affect'));
   check('literal texts: only the title', /BRDP-S1-00117[\s\S]*?Write: title\n/.test(prompt));
-  check('catalog texts given, not rewritten', prompt.includes('Title (official, do not rewrite): Information codes'));
-  check('catalog: only the proposal', /BRDP-S1-00052[\s\S]*?Write: proposal\n/.test(prompt));
-  check('default BREX rule: title, definition and proposal', /BREX-S1-00242[\s\S]*?Write: title, definition, proposal/.test(prompt));
+  check('catalog texts given, not rewritten', prompt.includes('Title (official, do not rewrite): Schemas'));
+  check('catalog: only the proposal', /BRDP-S1-00006[\s\S]*?Write: proposal\n/.test(prompt));
+  check('objectUse proposal given, not rewritten', prompt.includes('Proposal (from the file, do not rewrite): Allowed LHT infocodes, including 055 and 930 which are not allowed in ATA CMP.'));
+  check('objectUse proposal: title and definition asked', /BRDP-S1-00052[\s\S]*?Write: title, definition\n/.test(prompt));
+  check('the objectUse given as the Proposal is not repeated', !/> Allowed LHT infocodes/.test(prompt) && prompt.includes('  > Decision by Company.'));
+  check('default BREX rule: title and definition, its objectUse as the Proposal', /BREX-S1-00242[\s\S]*?Write: title, definition\n/.test(prompt));
   check('default BREX rule named as such', prompt.includes('This is a rule of the S1000D default BREX, not a project decision'));
   check('decision text shown, not as the Proposal source when given', prompt.includes('Decision text in the file (nonContextRule):\n'));
   check('rule summary instead of XML', prompt.includes('- //caption — prohibited') && !prompt.includes('<structureObjectRule'));
@@ -68,7 +73,7 @@ const fresh = (id, extra = {}) => ({ ...fixture[id], classification: 'new_ext', 
 {
   const other = buildExtractFromRulesPrompt({ standard: 'S1000D 4.2', ruleFormat: 'BREX-4.2', candidates: [fresh('BRDP-S2-00002', { classification: 'other_spec', specification: 'S2000M' })] });
   check('other specification named', other.includes('This is a decision point of S2000M'));
-  check('other specification writes title and definition', other.includes('Write: title, definition, proposal'));
+  check('other specification writes title and definition', other.includes('Write: title, definition\n'));
 }
 {
   const dita = buildExtractFromRulesPrompt({
@@ -124,7 +129,7 @@ const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), 
   });
   check('3 batches of at most 10', calls.length === 3 && saved.sort().join(',') === '10,10,3', saved.join(','));
   check('fixed user message', calls.every((c) => c.user === EXTRACT_USER_MESSAGE));
-  check('every candidate drafted', results.length === 23 && results.every((r) => r.draft_status === 'drafted' && r.proposal === `P${r.key}`));
+  check('every candidate drafted', results.length === 23 && results.every((r) => r.draft_status === 'drafted' && r.title === `T${r.key}` && r.definition === `D${r.key}` && !('proposal' in r)));
   check('no rule XML sent', calls.every((c) => !c.system.includes('<structureObjectRule')));
 }
 {
@@ -168,7 +173,7 @@ const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), 
 }
 {
   // A catalog candidate never gets a title/definition from the AI.
-  const [r] = await draftCandidates([{ ...fixture['BRDP-S1-00052'], key: 'cat' }], {
+  const [r] = await draftCandidates([{ ...fixture['BRDP-S1-00006'], key: 'cat' }], {
     standard: 'S1000D 4.2',
     ruleFormat: 'BREX-4.2',
     ask: async () => JSON.stringify({ items: [{ key: 'cat', title: 'WRONG', definition: 'WRONG', proposal: 'Information codes shall be…' }] }),
@@ -194,16 +199,28 @@ const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), 
 {
   const list = [
     { key: 'a', classification: 'new_ext', draft_status: 'pending' },
-    { key: 'b', classification: 'catalog', draft_status: 'drafted' },
+    { key: 'b', classification: 'catalog', draft_status: 'drafted', proposal: 'P.' },
     { key: 'c', classification: 'changed', draft_status: 'not_needed' },
     { key: 'd', classification: 'other_spec', draft_status: 'pending' },
     { key: 'e', classification: 'empty', draft_status: 'pending' },
-    { key: 'f', classification: 'catalog', draft_status: 'manual' },
+    { key: 'f', classification: 'catalog', draft_status: 'manual', proposal: 'Hand P.' },
     { key: 'g', classification: 'default_rule', draft_status: 'pending', selected: false },
     { key: 'h', classification: 'default_rule', draft_status: 'pending', selected: true },
     { key: 'i', classification: 'new_ext', draft_status: 'pending', ai_fields: [] },
+    { key: 'j', classification: 'new_ext', draft_status: 'failed' },
   ];
-  check('only pending candidates of the written classes', candidatesToDraft(list).map((c) => c.key).join(',') === 'a,d,h');
+  // Checked or not, every row with texts left is written; the checked ones
+  // first (a / h checked, d / g not), file order within each group.
+  list[0].selected = true;
+  check('pending candidates of the written classes, checked first', candidatesToDraft(list).map((c) => c.key).join(',') === 'a,h,d,g',
+    candidatesToDraft(list).map((c) => c.key).join(','));
+  check('failed rows only when asked (retry)', candidatesToDraft(list, { includeFailed: true }).map((c) => c.key).join(',') === 'a,h,d,g,j');
+  // The state comes from the data: texts present = complete, whatever the status says.
+  check('text state from the data', extractTextState({ classification: 'catalog', ai_fields: ['proposal'], proposal: '', draft_status: 'drafted' }) === 'pending'
+    && extractTextState({ classification: 'new_ext', ai_fields: ['title'], title: 'T', draft_status: 'failed' }) === 'complete'
+    && extractTextState({ classification: 'new_ext', ai_fields: ['title'], title: '', draft_status: 'failed' }) === 'failed'
+    && extractTextState({ classification: 'changed', ai_fields: ['title'], title: '' }) === 'complete'
+    && extractTextState({ classification: 'catalog_edition', ai_fields: ['proposal'], proposal: '', draft_status: 'pending' }) === 'pending');
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);
