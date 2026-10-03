@@ -21,6 +21,14 @@ class RuleExtractJob(Base):
     "reading" | "classifying" | "similar". apply_result is set once the
     selected candidates were imported ({created, updated, omitted,
     invalid_rule, ...}); a job is applied at most once.
+
+    AI Extract (2/2) -- source_kind "text": BRDPs from free text. The page
+    reads the text (pasted, or a .txt/.md/.docx/.pdf read in the browser),
+    the server checks its word count and stores it (source_text,
+    word_count); the job then waits for the page to find the decisions with
+    the AI (status "awaiting_decisions", phase "finding") and, once they are
+    posted, classifies them in the background like a file. filename is the
+    file's name, or "" for a pasted text.
     """
 
     __tablename__ = "rule_extract_jobs"
@@ -34,6 +42,9 @@ class RuleExtractJob(Base):
     )
     filename: Mapped[str] = mapped_column(String, nullable=False, default="")
     file_format: Mapped[str] = mapped_column(String, nullable=False, default="")
+    source_kind: Mapped[str] = mapped_column(String, nullable=False, default="rules", server_default="rules")
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="running")
     phase: Mapped[str] = mapped_column(String, nullable=False, default="reading")
     total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

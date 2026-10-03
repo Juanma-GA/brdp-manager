@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # Largest BREX/Schematron accepted; over it, a 413 with the reason. The
     # "CA" BREX (5,536 rules, the largest seen) is 2.8 MB.
     rule_extract_max_bytes: int = 20 * 1024 * 1024
+    # AI Extract (2/2), free text: at most this many words (every proposed
+    # BRDP is reviewed by a person; a long text gives too many). Characters
+    # are capped too, so a text with few but huge "words" is still bounded.
+    extract_text_max_words: int = 5000
+    extract_text_max_chars: int = 200_000
 
 
 @lru_cache

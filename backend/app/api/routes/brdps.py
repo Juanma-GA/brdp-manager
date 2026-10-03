@@ -58,8 +58,8 @@ _HISTORY_FIELDS = {
 }
 
 # Deliberately its own numbering, scoped to ONLY this exact prefix -- NOT
-# a port of extractBRDPs.js's generateIds() (frontend, untouchable engine
-# file), which looks at the highest number across ANY prefix. Confirmed
+# a port of v1's extractBRDPs.js generateIds() (frontend, removed with AI
+# Extract 2/2), which looked at the highest number across ANY prefix. Confirmed
 # with the user: a project seeded from the catalog (identifiers like
 # "BRDP-S1-00001") must still start its first manually-added BRDP at
 # BRDP-EXT-00001, not continue from the catalog's numbers -- so catalog

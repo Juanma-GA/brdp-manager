@@ -156,7 +156,7 @@ def _build_user_prompt(row: dict) -> str:
 
 def _extract_json(text: str) -> dict:
     """Mirrors the frontend's own tolerance for LLM output that isn't pure
-    JSON (extractBRDPs.js does the same) -- grabs the first {...} block
+    JSON (v1's extractBRDPs.js did the same) -- grabs the first {...} block
     rather than assuming response_format is honored by whatever endpoint
     ACTIVE_LLM_PROVIDER points at (may be a private, non-OpenAI-compatible
     deployment, docs/v2 §3 point 6).

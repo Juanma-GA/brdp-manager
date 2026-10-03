@@ -14,6 +14,9 @@ class RuleExtractJobOut(BaseModel):
     project_id: uuid.UUID
     filename: str
     file_format: str
+    # "rules" (a BREX / Schematron) or "text" (AI Extract 2/2: free text).
+    source_kind: str = "rules"
+    word_count: int | None = None
     status: str
     phase: str
     total_items: int
@@ -52,3 +55,33 @@ class RuleExtractApplyRequest(BaseModel):
     # Validated + rule Verified, for the candidates whose rule passes the
     # format check (the others stay Pending/Draft).
     import_as: Literal["pending", "in_force"] = "pending"
+
+
+class RuleExtractLimitsOut(BaseModel):
+    max_words: int
+    max_chars: int
+
+
+class RuleExtractTextRequest(BaseModel):
+    """A free text (pasted, or read from a file in the browser). filename is
+    the file's name; empty for a pasted text."""
+
+    text: str
+    filename: str = Field(default="", max_length=255)
+
+
+class RuleExtractSourceTextOut(BaseModel):
+    job_id: uuid.UUID
+    text: str
+    word_count: int
+
+
+class RuleExtractDecision(BaseModel):
+    """One decision the AI found: the literal quote and a short title."""
+
+    quote: str = Field(max_length=20000)
+    title: str = Field(default="", max_length=2000)
+
+
+class RuleExtractDecisions(BaseModel):
+    decisions: list[RuleExtractDecision] = Field(default_factory=list, max_length=1000)

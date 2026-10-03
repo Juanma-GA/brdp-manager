@@ -82,6 +82,7 @@ from app.services.embeddings import EmbeddingUnavailable, compute_embeddings_bat
 from app.services.history import record_change
 from app.services.rule_extract import BIG_CANDIDATE_RULES, DEFAULT_RULE_RE, STANDARD_ISSUE, RulesFile, build_candidates
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
+from app.services.text_extract import build_text_candidates, normalize_ws
 from app.services.rule_wrappers import unwrap_rule_xml
 
 STALE_JOB_MINUTES = 60
@@ -149,6 +150,9 @@ def set_texts(c: dict, keep_written: bool = False) -> None:
         if classification in CATALOG_CLASSES and catalog:
             fixed["title"] = (catalog.get("title") or "", "catalog")
             fixed["definition"] = (catalog.get("definition") or "", "catalog")
+        # Free text: the title the AI gave with the decision (step 1).
+        if c.get("found_title") and "title" not in fixed:
+            fixed["title"] = (c["found_title"], "ai")
         literal = c.get("literal") or {}
         if literal.get("title") and "title" not in fixed:
             fixed["title"] = (literal["title"], "file")
@@ -438,7 +442,15 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
                 base = "changed"
             else:
                 base = "same"
-                if not importable_rule:
+                if c.get("source") == "text":
+                    c["warnings"].append(
+                        {
+                            "code": "exists_in_project",
+                            "params": {"identifier": brdp.identifier},
+                            "message": f"{brdp.identifier} already exists in the project: the import never changes its texts.",
+                        }
+                    )
+                elif not importable_rule:
                     c["warnings"].append(
                         {"code": "no_rule_to_import", "params": {}, "message": "There is no rule to import, nothing would change."}
                     )
@@ -563,7 +575,7 @@ def _renumber_warning(c: dict) -> None:
 
 
 def _similarity_text(c: dict) -> str:
-    parts = list(c.get("decision_texts") or []) + list(c.get("object_uses") or [])
+    parts = list(c.get("decision_texts") or []) + list(c.get("object_uses") or []) + [c.get("quote") or ""]
     return "\n".join(dict.fromkeys(p for p in parts if p))
 
 
@@ -737,6 +749,134 @@ async def run_extract_job(
         await progress.close()
 
 
+# ── Free text (AI Extract 2/2) ────────────────────────────────────────────
+
+
+async def create_text_job(
+    project_id: uuid.UUID, user_id: uuid.UUID, filename: str, text: str, word_count: int, db: AsyncSession
+) -> RuleExtractJob:
+    """A free text replaces the project's previous extraction, like a new
+    file. The job waits for the page to find the decisions with the AI
+    (status "awaiting_decisions"): the text is stored, so a reload or a
+    server restart can ask again."""
+    old_jobs = select(RuleExtractJob.id).where(RuleExtractJob.project_id == project_id)
+    await db.execute(delete(RuleExtractCandidate).where(RuleExtractCandidate.job_id.in_(old_jobs)))
+    job = RuleExtractJob(
+        project_id=project_id,
+        started_by=user_id,
+        filename=filename,
+        file_format="text",
+        source_kind="text",
+        source_text=text,
+        word_count=word_count,
+        status="awaiting_decisions",
+        phase="finding",
+        warnings=[],
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+async def _extracted_quotes(project_id: uuid.UUID, db: AsyncSession) -> dict[str, dict]:
+    """Normalized quote → {identifier, file} of the active BRDP an earlier
+    free-text extraction created from it (its "extracted_from" event)."""
+    existing = await _active_identifiers(project_id, db)
+    by_id = {b.id: b for b in existing.values()}
+    if not by_id:
+        return {}
+    rows = (
+        await db.execute(
+            select(BRDPHistory.brdp_id, BRDPHistory.new_value)
+            .where(BRDPHistory.brdp_id.in_(list(by_id)), BRDPHistory.field_name == "extracted_from")
+            .order_by(BRDPHistory.changed_at)
+        )
+    ).all()
+    out: dict[str, dict] = {}
+    for brdp_id, value in rows:
+        try:
+            event = json.loads(value)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("quote"):
+            out[normalize_ws(event["quote"])] = {"identifier": by_id[brdp_id].identifier, "file": event.get("file") or ""}
+    return out
+
+
+async def classify_text_candidates(project: Project, candidates: list[dict], db: AsyncSession) -> None:
+    """classify_candidates, then what is particular to a free text: a quote
+    not found in the text is unchecked (its warning is already there), and a
+    quote an earlier extraction already imported is unchecked with the BRDP
+    it became -- the same text imported twice warns instead of duplicating."""
+    await classify_candidates(project, candidates, db)
+    imported = await _extracted_quotes(project.id, db)
+    for c in candidates:
+        if not c.get("quote_found"):
+            c["selected"] = False
+        earlier = imported.get(normalize_ws(c.get("quote") or ""))
+        if earlier and c["classification"] != "same":
+            c["warnings"].append(
+                {
+                    "code": "quote_already_imported",
+                    "params": earlier,
+                    "message": f"This fragment was already imported as {earlier['identifier']}.",
+                }
+            )
+            c["selected"] = False
+
+
+async def run_text_extract_job(
+    job_id: uuid.UUID, project_id: uuid.UUID, decisions: list[dict], transport: httpx.AsyncBaseTransport | None = None
+) -> None:
+    """The decisions the AI found (step 1, posted by the page): quotes
+    checked and merged by code, classified, duplicate check, stored."""
+    progress = async_session_factory()
+    work = async_session_factory()
+    try:
+        project = await work.get(Project, project_id)
+        job = await work.get(RuleExtractJob, job_id)
+        candidates = build_text_candidates(job.source_text or "", decisions)
+        await _progress(progress, job_id, phase="classifying", total_items=len(candidates), processed_items=0)
+        await classify_text_candidates(project, candidates, work)
+        await _progress(progress, job_id, processed_items=len(candidates))
+        similar_targets = sum(1 for c in candidates if c["classification"] == "new_ext")
+        await _progress(progress, job_id, phase="similar", total_items=similar_targets, processed_items=0)
+
+        async def on_progress(done):
+            await _progress(progress, job_id, processed_items=done)
+
+        file_warnings = []
+        similarity_warning = await check_similar(project_id, candidates, work, transport, on_progress)
+        if similarity_warning is not None:
+            file_warnings.append(similarity_warning)
+        for position, c in enumerate(candidates):
+            rule_xml = c.pop("rule_xml")
+            work.add(RuleExtractCandidate(job_id=job_id, key=c["key"], position=position, data=c, rule_xml=rule_xml))
+        await work.commit()
+        job = await progress.get(RuleExtractJob, job_id)
+        job.warnings = (job.warnings or []) + file_warnings
+        job.status = "completed"
+        job.phase = "done"
+        job.total_items = len(candidates)
+        job.processed_items = len(candidates)
+        job.finished_at = datetime.now(timezone.utc)
+        await progress.commit()
+    except asyncio.CancelledError:
+        await work.rollback()
+        await _progress(
+            progress, job_id, status="failed", error="Extraction interrupted (server restarted or shut down mid-job)",
+            finished_at=datetime.now(timezone.utc),
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001 -- HR7: surface, never swallow
+        await work.rollback()
+        await _progress(progress, job_id, status="failed", error=str(exc), finished_at=datetime.now(timezone.utc))
+    finally:
+        await work.close()
+        await progress.close()
+
+
 # ── Candidates out / edits ────────────────────────────────────────────────
 
 
@@ -847,9 +987,19 @@ async def next_ext_allocator(job: RuleExtractJob, db: AsyncSession):
 
 
 def _history_event(
-    filename: str, origin: str | None, in_force: bool = False, catalog_edition: str | None = None, standard: str | None = None
+    filename: str,
+    origin: str | None,
+    in_force: bool = False,
+    catalog_edition: str | None = None,
+    standard: str | None = None,
+    quote: str | None = None,
 ) -> str:
     event = {"file": filename, "origin_identifier": origin}
+    if quote is not None:
+        # Free text: "extraída de <fichero o Texto pegado>", with the quote
+        # (file "" = a pasted text, named by the page in its language).
+        event["source"] = "text"
+        event["quote"] = quote
     if in_force:
         event["in_force"] = True
     if catalog_edition:
@@ -893,6 +1043,9 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
     Verified; its Proposal and Proposal Status are never touched."""
     if import_as not in IMPORT_AS:
         raise ValueError(f"import_as must be one of {IMPORT_AS}")
+    text_job = job.source_kind == "text"
+    if text_job and import_as != "pending":
+        raise ValueError("A free text is never imported as already in force: its BRDPs are created Pending, without a rule")
     in_force = import_as == "in_force"
     project = await db.get(Project, job.project_id)
     rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
@@ -959,7 +1112,7 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
         origin = c.get("origin_identifier")
         rule_xml = row.rule_xml if row.rule_xml and not c.get("rule_problem") else ""
         if classification in ("same", "empty"):
-            omit(c, "same" if classification == "same" else "no content")
+            omit(c, ("exists" if text_job else "same") if classification == "same" else "no content")
             continue
         verified = in_force and bool(rule_xml) and bool(rule_format)
         if classification == "changed":
@@ -1038,7 +1191,8 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
             kept_pending(c, identifier)
         record_change(
             db, brdp.id, user, "extracted_from", "",
-            _history_event(job.filename, origin, verified, edition, project.standard), always=True,
+            _history_event(job.filename, origin, verified, edition, project.standard, c.get("quote") if text_job else None),
+            always=True,
         )
         result["created"] += 1
         result["created_identifiers"].append({"key": c["key"], "identifier": identifier})

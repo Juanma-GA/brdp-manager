@@ -9,6 +9,16 @@
   GET   /jobs/{job_id}/candidates   viewer  the candidates for the review
   PATCH /jobs/{job_id}/candidates   editor  save texts written by the AI or by
                                             hand, classification, selection
+  GET   /limits                     viewer  free text: the word / character limits
+  POST  /text                       editor  free text (JSON {text, filename}) →
+                                            202 {job_id}; 422 empty or over the
+                                            word / character limit (counted
+                                            here again), 409 another running
+  GET   /jobs/{job_id}/text         viewer  the text of a free-text job
+  POST  /jobs/{job_id}/decisions    editor  the decisions the AI found in it
+                                            ([{quote, title}]): quotes checked
+                                            and classified in the background;
+                                            409 unless the job is waiting
   POST  /jobs/{job_id}/apply        editor  import the selected candidates;
                                             409 when a key is unknown, a
                                             checked row has texts pending or
@@ -43,8 +53,12 @@ from app.schemas.rule_extract import (
     RuleExtractApplyRequest,
     RuleExtractCandidateEdits,
     RuleExtractCandidatesOut,
+    RuleExtractDecisions,
     RuleExtractJobAccepted,
     RuleExtractJobOut,
+    RuleExtractLimitsOut,
+    RuleExtractSourceTextOut,
+    RuleExtractTextRequest,
 )
 from app.services.rule_extract import RuleExtractFileError, read_rules_file
 from app.services.rule_extract_jobs import (
@@ -53,11 +67,14 @@ from app.services.rule_extract_jobs import (
     apply_job,
     candidate_out,
     create_job,
+    create_text_job,
     get_most_recent_job,
     get_running_job,
     next_ext_allocator,
     run_extract_job,
+    run_text_extract_job,
 )
+from app.services.text_extract import count_words
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 
 logger = logging.getLogger(__name__)
@@ -142,6 +159,84 @@ async def parse_rules(
     job = await create_job(project_id, editor.id, file.filename or "", rules_file, db)
     background_tasks.add_task(run_extract_job, job.id, project_id, rules_file, transport)
     return RuleExtractJobAccepted(job_id=job.id)
+
+
+@router.get("/limits", response_model=RuleExtractLimitsOut)
+async def get_limits(_viewer: User = Depends(require_project_role("viewer"))) -> RuleExtractLimitsOut:
+    settings = get_settings()
+    return RuleExtractLimitsOut(max_words=settings.extract_text_max_words, max_chars=settings.extract_text_max_chars)
+
+
+@router.post("/text", response_model=RuleExtractJobAccepted, status_code=status.HTTP_202_ACCEPTED)
+async def start_text(
+    project_id: uuid.UUID,
+    body: RuleExtractTextRequest,
+    editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+) -> RuleExtractJobAccepted:
+    """The page counts the words before calling the AI; they are counted
+    here again (a direct request is bound by the same limit). Over the limit
+    the text is rejected, never cut."""
+    await _project(project_id, db)
+    settings = get_settings()
+    text = body.text.replace("\r\n", "\n")
+    words = count_words(text)
+    if words == 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="The text is empty.")
+    if words > settings.extract_text_max_words:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"This text has {words} words; the limit is {settings.extract_text_max_words}. "
+            "Split it into sections and import them one by one.",
+        )
+    if len(text) > settings.extract_text_max_chars:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"This text has {len(text)} characters; the limit is {settings.extract_text_max_chars}. "
+            "Split it into sections and import them one by one.",
+        )
+    running = await get_running_job(project_id, db)
+    if running is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"An extraction is already running for this project (started at {running.started_at.isoformat()})",
+        )
+    job = await create_text_job(project_id, editor.id, body.filename.strip(), text, words, db)
+    return RuleExtractJobAccepted(job_id=job.id)
+
+
+@router.get("/jobs/{job_id}/text", response_model=RuleExtractSourceTextOut)
+async def get_source_text(
+    project_id: uuid.UUID,
+    job_id: uuid.UUID,
+    _viewer: User = Depends(require_project_role("viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> RuleExtractSourceTextOut:
+    job = await _job(project_id, job_id, db)
+    if job.source_kind != "text":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This extraction is not a free text")
+    return RuleExtractSourceTextOut(job_id=job.id, text=job.source_text or "", word_count=job.word_count or 0)
+
+
+@router.post("/jobs/{job_id}/decisions", response_model=RuleExtractJobOut, status_code=status.HTTP_202_ACCEPTED)
+async def post_decisions(
+    project_id: uuid.UUID,
+    job_id: uuid.UUID,
+    body: RuleExtractDecisions,
+    background_tasks: BackgroundTasks,
+    _editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+    transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
+) -> RuleExtractJob:
+    job = await _job(project_id, job_id, db)
+    if job.source_kind != "text" or job.status != "awaiting_decisions":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This extraction is not waiting for decisions")
+    job.status = "running"
+    job.phase = "classifying"
+    await db.commit()
+    await db.refresh(job)
+    background_tasks.add_task(run_text_extract_job, job.id, project_id, [d.model_dump() for d in body.decisions], transport)
+    return job
 
 
 @router.get("/jobs/active", response_model=RuleExtractJobOut | None)
@@ -235,6 +330,11 @@ async def apply_candidates(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="These candidates were already imported")
     if not body.keys:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No candidate selected")
+    if job.source_kind == "text" and body.import_as != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A free text is never imported as already in force: its BRDPs are created Pending, without a rule.",
+        )
     try:
         return await apply_job(job, body.keys, editor, db, import_as=body.import_as)
     except ApplyRefused as exc:
