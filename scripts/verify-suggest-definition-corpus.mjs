@@ -135,7 +135,9 @@ async function main() {
   assert(similarA.style_references.length === 0, "5 similar (not <3) -- no style references");
   const identifiers = new Set(similarA.candidates.map((c) => c.identifier));
   assert(identifiers.has("BRDP-SDCAT-CLOSE-01") && identifiers.has("BRDP-SDCAT-CLOSE-02"), "both Records candidates present");
-  assert(identifiers.has("BRDP-SDCAT-LIVE-001") || identifiers.has("BRDP-CAT-ASKTEST-001"), "at least one Catalog candidate present");
+  // Which catalog rows win depends on the catalog loaded for the standard
+  // (the whole S1000D 4.2 one, embedded, in this environment).
+  assert(similarA.candidates.some((c) => c.source === "Catalog"), "at least one Catalog candidate present");
   const catalogCandidate = similarA.candidates.find((c) => c.source === "Catalog");
   assert(!!catalogCandidate, "a candidate is labeled source === 'Catalog'");
   const recordsCandidate = similarA.candidates.find((c) => c.source === `Records: ${projA.name}`);
@@ -227,6 +229,9 @@ async function main() {
     // ---- Catalog-disabled button (Project A / BRDP-SDCAT-LIVE-001) ----
     await openRecords(`Suggest Definition Verify A ${suffix}`, "BRDP-SDCAT-LIVE-001");
     const catalogButton = page.getByRole("button", { name: "Suggest Definition" });
+    // The catalog's identifiers load with the page (the whole S1000D 4.2
+    // catalog here, ~430 rows): wait for them before reading the button.
+    for (let i = 0; i < 50 && !(await catalogButton.isDisabled()); i += 1) await page.waitForTimeout(200);
     assert(await catalogButton.isDisabled(), "Suggest Definition is disabled for a catalog-sourced BRDP");
     assert(
       (await catalogButton.getAttribute("title")) === "Official definition from the standard catalog",
