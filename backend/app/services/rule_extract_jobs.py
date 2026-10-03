@@ -106,7 +106,14 @@ SPECIFICATIONS = {
 # the S1000D one).
 _OWN_CODES = {"S1000D": {"S1"}, "DITA": {"D1", "S1"}}
 
-CLASSIFICATIONS = ("same", "changed", "catalog", "other_spec", "default_rule", "new_ext", "empty")
+CLASSIFICATIONS = (
+    "same", "changed", "catalog", "catalog_edition", "catalog_edition_marked", "other_spec", "default_rule", "new_ext", "empty",
+)
+# "From catalog (S1000D 4.1)": an identifier of the project's specification
+# that is not in its own standard's catalog but is in another edition's
+# (the same number is the same decision across editions). Imported with its
+# own identifier, or "marked" with the edition (BRDP-S1-00012-4.1).
+CATALOG_CLASSES = ("catalog", "catalog_edition", "catalog_edition_marked")
 TEXT_FIELDS = ("title", "definition", "proposal")
 TEXT_SOURCES = ("project", "catalog", "file", "ai", "manual")
 
@@ -139,7 +146,7 @@ def set_texts(c: dict, keep_written: bool = False) -> None:
             fixed[f] = (v or "", "project")
     else:
         catalog = c.get("catalog_texts") or {}
-        if classification == "catalog" and catalog:
+        if classification in CATALOG_CLASSES and catalog:
             fixed["title"] = (catalog.get("title") or "", "catalog")
             fixed["definition"] = (catalog.get("definition") or "", "catalog")
         literal = c.get("literal") or {}
@@ -169,6 +176,55 @@ def set_texts(c: dict, keep_written: bool = False) -> None:
         c["draft_status"] = c["draft_status"] if c.get("draft_status") in ("drafted", "manual") else "drafted"
     else:
         c["draft_status"] = "pending"
+
+
+_WRITES_TITLE = ("new_ext", "other_spec", "default_rule")
+
+
+def text_state(c: dict) -> str:
+    """Whether a candidate has the texts it needs to be imported, from its
+    data alone (never from what a page has in memory, so it survives a page
+    reload or a server restart): "complete" (nothing left to write, or every
+    field the AI writes has text, written by the AI or by hand), "failed"
+    (the AI could not write it: retry, write it by hand, or uncheck the
+    row) or "pending" (not written yet). An existing BRDP ("same" /
+    "changed") and "Sin contenido" keep the project's texts / are not
+    imported: always complete."""
+    classification = c.get("classification")
+    if classification in ("same", "changed", "empty"):
+        return "complete"
+    fields = c.get("ai_fields")
+    if fields is None:  # an extraction saved before ai_fields existed
+        fields = list(TEXT_FIELDS) if classification in _WRITES_TITLE else ["proposal"]
+    if all((c.get(f) or "").strip() for f in fields):
+        return "complete"
+    return "failed" if c.get("draft_status") == "failed" else "pending"
+
+
+def _edition_version(standard: str) -> tuple[int, ...] | None:
+    m = re.match(r"^S1000D (\d+(?:\.\d+)*)$", standard or "")
+    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+
+
+def _version_value(version: tuple[int, ...]) -> float:
+    return sum(n / (10 ** (2 * i)) for i, n in enumerate(version))
+
+
+def closest_edition(project_standard: str, editions: list[str]) -> str | None:
+    """Of the other S1000D editions whose catalog has the identifier, the
+    closest to the project's (4.1 for a 4.2 project, before 5.0 or 3.0.1);
+    on a tie, the most recent."""
+    own = _edition_version(project_standard)
+    found = [(e, _edition_version(e)) for e in editions if _edition_version(e) and e != project_standard]
+    if own is None or not found:
+        return None
+    target = _version_value(own)
+    return min(found, key=lambda ev: (round(abs(_version_value(ev[1]) - target), 9), -_version_value(ev[1])))[0]
+
+
+def edition_suffix(edition: str) -> str:
+    """"S1000D 4.1" → "4.1" (the "marked" identifier is BRDP-S1-00012-4.1)."""
+    return edition.split(" ", 1)[1] if " " in edition else edition
 
 
 def other_specification(identifier: str | None, standard: str) -> str | None:
@@ -325,6 +381,26 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         ).scalars().all()
         catalog = {r.identifier: r for r in rows}
     extracted = await _extracted_origins(project.id, existing, db)
+    # Other S1000D editions' catalogs, for official identifiers of the
+    # project's specification that its own catalog does not have.
+    edition_catalog: dict[str, dict[str, BRDPCatalog]] = {}
+    if _edition_version(project.standard) is not None:
+        missing = [
+            i for i in origin_ids
+            if i not in catalog and (m := _OFFICIAL_RE.match(i)) and m.group(1) + m.group(2) in _own_codes(project.standard)
+        ]
+        if missing:
+            rows = (
+                await db.execute(
+                    select(BRDPCatalog).where(
+                        BRDPCatalog.standard.like("S1000D %"),
+                        BRDPCatalog.standard != project.standard,
+                        BRDPCatalog.identifier.in_(missing),
+                    )
+                )
+            ).scalars().all()
+            for r in rows:
+                edition_catalog.setdefault(r.identifier, {})[r.standard] = r
 
     def match(origin):
         if not origin:
@@ -374,6 +450,22 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             base = "catalog"
             c["identifier"] = origin
             options = ["catalog", "new_ext"]
+        elif origin and origin in edition_catalog and closest_edition(project.standard, list(edition_catalog[origin])):
+            edition = closest_edition(project.standard, list(edition_catalog[origin]))
+            entry = edition_catalog[origin][edition]
+            base = "catalog_edition"
+            c["catalog_edition"] = edition
+            c["catalog_texts"] = {"title": entry.title, "definition": entry.definition}
+            c["identifier"] = origin
+            c["option_identifiers"] = {"catalog_edition": origin, "catalog_edition_marked": f"{origin}-{edition_suffix(edition)}"}
+            c["warnings"].append(
+                {
+                    "code": "catalog_other_edition",
+                    "params": {"identifier": origin, "standard": project.standard, "edition": edition},
+                    "message": f"{origin} is not in the {project.standard} catalog; it is in {edition}.",
+                }
+            )
+            options = ["catalog_edition", "catalog_edition_marked", "new_ext"]
         elif default_rule_specification(origin):
             base = "default_rule"
             c["specification"] = default_rule_specification(origin)
@@ -408,7 +500,9 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             c["identifier"] = None
             options = ["new_ext"]
         c["base_classification"] = base
-        classification = "empty" if c.get("no_content") and base in ("catalog", "new_ext", "other_spec", "default_rule") else base
+        classification = (
+            "empty" if c.get("no_content") and base in ("catalog", "catalog_edition", "new_ext", "other_spec", "default_rule") else base
+        )
         if classification == "empty":
             options = ["empty"] + options
         identifiers = c.setdefault("option_identifiers", {})
@@ -455,7 +549,8 @@ def _renumber_warning(c: dict) -> None:
     classification = c.get("classification")
     if classification == "empty":
         classification = c.get("base_classification")
-    if classification != "new_ext" or not _EXT_RE.match(origin or ""):
+    marked = classification == "catalog_edition_marked"
+    if not marked and (classification != "new_ext" or not _EXT_RE.match(origin or "")):
         return
     if c.get("identifier") and c["identifier"] != origin and c.get("rule_ids"):
         c["warnings"].append(
@@ -668,8 +763,15 @@ def apply_edit(data: dict, edit: dict, new_ext_identifier=None) -> dict:
     (set_texts) and the identifier it would be imported with: the one of
     that option, or, the first time it becomes a new EXT, the next free
     number (new_ext_identifier(), from the route). A text saved with
-    draft_status "drafted" is the AI's, any other text edit is by hand."""
+    draft_status "drafted" is the AI's, any other text edit is by hand.
+    The AI never overwrites a text written by hand (a batch that comes back
+    after the user edited one of its rows). After a hand edit the status is
+    worked out from the texts: "manual" once every field the AI writes has
+    text, otherwise it stays "pending" / "failed" (a failed row with only
+    one of its texts written still blocks the import)."""
     out = dict(data)
+    by_ai = edit.get("draft_status") == "drafted"
+    by_hand = False
     for field in EDITABLE_FIELDS:
         if field not in edit or edit[field] is None:
             continue
@@ -693,17 +795,31 @@ def apply_edit(data: dict, edit: dict, new_ext_identifier=None) -> dict:
             if not isinstance(value, str):
                 raise ValueError(f"{out['key']}: {field} must be text")
             sources = dict(out.get("text_sources") or {})
+            if by_ai and sources.get(field) == "manual" and (out.get(field) or "").strip():
+                continue
             if value != out.get(field):
-                sources[field] = "ai" if edit.get("draft_status") == "drafted" else "manual"
+                sources[field] = "ai" if by_ai else "manual"
+                by_hand = by_hand or not by_ai
             out["text_sources"] = sources
         elif field == "draft_status":
             if value not in DRAFT_STATUSES:
                 raise ValueError(f"{out['key']}: unknown draft status {value!r}")
+            if value == "manual":
+                continue  # worked out below from the texts
+            if value == "failed" and text_state(out) == "complete":
+                continue  # a failed batch never undoes texts already there
         elif field == "selected":
             value = bool(value)
         elif not isinstance(value, str):
             raise ValueError(f"{out['key']}: {field} must be text")
         out[field] = value
+    if by_hand or edit.get("draft_status") == "manual":
+        state = text_state(out)
+        if state == "complete":
+            if out.get("draft_status") != "not_needed":
+                out["draft_status"] = "manual"
+        elif out.get("draft_status") not in ("failed",):
+            out["draft_status"] = "pending"
     return out
 
 
@@ -730,14 +846,33 @@ async def next_ext_allocator(job: RuleExtractJob, db: AsyncSession):
 # ── Import ────────────────────────────────────────────────────────────────
 
 
-def _history_event(filename: str, origin: str | None, in_force: bool = False) -> str:
+def _history_event(
+    filename: str, origin: str | None, in_force: bool = False, catalog_edition: str | None = None, standard: str | None = None
+) -> str:
     event = {"file": filename, "origin_identifier": origin}
     if in_force:
         event["in_force"] = True
+    if catalog_edition:
+        # "catálogo S1000D 4.1, no existe en S1000D 4.2"
+        event["catalog_edition"] = catalog_edition
+        event["catalog_standard"] = standard
     return json.dumps(event, sort_keys=True, ensure_ascii=False)
 
 
 IMPORT_AS = ("pending", "in_force")
+
+
+class ApplyRefused(Exception):
+    """The import cannot run as asked; nothing is written. detail is the
+    409 body: {code, message, …}."""
+
+    def __init__(self, detail: dict):
+        super().__init__(detail["message"])
+        self.detail = detail
+
+
+def _label(c: dict) -> str:
+    return c.get("identifier") or c.get("origin_identifier") or c.get("key")
 
 
 async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncSession, import_as: str = "pending") -> dict:
@@ -761,26 +896,48 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
     in_force = import_as == "in_force"
     project = await db.get(Project, job.project_id)
     rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
+    keys = list(dict.fromkeys(keys))
     rows = (
         await db.execute(
             select(RuleExtractCandidate)
             .where(RuleExtractCandidate.job_id == job.id, RuleExtractCandidate.key.in_(keys))
             .order_by(RuleExtractCandidate.position)
+            .with_for_update()
         )
     ).scalars().all()
+    unknown = sorted(set(keys) - {r.key for r in rows})
+    if unknown:
+        raise ApplyRefused(
+            {"code": "unknown_candidates", "keys": unknown, "message": f"Unknown candidates: {', '.join(unknown)}"}
+        )
+    # Every checked row must have its texts (HR7: a row never reaches the
+    # project half-written, and never silently stays out).
+    pending = [_label(r.data) for r in rows if text_state(r.data) == "pending"]
+    failed = [_label(r.data) for r in rows if text_state(r.data) == "failed"]
+    if pending or failed:
+        raise ApplyRefused(
+            {
+                "code": "texts_incomplete",
+                "pending": pending,
+                "failed": failed,
+                "message": f"{len(pending)} checked rows have texts still to write and {len(failed)} have texts that failed: "
+                + ", ".join(pending + failed),
+            }
+        )
     existing = await _active_identifiers(project.id, db)
     all_data = (await db.execute(select(RuleExtractCandidate.data).where(RuleExtractCandidate.job_id == job.id))).scalars().all()
     file_numbers = [d.get("origin_identifier") or "" for d in all_data] + [d.get("identifier") or "" for d in all_data]
     next_ext = [max(_next_ext_numbers(existing), _next_ext_numbers(file_numbers))]
     taken: set[str] = set()
+    updated_keys: set[str] = set()
     result = {
-        "import_as": import_as, "created": 0, "updated": 0, "omitted": 0, "invalid_rule": 0, "kept_pending": 0,
-        "omitted_detail": [], "created_identifiers": [], "kept_pending_detail": [],
+        "import_as": import_as, "selected": len(keys), "created": 0, "updated": 0, "omitted": 0, "invalid_rule": 0, "kept_pending": 0,
+        "omitted_detail": [], "created_identifiers": [], "updated_identifiers": [], "kept_pending_detail": [],
     }
 
     def omit(c: dict, reason: str) -> None:
         result["omitted"] += 1
-        result["omitted_detail"].append({"key": c["key"], "origin_identifier": c.get("origin_identifier"), "reason": reason})
+        result["omitted_detail"].append({"key": c["key"], "identifier": _label(c), "origin_identifier": c.get("origin_identifier"), "reason": reason})
 
     def new_ext(shown: str | None) -> str:
         if shown and _EXT_RE.match(shown) and shown not in existing and shown not in taken:
@@ -827,9 +984,16 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
             record_change(db, brdp.id, user, "rule", old_xml, rule_xml)
             record_change(db, brdp.id, user, "extracted_from", "", _history_event(job.filename, origin, verified), always=True)
             result["updated"] += 1
+            updated_keys.add(c["key"])
+            result["updated_identifiers"].append({"key": c["key"], "identifier": brdp.identifier})
             continue
         if classification == "new_ext":
             identifier = new_ext(c.get("identifier"))
+        elif classification in ("catalog_edition", "catalog_edition_marked"):
+            identifier = (c.get("option_identifiers") or {}).get(classification) or c.get("identifier")
+            if not identifier or identifier in existing or identifier in taken:
+                omit(c, f"{identifier} already exists in the project")
+                continue
         else:
             identifier = origin
             if not identifier or identifier in existing or identifier in taken:
@@ -837,10 +1001,13 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
                 continue
         taken.add(identifier)
         title, definition = c.get("title") or "", c.get("definition") or ""
-        if classification == "catalog":
+        edition = c.get("catalog_edition") if classification in ("catalog_edition", "catalog_edition_marked") else None
+        if classification in CATALOG_CLASSES:
             entry = (
                 await db.execute(
-                    select(BRDPCatalog).where(BRDPCatalog.standard == project.standard, BRDPCatalog.identifier == identifier)
+                    select(BRDPCatalog).where(
+                        BRDPCatalog.standard == (edition or project.standard), BRDPCatalog.identifier == (origin if edition else identifier)
+                    )
                 )
             ).scalar_one_or_none()
             if entry is not None:
@@ -869,9 +1036,26 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
             result["invalid_rule"] += 1
         if in_force and not verified:
             kept_pending(c, identifier)
-        record_change(db, brdp.id, user, "extracted_from", "", _history_event(job.filename, origin, verified), always=True)
+        record_change(
+            db, brdp.id, user, "extracted_from", "",
+            _history_event(job.filename, origin, verified, edition, project.standard), always=True,
+        )
         result["created"] += 1
         result["created_identifiers"].append({"key": c["key"], "identifier": identifier})
+    # Checked = created + updated + omitted, or nothing is written: a row
+    # that went nowhere is an error with its identifier, never a silent loss.
+    handled = {d["key"] for d in result["omitted_detail"] + result["created_identifiers"]} | updated_keys
+    missing = [_label(r.data) for r in rows if r.key not in handled]
+    if missing or result["created"] + result["updated"] + result["omitted"] != len(keys):
+        await db.rollback()
+        raise ApplyRefused(
+            {
+                "code": "count_mismatch",
+                "missing": missing,
+                "message": f"{len(keys)} checked, but {result['created']} created + {result['updated']} updated + "
+                f"{result['omitted']} omitted; nothing was imported. Missing: {', '.join(missing) or '-'}",
+            }
+        )
     job.apply_result = {k: v for k, v in result.items()}
     job.applied_at = datetime.now(timezone.utc)
     await db.commit()

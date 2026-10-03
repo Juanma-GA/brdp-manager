@@ -29,13 +29,16 @@ from app.db.base import async_session_factory
 from app.main import app
 from app.models import BRDP, BRDPCatalog, BRDPHistory, Project, RuleApproval, RuleExtractCandidate, User, UserProjectRole
 from app.services import rule_formats
-from app.services.rule_extract import RuleExtractFileError, build_candidates, literal_texts, read_rules_file
+from app.services.rule_extract import RuleExtractFileError, build_candidates, literal_texts, object_use_text, read_rules_file
 from app.services.rule_extract_jobs import (
+    apply_edit,
     check_similar,
+    closest_edition,
     default_rule_specification,
     normalize_rule,
     other_specification,
     set_texts,
+    text_state,
 )
 from app.services.rule_wrappers import split_rule_pieces
 
@@ -107,8 +110,15 @@ def test_lufthansa_brex_groups_by_the_identifier_in_the_text():
     # a literal Proposal (300 "Decision made by Project. …", 169 TDWG).
     assert sum(c["noncontext_count"] for c in candidates) == 469
     assert sum(len([p for p in split_rule_pieces(c["rule_xml"], "BREX-4.2") if p["kind"] == "noncontext"]) for c in candidates) == 469
-    literal = [c for c in candidates if c["literal"]["proposal"]]
+    literal = [c for c in candidates if c["proposal_from"] == "noncontext"]
     assert len(literal) == 469 and all(c["literal"]["definition"] for c in literal)
+    # Without a nonContextRule: one candidate whose rules all say the same
+    # objectUse once "Decision by Company." is dropped -- S1-00052 -- has it
+    # as its Proposal; the 32 whose objectUses only say who decided, none.
+    from_use = [c for c in candidates if c["proposal_from"] == "object_use"]
+    assert [c["origin_identifier"] for c in from_use] == ["BRDP-S1-00052"]
+    assert from_use[0]["literal"]["proposal"] == "Allowed LHT infocodes, including 055 and 930 which are not allowed in ATA CMP."
+    assert sum(1 for c in candidates if not c["literal"]["proposal"]) == 32
     assert sum(1 for c in literal if c["literal"]["proposal"] == "Decision made by TDWG.") == 169
     assert not any(c["literal"]["proposal"].startswith("Decision made by Project") for c in literal)
     # The rule text is the file's own, without the root's xmlns, and with the
@@ -145,8 +155,14 @@ def test_ca_brex_brdecisionref_big_candidate_other_version_and_ids():
     # "not a BRDP identifier" (their own classification, see below).
     assert sum(1 for c in candidates if c["origin_identifier"].startswith("BREX-S1-")) == 243
     assert not any(w["code"] == "not_brdp_identifier" for w in ids["BREX-S1-00001"]["warnings"])
-    # No nonContextRule in the "CA" BREX: nothing literal, the AI writes.
-    assert not any(c["literal"]["proposal"] for c in candidates)
+    # No nonContextRule in the "CA" BREX, but every candidate's rules share
+    # one objectUse: it is the Proposal of all 533 (S1-00007: one text over
+    # its 4,500 rules, not only the 20 kept in object_uses).
+    assert all(c["proposal_from"] == "object_use" for c in candidates)
+    assert s7["literal"]["proposal"] == (
+        "The element or attribute is not used. The list of optional elements are specified in List of Optional Elements appendix. (Chap. 2.5.1 Para_2.1.3)."
+    )
+    assert ids["BRDP-S1-00012"]["literal"]["proposal"] == 'The security classification is always "01" (Unclassified). (Chap. 3.6 Para_2.4).'
     assert ids["BRDP-S2-00002"]["rule_count"] == 301
 
 
@@ -176,6 +192,61 @@ def test_literal_texts_from_the_noncontext_paragraphs():
     # The identifier alone in the first paragraph: no Definition.
     assert literal_texts([["", "Decision made by Project. Y."]]) == {"title": None, "definition": None, "proposal": "Y."}
     assert literal_texts([]) == {"title": None, "definition": None, "proposal": None}
+
+
+def _ref_rule(identifier, use, path="//x"):
+    return (
+        f'<structureObjectRule><brDecisionRef brDecisionIdentNumber="{identifier}"/>'
+        f'<objectPath allowedObjectFlag="0">{path}</objectPath><objectUse>{use}</objectUse></structureObjectRule>'
+    )
+
+
+def test_proposal_from_the_objectuse_every_rule_shares():
+    """Without a nonContextRule, the one objectUse all the candidate's rules
+    share is the Proposal (whitespace and the identifier in front do not
+    count); several distinct ones, none, or only the identifier / who
+    decided: the AI writes it."""
+    content = (
+        # Same text in both rules, written differently.
+        _ref_rule("BRDP-S1-00012", "BRDP-S1-00012. Caveats are\n   not used.") + _ref_rule("BRDP-S1-00012", "Caveats are not used.", "//y")
+        # Two distinct objectUses.
+        + _ref_rule("BRDP-S1-00013", "Caveats are not used.") + _ref_rule("BRDP-S1-00013", "Something else.", "//y")
+        # Empty, and only the identifier.
+        + _ref_rule("BRDP-S1-00014", "") + _ref_rule("BRDP-S1-00015", "BRDP-S1-00015.")
+        # Only who decided; then who decided + a real text.
+        + _ref_rule("BRDP-S1-00016", "BRDP-S1-00016. Decision by Company.")
+        + _ref_rule("BRDP-S1-00017", "BRDP-S1-00017. Decision by Company.") + _ref_rule("BRDP-S1-00017", "BRDP-S1-00017. Allowed codes: 055.", "//y")
+        # A nonContextRule wins over the objectUse.
+        + _ref_rule("BRDP-S1-00018", "Rule text.")
+        + '<nonContextRule id="BRDP-S1-00018"><simplePara>BRDP-S1-00018. Decide Y.</simplePara><simplePara>Decision made by Project. Y shall be used.</simplePara></nonContextRule>'
+    )
+    rf = read_rules_file(_brex("4.2", content), "BREX-4.2", "S1000D 4.2")
+    ids = _by_id(build_candidates(rf, "4.2")[0])
+    proposal = {i: (ids[i]["literal"]["proposal"], ids[i]["proposal_from"]) for i in ids}
+    assert proposal["BRDP-S1-00012"] == ("Caveats are not used.", "object_use")
+    assert proposal["BRDP-S1-00013"] == (None, None)
+    assert proposal["BRDP-S1-00014"] == (None, None)
+    assert proposal["BRDP-S1-00015"] == (None, None)
+    assert proposal["BRDP-S1-00016"] == (None, None)
+    assert proposal["BRDP-S1-00017"] == ("Allowed codes: 055.", "object_use")
+    assert proposal["BRDP-S1-00018"] == ("Y shall be used.", "noncontext")
+    # Given to the review as the file's text: catalog with it → nothing for the AI.
+    c = {"classification": "catalog", "literal": ids["BRDP-S1-00012"]["literal"], "catalog_texts": {"title": "T", "definition": "D"}}
+    set_texts(c)
+    assert (c["proposal"], c["text_sources"]["proposal"], c["ai_fields"]) == ("Caveats are not used.", "file", [])
+    assert object_use_text("Decision made by TDWG. Use A.", None) == "Use A."
+    assert object_use_text("BRDP-S1-00002. Decision by .", "BRDP-S1-00002") == ""
+
+
+def test_proposal_from_objuse_in_3_0_1_and_never_from_schematron_messages():
+    content = (
+        '<objrule id="BRDP-S1-00133"><objpath objappl="0">//randlist</objpath><objuse>BRDP-S1-00133. No random lists.</objuse></objrule>'
+    )
+    rf = read_rules_file(_brex("3.0.1", content), "BREX-3.0.1", "S1000D 3.0.1")
+    c = _by_id(build_candidates(rf, "3.0.1")[0])["BRDP-S1-00133"]
+    assert (c["literal"]["proposal"], c["proposal_from"]) == ("No random lists.", "object_use")
+    rf = read_rules_file(XPATH2.read_bytes(), "SCH-DITA", "DITA 1.3 Xpath2.0")
+    assert not any(c["proposal_from"] for c in build_candidates(rf, None)[0])
 
 
 def test_set_texts_sources_and_ai_fields():
@@ -413,6 +484,23 @@ async def _extract(client, project_id, headers, data: bytes, name="brex.xml"):
     return job, cands["candidates"]
 
 
+async def _apply(client, url, headers, body):
+    """POST …/apply after writing, as the AI would, the texts still missing
+    of the keys sent (the import refuses checked rows without texts)."""
+    cands = (await client.get(f"{url}/candidates", headers=headers)).json()["candidates"]
+    keys = set(body["keys"])
+    items = [
+        {"key": c["key"], "draft_status": "drafted", **{f: c.get(f) or f"AI {f} {c['key']}" for f in c.get("ai_fields") or []}}
+        for c in cands
+        if c["key"] in keys and c.get("ai_fields") and c["classification"] not in ("same", "changed", "empty")
+        and not all(c.get(f) for f in c["ai_fields"])
+    ]
+    if items:
+        res = await client.patch(f"{url}/candidates", headers=headers, json={"items": items})
+        assert res.status_code == 200, res.text
+    return await client.post(f"{url}/apply", headers=headers, json=body)
+
+
 async def _seed(project_id, identifier, rule=None, **fields):
     async with async_session_factory() as session:
         brdp = BRDP(project_id=project_id, identifier=identifier, title=fields.get("title", "T"),
@@ -504,7 +592,7 @@ async def test_classification_and_import(client, project_users, synthetic_standa
 
     keys = [c["key"] for c in cands if c["selected"]]
     assert (await client.post(f"{url}/apply", headers=viewer, json={"keys": keys})).status_code == 403
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": keys})
+    res = await _apply(client, url, editor, {"keys": keys})
     assert res.status_code == 200, res.text
     result = res.json()
     assert (result["created"], result["updated"], result["omitted"]) == (4, 1, 0)
@@ -560,7 +648,7 @@ async def test_invalid_rule_imports_without_rule(client, project_users):
     [c] = cands
     assert c["rule_problem"]["code"] == "not_parsed"
     url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"]]})
+    res = await _apply(client, url, editor, {"keys": [c["key"]]})
     assert res.json()["created"] == 1 and res.json()["invalid_rule"] == 1
     async with async_session_factory() as session:
         brdp = (await session.execute(select(BRDP).where(BRDP.project_id == project.id))).scalar_one()
@@ -585,9 +673,10 @@ async def test_ca_brex_end_to_end_in_a_42_project(client, project_users, monkeyp
     b1 = by["BREX-S1-00001"]
     assert (b1["specification"], b1["identifier"], b1["options"]) == ("S1000D", "BREX-S1-00001", ["default_rule", "new_ext"])
     assert [w["code"] for w in b1["warnings"]] == ["default_rule"]
-    assert b1["ai_fields"] == ["title", "definition", "proposal"]
+    # Its Proposal is its objectUse; the AI writes Title and Definition.
+    assert b1["ai_fields"] == ["title", "definition"] and b1["text_sources"]["proposal"] == "file"
     url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [s7["key"], b1["key"]]})
+    res = await _apply(client, url, editor, {"keys": [s7["key"], b1["key"]]})
     assert res.status_code == 200 and res.json()["created"] == 2
     created = {c["key"]: c["identifier"] for c in res.json()["created_identifiers"]}
     assert created[b1["key"]] == "BREX-S1-00001"
@@ -674,14 +763,14 @@ async def test_lufthansa_round_trip_keeps_every_noncontext_rule(client, project_
     s117 = by["BRDP-S1-00117"]
     assert (s117["proposal"], s117["text_sources"]["proposal"]) == ("Captions shall not be used.", "file")
     assert s117["text_sources"]["definition"] == "file" and s117["ai_fields"] == ["title"]
-    assert sum(1 for c in cands if c["text_sources"].get("proposal") == "file") == 469
-    assert sum(1 for c in cands if "proposal" in c["ai_fields"]) == 33
+    assert sum(1 for c in cands if c["text_sources"].get("proposal") == "file") == 470
+    assert sum(1 for c in cands if "proposal" in c["ai_fields"]) == 32
     # An S1 identifier renumbered as EXT names itself only in the objectUse
     # text: no "identifiers inside the rule" warning (that one is for an EXT
     # number of the file that was taken).
     assert not any(w["code"] == "rule_ids_from_file" for c in cands for w in c["warnings"])
     url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands]})
+    res = await _apply(client, url, editor, {"keys": [c["key"] for c in cands]})
     assert res.status_code == 200 and res.json()["created"] == 502 and res.json()["invalid_rule"] == 0
     created = {c["key"]: c["identifier"] for c in res.json()["created_identifiers"]}
     async with async_session_factory() as session:
@@ -1003,7 +1092,7 @@ async def test_xpath2_schematron_in_an_empty_project_keeps_its_ids_and_round_tri
     ]
     assert all(not any(w["code"] == "rule_ids_from_file" for w in c["warnings"]) for c in cands)
     url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands], "import_as": "in_force"})
+    res = await _apply(client, url, editor, {"keys": [c["key"] for c in cands], "import_as": "in_force"})
     assert res.status_code == 200, res.text
     result = res.json()
     assert (result["created"], result["kept_pending"], result["import_as"]) == (6, 0, "in_force")
@@ -1029,7 +1118,7 @@ async def test_xpath3_schematron_imports_as_pending_review(client, project_users
     job, cands = await _extract(client, project.id, editor, XPATH3.read_bytes(), "BRDP-D1_schematron-xpath3.sch")
     assert job["warnings"] == []
     url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands]})
+    res = await _apply(client, url, editor, {"keys": [c["key"] for c in cands]})
     assert res.status_code == 200 and res.json()["import_as"] == "pending"
     brdps = await _project_brdps(project.id)
     assert len(brdps) == 7
@@ -1077,7 +1166,7 @@ async def test_ext_numbers_of_the_file(client, project_users):
     assert c5["identifier"] == "BRDP-EXT-00005" and not any(w["code"] == "rule_ids_from_file" for w in c5["warnings"])
     res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [{"key": k5, "classification": "new_ext"}]})
     assert res.json()["candidates"][0]["identifier"] == "BRDP-EXT-00011"
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands]})
+    res = await _apply(client, url, editor, {"keys": [c["key"] for c in cands]})
     assert res.status_code == 200, res.text
     created = {c["key"]: c["identifier"] for c in res.json()["created_identifiers"]}
     assert [created[c["key"]] for c in cands] == ["BRDP-EXT-00002", "BRDP-EXT-00011", "BRDP-EXT-00010", "BRDP-EXT-00009"]
@@ -1109,7 +1198,7 @@ async def test_in_force_import(client, project_users):
     by["BRDP-EXT-00003"] = bad
     url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
     assert (await client.post(f"{url}/apply", headers=editor, json={"keys": [cands[0]["key"]], "import_as": "live"})).status_code == 422
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands], "import_as": "in_force"})
+    res = await _apply(client, url, editor, {"keys": [c["key"] for c in cands], "import_as": "in_force"})
     assert res.status_code == 200, res.text
     result = res.json()
     assert (result["created"], result["updated"], result["kept_pending"], result["invalid_rule"]) == (2, 1, 1, 1)
@@ -1143,7 +1232,7 @@ async def test_lufthansa_in_force_import_is_all_verified(client, project_users):
     project, editor, _ = project_users
     job, cands = await _extract(client, project.id, editor, LUFTHANSA.read_bytes(), LUFTHANSA.name)
     url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
-    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in cands], "import_as": "in_force"})
+    res = await _apply(client, url, editor, {"keys": [c["key"] for c in cands], "import_as": "in_force"})
     assert res.status_code == 200, res.text
     assert (res.json()["created"], res.json()["kept_pending"]) == (502, 0)
     async with async_session_factory() as session:
@@ -1157,3 +1246,196 @@ async def test_lufthansa_in_force_import_is_all_verified(client, project_users):
     assert {(r.validation, r.status) for r in rows} == {("Validated", "approved")}
     assert sum(r.rule_xml.count("<structureObjectRule>") for r in rows) == 61
     assert sum(1 for r in rows for p in split_rule_pieces(r.rule_xml, "BREX-4.2") if p["kind"] == "noncontext") == 469
+
+
+# ── Import only with complete texts ───────────────────────────────────────
+
+
+def test_text_state_from_the_data_alone():
+    base = {"classification": "new_ext", "ai_fields": ["title", "definition"], "proposal": "P."}
+    assert text_state({**base, "title": "", "definition": "", "draft_status": "pending"}) == "pending"
+    assert text_state({**base, "title": "", "definition": "", "draft_status": "failed"}) == "failed"
+    assert text_state({**base, "title": "T", "definition": "D", "draft_status": "drafted"}) == "complete"
+    # A hand edit of one field of a failed row: still failed.
+    assert text_state({**base, "title": "T", "definition": "", "draft_status": "failed"}) == "failed"
+    assert text_state({"classification": "catalog", "ai_fields": [], "draft_status": "not_needed"}) == "complete"
+    for cls in ("same", "changed", "empty"):
+        assert text_state({"classification": cls, "ai_fields": ["title"], "title": ""}) == "complete"
+
+
+def test_apply_edit_never_overwrites_a_hand_edit_and_works_out_the_status():
+    c = {"key": "c1", "classification": "new_ext", "options": ["new_ext"], "ai_fields": ["title", "definition"],
+         "title": "", "definition": "", "proposal": "P.", "draft_status": "failed", "text_sources": {"proposal": "file"}}
+    # By hand, one of two fields: the row is still failed (blocks the import).
+    one = apply_edit(c, {"key": "c1", "title": "Hand title", "draft_status": "manual"})
+    assert (one["title"], one["text_sources"]["title"], one["draft_status"]) == ("Hand title", "manual", "failed")
+    # Both: complete, "manual".
+    both = apply_edit(one, {"key": "c1", "definition": "Hand def", "draft_status": "manual"})
+    assert both["draft_status"] == "manual" and text_state(both) == "complete"
+    # An AI batch coming back afterwards keeps the hand texts.
+    after = apply_edit(both, {"key": "c1", "title": "AI title", "definition": "AI def", "draft_status": "drafted"})
+    assert (after["title"], after["definition"]) == ("Hand title", "Hand def")
+    # A failed AI batch never undoes texts already there.
+    assert apply_edit(both, {"key": "c1", "draft_status": "failed"})["draft_status"] == "manual"
+    # A pending row edited by hand in one field stays pending.
+    pending = apply_edit({**c, "draft_status": "pending"}, {"key": "c1", "title": "T", "draft_status": "manual"})
+    assert pending["draft_status"] == "pending"
+
+
+async def test_apply_refuses_checked_rows_without_texts_unknown_keys_and_counts_every_row(client, project_users):
+    project, editor, _ = project_users
+    content = (
+        _rule("BRDP-EXT-00001", "//a") + _rule("BRDP-EXT-00002", "//b") + _rule("BRDP-EXT-00003", "//c")
+    )
+    job, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    by = _by_id(cands)
+    k1, k2, k3 = (by[f"BRDP-EXT-0000{i}"]["key"] for i in (1, 2, 3))
+    # Row 1 written, row 2 failed, row 3 still pending.
+    fields1 = {f: f"AI {f}" for f in by["BRDP-EXT-00001"]["ai_fields"]}
+    res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [
+        {"key": k1, **fields1, "draft_status": "drafted"}, {"key": k2, "draft_status": "failed"},
+    ]})
+    assert res.status_code == 200, res.text
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [k1, k2, k3]})
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert (detail["code"], detail["pending"], detail["failed"]) == ("texts_incomplete", ["BRDP-EXT-00003"], ["BRDP-EXT-00002"])
+    async with async_session_factory() as session:
+        assert (await session.execute(select(BRDP).where(BRDP.project_id == project.id))).first() is None
+    # An unknown key: refused, nothing written.
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [k1, "c99999"]})
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "unknown_candidates"
+    # Unchecked rows with failed / pending texts never block; a repeated key counts once.
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [k1, k1]})
+    assert res.status_code == 200, res.text
+    result = res.json()
+    assert (result["selected"], result["created"], result["updated"], result["omitted"]) == (1, 1, 0, 0)
+
+
+async def test_concurrent_saves_never_lose_an_edit(client, project_users):
+    """A batch of AI texts and a "select all shown" saved at the same time:
+    both edits are kept (row locks, never a lost update)."""
+    import asyncio
+
+    project, editor, _ = project_users
+    content = "".join(_rule(f"BRDP-EXT-{i:05d}", f"//x{i}") for i in range(1, 31))
+    job, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    for c in cands:
+        assert c["selected"] is True
+    off = [{"key": c["key"], "selected": False} for c in cands]
+    texts = [{"key": c["key"], "draft_status": "drafted", **{f: f"AI {f}" for f in c["ai_fields"]}} for c in cands]
+    results = await asyncio.gather(
+        *[client.patch(f"{url}/candidates", headers=editor, json={"items": items}) for items in (texts, off, texts[:10], off[10:])]
+    )
+    assert all(r.status_code == 200 for r in results), [r.text for r in results]
+    final = (await client.get(f"{url}/candidates", headers=editor)).json()["candidates"]
+    assert all(c["selected"] is False for c in final)
+    assert all(text_state(c) == "complete" and c["draft_status"] == "drafted" for c in final)
+
+
+# ── Catalog of another edition ─────────────────────────────────────────────
+
+
+def test_closest_edition():
+    assert closest_edition("S1000D 4.2", ["S1000D 4.1", "S1000D 5.0"]) == "S1000D 4.1"
+    assert closest_edition("S1000D 4.2", ["S1000D 3.0.1", "S1000D 5.0"]) == "S1000D 5.0"
+    # A tie: the most recent.
+    assert closest_edition("S1000D 4.2", ["S1000D 4.1", "S1000D 4.3"]) == "S1000D 4.3"
+    assert closest_edition("S1000D 4.2", ["S1000D 4.2"]) is None
+    assert closest_edition("DITA 1.3 Xpath2.0", ["S1000D 4.1"]) is None
+
+
+@pytest.fixture
+async def project_42_users():
+    async with async_session_factory() as session:
+        project = Project(name=f"Extract 4.2 {uuid.uuid4()}", standard="S1000D 4.2")
+        editor = User(email=f"extract-ed-{uuid.uuid4()}@example.com", password_hash=hash_password("x"), display_name="Ed", global_role="user")
+        session.add_all([project, editor])
+        await session.flush()
+        session.add(UserProjectRole(user_id=editor.id, project_id=project.id, role="editor"))
+        await session.commit()
+        await session.refresh(project)
+        await session.refresh(editor)
+    yield project, {"Authorization": f"Bearer {create_access_token(str(editor.id))}"}
+    async with async_session_factory() as session:
+        await session.delete(await session.get(Project, project.id))
+        await session.commit()
+
+
+async def test_identifier_from_another_editions_catalog(client, project_42_users):
+    """An S1 identifier missing from the 4.2 catalog but in the 4.1 one:
+    "From catalog (S1000D 4.1)", unchecked, Title and Definition from that
+    catalog; imported with its identifier, or "marked" with the edition; a
+    re-import finds both. In both catalogs: a normal catalog BRDP."""
+    project, editor = project_42_users
+    n = uuid.uuid4().int % 90000 + 10000
+    only41, both, in5, nowhere, taken = (f"BRDP-S1-{(n + i) % 100000:05d}" for i in range(5))
+    added = []
+    async with async_session_factory() as session:
+        for standard, identifier, title in (
+            ("S1000D 4.1", only41, "Title 4.1"), ("S1000D 4.1", both, "Old title"), ("S1000D 4.2", both, "Title 4.2"),
+            ("S1000D 5.0", only41, "Title 5.0"), ("S1000D 5.0", in5, "Title 5.0 only"), ("S1000D 4.1", taken, "Taken"),
+        ):
+            row = BRDPCatalog(standard=standard, identifier=identifier, title=title, definition=f"Def {title}")
+            session.add(row)
+            added.append(row)
+        await session.commit()
+    try:
+        content = "".join(
+            f'<structureObjectRule id="{i}"><brDecisionRef brDecisionIdentNumber="{i}"/><objectPath allowedObjectFlag="0">//x{k}</objectPath>'
+            f"<objectUse>{i}. Rule {k} text.</objectUse></structureObjectRule>"
+            for k, i in enumerate((only41, both, in5, nowhere, taken))
+        )
+        await _seed(project.id, f"{taken}-4.1")
+        job, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+        by = _by_id(cands)
+        c41 = by[only41]
+        assert (c41["classification"], c41["selected"], c41["catalog_edition"]) == ("catalog_edition", False, "S1000D 4.1")
+        assert c41["options"] == ["catalog_edition", "catalog_edition_marked", "new_ext"]
+        assert c41["option_identifiers"] == {"catalog_edition": only41, "catalog_edition_marked": f"{only41}-4.1"}
+        assert (c41["title"], c41["definition"], c41["proposal"]) == ("Title 4.1", "Def Title 4.1", "Rule 0 text.")
+        assert c41["text_sources"] == {"title": "catalog", "definition": "catalog", "proposal": "file"} and c41["ai_fields"] == []
+        w = next(w for w in c41["warnings"] if w["code"] == "catalog_other_edition")
+        assert w["params"] == {"identifier": only41, "standard": "S1000D 4.2", "edition": "S1000D 4.1"}
+        assert (by[both]["classification"], by[both]["title"]) == ("catalog", "Title 4.2")
+        assert (by[in5]["classification"], by[in5]["catalog_edition"]) == ("catalog_edition", "S1000D 5.0")
+        assert by[nowhere]["classification"] == "new_ext"
+        assert any(w["code"] == "not_in_catalog" for w in by[nowhere]["warnings"])
+
+        url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+        # in5 "marked": its rule names another identifier (warning).
+        res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [
+            {"key": by[in5]["key"], "classification": "catalog_edition_marked"},
+            {"key": by[taken]["key"], "classification": "catalog_edition_marked"},
+        ]})
+        assert res.status_code == 200, res.text
+        marked = {c["key"]: c for c in res.json()["candidates"]}[by[in5]["key"]]
+        assert marked["identifier"] == f"{in5}-5.0"
+        assert any(w["code"] == "rule_ids_from_file" for w in marked["warnings"])
+        keys = [by[i]["key"] for i in (only41, both, in5, taken)]
+        res = await _apply(client, url, editor, {"keys": keys})
+        assert res.status_code == 200, res.text
+        result = res.json()
+        assert (result["selected"], result["created"], result["omitted"]) == (4, 3, 1)
+        assert result["omitted_detail"][0]["reason"] == f"{taken}-4.1 already exists in the project"
+        async with async_session_factory() as session:
+            brdps = {b.identifier: b for b in (await session.execute(select(BRDP).where(BRDP.project_id == project.id))).scalars()}
+            assert {only41, both, f"{in5}-5.0"} <= set(brdps)
+            assert (brdps[only41].title, brdps[f"{in5}-5.0"].title) == ("Title 4.1", "Title 5.0 only")
+            approval = await session.get(RuleApproval, (brdps[f"{in5}-5.0"].id, "BREX-4.2"))
+            assert f'brDecisionIdentNumber="{in5}"' in approval.rule_xml  # the rule is unchanged
+            event = (await session.execute(select(BRDPHistory.new_value).where(
+                BRDPHistory.brdp_id == brdps[only41].id, BRDPHistory.field_name == "extracted_from"))).scalar_one()
+            assert json.loads(event)["catalog_edition"] == "S1000D 4.1" and json.loads(event)["catalog_standard"] == "S1000D 4.2"
+        # Re-import: both found by their origin, "same".
+        job2, cands2 = await _extract(client, project.id, editor, _brex("4.2", content))
+        by2 = _by_id(cands2)
+        assert by2[only41]["classification"] == "same" and by2[in5]["classification"] == "same"
+        assert by2[in5]["identifier"] == f"{in5}-5.0"
+    finally:
+        async with async_session_factory() as session:
+            for row in added:
+                await session.delete(await session.get(BRDPCatalog, row.id))
+            await session.commit()

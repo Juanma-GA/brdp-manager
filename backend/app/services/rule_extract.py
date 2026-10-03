@@ -68,7 +68,10 @@ nothing is asked of the AI (literal_texts): with two or more paragraphs the
 first one (without the identifier) is the Definition and the rest the
 Proposal ("Decision made by Project." dropped when text follows it; a bare
 "Decision made by TDWG." stays as it is); a single paragraph is the
-Proposal.
+Proposal. Without a nonContextRule Proposal, a BREX whose rules all say the
+same objectUse (counted over every rule, identifier and a leading "Decision
+by Company." dropped -- single_object_use) has that text as the Proposal;
+with several distinct objectUses, or none, the AI writes it.
 """
 
 from __future__ import annotations
@@ -138,13 +141,22 @@ FORMAT_LABEL = {
 # A rule of a specification's default BREX (the "CA" BREX numbers them
 # BREX-S1-00001…BREX-S1-00243): not a project decision.
 DEFAULT_RULE_RE = re.compile(r"^BREX-([A-Z]\d)-\d+$")
-_ID_RE = re.compile(r"(?<![A-Za-z0-9])(?:p-)?(BRDP-[A-Z0-9]+-\d{5})")
-_ID_PREFIX_RE = re.compile(r"^\s*(BRDP-[A-Z0-9]+-\d{5})(?![0-9])")
+# An identifier may carry an edition suffix when the app imported it from
+# another edition's catalog "marked" (BRDP-S1-00012-4.1): it is read whole,
+# never as BRDP-S1-00012.
+_EDITION_SUFFIX = r"(?:-\d+(?:\.\d+)+)?"
+_ID_RE = re.compile(r"(?<![A-Za-z0-9])(?:p-)?(BRDP-[A-Z0-9]+-\d{5}" + _EDITION_SUFFIX + r")")
+_ID_PREFIX_RE = re.compile(r"^\s*(BRDP-[A-Z0-9]+-\d{5}" + _EDITION_SUFFIX + r")(?![0-9])")
 _ISSUE_URL_RE = re.compile(r"S1000D_(\d)-(\d)(?:-(\d))?")
 _NO_CONTENT_RE = re.compile(r"does not exist in S1000D|not to take into account", re.IGNORECASE)
 # "Decision made by Project." in front of the decision itself: dropped from
 # the Proposal only when text follows it.
 _PROJECT_DECISION_RE = re.compile(r"^Decision made by (?:the )?Project\s*[.:]\s*(?=\S)", re.IGNORECASE)
+# "Decision by Company." / "Decision made by TDWG." at the start of an
+# objectUse says WHO decided, not the decision: it is dropped before the
+# objectUse can become the Proposal (an objectUse that is only that, like 54
+# of Lufthansa's, says nothing about the decision and counts as empty).
+_ATTRIBUTION_RE = re.compile(r"^Decision (?:made )?by\b[^.:]{0,40}[.:]\s*", re.IGNORECASE)
 
 # Same token scan as rule_wrappers.py (comments, CDATA, PIs and tags with
 # their attributes).
@@ -769,6 +781,27 @@ def _assemble_rule(file_format: str, rules: list[_Piece], noncontext: list[_Piec
     return "\n".join(parts)
 
 
+def object_use_text(use: str | None, identifier: str | None) -> str:
+    """An objectUse / objuse as a candidate Proposal: without the identifier
+    in front ("BRDP-S1-00052. …"), whitespace collapsed, without a leading
+    "Decision by Company." (_ATTRIBUTION_RE). "" when nothing is left."""
+    text = re.sub(r"\s+", " ", _strip_id_prefix(use or "", identifier)).strip()
+    m = _ID_PREFIX_RE.match(text)
+    if m:  # an objectUse that starts with another identifier
+        text = text[m.end() :].lstrip(" .:-–—").strip()
+    return _ATTRIBUTION_RE.sub("", text, count=1).strip()
+
+
+def single_object_use(infos: list[dict], identifier: str | None) -> str | None:
+    """The Proposal written in the file's rules: when, over ALL the
+    candidate's rules (not the 20 kept in object_uses), there is exactly one
+    distinct non-empty objectUse (object_use_text), that text; with several
+    distinct texts, or none, None (the AI writes it). A rule without
+    objectUse does not count against it."""
+    texts = {object_use_text(i.get("use"), identifier) for i in infos} - {""}
+    return next(iter(texts)) if len(texts) == 1 else None
+
+
 def literal_texts(paragraph_groups: list[list[str]], title: str | None = None) -> dict:
     """Title, Definition and Proposal written in the file: the Definition
     and Proposal from the first nonContextRule that has text (its
@@ -861,7 +894,7 @@ def _summary(file_format: str, rules: list[_Piece], infos: list[dict]) -> dict:
 def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dict], list[dict]]:
     """→ (candidates, file warnings). Each candidate:
     {key, origin_identifier, rule_xml, rule_count, rule_preview, rule_problem,
-     noncontext_count, decision_texts, literal, object_uses, summary,
+     noncontext_count, decision_texts, literal, proposal_from, object_uses, summary,
      warnings, no_content}. rule_xml is the rules as written (executable
      ones, then nonContextRules); rule_count counts the executable ones."""
     pieces, globals_ = _scan_pieces(rf)
@@ -978,6 +1011,15 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
         if rf.file_format == "SCH-DITA":
             object_uses = list(dict.fromkeys(_strip_id_prefix(t, identifier) for i in infos for t in i.get("texts", []) if t))
         no_content = not rules and bool(_NO_CONTENT_RE.search(" ".join(group["noncontext"])))
+        literal = literal_texts(group["paragraphs"], title)
+        proposal_from = "noncontext" if literal["proposal"] else None
+        if not literal["proposal"] and not is_sch:
+            # BREX: one objectUse shared by every rule is the decision as the
+            # file states it (the nonContextRule's text, when there is one,
+            # wins). Schematron messages are not used this way.
+            use = single_object_use(infos, identifier)
+            if use:
+                literal["proposal"], proposal_from = use, "object_use"
         candidates.append(
             {
                 "key": f"c{index:05d}",
@@ -988,7 +1030,10 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
                 "rule_preview": preview,
                 "rule_problem": rule_problem,
                 "decision_texts": group["noncontext"],
-                "literal": literal_texts(group["paragraphs"], title),
+                "literal": literal,
+                # Where the literal Proposal comes from: "noncontext" (its
+                # paragraphs), "object_use" (the objectUse every rule shares).
+                "proposal_from": proposal_from,
                 "object_uses": object_uses[:20],
                 "summary": _summary(rf.file_format, rules, infos) if rules else None,
                 "warnings": cand_warnings,

@@ -9,7 +9,11 @@
   GET   /jobs/{job_id}/candidates   viewer  the candidates for the review
   PATCH /jobs/{job_id}/candidates   editor  save texts written by the AI or by
                                             hand, classification, selection
-  POST  /jobs/{job_id}/apply        editor  import the selected candidates
+  POST  /jobs/{job_id}/apply        editor  import the selected candidates;
+                                            409 when a key is unknown, a
+                                            checked row has texts pending or
+                                            failed, or the counts do not add
+                                            up (nothing written)
 
 Nothing is written to the project's BRDPs until /apply. See
 app/services/rule_extract.py (reading) and rule_extract_jobs.py
@@ -44,6 +48,7 @@ from app.schemas.rule_extract import (
 )
 from app.services.rule_extract import RuleExtractFileError, read_rules_file
 from app.services.rule_extract_jobs import (
+    ApplyRefused,
     apply_edit,
     apply_job,
     candidate_out,
@@ -190,7 +195,13 @@ async def edit_candidates(
     edits = {e.key: e.model_dump(exclude_unset=True) for e in body.items}
     rows = (
         await db.execute(
-            select(RuleExtractCandidate).where(RuleExtractCandidate.job_id == job.id, RuleExtractCandidate.key.in_(list(edits)))
+            select(RuleExtractCandidate)
+            .where(RuleExtractCandidate.job_id == job.id, RuleExtractCandidate.key.in_(list(edits)))
+            .order_by(RuleExtractCandidate.position)
+            # Row locks: a batch of AI texts and a "select all shown" saved
+            # at the same time each apply their edit on the other's result
+            # (never a lost update), always locked in the same order.
+            .with_for_update()
         )
     ).scalars().all()
     missing = set(edits) - {r.key for r in rows}
@@ -224,4 +235,8 @@ async def apply_candidates(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="These candidates were already imported")
     if not body.keys:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No candidate selected")
-    return await apply_job(job, body.keys, editor, db, import_as=body.import_as)
+    try:
+        return await apply_job(job, body.keys, editor, db, import_as=body.import_as)
+    except ApplyRefused as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
