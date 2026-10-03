@@ -57,6 +57,8 @@ from app.schemas.rule_extract import (
     RuleExtractJobAccepted,
     RuleExtractJobOut,
     RuleExtractLimitsOut,
+    RuleExtractCandidateKeysOut,
+    RuleExtractDraftingRequest,
     RuleExtractSourceTextOut,
     RuleExtractTextRequest,
 )
@@ -70,6 +72,7 @@ from app.services.rule_extract_jobs import (
     create_text_job,
     get_most_recent_job,
     get_running_job,
+    missing_from_manifest,
     next_ext_allocator,
     run_extract_job,
     run_text_extract_job,
@@ -271,7 +274,68 @@ async def get_candidates(
             select(RuleExtractCandidate).where(RuleExtractCandidate.job_id == job.id).order_by(RuleExtractCandidate.position)
         )
     ).scalars().all()
-    return RuleExtractCandidatesOut(job_id=job.id, candidates=[candidate_out(r) for r in rows])
+    return RuleExtractCandidatesOut(
+        job_id=job.id,
+        candidates=[candidate_out(r) for r in rows],
+        total_items=job.total_items,
+        missing=missing_from_manifest(job, {r.key for r in rows}),
+    )
+
+
+@router.get("/jobs/{job_id}/candidate-keys", response_model=RuleExtractCandidateKeysOut)
+async def get_candidate_keys(
+    project_id: uuid.UUID,
+    job_id: uuid.UUID,
+    _viewer: User = Depends(require_project_role("viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> RuleExtractCandidateKeysOut:
+    """Every candidate's key, identifiers and current classification, without
+    texts or rules: when the page shows fewer rows than the job read, it
+    compares its own keys with these and names the missing ones."""
+    job = await _job(project_id, job_id, db)
+    data = RuleExtractCandidate.data
+    rows = (
+        await db.execute(
+            select(
+                RuleExtractCandidate.key,
+                data["identifier"].astext,
+                data["origin_identifier"].astext,
+                data["classification"].astext,
+            )
+            .where(RuleExtractCandidate.job_id == job.id)
+            .order_by(RuleExtractCandidate.position)
+        )
+    ).all()
+    keys = [
+        {"key": k, "identifier": ident or "", "origin_identifier": origin or "", "classification": cls or ""}
+        for k, ident, origin, cls in rows
+    ]
+    return RuleExtractCandidateKeysOut(
+        job_id=job.id,
+        total_items=job.total_items,
+        keys=keys,
+        missing=missing_from_manifest(job, {k["key"] for k in keys}),
+    )
+
+
+@router.post("/jobs/{job_id}/drafting", response_model=RuleExtractJobOut)
+async def set_drafting(
+    project_id: uuid.UUID,
+    job_id: uuid.UUID,
+    body: RuleExtractDraftingRequest,
+    _editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+) -> RuleExtractJob:
+    """"Stop" / "Continue writing" for the AI writing the texts. Stopped,
+    the page never resumes it by itself, not even after a reload; the rows
+    left stay pending (and block the import while checked)."""
+    job = await _job(project_id, job_id, db)
+    if job.applied_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="These candidates were already imported")
+    job.drafting_stopped = body.stopped
+    await db.commit()
+    await db.refresh(job)
+    return job
 
 
 @router.patch("/jobs/{job_id}/candidates", response_model=RuleExtractCandidatesOut)

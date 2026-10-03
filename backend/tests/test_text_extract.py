@@ -5,17 +5,21 @@ the text, and the import (no rule, Proposal Pending, the quote in History).
 The decisions are posted as the page would after asking the AI (step 1);
 the AI itself is never called here.
 """
+import hashlib
 import json
 import uuid
 
+import httpx
 import pytest
 from sqlalchemy import select
 
+from app.api.deps import get_httpx_transport
 from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
+from app.main import app
 from app.models import BRDP, BRDPCatalog, BRDPHistory, Project, RuleApproval, User, UserProjectRole
-from app.services import rule_formats
+from app.services import rule_extract_jobs, rule_formats
 from app.services.text_extract import SourceText, build_text_candidates, count_words, normalize_ws, paragraphs
 
 TEXT = """Style guide for the maintenance manuals
@@ -118,6 +122,38 @@ def test_normalize_ws_is_nfc():
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────
+
+# Fragments containing one of these words embed in the same direction (cosine
+# 1 between them: "the same decision in other words"); any other text gets
+# its own direction (cosine 0 with the rest).
+SAME_DIRECTION_WORDS = ("ONE-ACTION-PER-STEP",)
+
+
+def _vector(text: str) -> list[float]:
+    vector = [0.0] * 1024
+    for i, word in enumerate(SAME_DIRECTION_WORDS):
+        if word in text:
+            vector[i] = 1.0
+            return vector
+    vector[16 + int(hashlib.sha256(text.encode()).hexdigest(), 16) % 1000] = 1.0
+    return vector
+
+
+@pytest.fixture(autouse=True)
+def embeddings_calls():
+    """The Mistral embeddings transport (the repetition check of a free
+    text embeds its fragments). Returns the list of texts sent."""
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        texts = json.loads(request.content)["input"]
+        sent.extend(texts)
+        return httpx.Response(200, json={"data": [{"embedding": _vector(t), "index": i} for i, t in enumerate(texts)]})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
+    yield sent
+    app.dependency_overrides.pop(get_httpx_transport, None)
+
 
 
 @pytest.fixture
@@ -362,3 +398,133 @@ async def test_a_restart_keeps_the_text_waiting_and_a_new_text_replaces_it(clien
     assert second.status_code == 202
     active = (await client.get(f"{_base(project.id)}/jobs/active", headers=editor)).json()
     assert active["id"] == second.json()["job_id"]
+
+
+# ── Repeated decisions in one text ────────────────────────────────────────
+
+REPEAT_TEXT = """Guía de redacción
+
+Cada paso debe contener una sola acción (ONE-ACTION-PER-STEP).
+
+Las tablas deben llevar título.
+
+Recuerde: en un mismo paso no se mezclan dos acciones (ONE-ACTION-PER-STEP).
+
+Las advertencias van antes del paso.
+"""
+
+
+async def test_same_title_is_a_possible_repetition_unchecked_never_merged(client, users):
+    project, editor, _ = users
+    decisions = [
+        {"quote": "Las tablas deben llevar título.", "title": "Título de las tablas"},
+        {"quote": "Las advertencias van antes del paso.", "title": "  título  DE las TABLAS "},
+    ]
+    url, job, cands = await _extract(client, project.id, editor, REPEAT_TEXT, decisions)
+    assert len(cands) == 2  # never merged
+    first, second = cands
+    assert first["selected"] is True and not any(w["code"] == "possible_repetition" for w in first["warnings"])
+    rep = [w for w in second["warnings"] if w["code"] == "possible_repetition"]
+    assert second["selected"] is False and second["repeat_of"] == first["key"]
+    assert rep[0]["params"]["title"] == "Título de las tablas" and rep[0]["params"]["similarity"] is None
+
+
+async def test_similar_fragments_are_a_possible_repetition(client, users):
+    project, editor, _ = users
+    decisions = [
+        {"quote": "Cada paso debe contener una sola acción (ONE-ACTION-PER-STEP).", "title": "Una acción por paso"},
+        {"quote": "Las tablas deben llevar título.", "title": "Título de las tablas"},
+        {"quote": "en un mismo paso no se mezclan dos acciones (ONE-ACTION-PER-STEP).", "title": "No mezclar acciones"},
+        {"quote": "Las advertencias van antes del paso.", "title": "Advertencias primero"},
+    ]
+    url, job, cands = await _extract(client, project.id, editor, REPEAT_TEXT, decisions)
+    by = {c["found_title"]: c for c in cands}
+    assert len(cands) == 4
+    repeated = by["No mezclar acciones"]
+    rep = [w for w in repeated["warnings"] if w["code"] == "possible_repetition"]
+    assert repeated["selected"] is False and repeated["repeat_of"] == by["Una acción por paso"]["key"]
+    assert rep[0]["params"]["title"] == "Una acción por paso" and rep[0]["params"]["similarity"] >= rule_extract_jobs.REPETITION_SIMILARITY
+    for title in ("Una acción por paso", "Título de las tablas", "Advertencias primero"):
+        assert by[title]["selected"] is True and not any(w["code"] == "possible_repetition" for w in by[title]["warnings"])
+    assert not job["warnings"]
+
+
+async def test_repetition_check_unavailable_is_said_and_titles_still_compared(client, users):
+    project, editor, _ = users
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"message": "down"})
+
+    app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(broken)
+    decisions = [
+        {"quote": "Las tablas deben llevar título.", "title": "Tablas con título"},
+        {"quote": "Las advertencias van antes del paso.", "title": "Tablas con título"},
+        {"quote": "Cada paso debe contener una sola acción (ONE-ACTION-PER-STEP).", "title": "Una acción por paso"},
+    ]
+    url, job, cands = await _extract(client, project.id, editor, REPEAT_TEXT, decisions)
+    assert [w["code"] for w in job["warnings"]] == ["repetition_check_unavailable"]
+    assert "could not compare" in job["warnings"][0]["message"]
+    tables = [c for c in cands if c["found_title"] == "Tablas con título"]
+    assert tables[1]["repeat_of"] == tables[0]["key"] and tables[1]["selected"] is False
+
+
+async def test_a_candidate_like_a_project_brdp_keeps_its_similar_warning(client, users, embeddings_calls):
+    """The repetition check is between candidates of one text; the warning
+    against the project's BRDPs ("similar to BRDP-…") is unchanged."""
+    project, editor, _ = users
+    async with async_session_factory() as session:
+        session.add(
+            BRDP(project_id=project.id, identifier="BRDP-EXT-00900", title="Acciones", definition="d", proposal="p",
+                 validation="Validated", embedding=_vector("ONE-ACTION-PER-STEP"))
+        )
+        await session.commit()
+    decisions = [{"quote": "Cada paso debe contener una sola acción (ONE-ACTION-PER-STEP).", "title": "Una acción por paso"}]
+    url, job, cands = await _extract(client, project.id, editor, REPEAT_TEXT, decisions)
+    codes = [w["code"] for w in cands[0]["warnings"]]
+    assert codes == ["similar_to"] and cands[0]["warnings"][0]["params"]["identifier"] == "BRDP-EXT-00900"
+    assert cands[0]["selected"] is True
+
+
+# ── Manifest, keys and "Stop" ─────────────────────────────────────────────
+
+
+async def test_manifest_names_rows_the_server_does_not_have(client, users):
+    project, editor, viewer = users
+    decisions = [
+        {"quote": "Las tablas deben llevar título.", "title": "Tablas"},
+        {"quote": "Las advertencias van antes del paso.", "title": "Advertencias"},
+    ]
+    url, job, cands = await _extract(client, project.id, editor, REPEAT_TEXT, decisions)
+    full = (await client.get(f"{url}/candidates", headers=viewer)).json()
+    assert full["total_items"] == 2 and full["missing"] == []
+    keys = (await client.get(f"{url}/candidate-keys", headers=viewer)).json()
+    assert keys["total_items"] == 2 and keys["missing"] == []
+    assert [k["key"] for k in keys["keys"]] == [c["key"] for c in cands]
+    assert all(set(k) == {"key", "identifier", "origin_identifier", "classification"} for k in keys["keys"])
+    assert keys["keys"][0]["classification"] == "new_ext" and keys["keys"][0]["identifier"] == cands[0]["identifier"]
+    # A row lost on the server: named with its classification, never just counted.
+    from app.models import RuleExtractCandidate
+
+    async with async_session_factory() as session:
+        await session.execute(
+            RuleExtractCandidate.__table__.delete().where(RuleExtractCandidate.job_id == uuid.UUID(job["id"]), RuleExtractCandidate.key == cands[1]["key"])
+        )
+        await session.commit()
+    full = (await client.get(f"{url}/candidates", headers=viewer)).json()
+    assert len(full["candidates"]) == 1 and full["total_items"] == 2
+    assert full["missing"] == [{"key": cands[1]["key"], "identifier": cands[1]["identifier"], "origin_identifier": "", "classification": "new_ext"}]
+    keys = (await client.get(f"{url}/candidate-keys", headers=viewer)).json()
+    assert len(keys["keys"]) == 1 and keys["missing"][0]["key"] == cands[1]["key"]
+
+
+async def test_stop_and_continue_writing_are_kept_on_the_job(client, users):
+    project, editor, viewer = users
+    url, job, cands = await _extract(client, project.id, editor, REPEAT_TEXT, [{"quote": "Las tablas deben llevar título.", "title": "Tablas"}])
+    assert job["drafting_stopped"] is False
+    assert (await client.post(f"{url}/drafting", headers=viewer, json={"stopped": True})).status_code == 403
+    res = await client.post(f"{url}/drafting", headers=editor, json={"stopped": True})
+    assert res.status_code == 200 and res.json()["drafting_stopped"] is True
+    assert (await client.get(url, headers=viewer)).json()["drafting_stopped"] is True
+    assert (await client.get(f"{_base(project.id)}/jobs/active", headers=viewer)).json()["drafting_stopped"] is True
+    res = await client.post(f"{url}/drafting", headers=editor, json={"stopped": False})
+    assert res.json()["drafting_stopped"] is False

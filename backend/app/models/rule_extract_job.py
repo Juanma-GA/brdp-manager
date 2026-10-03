@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, false, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +29,10 @@ class RuleExtractJob(Base):
     the AI (status "awaiting_decisions", phase "finding") and, once they are
     posted, classifies them in the background like a file. filename is the
     file's name, or "" for a pasted text.
+
+    manifest: the candidates written (key, identifier, classification), in
+    the same transaction as their rows. drafting_stopped: the AI writing
+    was stopped with "Stop" (see RuleExtractSection.jsx).
     """
 
     __tablename__ = "rule_extract_jobs"
@@ -54,6 +58,14 @@ class RuleExtractJob(Base):
     # not read, the duplicate check unavailable.
     warnings: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     apply_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The candidates the job wrote ([{key, identifier, origin_identifier,
+    # classification}]), committed together with the candidate rows: the
+    # page can name a row it does not have (missing on the server or only
+    # on the screen) instead of just counting it.
+    manifest: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # "Stop" on the AI writing: the rows left stay pending and nothing
+    # resumes by itself (not after a reload) until "Continue writing".
+    drafting_stopped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

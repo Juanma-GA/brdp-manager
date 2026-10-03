@@ -64,7 +64,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -637,6 +639,108 @@ async def check_similar(
     return None
 
 
+# ── Repeated decisions in one free text ───────────────────────────────────
+
+# Two candidates of the same text whose fragments embed at or above this
+# cosine similarity are "possibly the same decision" (the same embeddings as
+# the "similar to BRDP-…" check). Higher than MIN_SIMILARITY on purpose:
+# that one points at a related BRDP of the project, this one unchecks a row,
+# and two different decisions of one style guide easily reach 0.5.
+REPETITION_SIMILARITY = 0.9
+
+
+def normalize_title(title: str | None) -> str:
+    """A title for comparing: no accents, no case, words only."""
+    text = unicodedata.normalize("NFKD", title or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch)).casefold()
+    return " ".join(re.findall(r"\w+", text))
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _mark_repetition(c: dict, first: dict, similarity: float | None) -> None:
+    # Named by the identifier the text gave it, else by its title: a new
+    # EXT's number is only proposed and may change before the import.
+    label = first.get("origin_identifier") or ""
+    c["warnings"].append(
+        {
+            "code": "possible_repetition",
+            "params": {"title": first.get("title") or "", "identifier": label, "key": first["key"], "similarity": similarity},
+            "message": f"Possible repetition of {label or repr(first.get('title') or first['key'])}.",
+        }
+    )
+    c["repeat_of"] = first["key"]
+    c["selected"] = False
+
+
+async def check_repetitions(candidates: list[dict], transport: httpx.AsyncBaseTransport | None = None) -> dict | None:
+    """Free text (AI Extract 2/2): the same decision written twice in one
+    document (a summary repeating a rule in other words) comes back as two
+    candidates. Code compares them, in text order: the same title (no
+    accents, no case) or fragments embedding at REPETITION_SIMILARITY or
+    above make the later one "possible repetition of <the first>", unchecked
+    -- never merged or hidden. Returns a file-level warning when the
+    embeddings could not run (HR7; the title comparison still did)."""
+    firsts: dict[str, dict] = {}
+    for c in candidates:
+        title = normalize_title(c.get("title"))
+        if not title:
+            continue
+        if title in firsts:
+            _mark_repetition(c, firsts[title], None)
+        else:
+            firsts[title] = c
+    targets = [c for c in candidates if not c.get("repeat_of") and _similarity_text(c)]
+    if len(targets) < 2:
+        return None
+    vectors: list[list[float]] = []
+    try:
+        for start in range(0, len(targets), EMBED_BATCH_SIZE):
+            batch = targets[start : start + EMBED_BATCH_SIZE]
+            vectors += await compute_embeddings_batch(
+                [truncate_for_embedding_input(_similarity_text(c))[0] for c in batch], transport
+            )
+    except EmbeddingUnavailable as exc:
+        return {
+            "code": "repetition_check_unavailable",
+            "params": {"reason": str(exc)},
+            "message": f"The check for repeated decisions could not compare the fragments: {exc}",
+        }
+    for i, c in enumerate(targets):
+        for j in range(i):
+            if targets[j].get("repeat_of"):
+                continue
+            similarity = _cosine(vectors[i], vectors[j])
+            if similarity >= REPETITION_SIMILARITY:
+                _mark_repetition(c, targets[j], round(similarity, 2))
+                break
+    return None
+
+
+def _manifest(candidates: list[dict]) -> list[dict]:
+    """What the job wrote, committed with the rows (see RuleExtractJob.manifest)."""
+    return [
+        {
+            "key": c["key"],
+            "identifier": c.get("identifier") or "",
+            "origin_identifier": c.get("origin_identifier") or "",
+            "classification": c.get("classification") or "",
+        }
+        for c in candidates
+    ]
+
+
+def missing_from_manifest(job: RuleExtractJob, keys: set[str]) -> list[dict]:
+    """The manifest's candidates the server has no row for (should never
+    happen; named so the page can say which -- HR7)."""
+    return [m for m in (job.manifest or []) if m["key"] not in keys]
+
+
 # ── Job ───────────────────────────────────────────────────────────────────
 
 
@@ -725,6 +829,8 @@ async def run_extract_job(
         for position, c in enumerate(candidates):
             rule_xml = c.pop("rule_xml")
             work.add(RuleExtractCandidate(job_id=job_id, key=c["key"], position=position, data=c, rule_xml=rule_xml))
+        # The manifest goes in the same transaction as the rows.
+        (await work.get(RuleExtractJob, job_id)).manifest = _manifest(candidates)
         await work.commit()
         job = await progress.get(RuleExtractJob, job_id)
         job.warnings = (job.warnings or []) + file_warnings
@@ -847,12 +953,17 @@ async def run_text_extract_job(
             await _progress(progress, job_id, processed_items=done)
 
         file_warnings = []
+        repetition_warning = await check_repetitions(candidates, transport)
+        if repetition_warning is not None:
+            file_warnings.append(repetition_warning)
         similarity_warning = await check_similar(project_id, candidates, work, transport, on_progress)
         if similarity_warning is not None:
             file_warnings.append(similarity_warning)
         for position, c in enumerate(candidates):
             rule_xml = c.pop("rule_xml")
             work.add(RuleExtractCandidate(job_id=job_id, key=c["key"], position=position, data=c, rule_xml=rule_xml))
+        # The manifest goes in the same transaction as the rows.
+        (await work.get(RuleExtractJob, job_id)).manifest = _manifest(candidates)
         await work.commit()
         job = await progress.get(RuleExtractJob, job_id)
         job.warnings = (job.warnings or []) + file_warnings

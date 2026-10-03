@@ -27,11 +27,31 @@ class RuleExtractJobOut(BaseModel):
     started_at: datetime
     finished_at: datetime | None = None
     applied_at: datetime | None = None
+    drafting_stopped: bool = False
 
 
 class RuleExtractCandidatesOut(BaseModel):
     job_id: uuid.UUID
     candidates: list[dict]
+    # The rows the job read and the ones of its manifest the server does not
+    # have (should never happen; named rather than counted -- HR7).
+    total_items: int = 0
+    missing: list[dict] = Field(default_factory=list)
+
+
+class RuleExtractCandidateKeysOut(BaseModel):
+    """Every candidate's key, identifiers and classification, without its
+    texts and rule: what the page compares with its own rows when it shows
+    fewer than the job read."""
+
+    job_id: uuid.UUID
+    total_items: int
+    keys: list[dict]
+    missing: list[dict] = Field(default_factory=list)
+
+
+class RuleExtractDraftingRequest(BaseModel):
+    stopped: bool
 
 
 class RuleExtractCandidateEdit(BaseModel):
