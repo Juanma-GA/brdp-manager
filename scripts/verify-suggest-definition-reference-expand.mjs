@@ -72,8 +72,11 @@ async function main() {
     }),
   }).then((r) => r.json());
 
+  // The two close candidates share the source's words ("reference expand
+  // source"): the closest rows even with a whole catalog of the standard
+  // embedded (the embeddings simulator compares by shared words).
   const longTitle =
-    "Numbering of procedural steps within a maintenance task that spans multiple pages and sub-procedures, including exceptions";
+    "Reference expand source: numbering of procedural steps within a maintenance task that spans multiple pages and sub-procedures, including exceptions";
   const closeDefinition = "This is the full Definition text for the close reference candidate, shown when expanded.";
   const close1 = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
@@ -92,7 +95,7 @@ async function main() {
     headers: auth,
     body: JSON.stringify({
       identifier: "BRDP-REFEXP-CLOSE-2",
-      title: "Short title",
+      title: "Reference expand source, short title",
       definition: close2Definition,
       proposal: "Proposal text.",
       validation: "Validated",

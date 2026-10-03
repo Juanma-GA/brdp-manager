@@ -97,7 +97,10 @@ async function main() {
       headers: auth,
       body: JSON.stringify({
         identifier: `BRDP-SDCAT-CLOSE-0${i + 1}`,
-        title: `Close precedent ${i + 1}`,
+        // Shares the source's words: the closest rows even with a whole
+        // catalog of the standard embedded (the embeddings simulator
+        // compares by shared words).
+        title: `Torque calibration procedure precedent ${i + 1}`,
         definition: `Close precedent definition text ${i + 1}.`,
         proposal: `Close precedent proposal text ${i + 1}.`,
         validation: "Validated",

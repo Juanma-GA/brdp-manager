@@ -25,16 +25,16 @@ const EMBEDDING_DIM = 1024;
 
 let callCount = 0;
 
-// Same text -> same vector; two different texts -> cosine about 0.85
-// (never exactly 1). A shared base direction (weight 0.85) plus a
-// per-text random direction from a PRNG seeded with the text's hash
-// (weight 0.15): high enough that every "similar" check of the app (at or
-// above 0.5) still finds the other BRDPs, low enough that "possibly the
-// same decision" (0.9, AI Extract on a free text) only fires for the same
-// text. Before AI Extract's repetition check every vector was a multiple of
-// the same one, so any two texts compared at exactly 1.
-const BASE_WEIGHT = Math.sqrt(0.85);
-const OWN_WEIGHT = Math.sqrt(0.15);
+// Texts that share words embed close together, like a real model would: a
+// shared base direction (weight 0.65) plus a bag of the text's words (each
+// word hashed to a dimension and a sign; weight 0.35). Two unrelated texts
+// compare at about 0.65 -- every "similar" check of the app (at or above
+// 0.5) still finds them -- texts sharing most of their words at about 0.9,
+// the same text at 1. Before AI Extract's repetition check every vector was
+// a multiple of the same one: any two texts compared at exactly 1, and
+// which "similar" rows came first depended only on the tie-break.
+const BASE_WEIGHT = Math.sqrt(0.65);
+const WORDS_WEIGHT = Math.sqrt(0.35);
 
 function textHash(text) {
   let hash = 0;
@@ -44,23 +44,16 @@ function textHash(text) {
   return hash;
 }
 
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 function embeddingForText(text) {
-  const random = mulberry32(textHash(text) || 1);
-  const own = Array.from({ length: EMBEDDING_DIM }, () => random() * 2 - 1);
-  const norm = Math.sqrt(own.reduce((sum, x) => sum + x * x, 0));
+  const words = [...new Set(String(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])];
+  const bag = new Array(EMBEDDING_DIM).fill(0);
+  for (const word of words.length ? words : [""]) {
+    const h = textHash(word);
+    bag[h % EMBEDDING_DIM] += (h >>> 16) & 1 ? 1 : -1;
+  }
+  const norm = Math.sqrt(bag.reduce((sum, x) => sum + x * x, 0)) || 1;
   const base = 1 / Math.sqrt(EMBEDDING_DIM);
-  return own.map((x) => Number((BASE_WEIGHT * base + (OWN_WEIGHT * x) / norm).toFixed(6)));
+  return bag.map((x) => Number((BASE_WEIGHT * base + (WORDS_WEIGHT * x) / norm).toFixed(6)));
 }
 
 const server = http.createServer((req, res) => {
