@@ -81,6 +81,11 @@ function isSuggestRule(text) {
 //                                     having only one marker, is not
 //   TRUNCATEALWAYS                    every answer is cut
 const DECISION_SENTENCE_RE = /\b(shall|must|never|always|debe|deben|siempre|nunca|se marcan|se redacta|se divide|no se mezclan|no se admiten)\b/i;
+const TITLE_TOPICS = [
+  [/\b(una sola acción|dos acciones|acciones distintas)\b/i, "Una sola acción por paso"],
+  [/\bone action\b/i, "One action per step"],
+];
+
 function findDecisionsReply(systemPrompt) {
   const text = (systemPrompt.split("<<<TEXT\n")[1] || "").split("\nTEXT>>>")[0];
   const truncate = /TRUNCATEALWAYS/.test(text) || (/TRUNCATEFIND-START/.test(text) && /TRUNCATEFIND-END/.test(text));
@@ -90,7 +95,11 @@ function findDecisionsReply(systemPrompt) {
     for (const sentence of paragraph.replace(/\s+/g, " ").trim().split(/(?<=[.!?»])\s+(?=[A-ZÁÉÍÓÚ¿¡«])/)) {
       if (!DECISION_SENTENCE_RE.test(sentence)) continue;
       const words = sentence.replace(/[«»"“”.,:;]/g, "").split(" ").filter((w) => !/^BRDP-/.test(w));
-      decisions.push({ quote: sentence, title: words.slice(0, 6).join(" ") });
+      // A real model names the same decision the same way: a sentence about
+      // one action per step (the Spanish guide says it twice, the second
+      // time in its closing reminder) always gets the same title.
+      const topic = TITLE_TOPICS.find(([re]) => re.test(sentence));
+      decisions.push({ quote: sentence, title: topic ? topic[1] : words.slice(0, 6).join(" ") });
     }
   }
   if (/INVENTQUOTE/.test(text)) decisions.push({ quote: "Every figure shall have a caption with its number.", title: "Invented figure captions" });

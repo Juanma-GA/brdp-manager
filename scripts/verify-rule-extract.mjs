@@ -102,6 +102,13 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  // A new file or text over an extraction not imported yet asks first
+  // ("the current one is discarded"): accepted, as a user starting over.
+  // Any other dialog is left to its own handler (or dismissed, the default).
+  page.on("dialog", (d) => {
+    if (/new extraction|extracción nueva/.test(d.message())) d.accept();
+    else if (page.listenerCount("dialog") === 1) d.dismiss();
+  });
   const projects = [];
   try {
     await page.goto(BASE_URL);

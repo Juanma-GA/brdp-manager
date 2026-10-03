@@ -63,6 +63,19 @@ export function languageCheck(text, expect) {
   return { status: detected === expect ? "pass" : "fail", detail: `expected ${expect}, detected ${detected} (heuristic, word-list based)` };
 }
 
+// Each title on its own (a free-text extraction's titles are short, so most
+// fall under the short-text rule: only one detected as another language
+// fails). Fails when there is no title at all.
+export function titlesLanguageCheck(titles, expect) {
+  const list = (titles || []).filter((t) => (t || "").trim());
+  if (!list.length) return { status: "fail", detail: "no title" };
+  const bad = list.map((title) => ({ title, r: languageCheck(title, expect) })).filter((x) => x.r.status !== "pass");
+  return {
+    status: bad.length ? "fail" : "pass",
+    detail: bad.length ? `not ${expect}: ${bad.map((x) => `${JSON.stringify(x.title)} (${x.r.detail})`).join("; ")}` : `${list.length} title(s), none in another language`,
+  };
+}
+
 // ---- Schema names in any form --------------------------------------------
 
 const CAMEL_CASE_RE = /^[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*$/;

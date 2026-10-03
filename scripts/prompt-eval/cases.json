@@ -3239,14 +3239,15 @@
       "id": "extract-text-dita-style-guide-es",
       "type": "extract-from-text",
       "standard": "DITA 1.3 Xpath2.0",
-      "description": "AI Extract (2/2): the Spanish DITA style guide extract (4 clear decisions, 1 naming BRDP-D1-00020, 2 paragraphs with no decision, 1 decision repeated in other words). Expected: 5 decisions (the repeated one given once).",
+      "description": "AI Extract (2/2): the Spanish DITA style guide extract (4 clear decisions, 1 naming BRDP-D1-00020, 2 paragraphs with no decision, 1 decision repeated in other words in the closing reminder). Expected: 5 decisions -- the repeated one given once, or given again and warned by code as a possible repetition (unchecked). Titles in Spanish.",
       "textFile": "scripts/prompt-eval/fixtures/text-extract/guia-estilo-dita-es.md",
       "checks": [
         {
           "type": "text_candidates_count",
           "min": 5,
-          "max": 6,
-          "note": "5 decisions; the repeated one once (6 if repeated)"
+          "max": 5,
+          "note": "5 decisions; a repeated one only if the code warns it as a possible repetition",
+          "distinct": true
         },
         {
           "type": "text_quotes_literal"
@@ -3273,6 +3274,12 @@
           "type": "language",
           "target": "text_candidates",
           "expect": "es"
+        },
+        {
+          "type": "language",
+          "target": "titles",
+          "expect": "es",
+          "note": "every title in Spanish (each title on its own; short ones follow the short-text rule)"
         }
       ]
     },

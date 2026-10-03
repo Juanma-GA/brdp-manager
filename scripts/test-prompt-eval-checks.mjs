@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { distinctSchemaNames, languageCheck, LANGUAGE_MIN_WORDS, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
+import { distinctSchemaNames, languageCheck, titlesLanguageCheck, LANGUAGE_MIN_WORDS, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { UNFILLED_MARKER_RE } from "../src/utils/proposalMarkers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -160,6 +160,11 @@ check("three-word Spanish title with no frequent word is not a failure", languag
 check("short text detected as the other language fails", languageCheck("Uso de la tabla", "en").status === "fail");
 check("short text in the expected language passes", languageCheck("Use of the table", "en").status === "pass");
 check(`${LANGUAGE_MIN_WORDS}+ words with no frequent word is unknown -> fails`, languageCheck("Xyz abc def ghi jkl mno pqr stu vwx", "en").status === "fail");
+// Titles of a free-text extraction, one by one.
+check("titles: all Spanish pass", titlesLanguageCheck(["Una sola acción por paso", "Título de las tablas", "Advertencias de seguridad"], "es").status === "pass");
+check("titles: one English title among Spanish ones fails and is named", (() => { const r = titlesLanguageCheck(["Una sola acción por paso", "Title of the tables"], "es"); return r.status === "fail" && r.detail.includes("Title of the tables"); })());
+check("titles: a short English title without a frequent word is too short to tell (short-text rule)", titlesLanguageCheck(["One action per step"], "es").status === "pass");
+check("titles: none at all fails", titlesLanguageCheck(["", "  "], "es").status === "fail");
 check("long Spanish text expected English fails", languageCheck("La tabla debe tener un título y se usa para los datos del módulo", "en").status === "fail");
 check("long Spanish text expected Spanish passes", languageCheck("La tabla debe tener un título y se usa para los datos del módulo", "es").status === "pass");
 

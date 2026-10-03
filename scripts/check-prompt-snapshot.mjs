@@ -348,6 +348,12 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // AI) and extractFromText (step 2: a new EXT whose Title came from step 1,
 // a catalog identifier, a new EXT with the Title asked). 5 new cases; the
 // 51 existing prompts are unchanged.
+//
+// AI Extract, free text: titles in English 1 of 3 times for the Spanish style
+// guide (Mistral). Step 1 says the titles go in the text's language with its
+// own "LANGUAGE OF THE TITLES" paragraph instead of a clause at the end of the
+// title line. Only the 3 findDecisions cases change; the other 53 are
+// unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';
 import { buildExtractFromTextPrompt, buildFindDecisionsPrompt } from '../src/prompts/extractFromTextPrompt.js';

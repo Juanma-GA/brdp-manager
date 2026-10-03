@@ -25,15 +25,42 @@ const EMBEDDING_DIM = 1024;
 
 let callCount = 0;
 
-function embeddingForText(text) {
+// Same text -> same vector; two different texts -> cosine about 0.85
+// (never exactly 1). A shared base direction (weight 0.85) plus a
+// per-text random direction from a PRNG seeded with the text's hash
+// (weight 0.15): high enough that every "similar" check of the app (at or
+// above 0.5) still finds the other BRDPs, low enough that "possibly the
+// same decision" (0.9, AI Extract on a free text) only fires for the same
+// text. Before AI Extract's repetition check every vector was a multiple of
+// the same one, so any two texts compared at exactly 1.
+const BASE_WEIGHT = Math.sqrt(0.85);
+const OWN_WEIGHT = Math.sqrt(0.15);
+
+function textHash(text) {
   let hash = 0;
   for (let i = 0; i < text.length; i++) {
     hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
   }
-  // A small, stable-per-text fractional value -- distinct texts get
-  // distinct vectors, the same text always gets the same vector.
-  const value = (hash % 1000) / 1000;
-  return new Array(EMBEDDING_DIM).fill(value);
+  return hash;
+}
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function embeddingForText(text) {
+  const random = mulberry32(textHash(text) || 1);
+  const own = Array.from({ length: EMBEDDING_DIM }, () => random() * 2 - 1);
+  const norm = Math.sqrt(own.reduce((sum, x) => sum + x * x, 0));
+  const base = 1 / Math.sqrt(EMBEDDING_DIM);
+  return own.map((x) => Number((BASE_WEIGHT * base + (OWN_WEIGHT * x) / norm).toFixed(6)));
 }
 
 const server = http.createServer((req, res) => {

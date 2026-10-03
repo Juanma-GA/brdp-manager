@@ -19,7 +19,13 @@
 // ("awaiting_decisions") is picked up again after a reload or a restart.
 // The table is the same, with the quote ("Fragment") instead of the rule.
 // Everything lives on the server (rule_extract_jobs / _candidates); nothing
-// in browser storage (HR1).
+// in browser storage (HR1). "Stop" on the AI writing is kept on the job
+// (drafting_stopped), so a reload never resumes it by itself.
+//
+// Candidate keys repeat from one extraction to the next (c00000…): every
+// list, save and AI batch is tied to the job it belongs to and dropped when
+// the page has moved on to another job -- a slow answer of the previous
+// extraction never lands in the table of the new one.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authFetch, authFetchJson } from '../../services/apiClient';
@@ -137,6 +143,10 @@ function warningText(t, w) {
       return t('config.ruleExtract.warnings.quote_already_imported', { identifier: p.identifier });
     case 'similarity_unavailable':
       return t('config.ruleExtract.warnings.similarity_unavailable', { reason: p.reason });
+    case 'possible_repetition':
+      return t('config.ruleExtract.warnings.possible_repetition', { row: p.identifier || `«${p.title}»` });
+    case 'repetition_check_unavailable':
+      return t('config.ruleExtract.warnings.repetition_check_unavailable', { reason: p.reason });
     default:
       return w.message || w.code;
   }
@@ -266,6 +276,8 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   const { t } = useTranslation();
   const [job, setJob] = useState(null);
   const [candidates, setCandidates] = useState(null);
+  // The job the shown list belongs to (keys repeat between jobs).
+  const [candidatesJobId, setCandidatesJobId] = useState(null);
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [drafting, setDrafting] = useState(null); // { done, total }
@@ -281,7 +293,21 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   const [limits, setLimits] = useState(null);
   const [finding, setFinding] = useState(false);
   const [findError, setFindError] = useState(null);
+  const [stopping, setStopping] = useState(false);
+  // Rows the screen lacks, compared with the server's keys (HR7: named,
+  // never only counted), and what "Reload" found.
+  const [rowCheck, setRowCheck] = useState(null);
+  const [reloadNote, setReloadNote] = useState(null);
   const findingRef = useRef(false);
+  // The job the page shows now: answers for any other job are dropped.
+  const jobIdRef = useRef(null);
+  const candidatesJobIdRef = useRef(null);
+  // The job the AI writing was last started for by itself (once per job
+  // and page load; "Continue writing" starts it again by hand).
+  const autoDraftedRef = useRef(null);
+  // A file or text was started on this page: the mount's "latest job" no
+  // longer applies when it comes back late.
+  const startedRef = useRef(false);
   const fileRef = useRef(null);
   const stopRef = useRef(false);
   const draftingRef = useRef(false);
@@ -307,13 +333,29 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     };
   }, []);
 
+  // Every job the page shows goes through here, so jobIdRef always knows it.
+  const showJob = useCallback((j) => {
+    jobIdRef.current = j?.id ?? null;
+    setJob(j);
+  }, []);
+
+  const setList = useCallback((jobId, list) => {
+    candidatesJobIdRef.current = list ? jobId : null;
+    setCandidatesJobId(list ? jobId : null);
+    setCandidates(list);
+  }, []);
+
+  // A list only lands when its job is still the one shown. Returns the
+  // server's answer (with total_items and the manifest's missing rows), or
+  // null when dropped.
   const loadCandidates = useCallback(
     async (jobId) => {
       const data = await authFetchJson(`${base}/jobs/${jobId}/candidates`);
-      setCandidates(data.candidates);
-      return data.candidates;
+      if (jobIdRef.current !== jobId) return null;
+      setList(jobId, data.candidates);
+      return data;
     },
-    [base]
+    [base, setList]
   );
 
   // The project's latest extraction, on mount: still running → poll;
@@ -322,8 +364,9 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     let cancelled = false;
     authFetchJson(`${base}/jobs/active`)
       .then(async (j) => {
-        if (cancelled || !j) return;
-        setJob(j);
+        // Dropped if an upload or a text started meanwhile.
+        if (cancelled || !j || startedRef.current) return;
+        showJob(j);
         if (j.status === 'completed' && !j.applied_at) await loadCandidates(j.id);
         if (j.applied_at) setApplyResult(j.apply_result);
       })
@@ -331,7 +374,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     return () => {
       cancelled = true;
     };
-  }, [base, loadCandidates]);
+  }, [base, loadCandidates, showJob]);
 
   // Poll a running job.
   useEffect(() => {
@@ -339,6 +382,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     const timer = setInterval(async () => {
       try {
         const j = await authFetchJson(`${base}/jobs/${job.id}`);
+        if (jobIdRef.current !== j.id) return;
         setJob(j);
         if (j.status === 'completed') await loadCandidates(j.id);
       } catch (err) {
@@ -353,13 +397,17 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   // back to what they were if it fails -- so overlapping saves (AI batches,
   // checks, a bulk classification) never undo each other, and a failed
   // batch leaves its rows "pending" without touching their check. Returns
-  // true when saved.
+  // true when saved. jobId: the job of the rows edited (the shown list's by
+  // default; an AI batch passes the job it was started for). An answer for
+  // a job the page no longer shows is dropped.
   const patch = useCallback(
-    async (items) => {
+    async (items, jobId = candidatesJobIdRef.current) => {
+      if (!jobId) return false;
+      const here = () => jobIdRef.current === jobId && candidatesJobIdRef.current === jobId;
       const edits = new Map(items.map((i) => [i.key, i]));
       const owned = new Map(items.map((i) => [i.key, ownedFields(i)]));
       const previous = new Map();
-      setCandidates((list) =>
+      if (here()) setCandidates((list) =>
         list.map((c) => {
           if (!edits.has(c.key)) return c;
           previous.set(c.key, Object.fromEntries([...owned.get(c.key)].map((k) => [k, c[k]])));
@@ -367,11 +415,12 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
         })
       );
       try {
-        const data = await authFetchJson(`${base}/jobs/${job.id}/candidates`, {
+        const data = await authFetchJson(`${base}/jobs/${jobId}/candidates`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items }),
         });
+        if (!here()) return true;
         const byKey = new Map(data.candidates.map((c) => [c.key, c]));
         setCandidates((list) =>
           list.map((c) => {
@@ -383,12 +432,13 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
         );
         return true;
       } catch (err) {
+        if (!here()) return false;
         setCandidates((list) => list.map((c) => (previous.has(c.key) ? { ...c, ...previous.get(c.key) } : c)));
         setError(t('config.ruleExtract.saveFailed', { error: err.message }));
         return false;
       }
     },
-    [base, job, t]
+    [base, t]
   );
 
   const ask = useCallback(
@@ -430,7 +480,8 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
           body: JSON.stringify({ decisions }),
         });
         if (!res.ok) throw new Error(await detailOf(res));
-        setJob(await res.json());
+        const j = await res.json();
+        if (jobIdRef.current === j.id) setJob(j);
       } catch (err) {
         setFindError(err.code === FIND_TRUNCATED ? t('config.ruleExtract.text.findTruncated') : t('config.ruleExtract.text.findFailed', { error: err.message }));
       } finally {
@@ -459,11 +510,43 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id, job?.status, aiProvider, canEdit]);
 
-  const startText = async (text, filename) => {
+  // A new file or text replaces the current extraction (the server deletes
+  // its rows). With one not imported yet, ask first -- also while the AI is
+  // writing or stopped. Confirmed: the old job is let go (its last AI
+  // batches finish against it and are dropped here).
+  const startNewExtraction = () => {
+    const current = job && !job.applied_at && ['completed', 'awaiting_decisions'].includes(job.status);
+    if (current && !window.confirm(t('config.ruleExtract.confirmDiscard', { file: jobName }))) return false;
+    stopRef.current = true;
+    startedRef.current = true;
+    autoDraftedRef.current = null;
+    jobIdRef.current = null;
+    setJob(null);
+    setList(null, null);
     setError(null);
     setFindError(null);
     setApplyResult(null);
-    setCandidates(null);
+    setRowCheck(null);
+    setReloadNote(null);
+    return true;
+  };
+
+  // A new file or text the server refused (not an .xml, over the word
+  // limit…) deleted nothing: the previous extraction is shown again.
+  const restoreLatest = async () => {
+    try {
+      const j = await authFetchJson(`${base}/jobs/active`);
+      if (!j || jobIdRef.current !== null) return;
+      showJob(j);
+      if (j.status === 'completed' && !j.applied_at) await loadCandidates(j.id);
+      if (j.applied_at) setApplyResult(j.apply_result);
+    } catch {
+      // The refusal itself is already shown; nothing more to say here.
+    }
+  };
+
+  const startText = async (text, filename) => {
+    if (!startNewExtraction()) return;
     setUploading(true);
     try {
       const res = await authFetch(`${base}/text`, {
@@ -473,10 +556,11 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
       });
       if (!res.ok) throw new Error(await detailOf(res));
       const { job_id: jobId } = await res.json();
-      const j = await authFetchJson(`${base}/jobs/${jobId}`);
-      setJob(j);
+      jobIdRef.current = jobId;
+      showJob(await authFetchJson(`${base}/jobs/${jobId}`));
     } catch (err) {
       setError(err.message);
+      await restoreLatest();
     } finally {
       setUploading(false);
     }
@@ -485,49 +569,91 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   // Writes the given rows (checked ones first: candidatesToDraft), saving
   // each batch at once. A batch whose save fails goes back to "pending" (its
   // rows are counted in the warning and "Continue writing" picks them up).
+  // "Stop" (or a new extraction) lets the batches already sent finish and
+  // be saved, and sends no more; the rows left stay pending.
   const runDrafting = useCallback(
     async (targets) => {
-      if (!targets.length || draftingRef.current || !aiProvider) return;
+      const jobId = candidatesJobIdRef.current;
+      if (!targets.length || draftingRef.current || !aiProvider || !jobId) return;
       draftingRef.current = true;
       stopRef.current = false;
       let done = 0;
-      setDrafting({ done, total: targets.length });
+      setDrafting({ jobId, done, total: targets.length });
       try {
         await draftCandidates(targets, {
           standard,
           ruleFormat,
           ask,
-          shouldStop: () => stopRef.current,
+          shouldStop: () => stopRef.current || jobIdRef.current !== jobId,
           onBatch: async (results) => {
-            await patch(results.map(({ error: _e, ...r }) => r));
+            await patch(results.map(({ error: _e, ...r }) => r), jobId);
             done += results.length;
-            setDrafting({ done, total: targets.length });
+            setDrafting({ jobId, done, total: targets.length });
           },
         });
       } catch (err) {
-        setError(err.message);
+        if (jobIdRef.current === jobId) setError(err.message);
       } finally {
         draftingRef.current = false;
         setDrafting(null);
+        setStopping(false);
       }
     },
     [aiProvider, ask, patch, ruleFormat, standard]
   );
 
+  const setStopped = useCallback(
+    async (stopped) => {
+      const j = await authFetchJson(`${base}/jobs/${job.id}/drafting`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stopped }),
+      });
+      if (jobIdRef.current === j.id) setJob(j);
+      return j;
+    },
+    [base, job]
+  );
+
+  const stopDrafting = async () => {
+    stopRef.current = true;
+    setStopping(true);
+    try {
+      await setStopped(true);
+    } catch (err) {
+      setError(t('config.ruleExtract.stopFailed', { error: err.message }));
+    }
+  };
+
+  // "Continue writing": only the rows still pending (checked first).
+  const continueDrafting = async () => {
+    try {
+      if (job?.drafting_stopped) await setStopped(false);
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    runDrafting(candidatesToDraft(candidates));
+  };
+
   // Write what is missing as soon as the candidates are there (also when
   // coming back to an extraction left half-written, or after a server
   // restart): every row with texts left, checked or not, checked first.
+  // Once per job and page load, never while stopped ("Stop" is kept on the
+  // job), and only after the writing of a previous job has wound down.
   useEffect(() => {
-    if (!candidates || !canEdit || !aiProvider || job?.applied_at) return;
+    if (!candidates || !canEdit || !aiProvider || !job || job.applied_at || job.drafting_stopped) return;
+    if (candidatesJobId !== job.id || autoDraftedRef.current === job.id || draftingRef.current) return;
+    autoDraftedRef.current = job.id;
     runDrafting(candidatesToDraft(candidates));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates === null, aiProvider, canEdit]);
+  }, [candidatesJobId, job?.id, job?.applied_at, job?.drafting_stopped, aiProvider, canEdit, drafting]);
 
   const upload = async (file) => {
-    setError(null);
-    setFindError(null);
-    setApplyResult(null);
-    setCandidates(null);
+    if (!startNewExtraction()) {
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
     setUploading(true);
     try {
       const form = new FormData();
@@ -535,9 +661,11 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
       const res = await authFetch(`${base}/parse`, { method: 'POST', body: form });
       if (!res.ok) throw new Error(await detailOf(res));
       const { job_id: jobId } = await res.json();
-      setJob(await authFetchJson(`${base}/jobs/${jobId}`));
+      jobIdRef.current = jobId;
+      showJob(await authFetchJson(`${base}/jobs/${jobId}`));
     } catch (err) {
       setError(err.message);
+      await restoreLatest();
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -582,6 +710,60 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
       setApplying(false);
     }
   };
+
+  // Safety net: the table must show every candidate the job read. When it
+  // does not, the server's keys say which rows are missing (and the
+  // manifest, which the server itself lacks) -- named, never only counted.
+  const rowMismatch =
+    job?.status === 'completed' && !job.applied_at && !!candidates && candidatesJobId === job.id && candidates.length !== job.total_items;
+  useEffect(() => {
+    if (!rowMismatch) {
+      setRowCheck(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const jobId = job.id;
+    const shownKeys = new Set(candidates.map((c) => c.key));
+    authFetchJson(`${base}/jobs/${jobId}/candidate-keys`)
+      .then((data) => {
+        if (cancelled || jobIdRef.current !== jobId) return;
+        setRowCheck({
+          jobId,
+          missing: data.keys.filter((k) => !shownKeys.has(k.key)),
+          serverMissing: data.missing,
+          serverRows: data.keys.length,
+        });
+      })
+      .catch((err) => !cancelled && setRowCheck({ jobId, error: err.message }));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowMismatch, job?.id, candidates?.length]);
+  useEffect(() => setReloadNote(null), [job?.id]);
+
+  // "Reload": the job and its candidates again, and what that gave.
+  const reloadRows = async () => {
+    const jobId = job.id;
+    setReloadNote(null);
+    try {
+      const j = await authFetchJson(`${base}/jobs/${jobId}`);
+      if (jobIdRef.current !== jobId) return;
+      setJob(j);
+      const data = await loadCandidates(jobId);
+      if (!data) return;
+      const missing = j.total_items - data.candidates.length;
+      setReloadNote(
+        missing <= 0
+          ? { kind: 'complete', total: data.candidates.length }
+          : { kind: 'missing', count: missing, rows: data.missing }
+      );
+    } catch (err) {
+      setReloadNote({ kind: 'error', error: err.message });
+    }
+  };
+  const rowLabel = (k) =>
+    `${k.identifier || k.origin_identifier || k.key} (${classLabel(t, k, k.classification, textJob).replace(/\s*\(\)/, '')})`;
 
   // "Classify the shown rows as…": the options valid for every shown row.
   const classifyShown = async (classification) => {
@@ -655,7 +837,12 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   if (!canEdit) return null;
 
   const running = job?.status === 'running';
-  const busy = uploading || running || finding || !!drafting || applying;
+  // The AI writing of the shown job (a previous job's last batches may
+  // still be finishing after a new extraction started).
+  const draftingHere = drafting && drafting.jobId === job?.id ? drafting : null;
+  // While the AI writes, a new file or text can still start (after
+  // confirming the current extraction is discarded).
+  const busy = uploading || running || finding || applying;
   return (
     <div className={pageStyles.card} data-testid="rule-extract-section">
       <h2 className={pageStyles.sectionHeading}>{t('config.ruleExtract.sectionTitle')}</h2>
@@ -812,41 +999,88 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
             )}
           </p>
           {/* Safety net: the table must show every candidate the job read
-              (506 of 533 was seen once, right after a server restart). */}
-          {job.status === 'completed' && candidates.length !== job.total_items && (
+              (506 and 527 of 533 were seen). The missing rows are named. */}
+          {rowMismatch && (
             <ul className={pageStyles.errorList} data-testid="rule-extract-count-mismatch">
               <li>
                 {t('config.ruleExtract.countMismatch', { shown: candidates.length, total: job.total_items })}{' '}
-                <button type="button" className={pageStyles.secondaryButton} onClick={() => loadCandidates(job.id).catch((err) => setError(err.message))} data-testid="rule-extract-reload">
+                {!rowCheck || rowCheck.jobId !== job.id ? (
+                  <span>{t('config.ruleExtract.checkingRows')}</span>
+                ) : rowCheck.error ? (
+                  <span>{t('config.ruleExtract.checkRowsFailed', { error: rowCheck.error })}</span>
+                ) : (
+                  <>
+                    {rowCheck.missing.length > 0 && (
+                      <span data-testid="rule-extract-missing-rows">
+                        {t('config.ruleExtract.missingRows', { count: rowCheck.missing.length, rows: rowCheck.missing.map(rowLabel).join(', ') })}{' '}
+                      </span>
+                    )}
+                    {rowCheck.serverMissing.length > 0 && (
+                      <span data-testid="rule-extract-server-missing-rows">
+                        {t('config.ruleExtract.serverMissingRows', { count: rowCheck.serverMissing.length, rows: rowCheck.serverMissing.map(rowLabel).join(', ') })}{' '}
+                      </span>
+                    )}
+                    {rowCheck.missing.length === 0 && rowCheck.serverMissing.length === 0 && (
+                      <span>{t('config.ruleExtract.serverMissingUnknown', { count: job.total_items - rowCheck.serverRows })} </span>
+                    )}
+                  </>
+                )}{' '}
+                {t('config.ruleExtract.countMismatchHint')}{' '}
+                <button type="button" className={pageStyles.secondaryButton} onClick={reloadRows} data-testid="rule-extract-reload">
                   {t('config.ruleExtract.reload')}
                 </button>
               </li>
             </ul>
           )}
+          {reloadNote && (
+            <p
+              className={reloadNote.kind === 'complete' ? pageStyles.hint : styles.blocked}
+              data-testid="rule-extract-reload-result"
+              data-kind={reloadNote.kind}
+            >
+              {reloadNote.kind === 'complete'
+                ? t('config.ruleExtract.reloadComplete', { total: reloadNote.total })
+                : reloadNote.kind === 'error'
+                ? t('config.ruleExtract.reloadFailed', { error: reloadNote.error })
+                : reloadNote.rows.length
+                ? t('config.ruleExtract.reloadMissing', { count: reloadNote.count, rows: reloadNote.rows.map(rowLabel).join(', ') })
+                : t('config.ruleExtract.reloadMissingUnknown', { count: reloadNote.count })}
+            </p>
+          )}
           <p className={pageStyles.hint} data-testid="rule-extract-text-counts">
             {t('config.ruleExtract.textCounts', { drafted: textCounts.drafted, pending: textCounts.pending, failed: textCounts.failed })}
           </p>
-          {drafting && (
+          {draftingHere && (
             <div data-testid="rule-extract-drafting">
               <p className={pageStyles.hint}>
                 <span className={pageStyles.spinner} aria-hidden="true" />
-                {t('config.ruleExtract.drafting', { done: drafting.done, total: drafting.total })}
+                {t('config.ruleExtract.drafting', { done: draftingHere.done, total: draftingHere.total })}{' '}
+                {stopping ? (
+                  <span data-testid="rule-extract-stopping">{t('config.ruleExtract.stopping')}</span>
+                ) : (
+                  <button type="button" className={pageStyles.secondaryButton} onClick={stopDrafting} data-testid="rule-extract-stop">
+                    {t('config.ruleExtract.stopDrafting')}
+                  </button>
+                )}
               </p>
-              <progress className={styles.progress} max={drafting.total} value={drafting.done} />
+              <progress className={styles.progress} max={draftingHere.total} value={draftingHere.done} />
             </div>
           )}
           {aiProvider === null && <p className={pageStyles.hint}>{t('config.ruleExtract.noAi')}</p>}
-          {!drafting && (textCounts.pending > 0 || textCounts.failed > 0) && (
+          {!draftingHere && (textCounts.pending > 0 || textCounts.failed > 0) && (
             <div className={styles.resume} data-testid="rule-extract-resume">
+              {job.drafting_stopped && textCounts.pending > 0 && (
+                <span data-testid="rule-extract-stopped">{t('config.ruleExtract.draftingStopped')}</span>
+              )}
               {textCounts.pending > 0 && (
                 <span>
                   <span data-testid="rule-extract-pending-count">{t('config.ruleExtract.pendingRows', { count: textCounts.pending })}</span>{' '}
                   <button
                     type="button"
                     className={pageStyles.secondaryButton}
-                    disabled={!aiProvider}
+                    disabled={!aiProvider || !!drafting}
                     title={!aiProvider ? t('config.ruleExtract.noAi') : undefined}
-                    onClick={() => runDrafting(candidatesToDraft(candidates))}
+                    onClick={continueDrafting}
                     data-testid="rule-extract-continue"
                   >
                     {t('config.ruleExtract.continueDrafting')}
@@ -859,7 +1093,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                   <button
                     type="button"
                     className={pageStyles.secondaryButton}
-                    disabled={!aiProvider}
+                    disabled={!aiProvider || !!drafting}
                     title={!aiProvider ? t('config.ruleExtract.noAi') : undefined}
                     onClick={() => runDrafting(candidatesToDraft(candidates.filter((c) => extractTextState(c) === 'failed'), { includeFailed: true }))}
                     data-testid="rule-extract-retry-failed"
@@ -1064,7 +1298,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
               onClick={apply}
               busy={applying}
               busyLabel={t('config.ruleExtract.importing')}
-              disabled={selectedCount === 0 || !!drafting || importBlocked}
+              disabled={selectedCount === 0 || !!draftingHere || importBlocked}
               data-testid="rule-extract-apply"
             >
               {t('config.ruleExtract.importSelected', { count: selectedCount })}
@@ -1081,7 +1315,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
           <p className={pageStyles.hint} data-testid="rule-extract-import-as-hint">
             {t(textJob ? 'config.ruleExtract.text.importHint' : importAs === 'in_force' ? 'config.ruleExtract.importAsHintInForce' : 'config.ruleExtract.importAsHintPending')}
           </p>
-          {drafting && <p className={pageStyles.hint}>{t('config.ruleExtract.waitDrafting')}</p>}
+          {draftingHere && <p className={pageStyles.hint}>{t('config.ruleExtract.waitDrafting')}</p>}
         </div>
       )}
     </div>

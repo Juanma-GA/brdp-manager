@@ -159,6 +159,13 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1380, height: 900 } });
+  // A new file or text over an extraction not imported yet asks first
+  // ("the current one is discarded"): accepted, as a user starting over.
+  // Any other dialog is left to its own handler (or dismissed, the default).
+  page.on("dialog", (d) => {
+    if (/new extraction|extracción nueva/.test(d.message())) d.accept();
+    else if (page.listenerCount("dialog") === 1) d.dismiss();
+  });
   const project = await api("/api/projects", {
     method: "POST",
     body: JSON.stringify({ name: `AI Extract columns ${Date.now()}`, standard: "S1000D 4.2", project_config: {}, seed_from_catalog: false }),

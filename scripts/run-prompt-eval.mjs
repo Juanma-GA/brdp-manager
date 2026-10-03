@@ -86,7 +86,7 @@ function caseSchemaLocation(testCase) {
   return schemaLocationOf(config, testCase.standard);
 }
 import { validateXML } from "xmllint-wasm";
-import { distinctSchemaNames, languageCheck, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
+import { distinctSchemaNames, languageCheck, titlesLanguageCheck, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
 import { importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
@@ -231,9 +231,16 @@ async function runCheck(check, answer, ctx = {}) {
     }
     // AI Extract (2/2), free text: what code checked on the AI's decisions.
     case "text_candidates_count": {
-      const n = (ctx.textCandidates || []).length;
+      // "distinct": the candidates the code warns as a possible repetition
+      // of an earlier one (unchecked, never merged) do not count.
+      const all = ctx.textCandidates || [];
+      const repeated = all.filter((c) => (c.warnings || []).some((w) => w.code === "possible_repetition")).length;
+      const n = check.distinct ? all.length - repeated : all.length;
       const ok = n >= check.min && n <= check.max;
-      return { status: ok ? "pass" : "fail", detail: `${n} candidate(s), expected ${check.min}-${check.max}` };
+      const detail = check.distinct
+        ? `${n} distinct decision(s) (${all.length} candidate(s), ${repeated} warned as a possible repetition), expected ${check.min}-${check.max}`
+        : `${n} candidate(s), expected ${check.min}-${check.max}`;
+      return { status: ok ? "pass" : "fail", detail };
     }
     case "text_quotes_literal": {
       const missing = (ctx.textCandidates || []).filter((c) => !c.quote_found);
@@ -463,8 +470,12 @@ function runTextCheck(check, answer, flags, ctx = {}) {
       const shown = names.slice(0, 20).join(", ") + (names.length > 20 ? ", …" : "");
       return { status: names.length <= check.max ? "pass" : "fail", detail: `${names.length} distinct schema name(s), max ${check.max}${names.length ? ": " + shown : ""}` };
     }
-    case "language":
+    case "language": {
+      // "titles": each candidate title on its own (short ones follow the
+      // short-text rule); fails when any title is in another language.
+      if (check.target === "titles") return titlesLanguageCheck((ctx.textCandidates || []).map((c) => c.title), check.expect);
       return languageCheck(answer, check.expect);
+    }
     case "no_markdown": {
       const hit = MARKDOWN_PATTERNS.some((re) => re.test(answer));
       return { status: hit ? "fail" : "pass", detail: check.note || "no markdown syntax (**, __, `, #, -, 1.)" };
