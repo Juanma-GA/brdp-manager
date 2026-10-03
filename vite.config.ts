@@ -12,14 +12,14 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/mistral-proxy/, ''),
         secure: false,
       },
-      // Forwards to the Express + SQLite backend (server.js), which must be
-      // running separately (`npm start`) -- Vite only proxies the request,
-      // it does not start that process. Without this, every /api/* call in
-      // dev mode hit Vite's own SPA fallback/404 instead of the real
-      // backend, so BRDPs/approvals/config/settings/notes were never
-      // actually persisted.
+      // Forwards to the v2 FastAPI backend (backend/app/main.py), which must
+      // be running separately (`uvicorn app.main:app`) -- Vite only proxies
+      // the request, it does not start that process. v1's Express backend
+      // (server.js, port 3000) is untouched and still exists, but the
+      // frontend in this branch talks to v2 (docs/v2 §1: "Servidor ...
+      // FastAPI (Python)"; §5.1: "FastAPI es solo API").
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
     },

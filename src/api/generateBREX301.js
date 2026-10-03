@@ -1,5 +1,8 @@
-import { checkWellFormed } from "./generateBREX.js";
+import { ruleEnters } from '../utils/generatePlan.js';
+import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
+import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache301 = null;
 
@@ -169,29 +172,50 @@ function splitMultipleObjPaths301(xml) {
   return result;
 }
 
-const XML_FOOTER_301 = `
-</structrules>
-</contextrules>
-</brex>
-</content>
-</dmodule>`;
-
 function assembleChunks301(baseXml, additionalRules) {
-  // Extrae objrule Y comentarios nonContextRule en orden de documento (preserva trazabilidad)
-  const piecePattern = /<objrule[\s\S]*?<\/objrule>|<!--\s*nonContextRule[\s\S]*?-->/g;
+  // S1000D 3.0.1 ALSO allows multiple <contextrules context="..."> as
+  // siblings under <brex> -- confirmed directly against
+  // sources/S3.0.1/brex.xsd (brexType: contextrules maxOccurs="unbounded"),
+  // same mechanism as 4.x's contextRules/rulesContext, just lowercase
+  // element/attribute names and "context" instead of "rulesContext". Not
+  // dead code: this is the real 3.0.1 equivalent, not an assumption.
+  // The rules are taken apart by splitRuleXmlPieces (src/utils/
+  // ruleWrappers.js, the same scan the Excel import and
+  // normalize_rule_wrappers.py use to store them clean): complete
+  // <contextrules context="..."> blocks whole (a <contextrules> without a
+  // context is the generic container, only a wrapper), and every objrule
+  // and nonContextRule comment wherever it sits, in document order
+  // (traceability), so a legacy wrapper (<rules>, a bare <structrules>)
+  // never hides one.
+  const contextRulesBlocks = [];
   const pieces = [];
-  let m;
-  while ((m = piecePattern.exec(additionalRules)) !== null) {
-    let piece = m[0];
-    if (piece.startsWith('<!--')) piece = sanitizeNonContextComments301(piece);
-    pieces.push(piece);
+  for (const piece of splitRuleXmlPieces(additionalRules, 'BREX-3.0.1')) {
+    if (piece.kind === 'block') contextRulesBlocks.push(piece.text);
+    else if (piece.kind === 'rule') pieces.push(piece.text);
+    else if (piece.kind === 'noncontext') pieces.push(sanitizeNonContextComments301(piece.text));
   }
-  if (!pieces.length) return baseXml;
+  // One block per schema: blocks with the same context (already in the
+  // project's "Schema location" form) are joined in BRDP order where the
+  // first one was (mergeContextBlocks, src/utils/ruleWrappers.js).
+  const mergedBlocks = mergeContextBlocks(contextRulesBlocks, 'BREX-3.0.1');
+  const contextRulesSiblings = mergedBlocks.length ? '\n' + mergedBlocks.join('\n') : '';
+  if (!pieces.length && !contextRulesBlocks.length) return baseXml;
 
-  // Insertar justo antes de </structrules> para preservar todo lo que ya hay dentro
+  // Insertar las piezas sueltas justo antes de </structrules> para
+  // preservar todo lo que ya hay dentro, luego los bloques con contexto
+  // como hermanos justo después del </contextrules> genérico que ya
+  // cerró (uno por esquema, ya unidos arriba).
   const idx = baseXml.lastIndexOf('</structrules>');
   if (idx !== -1) {
-    return baseXml.slice(0, idx) + pieces.join('\n') + '\n' + baseXml.slice(idx);
+    let assembled = baseXml.slice(0, idx) + (pieces.length ? pieces.join('\n') + '\n' : '') + baseXml.slice(idx);
+    if (contextRulesSiblings) {
+      const genericCloseIdx = assembled.indexOf('</contextrules>', idx);
+      const insertAt = genericCloseIdx !== -1 ? genericCloseIdx + '</contextrules>'.length : -1;
+      if (insertAt !== -1) {
+        assembled = assembled.slice(0, insertAt) + contextRulesSiblings + assembled.slice(insertAt);
+      }
+    }
+    return assembled;
   }
 
   // Fallback: XML truncado sin </structrules> — reconstruir footer
@@ -208,7 +232,14 @@ function assembleChunks301(baseXml, additionalRules) {
     const endLen = lastObj >= lastComment ? '</objrule>'.length : '-->'.length;
     stripped = stripped.slice(0, lastAny + endLen);
   }
-  return stripped + '\n' + pieces.join('\n') + XML_FOOTER_301;
+  return (
+    stripped +
+    '\n' +
+    (pieces.length ? pieces.join('\n') + '\n' : '') +
+    '</structrules>\n</contextrules>' +
+    contextRulesSiblings +
+    '\n</brex>\n</content>\n</dmodule>'
+  );
 }
 
 const MAX_RETRIES_301 = 2;
@@ -332,6 +363,11 @@ function dedupeNonContextComments301(xml) {
   });
 }
 
+// Reviewed against multiple <contextrules> siblings (assembleChunks301()'s
+// context-scoped blocks): none of these functions reference "contextrules"
+// at all, they operate on dmodule/objrule/avee elements/comments directly
+// with global (/g) regexes, so which <contextrules> parent an objrule sits
+// under is irrelevant to any of them.
 function finalizeDocument301(xml, projectConfig, schemaSummary) {
   xml = forceDmoduleTag301(xml, schemaSummary && schemaSummary.dmodule_opening_tag);
   xml = fixObjapplPlacement301(xml);
@@ -353,7 +389,12 @@ function finalizeDocument301(xml, projectConfig, schemaSummary) {
 // <contextrules> is always present (S1000D 3.0.1's <brex> requires at least
 // one), but its <structrules> child (which itself requires at least one
 // <objrule> when present) starts empty and is pruned away by
-// pruneEmptyContainers301 if no approved BRDP produced one.
+// pruneEmptyContainers301 if no approved BRDP produced one. Additional
+// <contextrules context="..."> siblings can appear alongside this generic
+// one -- extracted verbatim from an approved BRDP's rule_xml by
+// assembleChunks301() (brex.xsd confirms contextrules maxOccurs="unbounded",
+// same mechanism as 4.x's contextRules/rulesContext) -- this generic one is
+// unaffected either way.
 function esc301(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -408,6 +449,13 @@ ${openingTag}
 </dmodule>`;
 }
 
+// Safe with multiple <contextrules> siblings now possible
+// (assembleChunks301()'s context-scoped blocks): `>\s*<` between open/close
+// with no [\s\S]* wildcard means this can only match a genuinely empty
+// <structrules></structrules> pair, wherever it occurs -- it never spans
+// into a different, content-bearing block. A freshly-extracted context
+// block always carries the real content it was extracted with, so its own
+// <structrules> (if it has one) is never empty either.
 function pruneEmptyContainers301(xml) {
   return xml.replace(/<structrules>\s*<\/structrules>/g, '');
 }
@@ -415,12 +463,14 @@ function pruneEmptyContainers301(xml) {
 // Pure deterministic assembler -- no LLM call, ever. See generateBREX.js's
 // generateBREX() for the full design rationale. generateSingleRule301 and
 // the prompt builders above still exist, unchanged, for the BRDP Assistant's
-// "Suggest Rule" mode and for generateBREXSch.js (which reuses this same
-// function with approvalsFormat: 'SCH-S1000D' -- its simplification is
-// inherited automatically from this one, nothing else needed there).
+// "Suggest Rule" mode and for generateBREXSch.js (which can reuse this same
+// function, or generateBREX41/generateBREX depending on the project's real
+// standard, as its base generator -- its simplification is inherited
+// automatically from whichever one runs, nothing else needed there).
 export async function generateBREX301(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,
+    includeDrafts = false,
     approvals: approvalsOverride,
     approvalsFormat = 'BREX-3.0.1',
     schemaSummary: schemaSummaryOverride,
@@ -451,14 +501,31 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
   const approvedBRDPs = [];
   const unapprovedBRDPs = [];
   for (const brdp of targetBRDPs) {
-    if (approvalById.get(brdp.id)?.status === 'approved') approvedBRDPs.push(brdp);
+    if (ruleEnters(approvalById.get(brdp.id), includeDrafts)) approvedBRDPs.push(brdp);
     else unapprovedBRDPs.push(brdp);
   }
+
+  // Schema URLs follow the project's CURRENT "Schema location" (output only;
+  // the stored rules are never changed): context blocks and allowed values
+  // recognized as schema URLs are rewritten, the rest is reported
+  // (src/utils/ruleSchemaContext.js, rewriteRuleSchemaUrls).
+  const schemaLocation = schemaLocationOf(projectConfig, 'S1000D 3.0.1');
+  let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [], mixed: [] };
+  const schemaRewrite = (list) => {
+    const r = rewriteApprovedRulesSchemaUrls(
+      list.map((b) => ({ id: b.id, identifier: b.identifier || b.id, xml: approvalById.get(b.id).rule_xml })),
+      'BREX-3.0.1',
+      'S1000D 3.0.1',
+      schemaLocation
+    );
+    schemaUrls = r.schemaUrls;
+    return r.rules;
+  };
 
   let finalXml = buildEmptyDocument301(projectConfig, schemaSummary);
 
   if (approvedBRDPs.length > 0) {
-    const approvedXml = approvedBRDPs.map((b) => approvalById.get(b.id).rule_xml).join('\n');
+    const approvedXml = schemaRewrite(approvedBRDPs).map((r) => r.xml).join('\n');
     finalXml = assembleChunks301(finalXml, approvedXml);
   }
 
@@ -466,14 +533,19 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
 
   if (unapprovedBRDPs.length > 0) {
     const comments = unapprovedBRDPs
-      .map((b) => `<!-- ${b.id}: pendiente de aprobación de regla, no incluida en este documento -->`)
+      .map(pendingApprovalComment)
       .join('\n');
     finalXml = finalXml.replace('</brex>', comments + '\n</brex>');
   }
 
   finalXml = finalizeDocument301(finalXml, projectConfig, schemaSummary);
+  finalXml = setDmoduleSchemaLocation(finalXml, schemaContextUrl('S1000D 3.0.1', 'brex', schemaLocation));
 
   const { valid, error } = checkWellFormed(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length };
+  // Safety net (HR7): never expected -- the general block has no scope
+  // attribute -- but reported if an empty one ever reaches the output.
+  const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
+
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks };
 }

@@ -1,4 +1,8 @@
+import { ruleEnters } from '../utils/generatePlan.js';
 import { getApprovalsForFormat } from "./approvals.js";
+import { wrapRuleXmlFragment } from "../utils/ruleXmlFragment.js";
+import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache = null;
 
@@ -23,10 +27,43 @@ export function extractXML(rawResponse) {
   return text.trim();
 }
 
+// wrapRuleXmlFragment lives in src/utils/ruleXmlFragment.js (pure, no API
+// imports) so the rule test engine can use it too; re-exported here for the
+// existing callers.
+export { wrapRuleXmlFragment };
+
+// Comment left in the generated BREX for a BRDP without a Verified rule
+// (shared by the 4.2, 4.1 and 3.0.1 generators). Uses the BRDP's identifier
+// (BRDP-EXT-00031), never its internal UUID (brdp.id), and is in English
+// like the rest of the generated document. An identifier is user data, so
+// "--" (never legal inside an XML comment) and a trailing "-" are neutralized.
+export function pendingApprovalComment(brdp) {
+  const identifier = String(brdp.identifier || '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/-{2,}/g, '—')
+    .replace(/-+$/, '')
+    .trim();
+  return `<!-- ${identifier}: rule pending approval, not included in this document -->`;
+}
+
 export function checkWellFormed(xmlString) {
   try {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(xmlString, "application/xml");
+    // A rule_xml fragment (never has an <?xml ...?> declaration, unlike a
+    // full assembled document) can legitimately have multiple XML-sibling
+    // roots since this round's rulesContext support -- a loose
+    // <structureObjectRule> alongside one or more complete
+    // <contextRules rulesContext="..."> blocks in the very same cell (e.g.
+    // BRDP-S1-00006). Confirmed empirically that DOMParser otherwise
+    // rejects that with "Extra content at the end of the document", same
+    // as lxml server-side (see _xml_well_formed_error in approvals.py) --
+    // wrapping in a throwaway <root> fixes it for fragments without
+    // changing anything for a real document (detected by its <?xml
+    // declaration), which already always has exactly one root and is
+    // parsed unwrapped, unchanged from before.
+    const isFragment = !xmlString.trim().startsWith("<?xml");
+    const toParse = isFragment ? wrapRuleXmlFragment(xmlString) : xmlString;
+    const doc = parser.parseFromString(toParse, "application/xml");
     const parserError = doc.querySelector("parsererror");
     if (parserError) {
       const msg = parserError.textContent || "XML is not well-formed";
@@ -145,7 +182,13 @@ function escapeXMLContent(xml) {
 
 function splitMultipleObjectPaths(xml) {
   const original = xml;
-  const rulePattern = /<structureObjectRule[\s\S]*?<\/structureObjectRule>/g;
+  // (?![a-zA-Z]) anchors the opening tag so it can't also match the
+  // literal prefix "<structureObjectRule" inside "<structureObjectRuleGroup>"
+  // -- confirmed real bug (Lufthansa 78-BRDP BREX): without the anchor this
+  // swallows everything up to the next real </structureObjectRule>,
+  // corrupting the group's own closing tag. See assembleChunks() below,
+  // where the same bug caused a real "tag mismatch" well-formedness error.
+  const rulePattern = /<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/g;
 
   const rules = [];
   let match;
@@ -199,93 +242,182 @@ function splitMultipleObjectPaths(xml) {
   return result;
 }
 
-function assembleChunks(baseXml, additionalRules) {
-  // Extraer structureObjectRule (igual que antes)
-  const structureRules = [];
-  const rulePattern = /<structureObjectRule[\s\S]*?<\/structureObjectRule>/g;
-  let match;
-  while ((match = rulePattern.exec(additionalRules)) !== null) {
-    structureRules.push(match[0]);
+// Parses one approved BRDP's rule_xml fragment into a throwaway <root>
+// wrapper element -- same wrapping trick checkWellFormed() already uses,
+// needed for exactly the same reason: a fragment can legitimately have
+// several XML-sibling roots (a loose <structureObjectRule> alongside one or
+// more complete <contextRules rulesContext="..."> blocks, e.g.
+// BRDP-S1-00006's real Lufthansa data), which a parser rejects unwrapped.
+// Throws a clear, BRDP-attributed error on malformed input instead of
+// letting a single corrupt fragment silently corrupt the whole assembled
+// document (or, with the old regex approach, corrupt unrelated content via
+// a runaway match) -- the caller (assembleChunks) lets this propagate so
+// generateBREX() fails loudly, naming the one responsible BRDP, rather than
+// returning a document that looks fine but is quietly missing or mangled.
+function parseRuleFragment(brdpId, xmlFragment) {
+  const doc = new DOMParser().parseFromString(`<root>${xmlFragment}</root>`, 'application/xml');
+  const parserError = doc.querySelector('parsererror');
+  if (parserError) {
+    const msg = (parserError.textContent || 'XML is not well-formed').split('\n')[0].trim();
+    throw new Error(`Malformed rule_xml for ${brdpId}: ${msg}`);
   }
+  return doc.documentElement;
+}
 
-  // Extraer nonContextRule sueltos de los chunks
-  const nonContextRules = [];
-  const nonContextPattern = /<nonContextRule[\s\S]*?<\/nonContextRule>/g;
-  while ((match = nonContextPattern.exec(additionalRules)) !== null) {
-    nonContextRules.push(match[0]);
-  }
+// DOM-based assembler -- replaces an earlier regex/text-splicing
+// implementation that mis-extracted <structureObjectRule> as a prefix match
+// inside <structureObjectRuleGroup> (real bug, Lufthansa 78-BRDP BREX,
+// fixed with an anchor as a stopgap; see git history). Operating on real
+// parsed nodes instead of substrings removes that whole bug class: a tag
+// name can never again be confused with another tag name that happens to
+// start with the same characters.
+//
+// approvedRules: array of { id, xml } -- one entry per approved BRDP,
+// parsed individually (rather than one giant pre-joined string) so a
+// malformed rule_xml is attributed to the exact BRDP that produced it.
+//
+// Mutates and returns baseDoc (a Document already parsed from
+// buildEmptyDocument()'s output) rather than a string -- the caller
+// serializes once, after every BRDP has been placed.
+function assembleChunks(baseDoc, approvedRules) {
+  // S1000D 4.2 allows multiple <contextRules rulesContext="..."> as
+  // siblings under <brex> (brex4.2.xsd: contextRules maxOccurs="unbounded"),
+  // each scoped to a specific schema (e.g. proced.xsd, fault.xsd). A real
+  // approved BRDP's rule_xml can carry one of these complete blocks
+  // (extracted from a real customer BREX, e.g. Lufthansa) alongside or
+  // instead of a loose structureObjectRule/nonContextRule.
+  const structureNodes = [];
+  const nonContextNodes = [];
+  const contextRulesNodes = [];
+  const contextBlockTexts = [];
 
-  const cleanedStructure = structureRules.join('\n');
-  const cleanedNonContext = nonContextRules.join('\n');
+  for (const { id, xml } of approvedRules) {
+    if (!xml || !xml.trim()) continue;
+    // Well-formedness first, attributed to this BRDP.
+    parseRuleFragment(id, xml);
 
-  if (!cleanedStructure.trim() && !cleanedNonContext.trim()) return baseXml;
-
-  // Strip footer del baseXml (igual que antes)
-  const footerTags = ['</structureObjectRuleGroup>', '</contextRules>', '</nonContextRules>', '</brex>', '</content>', '</dmodule>'];
-  let stripped = baseXml;
-  for (const tag of footerTags) {
-    const idx = stripped.lastIndexOf(tag);
-    if (idx !== -1) {
-      stripped = stripped.slice(0, idx);
+    // Real hand-authored rule_xml (confirmed against the actual Lufthansa
+    // 78-BRDP dataset) doesn't always put structureObjectRule/
+    // nonContextRule as DIRECT children of the fragment -- some rows wrap
+    // them in an extra container of their own (a bare <rules>, or even a
+    // stray <structureObjectRuleGroup>) that has no meaning here. The
+    // fragment is taken apart by splitRuleXmlPieces (src/utils/
+    // ruleWrappers.js, the same scan the Excel import and
+    // normalize_rule_wrappers.py use to store rules clean): complete
+    // <contextRules rulesContext="..."> blocks whole (nothing inside them
+    // taken again as a loose rule), and every structureObjectRule /
+    // nonContextRule wherever it sits. A <contextRules> with an empty or
+    // missing rulesContext is only a wrapper, never a block: its rules go
+    // into buildEmptyDocument()'s own general <contextRules> (no attribute
+    // -- s1kd-brexcheck applies a block only if it has no rulesContext or
+    // it equals the DM's schema, so rulesContext="" would apply nowhere).
+    // Each piece is parsed on its own.
+    for (const piece of splitRuleXmlPieces(xml, 'BREX-4.2')) {
+      if (piece.kind === 'comment') continue;
+      const node = parseRuleFragment(id, piece.text).firstElementChild;
+      if (piece.kind === 'block') contextBlockTexts.push({ id, text: piece.text });
+      else if (piece.kind === 'rule') structureNodes.push(node);
+      else nonContextNodes.push(node);
     }
   }
-  const lastStructure = stripped.lastIndexOf('</structureObjectRule>');
-  const lastNonContext = stripped.lastIndexOf('</nonContextRule>');
-  const lastAny = Math.max(lastStructure, lastNonContext);
-  if (lastAny !== -1) {
-    const endTag = lastStructure >= lastNonContext
-      ? '</structureObjectRule>'
-      : '</nonContextRule>';
-    stripped = stripped.slice(0, lastAny + endTag.length);
+
+  // One block per schema: blocks with the same rulesContext (already in the
+  // project's "Schema location" form) are joined, in BRDP order, where the
+  // first of them was (mergeContextBlocks, src/utils/ruleWrappers.js).
+  // Each merged block is parsed again; a block's own text was already
+  // checked above, so a failure here can only come from the merge.
+  const blockTexts = mergeContextBlocks(contextBlockTexts.map((b) => b.text), 'BREX-4.2');
+  for (const text of blockTexts) {
+    contextRulesNodes.push(parseRuleFragment('merged context block', text).firstElementChild);
   }
 
-  // Construir el bloque nonContextRules si hay reglas sin contexto
-  let nonContextBlock = '';
-  if (cleanedNonContext.trim()) {
-    // Recopilar TODOS los ids ya presentes en el documento (safety net global)
-    const globalIds = new Set();
-    const globalIdPattern = /\bid="([^"]+)"/g;
-    let gMatch;
-    while ((gMatch = globalIdPattern.exec(stripped)) !== null) {
-      globalIds.add(gMatch[1]);
-    }
+  if (!structureNodes.length && !nonContextNodes.length && !contextRulesNodes.length) return baseDoc;
 
-    // Verificar si baseXml ya tiene <nonContextRules> del chunk 1
-    const hasExisting = baseXml.includes('<nonContextRules>');
-    if (hasExisting) {
-      // Extraer las que ya hay en baseXml y combinar
-      const existingMatch = baseXml.match(/<nonContextRules>([\s\S]*?)<\/nonContextRules>/);
-      const existingContent = existingMatch ? existingMatch[1] : '';
+  const genericContextRules = baseDoc.querySelector('contextRules:not([rulesContext])');
+  const group = genericContextRules.querySelector('structureObjectRuleGroup');
 
-      // Filtrar nonContextRule duplicados contra ids globales
-      const deduped = (cleanedNonContext.match(/<nonContextRule[\s\S]*?<\/nonContextRule>/g) || [])
-        .filter(rule => {
-          const m = rule.match(/\bid="([^"]+)"/);
-          return m ? !globalIds.has(m[1]) : true;
-        })
-        .join('\n');
+  // Loose structureObjectRule nodes go into the generic group, inserted
+  // before its existing (whitespace-only) last child so that trailing
+  // whitespace still ends up right before </structureObjectRuleGroup>.
+  const groupTrailingNode = group.lastChild;
+  structureNodes.forEach((node, i) => {
+    group.insertBefore(baseDoc.createTextNode(i === 0 ? '\n\n' : '\n'), groupTrailingNode);
+    group.insertBefore(baseDoc.importNode(node, true), groupTrailingNode);
+  });
 
-      nonContextBlock = `\n<nonContextRules>\n${existingContent}${deduped.trim() ? '\n' + deduped : ''}\n</nonContextRules>`;
-    } else {
-      // Filtrar cleanedNonContext contra ids globales incluso sin existing block
-      const deduped = (cleanedNonContext.match(/<nonContextRule[\s\S]*?<\/nonContextRule>/g) || [])
-        .filter(rule => {
-          const m = rule.match(/\bid="([^"]+)"/);
-          return m ? !globalIds.has(m[1]) : true;
-        })
-        .join('\n');
-      nonContextBlock = deduped.trim() ? `\n<nonContextRules>\n${deduped}\n</nonContextRules>` : '';
-    }
-  } else if (baseXml.includes('<nonContextRules>')) {
-    // chunk 1 generó nonContextRules pero chunks adicionales no tienen más — preservar
-    const existingMatch = baseXml.match(/<nonContextRules>([\s\S]*?)<\/nonContextRules>/);
-    nonContextBlock = existingMatch ? `\n${existingMatch[0]}` : '';
+  const brexEl = baseDoc.querySelector('brex');
+  const brexTrailingNode = brexEl.lastChild;
+
+  // The <contextRules rulesContext="..."> blocks, already merged into one
+  // per schema above. brex4.2.xsd would permit repeated blocks for the same
+  // schema (maxOccurs="unbounded"), but a real BREX has one per schema and
+  // the round trip original -> AI Extract -> Generate must give that back
+  // (Lufthansa: one proced block with 4 rules, not 4 blocks of 1). They
+  // must come AFTER the generic
+  // <contextRules> and BEFORE nonContextRules: brexElemType's sequence is
+  // contextRules* then nonContextRules? (also confirmed against the
+  // schema) -- nonContextRules can never precede a contextRules sibling.
+  for (const crNode of contextRulesNodes) {
+    brexEl.insertBefore(baseDoc.createTextNode('\n'), brexTrailingNode);
+    brexEl.insertBefore(baseDoc.importNode(crNode, true), brexTrailingNode);
   }
 
-  // Ensamblar footer correcto
-  const footer = `\n</structureObjectRuleGroup>\n</contextRules>${nonContextBlock}\n</brex>\n</content>\n</dmodule>`;
+  if (nonContextNodes.length) {
+    // "Already present in the document" dedup -- ids that existed in
+    // baseDoc BEFORE this call (never any, in practice, since
+    // buildEmptyDocument()'s skeleton carries no rule elements; kept for
+    // parity with the original safety net in case that ever changes).
+    // Same-batch duplicates across approvedRules are intentionally NOT
+    // deduped here -- that is dedupeNonContextRules()'s job, applied
+    // globally after assembly, in finalizeDocument().
+    const globalIds = new Set(
+      Array.from(baseDoc.querySelectorAll('[id]')).map((el) => el.getAttribute('id'))
+    );
+    const toAdd = nonContextNodes.filter((node) => {
+      const nid = node.getAttribute('id');
+      return !nid || !globalIds.has(nid);
+    });
 
-  return stripped + '\n' + (cleanedStructure || '') + footer;
+    if (toAdd.length) {
+      let ncContainer = baseDoc.querySelector('nonContextRules');
+      if (ncContainer) {
+        // Pre-existing container (dead path today -- buildEmptyDocument()
+        // never emits one -- kept only so this never crashes if that
+        // changes): append after its current content.
+        const ncTrailingNode = ncContainer.lastChild;
+        for (const node of toAdd) {
+          ncContainer.insertBefore(baseDoc.createTextNode('\n'), ncTrailingNode);
+          ncContainer.insertBefore(baseDoc.importNode(node, true), ncTrailingNode);
+        }
+      } else {
+        ncContainer = baseDoc.createElement('nonContextRules');
+        ncContainer.appendChild(baseDoc.createTextNode('\n'));
+        toAdd.forEach((node, i) => {
+          if (i > 0) ncContainer.appendChild(baseDoc.createTextNode('\n'));
+          ncContainer.appendChild(baseDoc.importNode(node, true));
+        });
+        ncContainer.appendChild(baseDoc.createTextNode('\n'));
+        brexEl.insertBefore(baseDoc.createTextNode('\n'), brexTrailingNode);
+        brexEl.insertBefore(ncContainer, brexTrailingNode);
+      }
+    }
+  }
+
+  return baseDoc;
+}
+
+// Serializing the whole Document (rather than splicing strings) can
+// reorder the <dmodule> root's own attributes (confirmed empirically:
+// Chrome's XMLSerializer groups xmlns:* declarations separately from plain
+// attributes) -- harmless here because forceDmoduleTag() (finalizeDocument,
+// called right after this) unconditionally overwrites that entire opening
+// tag with schemaSummary's exact literal string regardless of what this
+// produced. The one difference serialization does NOT self-heal anywhere
+// else in the pipeline is dropping the newline between the XML declaration
+// and <dmodule -- restored explicitly here.
+function serializeDocument(doc) {
+  const xml = new XMLSerializer().serializeToString(doc);
+  return xml.replace(/(<\?xml[^>]*\?>)\s*(<dmodule\b)/, '$1\n$2');
 }
 
 const MAX_RETRIES = 2;
@@ -318,8 +450,8 @@ export async function generateSingleRule(brdp, projectConfig, schemaSummary, cal
     const escapedContent = escapeXMLContent(escaped);
     const splitContent = splitMultipleObjectPaths(escapedContent);
 
-    // Intentar structureObjectRule primero
-    const ruleMatch = splitContent.match(/<structureObjectRule[\s\S]*?<\/structureObjectRule>/);
+    // Intentar structureObjectRule primero (mismo ancla que splitMultipleObjectPaths/assembleChunks)
+    const ruleMatch = splitContent.match(/<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/);
     if (ruleMatch) {
       const idMatch = ruleMatch[0].match(/structureObjectRule id="([^"]+)"/);
       if (idMatch && idMatch[1] === brdp.id) {
@@ -446,6 +578,15 @@ function dropRedundantNonContextRules(xml) {
   });
 }
 
+// Reviewed against the possibility of multiple <contextRules> siblings
+// (assembleChunks()'s rulesContext blocks): none of forceDmoduleTag/
+// forceIssueType/fixFlagPlacement/promoteOrphanSplitRules/forceDmCodeFields/
+// dropRedundantNonContextRules/dedupeNonContextRules reference the literal
+// string "contextRules" at all -- they operate on dmodule/dmStatus/dmCode/
+// structureObjectRule/nonContextRule elements directly, scanning the whole
+// document with global (/g) regexes, so which <contextRules> parent a rule
+// happens to sit under is irrelevant to any of them. No single-container
+// assumption exists here to fix.
 function finalizeDocument(xml, projectConfig, schemaSummary) {
   xml = forceDmoduleTag(xml, schemaSummary && schemaSummary.dmodule_opening_tag);
   xml = forceIssueType(xml);
@@ -522,7 +663,7 @@ ${openingTag}
 </identAndStatusSection>
 <content>
 <brex>
-<contextRules rulesContext="">
+<contextRules>
 <structureObjectRuleGroup>
 </structureObjectRuleGroup>
 </contextRules>
@@ -536,7 +677,14 @@ ${openingTag}
 // nonContextRule, or there were none at all), an empty
 // structureObjectRuleGroup would violate its own required-child schema rule,
 // so it (and then contextRules, if that leaves it empty too) is dropped
-// rather than left dangling-empty.
+// rather than left dangling-empty. Safe with multiple <contextRules> now
+// possible (assembleChunks()'s rulesContext-scoped siblings): the regex
+// requires `>\s*<` immediately between open and close tags (no [\s\S]*
+// wildcard), so it can only ever match a genuinely empty pair -- it cannot
+// span across a real, content-bearing sibling to falsely "empty out" two
+// adjacent blocks together, and a freshly-extracted rulesContext block is
+// never empty in the first place (it always carries the real content it
+// was extracted with), so it never matches this pattern regardless.
 function pruneEmptyContainers(xml) {
   xml = xml.replace(/<structureObjectRuleGroup>\s*<\/structureObjectRuleGroup>/g, '');
   xml = xml.replace(/<contextRules\b[^>]*>\s*<\/contextRules>/g, '');
@@ -555,6 +703,7 @@ function pruneEmptyContainers(xml) {
 export async function generateBREX(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,
+    includeDrafts = false,
     approvals: approvalsOverride,
     approvalsFormat = 'BREX-4.2',
     schemaSummary: schemaSummaryOverride,
@@ -585,22 +734,41 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
   const approvedBRDPs = [];
   const unapprovedBRDPs = [];
   for (const brdp of targetBRDPs) {
-    if (approvalById.get(brdp.id)?.status === 'approved') approvedBRDPs.push(brdp);
+    if (ruleEnters(approvalById.get(brdp.id), includeDrafts)) approvedBRDPs.push(brdp);
     else unapprovedBRDPs.push(brdp);
   }
+
+  // Schema URLs follow the project's CURRENT "Schema location" (output only;
+  // the stored rules are never changed): context blocks and allowed values
+  // recognized as schema URLs are rewritten, the rest is reported
+  // (src/utils/ruleSchemaContext.js, rewriteRuleSchemaUrls).
+  const schemaLocation = schemaLocationOf(projectConfig, 'S1000D 4.2');
+  let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [], mixed: [] };
+  const schemaRewrite = (list) => {
+    const r = rewriteApprovedRulesSchemaUrls(
+      list.map((b) => ({ id: b.id, identifier: b.identifier || b.id, xml: approvalById.get(b.id).rule_xml })),
+      'BREX-4.2',
+      'S1000D 4.2',
+      schemaLocation
+    );
+    schemaUrls = r.schemaUrls;
+    return r.rules;
+  };
 
   let finalXml = buildEmptyDocument(projectConfig, schemaSummary);
 
   if (approvedBRDPs.length > 0) {
-    const approvedXml = approvedBRDPs.map((b) => approvalById.get(b.id).rule_xml).join('\n');
-    finalXml = assembleChunks(finalXml, approvedXml);
+    const approvedRules = schemaRewrite(approvedBRDPs).map((r) => ({ id: r.id, xml: r.xml }));
+    const baseDoc = new DOMParser().parseFromString(finalXml, 'application/xml');
+    assembleChunks(baseDoc, approvedRules);
+    finalXml = serializeDocument(baseDoc);
   }
 
   finalXml = pruneEmptyContainers(finalXml);
 
   if (unapprovedBRDPs.length > 0) {
     const comments = unapprovedBRDPs
-      .map((b) => `<!-- ${b.id}: pendiente de aprobación de regla, no incluida en este documento -->`)
+      .map(pendingApprovalComment)
       .join('\n');
     finalXml = finalXml.replace('</brex>', comments + '\n</brex>');
   }
@@ -611,8 +779,13 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
   // is already correct by construction in buildEmptyDocument, so this is a
   // safety net, not a correction of LLM output.
   finalXml = finalizeDocument(finalXml, projectConfig, schemaSummary);
+  finalXml = setDmoduleSchemaLocation(finalXml, schemaContextUrl('S1000D 4.2', 'brex', schemaLocation));
 
   const { valid, error } = checkWellFormed(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length };
+  // Safety net (HR7): never expected -- the general block has no scope
+  // attribute -- but reported if an empty one ever reaches the output.
+  const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
+
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks };
 }
