@@ -23,6 +23,46 @@ export function stripPlaceholders(text) {
   return String(text ?? "").replace(PLACEHOLDER_GLOBAL_RE, "[]");
 }
 
+// ---- language ---------------------------------------------------------------
+
+// Heuristic, word-list based: counts frequent Spanish and English words.
+const ES_WORDS = new Set([
+  "el", "la", "los", "las", "de", "del", "que", "para", "con", "una", "uno",
+  "por", "este", "esta", "estos", "estas", "es", "son", "debe", "deben",
+  "se", "como", "sus", "más", "pero", "porque", "cuando", "sin", "entre",
+  "sobre", "así", "un", "también", "ya", "muy", "puede", "pueden",
+]);
+const EN_WORDS = new Set([
+  "the", "is", "and", "of", "to", "for", "with", "this", "that", "are",
+  "shall", "must", "be", "as", "it", "on", "in", "not", "if", "when",
+  "without", "between", "about", "so", "a", "an", "its", "can", "should",
+]);
+// Below this many words a text may have no frequent word at all ("Data
+// module title"): "unknown" is then not a failure -- only detecting the
+// other language is.
+export const LANGUAGE_MIN_WORDS = 8;
+
+export function detectLanguage(text) {
+  const words = String(text ?? "").toLowerCase().match(/[a-zà-ÿñ]+/gi) || [];
+  let es = 0;
+  let en = 0;
+  for (const w of words) {
+    if (ES_WORDS.has(w)) es++;
+    if (EN_WORDS.has(w)) en++;
+  }
+  if (es === 0 && en === 0) return "unknown";
+  return es > en ? "es" : "en";
+}
+
+export function languageCheck(text, expect) {
+  const detected = detectLanguage(text);
+  const words = String(text ?? "").trim().split(/\s+/).filter(Boolean).length;
+  if (detected === "unknown" && words < LANGUAGE_MIN_WORDS) {
+    return { status: "pass", detail: `expected ${expect}, too short to tell (${words} words, under ${LANGUAGE_MIN_WORDS}): not another language` };
+  }
+  return { status: detected === expect ? "pass" : "fail", detail: `expected ${expect}, detected ${detected} (heuristic, word-list based)` };
+}
+
 // ---- Schema names in any form --------------------------------------------
 
 const CAMEL_CASE_RE = /^[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*$/;

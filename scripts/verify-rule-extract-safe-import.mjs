@@ -17,9 +17,11 @@
 //     EXT; History; a re-import finds them; the marked identifier in BRDP
 //     Records (search), Ask and the Excel export;
 //   - bulk classify offers only the options valid for every shown row.
-// Needs both catalogs loaded (the 4.1 one is a stand-in, see the script):
+// Needs both catalogs loaded -- 4.2 from sources/, and the real 4.1 one of
+// the repo (552 identifiers; it has the 108 BRDP-S1 identifiers of the "CA"
+// BREX that the 4.2 catalog lacks):
 //     cd backend && .venv/bin/python scripts/seed_extract_catalog_42.py
-//     cd backend && .venv/bin/python scripts/seed_extract_catalog_41.py
+//     cd backend && .venv/bin/python scripts/import_brdp_catalog.py catalog_sources/s1000d_4.1.xlsx "S1000D 4.1"
 // and restarts the backend once (kills the uvicorn process by its exact
 // PID and starts it again with the same mock endpoints).
 //
@@ -233,7 +235,9 @@ async function main() {
     assert(!(await r1.getByTestId("rule-extract-select").isChecked()), "unchecked by default");
     assert((await r1.getByTestId("rule-extract-warnings").innerText()).includes(`${first.origin_identifier} is not in the S1000D 4.2 catalog; it is in S1000D 4.1.`), "with its warning");
     assert((await r1.getByTestId("rule-extract-source-title").innerText()) === "from the S1000D 4.1 catalog", "Title tagged 'from the S1000D 4.1 catalog'");
-    assert(first.title === `Stand-in 4.1 title of ${first.origin_identifier}` && first.text_sources.proposal === "file", "Title from the 4.1 catalog, Proposal from the file");
+    const catalog41 = new Map((await api(`/api/brdp-catalog?standard=${encodeURIComponent("S1000D 4.1")}`)).map((e) => [e.identifier, e]));
+    assert(catalog41.size === 552, `the real S1000D 4.1 catalog is loaded (${catalog41.size} identifiers)`);
+    assert(first.title === catalog41.get(first.origin_identifier)?.title && first.title && first.text_sources.proposal === "file", "Title from the 4.1 catalog, Proposal from the file", first.title);
     const opts = await r1.getByTestId("rule-extract-class").locator("option").allInnerTexts();
     assert(opts.join(" | ") === "From catalog (S1000D 4.1) | From catalog (S1000D 4.1), marked | New EXT", `three options: ${opts.join(" | ")}`);
     await r1.scrollIntoViewIfNeeded();
@@ -287,7 +291,7 @@ async function main() {
       `imported: ${o1.origin_identifier}, ${o2.origin_identifier}-4.1 and a new EXT for ${o3.origin_identifier}`);
     const b1 = brdps.find((b) => b.identifier === o1.origin_identifier);
     const b2 = brdps.find((b) => b.identifier === `${o2.origin_identifier}-4.1`);
-    assert(b1.title.startsWith("Stand-in 4.1 title") && b2.title.startsWith("Stand-in 4.1 title"), "with the 4.1 catalog's Title");
+    assert(b1.title === catalog41.get(o1.origin_identifier).title && b2.title === catalog41.get(o2.origin_identifier).title, "with the 4.1 catalog's Title");
 
     // History, Records search, Ask.
     await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));

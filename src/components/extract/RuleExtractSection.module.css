@@ -245,3 +245,54 @@
   font-size: 13px;
   color: #b91c1c;
 }
+
+/* AI Extract (2/2): "Import from text or document" */
+.textInput {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+.textBox {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  resize: vertical;
+}
+.textBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.disabledLabel {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.wordCount {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+}
+.wordCountOver {
+  color: #b91c1c;
+  font-weight: 600;
+}
+.textHelp {
+  margin: 4px 0 12px;
+  color: #475569;
+}
+.textHelp summary {
+  cursor: pointer;
+}
+.quote {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-left: 3px solid #94a3b8;
+  background: #f8fafc;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

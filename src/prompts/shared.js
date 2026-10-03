@@ -45,6 +45,11 @@ export const RULE_TEST_MAX_TOKENS = 16000;
 // AI Extract (1/2): a batch of 10 BRDPs answers with title, definition and
 // proposal for each (~2-3k tokens); twice that leaves room for long texts.
 export const EXTRACT_MAX_TOKENS = 8000;
+// AI Extract (2/2), step 1: finding the decisions of a free text is
+// copying literal quotes -- as steady as possible. Its answer (quotes and
+// titles of a text of at most 5,000 words) fits EXTRACT_MAX_TOKENS; when it
+// does not, the text is asked again in two halves (src/utils/textExtract.js).
+export const FIND_DECISIONS_TEMPERATURE = 0.1;
 
 // A hand-authored Rule can be very long (Navantia's Xpath3.0 few-shot
 // examples with inline function expressions run well past this) -- rather

@@ -215,7 +215,6 @@ brdp-manager/
 │   │   ├── generateBREXSch.js     # Schematron 1.0 (via BREX 3.0.1 + converter)
 │   │   ├── brexToSchematron.js    # Deterministic BREX → Schematron converter
 │   │   ├── buildBREXdocReport.js  # BREXdoc report builder
-│   │   ├── extractBRDPs.js        # AI Extract (DOCX/PDF/plain text → BRDPs)
 │   │   └── llmAPI.js              # Provider-agnostic LLM client
 │   ├── components/            # React components
 │   ├── context/               # BRDPContext (global state)

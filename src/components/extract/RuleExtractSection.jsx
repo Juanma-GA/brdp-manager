@@ -1,5 +1,6 @@
-// AI Extract (1/2): "Import from BREX / Schematron" in Project
-// Configuration, next to the Excel import.
+// AI Extract in Project Configuration, next to the Excel import:
+// "Import from BREX / Schematron" (1/2) and "Import from text or document"
+// (2/2).
 //
 //   1. The file goes to POST …/ai-extract/parse; reading and classifying run
 //      in a background job on the server (progress polled here).
@@ -11,15 +12,24 @@
 //      for "Already exists (changes)" the diff with the stored one; for a
 //      big candidate the count and its first 20 rules), warnings. Paged.
 //   4. Nothing is written to the project's BRDPs until "Import selected".
+// A free text (TextExtractInput) first goes to POST …/ai-extract/text (the
+// words counted again there); the AI then finds its decisions here (step 1,
+// src/utils/textExtract.js) and they are posted to …/decisions, where code
+// checks every quote and classifies them. A text job waiting for step 1
+// ("awaiting_decisions") is picked up again after a reload or a restart.
+// The table is the same, with the quote ("Fragment") instead of the rule.
 // Everything lives on the server (rule_extract_jobs / _candidates); nothing
 // in browser storage (HR1).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authFetch, authFetchJson } from '../../services/apiClient';
 import { sendMessage } from '../../api/llmAPI.js';
-import { EXTRACT_MAX_TOKENS, SUGGEST_TEMPERATURE } from '../../prompts/shared.js';
+import { EXTRACT_MAX_TOKENS, FIND_DECISIONS_TEMPERATURE, SUGGEST_TEMPERATURE } from '../../prompts/shared.js';
+import { findDecisions, FIND_TRUNCATED } from '../../utils/textExtract.js';
+import TextExtractInput from './TextExtractInput';
 import { candidatesToDraft, draftCandidates, DRAFTED_CLASSES, extractTextState } from '../../utils/ruleExtractDraft.js';
 import { aiFieldsOf } from '../../prompts/extractFromRulesPrompt.js';
+import { EXTRACT_FILTERS, filterLabelKey, isClassFilter } from '../../utils/ruleExtractFilters.js';
 import { diffRuleLines, normalizeRuleXml } from '../../utils/brdpCompare.js';
 import {
   checkAgainstVocabulary,
@@ -36,10 +46,6 @@ export const EXTRACT_PAGE_SIZE = 25;
 const POLL_MS = 1000;
 const DRAFT_CLASSES = DRAFTED_CLASSES;
 const WRITES_TITLE = new Set(['new_ext', 'other_spec', 'default_rule']);
-const CLASS_FILTERS = [
-  'all', 'new_ext', 'catalog', 'catalog_edition', 'catalog_edition_marked', 'other_spec', 'default_rule', 'changed', 'same', 'empty',
-  'warnings', 'blocking',
-];
 const TEXT_KEYS = ['title', 'definition', 'proposal'];
 // Which fields of a row a save owns, so its answer (or its failure) never
 // touches what another save changed meanwhile: a batch of AI texts never
@@ -71,7 +77,10 @@ async function detailOf(res) {
   }
 }
 
-function classLabel(t, c, classification = c.classification) {
+function classLabel(t, c, classification = c.classification, textJob = false) {
+  // A free text never brings a rule: an identifier of the project is just
+  // "Already exists".
+  if (textJob && classification === 'same') return t('config.ruleExtract.classes.exists');
   if (classification === 'other_spec' || classification === 'default_rule') {
     return t(`config.ruleExtract.classes.${classification}`, { spec: c.specification || '' });
   }
@@ -118,6 +127,14 @@ function warningText(t, w) {
       return t('config.ruleExtract.warnings.rule_ids_from_file', { identifier: p.identifier, ids: (p.ids || []).join(', ') });
     case 'default_rule':
       return t('config.ruleExtract.warnings.default_rule', { specification: p.specification });
+    case 'quote_not_found':
+      return t('config.ruleExtract.warnings.quote_not_found');
+    case 'paragraph_several_identifiers':
+      return t('config.ruleExtract.warnings.paragraph_several_identifiers', { ids: (p.ids || []).join(', ') });
+    case 'exists_in_project':
+      return t('config.ruleExtract.warnings.exists_in_project', { identifier: p.identifier });
+    case 'quote_already_imported':
+      return t('config.ruleExtract.warnings.quote_already_imported', { identifier: p.identifier });
     case 'similarity_unavailable':
       return t('config.ruleExtract.warnings.similarity_unavailable', { reason: p.reason });
     default:
@@ -189,6 +206,19 @@ function RuleCell({ c, t }) {
   );
 }
 
+// "Fragment": the quote of the text the candidate was found in, collapsed,
+// so the reviewer can compare what was written with what the document says.
+function QuoteCell({ c, t }) {
+  const quote = c.quote || '';
+  const short = quote.length > 90 ? `${quote.slice(0, 90)}…` : quote;
+  return (
+    <details className={styles.ruleDetails}>
+      <summary data-testid="rule-extract-quote-summary">{short}</summary>
+      <blockquote className={styles.quote} data-testid="rule-extract-quote">{quote}</blockquote>
+    </details>
+  );
+}
+
 function RuleDiff({ stored, incoming, t }) {
   const rows = useMemo(
     () => diffRuleLines(normalizeRuleXml(stored).text, normalizeRuleXml(incoming).text),
@@ -248,10 +278,22 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   const [page, setPage] = useState(0);
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState(null);
+  const [limits, setLimits] = useState(null);
+  const [finding, setFinding] = useState(false);
+  const [findError, setFindError] = useState(null);
+  const findingRef = useRef(false);
   const fileRef = useRef(null);
   const stopRef = useRef(false);
   const draftingRef = useRef(false);
   const base = `/api/projects/${projectId}/ai-extract`;
+  // A free-text extraction (2/2): no rule, the quote instead.
+  const textJob = job?.source_kind === 'text';
+  const jobName = job ? job.filename || (textJob ? t('config.ruleExtract.text.pastedText') : '') : '';
+
+  useEffect(() => {
+    authFetchJson(`${base}/limits`).then(setLimits).catch((err) => setError(err.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   useEffect(() => {
     authFetchJson('/api/config/ai-provider').then(setAiProvider).catch(() => setAiProvider(null));
@@ -360,6 +402,86 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     [aiProvider]
   );
 
+  const askFind = useCallback(
+    async ({ system, user }) => {
+      const res = await sendMessage([{ role: 'user', content: user }], null, aiProvider.model, aiProvider.provider, system, {
+        temperature: FIND_DECISIONS_TEMPERATURE,
+        maxTokens: EXTRACT_MAX_TOKENS,
+      });
+      return res.content;
+    },
+    [aiProvider]
+  );
+
+  // Step 1 of a free text: the AI finds the decisions (quote + title) and
+  // they are posted for the server to check and classify. Never twice at
+  // the same time; an error leaves the job waiting, with "Search again".
+  const runFind = useCallback(
+    async (jobId, text) => {
+      if (findingRef.current || !aiProvider) return;
+      findingRef.current = true;
+      setFinding(true);
+      setFindError(null);
+      try {
+        const decisions = await findDecisions({ text, standard, ask: askFind });
+        const res = await authFetch(`${base}/jobs/${jobId}/decisions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decisions }),
+        });
+        if (!res.ok) throw new Error(await detailOf(res));
+        setJob(await res.json());
+      } catch (err) {
+        setFindError(err.code === FIND_TRUNCATED ? t('config.ruleExtract.text.findTruncated') : t('config.ruleExtract.text.findFailed', { error: err.message }));
+      } finally {
+        findingRef.current = false;
+        setFinding(false);
+      }
+    },
+    [aiProvider, askFind, base, standard, t]
+  );
+
+  const resumeFind = useCallback(
+    async (j) => {
+      try {
+        const { text } = await authFetchJson(`${base}/jobs/${j.id}/text`);
+        await runFind(j.id, text);
+      } catch (err) {
+        setFindError(t('config.ruleExtract.text.findFailed', { error: err.message }));
+      }
+    },
+    [base, runFind, t]
+  );
+
+  // A text job left waiting for step 1 (a reload, a restart): ask again.
+  useEffect(() => {
+    if (job?.status === 'awaiting_decisions' && canEdit && aiProvider && !findError) resumeFind(job);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id, job?.status, aiProvider, canEdit]);
+
+  const startText = async (text, filename) => {
+    setError(null);
+    setFindError(null);
+    setApplyResult(null);
+    setCandidates(null);
+    setUploading(true);
+    try {
+      const res = await authFetch(`${base}/text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, filename }),
+      });
+      if (!res.ok) throw new Error(await detailOf(res));
+      const { job_id: jobId } = await res.json();
+      const j = await authFetchJson(`${base}/jobs/${jobId}`);
+      setJob(j);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   // Writes the given rows (checked ones first: candidatesToDraft), saving
   // each batch at once. A batch whose save fails goes back to "pending" (its
   // rows are counted in the warning and "Continue writing" picks them up).
@@ -403,6 +525,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
 
   const upload = async (file) => {
     setError(null);
+    setFindError(null);
     setApplyResult(null);
     setCandidates(null);
     setUploading(true);
@@ -423,14 +546,15 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
 
   const apply = async () => {
     const keys = candidates.filter((c) => c.selected).map((c) => c.key);
-    if (importAs === 'in_force' && !window.confirm(t('config.ruleExtract.confirmInForce', { count: keys.length }))) return;
+    const asked = textJob ? 'pending' : importAs;
+    if (asked === 'in_force' && !window.confirm(t('config.ruleExtract.confirmInForce', { count: keys.length }))) return;
     setApplying(true);
     setError(null);
     try {
       const res = await authFetch(`${base}/jobs/${job.id}/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keys, import_as: importAs }),
+        body: JSON.stringify({ keys, import_as: asked }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -495,7 +619,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   const groupLabel = (k) => {
     const rows = (candidates || []).filter((c) => c.classification === k || c.options?.includes(k));
     const one = (field) => (rows.length && rows.every((c) => c[field] === rows[0][field]) ? rows[0][field] : '');
-    return classLabel(t, { specification: one('specification'), catalog_edition: one('catalog_edition') }, k).replace(/\s*\(\)/, '');
+    return classLabel(t, { specification: one('specification'), catalog_edition: one('catalog_edition') }, k, textJob).replace(/\s*\(\)/, '');
   };
   const counts = useMemo(() => {
     const out = {};
@@ -507,10 +631,15 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   // restart. Checked rows with texts pending / failed block the import;
   // unchecked ones never do.
   const textCounts = useMemo(() => {
-    const out = { pending: 0, failed: 0, blockingPending: 0, blockingFailed: 0 };
+    const out = { drafted: 0, pending: 0, failed: 0, blockingPending: 0, blockingFailed: 0 };
     for (const c of candidates || []) {
       const state = extractTextState(c);
-      if (state === 'complete') continue;
+      if (state === 'complete') {
+        // Written by the AI: a row of the drafted classes whose AI fields
+        // are all there and at least one of them is the AI's.
+        if (DRAFT_CLASSES.has(c.classification) && aiFieldsOf(c).some((f) => c.text_sources?.[f] === 'ai')) out.drafted += 1;
+        continue;
+      }
       out[state] += 1;
       if (c.selected) out[state === 'pending' ? 'blockingPending' : 'blockingFailed'] += 1;
     }
@@ -526,9 +655,11 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   if (!canEdit) return null;
 
   const running = job?.status === 'running';
+  const busy = uploading || running || finding || !!drafting || applying;
   return (
     <div className={pageStyles.card} data-testid="rule-extract-section">
-      <h2 className={pageStyles.sectionHeading}>{t('config.ruleExtract.title')}</h2>
+      <h2 className={pageStyles.sectionHeading}>{t('config.ruleExtract.sectionTitle')}</h2>
+      <h3 className={pageStyles.subsectionHeading}>{t('config.ruleExtract.title')}</h3>
       <p className={pageStyles.hint}>{t(ruleFormat === 'SCH-DITA' ? 'config.ruleExtract.introSchematron' : 'config.ruleExtract.introBrex', { standard })}</p>
 
       {!running && (
@@ -540,10 +671,47 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
             accept=".xml,.sch"
             hidden
             data-testid="rule-extract-file"
-            disabled={uploading || !!drafting || applying}
+            disabled={busy}
             onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
           />
         </label>
+      )}
+
+      <TextExtractInput
+        maxWords={limits?.max_words ?? null}
+        busy={finding || (uploading && textJob)}
+        disabledReason={
+          aiProvider === null
+            ? t('config.ruleExtract.text.noAi')
+            : busy && !finding
+            ? t('config.ruleExtract.text.waitBusy')
+            : null
+        }
+        onSubmit={startText}
+      />
+
+      {finding && (
+        <p className={pageStyles.hint} data-testid="rule-extract-finding">
+          <span className={pageStyles.spinner} aria-hidden="true" />
+          {t('config.ruleExtract.phase.finding')}
+        </p>
+      )}
+      {findError && (
+        <ul className={pageStyles.errorList} data-testid="rule-extract-find-error">
+          <li>
+            {findError}{' '}
+            {job?.status === 'awaiting_decisions' && aiProvider && !finding && (
+              <button type="button" className={pageStyles.secondaryButton} onClick={() => resumeFind(job)} data-testid="rule-extract-find-retry">
+                {t('config.ruleExtract.text.findRetry')}
+              </button>
+            )}
+          </li>
+        </ul>
+      )}
+      {textJob && job.status === 'completed' && !applyResult && candidates?.length === 0 && (
+        <p className={pageStyles.hint} data-testid="rule-extract-no-decisions">
+          {t('config.ruleExtract.text.noDecisions', { file: jobName })}
+        </p>
       )}
 
       {(uploading || running) && (
@@ -579,7 +747,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
 
       {applyResult && (
         <div data-testid="rule-extract-result">
-          <h3 className={pageStyles.subsectionHeading}>{t('config.ruleExtract.resultTitle', { file: job?.filename })}</h3>
+          <h3 className={pageStyles.subsectionHeading}>{t('config.ruleExtract.resultTitle', { file: jobName })}</h3>
           <p data-testid="rule-extract-result-summary">
             {t('config.ruleExtract.resultSummary', {
               selected: applyResult.selected ?? applyResult.created + applyResult.updated + applyResult.omitted,
@@ -616,6 +784,8 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                     {`${o.identifier || o.origin_identifier || o.key}: `}
                     {o.reason === 'same'
                       ? t('config.ruleExtract.omitReasons.same')
+                      : o.reason === 'exists'
+                      ? t('config.ruleExtract.omitReasons.exists')
                       : o.reason === 'no content'
                       ? t('config.ruleExtract.omitReasons.noContent')
                       : o.reason}
@@ -627,10 +797,10 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
         </div>
       )}
 
-      {candidates && !applyResult && (
+      {candidates && candidates.length > 0 && !applyResult && (
         <div data-testid="rule-extract-review">
           <p className={pageStyles.hint} data-testid="rule-extract-counts">
-            {t('config.ruleExtract.counts', { count: candidates.length, file: job.filename })}{' '}
+            {t('config.ruleExtract.counts', { count: candidates.length, file: jobName })}{' '}
             {Object.entries(counts)
               .map(([k, n]) => `${groupLabel(k)}: ${n}`)
               .join(' · ')}
@@ -640,6 +810,21 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                 {t('config.ruleExtract.elapsed', { seconds: ((new Date(job.finished_at) - new Date(job.started_at)) / 1000).toFixed(1) })}
               </span>
             )}
+          </p>
+          {/* Safety net: the table must show every candidate the job read
+              (506 of 533 was seen once, right after a server restart). */}
+          {job.status === 'completed' && candidates.length !== job.total_items && (
+            <ul className={pageStyles.errorList} data-testid="rule-extract-count-mismatch">
+              <li>
+                {t('config.ruleExtract.countMismatch', { shown: candidates.length, total: job.total_items })}{' '}
+                <button type="button" className={pageStyles.secondaryButton} onClick={() => loadCandidates(job.id).catch((err) => setError(err.message))} data-testid="rule-extract-reload">
+                  {t('config.ruleExtract.reload')}
+                </button>
+              </li>
+            </ul>
+          )}
+          <p className={pageStyles.hint} data-testid="rule-extract-text-counts">
+            {t('config.ruleExtract.textCounts', { drafted: textCounts.drafted, pending: textCounts.pending, failed: textCounts.failed })}
           </p>
           {drafting && (
             <div data-testid="rule-extract-drafting">
@@ -690,11 +875,9 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
             <label>
               {t('config.ruleExtract.filter')}{' '}
               <select value={filter} onChange={(e) => setFilter(e.target.value)} data-testid="rule-extract-filter">
-                {CLASS_FILTERS.map((f) => (
+                {EXTRACT_FILTERS.map((f) => (
                   <option key={f} value={f}>
-                    {f === 'all' || f === 'warnings'
-                      ? t(`config.ruleExtract.filters.${f}`)
-                      : groupLabel(f)}
+                    {isClassFilter(f) ? groupLabel(f) : t(filterLabelKey(f))}
                   </option>
                 ))}
               </select>
@@ -728,7 +911,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                 <option value="">…</option>
                 {commonOptions.map((o) => (
                   <option key={o} value={o}>
-                    {classLabel(t, visible[0], o)}
+                    {classLabel(t, visible[0], o, textJob)}
                   </option>
                 ))}
               </select>
@@ -757,7 +940,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                   </th>
                   <th>{t('config.ruleExtract.colDefinition')}</th>
                   <th>{t('config.ruleExtract.colProposal')}</th>
-                  <th className={styles.colRule}>{t('config.ruleExtract.colRule')}</th>
+                  <th className={styles.colRule}>{t(textJob ? 'config.ruleExtract.colFragment' : 'config.ruleExtract.colRule')}</th>
                   <th className={styles.colWarnings}>{t('config.ruleExtract.colWarnings')}</th>
                 </tr>
               </thead>
@@ -792,7 +975,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                         >
                           {c.options.map((o) => (
                             <option key={o} value={o}>
-                              {classLabel(t, c, o)}
+                              {classLabel(t, c, o, textJob)}
                             </option>
                           ))}
                         </select>
@@ -839,7 +1022,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                         )}
                       </td>
                       <td>
-                        <RuleCell c={c} t={t} />
+                        {textJob ? <QuoteCell c={c} t={t} /> : <RuleCell c={c} t={t} />}
                       </td>
                       <td>
                         {lines.length > 0 && (
@@ -867,13 +1050,16 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
           </div>
 
           <div className={styles.applyBar}>
-            <label>
-              {t('config.ruleExtract.importAs')}{' '}
-              <select value={importAs} onChange={(e) => setImportAs(e.target.value)} data-testid="rule-extract-import-as">
-                <option value="pending">{t('config.ruleExtract.importAsPending')}</option>
-                <option value="in_force">{t('config.ruleExtract.importAsInForce')}</option>
-              </select>
-            </label>
+            {/* A free text has no rule: never "Already in force". */}
+            {!textJob && (
+              <label>
+                {t('config.ruleExtract.importAs')}{' '}
+                <select value={importAs} onChange={(e) => setImportAs(e.target.value)} data-testid="rule-extract-import-as">
+                  <option value="pending">{t('config.ruleExtract.importAsPending')}</option>
+                  <option value="in_force">{t('config.ruleExtract.importAsInForce')}</option>
+                </select>
+              </label>
+            )}
             <Button
               onClick={apply}
               busy={applying}
@@ -893,7 +1079,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
             </p>
           )}
           <p className={pageStyles.hint} data-testid="rule-extract-import-as-hint">
-            {t(importAs === 'in_force' ? 'config.ruleExtract.importAsHintInForce' : 'config.ruleExtract.importAsHintPending')}
+            {t(textJob ? 'config.ruleExtract.text.importHint' : importAs === 'in_force' ? 'config.ruleExtract.importAsHintInForce' : 'config.ruleExtract.importAsHintPending')}
           </p>
           {drafting && <p className={pageStyles.hint}>{t('config.ruleExtract.waitDrafting')}</p>}
         </div>

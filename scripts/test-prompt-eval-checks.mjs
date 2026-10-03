@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { distinctSchemaNames, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
+import { distinctSchemaNames, languageCheck, LANGUAGE_MIN_WORDS, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { UNFILLED_MARKER_RE } from "../src/utils/proposalMarkers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -153,6 +153,15 @@ const dumpNames = fixtures.answers.map((a) => names(a.answer).length);
 console.log(`       max_names on the 9 answers: ${dumpNames.join("/")}`);
 check("max_names counts the names in italics (some real answer with 10 or more)", dumpNames.some((n) => n >= 10), dumpNames.join("/"));
 check("an answer with no element names passes (nothing to analyse)", offenders("Es un párrafo; úsalo con moderación.").length === 0);
+
+console.log("language: short texts");
+check("three-word title with no frequent word is not a failure", languageCheck("Data module title", "en").status === "pass");
+check("three-word Spanish title with no frequent word is not a failure", languageCheck("Código de datos", "es").status === "pass");
+check("short text detected as the other language fails", languageCheck("Uso de la tabla", "en").status === "fail");
+check("short text in the expected language passes", languageCheck("Use of the table", "en").status === "pass");
+check(`${LANGUAGE_MIN_WORDS}+ words with no frequent word is unknown -> fails`, languageCheck("Xyz abc def ghi jkl mno pqr stu vwx", "en").status === "fail");
+check("long Spanish text expected English fails", languageCheck("La tabla debe tener un título y se usa para los datos del módulo", "en").status === "fail");
+check("long Spanish text expected Spanish passes", languageCheck("La tabla debe tener un título y se usa para los datos del módulo", "es").status === "pass");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

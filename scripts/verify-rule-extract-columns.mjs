@@ -13,8 +13,9 @@
 //     inside its own box, when it does not fit).
 // Needs the backend, Vite and the Mistral chat simulator running (the AI
 // writes the texts of the new rows first), as in verify-rule-extract.mjs,
-// and the 4.2 and (stand-in) 4.1 catalogs loaded so the "From catalog
-// (S1000D 4.1)" labels appear (seed_extract_catalog_42.py / _41.py).
+// and the 4.2 and 4.1 catalogs loaded so the "From catalog (S1000D 4.1)"
+// labels appear (seed_extract_catalog_42.py; the real 4.1 catalog with
+// import_brdp_catalog.py catalog_sources/s1000d_4.1.xlsx "S1000D 4.1").
 //
 //     node scripts/verify-rule-extract-columns.mjs [--shots-only]
 import os from "node:os";

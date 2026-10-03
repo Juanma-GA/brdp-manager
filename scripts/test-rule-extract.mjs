@@ -9,6 +9,8 @@ import { readFileSync } from 'node:fs';
 import { buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../src/prompts/extractFromRulesPrompt.js';
 import { candidatesToDraft, draftCandidates, extractTextState } from '../src/utils/ruleExtractDraft.js';
 import { LLM_TRUNCATED } from '../src/api/llmTruncation.js';
+import { EXTRACT_FILTERS, filterLabelKey } from '../src/utils/ruleExtractFilters.js';
+import i18n from '../src/i18n/index.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./rule-test-fixtures/extract-candidates.json', import.meta.url), 'utf-8'));
 let failures = 0;
@@ -221,6 +223,18 @@ const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), 
     && extractTextState({ classification: 'new_ext', ai_fields: ['title'], title: '', draft_status: 'failed' }) === 'failed'
     && extractTextState({ classification: 'changed', ai_fields: ['title'], title: '' }) === 'complete'
     && extractTextState({ classification: 'catalog_edition', ai_fields: ['proposal'], proposal: '', draft_status: 'pending' }) === 'pending');
+}
+
+// ── Every "Show" filter option has its text in EN and ES ─────────────────
+{
+  for (const lang of ['en', 'es']) {
+    for (const f of EXTRACT_FILTERS) {
+      const key = filterLabelKey(f);
+      check(`filter "${f}" has a ${lang} label (${key})`, i18n.exists(key, { lng: lang, fallbackLng: false }));
+    }
+  }
+  check('"blocking" label EN', i18n.getFixedT('en')(filterLabelKey('blocking')) === 'Blocking the import');
+  check('"blocking" label ES', i18n.getFixedT('es')(filterLabelKey('blocking')) === 'Bloquean la importación');
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);

@@ -81,6 +81,21 @@ async function uploadAndReview(page, file) {
   await page.getByTestId("rule-extract-drafting").waitFor({ state: "detached", timeout: 240000 });
 }
 
+// With the real S1000D 4.1 catalog loaded, the S1 identifiers of the
+// Lufthansa BREX that the 4.2 catalog lacks are "From catalog (S1000D 4.1)",
+// unchecked. This script was written for them as "New EXT" (checked by
+// default): they are reclassified so, through the same PATCH the page uses.
+async function lufthansaS1AsNewExt(page, projectId) {
+  const { job, list } = await candidates(projectId);
+  const items = list.filter((c) => c.classification === "catalog_edition").map((c) => ({ key: c.key, classification: "new_ext", selected: true }));
+  if (!items.length) return;
+  await api(`/api/projects/${projectId}/ai-extract/jobs/${job.id}/candidates`, { method: "PATCH", body: JSON.stringify({ items }) });
+  await page.reload();
+  await page.getByTestId("rule-extract-table").waitFor({ timeout: 240000 });
+  await page.waitForTimeout(500);
+  await page.getByTestId("rule-extract-drafting").waitFor({ state: "detached", timeout: 240000 });
+}
+
 async function candidates(projectId) {
   const job = await api(`/api/projects/${projectId}/ai-extract/jobs/active`);
   return { job, list: (await api(`/api/projects/${projectId}/ai-extract/jobs/${job.id}/candidates`)).candidates };
@@ -253,6 +268,7 @@ async function main() {
     projects.push(lh);
     await openConfig(page, lh.id);
     await uploadAndReview(page, LUFTHANSA);
+    await lufthansaS1AsNewExt(page, lh.id);
     assert((await page.getByTestId("rule-extract-shown").innerText()) === "502 of 502", "counter 502 of 502");
     const search = page.getByTestId("rule-extract-search");
     await search.fill("00117");

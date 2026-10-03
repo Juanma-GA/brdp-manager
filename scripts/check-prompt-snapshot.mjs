@@ -342,15 +342,22 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // (compareBrdp.source = 'other_project', so the 'Project "<name>"
 // (<standard>)' source label is covered). The 44 existing prompts are
 // unchanged.
+//
+// AI Extract (2/2), free text: two new groups -- findDecisions (step 1: the
+// two sample texts of the eval set and the text with instructions to the
+// AI) and extractFromText (step 2: a new EXT whose Title came from step 1,
+// a catalog identifier, a new EXT with the Title asked). 5 new cases; the
+// 51 existing prompts are unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';
-import { askCases, extractFromRulesCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
+import { buildExtractFromTextPrompt, buildFindDecisionsPrompt } from '../src/prompts/extractFromTextPrompt.js';
+import { askCases, extractFromRulesCases, extractFromTextCases, findDecisionsCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXPECTED_PATH = path.join(__dirname, 'prompt-snapshot', 'expected-prompts.json');
 
 function buildActual() {
-  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {}, extractFromRules: {} };
+  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {}, extractFromRules: {}, findDecisions: {}, extractFromText: {} };
   for (const c of askCases) actual.ask[c.name] = buildAskSystemPrompt(...c.args);
   for (const c of suggestDefinitionCases) actual.suggestDefinition[c.name] = buildSuggestDefinitionPrompt(...c.args);
   for (const c of suggestProposalCases) actual.suggestProposal[c.name] = buildSuggestProposalPrompt(...c.args);
@@ -358,6 +365,8 @@ function buildActual() {
   for (const c of ruleTestExamplesCases) actual.ruleTestExamples[c.name] = buildRuleTestExamplesPrompt(...c.args);
   for (const c of ruleTestReviewCases) actual.ruleTestReview[c.name] = buildRuleTestReviewPrompt(...c.args);
   for (const c of extractFromRulesCases) actual.extractFromRules[c.name] = buildExtractFromRulesPrompt(...c.args);
+  for (const c of findDecisionsCases) actual.findDecisions[c.name] = buildFindDecisionsPrompt(...c.args);
+  for (const c of extractFromTextCases) actual.extractFromText[c.name] = buildExtractFromTextPrompt(...c.args);
   return actual;
 }
 

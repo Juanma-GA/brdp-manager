@@ -55,7 +55,7 @@ import {
   buildSuggestRulePrompt,
   parseSuggestRuleResponse,
 } from "../src/prompts/suggestRulePrompt.js";
-import { ASK_TEMPERATURE, EXTRACT_MAX_TOKENS, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { ASK_TEMPERATURE, EXTRACT_MAX_TOKENS, FIND_DECISIONS_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
 import { isTruncatedAnswer, truncatedAnswerError } from "../src/api/llmTruncation.js";
 
 // The default output limit of every other use (llmAPI.js DEFAULT_MAX_TOKENS;
@@ -86,11 +86,13 @@ function caseSchemaLocation(testCase) {
   return schemaLocationOf(config, testCase.standard);
 }
 import { validateXML } from "xmllint-wasm";
-import { distinctSchemaNames, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
+import { distinctSchemaNames, languageCheck, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
 import { importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
 import { candidatesToDraft, draftCandidates } from "../src/utils/ruleExtractDraft.js";
+import { findDecisions } from "../src/utils/textExtract.js";
+import { FIND_DECISIONS_USER_MESSAGE } from "../src/prompts/extractFromTextPrompt.js";
 import { UNFILLED_MARKER_RE } from "../src/utils/proposalMarkers.js";
 import {
   STANDARD_TO_VOCABULARY_FILE,
@@ -142,30 +144,6 @@ function parseArgs(argv) {
 // ---- Automatic checks -------------------------------------------------
 // Each returns { status: "pass" | "fail" | "manual", detail }. "manual" is
 // never a pass/fail guess -- it's reported as-is for a human to read.
-
-const ES_WORDS = new Set([
-  "el", "la", "los", "las", "de", "del", "que", "para", "con", "una", "uno",
-  "por", "este", "esta", "estos", "estas", "es", "son", "debe", "deben",
-  "se", "como", "sus", "más", "pero", "porque", "cuando", "sin", "entre",
-  "sobre", "así", "the", "un", "también", "ya", "muy", "puede", "pueden",
-]);
-const EN_WORDS = new Set([
-  "the", "is", "and", "of", "to", "for", "with", "this", "that", "are",
-  "shall", "must", "be", "as", "it", "on", "in", "not", "if", "when",
-  "without", "between", "about", "so", "a", "an", "its", "can", "should",
-]);
-
-function detectLanguage(text) {
-  const words = (text.toLowerCase().match(/[a-zà-ÿñ]+/gi) || []);
-  let es = 0;
-  let en = 0;
-  for (const w of words) {
-    if (ES_WORDS.has(w)) es++;
-    if (EN_WORDS.has(w)) en++;
-  }
-  if (es === 0 && en === 0) return "unknown";
-  return es > en ? "es" : "en";
-}
 
 function countParagraphs(text) {
   return text
@@ -222,7 +200,11 @@ async function runCheck(check, answer, ctx = {}) {
   // AI Extract: "title" / "definition" = the texts written for the
   // candidate (the answer is its proposal).
   const target =
-    check.target === "title"
+    check.target === "text_candidates"
+      ? (ctx.textCandidates || []).map((c) => [c.title, c.definition, c.proposal].filter(Boolean).join("\n")).join("\n\n")
+      : check.target === "text_quotes"
+      ? (ctx.textCandidates || []).map((c) => c.quote).join("\n")
+      : check.target === "title"
       ? ctx.extract?.title ?? ""
       : check.target === "definition"
       ? ctx.extract?.definition ?? ""
@@ -246,6 +228,28 @@ async function runCheck(check, answer, ctx = {}) {
       // Exact text (AI Extract's literal texts, taken from the file).
       const ok = target === check.value;
       return { status: ok ? "pass" : "fail", detail: ok ? "exactly as expected" : `got: ${JSON.stringify(target).slice(0, 200)}` };
+    }
+    // AI Extract (2/2), free text: what code checked on the AI's decisions.
+    case "text_candidates_count": {
+      const n = (ctx.textCandidates || []).length;
+      const ok = n >= check.min && n <= check.max;
+      return { status: ok ? "pass" : "fail", detail: `${n} candidate(s), expected ${check.min}-${check.max}` };
+    }
+    case "text_quotes_literal": {
+      const missing = (ctx.textCandidates || []).filter((c) => !c.quote_found);
+      return { status: missing.length ? "fail" : "pass", detail: missing.length ? `not in the text: ${missing.map((c) => JSON.stringify(c.quote.slice(0, 80))).join("; ")}` : "every quote found literally in the text" };
+    }
+    case "text_identifier_detected": {
+      const c = (ctx.textCandidates || []).find((x) => x.origin_identifier === check.identifier);
+      return { status: c ? "pass" : "fail", detail: c ? `${check.identifier} read by code (${c.classification})` : `no candidate with ${check.identifier}` };
+    }
+    case "text_not_extracted": {
+      const hits = (ctx.textCandidates || []).filter((c) => check.patterns.some((p) => new RegExp(p, "i").test(c.quote)));
+      return { status: hits.length ? "fail" : "pass", detail: hits.length ? `extracted: ${hits.map((c) => JSON.stringify(c.quote.slice(0, 80))).join("; ")}` : "none of them extracted" };
+    }
+    case "text_drafted": {
+      const bad = (ctx.textCandidates || []).filter((c) => (c.ai_fields || []).some((f) => !(c[f] || "").trim()));
+      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `${bad.length} candidate(s) without their texts` : "every candidate has its texts" };
     }
     case "extract_literal": {
       // The candidate needed nothing from the AI (its texts come from the
@@ -459,10 +463,8 @@ function runTextCheck(check, answer, flags, ctx = {}) {
       const shown = names.slice(0, 20).join(", ") + (names.length > 20 ? ", …" : "");
       return { status: names.length <= check.max ? "pass" : "fail", detail: `${names.length} distinct schema name(s), max ${check.max}${names.length ? ": " + shown : ""}` };
     }
-    case "language": {
-      const detected = detectLanguage(answer);
-      return { status: detected === check.expect ? "pass" : "fail", detail: `expected ${check.expect}, detected ${detected} (heuristic, word-list based)` };
-    }
+    case "language":
+      return languageCheck(answer, check.expect);
     case "no_markdown": {
       const hit = MARKDOWN_PATTERNS.some((re) => re.test(answer));
       return { status: hit ? "fail" : "pass", detail: check.note || "no markdown syntax (**, __, `, #, -, 1.)" };
@@ -901,7 +903,52 @@ async function runExtractCase(project, aiProvider, _createdBrdp, testCase) {
   };
 }
 
+// AI Extract (2/2): a free text through the same steps as the page -- the
+// real /text endpoint (the word count), step 1 with the app's findDecisions
+// (the halves when an answer is cut), the decisions posted for the server
+// to check and classify, then the batch drafter for Definition / Proposal.
+// The answer reported is the decisions JSON of step 1; the candidates (with
+// their texts) are in the check context.
+async function runExtractTextCase(project, aiProvider, _createdBrdp, testCase) {
+  const text = testCase.textFile ? fs.readFileSync(path.join(REPO_ROOT, testCase.textFile), "utf8") : testCase.text;
+  const filename = testCase.textFile ? path.basename(testCase.textFile) : "";
+  const { job_id: jobId } = await apiFetch(`/api/projects/${project.id}/ai-extract/text`, { method: "POST", body: JSON.stringify({ text, filename }) });
+  let systemPrompt = "";
+  const decisions = await findDecisions({
+    text,
+    standard: testCase.standard,
+    ask: async ({ system, user }) => {
+      if (!systemPrompt) systemPrompt = system;
+      return sendMessagesToLlm(aiProvider, system, [{ role: "user", content: user }], FIND_DECISIONS_TEMPERATURE, EXTRACT_MAX_TOKENS);
+    },
+  });
+  await apiFetch(`/api/projects/${project.id}/ai-extract/jobs/${jobId}/decisions`, { method: "POST", body: JSON.stringify({ decisions }) });
+  const deadline = Date.now() + 5 * 60 * 1000;
+  for (;;) {
+    const job = await apiFetch(`/api/projects/${project.id}/ai-extract/jobs/${jobId}`);
+    if (job.status === "completed") break;
+    if (job.status === "failed") throw new Error(`extraction failed: ${job.error}`);
+    if (Date.now() > deadline) throw new Error("extraction did not finish within 5 minutes");
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const { candidates } = await apiFetch(`/api/projects/${project.id}/ai-extract/jobs/${jobId}/candidates`);
+  const written = await draftCandidates(candidatesToDraft(candidates), {
+    standard: testCase.standard,
+    ruleFormat: STANDARD_TO_RULE_FORMAT[testCase.standard],
+    ask: async ({ system, user }) => sendMessagesToLlm(aiProvider, system, [{ role: "user", content: user }], SUGGEST_TEMPERATURE, EXTRACT_MAX_TOKENS),
+  });
+  const byKey = new Map(written.map((r) => [r.key, r]));
+  const textCandidates = candidates.map((c) => ({ ...c, ...(byKey.get(c.key) || {}) }));
+  return {
+    systemPrompt,
+    userMessage: FIND_DECISIONS_USER_MESSAGE,
+    answer: JSON.stringify({ decisions }),
+    checkContext: { standard: testCase.standard, systemPrompt, textCandidates },
+  };
+}
+
 async function runCaseOnce(project, aiProvider, createdBrdp, testCase) {
+  if (testCase.type === "extract-from-text") return runExtractTextCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "extract-from-rules") return runExtractCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "rule-test") return runRuleTestCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "rule-review") return runRuleReviewCase(project, aiProvider, createdBrdp, testCase);
@@ -969,8 +1016,8 @@ async function main() {
           });
         }
       }
-      // An extract-from-rules case has no BRDP of its own: its candidates
-      // come from the file.
+      // An extract-from-rules / extract-from-text case has no BRDP of its
+      // own: its candidates come from the file or the text.
       if (testCase.brdp) brdpByCase.set(testCase.id, await createBrdp(project.id, testCase.brdp));
     }
 
@@ -1058,7 +1105,7 @@ function buildReportHeader(meta, runs) {
     model: meta.aiProvider.model,
     commit: meta.gitInfo.commit,
     uncommittedChanges: meta.gitInfo.dirty,
-    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE, "extract-from-rules": SUGGEST_TEMPERATURE },
+    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE, "extract-from-rules": SUGGEST_TEMPERATURE, "extract-from-text": FIND_DECISIONS_TEMPERATURE },
     runs,
     generatedAt: meta.generatedAt,
     // C3: only some cases were run (--only / --cases).
@@ -1077,7 +1124,7 @@ function writeReport(results, runs, meta) {
   lines.push(`- Provider: ${header.provider} / ${header.model}`);
   lines.push(`- Commit: ${header.commit}${header.uncommittedChanges ? " (+ uncommitted changes)" : ""}`);
   lines.push(
-    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}, extract-from-rules=${header.temperatures["extract-from-rules"]}`
+    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}, extract-from-rules=${header.temperatures["extract-from-rules"]}, extract-from-text=${header.temperatures["extract-from-text"]} (texts ${SUGGEST_TEMPERATURE})`
   );
   lines.push(`- Runs per case: ${header.runs}`);
   lines.push(`- Generated: ${header.generatedAt}`);

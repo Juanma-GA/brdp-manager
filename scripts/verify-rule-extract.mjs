@@ -119,7 +119,20 @@ async function main() {
     await waitReviewDrafted(page);
     const counts = await page.getByTestId("rule-extract-counts").innerText();
     assert(counts.includes("502 candidates"), "502 candidates from the Lufthansa BREX", counts);
-    assert(/From catalog: \d+/.test(counts) && /New EXT: \d+/.test(counts), "classified as From catalog / New EXT", counts);
+    // With the real S1000D 4.1 catalog loaded, the 116 S1 identifiers the 4.2
+    // catalog lacks are "From catalog (S1000D 4.1)"; without it, "New EXT".
+    assert(/From catalog: \d+/.test(counts) && /(New EXT|From catalog \(S1000D 4\.1\)): \d+/.test(counts), "classified as From catalog / New EXT or From catalog (S1000D 4.1)", counts);
+    {
+      // This script tests the new-EXT path: those rows are reclassified as
+      // "New EXT" (checked, as a new EXT is by default) -- the state it was
+      // written for, before the real 4.1 catalog was loaded.
+      const job = await api(`/api/projects/${lh.id}/ai-extract/jobs/active`);
+      const all = (await api(`/api/projects/${lh.id}/ai-extract/jobs/${job.id}/candidates`)).candidates;
+      const items = all.filter((c) => c.classification === "catalog_edition").map((c) => ({ key: c.key, classification: "new_ext", selected: true }));
+      if (items.length) await api(`/api/projects/${lh.id}/ai-extract/jobs/${job.id}/candidates`, { method: "PATCH", body: JSON.stringify({ items }) });
+      await page.reload();
+      await waitReviewDrafted(page);
+    }
 
     let r = await showRowOf(page, "BRDP-S1-00117");
     assert((await r.getByTestId("rule-extract-class").inputValue()) === "catalog", "S1-00117 is From catalog");

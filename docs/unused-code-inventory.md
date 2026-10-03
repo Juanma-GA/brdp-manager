@@ -80,10 +80,14 @@ Todo lo que sigue solo lo alcanza `generateSuggestedRule.js` (sección 1):
 
 | Fichero / export | Quién lo importa | Versión | Reutilización | Recomendación |
 |---|---|---|---|---|
-| `src/components/AIExtractModal/AIExtractModal.jsx` (+ CSS) | nadie | v1 | **AI Extract** | mantener para AI Extract. **Al reutilizarlo**, quitar la lectura de `brdp_api_key`, `brdp_provider` y demás de `localStorage` (HR1) y usar el proveedor del servidor, como Ask. |
-| `src/api/extractBRDPs.js` y sus exports `extractTextFromDOCX`, `extractTextFromPDF`, `extractTextFromFile`, `generateIds` | `AIExtractModal.jsx` | v1 con transporte v2: llama a `sendMessage` → `/api/llm-proxy` | **AI Extract** | mantener para AI Extract. `generateIds` crea ids `BRDP-EXT-NNNNN` en el cliente; v2 ya tiene `GET …/brdps/next-ext-identifier`, así que **revisar** al reutilizar. |
-| `src/api/llmAPI.js` → `sendMessage` | vivo (Ask, Suggest, test de reglas) | v2 | AI Extract también | mantener |
-| Dependencias `mammoth` y `pdfjs-dist` | `extractBRDPs.js` | — | **AI Extract** | mantener |
+**Cerrado (AI Extract 2/2)**: AI Extract se ha reescrito sobre v2 (`src/components/extract/RuleExtractSection.jsx` + `TextExtractInput.jsx`, servidor `rule_extract*.py` / `text_extract.py`), sin reutilizar el modal de v1.
+
+| Fichero / export | Estado |
+|---|---|
+| `src/components/AIExtractModal/AIExtractModal.jsx` (+ CSS) | **borrado** (no lo importaba nadie; leía la clave del proveedor de `localStorage`, HR1) |
+| `src/api/extractBRDPs.js` | **borrado**; la lectura de .docx/.pdf (`extractTextFromDOCX`/`extractTextFromPDF`) pasa a `src/utils/documentText.js`; `generateIds` no se reutiliza (los números EXT los da el servidor) |
+| `src/api/llmAPI.js` → `sendMessage` | vivo (Ask, Suggest, test de reglas, AI Extract) |
+| Dependencias `mammoth` y `pdfjs-dist` | vivas: `src/utils/documentText.js` |
 
 ## 5. Páginas y componentes de v1 (`BRDPPage` y compañía)
 

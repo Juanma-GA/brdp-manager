@@ -69,17 +69,46 @@ function isSuggestRule(text) {
 // recognisable; the texts are in Spanish when the decision text is.
 // EXTRACT_BROKEN in a decision text → an answer that is not JSON (every
 // time, so the batch ends "not written").
+// AI Extract (2/2): "Find the decisions in this text." -- the sentences of
+// the text between the markers that read like a decision (shall / must /
+// debe / siempre / nunca …), each as its literal quote (whitespace
+// collapsed, as an AI usually writes it) with a short title. Markers in
+// the text:
+//   INVENTQUOTE                       one more decision whose quote is not
+//                                     in the text
+//   TRUNCATEFIND-START … -END         the whole text is "cut by its length"
+//                                     (finish_reason length); each half,
+//                                     having only one marker, is not
+//   TRUNCATEALWAYS                    every answer is cut
+const DECISION_SENTENCE_RE = /\b(shall|must|never|always|debe|deben|siempre|nunca|se marcan|se redacta|se divide|no se mezclan|no se admiten)\b/i;
+function findDecisionsReply(systemPrompt) {
+  const text = (systemPrompt.split("<<<TEXT\n")[1] || "").split("\nTEXT>>>")[0];
+  const truncate = /TRUNCATEALWAYS/.test(text) || (/TRUNCATEFIND-START/.test(text) && /TRUNCATEFIND-END/.test(text));
+  const decisions = [];
+  for (const paragraph of text.split(/\n\s*\n/)) {
+    if (/^#/.test(paragraph.trim())) continue;
+    for (const sentence of paragraph.replace(/\s+/g, " ").trim().split(/(?<=[.!?»])\s+(?=[A-ZÁÉÍÓÚ¿¡«])/)) {
+      if (!DECISION_SENTENCE_RE.test(sentence)) continue;
+      const words = sentence.replace(/[«»"“”.,:;]/g, "").split(" ").filter((w) => !/^BRDP-/.test(w));
+      decisions.push({ quote: sentence, title: words.slice(0, 6).join(" ") });
+    }
+  }
+  if (/INVENTQUOTE/.test(text)) decisions.push({ quote: "Every figure shall have a caption with its number.", title: "Invented figure captions" });
+  return { reply: JSON.stringify({ decisions }), truncate };
+}
+
 function extractReply(systemPrompt) {
   if (/EXTRACT_BROKEN/.test(systemPrompt)) return "Sorry, here are the texts: {not json";
   const blocks = systemPrompt.split(/\n(?=BRDP key=)/).slice(1);
   const items = blocks.map((block) => {
     const key = (block.match(/^BRDP key=(\S+)/) || [])[1];
-    const origin = (block.match(/Identifier in the source file: (\S+)/) || [])[1] || key;
+    const origin = (block.match(/Identifier (?:in the source file|named in the document): (\S+)/) || [])[1] || key;
     const write = ((block.match(/\n {2}Write: ([^\n]*)/) || [])[1] || "proposal").split(/,\s*/);
     const writeAll = write.includes("title");
-    const decisionBlock = (block.match(/Decision text in the file[^\n]*\n((?: {2}> .*\n?)+)/) || [])[1] || "";
+    // A free text (AI Extract 2/2) gives the quote instead of a decision text.
+    const decisionBlock = (block.match(/(?:Decision text in the file|Quote from the document)[^\n]*\n((?: {2}> .*\n?)+)/) || [])[1] || "";
     const decisionLines = decisionBlock.split("\n").map((l) => l.replace(/^ {2}> /, "")).filter(Boolean);
-    const decision = (decisionLines.find((l) => /Decision made by|shall|must|debe/.test(l)) || decisionLines[0] || "").replace(/^Decision made by \w+\.\s*/, "");
+    const decision = (decisionLines.find((l) => /Decision made by|shall|must|debe/.test(l)) || decisionLines.join(" ") || "").replace(/^Decision made by \w+\.\s*/, "");
     const firstRule = (block.match(/\n {2}- (\/\/?[^ ]+)/) || [])[1] || "";
     const spanish = /\b(Decidir|debe|deben|el|la|los|las)\b/.test(decision);
     const proposal = spanish
@@ -812,6 +841,10 @@ const server = http.createServer((req, res) => {
       reply =
         "MOCK-LONG-DEFINITION: This decision point governs the applicability and scope of the allowedObjectFlag attribute across every structureObjectRule and nonContextRule in the data module, including split-rule variants, and must be evaluated consistently for every objectPath regardless of dmCode context or system differences. " +
         "Alsounabrokenverylongsingletokenwithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    } else if (userText === "Find the decisions in this text.") {
+      const found = findDecisionsReply(messages.find((m) => m.role === "system")?.content || "");
+      reply = found.reply;
+      if (found.truncate) truncateNextArmed = true;
     } else if (userText === "Write the texts for these BRDPs.") {
       extractCalls += 1;
       reply = extractBroken ? "Sorry, here are the texts: {not json" : extractReply(messages.find((m) => m.role === "system")?.content || "");

@@ -1,5 +1,6 @@
-// AI Extract (1/2): writes, in batches, the texts the file cannot give
-// (see src/prompts/extractFromRulesPrompt.js). Pure apart from the injected
+// AI Extract: writes, in batches, the texts the file cannot give (see
+// src/prompts/extractFromRulesPrompt.js; for a free text,
+// src/prompts/extractFromTextPrompt.js). Pure apart from the injected
 // `ask`, so the review page and scripts/run-prompt-eval.mjs run exactly the
 // same steps:
 //   ask({ system, user }) → the LLM's answer text, at SUGGEST_TEMPERATURE;
@@ -9,6 +10,7 @@
 // hand -- HR7: never invented, never silently empty). A candidate the
 // answer leaves out is "failed" too, without retrying the whole batch.
 import { aiFieldsOf, buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../prompts/extractFromRulesPrompt.js';
+import { buildExtractFromTextPrompt, EXTRACT_TEXT_USER_MESSAGE } from '../prompts/extractFromTextPrompt.js';
 
 export const DRAFT_BATCH_SIZE = 10;
 export const DRAFT_CONCURRENCY = 3;
@@ -45,14 +47,23 @@ export function candidatesToDraft(candidates, { includeFailed = false } = {}) {
   return [...todo.filter((c) => c.selected), ...todo.filter((c) => !c.selected)];
 }
 
+// A free-text extraction (AI Extract 2/2) writes from the quote and its
+// paragraph; a BREX / Schematron one from the rules' summary. Same JSON.
+function batchPrompt(batch, { standard, ruleFormat }) {
+  if (batch[0]?.source === 'text') {
+    return { system: buildExtractFromTextPrompt({ standard, candidates: batch }), user: EXTRACT_TEXT_USER_MESSAGE };
+  }
+  return { system: buildExtractFromRulesPrompt({ standard, ruleFormat, candidates: batch }), user: EXTRACT_USER_MESSAGE };
+}
+
 async function draftBatch(batch, { standard, ruleFormat, ask }) {
-  const system = buildExtractFromRulesPrompt({ standard, ruleFormat, candidates: batch });
+  const { system, user } = batchPrompt(batch, { standard, ruleFormat });
   const keys = batch.map((c) => c.key);
   const fieldsByKey = new Map(batch.map((c) => [c.key, aiFieldsOf(c)]));
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const text = await ask({ system, user: EXTRACT_USER_MESSAGE });
+      const text = await ask({ system, user });
       const { items } = parseExtractFromRulesResponse(text, keys, fieldsByKey);
       return batch.map((c) => {
         const item = items.get(c.key);
