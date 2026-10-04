@@ -503,6 +503,10 @@ const resources = {
           label: 'Resize the detail panel',
           hint: 'Drag or use the arrow keys to resize; double-click to reset',
         },
+        catalogEdition: {
+          title: 'From the {{edition}} catalog. Not in {{standard}}.',
+          titleRetired: 'From the {{edition}} catalog. Not in {{standard}} (retired).',
+        },
         searchPlaceholder: 'Search by ID or Title…',
         addButton: 'Add BRDP',
         selectHint: 'Select a BRDP from the table.',
@@ -1730,6 +1734,10 @@ const resources = {
         resizeDivider: {
           label: 'Redimensionar el panel de detalle',
           hint: 'Arrastra o usa las flechas para redimensionar; doble clic para restablecer',
+        },
+        catalogEdition: {
+          title: 'Del catálogo {{edition}}. No existe en {{standard}}.',
+          titleRetired: 'Del catálogo {{edition}}. No existe en {{standard}} (obsoleta).',
         },
         searchPlaceholder: 'Buscar por ID o Título…',
         addButton: 'Añadir BRDP',

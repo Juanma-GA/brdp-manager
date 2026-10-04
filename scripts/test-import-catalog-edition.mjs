@@ -2,6 +2,8 @@
 // History entry, in English and Spanish, with the real translations.
 //     node scripts/test-import-catalog-edition.mjs
 import i18n from '../src/i18n/index.js';
+import { catalogEditionLabel, catalogEditionRetired, catalogEditionTitle } from '../src/utils/catalogEdition.js';
+import { buildHTML, buildMarkdown } from '../src/api/buildBREXdocReport.js';
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -40,6 +42,31 @@ for (const key of ['catalogEditionListTitle', 'catalogEditionShow', 'catalogEdit
     check(`${key} ${lang} translated`, text.startsWith('config.') || text.includes('{{'), false);
   }
 }
+
+// The "4.1" label next to the identifier (Records, the BRDP panel, Compare).
+check('label', catalogEditionLabel('S1000D 4.1'), '4.1');
+check('label 3.0.1', catalogEditionLabel('S1000D 3.0.1'), '3.0.1');
+check('retired: 4.1 in a 4.2 project', catalogEditionRetired('S1000D 4.1', 'S1000D 4.2'), true);
+check('not retired: 4.2 in a 4.1 project', catalogEditionRetired('S1000D 4.2', 'S1000D 4.1'), false);
+check('retired: 3.0.1 in a 4.1 project', catalogEditionRetired('S1000D 3.0.1', 'S1000D 4.1'), true);
+check('tooltip ES, older', catalogEditionTitle(es, 'S1000D 4.1', 'S1000D 4.2'), 'Del catálogo S1000D 4.1. No existe en S1000D 4.2 (obsoleta).');
+check('tooltip ES, newer', catalogEditionTitle(es, 'S1000D 4.2', 'S1000D 4.1'), 'Del catálogo S1000D 4.2. No existe en S1000D 4.1.');
+check('tooltip EN, older', catalogEditionTitle(en, 'S1000D 4.1', 'S1000D 4.2'), 'From the S1000D 4.1 catalog. Not in S1000D 4.2 (retired).');
+check('tooltip EN, newer', catalogEditionTitle(en, 'S1000D 4.2', 'S1000D 4.1'), 'From the S1000D 4.2 catalog. Not in S1000D 4.1.');
+
+// Report: "Catalog Edition" column, "S1000D 4.1" in those rows, empty in the rest.
+const reportRows = [
+  { id: 'BRDP-S1-00036', title: 'T', definition: 'D', proposal: 'P', validation: 'Pending', ruleStatus: 'To Do', catalogEdition: 'S1000D 4.1' },
+  { id: 'BRDP-S1-00052', title: 'T', definition: 'D', proposal: 'P', validation: 'Pending', ruleStatus: 'To Do' },
+];
+const html = buildHTML(reportRows, { projectName: 'P' });
+check('report HTML: column header', html.includes('<th>Catalog Edition</th>'), true);
+check('report HTML: data carries the edition', html.includes('"catalogEdition":"S1000D 4.1"'), true);
+check('report HTML: empty for the rest', html.includes('"id":"BRDP-S1-00052","title":"T","definition":"D","proposal":"P","validation":"Pending","ruleStatus":"To Do","catalogEdition":""'), true);
+const md = buildMarkdown(reportRows, { projectName: 'P' });
+check('report Markdown: header', md.includes('| ID | Title | Definition | Proposal | Status | Rule Status | Catalog Edition |'), true);
+check('report Markdown: row with the edition', md.includes('| `BRDP-S1-00036` | T | D | P | Pending | To Do | S1000D 4.1 |'), true);
+check('report Markdown: row without', md.includes('| `BRDP-S1-00052` | T | D | P | Pending | To Do |  |'), true);
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL OK');
 process.exit(failures ? 1 : 0);

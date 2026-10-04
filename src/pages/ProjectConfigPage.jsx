@@ -77,6 +77,8 @@ function brdpToExportRow(brdp, ruleApproval) {
     proposalStatus: brdp.validation,
     ruleStatus: RULE_STATUS_LABELS[ruleStateOf(ruleApproval)],
     rule: ruleApproval?.rule_xml || '',
+    // Informative column: the import ignores it (the identifier decides).
+    catalogEdition: brdp.catalog_edition || '',
   };
 }
 

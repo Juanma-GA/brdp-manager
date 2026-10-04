@@ -44,5 +44,10 @@ class BRDPOut(BaseModel):
     history: list
     created_at: datetime
     updated_at: datetime
+    # The other S1000D edition whose catalog has this identifier when the
+    # catalog of the project's standard does not ("S1000D 4.1"), else None.
+    # Computed per response (app/api/routes/brdps.py's _with_catalog_edition),
+    # never stored.
+    catalog_edition: str | None = None
 
     model_config = {"from_attributes": True}

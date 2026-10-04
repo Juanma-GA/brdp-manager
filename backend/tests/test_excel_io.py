@@ -253,7 +253,9 @@ def test_text_that_looks_like_a_formula_stays_text():
     )
     data = build_export_workbook([row])
     sheet = openpyxl.load_workbook(io.BytesIO(data)).active
-    assert [(c.value, c.data_type) for c in sheet[2]] == [
+    # The 8th column (Catalog Edition) is empty for this row.
+    assert not sheet[2][7].value
+    assert [(c.value, c.data_type) for c in sheet[2][:7]] == [
         ("BRDP-XL-FORMULA", "s"),
         ("=1+1", "s"),
         ('=HYPERLINK("http://x","y")', "s"),
@@ -478,5 +480,6 @@ def test_read_template_script_writes_utf8_even_with_a_cp1252_console(tmp_path):
             "Proposal Status": "Validated",
             "Rule Status": "To Do",
             "Rule": "",
+            "Catalog Edition": "",
         }
     ]

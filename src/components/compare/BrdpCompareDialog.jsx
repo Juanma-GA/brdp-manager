@@ -14,6 +14,7 @@ import { validateRuleXml } from '../../hooks/useSuggestions';
 import { RuleValidationWarnings } from '../assistant/RuleSuggestionPanel';
 import recordsStyles from '../../pages/RecordsPage.module.css';
 import styles from './BrdpCompareDialog.module.css';
+import CatalogEditionTag from '../CatalogEditionTag';
 
 const detailUrl = (projectId, brdpId, otherId) => `/api/projects/${projectId}/brdps/${brdpId}/compare-detail/${otherId}`;
 
@@ -347,7 +348,10 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
 
   const header = (detail, testId) => (
     <div className={styles.columnHeader} data-testid={testId}>
-      <strong>{detail.identifier}</strong>
+      <strong>
+        {detail.identifier}
+        <CatalogEditionTag edition={detail.catalog_edition} standard={detail.standard} />
+      </strong>
       <span>{t('records.compare.columnHeader', { project: detail.project_name, standard: detail.standard })}</span>
     </div>
   );
@@ -366,6 +370,7 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
         <div className={styles.titleBar}>
           <h3 id="brdp-compare-title" className={styles.title}>
             {t('records.compare.title', { identifier: selected.identifier })}
+            <CatalogEditionTag edition={selected.catalog_edition} standard={project.standard} />
           </h3>
           <button type="button" onClick={onClose} data-testid="compare-close">
             {t('records.compare.close')}
@@ -396,7 +401,10 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
                 {candidates.same_brdp.map((c) => (
                   <li key={c.brdp_id}>
                     <button type="button" className={chosenId === c.brdp_id ? styles.candidateActive : styles.candidate} aria-pressed={chosenId === c.brdp_id} onClick={() => setChosenId(c.brdp_id)} data-testid="compare-candidate">
-                      <span className={styles.candidateProject}>{c.project_name}</span>
+                      <span className={styles.candidateProject}>
+                        {c.project_name}
+                        <CatalogEditionTag edition={c.catalog_edition} standard={c.standard} />
+                      </span>
                       <span className={c.standard === candidates.standard ? styles.candidateStandard : styles.candidateStandardOther}>{c.standard}</span>
                       <CandidateStates candidate={c} />
                     </button>
@@ -414,7 +422,10 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
                   {projectMatches.map((b) => (
                     <li key={b.id}>
                       <button type="button" className={chosenId === b.id ? styles.candidateActive : styles.candidate} aria-pressed={chosenId === b.id} onClick={() => setChosenId(b.id)} data-testid="compare-project-candidate">
-                        <span className={styles.candidateProject}>{b.identifier}</span>
+                        <span className={styles.candidateProject}>
+                          {b.identifier}
+                          <CatalogEditionTag edition={b.catalog_edition} standard={project.standard} />
+                        </span>
                         <span className={styles.candidateTitle}>{b.title}</span>
                       </button>
                     </li>

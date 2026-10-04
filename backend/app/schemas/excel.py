@@ -14,6 +14,7 @@ class ExportRowIn(BaseModel):
     proposalStatus: str = ""
     ruleStatus: str = ""
     rule: str = ""
+    catalogEdition: str = ""
 
 
 class ExportRequest(BaseModel):

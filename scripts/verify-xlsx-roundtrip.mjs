@@ -59,6 +59,9 @@ const CURATED = {
   "DITA 1.3 Xpath3.0": ["brdp-template-dita-xpath3.xlsx", "SCH-DITA"],
 };
 const EXPORT_COLUMNS = ["ID", "Title", "Definition", "Proposal", "Proposal Status", "Rule Status", "Rule"];
+// Informative export column ("S1000D 4.1" for an identifier only in another
+// edition's catalog); the import ignores it.
+const EXPORTED_COLUMNS = [...EXPORT_COLUMNS, "Catalog Edition"];
 const RULE_STATUS = { approved: "Verified", pending_review: "Draft" };
 
 let failures = 0;
@@ -297,7 +300,7 @@ async function main() {
       const exportName = await download("Export to Excel", exportPath);
       assert(exportName === "brdps-export.xlsx", `export: ${exportName}`);
       const { rows, header } = readSheet(exportPath);
-      assert(JSON.stringify(header) === JSON.stringify(EXPORT_COLUMNS), `export: columns ${header.join(", ")}`);
+      assert(JSON.stringify(header) === JSON.stringify(EXPORTED_COLUMNS), `export: columns ${header.join(", ")}`);
       assert(rows.length === 10, `export: 10 rows (${rows.length})`);
       const approvalByBrdp = Object.fromEntries(approvals.map((a) => [a.brdp_id, a]));
       const mismatches = [];
@@ -308,7 +311,7 @@ async function main() {
           continue;
         }
         const a = approvalByBrdp[b.id];
-        const expected = { Title: b.title, Definition: b.definition, Proposal: b.proposal, "Proposal Status": b.validation, "Rule Status": a ? RULE_STATUS[a.status] : "To Do", Rule: a?.rule_xml || "" };
+        const expected = { Title: b.title, Definition: b.definition, Proposal: b.proposal, "Proposal Status": b.validation, "Rule Status": a ? RULE_STATUS[a.status] : "To Do", Rule: a?.rule_xml || "", "Catalog Edition": b.catalog_edition || "" };
         for (const [col, value] of Object.entries(expected)) if (String(row[col]) !== value) mismatches.push(`${b.identifier} ${col}: ${JSON.stringify(String(row[col]).slice(0, 60))} != ${JSON.stringify(value.slice(0, 60))}`);
       }
       assert(mismatches.length === 0, "export: every cell equals the stored value (multi-line rules included)", mismatches.slice(0, 5).join("\n       "));

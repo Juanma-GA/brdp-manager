@@ -22,6 +22,7 @@ from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.brdp_compare import CompareCandidateOut, CompareCandidatesOut, CompareDetailOut
 from app.schemas.rule_approval import RuleApprovalOut, rule_xml_hash
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
+from app.services.rule_extract_jobs import catalog_edition_labels
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps/{brdp_id}", tags=["brdp-compare"])
 
@@ -48,7 +49,8 @@ async def get_compare_candidates(
 ) -> CompareCandidatesOut:
     """The same BRDP in other projects: same identifier, active (never in
     the Papelera), in a project the user can see. Only when the identifier
-    is in the official catalog of THIS project's standard -- an EXT
+    is in the official catalog of THIS project's standard (or, failing
+    that, of another S1000D edition: catalog_edition_labels) -- an EXT
     identifier is the project's own and can match another project's by
     chance (the same rule as Suggest Proposal/Rule's same_brdp). Projects
     of another standard are included; each candidate carries its standard.
@@ -62,6 +64,11 @@ async def get_compare_candidates(
             .where(BRDPCatalog.standard == project.standard, BRDPCatalog.identifier == brdp.identifier)
         )
     ).scalar_one() > 0
+    # An identifier only in another S1000D edition's catalog (the "4.1"
+    # label) is just as official: the same identifier elsewhere is the same
+    # decision, so other projects are searched too.
+    if not catalog_identifier:
+        catalog_identifier = bool(await catalog_edition_labels(project.standard, [brdp.identifier], db))
 
     same_brdp: list[CompareCandidateOut] = []
     if catalog_identifier:
@@ -74,12 +81,19 @@ async def get_compare_candidates(
             )
         ).all()
         allowed: dict[uuid.UUID, bool] = {}
+        # The edition label of each candidate, under its own project's
+        # standard: one lookup per standard, not per row.
+        labels_by_standard: dict[str, dict[str, str]] = {}
         for other, other_project in rows:
             if other_project.id not in allowed:
                 allowed[other_project.id] = await has_project_role(current_user, other_project.id, "viewer", db)
             if not allowed[other_project.id]:
                 continue
             rule_format, approval = await _approval_for(db, other.id, other_project.standard)
+            if other_project.standard not in labels_by_standard:
+                labels_by_standard[other_project.standard] = await catalog_edition_labels(
+                    other_project.standard, [brdp.identifier], db
+                )
             same_brdp.append(
                 CompareCandidateOut(
                     brdp_id=other.id,
@@ -87,6 +101,7 @@ async def get_compare_candidates(
                     project_name=other_project.name,
                     standard=other_project.standard,
                     identifier=other.identifier,
+                    catalog_edition=labels_by_standard[other_project.standard].get(other.identifier),
                     title=other.title or "",
                     validation=other.validation,
                     rule_format=rule_format,
@@ -133,6 +148,7 @@ async def get_compare_detail(
         project_name=other_project.name,
         standard=other_project.standard,
         identifier=other.identifier,
+        catalog_edition=(await catalog_edition_labels(other_project.standard, [other.identifier], db)).get(other.identifier),
         title=other.title or "",
         definition=other.definition or "",
         proposal=other.proposal or "",

@@ -63,6 +63,10 @@ EXPORT_COLUMNS = [
     ("Proposal Status", "proposalStatus", 16),
     ("Rule Status", "ruleStatus", 14),
     ("Rule", "rule", 60),
+    # Informative only ("S1000D 4.1" when the identifier is only in another
+    # edition's catalog): never read back by the import (IMPORT_FIELD_MAP),
+    # the identifier decides.
+    ("Catalog Edition", "catalogEdition", 18),
 ]
 SHEET_NAME = "BRDPs"
 

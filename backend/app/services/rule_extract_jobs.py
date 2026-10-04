@@ -281,6 +281,49 @@ def other_edition_entry(
     return (edition, by_edition[edition]) if edition else None
 
 
+# A "marked" identifier carries the edition it came from
+# (BRDP-S1-00036-4.1, AI Extract's "From catalog (S1000D 4.1), marked").
+_MARKED_IDENTIFIER_RE = re.compile(r"^(BRDP-[A-Z]\d-\d{5})-\d+(?:\.\d+)*$")
+
+
+def catalog_base_identifier(identifier: str) -> str:
+    """BRDP-S1-00036-4.1 → BRDP-S1-00036; anything else as it is."""
+    m = _MARKED_IDENTIFIER_RE.match(identifier or "")
+    return m.group(1) if m else identifier
+
+
+async def catalog_edition_labels(standard: str, identifiers, db: AsyncSession) -> dict[str, str]:
+    """Identifier → the other S1000D edition whose catalog has it ("S1000D
+    4.1"), for every identifier the catalog of the project's standard does
+    not have -- the "4.1" label next to the identifier in Records, the BRDP
+    panel and Compare. Computed, never stored: the same lookup as the Excel
+    import and AI Extract (no label when the project's standard has no
+    catalog at all), a marked identifier looked up without its suffix, and
+    a constant number of queries whatever the number of BRDPs (3 at most)."""
+    if _edition_version(standard) is None:
+        return {}
+    bases = {i: catalog_base_identifier(i) for i in identifiers if i}
+    candidates = sorted({b for b in bases.values() if _OFFICIAL_RE.match(b)})
+    if not candidates:
+        return {}
+    own = set(
+        (
+            await db.execute(
+                select(BRDPCatalog.identifier).where(
+                    BRDPCatalog.standard == standard, BRDPCatalog.identifier.in_(candidates)
+                )
+            )
+        ).scalars().all()
+    )
+    editions = await load_other_edition_catalogs(standard, candidates, own, db)
+    out = {}
+    for identifier, base in bases.items():
+        found = other_edition_entry(standard, base, editions)
+        if found is not None:
+            out[identifier] = found[0]
+    return out
+
+
 def edition_suffix(edition: str) -> str:
     """"S1000D 4.1" → "4.1" (the "marked" identifier is BRDP-S1-00012-4.1)."""
     return edition.split(" ", 1)[1] if " " in edition else edition

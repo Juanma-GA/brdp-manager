@@ -34,6 +34,7 @@ function brdpToReportRow(brdp, ruleApproval) {
     proposal: brdp.proposal,
     validation: brdp.validation,
     ruleStatus: RULE_STATUS_LABELS[ruleStateOf(ruleApproval)],
+    catalogEdition: brdp.catalog_edition || '',
   };
 }
 

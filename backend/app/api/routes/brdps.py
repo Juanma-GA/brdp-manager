@@ -105,6 +105,23 @@ async def _get_owned_brdp(project_id: uuid.UUID, brdp_id: uuid.UUID, db: AsyncSe
     return brdp
 
 
+async def _with_catalog_edition(project_id: uuid.UUID, brdps: list[BRDP], db: AsyncSession) -> list[BRDP]:
+    """Sets brdp.catalog_edition (read by BRDPOut) on every BRDP: the other
+    S1000D edition whose catalog has its identifier when the catalog of the
+    project's standard does not. One batch lookup for all of them, never one
+    per row (SOPTE: 2,800 BRDPs). A plain attribute, not a mapped column:
+    nothing is stored."""
+    # Imported here: rule_extract_jobs imports route modules that import
+    # this one's neighbours.
+    from app.services.rule_extract_jobs import catalog_edition_labels
+
+    project = await db.get(Project, project_id)
+    labels = await catalog_edition_labels(project.standard, [b.identifier for b in brdps], db) if project else {}
+    for b in brdps:
+        b.catalog_edition = labels.get(b.identifier)
+    return brdps
+
+
 @router.get("", response_model=list[BRDPOut])
 async def list_brdps(
     project_id: uuid.UUID,
@@ -145,9 +162,10 @@ async def list_brdps(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
         rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
 
-    return await list_active_brdps(
+    brdps = await list_active_brdps(
         project_id, db, proposal_status=proposal_status, rule_status=rule_status, rule_format=rule_format
     )
+    return await _with_catalog_edition(project_id, list(brdps), db)
 
 
 @router.get("/stats", response_model=BRDPStatsOut)
@@ -226,7 +244,7 @@ async def create_brdp(
     db.add(brdp)
     await db.commit()
     await db.refresh(brdp)
-    return brdp
+    return (await _with_catalog_edition(project_id, [brdp], db))[0]
 
 
 @router.put("/{brdp_id}", response_model=BRDPOut)
@@ -258,7 +276,7 @@ async def update_brdp(
 
     await db.commit()
     await db.refresh(brdp)
-    return brdp
+    return (await _with_catalog_edition(project_id, [brdp], db))[0]
 
 
 @router.delete("/{brdp_id}", status_code=status.HTTP_204_NO_CONTENT)

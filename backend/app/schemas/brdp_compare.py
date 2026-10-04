@@ -17,6 +17,9 @@ class CompareCandidateOut(BaseModel):
     project_name: str
     standard: str
     identifier: str
+    # The other edition whose catalog has the identifier when that
+    # project's standard catalog does not ("S1000D 4.1"), else None.
+    catalog_edition: str | None = None
     title: str
     validation: str
     rule_format: str | None
@@ -48,6 +51,7 @@ class CompareDetailOut(BaseModel):
     project_name: str
     standard: str
     identifier: str
+    catalog_edition: str | None = None
     title: str
     definition: str
     proposal: str

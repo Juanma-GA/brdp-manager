@@ -41,6 +41,7 @@ import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
 import { useNameFixHints } from '../hooks/useNameFixHints.js';
 import SchemaNavCard from '../components/assistant/SchemaNavCard';
 import BrdpCompareDialog from '../components/compare/BrdpCompareDialog';
+import CatalogEditionTag from '../components/CatalogEditionTag';
 import SchemaSearch from '../components/assistant/SchemaSearch';
 import { useSchemaNavigation } from '../hooks/useSchemaNavigation';
 import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
@@ -1155,8 +1156,9 @@ export default function RecordsPage() {
                       className={selectedId === b.id ? styles.selectedRow : ''}
                       onClick={() => setSelectedId(b.id)}
                     >
-                      <td className={styles.mono}>
-                        {b.identifier}
+                      <td className={`${styles.mono} ${styles.idCell}`}>
+                        <span className={styles.idText}>{b.identifier}</span>
+                        <CatalogEditionTag edition={b.catalog_edition} standard={project.standard} />
                         {suggestions.suggestionsByBrdpId.has(b.id) && (
                           <span
                             className={styles.pendingSuggestionIcon}
@@ -1374,7 +1376,10 @@ export default function RecordsPage() {
             <>
               <label className={styles.fieldLabel}>{t('records.fieldId')}</label>
               <div className={styles.idRow}>
-                <p className={styles.mono}>{selected.identifier}</p>
+                <p className={styles.mono}>
+                  {selected.identifier}
+                  <CatalogEditionTag edition={selected.catalog_edition} standard={project.standard} />
+                </p>
                 <button type="button" onClick={() => setCompareDialogOpen(true)} title={t('records.compare.buttonTitle')} data-testid="compare-open">
                   {t('records.compare.button')}
                 </button>

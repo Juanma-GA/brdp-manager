@@ -70,6 +70,9 @@ export function buildHTML(brdps, projectConfig) {
     proposal: b.proposal || '—',
     validation: b.validation || '—',
     ruleStatus: b.ruleStatus || 'To Do',
+    // "S1000D 4.1" when the identifier is only in another edition's
+    // catalog; empty otherwise.
+    catalogEdition: b.catalogEdition || '',
   }))).replace(/</g, '\\u003c');
 
   return `<!DOCTYPE html>
@@ -167,6 +170,7 @@ export function buildHTML(brdps, projectConfig) {
         <th>Proposal</th>
         <th>Status</th>
         <th>Rule Status</th>
+        <th>Catalog Edition</th>
       </tr>
     </thead>
     <tbody id="brdp-tbody"></tbody>
@@ -228,6 +232,7 @@ export function buildHTML(brdps, projectConfig) {
         <td>\${escapeHtml(b.proposal)}</td>
         <td style="text-align:center;"><span class="\${badgeClass(b.validation)}">\${escapeHtml(b.validation)}</span></td>
         <td style="text-align:center;"><span class="\${ruleBadgeClass(b.ruleStatus)}">\${escapeHtml(b.ruleStatus)}</span></td>
+        <td style="white-space:nowrap;">\${escapeHtml(b.catalogEdition)}</td>
       </tr>\`).join('');
     renderPagination();
     window.scrollTo({ top: document.querySelector('.section:last-of-type').offsetTop - 20, behavior: 'smooth' });
@@ -280,7 +285,7 @@ export function buildMarkdown(brdps, projectConfig) {
   const pending   = brdps.filter(b => b.validation === 'Pending').length;
 
   const rows = brdps.map(b =>
-    `| \`${b.id || '—'}\` | ${escapeMarkdownCell(b.title)} | ${escapeMarkdownCell(b.definition)} | ${escapeMarkdownCell(b.proposal)} | ${b.validation || '—'} | ${escapeMarkdownCell(b.ruleStatus || 'To Do')} |`
+    `| \`${b.id || '—'}\` | ${escapeMarkdownCell(b.title)} | ${escapeMarkdownCell(b.definition)} | ${escapeMarkdownCell(b.proposal)} | ${b.validation || '—'} | ${escapeMarkdownCell(b.ruleStatus || 'To Do')} | ${escapeMarkdownCell(b.catalogEdition || '')} |`
   ).join('\n');
 
   return `# BRDP Review Closure Report
@@ -306,8 +311,8 @@ export function buildMarkdown(brdps, projectConfig) {
 
 ## BRDP Detail
 
-| ID | Title | Definition | Proposal | Status | Rule Status |
-|---|---|---|---|---|---|
+| ID | Title | Definition | Proposal | Status | Rule Status | Catalog Edition |
+|---|---|---|---|---|---|---|
 ${rows}
 
 ---

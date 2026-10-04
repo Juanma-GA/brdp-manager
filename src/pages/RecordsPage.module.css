@@ -173,8 +173,9 @@
    contain -- fixed width AND min-width so table-layout: fixed can't
    shrink it either. */
 .colId {
-  width: 150px;
-  min-width: 150px;
+  /* 175px: room for an identifier plus its edition label ("4.1") on one line. */
+  width: 175px;
+  min-width: 175px;
 }
 
 .colValidation {
@@ -1569,4 +1570,34 @@
 
 .idRow p {
   margin: 0;
+}
+
+/* The other catalog edition of a BRDP identifier ("4.1"), next to it --
+   same slate as the Draft/To Do tones already in use, never a new colour. */
+.catalogEditionTag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #475569;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 15px;
+  vertical-align: middle;
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* The ID cell of the Records table: the identifier never wraps, but the
+   edition label (or the pending-suggestion sparkle) drops to a second line
+   when a long identifier leaves no room, instead of running over Title. */
+.mono.idCell {
+  white-space: normal;
+}
+
+.idText {
+  white-space: nowrap;
 }
