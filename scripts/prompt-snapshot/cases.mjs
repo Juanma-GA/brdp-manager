@@ -24,7 +24,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { chooseTestSchemas, placeExample, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
+import { calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
+import { extractRuleNames } from '../../src/validation/schemaValidation.js';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
 import { describeRule, ruleConditions } from '../../src/utils/ruleTestEngine.js';
@@ -737,6 +738,20 @@ ruleTestExamplesCases.push(
   }
 );
 
+// Barrido final 1/2: a rule that looks at tables gets the model table built
+// from the first test schema's real structure, exactly as
+// prepareRuleTestSetup computes it (dita-xpath3-title-dependent-context and
+// brex-3-0-1-mandatory-absolute; every other case gets none).
+for (const c of ruleTestExamplesCases) {
+  const a = c.args[0];
+  const first = (a.placements || []).find((p) => p.role === 'rule' && p.insertion) || (a.placements || []).find((p) => p.role === 'rule');
+  if (!first) continue;
+  const key = `${String(a.standard).startsWith('DITA') ? 'DITA 1.3 Xpath2.0' : a.standard}|${first.schema}`;
+  const names = [...extractRuleNames(a.ruleXml).elements, ...ruleTargets(a.ruleXml).checked];
+  const model = ruleLooksAtTables(a.ruleXml, names) ? calsTableModel(realStructures[key]) : null;
+  if (model) a.tableModel = model;
+}
+
 // T3b "Review with the assistant": the review prompt, with the rule's
 // deterministic description (describeRule, English) -- a wrong rule (flag 2
 // on //emphasis, "cannot reject any content") and a right rule with a
@@ -881,6 +896,38 @@ export const extractFromTextCases = [
             paragraph: 'Las advertencias de seguridad se marcan siempre con el elemento <hazardstatement> y nunca con <note type="warning">.',
           },
         ],
+      },
+    ],
+  },
+];
+
+// Barrido final 1/2, Part 2: "does the rule implement the Proposal?", its
+// own call -- the real "at most three substeps" case (S1-00187's rule
+// forbids exactly one substep) and a rule that does implement its Proposal.
+const ruleOneSubstep =
+  '<structureObjectRule id="BRDP-S1-00187"><objectPath allowedObjectFlag="0">//proceduralStep[count(proceduralStep) = 1]</objectPath><objectUse>A step never has a single substep.</objectUse></structureObjectRule>';
+export const ruleProposalCheckCases = [
+  {
+    name: 'brex-4-2-at-most-three-vs-exactly-one',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-S1-00187', title: 'Substeps', definition: 'Number of substeps in a step.', proposal: 'A step has at most three substeps.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleOneSubstep,
+        ruleDescription: describeText(ruleOneSubstep, 'BREX-4.2'),
+      },
+    ],
+  },
+  {
+    name: 'brex-4-2-emphasis-forbidden-implements',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, proposal: '<emphasis> shall not be used.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleEmphasisFlag0,
+        ruleDescription: describeText(ruleEmphasisFlag0, 'BREX-4.2'),
       },
     ],
   },

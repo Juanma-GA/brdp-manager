@@ -55,7 +55,7 @@ import {
   buildSuggestRulePrompt,
   parseSuggestRuleResponse,
 } from "../src/prompts/suggestRulePrompt.js";
-import { ASK_TEMPERATURE, EXTRACT_MAX_TOKENS, FIND_DECISIONS_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
+import { ASK_TEMPERATURE, EXTRACT_MAX_TOKENS, FIND_DECISIONS_TEMPERATURE, RULE_PROPOSAL_CHECK_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE, SUGGEST_TEMPERATURE } from "../src/prompts/shared.js";
 import { isTruncatedAnswer, truncatedAnswerError } from "../src/api/llmTruncation.js";
 
 // The default output limit of every other use (llmAPI.js DEFAULT_MAX_TOKENS;
@@ -70,7 +70,8 @@ import i18n from "../src/i18n/index.js";
 import { ruleDescriptionText } from "../src/utils/ruleTestReasons.js";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import { analyzeRule, describeRule } from "../src/utils/ruleTestEngine.js";
-import { ruleTestVerdict } from "../src/utils/ruleTest.js";
+import { exampleProblems, ruleTestVerdict } from "../src/utils/ruleTest.js";
+import { cleanInternalNames } from "../src/utils/answerCleanup.js";
 import { generateRuleTestExamples } from "../src/utils/ruleTestRun.js";
 import { answerStructuralQuestion } from "../src/utils/structuralAnswer.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
@@ -326,7 +327,15 @@ async function runCheck(check, answer, ctx = {}) {
     case "rule_test_examples_valid": {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const bad = r.runs.map((run, i) => (run.validation.runnable ? null : r.examples[i].label)).filter(Boolean);
+      // Barrido final 1/2: each invalid example with its exact reason (the
+      // same English lines the correction round sends), not only its label.
+      const bad = r.runs
+        .map((run, i) => {
+          if (run.validation.runnable) return null;
+          const reasons = exampleProblems(run.validation, { standard: ctx.standard, schema: r.examples[i].schema });
+          return `"${r.examples[i].label}" (${reasons.join("; ") || "not runnable"})`;
+        })
+        .filter(Boolean);
       const corrected = r.correction ? ` (correction round: ${r.correction.truncated ? "answer cut off by max_tokens" : `${r.correction.fixed}/${r.correction.attempted} fixed`})` : "";
       return { status: bad.length ? "fail" : "pass", detail: bad.length ? `still invalid after the correction round: ${bad.join(", ")}${corrected}` : `all ${r.examples.length} examples valid${corrected}` };
     }
@@ -340,24 +349,26 @@ async function runCheck(check, answer, ctx = {}) {
     case "rule_test_verdict_correct": {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalMismatch);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
       return { status: verdict.kind === "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_verdict_review": {
       // "Revisar": a rule that does not implement the Proposal but whose
-      // examples pass -- the LLM's proposalMismatch turns "correct" into
-      // "review", as in the app.
+      // examples pass -- the separate Proposal check (Barrido final 1/2)
+      // turns "correct" into "review", as in the app. Only a real mismatch
+      // passes: "the Proposal could not be checked" is a review too, but
+      // not the answer this case expects.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalMismatch);
-      return { status: verdict.kind === "review" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
+      return { status: verdict.kind === "review" && !verdict.unchecked ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_verdict_incorrect": {
       // T3b: a known WRONG rule -- examples written from the decision must
       // expose it.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalMismatch);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
       return { status: verdict.kind === "incorrect" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_reject_examples_contain": {
@@ -664,11 +675,16 @@ async function runAskCase(project, aiProvider, createdBrdp, testCase) {
     vocabCheck,
     schemaFacts
   );
-  const answer = await sendToLlm(aiProvider, systemPrompt, testCase.question, ASK_TEMPERATURE);
+  const rawAnswer = await sendToLlm(aiProvider, systemPrompt, testCase.question, ASK_TEMPERATURE);
+  // Barrido final 1/2: the checks see what the user sees -- the app cleans
+  // the cards block's internal name ("SCHEMA FACTS") from the answer
+  // (src/utils/answerCleanup.js); responses.json keeps the raw answer too.
+  const answer = cleanInternalNames(rawAnswer, { userText: testCase.question });
   return {
     systemPrompt,
     userMessage: testCase.question,
     answer,
+    ...(answer !== rawAnswer ? { rawAnswer } : {}),
     checkContext: { vocabulary, vocabCheck, standard: testCase.standard, deterministic: false },
   };
 }
@@ -780,6 +796,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
   const ruleXml = schemas.length ? wrapRuleInSchemaContexts(testCase.rule, format, testCase.standard, schemas, location) : testCase.rule;
   const vocabulary = loadSchemaVocabulary(testCase.standard);
   const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse, standard: testCase.standard });
+  const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));
   const result = await generateRuleTestExamples({
     ruleXml,
     format,
@@ -795,9 +812,12 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
     fetchSchemaAttribute: (standard, name) =>
       apiFetch(`/api/schema-cards/attribute?standard=${encodeURIComponent(standard)}&name=${encodeURIComponent(name)}`),
     parseXml: xmldomParse,
+    // Barrido final 1/2: the Proposal check, the same separate call as the
+    // app (in parallel with the examples, RULE_PROPOSAL_CHECK_TEMPERATURE).
+    ruleDescription: description,
+    askProposalCheck: (messages, systemPrompt) => sendMessagesToLlm(aiProvider, systemPrompt, messages, RULE_PROPOSAL_CHECK_TEMPERATURE),
   });
-  const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalMismatch) : null;
-  const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));
+  const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalCheck) : null;
   return {
     systemPrompt: result.systemPrompt,
     userMessage: "Write the test examples for this rule.",
@@ -807,6 +827,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
       status: result.status,
       error: result.error || null,
       description,
+      proposalCheck: result.proposalCheck ? { status: result.proposalCheck.status, missing: result.proposalCheck.missing ?? null, error: result.proposalCheck.error ?? null, answer: result.proposalCheck.answer ?? null } : null,
       correction: result.correction ?? null,
       verdict,
       examples: (result.examples || []).map((ex, i) => ({
@@ -817,6 +838,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
         metadata: ex.metadata ?? null,
         xml: ex.xml,
         runnable: result.runs[i].validation.runnable,
+        problems: result.runs[i].validation.runnable ? [] : exampleProblems(result.runs[i].validation, { standard: testCase.standard, schema: ex.schema }),
         result: result.runs[i].result?.status ?? null,
       })),
     },
@@ -1053,10 +1075,10 @@ async function main() {
       for (let run = 1; run <= args.runs; run++) {
         process.stdout.write(`  ${testCase.id} (run ${run}/${args.runs})... `);
         try {
-          const { systemPrompt, userMessage, answer, finalRule, ruleTest, checkContext } = await runCaseOnce(project, aiProvider, createdBrdp, testCase);
+          const { systemPrompt, userMessage, answer, rawAnswer, finalRule, ruleTest, checkContext } = await runCaseOnce(project, aiProvider, createdBrdp, testCase);
           const checkResults = [];
           for (const check of testCase.checks) checkResults.push({ check, result: await runCheck(check, answer, checkContext) });
-          caseResult.runs.push({ run, systemPrompt, userMessage, answer, ...(finalRule !== undefined ? { finalRule } : {}), ...(ruleTest ? { ruleTest } : {}), checkResults });
+          caseResult.runs.push({ run, systemPrompt, userMessage, answer, ...(rawAnswer !== undefined ? { rawAnswer } : {}), ...(finalRule !== undefined ? { finalRule } : {}), ...(ruleTest ? { ruleTest } : {}), checkResults });
           const failed = checkResults.filter((c) => c.result.status === "fail").length;
           console.log(failed === 0 ? "ok" : `${failed} check(s) failed`);
         } catch (err) {
@@ -1124,7 +1146,7 @@ function buildReportHeader(meta, runs) {
     model: meta.aiProvider.model,
     commit: meta.gitInfo.commit,
     uncommittedChanges: meta.gitInfo.dirty,
-    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE, "extract-from-rules": SUGGEST_TEMPERATURE, "extract-from-text": FIND_DECISIONS_TEMPERATURE },
+    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE, "rule-proposal-check": RULE_PROPOSAL_CHECK_TEMPERATURE, "extract-from-rules": SUGGEST_TEMPERATURE, "extract-from-text": FIND_DECISIONS_TEMPERATURE },
     runs,
     generatedAt: meta.generatedAt,
     // C3: only some cases were run (--only / --cases).
@@ -1143,7 +1165,7 @@ function writeReport(results, runs, meta) {
   lines.push(`- Provider: ${header.provider} / ${header.model}`);
   lines.push(`- Commit: ${header.commit}${header.uncommittedChanges ? " (+ uncommitted changes)" : ""}`);
   lines.push(
-    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}, extract-from-rules=${header.temperatures["extract-from-rules"]}, extract-from-text=${header.temperatures["extract-from-text"]} (texts ${SUGGEST_TEMPERATURE})`
+    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}, rule-proposal-check=${header.temperatures["rule-proposal-check"]}, extract-from-rules=${header.temperatures["extract-from-rules"]}, extract-from-text=${header.temperatures["extract-from-text"]} (texts ${SUGGEST_TEMPERATURE})`
   );
   lines.push(`- Runs per case: ${header.runs}`);
   lines.push(`- Generated: ${header.generatedAt}`);
@@ -1206,9 +1228,13 @@ function writeReport(results, runs, meta) {
                   systemPrompt: r.systemPrompt,
                   userMessage: r.userMessage,
                   answer: r.answer,
+                  ...(r.rawAnswer !== undefined ? { rawAnswer: r.rawAnswer } : {}),
                   // Suggest Rule only: the rule as the app would save it
                   // (wrapped in the case's schema context blocks).
                   ...(r.finalRule !== undefined ? { finalRule: r.finalRule } : {}),
+                  // Test rule: the examples (with the exact reason of each
+                  // invalid one) and the Proposal check (Barrido final 1/2).
+                  ...(r.ruleTest ? { ruleTest: r.ruleTest } : {}),
                   checks: r.checkResults.map((cr) => ({ type: cr.check.type, ...cr.result })),
                 }
           ),

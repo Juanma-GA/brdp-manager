@@ -36,7 +36,9 @@ export function verdictView(t, verdict, standard) {
     case 'correct':
       return { tone: 'ok', text: t('records.ruleTest.verdicts.correct') };
     case 'review':
-      return { tone: 'warn', text: t('records.ruleTest.verdicts.review', { mismatch: verdict.mismatch }) };
+      return verdict.unchecked
+        ? { tone: 'warn', text: t('records.ruleTest.verdicts.reviewUnchecked', { error: verdict.error }) }
+        : { tone: 'warn', text: t('records.ruleTest.verdicts.review', { mismatch: verdict.mismatch }) };
     case 'incorrect':
       return {
         tone: 'bad',
@@ -191,6 +193,17 @@ function ColspecsAddedNote({ count }) {
   );
 }
 
+// Barrido final 1/2: the other table fixes the application made itself
+// (@cols raised, morerows past the last row lowered, an empty row removed)
+// -- said, never done silently.
+function TableFixNote({ text, testId }) {
+  return (
+    <p className={styles.ruleTestNote} data-testid={testId}>
+      {text}
+    </p>
+  );
+}
+
 // readOnly (Guardar la prueba aprobada): a kept example -- no Edit, only
 // Copy XML.
 // previousResult ("Probar con los ejemplos guardados"): the result this
@@ -260,6 +273,9 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
       )}
       {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
       {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}
+      {example.colsRaised?.length > 0 && <TableFixNote testId="rule-test-cols-raised" text={t('records.ruleTest.colsRaised', { count: example.colsRaised.length, values: example.colsRaised.map((c) => `${c.from} → ${c.to}`).join(', ') })} />}
+      {example.morerowsLowered?.length > 0 && <TableFixNote testId="rule-test-morerows-lowered" text={t('records.ruleTest.morerowsLowered', { count: example.morerowsLowered.length, rows: [...new Set(example.morerowsLowered)].join(', ') })} />}
+      {example.emptyRowsRemoved?.length > 0 && <TableFixNote testId="rule-test-empty-rows-removed" text={t('records.ruleTest.emptyRowsRemoved', { count: example.emptyRowsRemoved.length, rows: example.emptyRowsRemoved.join(', ') })} />}
       {example.brexReferenceNormalized && (
         <p className={styles.ruleTestNote} data-testid="rule-test-brex-normalized">
           {t('records.ruleTest.brexReferenceNormalized')}
@@ -674,9 +690,9 @@ export default function RuleTestPanel({
               busy={!aiProvider}
             />
           )}
-          {state.proposalMismatch && verdict?.kind !== 'review' && (
+          {state.proposalCheck?.status === 'mismatch' && verdict?.kind !== 'review' && (
             <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-mismatch">
-              ⚠ {t('records.ruleTest.proposalMismatch', { text: state.proposalMismatch })}
+              ⚠ {t('records.ruleTest.proposalMismatch', { text: state.proposalCheck.missing })}
             </p>
           )}
           <CorrectionNote correction={state.correction} />

@@ -1268,7 +1268,7 @@ export function checkExampleStructure(doc, structure) {
 // its free columns, the entries sitting in spanned columns are the extra
 // ones. Never throws: an unknown colname is treated as positional.
 export function checkCalsTableSpans(doc) {
-  return calsSpanProblems(doc).map(({ entry, ...problem }) => problem);
+  return calsSpanProblems(doc).map(({ entry, rowEl, maxMorerows, spannedInto, sectionRows, ...problem }) => problem);
 }
 
 // Same walk, keeping the offending <entry> of each spannedEntry problem.
@@ -1295,7 +1295,8 @@ function calsSpanProblems(doc) {
         // Without @cols or colspecs, the first row (nothing spans into it)
         // gives the width.
         const cols = declared || (rows[0] ? childrenNamed(rows[0], 'entry').length : 0);
-        const spanned = rows.map(() => new Set());
+        // Per row: column index → the row (0-based) whose morerows covers it.
+        const spanned = rows.map(() => new Map());
         rows.forEach((row, r) => {
           const entries = childrenNamed(row, 'entry');
           const named = (entry) => {
@@ -1329,18 +1330,28 @@ function calsSpanProblems(doc) {
             const more = intAttr(entry, 'morerows');
             for (let k = 1; k <= more; k += 1) {
               if (r + k >= rows.length) {
-                rowProblems.push({ kind: 'morerowsPastEnd', row: r + 1, column: label(span.start) });
+                rowProblems.push({ kind: 'morerowsPastEnd', row: r + 1, column: label(span.start), entry, maxMorerows: rows.length - 1 - r });
                 break;
               }
-              for (let c = span.start; c <= span.end; c += 1) spanned[r + k].add(c);
+              for (let c = span.start; c <= span.end; c += 1) if (!spanned[r + k].has(c)) spanned[r + k].set(c, r);
             }
           });
           const spannedCount = rowProblems.filter((p) => p.kind === 'spannedEntry').length;
           const fullyCovered = entries.length > 0 ? spannedCount === entries.length : cols > 0 && spanned[r].size >= cols;
           if (fullyCovered) {
-            problems.push({ kind: 'rowFullyCovered', row: r + 1 }, ...rowProblems.filter((p) => p.kind !== 'spannedEntry'));
+            // Which columns, and from which rows above -- so the correction
+            // request can say exactly what to change.
+            const coveredColumns =
+              entries.length > 0
+                ? rowProblems.filter((p) => p.kind === 'spannedEntry').map((p) => p.column)
+                : [...spanned[r].keys()].sort((a, b) => a - b).map(label);
+            const fromRows = [...new Set([...spanned[r].values()].map((x) => x + 1))].sort((a, b) => a - b);
+            problems.push(
+              { kind: 'rowFullyCovered', row: r + 1, columns: [...new Set(coveredColumns)], from: fromRows },
+              ...rowProblems.filter((p) => p.kind !== 'spannedEntry')
+            );
           } else if (entries.length === 0) {
-            problems.push({ kind: 'emptyRow', row: r + 1 });
+            problems.push({ kind: 'emptyRow', row: r + 1, rowEl: row, spannedInto: spanned[r].size > 0, sectionRows: rows.length });
           } else {
             problems.push(...rowProblems);
           }
@@ -1425,6 +1436,64 @@ export function removeSpannedCalsEntries(content, parseXml) {
   return { content: text, removedRows };
 }
 
+// Barrido final 1/2: two more table problems the application fixes itself,
+// because each has one fix that keeps every row reading the same:
+// - morerows past the last row (morerowsPastEnd): the span is lowered to the
+//   rows that exist (removed when none is left) -- the rows that exist keep
+//   exactly the cells they had.
+// - an empty <row/> that no morerows reaches (emptyRow): it is removed --
+//   it has no cell, and no span crosses it, so no other row changes. An
+//   empty row that a morerows above reaches, or the only row of its
+//   section, is not touched (its validation reports it).
+// On the TEXT of `content`, like removeSpannedCalsEntries → { content,
+// morerowsLowered: [row numbers], emptyRowsRemoved: [row numbers] }.
+// Unchanged when the content does not parse or its text and DOM disagree.
+export function fixCalsRowSpans(content, parseXml) {
+  const original = String(content ?? '');
+  const unchanged = { content: original, morerowsLowered: [], emptyRowsRemoved: [] };
+  let doc;
+  try {
+    doc = parseXml(wrapRuleXmlFragment(original));
+    if (!doc?.documentElement) return unchanged;
+  } catch {
+    return unchanged;
+  }
+  const problems = calsSpanProblems(doc);
+  const past = problems.filter((p) => p.kind === 'morerowsPastEnd');
+  const empty = problems.filter((p) => p.kind === 'emptyRow' && !p.spannedInto && p.sectionRows > 1);
+  if (past.length === 0 && empty.length === 0) return unchanged;
+  const domEntries = Array.from(doc.getElementsByTagName('entry'));
+  const domRows = Array.from(doc.getElementsByTagName('row'));
+  const entryTags = elementSpans(original, 'entry');
+  const rowTags = elementSpans(original, 'row');
+  if (entryTags.length !== domEntries.length || rowTags.length !== domRows.length) return unchanged;
+  const edits = [];
+  const morerowsLowered = [];
+  const emptyRowsRemoved = [];
+  for (const p of past) {
+    const tag = entryTags[domEntries.indexOf(p.entry)];
+    if (!tag) continue;
+    const open = original.slice(tag.start, tag.openEnd);
+    const m = /\s+morerows\s*=\s*(["'])[^"']*\1/.exec(open);
+    if (!m) continue;
+    const replacement = p.maxMorerows > 0 ? ` morerows="${p.maxMorerows}"` : '';
+    edits.push({ at: tag.start + m.index, del: m[0].length, text: replacement });
+    morerowsLowered.push(p.row);
+  }
+  for (const p of empty) {
+    const tag = rowTags[domRows.indexOf(p.rowEl)];
+    if (!tag || tag.end === null) continue;
+    let start = tag.start;
+    while (start > 0 && (original[start - 1] === ' ' || original[start - 1] === '\t')) start -= 1;
+    if (start > 0 && original[start - 1] === '\n') start -= 1;
+    edits.push({ at: start, del: tag.end - start, text: '' });
+    emptyRowsRemoved.push(p.row);
+  }
+  let text = original;
+  for (const e of edits.sort((a, b) => b.at - a.at)) text = text.slice(0, e.at) + e.text + text.slice(e.at + e.del);
+  return { content: text, morerowsLowered, emptyRowsRemoved };
+}
+
 // ─── Missing CALS colspecs (C3b follow-up) ─────────────────────────────────
 // An <entry colname="c2"> only means something if its <tgroup> has a
 // <colspec colname="c2"/>; an LLM often writes the colnames and no colspec
@@ -1448,6 +1517,22 @@ export function removeSpannedCalsEntries(content, parseXml) {
 // Either problem anywhere in the example leaves the whole example as
 // written (same as rowFullyCovered for morerows).
 const COLNAME_POSITION_RE = /^(?:c|col|column)?[-_]?(\d+)$/i;
+
+// The colnames of the first row (thead, then tbody, then tfoot) whose
+// entries all have a @colname (no namest/nameend), all different, and name
+// every one of `names` -- in reading order; null when no row does.
+function namingRowOrder(tgroup, names) {
+  const childrenNamed = (el, name) => Array.from(el.childNodes || []).filter((n) => n.nodeType === 1 && n.nodeName === name);
+  for (const section of ['thead', 'tbody', 'tfoot'].flatMap((n) => childrenNamed(tgroup, n))) {
+    for (const row of childrenNamed(section, 'row')) {
+      const entries = childrenNamed(row, 'entry');
+      if (entries.some((e) => !e.getAttribute('colname') || e.getAttribute('namest') || e.getAttribute('nameend'))) continue;
+      const order = entries.map((e) => e.getAttribute('colname'));
+      if (new Set(order).size === order.length && names.every((n) => order.includes(n))) return order;
+    }
+  }
+  return null;
+}
 
 function calsColspecPlans(doc) {
   const childrenNamed = (el, name) => Array.from(el.childNodes || []).filter((n) => n.nodeType === 1 && n.nodeName === name);
@@ -1476,9 +1561,15 @@ function calsColspecPlans(doc) {
     }
     const taken = new Set(existing.map((c) => c.position));
     const missing = [];
-    for (const name of used.filter((n) => !declared.has(n))) {
+    // Names with no number (colname="part"): with no colspec at all, a row
+    // that names every column used, each once and in reading order, gives
+    // their order (usually the header row: Part, Description, Qty.).
+    const undeclared = used.filter((n) => !declared.has(n));
+    const rowOrder =
+      existing.length === 0 && undeclared.some((n) => !COLNAME_POSITION_RE.test(n)) ? namingRowOrder(tgroup, undeclared) : null;
+    for (const name of undeclared) {
       const m = COLNAME_POSITION_RE.exec(name);
-      const position = m ? Number.parseInt(m[1], 10) : 0;
+      const position = rowOrder ? rowOrder.indexOf(name) + 1 : m ? Number.parseInt(m[1], 10) : 0;
       if (!position || taken.has(position)) {
         problems.push({ kind: 'unorderableColname', colname: name });
         continue;
@@ -1524,29 +1615,46 @@ function elementSpans(text, name) {
 }
 
 // Adds the missing colspecs to the TEXT of `content` (the rest stays exactly
-// as written) → { content, added }. Unchanged (added 0) when nothing is
-// missing, when any tgroup has an unfixable problem, or when the content
-// does not parse or its text and DOM disagree.
+// as written) → { content, added, colsRaised }. Barrido final 1/2: a
+// tgroup whose @cols is lower than the columns its entries really use
+// (tooManyColumns) gets @cols raised to that number -- every cell written
+// stays where it is, only the declaration follows the content
+// (colsRaised: [{ from, to }]). Unchanged (added 0, colsRaised []) when
+// nothing is missing, when any tgroup has a problem that cannot be fixed
+// (unorderableColname), or when the content does not parse or its text and
+// DOM disagree.
 export function addMissingCalsColspecs(content, parseXml) {
   const original = String(content ?? '');
+  const unchanged = { content: original, added: 0, colsRaised: [] };
   let doc;
   try {
     doc = parseXml(wrapRuleXmlFragment(original));
-    if (!doc?.documentElement) return { content: original, added: 0 };
+    if (!doc?.documentElement) return unchanged;
   } catch {
-    return { content: original, added: 0 };
+    return unchanged;
   }
   const plans = calsColspecPlans(doc);
-  if (plans.some((p) => p.problems.length > 0)) return { content: original, added: 0 };
-  if (!plans.some((p) => p.missing.length > 0)) return { content: original, added: 0 };
+  if (plans.some((p) => p.problems.some((pr) => pr.kind !== 'tooManyColumns'))) return unchanged;
+  const raise = (plan) => plan.problems.find((pr) => pr.kind === 'tooManyColumns');
+  if (!plans.some((p) => p.missing.length > 0 || raise(p))) return unchanged;
   const tgroupSpans = elementSpans(original, 'tgroup');
   const colspecSpans = elementSpans(original, 'colspec');
   if (tgroupSpans.length !== plans.length || colspecSpans.length !== doc.getElementsByTagName('colspec').length) {
-    return { content: original, added: 0 };
+    return unchanged;
   }
   const inserts = [];
+  const colsRaised = [];
   let added = 0;
   plans.forEach((plan, t) => {
+    const tooMany = raise(plan);
+    if (tooMany) {
+      const { start, openEnd } = tgroupSpans[t];
+      const m = /(\scols\s*=\s*)(["'])\s*\d+\s*\2/.exec(original.slice(start, openEnd));
+      if (m) {
+        inserts.push({ at: start + m.index, del: m[0].length, text: `${m[1]}${m[2]}${tooMany.columns}${m[2]}` });
+        colsRaised.push({ from: tooMany.cols, to: tooMany.columns });
+      }
+    }
     if (plan.missing.length === 0) return;
     const openEnd = tgroupSpans[t].openEnd;
     const lineBreak = /^\r?\n([ \t]*)/.exec(original.slice(openEnd));
@@ -1571,11 +1679,20 @@ export function addMissingCalsColspecs(content, parseXml) {
       }
       prevPosition = col.position;
     }
-    for (const [at, tags] of byAnchor) inserts.push({ at, text: tags.join('') });
+    for (const [at, tags] of byAnchor) inserts.push({ at, del: 0, text: tags.join('') });
   });
   let text = original;
-  for (const ins of inserts.sort((a, b) => b.at - a.at)) text = text.slice(0, ins.at) + ins.text + text.slice(ins.at);
-  return { content: text, added };
+  for (const ins of inserts.sort((a, b) => b.at - a.at)) text = text.slice(0, ins.at) + ins.text + text.slice(ins.at + ins.del);
+  return { content: text, added, colsRaised };
+}
+
+// " (column c2, by the morerows of row 1)" -- which cells of the row are
+// covered and from where; empty for a problem without those details.
+function coveredDetail(problem) {
+  if (!problem.columns?.length || !problem.from?.length) return '';
+  const cols = `${problem.columns.length === 1 ? 'column' : 'columns'} ${problem.columns.join(', ')}`;
+  const rows = `${problem.from.length === 1 ? 'row' : 'rows'} ${problem.from.join(', ')}`;
+  return ` (${cols}, by the morerows of ${rows})`;
 }
 
 // English, for the correction request sent back to the LLM (the panel
@@ -1589,7 +1706,7 @@ export function formatStructureProblem(problem, schema) {
     case 'emptyRow':
       return `row ${problem.row} has no entry`;
     case 'rowFullyCovered':
-      return `row ${problem.row} is entirely covered by morerows from above: give row ${problem.row} its own entries or lower the morerows`;
+      return `row ${problem.row} is entirely covered by morerows from above${coveredDetail(problem)}: give row ${problem.row} its own entries or lower the morerows`;
     case 'unorderableColname':
       return `colname="${problem.colname}" has no <colspec> and its column cannot be worked out: add <colspec colname="${problem.colname}"/> to the <tgroup>, in column order`;
     case 'tooManyColumns':
@@ -1896,6 +2013,19 @@ export function formatSchemaIssue(issue, t) {
   const params = { ...issue.params };
   if (Array.isArray(params.suggestions)) params.suggestions = joinList(params.suggestions, t('records.assistant.listOr'));
   if (Array.isArray(params.standards)) params.standards = formatStandardList(params.standards, t('records.assistant.listAnd'));
+  if (issue.code === 'rowFullyCovered') {
+    // " (column c2, by the morerows of row 1)" -- same text as
+    // formatStructureProblem in English.
+    const columns = params.columns || [];
+    const from = params.from || [];
+    params.detail =
+      columns.length && from.length
+        ? t('records.ruleTest.structure.coveredDetail', {
+            cols: t('records.ruleTest.structure.coveredColumns', { count: columns.length, columns: columns.join(', ') }),
+            rows: t('records.ruleTest.structure.coveredRows', { count: from.length, rows: from.join(', ') }),
+          })
+        : '';
+  }
   return t(key, params);
 }
 

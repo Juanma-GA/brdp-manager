@@ -1294,3 +1294,71 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
   }
   return { xml: lines.join('\n'), skeletonNodePaths: [...skeletonNodePaths, ...sectionPaths] };
 }
+
+// ─── Model table with a merged row (Barrido final 1/2) ─────────────────────
+// When a rule looks at tables, the examples prompt shows one valid CALS
+// table with a merged row, built here from the schema itself (never typed
+// by hand): every element and attribute it uses is checked against the
+// example schema's structure, and a cell takes its text in a <para> when
+// <entry> does not take text directly (S1000D 4.x). null when the schema
+// lacks any piece (no table, no morerows...), and then the prompt says
+// nothing about tables.
+const CALS_NAMES = new Set(['table', 'tgroup', 'colspec', 'thead', 'tbody', 'tfoot', 'row', 'entry']);
+
+export function ruleLooksAtTables(ruleXml, names) {
+  return names.some((n) => CALS_NAMES.has(n)) || /\bmorerows\b/.test(ruleXml || '');
+}
+
+export function calsTableModel(structure) {
+  const els = structure?.elements || {};
+  const has = (parent, child) => (els[parent]?.children || []).includes(child);
+  const attr = (el, name) => (els[el]?.attributes || []).includes(name);
+  const ok =
+    has('table', 'tgroup') &&
+    has('tgroup', 'colspec') &&
+    has('tgroup', 'thead') &&
+    has('tgroup', 'tbody') &&
+    has('thead', 'row') &&
+    has('tbody', 'row') &&
+    has('row', 'entry') &&
+    attr('tgroup', 'cols') &&
+    attr('colspec', 'colname') &&
+    attr('entry', 'colname') &&
+    attr('entry', 'morerows');
+  if (!ok) return null;
+  const textInEntry = structure.models?.entry ? structure.models.entry.text !== false : true;
+  if (!textInEntry && !has('entry', 'para')) return null;
+  const cell = (col, text, more = '') => `<entry colname="${col}"${more}>${textInEntry ? text : `<para>${text}</para>`}</entry>`;
+  // A required child of <table> before <tgroup> (S1000D: none; a title if
+  // the schema needs one).
+  const required = (structure.models?.table?.required || []).filter((r) => typeof r === 'string' && r !== 'tgroup');
+  const lead = required.includes('title') && has('table', 'title') ? ['    <title>Parts</title>'] : [];
+  return [
+    '<table>',
+    ...lead,
+    '  <tgroup cols="3">',
+    '    <colspec colname="c1"/>',
+    '    <colspec colname="c2"/>',
+    '    <colspec colname="c3"/>',
+    '    <thead>',
+    '      <row>',
+    `        ${cell('c1', 'Item')}`,
+    `        ${cell('c2', 'Description')}`,
+    `        ${cell('c3', 'Qty')}`,
+    '      </row>',
+    '    </thead>',
+    '    <tbody>',
+    '      <row>',
+    `        ${cell('c1', 'A-100', ' morerows="1"')}`,
+    `        ${cell('c2', 'Seal')}`,
+    `        ${cell('c3', '2')}`,
+    '      </row>',
+    '      <row>',
+    `        ${cell('c2', 'Gasket')}`,
+    `        ${cell('c3', '1')}`,
+    '      </row>',
+    '    </tbody>',
+    '  </tgroup>',
+    '</table>',
+  ].join('\n');
+}

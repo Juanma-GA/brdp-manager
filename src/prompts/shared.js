@@ -30,6 +30,10 @@ export const RULE_TEST_TEMPERATURE = 0.5;
 // Test de reglas T3b: "Review with the assistant" -- a diagnosis, not a
 // creative text: as steady as Suggest.
 export const RULE_TEST_REVIEW_TEMPERATURE = 0.3;
+// Barrido final 1/2: "does the rule implement the Proposal?" -- a yes/no
+// judgement on fixed inputs (the Proposal and describeRule's text): it must
+// give the same answer every time.
+export const RULE_PROPOSAL_CHECK_TEMPERATURE = 0;
 // Respuestas cortadas por el límite de tokens: the output limit of the rule
 // test's examples (generation and correction round). The default 4000 cut
 // the real BRDP-EXT-00029 answer (CMP ATA 4.2: ~8 examples across

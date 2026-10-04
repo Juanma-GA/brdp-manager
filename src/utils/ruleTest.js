@@ -25,6 +25,7 @@ import {
   checkCalsTableSpans,
   checkExampleStructure,
   extractDocumentNames,
+  fixCalsRowSpans,
   formatStructureProblem,
   removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
@@ -53,12 +54,27 @@ import { relocateMisplacedElements } from './schemaPlacement.js';
 // C3b follow-up: first of all, the colspecs its tables' colnames need and do
 // not have are added (addMissingCalsColspecs), so the morerows fix and the
 // checks read the columns by name; the example carries `colspecsAdded`.
+// Barrido final 1/2: also a @cols lower than the columns used is raised
+// (`colsRaised`), a morerows past the last row is lowered
+// (`morerowsLowered`) and an empty row no span reaches is removed
+// (`emptyRowsRemoved`) -- each has one fix that keeps every row reading the
+// same (see fixCalsRowSpans). A row entirely covered by the morerows above
+// has no such fix and goes to the correction round with the exact cells.
 export function materializeExample(example, setup, parseXml = parseXmlDocument) {
   const offered = Object.keys(setup.placements || {});
   const schema = example.schema || (offered.length === 1 ? offered[0] : null);
   const withColspecs = addMissingCalsColspecs(example.content, parseXml);
-  const { content, removedRows } = removeSpannedCalsEntries(withColspecs.content, parseXml);
-  const adjusted = { ...example, content, colspecsAdded: withColspecs.added, spannedEntriesRemoved: removedRows };
+  const rowSpans = fixCalsRowSpans(withColspecs.content, parseXml);
+  const { content, removedRows } = removeSpannedCalsEntries(rowSpans.content, parseXml);
+  const adjusted = {
+    ...example,
+    content,
+    colspecsAdded: withColspecs.added,
+    colsRaised: withColspecs.colsRaised,
+    morerowsLowered: rowSpans.morerowsLowered,
+    emptyRowsRemoved: rowSpans.emptyRowsRemoved,
+    spannedEntriesRemoved: removedRows,
+  };
   const entry = schema ? setup.placements[schema] : null;
   if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
   // Ruta del esquema, Part 2: an element the LLM put where the schema does
@@ -289,7 +305,13 @@ function nestingHint(problem, nestings) {
   return `To put <${n.descendant}> inside <${n.ancestor}>, the valid nesting is: ${n.path.join('/')}. Keep the nesting — do not move <${n.descendant}> outside <${n.ancestor}>.`;
 }
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null } = {}) {
+// Barrido final 1/2: the table problems the application cannot fix itself
+// (a row entirely under the morerows above, colnames whose column cannot be
+// worked out...) point at the model table the prompt gave (tableModel).
+const TABLE_PROBLEM_KINDS = new Set(['spannedEntry', 'morerowsPastEnd', 'emptyRow', 'rowFullyCovered', 'unorderableColname', 'tooManyColumns']);
+export const TABLE_MODEL_HINT = 'Write the table like the MODEL TABLE in the instructions: every colname has its <colspec>, and the row under a morerows has no <entry> in that column but keeps at least one <entry> of its own.';
+
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false } = {}) {
   const ruleElements = new Set(ruleNames?.elements || []);
   const ruleAttributes = new Set(ruleNames?.attributes || []);
   const offer = (line, element, alsoAttribute = false) =>
@@ -321,6 +343,7 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     out.push(offer(formatStructureProblem(p, schema), element));
   }
   for (const card of validation.cards || []) out.push(formatElementCard(card, schema));
+  if (tableModel && (validation.structure || []).some((p) => TABLE_PROBLEM_KINDS.has(p.kind))) out.push(TABLE_MODEL_HINT);
   return out;
 }
 
@@ -374,14 +397,20 @@ export function rejectedByBrexReference(result) {
 //   { kind: 'inconclusive', why: 'nothing_selected' | 'missing_expectation' }
 //   { kind: 'incorrect', permissive, strict } -- which way the rule was wrong
 //   { kind: 'correct' }
-// `proposalMismatch` (the LLM's indicative note that the rule does not seem
-// to implement the Proposal's decision): a verdict that would be "correct"
-// becomes { kind: 'review', mismatch } -- the examples pass, but they may
-// pass because the rule and the examples agree with each other, not with
-// the Proposal (real case: "at most three substeps" tested against
-// count(proceduralStep) = 1). Recorded as its own result, never "passed".
-// A failed or inconclusive verdict is left as it is.
-export function ruleTestVerdict(examples, runs, analysis = null, proposalMismatch = null) {
+// `proposalCheck` (Barrido final 1/2: the result of the separate "does the
+// rule implement the Proposal?" call, ruleTestRun.js's
+// checkRuleImplementsProposal): a verdict that would be "correct" becomes
+//   { kind: 'review', mismatch }   -- the check says it does not (real case:
+//     "at most three substeps" tested against count(proceduralStep) = 1:
+//     the examples pass because rule and examples agree with each other)
+//   { kind: 'review', unchecked: true, error } -- the check failed or did
+//     not answer valid JSON: "the Proposal could not be checked", never
+//     "correct" by default.
+// Recorded as its own result, never "passed". null (no check made -- the
+// examples kept from a passed test, or a caller without it) leaves
+// "correct" as it is; a string is read as a mismatch (the old shape). A
+// failed or inconclusive verdict is left as it is.
+export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck = null) {
   if (analysis?.status === 'not_executable') return { kind: 'not_executable', reason: analysis.reason };
   const ran = runs.filter((r) => r.result);
   const notExecutable = ran.find((r) => r.result.status === 'not_executable');
@@ -410,7 +439,9 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalMismatc
     };
   }
   if (!ranExpectations.has('accept') || !ranExpectations.has('reject')) return { kind: 'inconclusive', why: 'missing_expectation' };
-  if (typeof proposalMismatch === 'string' && proposalMismatch.trim()) return { kind: 'review', mismatch: proposalMismatch.trim() };
+  if (typeof proposalCheck === 'string' && proposalCheck.trim()) return { kind: 'review', mismatch: proposalCheck.trim() };
+  if (proposalCheck?.status === 'mismatch') return { kind: 'review', mismatch: proposalCheck.missing || '' };
+  if (proposalCheck?.status === 'unavailable') return { kind: 'review', unchecked: true, error: proposalCheck.error || '' };
   return { kind: 'correct' };
 }
 

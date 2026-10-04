@@ -35,9 +35,11 @@ import {
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
 import { analyzeRule, describeRule, ruleConditions } from '../src/utils/ruleTestEngine.js';
-import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkExampleStructure, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
+import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkExampleStructure, fixCalsRowSpans, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
 import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, keepMatchedNodeProblem, missesRuleProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
+import { TABLE_MODEL_HINT } from '../src/utils/ruleTest.js';
+import { calsTableModel, ruleLooksAtTables } from '../src/utils/ruleTestSkeleton.js';
 import { contentRoutes, metadataXml, normalizeBrexReferenceCode, ruleLooksAtBrexReference, ruleMatchExpressions, ruleUseNames, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
 import { formatRuleDescription, formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
 import { readPublicTemplate, retiredTemplateRows } from './lib/readXlsx.mjs';
@@ -223,7 +225,9 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const p = buildRuleTestExamplesPrompt({ brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: EMPH, placements });
   check('prompt: contains the rule verbatim', p.includes(EMPH));
   check('prompt: no explanation asked (describeRule gives it, T3b)', !p.includes('"explanation"'));
-  check('prompt: proposalMismatch field, marked as an indication', p.includes('"proposalMismatch": null when the rule implements') && p.includes('It is only an indication'));
+  // Barrido final 1/2: the Proposal is checked by its own call; the
+  // examples prompt no longer asks for proposalMismatch.
+  check('prompt: no proposalMismatch any more', !p.includes('proposalMismatch') && p.includes('{"examples": [{"label"'));
   check('prompt: the application builds the document; only the content', p.includes('Write\nONLY that content'));
   check('prompt: insertion point with the skeleton path', p.includes('your content goes directly inside <para>, at\n  dmodule/content/description/levelledPara/para.'), p);
   check('prompt: allowed children of the insertion point', /Allowed directly inside <para> in this schema: .*emphasis/.test(p));
@@ -256,8 +260,8 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
 {
   const good = '{"explanation":"Prohíbe <emphasis>.","proposalMismatch":null,"examples":[{"label":"ok","expected":"accept","schema":"descript","content":"a"},{"label":"bad","expected":"reject","schema":"descript","content":"<emphasis>a</emphasis>"}]}';
   const r = parseRuleTestResponse(good);
-  check('parse: valid JSON with content', r.ok && r.examples.length === 2 && r.examples[1].content === '<emphasis>a</emphasis>' && r.proposalMismatch === null, JSON.stringify(r));
-  check('parse: proposalMismatch text kept', parseRuleTestResponse(good.replace('"proposalMismatch":null', '"proposalMismatch":"No implementa la Proposal."')).proposalMismatch === 'No implementa la Proposal.');
+  check('parse: valid JSON with content', r.ok && r.examples.length === 2 && r.examples[1].content === '<emphasis>a</emphasis>' && !('proposalMismatch' in r), JSON.stringify(r));
+  check('parse: an old proposalMismatch is ignored', parseRuleTestResponse(good.replace('"proposalMismatch":null', '"proposalMismatch":"No implementa la Proposal."')).ok);
   check('parse: fenced JSON', parseRuleTestResponse('```json\n' + good + '\n```').ok);
   const broken = parseRuleTestResponse('{"explanation": "x", "examples": [ {"label": "a", ');
   check('parse: broken JSON → error', !broken.ok && /not valid JSON/.test(broken.error), JSON.stringify(broken));
@@ -850,11 +854,19 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('C3b row covered: content left byte for byte', untouched.content === coveredContent, untouched.content);
   check('C3b row covered: nothing reported as removed', untouched.removedRows.length === 0, JSON.stringify(untouched.removedRows));
   const coveredProblems = checkCalsTableSpans(parseXml(`<topic id="t"><title>T</title><body>${coveredContent}</body></topic>`));
-  check('C3b row covered: rowFullyCovered for row 2, no spannedEntry', JSON.stringify(coveredProblems.filter((p) => p.kind === 'rowFullyCovered' || p.kind === 'spannedEntry')) === '[{"kind":"rowFullyCovered","row":2}]', JSON.stringify(coveredProblems));
-  const coveredLine = 'row 2 is entirely covered by morerows from above: give row 2 its own entries or lower the morerows';
-  check('C3b row covered: exact English message', formatStructureProblem({ kind: 'rowFullyCovered', row: 2 }, 'topic') === coveredLine);
-  check('C3b row covered: EN/ES through i18n', formatSchemaIssue(structureIssues([{ kind: 'rowFullyCovered', row: 2 }], { schema: 'topic' })[0], i18n.getFixedT('en')) === coveredLine
-    && formatSchemaIssue(structureIssues([{ kind: 'rowFullyCovered', row: 2 }], { schema: 'topic' })[0], i18n.getFixedT('es')).startsWith('la fila 2 queda entera bajo el morerows'));
+  check('C3b row covered: rowFullyCovered for row 2, no spannedEntry', JSON.stringify(coveredProblems.filter((p) => p.kind === 'rowFullyCovered' || p.kind === 'spannedEntry')) === '[{"kind":"rowFullyCovered","row":2,"columns":["c2"],"from":[1]}]', JSON.stringify(coveredProblems));
+  // Barrido final 1/2: the message names the covered cells and the row
+  // whose morerows covers them.
+  const coveredProblem = { kind: 'rowFullyCovered', row: 2, columns: ['c2'], from: [1] };
+  const coveredLine = 'row 2 is entirely covered by morerows from above (column c2, by the morerows of row 1): give row 2 its own entries or lower the morerows';
+  check('C3b row covered: exact English message', formatStructureProblem(coveredProblem, 'topic') === coveredLine, formatStructureProblem(coveredProblem, 'topic'));
+  check('C3b row covered: EN through i18n = English line', formatSchemaIssue(structureIssues([coveredProblem], { schema: 'topic' })[0], i18n.getFixedT('en')) === coveredLine);
+  check('C3b row covered: ES through i18n', formatSchemaIssue(structureIssues([coveredProblem], { schema: 'topic' })[0], i18n.getFixedT('es')) === 'la fila 2 queda entera bajo el morerows de arriba (columna c2, por el morerows de la fila 1): dale a la fila 2 sus propias celdas o reduce el morerows',
+    formatSchemaIssue(structureIssues([coveredProblem], { schema: 'topic' })[0], i18n.getFixedT('es')));
+  const twoCovered = { kind: 'rowFullyCovered', row: 3, columns: ['c1', 'c2'], from: [1, 2] };
+  check('C3b row covered: plural EN/ES', formatSchemaIssue(structureIssues([twoCovered], { schema: 'topic' })[0], i18n.getFixedT('en')).includes('(columns c1, c2, by the morerows of rows 1, 2)')
+    && formatSchemaIssue(structureIssues([twoCovered], { schema: 'topic' })[0], i18n.getFixedT('es')).includes('(columnas c1, c2, por el morerows de las filas 1, 2)'));
+  check('C3b row covered: without details, the plain line', formatStructureProblem({ kind: 'rowFullyCovered', row: 2 }, 'topic') === 'row 2 is entirely covered by morerows from above: give row 2 its own entries or lower the morerows');
   // An empty <row/> fully spanned from above counts too.
   check('C3b row covered: an empty row under the spans', removeSpannedCalsEntries(tbl('<row><entry morerows="1">A</entry><entry morerows="1">B</entry><entry morerows="1">C</entry></row><row></row>', ''), parseXml).removedRows.length === 0
     && checkCalsTableSpans(parseXml(`<dmodule>${tbl('<row><entry morerows="1">A</entry><entry morerows="1">B</entry><entry morerows="1">C</entry></row><row></row>', '')}</dmodule>`)).some((p) => p.kind === 'rowFullyCovered' && p.row === 2));
@@ -863,7 +875,10 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     const emptyTbl = tbl(`<row><entry colname="c1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row>${empty}`);
     const emptyProblems = checkCalsTableSpans(parseXml(`<dmodule>${emptyTbl}</dmodule>`));
     check(`C3b empty row: ${empty} → emptyRow for row 2`, JSON.stringify(emptyProblems) === '[{"kind":"emptyRow","row":2}]', JSON.stringify(emptyProblems));
-    check(`C3b empty row: ${empty} left untouched by the app`, removeSpannedCalsEntries(emptyTbl, parseXml).content === emptyTbl);
+    check(`C3b empty row: ${empty} left untouched by the morerows fix`, removeSpannedCalsEntries(emptyTbl, parseXml).content === emptyTbl);
+    // Barrido final 1/2: nothing reaches it, so the app removes it.
+    const removedEmpty = fixCalsRowSpans(emptyTbl, parseXml);
+    check(`final 1/2: ${empty} with no span into it → removed by the app`, JSON.stringify(removedEmpty.emptyRowsRemoved) === '[2]' && removedEmpty.content === emptyTbl.replace(empty, ''), removedEmpty.content);
   }
   // Partly spanned from above but no entry of its own: still empty.
   check('C3b empty row: partly spanned empty row → emptyRow', JSON.stringify(checkCalsTableSpans(parseXml(`<dmodule>${tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row/>')}</dmodule>`))) === '[{"kind":"emptyRow","row":2}]');
@@ -871,12 +886,18 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('C3b empty row: EN/ES through i18n', formatSchemaIssue(structureIssues([{ kind: 'emptyRow', row: 2 }], { schema: 'descript' })[0], i18n.getFixedT('en')) === 'row 2 has no entry'
     && formatSchemaIssue(structureIssues([{ kind: 'emptyRow', row: 2 }], { schema: 'descript' })[0], i18n.getFixedT('es')) === 'la fila 2 no tiene ninguna celda');
   {
-    const emptyContent = `<para>Values:</para>${tbl('<row><entry colname="c1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row/>')}`;
+    // An empty row a morerows above reaches (partly) is not touched: it
+    // still goes to the correction round with its reason.
+    const emptyContent = `<para>Values:</para>${tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row/>')}`;
     const emptyExamples = [{ label: 'empty row', expected: 'accept', schema: 'descript', content: emptyContent }];
     const emptyRun = testRun(TBL, emptyExamples, setup);
-    check('C3b empty row: example not runnable', !emptyRun.runs[0].validation.runnable && emptyRun.runs[0].validation.structure.some((p) => p.kind === 'emptyRow'), JSON.stringify(emptyRun.runs[0].validation.structure));
+    check('C3b empty row (partly spanned): example not runnable', !emptyRun.runs[0].validation.runnable && emptyRun.runs[0].validation.structure.some((p) => p.kind === 'emptyRow'), JSON.stringify(emptyRun.runs[0].validation.structure));
+    check('final 1/2: partly spanned empty row not removed', JSON.stringify(emptyRun.materialized[0].emptyRowsRemoved) === '[]');
     const emptyFailures = exampleFailures(emptyExamples, emptyRun.materialized, emptyRun.runs, { ruleXml: TBL, standard: S42, format: 'BREX-4.2', parseXml });
     check('C3b empty row: goes to the correction round with its message', emptyFailures.length === 1 && emptyFailures[0].problems.includes('row 2 has no entry'), JSON.stringify(emptyFailures));
+    // With nothing reaching it, the example runs, with the app's note.
+    const freeEmpty = testRun(TBL, [{ label: 'empty row', expected: 'accept', schema: 'descript', content: `<para>Values:</para>${tbl('<row><entry colname="c1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row/>')}` }], setup);
+    check('final 1/2: empty row removed, example runs', freeEmpty.runs[0].validation.runnable && JSON.stringify(freeEmpty.materialized[0].emptyRowsRemoved) === '[2]', JSON.stringify(freeEmpty.runs[0].validation.structure));
   }
   // Partial overlap still auto-fixed (regression).
   check('C3b row covered: partial overlap still fixed', removeSpannedCalsEntries(covered('<entry colname="c2">Gasket</entry><entry colname="c3">1</entry>'), parseXml).removedRows.join() === '2');
@@ -945,9 +966,16 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     check('colspec: malformed content left as is', addMissingCalsColspecs('<table><tgroup cols="1">', parseXml).content === '<table><tgroup cols="1">');
 
     // Not adjusted: a colname with no column.
-    const part = '<table><tgroup cols="2"><tbody><row><entry colname="part">P-100</entry><entry colname="qty">2</entry></row></tbody></tgroup></table>';
+    // Barrido final 1/2: names without a number, all named by one row in
+    // reading order → that order (the colspecs go in it).
+    const named = '<table><tgroup cols="2"><tbody><row><entry colname="part">P-100</entry><entry colname="qty">2</entry></row></tbody></tgroup></table>';
+    const namedResult = addMissingCalsColspecs(named, parseXml);
+    check('final 1/2: colname="part"/"qty" in one row → colspecs in that order', namedResult.added === 2
+      && namedResult.content === named.replace('<tgroup cols="2">', '<tgroup cols="2"><colspec colname="part"/><colspec colname="qty"/>'), namedResult.content);
+    // Not adjusted: no row names both.
+    const part = '<table><tgroup cols="2"><tbody><row><entry colname="part">P-100</entry></row><row><entry colname="qty">2</entry></row></tbody></tgroup></table>';
     const partResult = addMissingCalsColspecs(part, parseXml);
-    check('colspec: colname="part" → nothing added', partResult.added === 0 && partResult.content === part);
+    check('colspec: colname="part" (no row names every column) → nothing added', partResult.added === 0 && partResult.content === part);
     const partProblems = checkCalsColspecs(parseXml(`<dmodule>${part}</dmodule>`));
     check('colspec: colname="part" → unorderableColname', JSON.stringify(partProblems) === '[{"kind":"unorderableColname","colname":"part"},{"kind":"unorderableColname","colname":"qty"}]', JSON.stringify(partProblems));
     const partLine = 'colname="part" has no <colspec> and its column cannot be worked out: add <colspec colname="part"/> to the <tgroup>, in column order';
@@ -958,11 +986,15 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     const clash = '<table><tgroup cols="2"><tbody><row><entry colname="c1">A</entry><entry colname="col1">B</entry></row></tbody></tgroup></table>';
     check('colspec: c1 and col1 → col1 unorderable, nothing added', addMissingCalsColspecs(clash, parseXml).added === 0
       && JSON.stringify(checkCalsColspecs(parseXml(clash))) === '[{"kind":"unorderableColname","colname":"col1"}]', JSON.stringify(checkCalsColspecs(parseXml(clash))));
-    // Not adjusted: more columns than @cols.
+    // More columns than @cols: reported by the check, and (Barrido final
+    // 1/2) fixed by the app -- @cols raised to the columns really used, the
+    // missing colspecs added, every cell left where it is.
     const wide = noSpecs(section('2')).replace('cols="3"', 'cols="2"');
     const wideProblems = checkCalsColspecs(parseXml(wide));
-    check('colspec: 3 columns with cols="2" → tooManyColumns, nothing added', addMissingCalsColspecs(wide, parseXml).content === wide
-      && JSON.stringify(wideProblems) === '[{"kind":"tooManyColumns","columns":3,"cols":2}]', JSON.stringify(wideProblems));
+    check('colspec: 3 columns with cols="2" → tooManyColumns reported', JSON.stringify(wideProblems) === '[{"kind":"tooManyColumns","columns":3,"cols":2}]', JSON.stringify(wideProblems));
+    const wideFixed = addMissingCalsColspecs(wide, parseXml);
+    check('final 1/2: cols="2" with 3 columns → raised to 3 and colspecs added', wideFixed.content === section('2') && JSON.stringify(wideFixed.colsRaised) === '[{"from":2,"to":3}]' && wideFixed.added === 3, wideFixed.content);
+    check('final 1/2: complete table but cols too low → only cols raised', addMissingCalsColspecs(section('2').replace('cols="3"', "cols='2'"), parseXml).content === section('2').replace('cols="3"', "cols='3'"));
     const wideLine = 'the table uses 3 columns but its <tgroup> says cols="2": use at most 2 columns or raise cols';
     check('colspec: tooManyColumns English message', formatStructureProblem(wideProblems[0], 'topic') === wideLine);
     check('colspec: tooManyColumns EN/ES through i18n', formatSchemaIssue(structureIssues(wideProblems, { schema: 'topic' })[0], i18n.getFixedT('en')) === wideLine
@@ -1010,7 +1042,9 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
       vocabulary: vocabDita, parseXml,
       ask: async (messages) => {
         partAsked.push(messages);
-        const content = partAsked.length === 1 ? section('2').replace(/<colspec colname="c\d"\/>/g, '').replace(/colname="c1"/g, 'colname="part"') : section('2');
+        // The header row names c1 as "part" but the body rows keep "c1":
+        // no row names every column, so the app cannot order them.
+        const content = partAsked.length === 1 ? section('2').replace(/<colspec colname="c\d"\/>/g, '').replace('<entry colname="c1">Part</entry>', '<entry colname="part">Part</entry>') : section('2');
         return JSON.stringify({ proposalMismatch: null, examples: [
           { label: 'quantity given', expected: 'accept', schema: 'topic', content },
           { label: 'quantity missing', expected: 'reject', schema: 'topic', content: section('') },
@@ -2400,6 +2434,196 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
     check('S1-00563: prompt uses schedul at <maintPlanning> with the way to <timeLimitCategory>', asked563.includes('"schema": "schedul"') && asked563.includes('<timeLimitInfo> (@timeLimitIdent) > <timeLimitCategory>'), asked563.slice(0, 300));
     check('S1-00563: valid, accepted / rejected, verdict correct', g563.runs.every((r) => r.validation.runnable) && g563.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && ruleTestVerdict(g563.examples, g563.runs, analyzeRule(R563, 'BREX-4.2', { parseXml })).kind === 'correct', JSON.stringify(g563.runs.map((r) => [r.validation.structure, r.result?.status])));
   }
+}
+
+// ─── Barrido final 1/2, Part 1: DITA tables with merged rows ──────────────
+{
+  const ext1 = readPublicTemplate('brdp-template-dita-xpath3.xlsx').find((r) => r.ID === 'BRDP-EXT-00001');
+  const DITA = 'DITA 1.3 Xpath2.0';
+  const vocabDita = vocabOf('schema-vocabulary-dita.json');
+  const T = (body, { cols = 3, specs = '<colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/>' } = {}) =>
+    `<section><title>LISTA DE MATERIAL OBLIGATORIO</title><table><tgroup cols="${cols}">${specs}<thead><row><entry colname="c1">Part</entry><entry colname="c2">Descripción</entry><entry colname="c3">Cant.</entry></row></thead><tbody>${body}</tbody></tgroup></table></section>`;
+  const gen = async (examples, extra = []) => {
+    const asked = [];
+    const result = await generateRuleTestExamples({
+      ruleXml: ext1.Rule, format: 'SCH-DITA', standard: 'DITA 1.3 Xpath3.0', schemaLocation: 'flat',
+      brdp: { identifier: 'BRDP-EXT-00001', title: '', definition: '', proposal: '' },
+      vocabulary: vocabDita, parseXml,
+      ask: async (messages, sys) => { asked.push({ messages, sys }); return JSON.stringify({ examples: asked.length === 1 ? examples : extra[asked.length - 2] || examples }); },
+      fetchSchemaCards: async (_std, names) => ({ cards: {}, document_schemas: ['topic'], element_schemas: Object.fromEntries(names.map((n) => [n, ['topic']])) }),
+      fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
+    });
+    return { result, asked };
+  };
+
+  // A correct table with merged rows: accepted, and the rule really runs on
+  // it -- the quantity of row 2 comes from the morerows of row 1.
+  const merged = T('<row><entry colname="c1">P-1</entry><entry colname="c2">Seal</entry><entry colname="c3" morerows="1">2</entry></row><row><entry colname="c1">P-2</entry><entry colname="c2">Gasket</entry></row>');
+  const missing = T('<row><entry colname="c1">P-1</entry><entry colname="c2">Seal</entry><entry colname="c3">2</entry></row><row><entry colname="c1">P-2</entry><entry colname="c2">Gasket</entry></row>');
+  {
+    const { result, asked } = await gen([
+      { label: 'merged quantity', expected: 'accept', schema: 'topic', content: merged },
+      { label: 'quantity missing', expected: 'reject', schema: 'topic', content: missing },
+    ]);
+    check('final 1/2 merged rows: no correction round', asked.length === 1 && result.correction === null, JSON.stringify(result.correction));
+    check('final 1/2 merged rows: both examples valid and run', result.runs.every((r) => r.validation.runnable), JSON.stringify(result.runs.map((r) => r.validation.structure)));
+    check('final 1/2 merged rows: row 2 selected in the merged example (rule ran on it)', result.runs[0].result.selectedNodePaths.length === 2, JSON.stringify(result.runs[0].result.selectedNodePaths));
+    check('final 1/2 merged rows: accepted / rejected', result.runs.map((r) => r.result.status).join() === 'accepted,rejected');
+    check('final 1/2 merged rows: verdict correct', ruleTestVerdict(result.examples, result.runs, analyzeRule(ext1.Rule, 'SCH-DITA', { parseXml })).kind === 'correct');
+    // The prompt carries the model table built from the DITA topic schema.
+    const sys = asked[0].sys;
+    check('final 1/2 prompt: MODEL TABLE block for a rule on tables', sys.includes('MODEL TABLE:') && sys.includes('<entry colname="c1" morerows="1">A-100</entry>') && sys.includes('the row below has NO\n  <entry> in that column'), sys.slice(sys.indexOf('MODEL TABLE'), sys.indexOf('MODEL TABLE') + 400));
+    check('final 1/2 prompt: no proposalMismatch asked any more', !sys.includes('proposalMismatch'));
+  }
+
+  // Colnames with no colspec: repaired and validated, no LLM round.
+  {
+    const bare = merged.replace(/<colspec colname="c\d"\/>/g, '');
+    const { result, asked } = await gen([
+      { label: 'no colspecs', expected: 'accept', schema: 'topic', content: bare },
+      { label: 'quantity missing', expected: 'reject', schema: 'topic', content: missing },
+    ]);
+    check('final 1/2 colspecs: repaired, valid, no correction round', asked.length === 1 && result.examples[0].colspecsAdded === 3 && result.runs[0].validation.runnable && result.runs[0].result.status === 'accepted');
+  }
+  // Colnames named after the header ("part", "desc", "cant") with no colspec:
+  // the header row gives the order.
+  {
+    const namedCols = merged.replace(/<colspec colname="c\d"\/>/g, '').replace(/colname="c1"/g, 'colname="part"').replace(/colname="c2"/g, 'colname="desc"').replace(/colname="c3"/g, 'colname="cant"');
+    const { result, asked } = await gen([
+      { label: 'named columns', expected: 'accept', schema: 'topic', content: namedCols },
+      { label: 'quantity missing', expected: 'reject', schema: 'topic', content: missing },
+    ]);
+    check('final 1/2 named colnames: colspecs part, desc, cant added in header order', asked.length === 1 && result.examples[0].content.includes('<tgroup cols="3"><colspec colname="part"/><colspec colname="desc"/><colspec colname="cant"/>') && result.runs[0].validation.runnable, result.examples[0].content);
+  }
+  // morerows past the last row and wrong @cols: fixed by the app, with notes.
+  {
+    const past = T('<row><entry colname="c1">P-1</entry><entry colname="c2">Seal</entry><entry colname="c3">2</entry></row><row><entry colname="c1">P-2</entry><entry colname="c2">Gasket</entry><entry colname="c3" morerows="2">1</entry></row>', { cols: 2 });
+    const { result, asked } = await gen([
+      { label: 'past the end', expected: 'accept', schema: 'topic', content: past },
+      { label: 'quantity missing', expected: 'reject', schema: 'topic', content: missing },
+    ]);
+    const ex = result.examples[0];
+    check('final 1/2 morerows past end: lowered (removed), cols raised, runs', asked.length === 1 && JSON.stringify(ex.morerowsLowered) === '[2]' && JSON.stringify(ex.colsRaised) === '[{"from":2,"to":3}]'
+      && !ex.content.includes('morerows') && ex.content.includes('<tgroup cols="3">') && result.runs[0].validation.runnable, ex.content);
+    const threeRows = '<table><tgroup cols="2"><tbody><row><entry morerows="3">A</entry><entry>x</entry></row><row><entry>B</entry></row><row><entry>C</entry></row></tbody></tgroup></table>';
+    const lowered = fixCalsRowSpans(threeRows, parseXml);
+    check('final 1/2 morerows past end: lowered to the rows left (3 → 2)', lowered.content === threeRows.replace('morerows="3"', 'morerows="2"') && JSON.stringify(lowered.morerowsLowered) === '[1]', lowered.content);
+    const t = (lng, key, o) => i18n.getFixedT(lng)(`records.ruleTest.${key}`, o);
+    check('final 1/2 notes EN/ES', t('en', 'morerowsLowered', { count: 1, rows: '2' }) === 'Adjusted by the app: a morerows that ran past the last row was shortened (row 2).'
+      && t('es', 'colsRaised', { count: 1, values: '2 → 3' }) === 'Ajustado por la app: el cols de la tabla no coincidía con sus columnas (2 → 3).'
+      && t('es', 'emptyRowsRemoved', { count: 1, rows: '3' }) === 'Ajustado por la app: se quitó una fila vacía (fila 3).');
+  }
+  // A row entirely covered by the morerows above (the real titled-context
+  // shape): rejected with the exact cells, and the correction round gets
+  // that reason and the pointer to the model table.
+  {
+    const covered = T('<row><entry colname="c1" morerows="1">P-100</entry><entry colname="c2" morerows="1">Seal</entry><entry colname="c3">2</entry></row><row><entry colname="c2">Gasket</entry></row>');
+    const { result, asked } = await gen(
+      [
+        { label: 'covered row', expected: 'accept', schema: 'topic', content: covered },
+        { label: 'quantity missing', expected: 'reject', schema: 'topic', content: missing },
+      ],
+      [[
+        { label: 'covered row', expected: 'accept', schema: 'topic', content: merged },
+        { label: 'quantity missing', expected: 'reject', schema: 'topic', content: missing },
+      ]]
+    );
+    const correction = asked[1]?.messages.at(-1).content || '';
+    check('final 1/2 covered row: correction gets the exact reason', correction.includes('row 2 is entirely covered by morerows from above (column c2, by the morerows of row 1)'), correction);
+    check('final 1/2 covered row: correction points at the model table', correction.includes(TABLE_MODEL_HINT));
+    check('final 1/2 covered row: fixed by the correction', result.correction.fixed === 1 && result.runs.every((r) => r.validation.runnable));
+  }
+  // The model table itself is valid in every schema it is built for.
+  for (const [standard, schema] of [['DITA 1.3 Xpath2.0', 'topic'], ['S1000D 4.2', 'descript'], ['S1000D 3.0.1', 'descript'], ['S1000D 4.1', 'proced']]) {
+    const structure = structureOf(standard, schema);
+    const model = calsTableModel(structure);
+    const doc = parseXml(model);
+    const problems = [...checkExampleStructure(doc, structure).filter((p) => p.kind !== 'wrongRoot'), ...checkCalsTableSpans(doc), ...checkCalsColspecs(doc)];
+    check(`final 1/2 model table valid in ${standard} ${schema}`, Boolean(model) && problems.length === 0, JSON.stringify(problems));
+  }
+  check('final 1/2 model: <para> cells in 4.2, plain text in DITA', calsTableModel(structureOf('S1000D 4.2', 'descript')).includes('<entry colname="c2"><para>Seal</para></entry>') && calsTableModel(structureOf('DITA 1.3 Xpath2.0', 'topic')).includes('<entry colname="c2">Seal</entry>'));
+  check('final 1/2 model: none for a rule that does not look at tables', !ruleLooksAtTables('<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath></structureObjectRule>', ['emphasis']) && ruleLooksAtTables('', ['row']));
+}
+
+// ─── Barrido final 1/2, Part 2: the Proposal check, its own call ──────────
+{
+  const { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } = await import('../src/prompts/ruleProposalCheckPrompt.js');
+  const { checkRuleImplementsProposal } = await import('../src/utils/ruleTestRun.js');
+  const { RULE_PROPOSAL_CHECK_TEMPERATURE } = await import('../src/prompts/shared.js');
+  const { ruleDescriptionText, verdictToTestRecord } = await import('../src/utils/ruleTestReasons.js');
+  const R187 = readPublicTemplate('brdp-template-4-2.xlsx').find((r) => r.ID === 'BRDP-S1-00187').Rule;
+  const description = ruleDescriptionText(describeRule(R187, 'BREX-4.2', { parseXml }), i18n.getFixedT('en'));
+  const brdp3 = { identifier: 'BRDP-S1-00187', title: 'Substeps', definition: 'Number of substeps.', proposal: 'A step has at most three substeps.' };
+  const prompt = buildRuleProposalCheckPrompt({ brdp: brdp3, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: R187, ruleDescription: description });
+  check('check prompt: the Proposal, the description and the rule', prompt.includes('Proposal: A step has at most three substeps.') && prompt.includes(description) && prompt.includes(R187));
+  check('check prompt: JSON shape asked', prompt.includes('{"implements": true, "missing": ""}'));
+  check('check: temperature 0', RULE_PROPOSAL_CHECK_TEMPERATURE === 0);
+  check('check parse: true', JSON.stringify(parseRuleProposalCheckResponse('{"implements": true, "missing": ""}')) === '{"ok":true,"implements":true,"missing":""}');
+  check('check parse: false with fence', parseRuleProposalCheckResponse('```json\n{"implements": false, "missing": "Solo prohíbe uno."}\n```').missing === 'Solo prohíbe uno.');
+  check('check parse: not JSON → error', !parseRuleProposalCheckResponse('I think so.').ok);
+  check('check parse: implements not boolean → error', !parseRuleProposalCheckResponse('{"implements": "yes"}').ok);
+
+  const asks = [];
+  const run = (answer) => checkRuleImplementsProposal({
+    brdp: brdp3, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: R187, ruleDescription: description,
+    ask: async (messages, sys) => { asks.push({ messages, sys }); if (answer instanceof Error) throw answer; return answer; },
+  });
+  const mismatch = await run('{"implements": false, "missing": "The Proposal allows at most three substeps; the rule only rejects exactly one."}');
+  check('check: mismatch with its sentence', mismatch.status === 'mismatch' && mismatch.missing.startsWith('The Proposal allows at most three'));
+  check('check: one user message, the fixed one', asks[0].messages.length === 1 && asks[0].messages[0].content === RULE_PROPOSAL_CHECK_USER_MESSAGE);
+  check('check: implements', (await run('{"implements": true, "missing": ""}')).status === 'implements');
+  const broken = await run('Looks fine to me.');
+  check('check: invalid JSON → unavailable with the reason', broken.status === 'unavailable' && /no JSON object/.test(broken.error), JSON.stringify(broken));
+  const thrown = await run(Object.assign(new Error('Connection error. Please try again.'), {}));
+  check('check: failed call → unavailable, never throws', thrown.status === 'unavailable' && thrown.error === 'Connection error. Please try again.');
+
+  // Verdicts: the same correct examples with each check result.
+  const setup187 = setupFor('S1000D 4.2', R187, ['proced']);
+  const step = (n) => `<proceduralStep><para>Remove the cover.</para>${'<proceduralStep><para>Sub.</para></proceduralStep>'.repeat(n)}</proceduralStep>`;
+  const ex = [
+    { label: 'two substeps', expected: 'accept', schema: 'proced', content: step(2) },
+    { label: 'one substep', expected: 'reject', schema: 'proced', content: step(1) },
+  ];
+  const r = testRun(R187, ex, setup187);
+  const analysis187 = analyzeRule(R187, 'BREX-4.2', { parseXml });
+  check('verdict: implements → correct, no extra review', ruleTestVerdict(r.materialized, r.runs, analysis187, { status: 'implements' }).kind === 'correct');
+  const rv = ruleTestVerdict(r.materialized, r.runs, analysis187, mismatch);
+  check('verdict: "max three" vs "exactly one" → review with what is missing', rv.kind === 'review' && !rv.unchecked && rv.mismatch === mismatch.missing, JSON.stringify(rv));
+  const ru = ruleTestVerdict(r.materialized, r.runs, analysis187, broken);
+  check('verdict: check failed → review "could not be checked", never correct', ru.kind === 'review' && ru.unchecked === true && ru.error === broken.error, JSON.stringify(ru));
+  const recU = verdictToTestRecord(ru);
+  check('verdict: unchecked recorded as review with test_proposal_unchecked', recU.result === 'review' && recU.reason.code === 'test_proposal_unchecked' && recU.reason.params.error === broken.error);
+  check('verdict: no check (saved examples) → correct as today', ruleTestVerdict(r.materialized, r.runs, analysis187, null).kind === 'correct');
+  const wrongEx = [{ ...ex[0], expected: 'reject' }, ex[1]];
+  const rw = testRun(R187, wrongEx, setup187);
+  check('verdict: an incorrect verdict stays incorrect whatever the check', ruleTestVerdict(rw.materialized, rw.runs, analysis187, broken).kind === 'incorrect');
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  check('unchecked text EN/ES', en('records.ruleTest.verdicts.reviewUnchecked', { error: 'x' }).startsWith('Review: the examples pass, but the Proposal could not be checked (x)')
+    && es('records.ruleTest.verdicts.reviewUnchecked', { error: 'x' }).startsWith('Revisar: los ejemplos pasan, pero no se pudo comprobar la Propuesta (x)')
+    && formatRuleTestReason(recU.reason, es) === `los ejemplos pasan, pero no se pudo comprobar la Propuesta (${broken.error})`);
+
+  // Through generateRuleTestExamples: both calls, in parallel; the
+  // examples' verdict gets the check.
+  const calls = [];
+  const g = await generateRuleTestExamples({
+    ruleXml: R187, format: 'BREX-4.2', standard: 'S1000D 4.2', schemaLocation: 'flat', brdp: brdp3, vocabulary, parseXml,
+    ask: async () => { calls.push('examples'); return JSON.stringify({ examples: ex }); },
+    askProposalCheck: async (_m, sys) => { calls.push(sys.startsWith('You check whether') ? 'check' : '?'); return '{"implements": false, "missing": "Only exactly one substep is rejected."}'; },
+    ruleDescription: description,
+    fetchSchemaCards: async (_s, names) => ({ cards: {}, document_schemas: ['proced'], element_schemas: Object.fromEntries(names.map((n) => [n, ['proced']])) }),
+    fetchStructure: async (_s, schema) => ({ available: true, ...structureOf('S1000D 4.2', schema) }),
+  });
+  check('generate: one examples call + one check call', calls.sort().join() === 'check,examples', calls.join());
+  check('generate: proposalCheck returned', g.proposalCheck?.status === 'mismatch' && g.proposalCheck.missing === 'Only exactly one substep is rejected.');
+  check('generate: verdict review 3 of 3 (deterministic once the check answers)', [0, 1, 2].every(() => ruleTestVerdict(g.examples, g.runs, analysis187, g.proposalCheck).kind === 'review'));
+  const g0 = await generateRuleTestExamples({
+    ruleXml: R187, format: 'BREX-4.2', standard: 'S1000D 4.2', schemaLocation: 'flat', brdp: brdp3, vocabulary, parseXml,
+    ask: async () => JSON.stringify({ examples: ex }),
+    fetchSchemaCards: async (_s, names) => ({ cards: {}, document_schemas: ['proced'], element_schemas: Object.fromEntries(names.map((n) => [n, ['proced']])) }),
+    fetchStructure: async (_s, schema) => ({ available: true, ...structureOf('S1000D 4.2', schema) }),
+  });
+  check('generate: without askProposalCheck no check (null)', g0.proposalCheck === null);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

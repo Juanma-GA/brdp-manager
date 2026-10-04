@@ -35,6 +35,7 @@ export function finalRuleXml(entry, ruleXml) {
   return wrapRuleInSchemaContexts(ruleXml, entry.format, entry.standard, schemas, entry.schemaLocation);
 }
 import { ruleStateOf } from '../utils/ruleState';
+import { cleanInternalNames } from '../utils/answerCleanup.js';
 
 // Suggest Rule validation (docs request, Part 4): deterministic. Two
 // things disable Accept: XML that isn't well-formed (the backend would
@@ -243,7 +244,8 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
           brdpId,
           kind,
           loading: false,
-          text: res.content,
+          // Barrido final 1/2: never the cards block's internal name.
+          text: cleanInternalNames(res.content),
           sourceBrdpIds: referenceSimilar.map((c) => c.id),
           similar: referenceSimilar,
           styleReferences: referenceStyle,
@@ -283,7 +285,8 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
           brdpId,
           kind,
           loading: false,
-          text: res.content,
+          // Barrido final 1/2: never the cards block's internal name.
+          text: cleanInternalNames(res.content),
           sourceBrdpIds: [...referenceSameBrdp, ...referenceSimilar, ...referenceThisProject].map((c) => c.id),
           sameBrdp: referenceSameBrdp,
           similar: referenceSimilar,

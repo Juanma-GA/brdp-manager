@@ -246,6 +246,24 @@ not a set of nodes. Write the examples so that:
 ${lines.join('\n')}`;
 }
 
+// Barrido final 1/2: a rule that looks at tables -- one valid CALS table
+// with a merged row, built by the application from the schema
+// (calsTableModel), and the three things a merged row needs. Mistral wrote
+// merged rows that did not validate (titled-context, c8e8fac).
+function tableModelInstructions(model) {
+  return `
+
+MODEL TABLE: every table in an example is a complete CALS table like this
+one (valid in this schema; your columns and texts are your own):
+${model}
+- Every colname has its <colspec>, in column order; cols is the number of
+  columns.
+- A cell merged into the next row has morerows="1", and the row below has NO
+  <entry> in that column ("A-100" also covers row 2 of column c1).
+- Every row keeps at least one <entry> of its own, and a morerows never
+  reaches past the last row.`;
+}
+
 // T4: how each example is built, for the placements offered.
 function buildingInstructions(standard, placements, dita) {
   const kind = dita ? 'topic type' : 'schema';
@@ -284,6 +302,7 @@ export function buildRuleTestExamplesPrompt({
   previousReview = null,
   matchExpressions = [],
   conditions = [],
+  tableModel = null,
 }) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
@@ -316,11 +335,6 @@ attributes and schemas are involved:
 ${ruleXml}
 
 WHAT TO WRITE:
-- "proposalMismatch": null when the rule implements the Proposal's decision.
-  When it does not seem to, one short sentence in the same language as the
-  Proposal saying why — for example: "This rule does not seem to implement
-  the Proposal (the Proposal is about CAGE codes; the rule checks
-  <emphasis>)." It is only an indication, so keep it short.
 - "examples": at least two examples, written from the Proposal's DECISION,
   never from the rule: one that follows the decision ("expected": "accept")
   and one that goes against it ("expected": "reject"). If the rule does not
@@ -361,6 +375,7 @@ ${
 
   if (ruleDependsOnTitle(matchExpressions)) prompt += titleDependentInstructions();
   if (conditions.length > 0) prompt += conditionInstructions(conditions);
+  if (tableModel) prompt += tableModelInstructions(tableModel);
 
   prompt += buildSchemaFactsBlock(standard, schemaFacts);
 
@@ -385,7 +400,7 @@ Write new examples that do not repeat this mistake.`;
   prompt += `
 
 OUTPUT: strict JSON, no comments:
-{"proposalMismatch": null, "examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", ${fields.join(', ')}}]}`;
+{"examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", ${fields.join(', ')}}]}`;
   return prompt;
 }
 
@@ -408,10 +423,12 @@ export function buildCopyableTestPrompt(systemPrompt) {
   return `${systemPrompt}\n\n${RULE_TEST_USER_MESSAGE}`;
 }
 
-// { ok: true, proposalMismatch, examples } | { ok: false, error } -- tolerant of a
-// markdown fence and of text around the JSON object, strict about its shape.
-// An "explanation" (asked for until T3b) is ignored: the panel shows
-// describeRule's instead.
+// { ok: true, examples } | { ok: false, error } -- tolerant of a markdown
+// fence and of text around the JSON object, strict about its shape. An
+// "explanation" (asked for until T3b) is ignored: the panel shows
+// describeRule's instead. A "proposalMismatch" (asked for until Barrido
+// final 1/2) is ignored too: the Proposal is now checked by its own call
+// (ruleProposalCheckPrompt.js).
 // options.contentOptionalSchemas: the schemas whose examples the
 // application builds whole (placeExample's rootOnly) -- their examples come
 // with no "content".
@@ -429,8 +446,6 @@ export function parseRuleTestResponse(raw, { contentOptionalSchemas = [] } = {})
   } catch (err) {
     return { ok: false, error: `The answer is not valid JSON (${err.message}).` };
   }
-  const proposalMismatch =
-    typeof data.proposalMismatch === 'string' && data.proposalMismatch.trim() ? data.proposalMismatch.trim() : null;
   if (!Array.isArray(data.examples) || data.examples.length === 0) {
     return { ok: false, error: 'The answer has no "examples" list.' };
   }
@@ -460,5 +475,5 @@ export function parseRuleTestResponse(raw, { contentOptionalSchemas = [] } = {})
       ...(metadata ? { metadata } : {}),
     });
   }
-  return { ok: true, proposalMismatch, examples };
+  return { ok: true, examples };
 }

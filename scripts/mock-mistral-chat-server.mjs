@@ -22,6 +22,9 @@ import http from "node:http";
 
 const PORT = 8902;
 let lastRequest = null;
+let lastProposalCheck = null;
+let proposalCheckCalls = 0;
+let proposalCheckFailNext = false;
 
 function isOffTopic(text) {
   return /what'?s the weather|qué tiempo hace|weather like/i.test(text || "");
@@ -194,7 +197,8 @@ function isRuleTest(text) {
 //   BROKENSTRUCT the reject example is <warning><content> inside <para>
 //                (the first real run); the correction round fixes it
 //   STUBBORN     same, but the correction keeps it broken
-//   MISMATCH     "proposalMismatch" filled in
+//   MISMATCH     the Proposal check (its own call) says the rule does
+//                not implement the Proposal
 //   SIBLINGLISTS (//randomList//randomList) the reject example is two
 //                sibling lists, also after the correction round
 //   SPANNEDCELLS (C3b, //thead rule) both examples carry a table whose row 2
@@ -358,16 +362,9 @@ function ruleTestReply(systemPrompt, messages) {
   const correcting = lastUser.startsWith("Some examples are not valid.");
   const reviewed = /\nPREVIOUS EXAMPLES WERE WRONG:/.test(systemPrompt);
   if (/BROKENJSON/.test(proposal)) {
-    return '{"proposalMismatch": null, "examples": [ {"label": "cut", "expected": "accept", "content": "<para>';
+    return '{"examples": [ {"label": "cut", "expected": "accept", "content": "<para>';
   }
-  // "at most three substeps" (the real "Revisar" case): the rule only
-  // forbids exactly one substep.
-  const mismatch = /MISMATCH/.test(proposal)
-    ? "This rule does not seem to implement the Proposal (the Proposal is about CAGE codes; the rule checks <emphasis>)."
-    : /at most three substeps/i.test(proposal)
-      ? "The Proposal allows at most three substeps; the rule only rejects a step with exactly one substep, so four or more are accepted."
-      : null;
-  const answer = (examples) => JSON.stringify({ proposalMismatch: mismatch, examples });
+  const answer = (examples) => JSON.stringify({ examples });
   if (/ALLINVALID/.test(proposal)) {
     const bad = "<sbSummary><levelledPara><para>Remove the panel.</para></levelledPara></sbSummary>";
     return answer([
@@ -424,6 +421,27 @@ function ruleTestReply(systemPrompt, messages) {
     // the title on the table itself (table/title, the real run: nothing
     // matches); the correction round -- which names the reject example --
     // wraps the table in a <section> with the context's first title.
+    // Barrido final 1/2: MERGEDROWS -- tables with merged rows as Mistral
+    // wrote them (c8e8fac): the accept example uses colnames with no
+    // <colspec>, a cols lower than its columns and a morerows past the last
+    // row (all three fixed by the app); the reject example has a row
+    // entirely covered by the morerows above (the app cannot fix it) --
+    // the correction round, which gets the exact cells and the pointer to
+    // the MODEL TABLE, writes a valid merged row (MERGEDROWSSTUBBORN: it
+    // keeps it broken).
+    if (/MERGEDROWS/.test(proposal) && /\/\/table/.test(rule)) {
+      const title = (rule.match(/context="[^"]*?'([^']+)'/) || [])[1] || "Parts list";
+      const head = '<thead><row><entry colname="c1">Part</entry><entry colname="c2">Descripción</entry><entry colname="c3">Cant.</entry></row></thead>';
+      const specs = '<colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/>';
+      const accept = `<section><title>${title}</title><table><tgroup cols="2">${head}<tbody><row><entry colname="c1">P-100</entry><entry colname="c2">Junta tórica</entry><entry colname="c3" morerows="1">2</entry></row><row><entry colname="c1">P-101</entry><entry colname="c2">Arandela</entry></row><row><entry colname="c1">P-102</entry><entry colname="c2">Tuerca</entry><entry colname="c3" morerows="2">4</entry></row></tbody></tgroup></table></section>`;
+      const covered = `<section><title>${title}</title><table><tgroup cols="3">${specs}${head}<tbody><row><entry colname="c1" morerows="1">P-100</entry><entry colname="c2" morerows="1">Junta tórica</entry><entry colname="c3">2</entry></row><row><entry colname="c2">Arandela</entry></row><row><entry colname="c1">P-101</entry><entry colname="c2">Tuerca</entry></row></tbody></tgroup></table></section>`;
+      const fixed = `<section><title>${title}</title><table><tgroup cols="3">${specs}${head}<tbody><row><entry colname="c1" morerows="1">P-100</entry><entry colname="c2">Junta tórica</entry><entry colname="c3">2</entry></row><row><entry colname="c2">Arandela</entry><entry colname="c3">1</entry></row><row><entry colname="c1">P-101</entry><entry colname="c2">Tuerca</entry></row></tbody></tgroup></table></section>`;
+      const gotModel = correcting && /MODEL TABLE/.test(lastUser) && !/MERGEDROWSSTUBBORN/.test(proposal);
+      return answer([
+        { label: "Merged quantity", expected: "accept", schema: ditaType, content: accept },
+        { label: "Part without quantity", expected: "reject", schema: ditaType, content: gotModel ? fixed : covered },
+      ]);
+    }
     if (/THE RULE DEPENDS ON A TITLE/.test(systemPrompt) && /\/\/table/.test(rule)) {
       const title = (rule.match(/context="[^"]*?'([^']+)'/) || [])[1] || "Parts list";
       const table = (caption, qty) =>
@@ -599,6 +617,22 @@ function ruleTestReply(systemPrompt, messages) {
   ]);
 }
 
+// Barrido final 1/2: the separate "does the rule implement the Proposal?"
+// call. MISMATCH and "at most three substeps" (the real "Revisar" case: the
+// rule only forbids exactly one substep) → implements false; PROPCHECKFAIL
+// → an answer that is not JSON (the check failed); anything else → true.
+function ruleProposalCheckReply(systemPrompt) {
+  const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
+  if (/PROPCHECKFAIL/.test(proposal)) return "I think the rule is probably fine.";
+  if (/MISMATCH/.test(proposal)) {
+    return JSON.stringify({ implements: false, missing: "The Proposal is about CAGE codes; the rule checks <emphasis>." });
+  }
+  if (/at most three substeps|como m[aá]ximo tres subpasos/i.test(proposal)) {
+    return JSON.stringify({ implements: false, missing: "The Proposal allows at most three substeps; the rule only rejects a step with exactly one substep, so four or more are accepted." });
+  }
+  return JSON.stringify({ implements: true, missing: "" });
+}
+
 // T3b "Review with the assistant": the cause follows the deterministic
 // description the prompt carries -- a rule that "cannot reject any content"
 // is the rule's fault; otherwise the examples'. UNCLEAR in the Proposal
@@ -739,6 +773,22 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ calls: extractCalls }));
     return;
   }
+  if (req.method === "GET" && req.url === "/last-proposal-check") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(lastProposalCheck));
+    return;
+  }
+  if (req.method === "GET" && req.url === "/proposal-check-calls") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ calls: proposalCheckCalls }));
+    return;
+  }
+  if (req.method === "POST" && req.url === "/proposal-check-fail-next") {
+    proposalCheckFailNext = true;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(lastRequest));
@@ -746,6 +796,9 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && req.url === "/reset") {
     lastRequest = null;
+    lastProposalCheck = null;
+    proposalCheckCalls = 0;
+    proposalCheckFailNext = false;
     slowNextArmed = false;
     extractDelayMs = 0;
     extractBroken = false;
@@ -797,6 +850,25 @@ const server = http.createServer((req, res) => {
     } catch {
       res.writeHead(400);
       res.end("bad json");
+      return;
+    }
+    // Barrido final 1/2: the Proposal check runs in parallel with the
+    // examples of every rule test. It is answered here, apart: it never
+    // becomes the /last-request and never consumes a one-shot flag armed
+    // for the examples (/truncate-next, /error-next, /slow-next…), so the
+    // existing scripts see the same requests as before. GET
+    // /last-proposal-check and /proposal-check-calls show it; POST
+    // /proposal-check-fail-next makes the next one answer something that
+    // is not JSON.
+    const checkUser = [...(parsed.messages || [])].reverse().find((m) => m.role === "user")?.content;
+    if (checkUser === "Check whether the rule implements the Proposal.") {
+      lastProposalCheck = parsed;
+      proposalCheckCalls += 1;
+      const system = (parsed.messages || []).find((m) => m.role === "system")?.content || "";
+      const content = proposalCheckFailNext ? "I think the rule is probably fine." : ruleProposalCheckReply(system);
+      proposalCheckFailNext = false;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }] }));
       return;
     }
     lastRequest = parsed;
@@ -883,6 +955,12 @@ const server = http.createServer((req, res) => {
       if (/REALSIZE|\/ddn or \/dml/.test(messages.find((m) => m.role === "system")?.content || "")) reply = realSize(reply);
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
+    } else if (/<warning> y cu[aá]ndo conviene/.test(userText) || /SCHEMAFACTSNAME/.test(userText)) {
+      // Barrido final 1/2: the two real patterns of a Mistral answer that
+      // named the cards block (ask-open-question-no-disclaimer, c8e8fac);
+      // the app cleans them from what the user sees.
+      reply =
+        "MOCK-ANSWER: El elemento <warning> sirve para avisar de un peligro para las personas. Puede ir dentro de varios elementos, según los **SCHEMA FACTS**:\n- <proceduralStep>\n- <levelledPara>\n\nConviene usarlo antes del paso al que se refiere, como indica la tarjeta de esquema proporcionada (SCHEMA FACTS).";
     } else {
       reply = `MOCK-ANSWER: Here is information about this BRDP, in response to: "${userText}"`;
     }

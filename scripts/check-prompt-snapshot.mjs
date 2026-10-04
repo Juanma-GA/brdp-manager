@@ -362,22 +362,32 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // whether …") and its LANGUAGE line names title, definition and proposal and
 // says a given (catalog/project) text is never translated. Only the 2
 // extractFromText cases change; the other 54 are unchanged.
+//
+// Barrido final 1/2: all ruleTestExamples cases change on purpose -- the
+// "proposalMismatch" field leaves the examples prompt (the Proposal is
+// now checked by its own call: new group ruleProposalCheck, 2 cases), and
+// the two cases whose rule looks at tables (brex-3-0-1-mandatory-absolute,
+// dita-xpath3-title-dependent-context) gain the MODEL TABLE block, a valid
+// CALS table with a merged row built from the schema. Ask, Suggest, review
+// and AI Extract prompts are unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
+import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';
 import { buildExtractFromTextPrompt, buildFindDecisionsPrompt } from '../src/prompts/extractFromTextPrompt.js';
-import { askCases, extractFromRulesCases, extractFromTextCases, findDecisionsCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
+import { askCases, extractFromRulesCases, extractFromTextCases, findDecisionsCases, ruleProposalCheckCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXPECTED_PATH = path.join(__dirname, 'prompt-snapshot', 'expected-prompts.json');
 
 function buildActual() {
-  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {}, extractFromRules: {}, findDecisions: {}, extractFromText: {} };
+  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {}, ruleProposalCheck: {}, extractFromRules: {}, findDecisions: {}, extractFromText: {} };
   for (const c of askCases) actual.ask[c.name] = buildAskSystemPrompt(...c.args);
   for (const c of suggestDefinitionCases) actual.suggestDefinition[c.name] = buildSuggestDefinitionPrompt(...c.args);
   for (const c of suggestProposalCases) actual.suggestProposal[c.name] = buildSuggestProposalPrompt(...c.args);
   for (const c of suggestRuleCases) actual.suggestRule[c.name] = buildSuggestRulePrompt(...c.args);
   for (const c of ruleTestExamplesCases) actual.ruleTestExamples[c.name] = buildRuleTestExamplesPrompt(...c.args);
   for (const c of ruleTestReviewCases) actual.ruleTestReview[c.name] = buildRuleTestReviewPrompt(...c.args);
+  for (const c of ruleProposalCheckCases) actual.ruleProposalCheck[c.name] = buildRuleProposalCheckPrompt(...c.args);
   for (const c of extractFromRulesCases) actual.extractFromRules[c.name] = buildExtractFromRulesPrompt(...c.args);
   for (const c of findDecisionsCases) actual.findDecisions[c.name] = buildFindDecisionsPrompt(...c.args);
   for (const c of extractFromTextCases) actual.extractFromText[c.name] = buildExtractFromTextPrompt(...c.args);

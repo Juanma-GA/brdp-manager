@@ -21,7 +21,7 @@ import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
 import i18n from '../i18n';
-import { RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
+import { RULE_PROPOSAL_CHECK_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
 import { buildCopyableTestPrompt } from '../prompts/ruleTestExamplesPrompt.js';
 import {
   buildRuleTestReviewPrompt,
@@ -35,6 +35,7 @@ import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
 import { passedTestToReplaceAt } from '../utils/ruleTestStatus.js';
 import { withPassedTest } from '../utils/ruleTestSaved.js';
 import { ruleDescriptionText, verdictToTestRecord } from '../utils/ruleTestReasons.js';
+import { cleanInternalNames } from '../utils/answerCleanup.js';
 
 async function fetchStructure(standard, schema) {
   return authFetchJson(
@@ -151,6 +152,16 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       isCurrent: () => generationRef.current === generation,
       onPrompt: (systemPrompt) => setCopyablePrompt(buildCopyableTestPrompt(systemPrompt)),
       previousReview: previousReview?.mismatches ? previousReview : null,
+      // Barrido final 1/2: "does the rule implement the Proposal?" -- its
+      // own short call, in parallel with the examples (one more call per
+      // test), given the rule's deterministic description in English.
+      ruleDescription: ruleDescriptionText(description, i18n.getFixedT('en')),
+      askProposalCheck: async (messages, systemPrompt) =>
+        (
+          await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
+            temperature: RULE_PROPOSAL_CHECK_TEMPERATURE,
+          })
+        ).content,
     });
     if (!result) return; // a newer generation started
     if (result.status === 'not_executable') {
@@ -164,15 +175,15 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       return;
     }
     setupRef.current = result.setup;
-    const { proposalMismatch, examples, runs, correction, untested } = result;
-    setState({ status: 'ready', proposalMismatch, examples, runs, correction, untested });
+    const { proposalCheck, examples, runs, correction, untested } = result;
+    setState({ status: 'ready', proposalCheck, examples, runs, correction, untested });
     if (!onDemand) {
       // A passed test keeps its examples (Guardar la prueba aprobada).
-      const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalMismatch)), examples, runs, brdp?.proposal);
+      const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalCheck)), examples, runs, brdp?.proposal);
       recordedRef.current = record;
       report(record);
     }
-  }, [ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, analysis, onDemand]);
+  }, [ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, analysis, description, onDemand]);
 
   // Generate once when the panel opens (it is remounted for another rule),
   // unless the rule is not executable at all: then only on request. The ref
@@ -215,7 +226,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
             recorded: recordedRef.current,
             alreadyRecorded: editsRecordedRef.current,
             examples,
-            verdict: ruleTestVerdict(examples, runs, analysis, state.proposalMismatch),
+            verdict: ruleTestVerdict(examples, runs, analysis, state.proposalCheck),
           }),
           examples,
           runs,
@@ -240,7 +251,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     setEditNotice({ kind: 'recorded', count: record.editedExamples.length });
   };
 
-  const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalMismatch) : null;
+  const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck) : null;
   const shownAnalysis = lateAnalysis || analysis;
 
   // T3b "Review with the assistant" (incorrect verdict only): the Proposal,
@@ -266,7 +277,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       });
       if (generationRef.current !== generation) return; // examples replaced meanwhile
       const parsed = parseRuleTestReviewResponse(res.content);
-      setReview(parsed.ok ? { status: 'ready', cause: parsed.cause, explanation: parsed.explanation, mismatches } : { status: 'error', error: parsed.error, mismatches });
+      setReview(parsed.ok ? { status: 'ready', cause: parsed.cause, explanation: cleanInternalNames(parsed.explanation), mismatches } : { status: 'error', error: parsed.error, mismatches });
     } catch (err) {
       if (generationRef.current === generation) setReview({ status: 'error', error: err.message, mismatches });
     }

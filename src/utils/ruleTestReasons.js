@@ -36,7 +36,8 @@
 //   several parts: parts {parts: [{ ruleId, reason }]};
 //   recorded verdicts (verdictToTestRecord below): test_incorrect
 //     {permissive, strict}, test_nothing_selected, test_missing_expectation,
-//     test_no_runnable, test_proposal_mismatch {mismatch}.
+//     test_no_runnable, test_proposal_mismatch {mismatch},
+//     test_proposal_unchecked {error} (Barrido final 1/2).
 
 import { formatSchemaIssue } from '../validation/schemaValidation.js';
 
@@ -47,7 +48,7 @@ export const ENGINE_REASON_CODES = [
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context',
 ];
-export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch'];
+export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -76,7 +77,9 @@ export function formatRuleTestReason(reason, t) {
 // The result to record for a panel verdict (ruleTest.js's ruleTestVerdict):
 //   { result: 'passed' | 'review' | 'failed' | 'inconclusive' | 'not_executable', reason }
 // "review": the examples passed but the rule does not seem to implement the
-// Proposal (test_proposal_mismatch {mismatch} -- the LLM's note, as it wrote it).
+// Proposal (test_proposal_mismatch {mismatch} -- the check's sentence, as
+// the LLM wrote it), or the Proposal could not be checked
+// (test_proposal_unchecked {error}, Barrido final 1/2).
 // null while there is no verdict yet.
 export function verdictToTestRecord(verdict) {
   if (!verdict) return null;
@@ -84,7 +87,9 @@ export function verdictToTestRecord(verdict) {
     case 'correct':
       return { result: 'passed', reason: null };
     case 'review':
-      return { result: 'review', reason: { code: 'test_proposal_mismatch', params: { mismatch: verdict.mismatch } } };
+      return verdict.unchecked
+        ? { result: 'review', reason: { code: 'test_proposal_unchecked', params: { error: verdict.error || '' } } }
+        : { result: 'review', reason: { code: 'test_proposal_mismatch', params: { mismatch: verdict.mismatch } } };
     case 'incorrect':
       return { result: 'failed', reason: { code: 'test_incorrect', params: { permissive: Boolean(verdict.permissive), strict: Boolean(verdict.strict) } } };
     case 'inconclusive':

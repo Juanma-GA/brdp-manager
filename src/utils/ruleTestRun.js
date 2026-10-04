@@ -14,13 +14,15 @@
 // prompt, the LLM's answer, the checks of each example, ONE automatic
 // correction round for the examples that fail them, and the engine run.
 import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleTestResponse, RULE_TEST_USER_MESSAGE } from '../prompts/ruleTestExamplesPrompt.js';
+import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } from '../prompts/ruleProposalCheckPrompt.js';
 import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { describeRule, parseXmlDocument, ruleConditions } from './ruleTestEngine.js';
 import { stripLiterals } from './ruleTestCommon.js';
-import { chooseTestSchemas, placeExample, ruleLooksAtBrexReference, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
+import { calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
+import { cleanInternalNames } from './answerCleanup.js';
 
 // Same cap as the schema facts of Ask / Suggest Rule.
 const MAX_SCHEMA_FACTS = 6;
@@ -119,7 +121,22 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     rulePlacements.length > 0 && rulePlacements.every((p) => p.unreachable)
       ? { code: 'unreachable_target', params: { names: [...new Set(rulePlacements.flatMap((p) => p.unreachable))].join(', ') } }
       : null;
-  return { contextSchemas, schemaFacts, promptPlacements, unreachable, untested, setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) } };
+  // Barrido final 1/2: a rule that looks at tables gets a model table with a
+  // merged row in the prompt, built from the first test schema's structure.
+  const firstRule = rulePlacements.find((p) => p.insertion) || rulePlacements[0];
+  const tableModel =
+    firstRule && ruleLooksAtTables(ruleXml, [...extractRuleNames(ruleXml).elements, ...targets.checked])
+      ? calsTableModel(placements[firstRule.schema]?.structure)
+      : null;
+  return {
+    contextSchemas,
+    schemaFacts,
+    promptPlacements,
+    unreachable,
+    untested,
+    tableModel,
+    setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml), tableModel: Boolean(tableModel) },
+  };
 }
 
 // For each attribute-only alternative of the rule (//@materialUsage), the
@@ -274,6 +291,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             ruleNames,
             nestings: setup?.placements?.[materialized[index].schema]?.placement?.nestings || [],
             expected: examples[index].expected,
+            tableModel: Boolean(setup?.tableModel),
           });
       if (problems.length > 0 && !missing && keep && examples[index].expected === 'reject') problems.push(keep);
       return { index, label: examples[index].label, problems };
@@ -288,7 +306,29 @@ export function runRuleTestExamples(examples, { ruleXml, format, setup, vocabula
   return { materialized, runs };
 }
 
-// → { status: 'ready', proposalMismatch, examples, runs,
+// Barrido final 1/2, Part 2: does the rule implement the Proposal? Its own
+// call (ruleProposalCheckPrompt.js), given the decision and the rule's
+// deterministic description. `ask(messages, systemPrompt)` → the answer
+// text (the caller sends it at RULE_PROPOSAL_CHECK_TEMPERATURE).
+//   { status: 'implements' }
+//   { status: 'mismatch', missing }   -- missing: the LLM's sentence
+//   { status: 'unavailable', error, truncated? } -- the call failed or did
+//     not answer valid JSON: never read as "implements" (the verdict says
+//     the Proposal could not be checked).
+// Never throws.
+export async function checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask }) {
+  const systemPrompt = buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription });
+  try {
+    const answer = await ask([{ role: 'user', content: RULE_PROPOSAL_CHECK_USER_MESSAGE }], systemPrompt);
+    const parsed = parseRuleProposalCheckResponse(answer);
+    if (!parsed.ok) return { status: 'unavailable', error: parsed.error, systemPrompt, answer };
+    return parsed.implements ? { status: 'implements', systemPrompt, answer } : { status: 'mismatch', missing: cleanInternalNames(parsed.missing), systemPrompt, answer };
+  } catch (err) {
+    return { status: 'unavailable', error: err?.message || String(err), truncated: err?.code === LLM_TRUNCATED, systemPrompt };
+  }
+}
+
+// → { status: 'ready', proposalCheck, examples, runs,
 //     correction, setup, systemPrompt, responses }
 //   | { status: 'not_executable', reason, setup } -- the rule looks at
 //     nothing the examples can contain (no LLM call)
@@ -313,6 +353,11 @@ export async function generateRuleTestExamples({
   isCurrent = () => true,
   onPrompt,
   previousReview = null,
+  // Barrido final 1/2: the Proposal check, run in parallel with the
+  // examples (one more LLM call per test). Without askProposalCheck no
+  // check is made and proposalCheck is null.
+  askProposalCheck = null,
+  ruleDescription = null,
 }) {
   let systemPrompt = null;
   const responses = [];
@@ -323,6 +368,10 @@ export async function generateRuleTestExamples({
     // The schemas whose examples the application builds whole (rootOnly):
     // their examples come with no "content".
     const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema) };
+    const checkPromise =
+      askProposalCheck && ruleDescription != null
+        ? checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck })
+        : Promise.resolve(null);
     systemPrompt = buildRuleTestExamplesPrompt({
       brdp,
       standard,
@@ -334,6 +383,7 @@ export async function generateRuleTestExamples({
       previousReview,
       matchExpressions: ruleMatchExpressions(ruleXml),
       conditions: ruleConditions(ruleXml, format, { parseXml }),
+      tableModel: prepared.tableModel,
     });
     onPrompt?.(systemPrompt);
     const run = (examples) => runRuleTestExamples(examples, { ruleXml, format, setup: prepared.setup, vocabulary, parseXml });
@@ -386,9 +436,11 @@ export async function generateRuleTestExamples({
         if (err?.code === LLM_TRUNCATED) correction.truncated = true;
       }
     }
+    const proposalCheck = await checkPromise;
+    if (!isCurrent()) return null;
     return {
       status: 'ready',
-      proposalMismatch: parsed.proposalMismatch,
+      proposalCheck,
       examples: materialized,
       runs,
       correction,

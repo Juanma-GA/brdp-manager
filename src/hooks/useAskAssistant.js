@@ -11,6 +11,7 @@ import { buildAskSystemPrompt } from '../prompts/askPrompt.js';
 import { ASK_TEMPERATURE } from '../prompts/shared.js';
 import { checkAnswerNames, loadSchemaVocabulary } from '../validation/schemaValidation.js';
 import { answerStructuralQuestion } from '../utils/structuralAnswer.js';
+import { cleanInternalNames } from '../utils/answerCleanup.js';
 
 export function useAskAssistant({ projectId, standard, ruleFormat, selected, ruleApproval, aiProvider, vocabulary, recomputeVocabResult }) {
   // `question` is only ever the live DRAFT in the textarea -- it auto-
@@ -174,12 +175,15 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
       const res = await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
         temperature: ASK_TEMPERATURE,
       });
-      setAnswer(res.content);
+      // Barrido final 1/2: the internal name of the cards block ("SCHEMA
+      // FACTS") never reaches the user (answerCleanup.js).
+      const shown = cleanInternalNames(res.content, { userText: askedQuestion });
+      setAnswer(shown);
       setAnswerSource('llm');
       // The same vocabulary as the BRDP's own notice; the names that notice
       // already reports are left out (the user has been warned about them).
-      setAnswerNameCheck(checkAnswerNames(res.content, questionVocabulary, vocab));
-      setPrevTurn({ question: askedQuestion, answer: res.content });
+      setAnswerNameCheck(checkAnswerNames(shown, questionVocabulary, vocab));
+      setPrevTurn({ question: askedQuestion, answer: shown });
       // Auto-clear on success only (docs request) -- an errored question
       // stays in the textarea below so the user never loses what they typed.
       setQuestion('');
