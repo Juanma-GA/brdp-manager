@@ -149,6 +149,8 @@ async function main() {
     await page.getByTestId("text-extract-box").fill("   \n\t  ");
     assert(await submit.isDisabled(), "whitespace only: still disabled");
     await page.getByTestId("text-extract-box").fill(ES_TEXT);
+    // The maximum comes from the server: wait until it is shown.
+    await page.waitForFunction(() => !document.querySelector('[data-testid="text-extract-count"]')?.innerText.includes("…"));
     const count = await page.getByTestId("text-extract-count").innerText();
     assert(count === "334 / 5,000 words", `counter "${count}"`);
     await mock("/reset");
@@ -162,6 +164,20 @@ async function main() {
     assert(cands.length >= 5 && cands.every((c) => c.quote_found), `${cands.length} candidates, every quote found literally in the text`);
     const cmd = cands.find((c) => c.origin_identifier === "BRDP-D1-00020");
     assert(!!cmd && /<cmd>/.test(cmd.quote), "BRDP-D1-00020 read from the quote by code");
+    // Language: the drafting prompt opens the Definition in the quote's
+    // language, and a New EXT row of a Spanish text gets Spanish texts; a
+    // catalog row keeps its catalog Title and Definition untranslated.
+    const draftReq = await lastRequest();
+    const draftSystem = JSON.stringify(draftReq?.system ?? draftReq?.messages?.[0]?.content ?? "");
+    assert(draftSystem.includes("Decidir si") && draftSystem.includes("Never write a definition in English"), "the drafting prompt gives the Spanish opening of a Definition");
+    const newExt = cands.filter((c) => c.classification === "new_ext");
+    assert(newExt.length && newExt.every((c) => c.definition.startsWith("Decidir") && c.text_sources.definition === "ai"), "New EXT rows: Spanish Definition written by the AI");
+    if (cmd.classification === "catalog") {
+      assert(cmd.text_sources.title === "catalog" && cmd.text_sources.definition === "catalog" && !cmd.ai_fields.includes("definition") && !cmd.ai_fields.includes("title"),
+        "BRDP-D1-00020 (catalog): Title and Definition from the catalog, not rewritten");
+    } else {
+      console.log(`       (BRDP-D1-00020 is ${cmd.classification} here: no DITA catalog row for it)`);
+    }
     assert(!cands.some((c) => /revisa los procedimientos|editor XML compartido|responsable de la documentación/.test(c.quote)), "the paragraphs with no decision are not extracted");
     const header = await page.locator('[data-testid="rule-extract-table"] thead').innerText();
     assert(header.includes("Fragment") && !header.includes("Rule"), "the table has a Fragment column instead of Rule");
@@ -221,8 +237,36 @@ async function main() {
     assert(s187?.classification === "catalog" && s187.title === "Minimum number of substeps in a step" && s187.ai_fields.join() === "proposal",
       "BRDP-S1-00187 (named in the text): From catalog, Title from the catalog, only the Proposal by the AI");
     assert(cands.every((c) => c.quote_found), "every quote of the PDF found literally (line breaks of the PDF do not count)");
+    const catalog42 = await api(`/api/brdp-catalog?standard=${encodeURIComponent("S1000D 4.2")}`);
+    const cat187 = catalog42.find((r) => r.identifier === "BRDP-S1-00187");
+    assert(s187.definition === cat187.definition && s187.text_sources.definition === "catalog", "EN: catalog Definition unchanged");
+    const enNew = cands.filter((c) => c.classification === "new_ext");
+    assert(enNew.length && enNew.every((c) => c.definition.startsWith("Decide ") && c.proposal.startsWith("MOCK-PROPOSAL") && !c.title.startsWith("Título")),
+      "EN: Title, Definition and Proposal of the New EXT rows in English");
+    assert(s187.proposal.startsWith("MOCK-PROPOSAL"), "EN: catalog row's Proposal in English");
+
     await page.getByTestId("rule-extract-apply").click();
     await page.getByTestId("rule-extract-result").waitFor();
+    console.log("\nSpanish text → S1000D 4.2 project (catalog row and New EXT row)");
+    const s42es = await createProject("Text extract 4.2 ES", "S1000D 4.2");
+    projects.push(s42es);
+    await openConfig(page, s42es.id);
+    await page.getByTestId("text-extract-box").fill(
+      "Según BRDP-S1-00187, un paso que tenga subpasos debe contener al menos dos.\n\nLas figuras de los procedimientos deben llevar siempre un título descriptivo."
+    );
+    await page.waitForFunction(() => !document.querySelector('[data-testid="text-extract-count"]')?.innerText.includes("…"));
+    await mock("/reset");
+    await page.getByTestId("text-extract-submit").click();
+    await waitDrafted(page);
+    ({ cands } = await candidatesOf(s42es.id));
+    const es187 = cands.find((c) => c.origin_identifier === "BRDP-S1-00187");
+    assert(es187?.classification === "catalog" && es187.title === cat187.title && es187.definition === cat187.definition
+      && es187.text_sources.title === "catalog" && es187.text_sources.definition === "catalog",
+      "ES, De catálogo: catalog Title and Definition unchanged (not translated)");
+    assert(es187.text_sources.proposal === "ai" && es187.proposal.startsWith("MOCK-PROPUESTA"), "ES, De catálogo: Proposal in Spanish");
+    const esNew = cands.find((c) => c.classification === "new_ext");
+    assert(!!esNew && /figuras|Título/.test(esNew.title), `ES, Nueva EXT: Spanish title ("${esNew?.title}")`);
+    assert(esNew?.definition.startsWith("Decidir") && esNew.proposal.startsWith("MOCK-PROPUESTA"), "ES, Nueva EXT: Definition and Proposal in Spanish");
 
     console.log("\nExisting BRDP, other edition's catalog, a quote the AI made up");
     await openConfig(page, s42.id);
@@ -259,18 +303,27 @@ async function main() {
     // ── Word limit ─────────────────────────────────────────────────────────
     console.log("\nWord limit");
     await openConfig(page, s42.id);
+    assert((await page.getByTestId("text-extract-why-limit").count()) === 0 && (await page.getByText("Why is there a limit?").count()) === 0, "empty box: the reason for the limit is not shown");
     await page.getByTestId("text-extract-box").fill(words(5000));
     assert((await page.getByTestId("text-extract-count").innerText()) === "5,000 / 5,000 words" && (await page.getByTestId("text-extract-submit").isEnabled()), "5,000 words: accepted");
+    assert((await page.getByTestId("text-extract-why-limit").count()) === 0, "5,000 words: the reason for the limit is not shown");
     await page.getByTestId("text-extract-box").fill(words(5001));
     await mock("/reset");
     assert(await page.getByTestId("text-extract-submit").isDisabled(), "5,001 words: the button is disabled");
     assert((await page.getByTestId("text-extract-too-long").innerText()) === "This text has 5,001 words; the maximum is 5,000. Split it into sections and import them one by one.", "5,001 words: the message with the count");
+    const why = page.getByTestId("text-extract-why-limit");
+    assert((await why.innerText()) === "Why is there a limit? Every proposed BRDP is reviewed by a person. Long texts give too many proposals and the review loses focus. If your document is longer, import it section by section.", "5,001 words: the reason for the limit shown");
+    const [errBox, whyBox] = [await page.getByTestId("text-extract-too-long").boundingBox(), await why.boundingBox()];
+    assert(whyBox.y >= errBox.y + errBox.height - 1, "the reason is below the message");
+    assert((await page.getByTestId("rule-extract-section").innerText()).includes("At most 5,000 words."), "the hint line stays");
     assert((await lastRequest()) === null, "no AI call");
     const direct = await fetch(`${API}/api/projects/${s42.id}/ai-extract/text`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ text: words(5001) }),
     });
     assert(direct.status === 422 && (await direct.json()).detail.includes("5001 words; the limit is 5000"), "a direct request with 5,001 words: rejected by the server");
     await page.getByTestId("text-extract").screenshot({ path: path.join(SHOTS, "text-extract-too-long.png") });
+    await page.getByTestId("text-extract-box").fill(words(4999));
+    assert((await page.getByTestId("text-extract-why-limit").count()) === 0 && (await page.getByTestId("text-extract-too-long").count()) === 0, "trimmed under the limit: message and reason gone");
 
     // ── Files that cannot be read ──────────────────────────────────────────
     console.log("\nFiles that cannot be read");
@@ -365,10 +418,10 @@ async function main() {
     const esCounts = await page.getByTestId("rule-extract-text-counts").innerText();
     assert(es.includes("Fragmento") && esCounts === "Textos: 3 redactados por IA · 0 pendientes · 0 fallidos", "ES: Fragment column and texts line", esCounts);
     assert((await page.getByTestId("rule-extract-filter").locator('option[value="blocking"]').innerText()) === "Bloquean la importación", "ES: 'Bloquean la importación'");
-    await page.getByText("¿Por qué hay límite?").click();
-    assert((await page.getByTestId("rule-extract-section").innerText()).includes("Cada BRDP propuesta la revisa una persona."), "ES: why there is a limit");
+    assert((await page.getByText("¿Por qué hay límite?").count()) === 0, "ES: under the limit, no reason shown");
     await page.getByTestId("text-extract-box").fill(words(7320));
     assert((await page.getByTestId("text-extract-too-long").innerText()) === "Este texto tiene 7 320 palabras; el máximo es 5 000. Divídelo por secciones e impórtalas una a una.", "ES: too long");
+    assert((await page.getByTestId("text-extract-why-limit").innerText()).startsWith("¿Por qué hay límite? Cada BRDP propuesta la revisa una persona."), "ES: the reason below the message");
     await page.getByTestId("text-extract").screenshot({ path: path.join(SHOTS, "text-extract-es.png") });
     await page.locator("header select, nav select").first().selectOption("en");
   } finally {

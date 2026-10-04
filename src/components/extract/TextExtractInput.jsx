@@ -105,14 +105,16 @@ export default function TextExtractInput({ maxWords, disabledReason, busy, onSub
         </span>
       </div>
       <p className={pageStyles.hint}>{t('config.ruleExtract.text.hint', { max: maxWords != null ? n(maxWords) : '…' })}</p>
-      <details className={styles.textHelp}>
-        <summary>{t('config.ruleExtract.text.whyLimit')}</summary>
-        <p>{t('config.ruleExtract.text.whyLimitText')}</p>
-      </details>
       {tooLong && (
-        <ul className={pageStyles.errorList} data-testid="text-extract-too-long">
-          <li>{t('config.ruleExtract.text.tooLong', { words: n(words), max: n(maxWords) })}</li>
-        </ul>
+        <>
+          <ul className={pageStyles.errorList} data-testid="text-extract-too-long">
+            <li>{t('config.ruleExtract.text.tooLong', { words: n(words), max: n(maxWords) })}</li>
+          </ul>
+          {/* Why there is a limit: only next to the message that it was passed. */}
+          <p className={styles.textHelp} data-testid="text-extract-why-limit">
+            <strong>{t('config.ruleExtract.text.whyLimit')}</strong> {t('config.ruleExtract.text.whyLimitText')}
+          </p>
+        </>
       )}
       {readError && (
         <ul className={pageStyles.errorList} data-testid="text-extract-read-error">

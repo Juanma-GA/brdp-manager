@@ -63,17 +63,25 @@ export function languageCheck(text, expect) {
   return { status: detected === expect ? "pass" : "fail", detail: `expected ${expect}, detected ${detected} (heuristic, word-list based)` };
 }
 
-// Each title on its own (a free-text extraction's titles are short, so most
+// Each text on its own (a free-text extraction's titles are short, so most
 // fall under the short-text rule: only one detected as another language
-// fails). Fails when there is no title at all.
-export function titlesLanguageCheck(titles, expect) {
+// fails). Fails when there is none at all. `noun` names them in the detail.
+export function titlesLanguageCheck(titles, expect, noun = "title") {
   const list = (titles || []).filter((t) => (t || "").trim());
-  if (!list.length) return { status: "fail", detail: "no title" };
+  if (!list.length) return { status: "fail", detail: `no ${noun}` };
   const bad = list.map((title) => ({ title, r: languageCheck(title, expect) })).filter((x) => x.r.status !== "pass");
   return {
     status: bad.length ? "fail" : "pass",
-    detail: bad.length ? `not ${expect}: ${bad.map((x) => `${JSON.stringify(x.title)} (${x.r.detail})`).join("; ")}` : `${list.length} title(s), none in another language`,
+    detail: bad.length ? `not ${expect}: ${bad.map((x) => `${JSON.stringify(x.title)} (${x.r.detail})`).join("; ")}` : `${list.length} ${noun}(s), none in another language`,
   };
+}
+
+// Only the texts the AI wrote for `field` (text_sources[field] === "ai"):
+// a catalog Title or Definition stays in the catalog's language and is never
+// translated, so it is not judged.
+export function aiFieldLanguageCheck(candidates, field, expect) {
+  const texts = (candidates || []).filter((c) => c?.text_sources?.[field] === "ai").map((c) => c[field]);
+  return titlesLanguageCheck(texts, expect, `AI-written ${field}`);
 }
 
 // ---- Schema names in any form --------------------------------------------

@@ -354,6 +354,14 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // own "LANGUAGE OF THE TITLES" paragraph instead of a clause at the end of the
 // title line. Only the 3 findDecisions cases change; the other 53 are
 // unchanged.
+//
+// AI Extract, free text: with a Spanish text the AI-written Definition came
+// out in English (Title and Proposal were Spanish) -- the only examples of
+// the definition line were English ("Decide whether …"). The drafting prompt
+// gives the opening in the quote's language ("Decidir si …" / "Decide
+// whether …") and its LANGUAGE line names title, definition and proposal and
+// says a given (catalog/project) text is never translated. Only the 2
+// extractFromText cases change; the other 54 are unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';
 import { buildExtractFromTextPrompt, buildFindDecisionsPrompt } from '../src/prompts/extractFromTextPrompt.js';

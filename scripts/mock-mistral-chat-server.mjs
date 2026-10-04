@@ -119,7 +119,9 @@ function extractReply(systemPrompt) {
     const decisionLines = decisionBlock.split("\n").map((l) => l.replace(/^ {2}> /, "")).filter(Boolean);
     const decision = (decisionLines.find((l) => /Decision made by|shall|must|debe/.test(l)) || decisionLines.join(" ") || "").replace(/^Decision made by \w+\.\s*/, "");
     const firstRule = (block.match(/\n {2}- (\/\/?[^ ]+)/) || [])[1] || "";
-    const spanish = /\b(Decidir|debe|deben|el|la|los|las)\b/.test(decision);
+    // A real model writes in the language of the quote: any Spanish word or
+    // accent in the decision is enough to answer in Spanish.
+    const spanish = /[áéíóúñ¿¡]|\b(Decidir|debe|deben|el|la|los|las|de|del|se|en|un|una|cada|sin|con)\b/i.test(decision);
     const proposal = spanish
       ? `MOCK-PROPUESTA ${origin}: ${decision || "se aplicará la regla"}.`
       : `MOCK-PROPOSAL ${origin}: ${decision || (firstRule ? `${firstRule} shall be used as the rule enforces` : "the rule shall apply")}.`;

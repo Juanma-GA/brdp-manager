@@ -86,7 +86,7 @@ function caseSchemaLocation(testCase) {
   return schemaLocationOf(config, testCase.standard);
 }
 import { validateXML } from "xmllint-wasm";
-import { distinctSchemaNames, languageCheck, titlesLanguageCheck, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
+import { distinctSchemaNames, languageCheck, aiFieldLanguageCheck, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
 import { importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
@@ -471,9 +471,11 @@ function runTextCheck(check, answer, flags, ctx = {}) {
       return { status: names.length <= check.max ? "pass" : "fail", detail: `${names.length} distinct schema name(s), max ${check.max}${names.length ? ": " + shown : ""}` };
     }
     case "language": {
-      // "titles": each candidate title on its own (short ones follow the
-      // short-text rule); fails when any title is in another language.
-      if (check.target === "titles") return titlesLanguageCheck((ctx.textCandidates || []).map((c) => c.title), check.expect);
+      // "titles" / "definitions": each text the AI wrote, on its own (short
+      // ones follow the short-text rule); a catalog or project text is
+      // never judged -- it stays in its own language.
+      if (check.target === "titles") return aiFieldLanguageCheck(ctx.textCandidates, "title", check.expect);
+      if (check.target === "definitions") return aiFieldLanguageCheck(ctx.textCandidates, "definition", check.expect);
       return languageCheck(answer, check.expect);
     }
     case "no_markdown": {
@@ -949,7 +951,13 @@ async function runExtractTextCase(project, aiProvider, _createdBrdp, testCase) {
     ask: async ({ system, user }) => sendMessagesToLlm(aiProvider, system, [{ role: "user", content: user }], SUGGEST_TEMPERATURE, EXTRACT_MAX_TOKENS),
   });
   const byKey = new Map(written.map((r) => [r.key, r]));
-  const textCandidates = candidates.map((c) => ({ ...c, ...(byKey.get(c.key) || {}) }));
+  // Like the server when the page saves a batch: every field the AI wrote is
+  // marked "ai" in text_sources (the language checks judge only those).
+  const textCandidates = candidates.map((c) => {
+    const r = byKey.get(c.key) || {};
+    const aiWritten = (c.ai_fields || []).filter((f) => (r[f] || "").trim()).map((f) => [f, "ai"]);
+    return { ...c, ...r, text_sources: { ...(c.text_sources || {}), ...Object.fromEntries(aiWritten) } };
+  });
   return {
     systemPrompt,
     userMessage: FIND_DECISIONS_USER_MESSAGE,

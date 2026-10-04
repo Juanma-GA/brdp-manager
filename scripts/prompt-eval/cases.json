@@ -3279,7 +3279,13 @@
           "type": "language",
           "target": "titles",
           "expect": "es",
-          "note": "every title in Spanish (each title on its own; short ones follow the short-text rule)"
+          "note": "every title the AI wrote in Spanish (each on its own; short ones follow the short-text rule); catalog titles are not judged"
+        },
+        {
+          "type": "language",
+          "target": "definitions",
+          "expect": "es",
+          "note": "every Definition the AI wrote in Spanish; catalog Definitions are not judged"
         }
       ]
     },
@@ -3354,6 +3360,12 @@
           "type": "language",
           "target": "text_candidates",
           "expect": "es"
+        },
+        {
+          "type": "language",
+          "target": "definitions",
+          "expect": "es",
+          "note": "every Definition the AI wrote in Spanish"
         }
       ]
     }

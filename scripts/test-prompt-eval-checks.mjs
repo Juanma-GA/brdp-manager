@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { distinctSchemaNames, languageCheck, titlesLanguageCheck, LANGUAGE_MIN_WORDS, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
+import { distinctSchemaNames, languageCheck, titlesLanguageCheck, aiFieldLanguageCheck, LANGUAGE_MIN_WORDS, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { UNFILLED_MARKER_RE } from "../src/utils/proposalMarkers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -165,6 +165,20 @@ check("titles: all Spanish pass", titlesLanguageCheck(["Una sola acción por pas
 check("titles: one English title among Spanish ones fails and is named", (() => { const r = titlesLanguageCheck(["Una sola acción por paso", "Title of the tables"], "es"); return r.status === "fail" && r.detail.includes("Title of the tables"); })());
 check("titles: a short English title without a frequent word is too short to tell (short-text rule)", titlesLanguageCheck(["One action per step"], "es").status === "pass");
 check("titles: none at all fails", titlesLanguageCheck(["", "  "], "es").status === "fail");
+// Only what the AI wrote is judged: a catalog title or Definition keeps its
+// own language (the real case: "Specify the language", catalog title of
+// BRDP-D1-00020, in a Spanish text).
+const textCands = [
+  { title: "Specify the language", definition: "Decide whether the language of a topic is specified and how.", text_sources: { title: "catalog", definition: "catalog", proposal: "ai" } },
+  { title: "Una sola acción por paso", definition: "Decidir si cada paso del procedimiento puede contener más de una acción.", text_sources: { title: "ai", definition: "ai", proposal: "ai" } },
+];
+check("AI titles: a catalog English title is not judged", aiFieldLanguageCheck(textCands, "title", "es").status === "pass");
+check("AI definitions: a catalog English Definition is not judged", aiFieldLanguageCheck(textCands, "definition", "es").status === "pass");
+check("AI definitions: an English one written by the AI fails and is named", (() => {
+  const r = aiFieldLanguageCheck([...textCands, { title: "Títulos de tabla", definition: "Decide whether every table must have a title and where it goes.", text_sources: { title: "ai", definition: "ai" } }], "definition", "es");
+  return r.status === "fail" && r.detail.includes("Decide whether every table");
+})());
+check("AI definitions: none written by the AI fails", aiFieldLanguageCheck([textCands[0]], "definition", "es").status === "fail");
 check("long Spanish text expected English fails", languageCheck("La tabla debe tener un título y se usa para los datos del módulo", "en").status === "fail");
 check("long Spanish text expected Spanish passes", languageCheck("La tabla debe tener un título y se usa para los datos del módulo", "es").status === "pass");
 
