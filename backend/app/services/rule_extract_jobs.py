@@ -110,13 +110,21 @@ SPECIFICATIONS = {
 _OWN_CODES = {"S1000D": {"S1"}, "DITA": {"D1", "S1"}}
 
 CLASSIFICATIONS = (
-    "same", "changed", "catalog", "catalog_edition", "catalog_edition_marked", "other_spec", "default_rule", "new_ext", "empty",
+    "same", "changed", "catalog", "catalog_edition", "other_spec", "default_rule", "new_ext", "empty",
 )
 # "From catalog (S1000D 4.1)": an identifier of the project's specification
 # that is not in its own standard's catalog but is in another edition's
 # (the same number is the same decision across editions). Imported with its
-# own identifier, or "marked" with the edition (BRDP-S1-00012-4.1).
-CATALOG_CLASSES = ("catalog", "catalog_edition", "catalog_edition_marked")
+# own identifier; the edition label next to it in the app says which
+# catalog it comes from.
+CATALOG_CLASSES = ("catalog", "catalog_edition")
+# Retired: "From catalog (S1000D 4.1), marked" imported the identifier with
+# the edition as a suffix (BRDP-S1-00012-4.1). The edition label does the
+# same without renaming, so the option is gone. BRDPs already imported with
+# the suffix stay as they are; an extraction saved before the change reads
+# those rows as "catalog_edition" (retire_marked_classification), and a
+# request asking for it is refused with the reason.
+RETIRED_MARKED_CLASSIFICATION = "catalog_edition_marked"
 TEXT_FIELDS = ("title", "definition", "proposal")
 TEXT_SOURCES = ("project", "catalog", "file", "ai", "manual")
 
@@ -282,7 +290,8 @@ def other_edition_entry(
 
 
 # A "marked" identifier carries the edition it came from
-# (BRDP-S1-00036-4.1, AI Extract's "From catalog (S1000D 4.1), marked").
+# (BRDP-S1-00036-4.1, from AI Extract's retired "From catalog (S1000D 4.1),
+# marked" option). Such BRDPs still exist in projects.
 _MARKED_IDENTIFIER_RE = re.compile(r"^(BRDP-[A-Z]\d-\d{5})-\d+(?:\.\d+)*$")
 
 
@@ -322,11 +331,6 @@ async def catalog_edition_labels(standard: str, identifiers, db: AsyncSession) -
         if found is not None:
             out[identifier] = found[0]
     return out
-
-
-def edition_suffix(edition: str) -> str:
-    """"S1000D 4.1" → "4.1" (the "marked" identifier is BRDP-S1-00012-4.1)."""
-    return edition.split(" ", 1)[1] if " " in edition else edition
 
 
 def other_specification(identifier: str | None, standard: str) -> str | None:
@@ -487,10 +491,19 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
     # project's specification that its own catalog does not have.
     edition_catalog = await load_other_edition_catalogs(project.standard, origin_ids, set(catalog), db)
 
+    # BRDPs imported with the retired "marked" identifier (BRDP-S1-00012-4.1)
+    # are the same decision: found by their base identifier too, also when
+    # they came in by Excel (no "extracted_from" event).
+    marked = {}
+    for identifier, b in sorted(existing.items()):
+        base_id = catalog_base_identifier(identifier)
+        if base_id != identifier:
+            marked.setdefault(base_id, b)
+
     def match(origin):
         if not origin:
             return None
-        return existing.get(origin) or extracted.get(origin)
+        return existing.get(origin) or extracted.get(origin) or marked.get(origin)
 
     approvals = {}
     existing_ids = [match(i).id for i in origin_ids if match(i) is not None]
@@ -550,7 +563,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             c["catalog_edition"] = edition
             c["catalog_texts"] = {"title": entry.title, "definition": entry.definition}
             c["identifier"] = origin
-            c["option_identifiers"] = {"catalog_edition": origin, "catalog_edition_marked": f"{origin}-{edition_suffix(edition)}"}
+            c["option_identifiers"] = {"catalog_edition": origin}
             c["warnings"].append(
                 {
                     "code": "catalog_other_edition",
@@ -558,7 +571,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
                     "message": f"{origin} is not in the {project.standard} catalog; it is in {edition}.",
                 }
             )
-            options = ["catalog_edition", "catalog_edition_marked", "new_ext"]
+            options = ["catalog_edition", "new_ext"]
         elif default_rule_specification(origin):
             base = "default_rule"
             c["specification"] = default_rule_specification(origin)
@@ -642,8 +655,7 @@ def _renumber_warning(c: dict) -> None:
     classification = c.get("classification")
     if classification == "empty":
         classification = c.get("base_classification")
-    marked = classification == "catalog_edition_marked"
-    if not marked and (classification != "new_ext" or not _EXT_RE.match(origin or "")):
+    if classification != "new_ext" or not _EXT_RE.match(origin or ""):
         return
     if c.get("identifier") and c["identifier"] != origin and c.get("rule_ids"):
         c["warnings"].append(
@@ -817,7 +829,11 @@ def _manifest(candidates: list[dict]) -> list[dict]:
 def missing_from_manifest(job: RuleExtractJob, keys: set[str]) -> list[dict]:
     """The manifest's candidates the server has no row for (should never
     happen; named so the page can say which -- HR7)."""
-    return [m for m in (job.manifest or []) if m["key"] not in keys]
+    return [
+        {**m, "classification": "catalog_edition"} if m.get("classification") == RETIRED_MARKED_CLASSIFICATION else m
+        for m in (job.manifest or [])
+        if m["key"] not in keys
+    ]
 
 
 # ── Job ───────────────────────────────────────────────────────────────────
@@ -1070,11 +1086,34 @@ async def run_text_extract_job(
 # ── Candidates out / edits ────────────────────────────────────────────────
 
 
+def retire_marked_classification(data: dict) -> dict:
+    """A candidate saved before the "marked" option was retired, read as
+    today's: "catalog_edition" with the original identifier, without the
+    retired option. Anything else as it is (the same dict)."""
+    if not isinstance(data, dict):
+        return data
+    retired = RETIRED_MARKED_CLASSIFICATION
+    options = data.get("options") or []
+    identifiers = data.get("option_identifiers") or {}
+    if data.get("classification") != retired and retired not in options and retired not in identifiers:
+        return data
+    out = dict(data)
+    out["options"] = [o for o in options if o != retired]
+    identifiers = {k: v for k, v in identifiers.items() if k != retired}
+    identifiers.setdefault("catalog_edition", out.get("origin_identifier"))
+    out["option_identifiers"] = identifiers
+    if out.get("classification") == retired:
+        out["classification"] = "catalog_edition"
+        out["identifier"] = identifiers.get("catalog_edition") or out.get("origin_identifier")
+    _renumber_warning(out)
+    return out
+
+
 def candidate_out(row: RuleExtractCandidate) -> dict:
     """The candidate for the review table. The full rule (and the stored one
     of an existing BRDP, for the diff) only up to BIG_CANDIDATE_RULES rules;
     beyond that the table shows the count and the first rules."""
-    data = dict(row.data)
+    data = retire_marked_classification(dict(row.data))
     big = data.get("rule_count", 0) > BIG_CANDIDATE_RULES
     data["rule_xml"] = None if big else row.rule_xml
     if big:
@@ -1099,7 +1138,7 @@ def apply_edit(data: dict, edit: dict, new_ext_identifier=None) -> dict:
     worked out from the texts: "manual" once every field the AI writes has
     text, otherwise it stays "pending" / "failed" (a failed row with only
     one of its texts written still blocks the import)."""
-    out = dict(data)
+    out = dict(retire_marked_classification(data))
     by_ai = edit.get("draft_status") == "drafted"
     by_hand = False
     for field in EDITABLE_FIELDS:
@@ -1107,6 +1146,11 @@ def apply_edit(data: dict, edit: dict, new_ext_identifier=None) -> dict:
             continue
         value = edit[field]
         if field == "classification":
+            if value == RETIRED_MARKED_CLASSIFICATION:
+                raise ValueError(
+                    f"{out['key']}: classification {value!r} was retired: import it as 'catalog_edition' (the original "
+                    "identifier; the edition label shows which catalog it comes from) or as 'new_ext'"
+                )
             if value not in out.get("options", []):
                 raise ValueError(f"{out['key']}: classification {value!r} is not possible for this candidate")
             if value != out.get("classification"):
@@ -1212,6 +1256,7 @@ class ApplyRefused(Exception):
 
 
 def _label(c: dict) -> str:
+    c = retire_marked_classification(c)
     return c.get("identifier") or c.get("origin_identifier") or c.get("key")
 
 
@@ -1297,7 +1342,7 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
 
     now = datetime.now(timezone.utc)
     for row in rows:
-        c = row.data
+        c = retire_marked_classification(row.data)
         classification = c.get("classification")
         origin = c.get("origin_identifier")
         rule_xml = row.rule_xml if row.rule_xml and not c.get("rule_problem") else ""
@@ -1332,7 +1377,7 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
             continue
         if classification == "new_ext":
             identifier = new_ext(c.get("identifier"))
-        elif classification in ("catalog_edition", "catalog_edition_marked"):
+        elif classification == "catalog_edition":
             identifier = (c.get("option_identifiers") or {}).get(classification) or c.get("identifier")
             if not identifier or identifier in existing or identifier in taken:
                 omit(c, f"{identifier} already exists in the project")
@@ -1344,7 +1389,7 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
                 continue
         taken.add(identifier)
         title, definition = c.get("title") or "", c.get("definition") or ""
-        edition = c.get("catalog_edition") if classification in ("catalog_edition", "catalog_edition_marked") else None
+        edition = c.get("catalog_edition") if classification == "catalog_edition" else None
         if classification in CATALOG_CLASSES:
             entry = (
                 await db.execute(

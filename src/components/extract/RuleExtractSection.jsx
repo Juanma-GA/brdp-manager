@@ -90,7 +90,7 @@ function classLabel(t, c, classification = c.classification, textJob = false) {
   if (classification === 'other_spec' || classification === 'default_rule') {
     return t(`config.ruleExtract.classes.${classification}`, { spec: c.specification || '' });
   }
-  if (classification === 'catalog_edition' || classification === 'catalog_edition_marked') {
+  if (classification === 'catalog_edition') {
     return t(`config.ruleExtract.classes.${classification}`, { edition: c.catalog_edition || '' });
   }
   return t(`config.ruleExtract.classes.${classification}`);

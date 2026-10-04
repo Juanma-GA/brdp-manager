@@ -64,6 +64,7 @@ from app.schemas.rule_extract import (
 )
 from app.services.rule_extract import RuleExtractFileError, read_rules_file
 from app.services.rule_extract_jobs import (
+    RETIRED_MARKED_CLASSIFICATION,
     ApplyRefused,
     apply_edit,
     apply_job,
@@ -307,7 +308,11 @@ async def get_candidate_keys(
         )
     ).all()
     keys = [
-        {"key": k, "identifier": ident or "", "origin_identifier": origin or "", "classification": cls or ""}
+        # A row of the retired "marked" option reads as "catalog_edition"
+        # with its original identifier (retire_marked_classification).
+        {"key": k, "identifier": origin or "", "origin_identifier": origin or "", "classification": "catalog_edition"}
+        if cls == RETIRED_MARKED_CLASSIFICATION
+        else {"key": k, "identifier": ident or "", "origin_identifier": origin or "", "classification": cls or ""}
         for k, ident, origin, cls in rows
     ]
     return RuleExtractCandidateKeysOut(

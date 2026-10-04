@@ -1367,8 +1367,11 @@ async def project_42_users():
 async def test_identifier_from_another_editions_catalog(client, project_42_users):
     """An S1 identifier missing from the 4.2 catalog but in the 4.1 one:
     "From catalog (S1000D 4.1)", unchecked, Title and Definition from that
-    catalog; imported with its identifier, or "marked" with the edition; a
-    re-import finds both. In both catalogs: a normal catalog BRDP."""
+    catalog, two options only (the "marked" one was retired: the edition
+    label says where it comes from); imported with its identifier, and a
+    re-import finds it. A BRDP imported earlier with the retired suffix
+    (BRDP-S1-xxxxx-4.1) is found as "already exists". In both catalogs: a
+    normal catalog BRDP."""
     project, editor = project_42_users
     n = uuid.uuid4().int % 90000 + 10000
     only41, both, in5, nowhere, taken = (f"BRDP-S1-{(n + i) % 100000:05d}" for i in range(5))
@@ -1393,49 +1396,106 @@ async def test_identifier_from_another_editions_catalog(client, project_42_users
         by = _by_id(cands)
         c41 = by[only41]
         assert (c41["classification"], c41["selected"], c41["catalog_edition"]) == ("catalog_edition", False, "S1000D 4.1")
-        assert c41["options"] == ["catalog_edition", "catalog_edition_marked", "new_ext"]
-        assert c41["option_identifiers"] == {"catalog_edition": only41, "catalog_edition_marked": f"{only41}-4.1"}
+        assert c41["options"] == ["catalog_edition", "new_ext"]
+        assert c41["option_identifiers"] == {"catalog_edition": only41}
         assert (c41["title"], c41["definition"], c41["proposal"]) == ("Title 4.1", "Def Title 4.1", "Rule 0 text.")
         assert c41["text_sources"] == {"title": "catalog", "definition": "catalog", "proposal": "file"} and c41["ai_fields"] == []
         w = next(w for w in c41["warnings"] if w["code"] == "catalog_other_edition")
         assert w["params"] == {"identifier": only41, "standard": "S1000D 4.2", "edition": "S1000D 4.1"}
         assert (by[both]["classification"], by[both]["title"]) == ("catalog", "Title 4.2")
         assert (by[in5]["classification"], by[in5]["catalog_edition"]) == ("catalog_edition", "S1000D 5.0")
+        assert by[in5]["options"] == ["catalog_edition", "new_ext"]
         assert by[nowhere]["classification"] == "new_ext"
         assert any(w["code"] == "not_in_catalog" for w in by[nowhere]["warnings"])
+        # The suffixed BRDP of an earlier import (no extracted_from event
+        # here: it came in some other way) is the same decision.
+        assert (by[taken]["classification"], by[taken]["identifier"]) == ("changed", f"{taken}-4.1")
 
         url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
-        # in5 "marked": its rule names another identifier (warning).
+        # The retired classification in a direct request: refused with its reason.
         res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [
             {"key": by[in5]["key"], "classification": "catalog_edition_marked"},
+        ]})
+        assert res.status_code == 422, res.text
+        assert "retired" in res.json()["detail"]
+        res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [
             {"key": by[taken]["key"], "classification": "catalog_edition_marked"},
         ]})
-        assert res.status_code == 200, res.text
-        marked = {c["key"]: c for c in res.json()["candidates"]}[by[in5]["key"]]
-        assert marked["identifier"] == f"{in5}-5.0"
-        assert any(w["code"] == "rule_ids_from_file" for w in marked["warnings"])
+        assert res.status_code == 422, res.text
         keys = [by[i]["key"] for i in (only41, both, in5, taken)]
         res = await _apply(client, url, editor, {"keys": keys})
         assert res.status_code == 200, res.text
         result = res.json()
-        assert (result["selected"], result["created"], result["omitted"]) == (4, 3, 1)
-        assert result["omitted_detail"][0]["reason"] == f"{taken}-4.1 already exists in the project"
+        assert (result["selected"], result["created"], result["updated"], result["omitted"]) == (4, 3, 1, 0)
         async with async_session_factory() as session:
             brdps = {b.identifier: b for b in (await session.execute(select(BRDP).where(BRDP.project_id == project.id))).scalars()}
-            assert {only41, both, f"{in5}-5.0"} <= set(brdps)
-            assert (brdps[only41].title, brdps[f"{in5}-5.0"].title) == ("Title 4.1", "Title 5.0 only")
-            approval = await session.get(RuleApproval, (brdps[f"{in5}-5.0"].id, "BREX-4.2"))
-            assert f'brDecisionIdentNumber="{in5}"' in approval.rule_xml  # the rule is unchanged
+            assert {only41, both, in5, f"{taken}-4.1"} == set(brdps)
+            assert (brdps[only41].title, brdps[in5].title) == ("Title 4.1", "Title 5.0 only")
+            approval = await session.get(RuleApproval, (brdps[f"{taken}-4.1"].id, "BREX-4.2"))
+            assert f'brDecisionIdentNumber="{taken}"' in approval.rule_xml  # the rule is unchanged
             event = (await session.execute(select(BRDPHistory.new_value).where(
                 BRDPHistory.brdp_id == brdps[only41].id, BRDPHistory.field_name == "extracted_from"))).scalar_one()
             assert json.loads(event)["catalog_edition"] == "S1000D 4.1" and json.loads(event)["catalog_standard"] == "S1000D 4.2"
-        # Re-import: both found by their origin, "same".
+        # Re-import: all found, "same".
         job2, cands2 = await _extract(client, project.id, editor, _brex("4.2", content))
         by2 = _by_id(cands2)
-        assert by2[only41]["classification"] == "same" and by2[in5]["classification"] == "same"
-        assert by2[in5]["identifier"] == f"{in5}-5.0"
+        assert [by2[i]["classification"] for i in (only41, in5, taken)] == ["same", "same", "same"]
+        assert by2[taken]["identifier"] == f"{taken}-4.1"
     finally:
         async with async_session_factory() as session:
             for row in added:
                 await session.delete(await session.get(BRDPCatalog, row.id))
+            await session.commit()
+
+
+async def test_an_old_extraction_with_marked_rows_reads_as_catalog_edition(client, project_42_users):
+    """A job saved before the "marked" option was retired: its rows read as
+    "From catalog (S1000D 4.1)" with the original identifier (candidates,
+    candidate keys and the import), never an error."""
+    project, editor = project_42_users
+    n = uuid.uuid4().int % 90000 + 10000
+    only41 = f"BRDP-S1-{n:05d}"
+    async with async_session_factory() as session:
+        row = BRDPCatalog(standard="S1000D 4.1", identifier=only41, title="Title 4.1", definition="Def 4.1")
+        session.add(row)
+        await session.commit()
+        catalog_id = row.id
+    try:
+        content = (
+            f'<structureObjectRule id="{only41}"><brDecisionRef brDecisionIdentNumber="{only41}"/>'
+            f'<objectPath allowedObjectFlag="0">//x</objectPath><objectUse>{only41}. Rule text.</objectUse></structureObjectRule>'
+        )
+        job, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+        key = _by_id(cands)[only41]["key"]
+        # Rewrite the row as the old code saved a "marked" choice.
+        async with async_session_factory() as session:
+            cand = await session.get(RuleExtractCandidate, (uuid.UUID(job["id"]), key))
+            data = dict(cand.data)
+            data.update({
+                "classification": "catalog_edition_marked",
+                "identifier": f"{only41}-4.1",
+                "options": ["catalog_edition", "catalog_edition_marked", "new_ext"],
+                "option_identifiers": {"catalog_edition": only41, "catalog_edition_marked": f"{only41}-4.1"},
+                "selected": True,
+            })
+            cand.data = data
+            await session.commit()
+        url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+        c = _by_id((await client.get(f"{url}/candidates", headers=editor)).json()["candidates"])[only41]
+        assert (c["classification"], c["identifier"]) == ("catalog_edition", only41)
+        assert c["options"] == ["catalog_edition", "new_ext"]
+        assert c["option_identifiers"] == {"catalog_edition": only41}
+        assert not any(w["code"] == "rule_ids_from_file" for w in c["warnings"])
+        keys = (await client.get(f"{url}/candidate-keys", headers=editor)).json()
+        entry = next(k for k in keys["keys"] if k["key"] == key)
+        assert (entry["identifier"], entry["classification"]) == (only41, "catalog_edition")
+        # An edit of another field keeps working and persists the normalized row.
+        res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [{"key": key, "title": "Edited"}]})
+        assert res.status_code == 200, res.text
+        res = await _apply(client, url, editor, {"keys": [key]})
+        assert res.status_code == 200, res.text
+        assert res.json()["created_identifiers"][0]["identifier"] == only41
+    finally:
+        async with async_session_factory() as session:
+            await session.delete(await session.get(BRDPCatalog, catalog_id))
             await session.commit()

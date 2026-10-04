@@ -12,10 +12,12 @@
 //     failed", unchecking one, writing one by hand; a direct /apply with a
 //     row still failed is a 409 with its identifier;
 //   - "From catalog (S1000D 4.1)": unchecked, with its warning and the 4.1
-//     catalog's texts; bulk classify the shown rows as "marked"; imported
-//     with the original identifier, marked (BRDP-S1-xxxxx-4.1) and as new
-//     EXT; History; a re-import finds them; the marked identifier in BRDP
-//     Records (search), Ask and the Excel export;
+//     catalog's texts; two options only ("marked" was retired: a direct
+//     request with it is a 422); bulk classify the shown rows as New EXT
+//     and back; imported with the original identifier and as new EXT;
+//     History; a re-import finds them, also a BRDP with the old suffix
+//     (BRDP-S1-xxxxx-4.1), which keeps its label, BRDP Records search, Ask
+//     and the Excel export;
 //   - bulk classify offers only the options valid for every shown row.
 // Needs both catalogs loaded -- 4.2 from sources/, and the real 4.1 one of
 // the repo (552 identifiers; it has the 108 BRDP-S1 identifiers of the "CA"
@@ -246,25 +248,45 @@ async function main() {
     assert(catalog41.size === 552, `the real S1000D 4.1 catalog is loaded (${catalog41.size} identifiers)`);
     assert(first.title === catalog41.get(first.origin_identifier)?.title && first.title && first.text_sources.proposal === "file", "Title from the 4.1 catalog, Proposal from the file", first.title);
     const opts = await r1.getByTestId("rule-extract-class").locator("option").allInnerTexts();
-    assert(opts.join(" | ") === "From catalog (S1000D 4.1) | From catalog (S1000D 4.1), marked | New EXT", `three options: ${opts.join(" | ")}`);
+    assert(opts.join(" | ") === "From catalog (S1000D 4.1) | New EXT", `two options: ${opts.join(" | ")}`);
     await r1.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(SHOTS, "rule-extract-catalog-edition.png") });
-    // Bulk classify the 108 shown as "marked".
+    const filterOpts = await page.getByTestId("rule-extract-filter").locator("option").allInnerTexts();
+    assert(!filterOpts.some((o) => /marked/.test(o)), `the "Show" filter has no "marked" (${filterOpts.length} options)`);
+    // The retired classification in a direct request: refused with its reason.
+    const refused = await fetch(`${API}/api/projects/${ca.id}/ai-extract/jobs/${job.id}/candidates`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ items: [{ key: first.key, classification: "catalog_edition_marked" }] }),
+    });
+    const refusedBody = await refused.json();
+    assert(refused.status === 422 && /retired/.test(refusedBody.detail || ""), `direct PATCH with the retired option: ${refused.status} ${refusedBody.detail}`);
+    // Bulk classify the 108 shown as New EXT and back.
     const bulkOpts = await page.getByTestId("rule-extract-classify-shown").locator("option").allInnerTexts();
-    assert(bulkOpts.slice(1).join(" | ") === "From catalog (S1000D 4.1) | From catalog (S1000D 4.1), marked | New EXT", `bulk classify offers the three: ${bulkOpts.slice(1).join(" | ")}`);
-    await page.getByTestId("rule-extract-classify-shown").selectOption("catalog_edition_marked");
+    assert(bulkOpts.slice(1).join(" | ") === "From catalog (S1000D 4.1) | New EXT", `bulk classify offers the two: ${bulkOpts.slice(1).join(" | ")}`);
+    await page.getByTestId("rule-extract-classify-shown").selectOption("new_ext");
     await page.waitForTimeout(1500);
     ({ cands } = await candidatesOf(ca.id));
-    const marked = cands.filter((c) => c.origin_identifier && ed.some((e) => e.key === c.key));
-    assert(marked.every((c) => c.classification === "catalog_edition_marked" && c.identifier === `${c.origin_identifier}-4.1`), "the 108 are marked: BRDP-S1-xxxxx-4.1");
-    assert(marked.every((c) => c.warnings.some((w) => w.code === "rule_ids_from_file")), "each with the warning that its rule names another identifier");
-    // Choose one of each option and check them.
-    const [o1, o2, o3] = marked;
+    const edKeys = new Set(ed.map((e) => e.key));
+    assert(cands.filter((c) => edKeys.has(c.key)).every((c) => c.classification === "new_ext" && /^BRDP-EXT-/.test(c.identifier)), "the 108 as New EXT");
+    await page.getByTestId("rule-extract-filter").selectOption("new_ext");
+    await page.getByTestId("rule-extract-search").fill("BRDP-S1-");
+    await page.waitForTimeout(300);
+    await page.getByTestId("rule-extract-classify-shown").selectOption("catalog_edition");
+    await page.waitForTimeout(1500);
+    await page.getByTestId("rule-extract-search").fill("");
+    ({ cands } = await candidatesOf(ca.id));
+    const back = cands.filter((c) => edKeys.has(c.key));
+    assert(back.every((c) => c.classification === "catalog_edition" && c.identifier === c.origin_identifier), "and back: the 108 with their original identifier");
+    // Choose: o1 imported as is, o3 as New EXT; o2 already in the project
+    // with the old suffix (as an earlier extraction left it): not imported now.
+    const [o1, o2, o3] = back;
+    const suffixed = `${o2.origin_identifier}-4.1`;
+    await api(`/api/projects/${ca.id}/brdps`, { method: "POST", body: JSON.stringify({ identifier: suffixed, title: catalog41.get(o2.origin_identifier).title }) });
     await api(`/api/projects/${ca.id}/ai-extract/jobs/${job.id}/candidates`, {
       method: "PATCH",
       body: JSON.stringify({ items: [
-        { key: o1.key, classification: "catalog_edition", selected: true },
-        { key: o2.key, selected: true },
+        { key: o1.key, selected: true },
         { key: o3.key, classification: "new_ext", selected: true },
       ] }),
     });
@@ -291,14 +313,15 @@ async function main() {
     assert(!!m && Number(m[1]) === checked.length && Number(m[2]) + Number(m[3]) + Number(m[4]) === Number(m[1]), `summary adds up: "${summary}"`);
     assert(!(await page.getByTestId("rule-extract-result-missing").count()), "no 'went nowhere' error");
     const brdps = await api(`/api/projects/${ca.id}/brdps`);
-    assert(brdps.length === Number(m[2]), `the project has exactly the ${m[2]} created BRDPs`);
+    assert(brdps.length === Number(m[2]) + 1, `the project has the ${m[2]} created BRDPs and the suffixed one`);
     await page.getByTestId("rule-extract-result").screenshot({ path: path.join(SHOTS, "rule-extract-import-summary.png") });
     const ids = new Set(brdps.map((b) => b.identifier));
-    assert(ids.has(o1.origin_identifier) && ids.has(`${o2.origin_identifier}-4.1`) && [...ids].some((i) => /^BRDP-EXT-/.test(i)),
-      `imported: ${o1.origin_identifier}, ${o2.origin_identifier}-4.1 and a new EXT for ${o3.origin_identifier}`);
+    assert(ids.has(o1.origin_identifier) && [...ids].some((i) => /^BRDP-EXT-/.test(i)) && ![...ids].some((i) => i !== suffixed && /-4\.1$/.test(i)),
+      `imported: ${o1.origin_identifier} and a new EXT for ${o3.origin_identifier}, never a suffixed identifier`);
     const b1 = brdps.find((b) => b.identifier === o1.origin_identifier);
-    const b2 = brdps.find((b) => b.identifier === `${o2.origin_identifier}-4.1`);
-    assert(b1.title === catalog41.get(o1.origin_identifier).title && b2.title === catalog41.get(o2.origin_identifier).title, "with the 4.1 catalog's Title");
+    const b2 = brdps.find((b) => b.identifier === suffixed);
+    assert(b1.title === catalog41.get(o1.origin_identifier).title, "with the 4.1 catalog's Title");
+    assert(b1.catalog_edition === "S1000D 4.1" && b2.catalog_edition === "S1000D 4.1", "both carry the 4.1 edition label (the suffixed one too)");
 
     // History, Records search, Ask.
     await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
@@ -307,10 +330,13 @@ async function main() {
     await page.waitForTimeout(300);
     const shown = await page.locator("tbody tr").allInnerTexts();
     assert(shown.length === 1 && shown[0].includes(b2.identifier), `search "-4.1" finds only ${b2.identifier}`);
-    await page.getByText(b2.identifier, { exact: true }).first().click();
+    assert((await page.locator("tbody tr").first().getByTestId("catalog-edition-tag").innerText()) === "4.1", "the suffixed BRDP keeps its '4.1' label");
+    await page.getByPlaceholder(/Search/).first().fill(o1.origin_identifier);
+    await page.waitForTimeout(300);
+    await page.getByText(b1.identifier, { exact: true }).first().click();
     await page.getByText("Extracted from").first().waitFor();
     const panel = await page.locator("body").innerText();
-    assert(panel.includes(`(source ID ${o2.origin_identifier}); S1000D 4.1 catalog, not in S1000D 4.2`), "History: '…; S1000D 4.1 catalog, not in S1000D 4.2'");
+    assert(panel.includes(`(source ID ${o1.origin_identifier}); S1000D 4.1 catalog, not in S1000D 4.2`), "History: '…; S1000D 4.1 catalog, not in S1000D 4.2'");
     await page.screenshot({ path: path.join(SHOTS, "rule-extract-history-catalog-edition.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.getByText("catálogo S1000D 4.1, no existe en S1000D 4.2", { exact: false }).first().waitFor();
@@ -318,6 +344,9 @@ async function main() {
     await page.locator("header select, nav select").first().selectOption("en");
     await mock("/reset");
     const askBox = page.locator("textarea").filter({ hasNot: page.locator("[readonly]") }).last();
+    await page.getByPlaceholder(/Search/).first().fill("-4.1");
+    await page.waitForTimeout(300);
+    await page.getByText(b2.identifier, { exact: true }).first().click();
     await page.getByPlaceholder(/Ask about this BRDP/).fill("What is this decision about?");
     await page.getByRole("button", { name: "Ask", exact: true }).click();
     await page.waitForFunction(() => document.body.innerText.includes("MOCK-ANSWER"), null, { timeout: 30000 });
@@ -326,7 +355,7 @@ async function main() {
     assert(system.includes(`ID: ${b2.identifier}`), `Ask sends the whole identifier (${b2.identifier})`);
     void askBox;
 
-    // Excel export → import: the marked identifier comes back whole.
+    // Excel export → import: the suffixed identifier comes back whole.
     const exportRows = brdps.map((b) => ({ id: b.identifier, title: b.title, definition: b.definition, proposal: b.proposal, proposalStatus: b.validation, ruleStatus: "Draft", rule: "" }));
     const xlsx = await fetch(`${API}/api/projects/${ca.id}/export.xlsx`, {
       method: "POST",
@@ -345,8 +374,9 @@ async function main() {
     await page.getByTestId("rule-extract-drafting").waitFor({ state: "detached", timeout: 300000 }).catch(() => {});
     ({ cands } = await candidatesOf(ca.id));
     const again = Object.fromEntries(cands.map((c) => [c.origin_identifier, c]));
-    assert([o1, o2, o3].every((o) => again[o.origin_identifier].classification === "same"), "re-import: the three are 'Already exists (same)'");
-    assert(again[o2.origin_identifier].identifier === b2.identifier, `the marked one found as ${b2.identifier}`);
+    assert([o1, o3].every((o) => again[o.origin_identifier].classification === "same"), "re-import: the two imported are 'Already exists (same)'");
+    assert(again[o2.origin_identifier].classification === "changed" && again[o2.origin_identifier].identifier === b2.identifier,
+      `the suffixed one found as ${b2.identifier}, 'Already exists (changes)' (it had no rule): ${again[o2.origin_identifier].classification}`);
 
     // ── Failed rows ─────────────────────────────────────────────────────────
     console.log("\nFailed rows (the AI answers something that is not JSON)");

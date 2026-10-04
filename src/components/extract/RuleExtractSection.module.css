@@ -48,12 +48,11 @@
 }
 
 /* Classification drop-down with the ID under it. Wide enough for the
-   longest classification in EN and ES ("De catálogo (S1000D 4.1), marcada"
-   / "From catalog (S1000D 4.1), marked", 223 px, plus "Otra especificación
-   (S2000M)", "Regla por defecto de S1000D");
+   longest classification in EN and ES ("Otra especificación (S2000M)",
+   "Regla por defecto de S1000D", "De catálogo (S1000D 4.1)");
    scripts/verify-rule-extract-columns.mjs measures it. */
 .colClass {
-  width: 252px;
+  width: 232px;
 }
 
 /* Every drop-down fills its cell: same width on every row, never wider than

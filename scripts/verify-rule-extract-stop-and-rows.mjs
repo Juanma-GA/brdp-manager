@@ -108,6 +108,24 @@ asyncio.run(main())
   execFileSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend") });
 }
 
+// Gives BRDPs the "-4.1" suffix of the retired "marked" option, as an
+// earlier extraction left them (the API never edits an identifier).
+function suffixIdentifiers(projectId, identifiers) {
+  const code = `
+import asyncio, uuid
+from sqlalchemy import select
+from app.db.base import async_session_factory
+from app.models import BRDP
+async def main():
+    async with async_session_factory() as s:
+        for b in (await s.execute(select(BRDP).where(BRDP.project_id == uuid.UUID(${JSON.stringify(projectId)}), BRDP.identifier.in_(${JSON.stringify(identifiers)})))).scalars():
+            b.identifier = b.identifier + "-4.1"
+        await s.commit()
+asyncio.run(main())
+`;
+  execFileSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend") });
+}
+
 const complete = (c) =>
   ["same", "changed", "empty"].includes(c.classification) || (c.ai_fields || []).every((f) => (c[f] || "").trim());
 
@@ -145,10 +163,12 @@ async function main() {
     const ed = cands.filter((c) => c.classification === "catalog_edition").slice(0, 6);
     await api(`${base}/jobs/${job.id}/candidates`, {
       method: "PATCH",
-      body: JSON.stringify({ items: ed.slice(0, 3).map((c) => ({ key: c.key, classification: "catalog_edition_marked", selected: true })).concat(ed.slice(3).map((c) => ({ key: c.key, selected: true }))) }),
+      body: JSON.stringify({ items: ed.map((c) => ({ key: c.key, selected: true })) }),
     });
     await page.getByTestId("rule-extract-drafting").waitFor({ state: "detached", timeout: 300000 }).catch(() => {});
     await api(`${base}/jobs/${job.id}/apply`, { method: "POST", body: JSON.stringify({ keys: ed.map((c) => c.key), import_as: "pending" }) });
+    // Three of them as the retired "marked" option left them: BRDP-S1-xxxxx-4.1.
+    suffixIdentifiers(p.id, ed.slice(0, 3).map((c) => c.origin_identifier));
 
     // The candidates answer loses the 6 "Already exists" rows on its way once.
     let cutOnce = true;
@@ -169,6 +189,7 @@ async function main() {
     const same = cands.filter((c) => c.classification === "same");
     console.log(`       ${warning.replace(/\s+/g, " ").slice(0, 300)}`);
     assert(same.length === 6, "the server has the 6 'Already exists (same)' rows");
+    assert(same.filter((c) => /-4\.1$/.test(c.identifier)).length === 3, "three of them found by their old suffixed identifier");
     assert(warning.includes("La pantalla muestra 527 de 533 filas."), "warning: 527 of 533");
     assert(same.every((c) => warning.includes(`${c.identifier} (Ya existe (igual))`)), "each missing row named with its classification");
     assert(warning.includes("Faltan en pantalla (6)"), "'Faltan en pantalla (6)'");

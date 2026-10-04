@@ -55,11 +55,11 @@ async function api(p, options = {}) {
 // Every label a classification drop-down can show, in the current language.
 const ALL_LABELS = {
   en: [
-    "New EXT", "From catalog", "From catalog (S1000D 4.1)", "From catalog (S1000D 4.1), marked", "Other specification (S2000M)",
+    "New EXT", "From catalog", "From catalog (S1000D 4.1)", "Other specification (S2000M)",
     "Already exists (changes)", "Already exists (same)", "Default rule of S1000D", "No content",
   ],
   es: [
-    "Nueva EXT", "De catálogo", "De catálogo (S1000D 4.1)", "De catálogo (S1000D 4.1), marcada", "Otra especificación (S2000M)",
+    "Nueva EXT", "De catálogo", "De catálogo (S1000D 4.1)", "Otra especificación (S2000M)",
     "Ya existe (cambia)", "Ya existe (igual)", "Regla por defecto de S1000D", "Sin contenido",
   ],
 };
