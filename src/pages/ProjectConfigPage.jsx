@@ -121,6 +121,9 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const [pendingRows, setPendingRows] = useState(null);
   const [analysis, setAnalysis] = useState(null); // { results: [...] } from /analyze
   const [conflictResolution, setConflictResolution] = useState('keep');
+  // The rows "from another edition's catalog" are listed on demand (a
+  // Lufthansa file has 116 of them).
+  const [showCatalogEdition, setShowCatalogEdition] = useState(false);
   const [importErrors, setImportErrors] = useState([]);
   const [exportError, setExportError] = useState(null);
   const [templateError, setTemplateError] = useState(null);
@@ -245,6 +248,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       });
       setPendingRows(rows);
       setAnalysis(result);
+      setShowCatalogEdition(false);
     } catch (err) {
       setImportErrors([err.message]);
     } finally {
@@ -303,6 +307,12 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // above -- rows Apply will skip touching entirely because all four core
   // fields already match what's stored (no field write, no history entry).
   const unchangedRows = analysis?.results.filter((r) => r.unchanged) ?? [];
+  // An official identifier the catalog of the project's standard does not
+  // have but another S1000D edition's does: imported with that edition's
+  // Title/Definition, never rejected (same as AI Extract's "From catalog
+  // (S1000D 4.1)").
+  const catalogEditionRows = analysis?.results.filter((r) => r.catalog_edition) ?? [];
+  const standardVersion = standard?.replace(/^S1000D\s+/, '');
 
   const handleExport = async () => {
     setBusy(true);
@@ -490,6 +500,14 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                         {t('config.dataManagement.summaryCatalogOverrides', { count: catalogOverrideRows.length })}
                       </>
                     )}
+                    {catalogEditionRows.length > 0 && (
+                      <>
+                        {' · '}
+                        <span data-testid="import-catalog-edition-count">
+                          {t('config.dataManagement.summaryCatalogEdition', { count: catalogEditionRows.length })}
+                        </span>
+                      </>
+                    )}
                     {ruleOverrideRows.length > 0 && (
                       <>
                         {' · '}
@@ -515,6 +533,48 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                     </>
                   )}
 
+                  {catalogEditionRows.length > 0 && (
+                    <div data-testid="import-catalog-edition">
+                      <h4 className={styles.subsectionHeading}>
+                        {t('config.dataManagement.catalogEditionListTitle', { count: catalogEditionRows.length })}{' '}
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          aria-expanded={showCatalogEdition}
+                          onClick={() => setShowCatalogEdition((v) => !v)}
+                          data-testid="import-catalog-edition-toggle"
+                        >
+                          {showCatalogEdition
+                            ? t('config.dataManagement.catalogEditionHide')
+                            : t('config.dataManagement.catalogEditionShow')}
+                        </button>
+                      </h4>
+                      {showCatalogEdition && (
+                        <>
+                          <p className={styles.hint}>{t('config.dataManagement.catalogEditionHint')}</p>
+                          <ul className={styles.warningList} data-testid="import-catalog-edition-list">
+                            {catalogEditionRows.map((r) => (
+                              <li key={r.row_number}>
+                                {t(
+                                  r.catalog_edition_retired
+                                    ? 'config.dataManagement.catalogEditionRowRetired'
+                                    : 'config.dataManagement.catalogEditionRow',
+                                  {
+                                    row: r.row_number,
+                                    identifier: r.identifier,
+                                    standard,
+                                    edition: r.catalog_edition,
+                                    version: standardVersion,
+                                  },
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   {catalogOverrideRows.length > 0 && (
                     <>
                       <h4 className={styles.subsectionHeading}>
@@ -523,10 +583,16 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                       <ul className={styles.warningList}>
                         {catalogOverrideRows.map((r) => (
                           <li key={r.row_number}>
-                            {t('config.dataManagement.catalogOverrideRow', {
-                              row: r.row_number,
-                              identifier: r.identifier,
-                            })}
+                            {r.catalog_edition
+                              ? t('config.dataManagement.catalogOverrideRowEdition', {
+                                  row: r.row_number,
+                                  identifier: r.identifier,
+                                  edition: r.catalog_edition,
+                                })
+                              : t('config.dataManagement.catalogOverrideRow', {
+                                  row: r.row_number,
+                                  identifier: r.identifier,
+                                })}
                           </li>
                         ))}
                       </ul>

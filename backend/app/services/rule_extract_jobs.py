@@ -228,6 +228,50 @@ def closest_edition(project_standard: str, editions: list[str]) -> str | None:
     return min(found, key=lambda ev: (round(abs(_version_value(ev[1]) - target), 9), -_version_value(ev[1])))[0]
 
 
+async def load_other_edition_catalogs(
+    standard: str, identifiers, own_catalog_ids: set[str], db: AsyncSession
+) -> dict[str, dict[str, BRDPCatalog]]:
+    """Identifier → {edition: catalog row} for the official identifiers of
+    the project's own specification (BRDP-S1-…) that its standard's catalog
+    does not have, from the catalogs of the other S1000D editions; one query
+    for all of them. Empty for a DITA project, and never for an EXT or an
+    identifier of another specification (S2…). Shared by AI Extract and the
+    Excel import; closest_edition() picks the edition."""
+    if _edition_version(standard) is None:
+        return {}
+    missing = sorted({
+        i for i in identifiers
+        if i and i not in own_catalog_ids and (m := _OFFICIAL_RE.match(i)) and m.group(1) + m.group(2) in _own_codes(standard)
+    })
+    out: dict[str, dict[str, BRDPCatalog]] = {}
+    if not missing:
+        return out
+    rows = (
+        await db.execute(
+            select(BRDPCatalog).where(
+                BRDPCatalog.standard.like("S1000D %"),
+                BRDPCatalog.standard != standard,
+                BRDPCatalog.identifier.in_(missing),
+            )
+        )
+    ).scalars().all()
+    for r in rows:
+        out.setdefault(r.identifier, {})[r.standard] = r
+    return out
+
+
+def other_edition_entry(
+    standard: str, identifier: str, edition_catalogs: dict[str, dict[str, BRDPCatalog]]
+) -> tuple[str, BRDPCatalog] | None:
+    """(edition, catalog row) of the closest other edition that has the
+    identifier, else None."""
+    by_edition = edition_catalogs.get(identifier)
+    if not by_edition:
+        return None
+    edition = closest_edition(standard, list(by_edition))
+    return (edition, by_edition[edition]) if edition else None
+
+
 def edition_suffix(edition: str) -> str:
     """"S1000D 4.1" → "4.1" (the "marked" identifier is BRDP-S1-00012-4.1)."""
     return edition.split(" ", 1)[1] if " " in edition else edition
@@ -389,24 +433,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
     extracted = await _extracted_origins(project.id, existing, db)
     # Other S1000D editions' catalogs, for official identifiers of the
     # project's specification that its own catalog does not have.
-    edition_catalog: dict[str, dict[str, BRDPCatalog]] = {}
-    if _edition_version(project.standard) is not None:
-        missing = [
-            i for i in origin_ids
-            if i not in catalog and (m := _OFFICIAL_RE.match(i)) and m.group(1) + m.group(2) in _own_codes(project.standard)
-        ]
-        if missing:
-            rows = (
-                await db.execute(
-                    select(BRDPCatalog).where(
-                        BRDPCatalog.standard.like("S1000D %"),
-                        BRDPCatalog.standard != project.standard,
-                        BRDPCatalog.identifier.in_(missing),
-                    )
-                )
-            ).scalars().all()
-            for r in rows:
-                edition_catalog.setdefault(r.identifier, {})[r.standard] = r
+    edition_catalog = await load_other_edition_catalogs(project.standard, origin_ids, set(catalog), db)
 
     def match(origin):
         if not origin:

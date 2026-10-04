@@ -151,6 +151,18 @@
   font-size: 12.5px;
 }
 
+/* "Show them" / "Hide them" next to a list heading. */
+.linkButton {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #2563eb;
+  font: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .actionsRow {
   display: flex;
   gap: 8px;

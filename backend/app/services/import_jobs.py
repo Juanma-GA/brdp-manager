@@ -53,6 +53,7 @@ better user experience than a confusing interleaved result anyway.
 """
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -65,10 +66,11 @@ from app.api.routes.approvals import _rule_state, _wrap_rule_xml_fragment, _xml_
 from app.services.rule_wrappers import unwrap_rule_xml
 from app.api.routes.brdps import _HISTORY_FIELDS
 from app.db.base import async_session_factory
-from app.models import BRDP, BRDPCatalog, ImportJob, Project, RuleApproval, User
+from app.models import BRDP, BRDPCatalog, BRDPHistory, ImportJob, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.brdp_import import ImportRowIn, ImportRowResult
 from app.services.history import record_change
+from app.services.rule_extract_jobs import _edition_version, load_other_edition_catalogs, other_edition_entry
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 
 # The only 3 legal Rule Status values -- exactly the display strings
@@ -185,6 +187,8 @@ def _classify_row(
     existing_brdp: BRDP | None,
     existing_approval: RuleApproval | None,
     catalog_entry: BRDPCatalog | None,
+    catalog_edition: str | None = None,
+    project_standard: str | None = None,
 ) -> ImportRowResult:
     """Pure function, no DB access -- every business rule from the docs
     request lives here, in the exact priority order confirmed with the
@@ -284,6 +288,17 @@ def _classify_row(
     catalog_override = catalog_entry is not None and (
         row.title != catalog_entry.title or row.definition != catalog_entry.definition
     )
+    # The catalog entry came from another S1000D edition (the identifier is
+    # not in the project's own standard's catalog): a warning of its own,
+    # shown also for an existing BRDP. "retired" when that edition is older
+    # than the project's (the decision left the specification after it).
+    edition_fields = {}
+    if catalog_edition:
+        own, other = _edition_version(project_standard or ""), _edition_version(catalog_edition)
+        edition_fields = {
+            "catalog_edition": catalog_edition,
+            "catalog_edition_retired": bool(own and other and other < own),
+        }
 
     # The one combination that is a real DB conflict, not a validation
     # failure: the file says "no rule" but this BRDP already has a real
@@ -301,6 +316,7 @@ def _classify_row(
             existing_rule_status=_rule_state(existing_approval).capitalize(),
             catalog_override=catalog_override,
             unchanged=unchanged,
+            **edition_fields,
         )
 
     # Same idea as catalog_override above, for the Rule column: warn when
@@ -334,6 +350,7 @@ def _classify_row(
         catalog_override=catalog_override,
         rule_override=rule_override,
         unchanged=unchanged,
+        **edition_fields,
     )
 
 
@@ -391,11 +408,29 @@ async def _load_catalog(
 
 async def analyze_rows(
     project_id: uuid.UUID, rows: list[ImportRowIn], db: AsyncSession
-) -> tuple[Project, str | None, list[ImportRowResult], dict[str, BRDP], dict[uuid.UUID, RuleApproval], dict[str, BRDPCatalog]]:
+) -> tuple[
+    Project, str | None, list[ImportRowResult], dict[str, BRDP], dict[uuid.UUID, RuleApproval], dict[str, BRDPCatalog], dict[str, str]
+]:
+    """The last two values: identifier → catalog row whose Title/Definition
+    the import writes (the project's own catalog, or, for an official
+    identifier it does not have, the closest other S1000D edition's -- as
+    AI Extract's "From catalog (S1000D 4.1)"), and identifier → that other
+    edition, only for the latter."""
     project = await _get_owned_project(project_id, db)
     rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
     existing_brdps, existing_approvals = await _load_existing(project_id, rows, rule_format, db)
     catalog_by_identifier = await _load_catalog(rows, project.standard, db)
+    # One more batch query, for every row together: the other editions'
+    # catalogs (S1000D projects only; never EXT or another specification).
+    edition_catalogs = await load_other_edition_catalogs(
+        project.standard, [r.identifier.strip() for r in rows], set(catalog_by_identifier), db
+    )
+    edition_by_identifier: dict[str, str] = {}
+    for identifier in edition_catalogs:
+        found = other_edition_entry(project.standard, identifier, edition_catalogs)
+        if found is not None:
+            edition_by_identifier[identifier] = found[0]
+            catalog_by_identifier[identifier] = found[1]
 
     results = []
     for row in rows:
@@ -403,8 +438,45 @@ async def analyze_rows(
         existing_brdp = existing_brdps.get(identifier)
         existing_approval = existing_approvals.get(existing_brdp.id) if existing_brdp is not None else None
         catalog_entry = catalog_by_identifier.get(identifier)
-        results.append(_classify_row(row, rule_format, existing_brdp, existing_approval, catalog_entry))
-    return project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier
+        results.append(
+            _classify_row(
+                row, rule_format, existing_brdp, existing_approval, catalog_entry,
+                edition_by_identifier.get(identifier), project.standard,
+            )
+        )
+    return project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier, edition_by_identifier
+
+
+async def _brdps_with_edition_event(brdp_ids: list[uuid.UUID], db: AsyncSession) -> set[tuple[uuid.UUID, str]]:
+    """(BRDP, edition) pairs whose History already says the texts come from
+    another edition's catalog -- written by an earlier Excel import
+    ("catalog_edition") or by AI Extract ("extracted_from" with
+    catalog_edition) -- so a re-import never repeats it."""
+    if not brdp_ids:
+        return set()
+    rows = (
+        await db.execute(
+            select(BRDPHistory.brdp_id, BRDPHistory.new_value).where(
+                BRDPHistory.brdp_id.in_(brdp_ids),
+                BRDPHistory.field_name.in_(("catalog_edition", "extracted_from")),
+            )
+        )
+    ).all()
+    out = set()
+    for brdp_id, value in rows:
+        try:
+            edition = json.loads(value or "{}").get("catalog_edition")
+        except (ValueError, AttributeError):
+            continue
+        if edition:
+            out.add((brdp_id, edition))
+    return out
+
+
+def catalog_edition_event(edition: str, standard: str) -> str:
+    """History value: "catálogo S1000D 4.1, no existe en S1000D 4.2" (the
+    page writes it with the same text AI Extract's event uses)."""
+    return json.dumps({"catalog_edition": edition, "catalog_standard": standard}, sort_keys=True)
 
 
 async def get_running_job(project_id: uuid.UUID, db: AsyncSession) -> ImportJob | None:
@@ -507,10 +579,13 @@ async def run_import_job(
     work_session = async_session_factory()
     try:
         editor = await work_session.get(User, started_by)
-        _project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier = await analyze_rows(
-            project_id, rows, work_session
+        project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier, edition_by_identifier = (
+            await analyze_rows(project_id, rows, work_session)
         )
         rows_by_number = {r.row_number: r for r in rows}
+        edition_events = await _brdps_with_edition_event(
+            [existing_brdps[i].id for i in edition_by_identifier if i in existing_brdps], work_session
+        )
 
         created = updated = rejected = conflicts_kept = conflicts_cleared = unchanged = 0
         processed = 0
@@ -578,6 +653,16 @@ async def run_import_job(
                 # without needing this code path to know that happened.
                 updated += 1
                 outcome = "updated"
+
+            # Texts from another edition's catalog: one History entry per
+            # BRDP and edition, the first time this import writes them.
+            edition = edition_by_identifier.get(identifier)
+            if edition and outcome != "unchanged" and (brdp.id, edition) not in edition_events:
+                record_change(
+                    work_session, brdp.id, editor, "catalog_edition", "",
+                    catalog_edition_event(edition, project.standard), always=True,
+                )
+                edition_events.add((brdp.id, edition))
 
             if result.outcome == "conflict":
                 existing_approval = existing_approvals.get(brdp.id)

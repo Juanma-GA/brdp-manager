@@ -51,6 +51,15 @@ class ImportRowResult(BaseModel):
     # the "conflict" outcome (file says "no rule" but one exists) -- that
     # case already has its own, unrelated warning via existing_rule_status.
     rule_override: bool = False
+    # The identifier is an official one of the project's specification that
+    # the catalog of the project's standard does not have, but another S1000D
+    # edition's does (the closest; on a tie the most recent): that edition
+    # ("S1000D 4.1"). A warning, never a rejection: the row imports with its
+    # identifier and that edition's Title/Definition (catalog_override as for
+    # any catalog match). catalog_edition_retired: the edition is older than
+    # the project's (the decision was retired from the specification).
+    catalog_edition: str | None = None
+    catalog_edition_retired: bool = False
     # True when this row's four core fields (title/definition/proposal/
     # proposal_status -- title/definition already catalog-resolved, same
     # values run_import_job would actually write) are byte-for-byte
