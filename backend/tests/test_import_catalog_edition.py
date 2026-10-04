@@ -199,10 +199,26 @@ async def test_tie_picks_the_most_recent_edition(client, make_project, catalog_r
     (x,) = _ids(1)
     # 4.0 project (synthetic name, still an S1000D edition): 3.9 and 4.1 at
     # the same distance → 4.1.
-    await catalog_rows([("S1000D 3.9", x, "3.9", "d"), ("S1000D 4.1", x, "4.1", "d")])
+    (filler,) = _ids(1)
+    await catalog_rows([
+        ("S1000D 4.0", filler, "own", "d"),  # the project's standard has a catalog
+        ("S1000D 3.9", x, "3.9", "d"),
+        ("S1000D 4.1", x, "4.1", "d"),
+    ])
     project, headers = await make_project("S1000D 4.0")
     analyzed = await _analyze(client, project, headers, [_row(2, x)])
     assert analyzed[x]["catalog_edition"] == "S1000D 4.1"
+
+
+async def test_no_catalog_for_the_project_standard_means_no_edition_lookup(client, make_project, catalog_rows):
+    """A standard with no catalog loaded at all (here a synthetic S1000D
+    3.8): "not in its catalog" cannot be told from "catalog not loaded", so
+    the row imports as today, with the Excel's texts and no warning."""
+    (x,) = _ids(1)
+    await catalog_rows([("S1000D 4.1", x, "4.1 title", "d")])
+    project, headers = await make_project("S1000D 3.8")
+    analyzed = await _analyze(client, project, headers, [_row(2, x, title="Excel title")])
+    assert analyzed[x]["catalog_edition"] is None and analyzed[x]["catalog_override"] is False
 
 
 async def test_dita_ext_and_other_specification_unchanged(client, make_project, catalog_rows):

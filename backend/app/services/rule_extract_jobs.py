@@ -236,7 +236,8 @@ async def load_other_edition_catalogs(
     does not have, from the catalogs of the other S1000D editions; one query
     for all of them. Empty for a DITA project, and never for an EXT or an
     identifier of another specification (S2…). Shared by AI Extract and the
-    Excel import; closest_edition() picks the edition."""
+    Excel import; closest_edition() picks the edition. Also empty when the
+    project's standard has no catalog loaded at all."""
     if _edition_version(standard) is None:
         return {}
     missing = sorted({
@@ -245,6 +246,14 @@ async def load_other_edition_catalogs(
     })
     out: dict[str, dict[str, BRDPCatalog]] = {}
     if not missing:
+        return out
+    # Without any catalog for the project's own standard, "not in the
+    # S1000D 3.0.1 catalog" cannot be told apart from "no 3.0.1 catalog
+    # loaded": nothing is taken from other editions then.
+    own_loaded = (
+        await db.execute(select(BRDPCatalog.id).where(BRDPCatalog.standard == standard).limit(1))
+    ).first()
+    if own_loaded is None:
         return out
     rows = (
         await db.execute(
