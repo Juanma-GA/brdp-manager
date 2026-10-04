@@ -71,8 +71,8 @@ async function main() {
   };
   const s187 = await makeBrdp({ identifier: "BRDP-S1-00187", ...base });
   const failedOnly = await makeBrdp({ identifier: "BRDP-SAV-FAIL", ...base });
-  const invalid = await makeBrdp({ identifier: "BRDP-SAV-INVALID", ...base, proposal: "A minimum of two sub-steps is required. ALLINVALID" });
-  const cut = await makeBrdp({ identifier: "BRDP-SAV-CUT", ...base });
+  await makeBrdp({ identifier: "BRDP-SAV-INVALID", ...base, proposal: "A minimum of two sub-steps is required. ALLINVALID" });
+  await makeBrdp({ identifier: "BRDP-SAV-CUT", ...base });
   const approval = (b) => api(`/api/projects/${project.id}/brdps/${b.id}/approvals/BREX-4.2`).then((r) => r.json());
   const lastRequest = () => fetch(`${MOCK}/last-request`).then((r) => r.json());
   const reset = () => fetch(`${MOCK}/reset`, { method: "POST" });

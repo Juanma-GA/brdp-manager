@@ -123,7 +123,7 @@ async function main() {
 
   // ---- Project S (S1000D 4.2): real generated vocabulary ----
   const projS = await makeProject(auth, `Vocab Verify S ${suffix}`, "S1000D 4.2");
-  const brdpS1 = await makeBrdp(auth, projS.id, {
+  await makeBrdp(auth, projS.id, {
     identifier: SAME_ID,
     title: "Fuel line clamp spacing decision (source)",
     definition: "Definition confirming proceduralStep numbering stays consistent.",

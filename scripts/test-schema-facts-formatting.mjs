@@ -266,7 +266,7 @@ assert(realBlock.includes("Differences by schema (beyond what is common to all")
   const block = buildSchemaFactsBlock("S1000D 4.2", [{ name: "identAndStatusSection", entry }]);
   assert(block.includes("<identAndStatusSection> — defined in 26 schemas:"), "real <identAndStatusSection>: 26 schemas in the header");
   assert(block.includes("\n  children depend on the schema (none common to all):"), "real <identAndStatusSection>: children depend on the schema");
-  assert(/\n    \[appliccrossreftable, [^\]]*wrngflds\]: dmAddress, dmStatus/.test(block), "real <identAndStatusSection>: the data-module group lists dmAddress, dmStatus");
+  assert(/\n {4}\[appliccrossreftable, [^\]]*wrngflds\]: dmAddress, dmStatus/.test(block), "real <identAndStatusSection>: the data-module group lists dmAddress, dmStatus");
   assert(block.includes("\n    [comment]: commentAddress, commentStatus"), "real <identAndStatusSection>: [comment] lists commentAddress, commentStatus");
   assert(!block.includes("children: none"), "real <identAndStatusSection>: never 'children: none'");
   assert(!block.includes("additional"), "real <identAndStatusSection>: no 'additional' anywhere");

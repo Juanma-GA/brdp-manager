@@ -60,7 +60,7 @@ async function main() {
   // Suggest Rule round: Suggest Rule now needs a Validated source BRDP with a
   // filled Proposal (and, like every Suggest, no pending embeddings) -- so the
   // source is created BEFORE the embeddings job, not after it.
-  const source = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
+  await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({

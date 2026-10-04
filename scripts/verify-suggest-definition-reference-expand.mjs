@@ -60,7 +60,7 @@ async function main() {
     body: JSON.stringify({ name: `Ref Expand Verify ${suffix}`, standard: "S1000D 4.2" }),
   }).then((r) => r.json());
 
-  const sourceBrdp = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
+  await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({
@@ -79,7 +79,7 @@ async function main() {
   const longTitle =
     "Zyxquorb refexpand: numbering of procedural steps within a maintenance task that spans multiple pages and sub-procedures, including exceptions";
   const closeDefinition = "This is the full Definition text for the close reference candidate, shown when expanded.";
-  const close1 = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
+  await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({
@@ -91,7 +91,7 @@ async function main() {
     }),
   }).then((r) => r.json());
   const close2Definition = "A second, different Definition text for the other close reference candidate.";
-  const close2 = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
+  await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({

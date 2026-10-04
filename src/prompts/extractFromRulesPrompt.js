@@ -170,7 +170,7 @@ export function parseExtractFromRulesResponse(text, expectedKeys, fieldsByKey = 
   try {
     data = JSON.parse(raw.slice(start, end + 1));
   } catch (err) {
-    throw new Error(`the answer is not valid JSON: ${err.message}`);
+    throw new Error(`the answer is not valid JSON: ${err.message}`, { cause: err });
   }
   if (!data || !Array.isArray(data.items)) throw new Error('the answer has no "items" list');
   const expected = new Set(expectedKeys);

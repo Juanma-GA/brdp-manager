@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { mockBRDPs } from '../data/mockBRDPs';
-import { fetchBRDPs, saveBRDPs, updateBRDPApi, deleteAllBRDPs } from '../services/api';
+import { fetchBRDPs, saveBRDPs, deleteAllBRDPs } from '../services/api';
 
 const STORAGE_KEY = 'brdp_data';
 

@@ -59,7 +59,7 @@ async function main() {
   }).then((r) => r.json());
 
   const spanishTitle = "Procedimiento de calibración del par de apriete";
-  const brdp = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
+  await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({

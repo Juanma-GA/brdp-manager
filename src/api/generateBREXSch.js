@@ -31,7 +31,7 @@ export async function generateBREXSch(brdps, projectConfig, options = {}) {
   try {
     sch = brexToSchematron(brexResult.xml, { preserveBrdpId: true, carryComments: true });
   } catch (err) {
-    throw new Error(`Conversión BREX -> Schematron fallida: ${err.message}`);
+    throw new Error(`Conversión BREX -> Schematron fallida: ${err.message}`, { cause: err });
   }
 
   const { valid, error } = checkWellFormed(sch);

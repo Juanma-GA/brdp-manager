@@ -118,7 +118,7 @@ async function main() {
       })
     );
   }
-  const refusedBrdp = await makeBrdp(auth, projA.id, {
+  await makeBrdp(auth, projA.id, {
     identifier: "BRDP-SPREFUSED-01",
     title: "Refused decision needing a new Proposal",
     definition: "Definition for the refused decision point.",
@@ -137,21 +137,21 @@ async function main() {
 
   // ---- Project B: Same-BRDP match #1 + 2 Similar-decisions candidates ----
   const projB = await makeProject(auth, `Suggest Proposal Verify B ${suffix}`, STANDARD);
-  const sameId1 = await makeBrdp(auth, projB.id, {
+  await makeBrdp(auth, projB.id, {
     identifier: SAME_ID,
     title: "Fuel line clamp spacing decision (Project B's own)",
     definition: "Project B's own Definition for the same decision point.",
     proposal: "Project B decided: clamps shall be spaced no more than 600 mm apart.",
     validation: "Validated",
   });
-  const similarDecision1 = await makeBrdp(auth, projB.id, {
+  await makeBrdp(auth, projB.id, {
     identifier: "BRDP-SPSIM-B-01",
     title: "Related decision 1",
     definition: "Related decision definition 1.",
     proposal: "Related decision proposal 1.",
     validation: "Validated",
   });
-  const similarDecision2 = await makeBrdp(auth, projB.id, {
+  await makeBrdp(auth, projB.id, {
     identifier: "BRDP-SPSIM-B-02",
     title: "Related decision 2",
     definition: "Related decision definition 2.",
@@ -162,14 +162,14 @@ async function main() {
 
   // ---- Project C: Same-BRDP match #2 + 1 Similar-decisions candidate ----
   const projC = await makeProject(auth, `Suggest Proposal Verify C ${suffix}`, STANDARD);
-  const sameId2 = await makeBrdp(auth, projC.id, {
+  await makeBrdp(auth, projC.id, {
     identifier: SAME_ID,
     title: "Fuel line clamp spacing decision (Project C's own)",
     definition: "Project C's own Definition for the same decision point.",
     proposal: "Project C decided: clamps shall be spaced no more than 500 mm apart.",
     validation: "Validated",
   });
-  const similarDecision3 = await makeBrdp(auth, projC.id, {
+  await makeBrdp(auth, projC.id, {
     identifier: "BRDP-SPSIM-C-01",
     title: "Related decision 3",
     definition: "Related decision definition 3.",

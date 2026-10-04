@@ -132,7 +132,6 @@ async function main() {
     await page.locator("tr", { hasText: "BRDP-ASK-TEST-A" }).click();
     await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
 
-    const askBox = page.locator("textarea[placeholder]").filter({ hasText: "" });
     // Pre-refactor-round staleness bug found while re-running the full verify
     // suite (unrelated to the prompt/hooks refactor): this script predates
     // the "mini-thread UI" round that made the textarea's placeholder change
@@ -143,7 +142,6 @@ async function main() {
     // verify-ask-question-thread-and-markdown.mjs for the same reason.
     const questionBox = page.locator("label", { hasText: "Ask a question" }).locator("xpath=following::textarea[1]");
     const askButton = page.getByRole("button", { name: /^Ask$/ });
-    const answerBox = page.locator("div").filter({ hasText: /^MOCK-/ }).last();
 
     // ---- Normal question: full BRDP scoping, including Refused reason,
     // Rule Status, and the truncated long Rule. ----

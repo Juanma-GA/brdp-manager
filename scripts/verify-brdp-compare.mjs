@@ -96,7 +96,7 @@ async function main() {
   await putRule(p301, b301, "BREX-3.0.1", obj301, "approved");
   const bHidden = await makeBrdp(pHidden, { identifier: "BRDP-S1-00052", title: "Information codes", definition: def, proposal: "Use info codes 000 and 002." });
   await putRule(pHidden, bHidden, "BREX-4.2", brex42OneLine("BRDP-S1-00052", ["000", "002"]), "approved");
-  const bExt = await makeBrdp(pLh, { identifier: "BRDP-EXT-CMP01", title: "Own decision", definition: "A project-only decision.", proposal: "Keep it." });
+  await makeBrdp(pLh, { identifier: "BRDP-EXT-CMP01", title: "Own decision", definition: "A project-only decision.", proposal: "Keep it." });
   const many = Array.from({ length: 155 }, (_, i) => String(i).padStart(3, "0"));
   const fewer = many.filter((v) => v !== "077" && v !== "140");
   const bMany = await makeBrdp(pLh, { identifier: "BRDP-CMP-MANY1", title: "Many codes", definition: "Codes.", proposal: "155 codes." });

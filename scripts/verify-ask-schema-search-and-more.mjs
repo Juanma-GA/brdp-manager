@@ -59,7 +59,6 @@ async function main() {
     const url = req.url();
     if (url.includes("/api/schema-cards")) cardRequests.push(decodeURIComponent(url.slice(url.indexOf("/api/schema-cards"))));
   });
-  const requestsFor = (needle) => cardRequests.filter((u) => u.includes(needle)).length;
 
   try {
     await page.goto(BASE_URL);

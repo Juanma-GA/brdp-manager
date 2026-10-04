@@ -19,7 +19,6 @@ import {
   validateSchemaPattern,
   wrapRuleInSchemaContexts,
 } from '../src/utils/ruleSchemaContext.js';
-import { brexToSchematron } from '../src/api/brexToSchematron.js';
 import { analyzeRule, runRuleOnFragment } from '../src/utils/ruleTestEngine.js';
 import { generateRuleTestExamples } from '../src/utils/ruleTestRun.js';
 import { ruleTestVerdict } from '../src/utils/ruleTest.js';

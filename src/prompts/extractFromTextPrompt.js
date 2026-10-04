@@ -55,7 +55,7 @@ export function parseFindDecisionsResponse(text) {
   try {
     data = JSON.parse(raw.slice(start, end + 1));
   } catch (err) {
-    throw new Error(`the answer is not valid JSON: ${err.message}`);
+    throw new Error(`the answer is not valid JSON: ${err.message}`, { cause: err });
   }
   if (!data || !Array.isArray(data.decisions)) throw new Error('the answer has no "decisions" list');
   return data.decisions

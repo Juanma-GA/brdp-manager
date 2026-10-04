@@ -116,7 +116,6 @@ async function main() {
   async function waitIndicator(state) {
     await page.waitForFunction((s) => document.querySelector('[data-testid="rule-test-indicator"]')?.dataset.state === s, state, { timeout: 15000 });
   }
-  const stepper = async () => (await page.locator('[class*="ruleStatusRow"]').first().textContent()) || "";
   async function historyEntries() {
     return page.locator('[class*="historyItem"]').allTextContents();
   }

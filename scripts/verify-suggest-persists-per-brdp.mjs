@@ -113,7 +113,7 @@ async function main() {
     headers: auth,
     body: JSON.stringify({ identifier: "BRDP-PERSIST-A", title: "Row A", definition: "Definition for row A.", proposal: "", validation: "Pending" }),
   }).then((r) => r.json());
-  const brdpB = await fetch(`${API}/api/projects/${proj.id}/brdps`, {
+  await fetch(`${API}/api/projects/${proj.id}/brdps`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({ identifier: "BRDP-PERSIST-B", title: "Row B", definition: "Definition for row B.", proposal: "", validation: "Pending" }),

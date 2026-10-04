@@ -51,7 +51,6 @@ function assert(cond, msg) {
   }
 }
 
-const FLAT42 = (s) => `http://www.s1000d.org/S1000D_4-2/xml_schema_flat/${s}.xsd`;
 
 async function main() {
   const token = (

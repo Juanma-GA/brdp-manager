@@ -121,7 +121,6 @@ async function main() {
   }
   const lastRequest = () => fetch(`${MOCK}/last-request`).then((r) => r.json());
   const systemOf = (req) => req.messages.find((m) => m.role === "system").content;
-  const colorOf = (loc) => loc.evaluate((el) => getComputedStyle(el).color);
 
   try {
     await page.goto(BASE_URL);

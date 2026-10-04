@@ -31,16 +31,6 @@ function escapeHtml(value) {
   ));
 }
 
-function statusBadgeHTML(validation) {
-  const map = {
-    'Validated': { bg: '#d1fae5', color: '#065f46', label: 'Validated' },
-    'Refused':   { bg: '#fee2e2', color: '#991b1b', label: 'Refused' },
-    'Pending':   { bg: '#fef3c7', color: '#92400e', label: 'Pending' },
-  };
-  const s = map[validation] || { bg: '#f3f4f6', color: '#6b7280', label: validation || '—' };
-  return `<span style="background:${s.bg};color:${s.color};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${s.label}</span>`;
-}
-
 export function buildHTML(brdps, projectConfig) {
   const today = new Date();
   const dateStr = formatDate(today);

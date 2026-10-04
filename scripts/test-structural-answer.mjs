@@ -52,7 +52,6 @@ async function answer(question, standard, vocabulary) {
   return r;
 }
 const det = (q, v = V42) => detectStructuralQuestion(q, v);
-const kindOf = (q, v) => det(q, v)?.kind ?? null;
 
 // ─── Detection: phrases that must match ─────────────────────────────────────
 const MATCH = [

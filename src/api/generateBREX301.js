@@ -314,11 +314,11 @@ function fixObjapplPlacement301(xml) {
 
 function resolveAveeFields301(projectConfig) {
   const cfg = projectConfig || {};
-  const useIfValid = (val, pattern, def) =>
+  const pickIfValid = (val, pattern, def) =>
     (typeof val === 'string' && pattern.test(val)) ? val : def;
   return {
-    modelic:  useIfValid(cfg.modelIdentCode, /^[A-Za-z0-9]{2,14}$/, cfg.modelIdentCode || 'UNKNOWN'),
-    sdc:      useIfValid(cfg.systemDiffCode, /^[A-Za-z0-9]{1,4}$/, 'A'),
+    modelic:  pickIfValid(cfg.modelIdentCode, /^[A-Za-z0-9]{2,14}$/, cfg.modelIdentCode || 'UNKNOWN'),
+    sdc:      pickIfValid(cfg.systemDiffCode, /^[A-Za-z0-9]{1,4}$/, 'A'),
     chapnum:  '00',
     section:  '0',
     subsect:  '0',

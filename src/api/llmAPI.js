@@ -135,7 +135,7 @@ export async function sendMessage(
         error.message.includes('Connection error')) {
       throw error;
     }
-    throw new Error('Connection error. Please try again.');
+    throw new Error('Connection error. Please try again.', { cause: error });
   }
 }
 
@@ -211,7 +211,7 @@ export async function sendMessageStream(
                 fullContent += text;
                 onChunk?.(text);
               }
-            } catch (e) {
+            } catch {
               // Skip parsing errors
             }
           }
@@ -228,7 +228,7 @@ export async function sendMessageStream(
                 fullContent += content;
                 onChunk?.(content);
               }
-            } catch (e) {
+            } catch {
               // Skip parsing errors
             }
           }
@@ -239,13 +239,13 @@ export async function sendMessageStream(
     return fullContent;
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error('Request cancelled by user.');
+      throw new Error('Request cancelled by user.', { cause: error });
     }
     if (error.message.includes('Invalid API key') ||
         error.message.includes('Connection error')) {
       throw error;
     }
-    throw new Error('Connection error. Please try again.');
+    throw new Error('Connection error. Please try again.', { cause: error });
   }
 }
 

@@ -120,7 +120,6 @@ async function main() {
     // completes), and the deterministic vocabulary check must recompute
     // (the notFound warning, if any were shown, must clear). ====
     await openRecords("BRDP-ASK-TABLE");
-    const titleInput = page.locator("input").filter({ hasText: "" }).first();
     // Locate the actual Title <input> by its current value rather than
     // position -- more robust than an index if the panel layout shifts.
     const inputs = await page.locator("input").all();

@@ -79,7 +79,7 @@ const server = http.createServer((req, res) => {
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
     callCount += 1;
-    let inputs = [];
+    let inputs;
     try {
       const parsed = JSON.parse(body);
       inputs = Array.isArray(parsed.input) ? parsed.input : [parsed.input];

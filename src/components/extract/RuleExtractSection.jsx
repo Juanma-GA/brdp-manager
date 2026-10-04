@@ -218,7 +218,7 @@ function RuleCell({ c, t }) {
 
 // "Fragment": the quote of the text the candidate was found in, collapsed,
 // so the reviewer can compare what was written with what the document says.
-function QuoteCell({ c, t }) {
+function QuoteCell({ c }) {
   const quote = c.quote || '';
   const short = quote.length > 90 ? `${quote.slice(0, 90)}…` : quote;
   return (
@@ -1256,7 +1256,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                         )}
                       </td>
                       <td>
-                        {textJob ? <QuoteCell c={c} t={t} /> : <RuleCell c={c} t={t} />}
+                        {textJob ? <QuoteCell c={c} /> : <RuleCell c={c} t={t} />}
                       </td>
                       <td>
                         {lines.length > 0 && (

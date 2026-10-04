@@ -60,7 +60,7 @@ async function main() {
   }).then((r) => r.json());
   console.log("Seeded two real projects:", projA.standard, "/", projB.standard);
 
-  const brdpA = await fetch(`${API}/api/projects/${projA.id}/brdps`, {
+  await fetch(`${API}/api/projects/${projA.id}/brdps`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({
@@ -71,7 +71,7 @@ async function main() {
       validation: "Pending",
     }),
   }).then((r) => r.json());
-  const brdpB = await fetch(`${API}/api/projects/${projB.id}/brdps`, {
+  await fetch(`${API}/api/projects/${projB.id}/brdps`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({

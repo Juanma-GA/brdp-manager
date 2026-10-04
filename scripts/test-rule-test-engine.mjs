@@ -258,7 +258,6 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
 }
 
 // ─── 2. Curated template rules ──────────────────────────────────────────────
-const OTHER_FILE = /reads another file/;
 const NON_CONTEXT = 'This rule has no XPath to execute (nonContextRule).';
 // Per rule: { schema, bad, good } (bad → rejected, good → accepted), or
 // { schema, never: fragment } for a rule that can't reject any fragment, or

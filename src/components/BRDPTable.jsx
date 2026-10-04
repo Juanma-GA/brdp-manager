@@ -1,15 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { RuleApprovalCell } from './RuleApprovalCell';
 import styles from './BRDPTable.module.css';
-
-const FORMAT_LABELS = {
-  'BREX-3.0.1': 'BREX 3.0.1',
-  'BREX-4.1': 'BREX 4.1',
-  'BREX-4.2': 'BREX 4.2',
-  'SCH-S1000D': 'Schematron S1000D',
-  'SCH-DITA': 'Schematron DITA',
-};
 
 /**
  * Utility function to truncate text with ellipsis

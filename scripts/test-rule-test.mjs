@@ -31,7 +31,6 @@ import {
   assembleExample,
   chooseTestSchemas,
   nestingPath,
-  nestingPaths,
   placeExample,
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { sendMessage, sendMessageStream } from '../api/llmAPI';
+import { sendMessageStream } from '../api/llmAPI';
 import { useBRDPContext } from '../context/BRDPContext';
 import { generateSuggestedRule } from '../api/generateSuggestedRule';
 
@@ -21,7 +21,7 @@ function buildDatasetSummary(brdps) {
   };
 
   brdps.forEach((brdp) => {
-    if (breakdown.hasOwnProperty(brdp.validation)) {
+    if (Object.hasOwn(breakdown, brdp.validation)) {
       breakdown[brdp.validation]++;
     }
   });

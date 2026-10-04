@@ -1,5 +1,5 @@
 import { ruleEnters } from '../utils/generatePlan.js';
-import { extractXML, checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
+import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { getApprovalsForFormat } from "./approvals.js";
 import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
 import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
@@ -391,11 +391,11 @@ function dedupeNonContextRules41(xml) {
 function resolveDmCodeFields41(projectConfig) {
   const cfg = projectConfig || {};
   const up = v => (typeof v === 'string' ? v.toUpperCase() : v);
-  const useIfValid = (v, p, d) => { const u = up(v); return (typeof u === 'string' && p.test(u)) ? u : d; };
+  const pickIfValid = (v, p, d) => { const u = up(v); return (typeof u === 'string' && p.test(u)) ? u : d; };
   const mic = up(cfg.modelIdentCode);
   return {
     modelIdentCode: (typeof mic === 'string' && /^[A-Z0-9]{2,14}$/.test(mic)) ? mic : (mic || 'UNKNOWN'),
-    systemDiffCode: useIfValid(cfg.systemDiffCode, /^[A-Z0-9]{1,4}$/, 'A'),
+    systemDiffCode: pickIfValid(cfg.systemDiffCode, /^[A-Z0-9]{1,4}$/, 'A'),
     systemCode: '00',
     subSystemCode: '0',
     subSubSystemCode: '0',

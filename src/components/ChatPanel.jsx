@@ -111,21 +111,6 @@ function parseSuggestions(content) {
 }
 
 /**
- * Typing indicator component
- * Shows animated dots while waiting for response
- * @returns {JSX.Element} Typing indicator
- */
-function TypingIndicator() {
-  return (
-    <div className={styles.typingIndicator}>
-      <span></span>
-      <span></span>
-      <span></span>
-    </div>
-  );
-}
-
-/**
  * Chat panel component
  * Displays conversation history and input for AI assistant
  * @param {Object} props - Component props
@@ -161,7 +146,7 @@ export default function ChatPanel({
   width = 340,
   onWidthChange,
 }) {
-  const { brdps, updateBRDP, appendHistoryEntry } = useBRDPContext();
+  const { updateBRDP, appendHistoryEntry } = useBRDPContext();
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('generic');
   const [isResizing, setIsResizing] = useState(false);

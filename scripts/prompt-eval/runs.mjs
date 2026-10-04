@@ -121,11 +121,10 @@ export function latestRunOfCommit(runs, commit) {
 // Saves a run: copies the report and responses the harness just wrote into
 // runs/<commit>-<time>/. Returns the new run's directory.
 export function saveRun({ reportDir, commit, generatedAt, runsDir = RUNS_DIR }) {
-  let name = runDirName(commit, generatedAt);
+  const name = runDirName(commit, generatedAt);
   let target = path.join(runsDir, name);
   // Two runs in the same second (tests): never overwrite one.
   for (let i = 2; fs.existsSync(target); i++) target = path.join(runsDir, `${name}-${i}`);
-  name = path.basename(target);
   fs.mkdirSync(target, { recursive: true });
   for (const file of ["report.md", "responses.json"]) fs.copyFileSync(path.join(reportDir, file), path.join(target, file));
   return target;

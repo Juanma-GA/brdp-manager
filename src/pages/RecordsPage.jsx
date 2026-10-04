@@ -495,7 +495,6 @@ export default function RecordsPage() {
     setProposalStatusFilter('');
     setRuleStatusFilter('');
     authFetchJson('/api/config/ai-provider').then(setAiProvider).catch(() => setAiProvider(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   useEffect(() => {
