@@ -5,6 +5,8 @@ Marco: AACF 2.0.1, copia local de `Juanma-GA/cursoFSD` (`Proyecto-CCMS-Nav/aacf/
 
 > **Estado tras AACF 1** (rama `v2-multiproyecto`): resueltos HR6 (los tres recortes silenciosos, `e3052f4`), HR7 (frontend: `dd9bbac`, `3fa0c5a`; mensajes saneados del backend: `31d7daf`), HR20 (`dd9bbac`) y el punto 3 del checklist de seguridad (validación de entrada, `1c181d2`). Cada sección afectada lo dice en su sitio; lo que sigue abierto está en "Qué sigue abierto tras AACF 1", al final. El resto del informe describe el código en `6e2c671`.
 
+> **Estado tras AACF 3**: HR1 cumple sin excepciones (`913e0aa`: las preferencias de interfaz viven en `users.ui_preferences`; en `src/` no queda ningún uso de localStorage/sessionStorage, solo comentarios). HR15 y HR21 resueltos salvo las excepciones aceptadas (`afe2de6`, ver "Qué sigue abierto tras AACF 3"). La marca ATEXIS se adopta sobre el CSS propio (`5187a67`, Decisión 20). Las cifras de la cabecera de Registros quedan alineadas a la derecha (`c26f17a`).
+
 Auditoría **de solo lectura**: no se ha cambiado código, configuración ni migraciones. Cada afirmación lleva `ruta:línea` comprobada en el código. Lo que no se ha podido comprobar sin ejecutar algo o sin acceder a otro sistema se marca **no comprobado** y se dice qué haría falta. Los tamaños (pequeño / medio / grande) indican el alcance del cambio, no un tiempo (HR14).
 
 ---
@@ -40,7 +42,7 @@ Permisos de `/similar` · clasificación de datos del repo · rate limiting y cu
 | Regla | Veredicto | Evidencia | Qué haría falta | Tamaño |
 |---|---|---|---|---|
 | HR0 Config con UI de administración | **NO CUMPLE** | 23 ajustes en `backend/app/core/config.py:20-77`, sin UI de administración: Settings solo tiene Perfil, Usuarios y Papelera (`src/pages/SettingsPage.jsx:799-801`); `/api/config/ai-provider` es de solo lectura (`backend/app/api/routes/config.py:20-29`) y ya no se muestra en ninguna página. Los ajustes funcionales del frontend son constantes de código, no configuración (ver HR8). | Una sección de administración, al menos de solo lectura, con los ajustes funcionales (límites, umbrales, proveedor y modelo). Los secretos y la infraestructura (`database_url`, claves, rutas de claves JWT) no deberían editarse desde la UI: ver Decisión 4. | grande |
-| HR1 Sin almacenamiento del navegador | **DESVIACIÓN A DECIDIR** | Solo quedan tres preferencias de interfaz: `src/layouts/AppLayout.jsx:22,29` (barra lateral plegada), `src/hooks/useResizableSplit.js:19-29` (ancho del panel), `src/pages/RecordsPage.jsx:261,268` (Historial abierto, `sessionStorage`). El access token vive en memoria (`src/context/AuthContext.jsx:22,28-32`); el refresh token, en una cookie HttpOnly (`backend/app/api/routes/auth.py:30-41`). Ningún estado autoritativo en el navegador. HR1 prohíbe "authoritative or persistent state"; `rules/javascript.mdc` prohíbe localStorage y sessionStorage sin excepción. | Si no se acepta la excepción: guardar las preferencias en `users`, como ya se hace con `preferred_language`. | pequeño |
+| HR1 Sin almacenamiento del navegador | **CUMPLE** (`913e0aa`; antes DESVIACIÓN A DECIDIR, Decisión 5: sin excepciones) | Las tres preferencias de interfaz (barra lateral plegada, ancho del panel de Registros, Historial abierto) dejaron el navegador: las dos primeras se guardan en `users.ui_preferences` (JSONB, migración `0026`, `PATCH /api/auth/me` con mezcla en el servidor, `backend/app/api/routes/auth.py`) y el Historial empieza siempre plegado. El access token vive en memoria y el refresh token en una cookie HttpOnly, como antes. Búsqueda de `localStorage`/`sessionStorage` en `src/`: solo comentarios. | — | — |
 | HR2 Arreglar y probar todo | CUMPLE (proceso) | Lint con 0 errores y 58 avisos (`npm run lint`, ejecutado hoy); suite backend y scripts de verificación por ronda. Abierto y documentado: `scripts/verify-suggest-rule.mjs:432` figuraba como fallido en la ronda de envoltorios; **no comprobado** si sigue fallando (habría que ejecutarlo con los simuladores). | — | — |
 | HR3 Verificar contra el código | CUMPLE (proceso) | Este informe. | — | — |
 | HR4 No simplificar en silencio | CUMPLE (proceso) | Los bloqueos están documentados en `CLAUDE.md`: s1kd-brexcheck sin poder instalarse aquí, `cdn.sheetjs.com` bloqueado. | — | — |
@@ -54,13 +56,13 @@ Permisos de `/similar` · clasificación de datos del repo · rate limiting y cu
 | HR12 | NO APLICA | No está definida en `atexis-hard-rules.md`. | Confirmar contra la versión del MCP (Decisión 15). | — |
 | HR13 Sin código heredado ni duplicado | **NO CUMPLE** | Ver tabla 1.8. Las ramas few-shot que el Barrido 4 dejó como dudosas son inalcanzables; hay además código duplicado (helpers de trabajos triplicados, `RULE_STATUS_LABELS` ×3), un endpoint sin llamador y herramientas sin uso. | Borrar o unificar. | pequeño |
 | HR14 Sin estimaciones | CUMPLE (proceso) | — | — | — |
-| HR15 Textos localizables | PARCIAL | Hay capa i18n (`src/i18n/index.js`) y el JSX no tiene literales sueltos (búsqueda sin resultados). Pero: `src/components/compare/BrdpCompareDialog.jsx:96` escribe "context:" y "test:" en inglés; el backend da el origen como "Records: <proyecto>" o "Catalog" (`similar.py:262`), que se pinta tal cual (`src/components/assistant/ReferenceRow.jsx:40`); los `detail` del backend en inglés llegan a pantalla con `err.message` (por ejemplo `backend/app/api/routes/brdps.py:237`); el informe es inglés fijo (`src/api/buildBREXdocReport.js:73,134-135`). | Traducir esas cadenas y devolver códigos en lugar de texto desde el backend, como ya hacen el import y el test de reglas. El informe y las cabeceras del Excel: Decisión 14. | medio |
+| HR15 Textos localizables | **RESUELTO** (`afe2de6`; antes PARCIAL) salvo excepciones aceptadas | Comparar dice "contexto"/"condición" por i18n; el origen de las referencias de Suggest llega estructurado (`source_type`, `source_project`) y se traduce en la interfaz; los mensajes del backend de uso normal llevan código y parámetros (`error_detail`) con frase EN/ES en `errors.codes.*`; los errores del asistente (conexión, respuesta cortada) y la página de login siguen el idioma. Excepciones aceptadas: el informe y las cabeceras del Excel en inglés (Decisión 14) y los nombres de elementos XML (`assert`, `report`, `objectUse`…). | Ver "Qué sigue abierto tras AACF 3" (mensajes que solo se alcanzan por la API). | — |
 | HR16 Un despliegue a la vez | NO APLICA | No hay procedimiento de despliegue (HR5). | — | — |
 | HR17 | NO APLICA | No está definida en `atexis-hard-rules.md`. | Decisión 15. | — |
 | HR18 Sin timeouts duros en procesos agénticos | PARCIAL | Ver tabla 1.9. Los trabajos tienen vigilancia que escala (60 min → `failed` con mensaje). El proxy del LLM no tiene ningún límite ni vigilancia (`backend/app/api/routes/llm_proxy.py:63`, `timeout=None`; sin `AbortController` en `src/api/llmAPI.js`): una petición colgada deja la pantalla esperando indefinidamente. | Vigilancia con aviso en el proxy del LLM y en el cliente. | pequeño |
 | HR19 Igual que HR18 | PARCIAL | Ídem. | Ídem. | pequeño |
 | HR20 UI de mutación optimista | **RESUELTO** (`dd9bbac`; antes NO CUMPLE) | Ver tabla 1.10. Los campos de texto de Records se ven al momento pero no se deshacen si el guardado falla. El estado de la Propuesta, Verify y Revoke esperan a la respuesta pese a que el resultado se conoce de antemano. AI Extract sí cumple (con deshacer). | Aplicar el cambio al momento y deshacerlo si el servidor lo rechaza, como ya hace AI Extract. | medio |
-| HR21 Humanizar textos | **NO CUMPLE** | `src/components/Header.jsx:30` muestra `user.global_role` crudo ("admin"/"user"); `BrdpCompareDialog.jsx:96` muestra `p.kind` (assert/report: son nombres de elemento XML, aceptables) y las etiquetas en inglés de HR15. | Traducir el rol. | pequeño |
+| HR21 Humanizar textos | **RESUELTO** (`afe2de6`; antes NO CUMPLE) | Los roles se pintan con las mismas claves `roles.*` en la cabecera, Ajustes y usuarios eliminados (un rol desconocido se muestra tal cual); los estados guardados del historial ("verified", "draft") se traducen también en su tooltip. `p.kind` de Comparar (assert/report) sigue siendo un nombre de elemento XML: excepción aceptada. | — | — |
 | Extra: FastAPI y `from __future__ import annotations` | CUMPLE | Solo aparece en servicios (`app/services/rule_extract.py`, `rule_extract_jobs.py`, `text_extract.py`), ningún fichero de `app/api/routes/` lo usa. | — | — |
 
 ### 1.1 HR0 — ajustes y dónde se configuran
@@ -303,12 +305,12 @@ Todas son decisiones de Juanma; no se recomienda migrar.
 | Tema | Qué se usa hoy | Tamaño de adoptarlo | Qué se pierde si no se adopta |
 |---|---|---|---|
 | TypeScript | JS/JSX; hay `tsconfig*.json` y `typescript` sin ningún fichero TS | grande | Tipos en la frontera con la API y las reglas de `javascript.mdc` sobre TypeScript |
-| Tailwind + shadcn/ui | CSS Modules por componente y `src/index.css` con variables propias (`:5`); Tailwind 4 instalado sin uso visible; sin shadcn | grande | Los componentes y la consistencia visual del registro ATEXIS |
+| Tailwind + shadcn/ui | **No se adopta** (Decisión 20): CSS Modules por componente y variables propias en `src/index.css`. Tailwind 4 sigue instalado sin uso visible (Decisión 22 pendiente) | — | — |
 | Zustand | Context (`AuthContext`), estado local y React Query para el estado del servidor (`useImportJob`, `useEmbeddingJob`, `useTrash`) | medio | Poco: React Query ya cubre el estado del servidor como pide `javascript.mdc` |
 | Estructura `frontend/` + `backend/` | Frontend en la raíz (`src/`) y backend en `backend/` | pequeño a medio | La consistencia con la plantilla; algunos scripts dependen de rutas relativas |
 | Keycloak OIDC | Usuarios, contraseñas y JWT propios | grande | SSO, MFA, alta y baja corporativas y política de contraseñas centralizada |
-| Tokens de diseño DTCG (OKLCH) | Variables CSS en hex (`index.css:5-…`) y hex directos en los módulos (`#2563eb` aparece 33 veces) | medio | Un único origen de colores y espaciados; temas |
-| Branding ATEXIS | Azul principal `#2563eb` (en el AACF es el color "Info", no el primario `#2E74B5`); `#2e74b5` solo en `LoginPage.module.css` y `RecordsPage.module.css`; fuente IBM Plex Sans (`index.css:40`) en lugar de Inter + JetBrains Mono | pequeño a medio | La identidad visual ATEXIS |
+| Tokens de diseño DTCG (OKLCH) | **No se adopta** (Decisión 20): tokens de color y fuente como variables CSS en hex en `src/index.css` (`:root`) | — | — |
+| Branding ATEXIS | **Adoptada sobre CSS propio** (`5187a67`, Decisión 20): primario `#2E74B5` (`--primary`, con `--primary-light`/`--primary-dark`), neutros y semánticos como variables de `src/index.css`; Inter y JetBrains Mono servidas desde el propio paquete (`@fontsource`, sin peticiones externas); favicon e informe con la marca; contraste AA comprobado en las pantallas principales. Quedan colores escritos a mano en los módulos que no son de marca (tonos de estado y fondos de aviso) | — | — |
 
 ---
 
@@ -337,7 +339,7 @@ Cada una se responde con sí o no.
 2. ¿Puede el repositorio seguir siendo público con los BREX de Lufthansa y CA, los Schematron de las pruebas DITA, los textos de Lufthansa en el juego de pruebas y la IP interna de `CLAUDE.md`?
 3. ¿Se acepta enviar datos de proyectos de cliente a la API pública de Mistral? (Si no: el despliegue T2 usa un endpoint privado o autoalojado.)
 4. ¿Se exige una UI de administración (HR0) para los ajustes funcionales, aceptando `.env` para secretos e infraestructura?
-5. ¿Se aceptan las tres preferencias de interfaz en localStorage/sessionStorage como excepción a HR1 y a `javascript.mdc`?
+5. ¿Se aceptan las tres preferencias de interfaz en localStorage/sessionStorage como excepción a HR1 y a `javascript.mdc`? **Respondida: no, HR1 sin excepciones** (resuelto en `913e0aa`).
 6. ¿Se mantiene "lo que puede comprobar el código, lo comprueba el código" frente a HR11 para las expresiones mecánicas (identificadores, huecos de la Propuesta)?
 7. ¿Se acepta que decidan con patrones el enrutado de preguntas a respuesta sin IA, la clase "Sin contenido", el recorte de "Decision by…" y la limpieza de "SCHEMA FACTS"?
 8. ¿Se adopta Keycloak OIDC?
@@ -346,13 +348,13 @@ Cada una se responde con sí o no.
 11. ¿Se pasa a JSON guiado (`response_format`) en lugar de `max_tokens` con lector tolerante?
 12. En AI Extract y el proxy, ¿se devuelve el motivo técnico al cliente (HR7) en lugar de un mensaje saneado (Global Rule 5)?
 13. ¿Pasan los borrados de proyecto y de usuario a borrado lógico? (Si no: basta con registrarlos.)
-14. ¿El informe y las cabeceras del Excel en inglés quedan como excepción a HR15 por ser formato de intercambio?
+14. ¿El informe y las cabeceras del Excel en inglés quedan como excepción a HR15 por ser formato de intercambio? **Respondida: sí.**
 15. ¿Hay una versión del AACF (MCP) que defina HR12 y HR17?
 16. ¿Se protege `main` en GitHub con PR y revisión obligatorias?
 17. ¿Se adoptan Tailwind y shadcn/ui?
 18. ¿Se adopta Zustand?
 19. ¿Se reorganiza el repo en `frontend/` y `backend/`?
-20. ¿Se adoptan los tokens DTCG y el branding ATEXIS (`#2E74B5`, Inter y JetBrains Mono)?
+20. ¿Se adoptan los tokens DTCG y el branding ATEXIS (`#2E74B5`, Inter y JetBrains Mono)? **Respondida: la marca sí, sobre las variables CSS propias; sin Tailwind/shadcn, sin DTCG y sin cambiar la densidad** (`5187a67`).
 21. ¿Se exige `must_change_password` también en el servidor?
 22. ¿Se quitan del repo las herramientas de TypeScript y Tailwind sin uso (si las respuestas 9 y 17 son "no")?
 
@@ -375,7 +377,7 @@ En orden: primero los bloqueantes de T2.
 | 11 | ~~Validación de entrada: `validation` como `Literal`, longitudes, quitar `history`, validar el standard, fijar modelo y `max_tokens` del proxy en el servidor~~ **hecho** (`1c181d2`) | 2.1 #3 | pequeño | no |
 | 12 | ~~Quitar los recortes silenciosos: cita 4 000, título 300, búsqueda de Comparar 50~~ **hecho** (`e3052f4`) | HR6 | pequeño | no |
 | 13 | Vigilancia con aviso en el proxy del LLM y en el cliente | HR18/19 | pequeño | no |
-| 14 | Traducir el rol (`Header.jsx:30`), "context:/test:" y "Records:/Catalog"; códigos en vez de texto en los errores del backend | HR15, HR21 | medio | no |
+| 14 | ~~Traducir el rol (`Header.jsx:30`), "context:/test:" y "Records:/Catalog"; códigos en vez de texto en los errores del backend~~ **hecho** (`afe2de6`) | HR15, HR21 | medio | no |
 | 15 | Limpieza de HR13: ramas few-shot, claves sin lector, duplicados, endpoint sin uso, columna `history` | HR13 | pequeño | no |
 | 16 | Procedimiento de despliegue completo (backend, Postgres, migraciones, proxy `/api`) | HR5 | medio | no |
 | 17 | Constantes funcionales a `Settings` (HR8) y UI de administración (HR0) | HR8, HR0 | medio / grande | no |
@@ -403,3 +405,13 @@ AACF 2 (`8500e86`, `ead5cd1`, `658db32`, `09de62b`): un servidor caído ya no se
 - **Purga automática de la Papelera**: no hay (decisión del encargo).
 - **Restaurar un proyecto o un usuario** no deja evento en ningún historial (solo se limpian las columnas de borrado).
 - **`approvals.py:457-475`** (descartar aprobación, sin llamador): sin tocar.
+
+## Qué sigue abierto tras AACF 3
+
+AACF 3 (`c26f17a`, `913e0aa`, `5187a67`, `afe2de6`): cifras de Registros alineadas a la derecha; preferencias de interfaz en el servidor (HR1 sin excepciones); marca ATEXIS sobre el CSS propio; textos y mensajes traducidos (HR15, HR21).
+
+- **Excepciones aceptadas a HR15**: el informe (Generate Report) y las cabeceras del Excel siguen en inglés (Decisión 14); los nombres de elementos y atributos XML (`assert`, `report`, `objectUse`, `structureObjectRule`…) se muestran tal cual en cualquier idioma; el contenido que escribe la IA (ejemplos del test de reglas, respuestas) está en el idioma que pide cada prompt, y los nombres de proyectos y usuarios son datos.
+- **Mensajes del backend que siguen en texto inglés sin código**: solo se alcanzan llamando a la API directamente o por una carrera (la interfaz no los permite o lo comprueba antes): requisitos previos de Suggest (`similar.py`, 400: la interfaz desactiva el botón con su motivo), filtros de `GET /brdps` y `conflict_resolution` del import (valores que la interfaz nunca manda), "Admin only"/"Not authorized" (la interfaz no muestra esas acciones), trabajos o usuarios eliminados que ya no existen (404 por carrera: se muestran con la frase genérica de "no encontrado" si el texto no es de usuario), regla mal formada o de otro formato en `PUT …/approvals` (el editor lo comprueba antes de guardar), `role must be viewer or editor`, el texto libre "en vigor" de AI Extract, y `suggestion_feedback`. Login (401/429) y la sesión (401/403 de `deps.py`) se traducen por estado en el cliente. Convertirlos si alguno pasa a alcanzarse en uso normal.
+- **Colores**: 160 de los 482 colores escritos a mano en los CSS Modules siguen como hex (tonos de estado, fondos de aviso, grises de separadores que no son tokens de marca); se pueden pasar a variables si se amplía la paleta.
+- **Tailwind** sigue instalado sin uso (Decisión 22).
+- Todo lo de "Qué sigue abierto tras AACF 2" que no se menciona aquí sigue igual.
