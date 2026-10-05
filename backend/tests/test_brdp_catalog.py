@@ -50,8 +50,26 @@ def _headers(user: User) -> dict:
 
 
 @pytest.fixture
-async def catalog_rows():
-    standard = f"Test Catalog Standard {uuid.uuid4()}"
+def _synthetic_standards_allowed(monkeypatch):
+    """Project creation only accepts the supported standards (AACF 1, Part
+    5); these tests seed catalogs under a throwaway standard so they never
+    depend on real catalog data -- that one standard is added to the list
+    for the test."""
+    from app.api.routes import projects as projects_route
+
+    added: list[str] = []
+
+    def allow(standard: str) -> str:
+        added.append(standard)
+        monkeypatch.setattr(projects_route, "SUPPORTED_STANDARDS", (*projects_route.SUPPORTED_STANDARDS, standard))
+        return standard
+
+    return allow
+
+
+@pytest.fixture
+async def catalog_rows(_synthetic_standards_allowed):
+    standard = _synthetic_standards_allowed(f"Test Catalog Standard {uuid.uuid4()}")
     async with async_session_factory() as session:
         session.add_all(
             [
@@ -166,7 +184,7 @@ async def test_create_project_without_seed_flag_creates_no_brdps(client, catalog
         await _cleanup_user(admin)
 
 
-async def test_seed_from_catalog_is_noop_for_standard_with_no_catalog_rows(client):
+async def test_seed_from_catalog_is_noop_for_standard_with_no_catalog_rows(client, _synthetic_standards_allowed):
     admin = await _make_user(global_role="admin")
     created_id = None
     try:
@@ -174,7 +192,7 @@ async def test_seed_from_catalog_is_noop_for_standard_with_no_catalog_rows(clien
             "/api/projects",
             json={
                 "name": f"No Catalog Project {uuid.uuid4()}",
-                "standard": f"Standard With No Catalog {uuid.uuid4()}",
+                "standard": _synthetic_standards_allowed(f"Standard With No Catalog {uuid.uuid4()}"),
                 "seed_from_catalog": True,
             },
             headers=_headers(admin),

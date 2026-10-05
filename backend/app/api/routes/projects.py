@@ -9,6 +9,8 @@ from app.db.base import get_db
 from app.models import BRDP, BRDPCatalog, Project, User, UserProjectRole
 from app.repositories.brdp_repository import compute_status_counts
 from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut, ProjectRename
+from app.services.project_config import project_config_problem
+from app.services.rule_formats import SUPPORTED_STANDARDS
 from app.services.schema_location import schema_location_problem
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -132,6 +134,14 @@ async def create_project(
     nothing else) -- these defaults are simply never displayed there. Any
     value the caller does supply in body.project_config wins over the default.
     """
+    if body.standard not in SUPPORTED_STANDARDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "standard_not_supported", "standard": body.standard, "supported": list(SUPPORTED_STANDARDS)},
+        )
+    shape = project_config_problem(body.project_config)
+    if shape:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=shape)
     project_config = {**_DEFAULT_PROJECT_CONFIG, **body.project_config}
     problem = schema_location_problem(body.standard, project_config)
     if problem:
@@ -189,6 +199,9 @@ async def update_project_config(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     # Same rules as the configuration page (src/utils/ruleSchemaContext.js):
     # a schema location the app could not use is never stored.
+    shape = project_config_problem(body.project_config)
+    if shape:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=shape)
     problem = schema_location_problem(project.standard, body.project_config)
     if problem:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problem)

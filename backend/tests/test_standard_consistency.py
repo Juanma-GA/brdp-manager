@@ -127,3 +127,12 @@ def test_template_rules_decode_excel_escapes():
             for text in (entry.rule_xml, entry.proposal, entry.definition):
                 assert "_x000" not in text, (standard, entry.identifier)
                 assert "\r" not in text, (standard, entry.identifier)
+
+
+def test_backend_supported_standards_are_the_create_project_dropdown():
+    """AACF 1, Part 5: the backend refuses a project with any other standard
+    (app/services/rule_formats.py SUPPORTED_STANDARDS) -- the list must be
+    exactly the dropdown's, in the same order."""
+    from app.services.rule_formats import SUPPORTED_STANDARDS
+
+    assert list(SUPPORTED_STANDARDS) == _extract_project_standards()

@@ -1,6 +1,7 @@
 import re
 import uuid
 from datetime import datetime, timezone
+from typing import get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, update
@@ -16,7 +17,7 @@ from app.repositories.brdp_repository import (
     get_active_brdp_by_identifier,
     list_active_brdps,
 )
-from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate, NextExtIdentifierOut
+from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate, NextExtIdentifierOut, ProposalStatus
 from app.schemas.brdp_history import BRDPHistoryOut
 from app.schemas.status_counts import ProposalStatusCounts, RuleStatusCounts
 from app.services.history import record_change
@@ -36,7 +37,7 @@ class BRDPStatsOut(BaseModel):
     rule_status_counts: RuleStatusCounts
 
 
-_PROPOSAL_STATUS_VALUES = {"Pending", "Validated", "Refused"}
+_PROPOSAL_STATUS_VALUES = set(get_args(ProposalStatus))
 _RULE_STATUS_VALUES = {"todo", "draft", "verified"}
 
 router = APIRouter(prefix="/api/projects/{project_id}/brdps", tags=["brdps"])

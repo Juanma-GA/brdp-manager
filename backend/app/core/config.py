@@ -5,6 +5,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
+# Excel's hard limit on the text of one cell (a fact of the file format, not
+# a setting): app/services/excel_io.py refuses an export over it, and it is
+# the default limit for every long BRDP text below, so whatever is saved can
+# always be exported.
+EXCEL_CELL_CHAR_LIMIT = 32767
+
 
 class Settings(BaseSettings):
     """Backend configuration, all overridable via environment variables or a
@@ -76,6 +82,25 @@ class Settings(BaseSettings):
     # are capped too, so a text with few but huge "words" is still bounded.
     extract_text_max_words: int = 5000
     extract_text_max_chars: int = 200_000
+    # A decision's literal quote kept from a free text (stored whole, never
+    # cut): over it the candidate is refused with a warning. The limit the
+    # decisions request already had (schemas/rule_extract.py).
+    extract_quote_max_chars: int = 20000
+
+    # --- BRDP text limits (AACF 1, Part 5) ---
+    # Checked on create/edit (schemas/brdp.py) and before an AI Extract
+    # import; over a limit the request is refused with the limit, never cut
+    # (HR6/HR7). Title: the limit AI Extract already used for a title.
+    # Definition, Proposal and the refusal reason: Excel's cell limit, so
+    # every saved BRDP can be exported.
+    brdp_title_max_chars: int = 2000
+    brdp_text_max_chars: int = EXCEL_CELL_CHAR_LIMIT
+
+    # --- LLM proxy limits (AACF 1, Part 5) ---
+    # The largest max_tokens the app asks for (the rule test's examples,
+    # src/prompts/shared.js RULE_TEST_MAX_TOKENS); a request over it is
+    # refused, never lowered silently.
+    llm_max_tokens: int = 16000
 
 
 @lru_cache

@@ -97,11 +97,9 @@ async def test_duplicate_identifier_rejected_within_same_project(client, editor_
 async def test_identifier_cannot_be_changed_via_put(client, editor_and_project):
     """identifier is immutable once a BRDP is created (docs request: "ID
     nunca debe ser editable, bajo ningún concepto") -- BRDPUpdate doesn't
-    declare the field at all, so sending it is silently ignored (not a
-    422, not a 409, no special-casing); other fields in the same request
-    still apply normally. This replaces the old rename-conflict tests,
-    which no longer have a rename to test in the first place.
-    """
+    declare the field at all. Since AACF 1 (Part 5) a field the schema does
+    not declare is refused with a 422 instead of being ignored: nothing in
+    the request is applied."""
     project, headers = editor_and_project
     brdp = (
         await client.post(
@@ -114,10 +112,11 @@ async def test_identifier_cannot_be_changed_via_put(client, editor_and_project):
         json={"identifier": "BRDP-SHOULD-BE-IGNORED", "title": "New Title"},
         headers=headers,
     )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["identifier"] == "BRDP-IMMUTABLE-001"
-    assert body["title"] == "New Title"
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "extra_forbidden"
+    rows = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
+    stored = next(b for b in rows if b["id"] == brdp["id"])
+    assert stored["identifier"] == "BRDP-IMMUTABLE-001" and stored["title"] == ""
 
 
 async def test_same_identifier_is_allowed_in_a_different_project(client, editor_and_project):

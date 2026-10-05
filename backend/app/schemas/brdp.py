@@ -1,17 +1,32 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.core.config import get_settings
+
+# The Proposal Status values the app uses (AACF 1, Part 5). The column has
+# no CHECK constraint: the Excel import keeps its own handling of other
+# values (rows "imported with a warning").
+ProposalStatus = Literal["Pending", "Validated", "Refused"]
+
+_settings = get_settings()
+_TITLE_MAX = _settings.brdp_title_max_chars
+_TEXT_MAX = _settings.brdp_text_max_chars
 
 
 class BRDPCreate(BaseModel):
+    # Any other field -- `history` among them, which is written only by the
+    # server -- is refused with a 422 (extra_forbidden).
+    model_config = ConfigDict(extra="forbid")
+
     identifier: str
-    title: str = ""
-    definition: str = ""
-    proposal: str = ""
-    validation: str = "Pending"
-    comments: str = ""
-    history: list = []
+    title: str = Field(default="", max_length=_TITLE_MAX)
+    definition: str = Field(default="", max_length=_TEXT_MAX)
+    proposal: str = Field(default="", max_length=_TEXT_MAX)
+    validation: ProposalStatus = "Pending"
+    comments: str = Field(default="", max_length=_TEXT_MAX)
 
 
 class BRDPUpdate(BaseModel):
@@ -19,13 +34,19 @@ class BRDPUpdate(BaseModel):
     # its lifetime once created (BRDPCreate still takes it), never editable
     # afterward under any circumstance. Same pattern as MeUpdate leaving
     # out global_role (schemas/auth.py): structurally impossible to send,
-    # not just hidden in the UI.
-    title: str | None = None
-    definition: str | None = None
-    proposal: str | None = None
-    validation: str | None = None
-    comments: str | None = None
-    history: list | None = None
+    # not just hidden in the UI. `history` is refused too (extra_forbidden).
+    # Each field may be left out; sent, it must be a value (a null used to
+    # reach the NOT NULL column as a 500). Over its limit the request is
+    # refused with the limit -- never cut (HR6). A BRDP already saved with a
+    # longer text is read and exported as before; only an edit of that field
+    # asks to shorten it.
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(default=None, max_length=_TITLE_MAX)
+    definition: str = Field(default=None, max_length=_TEXT_MAX)
+    proposal: str = Field(default=None, max_length=_TEXT_MAX)
+    validation: ProposalStatus = None
+    comments: str = Field(default=None, max_length=_TEXT_MAX)
 
 
 class NextExtIdentifierOut(BaseModel):

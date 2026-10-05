@@ -36,6 +36,7 @@ from sqlalchemy import select
 
 from app.db.base import async_session_factory
 from app.models import BRDPCatalog
+from app.services.rule_formats import SUPPORTED_STANDARDS
 
 SHEET_NAME = "Auto-gen Decisions"
 
@@ -55,15 +56,7 @@ SHEET_NAME = "Auto-gen Decisions"
 # reimporting under whichever of the two real strings the target project
 # actually uses (the migration itself renames any ALREADY-imported catalog
 # rows to Xpath2.0, matching the one real DITA project that existed).
-_KNOWN_STANDARDS = {
-    "S1000D 3.0.1",
-    "S1000D 4.1",
-    "S1000D 4.2",
-    "S1000D 5.0",
-    "S1000D 6.0",
-    "DITA 1.3 Xpath2.0",
-    "DITA 1.3 Xpath3.0",
-}
+_KNOWN_STANDARDS = set(SUPPORTED_STANDARDS)
 
 
 def _clean(value) -> str:

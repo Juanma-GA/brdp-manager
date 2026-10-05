@@ -6,6 +6,7 @@ tests. Everything else (auth requirement, provider/endpoint/key resolution
 from server settings, streaming pass-through, error propagation) runs for
 real against the actual app.
 """
+import json
 import logging
 import traceback
 
@@ -50,6 +51,11 @@ def _reset_transport_override():
     app.dependency_overrides.pop(get_httpx_transport, None)
 
 
+def _payload():
+    """A payload as the app sends it (src/api/llmAPI.js)."""
+    return {"max_tokens": 100, "temperature": 0.3, "messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]}
+
+
 def _install_mock_transport(handler):
     app.dependency_overrides[get_httpx_transport] = lambda: httpx.MockTransport(handler)
 
@@ -73,9 +79,7 @@ async def test_streams_upstream_chunks_byte_for_byte(client, auth_headers):
 
     _install_mock_transport(handler)
 
-    response = await client.post(
-        "/api/llm-proxy", json={"payload": {"model": "mistral-small", "messages": []}}, headers=auth_headers
-    )
+    response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=auth_headers)
     assert response.status_code == 200
     assert response.content == sse_body
     # FastAPI/Starlette appends "; charset=utf-8" to text-like media types
@@ -88,12 +92,17 @@ async def test_streams_upstream_chunks_byte_for_byte(client, auth_headers):
     settings = get_settings()
     assert str(sent.url) == settings.mistral_endpoint
     assert sent.headers["authorization"] == f"Bearer {settings.mistral_api_key}"
+    # The model is the server's (.env), added to what the client sent.
+    sent_body = json.loads(sent.content)
+    assert sent_body["model"] == settings.mistral_model
+    assert sent_body["messages"] == _payload()["messages"]
 
 
-async def test_client_supplied_endpoint_and_key_are_ignored(client, auth_headers):
-    """The whole point of docs/v2 §4.2's S2/SSRF fix: even if a client sends
-    targetEndpoint/apiKey (v1's shape), the server resolves both from its
-    own settings -- never from the request body.
+async def test_client_supplied_endpoint_and_key_are_refused(client, auth_headers):
+    """The whole point of docs/v2 §4.2's S2/SSRF fix: the server resolves
+    the endpoint and key from its own settings, never from the request.
+    Since AACF 1 (Part 5) a client that sends them (v1's shape) is refused
+    outright, and nothing reaches the provider.
     """
     captured_requests = []
 
@@ -106,31 +115,82 @@ async def test_client_supplied_endpoint_and_key_are_ignored(client, auth_headers
     response = await client.post(
         "/api/llm-proxy",
         json={
-            "payload": {"model": "x"},
+            "payload": _payload(),
             "targetEndpoint": "http://169.254.169.254/latest/meta-data/",
             "apiKey": "attacker-supplied-key",
         },
         headers=auth_headers,
     )
+    assert response.status_code == 422
+    assert {e["loc"][-1] for e in response.json()["detail"]} == {"targetEndpoint", "apiKey"}
+    assert captured_requests == []
+
+
+@pytest.mark.parametrize(
+    "payload, code",
+    [
+        ({**_payload(), "model": "some-other-model"}, "llm_params_not_allowed"),
+        ({**_payload(), "top_p": 0.9}, "llm_params_not_allowed"),
+        ({**_payload(), "stream": True}, "llm_params_not_allowed"),
+        ({"temperature": 0.3}, "llm_messages_invalid"),
+        ({"messages": [{"role": "tool", "content": "x"}]}, "llm_messages_invalid"),
+        ({**_payload(), "temperature": "hot"}, "llm_temperature_invalid"),
+        ({**_payload(), "max_tokens": 0}, "llm_max_tokens_invalid"),
+    ],
+)
+async def test_parameters_outside_the_list_are_refused(client, auth_headers, payload, code):
+    """AACF 1, Part 5: a closed list of parameters (the ones the app sends);
+    the model is the server's. Anything else is refused with a code -- never
+    dropped or adjusted silently -- and nothing reaches the provider."""
+    calls = []
+    _install_mock_transport(lambda request: calls.append(request) or httpx.Response(200, content=b"{}"))
+    response = await client.post("/api/llm-proxy", json={"payload": payload}, headers=auth_headers)
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == code
+    assert calls == []
+
+
+async def test_max_tokens_over_the_setting_is_refused_not_lowered(client, auth_headers):
+    limit = get_settings().llm_max_tokens
+    calls = []
+    _install_mock_transport(lambda request: calls.append(request) or httpx.Response(200, content=b"{}"))
+    response = await client.post(
+        "/api/llm-proxy", json={"payload": {**_payload(), "max_tokens": limit + 1}}, headers=auth_headers
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "llm_max_tokens_too_high", "max": limit, "requested": limit + 1}
+    assert calls == []
+    # The limit itself goes through, exactly as sent.
+    response = await client.post("/api/llm-proxy", json={"payload": {**_payload(), "max_tokens": limit}}, headers=auth_headers)
     assert response.status_code == 200
-    sent = captured_requests[0]
-    settings = get_settings()
-    assert str(sent.url) == settings.mistral_endpoint
-    assert "169.254.169.254" not in str(sent.url)
-    assert sent.headers["authorization"] == f"Bearer {settings.mistral_api_key}"
+    assert json.loads(calls[0].content)["max_tokens"] == limit
 
 
-async def test_upstream_error_status_is_propagated_not_streamed(client, auth_headers):
+async def test_upstream_error_status_is_propagated_not_streamed(client, auth_headers, caplog):
+    """The provider's status is kept; its body goes to the log under a
+    reference, never to the browser (Decisión 12)."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, content=b'{"error":"rate limited"}')
 
     _install_mock_transport(handler)
 
-    response = await client.post(
-        "/api/llm-proxy", json={"payload": {"model": "x"}}, headers=auth_headers
-    )
+    with caplog.at_level(logging.ERROR):
+        response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=auth_headers)
     assert response.status_code == 429
-    assert "rate limited" in response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "llm_upstream_error" and detail["upstream_status"] == 429
+    assert "rate limited" not in response.text
+    assert any(f"ref={detail['ref']}" in r.getMessage() and "rate limited" in r.getMessage() for r in caplog.records)
+
+
+async def test_upstream_401_never_reaches_the_browser_as_401(client, auth_headers):
+    """A 401/403 from the provider is about the server's API key; passed
+    through, the browser would take it for its own expired session."""
+    _install_mock_transport(lambda request: httpx.Response(401, content=b'{"error":"bad key"}'))
+    response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=auth_headers)
+    assert response.status_code == 502
+    assert response.json()["detail"]["upstream_status"] == 401
 
 
 async def test_upstream_connection_failure_is_logged_with_real_traceback(client, auth_headers, caplog):
@@ -154,18 +214,19 @@ async def test_upstream_connection_failure_is_logged_with_real_traceback(client,
     _install_mock_transport(handler)
 
     with caplog.at_level(logging.ERROR):
-        response = await client.post(
-            "/api/llm-proxy", json={"payload": {"model": "x"}}, headers=auth_headers
-        )
+        response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=auth_headers)
 
     assert response.status_code == 500
-    assert response.json()["detail"] == "LLM proxy request failed"
+    detail = response.json()["detail"]
+    assert detail["code"] == "llm_request_failed" and detail["ref"]
+    assert "SSL" not in response.text and "ConnectError" not in response.text
 
     matching = [
         r for r in caplog.records if r.levelno >= logging.ERROR and "upstream provider" in r.message
     ]
     assert len(matching) == 1, f"expected exactly one matching error log record, got: {caplog.records}"
     record = matching[0]
+    assert f"ref={detail['ref']}" in record.message
     assert record.exc_info is not None, "the log record must carry a real traceback, not just a message"
     formatted = "".join(traceback.format_exception(*record.exc_info))
     assert "simulated SSL certificate verification failure" in formatted

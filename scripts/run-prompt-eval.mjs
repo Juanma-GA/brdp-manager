@@ -599,12 +599,14 @@ async function getAiProvider() {
   return apiFetch("/api/config/ai-provider");
 }
 
+// The payload is what the app sends (src/api/llmAPI.js): messages,
+// temperature and max_tokens; the server sets the model and refuses any
+// other parameter (AACF 1, Part 5).
 async function sendToLlm(aiProvider, systemPrompt, userMessage, temperature) {
   const payload =
     aiProvider.provider === "Anthropic"
-      ? { model: aiProvider.model, max_tokens: DEFAULT_MAX_TOKENS, temperature, system: systemPrompt, messages: [{ role: "user", content: userMessage }] }
+      ? { max_tokens: DEFAULT_MAX_TOKENS, temperature, system: systemPrompt, messages: [{ role: "user", content: userMessage }] }
       : {
-          model: aiProvider.model,
           max_tokens: DEFAULT_MAX_TOKENS,
           temperature,
           messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
@@ -794,8 +796,8 @@ function xmldomParse(text) {
 async function sendMessagesToLlm(aiProvider, systemPrompt, messages, temperature, maxTokens = DEFAULT_MAX_TOKENS) {
   const payload =
     aiProvider.provider === "Anthropic"
-      ? { model: aiProvider.model, max_tokens: maxTokens, temperature, system: systemPrompt, messages }
-      : { model: aiProvider.model, max_tokens: maxTokens, temperature, messages: [{ role: "system", content: systemPrompt }, ...messages] };
+      ? { max_tokens: maxTokens, temperature, system: systemPrompt, messages }
+      : { max_tokens: maxTokens, temperature, messages: [{ role: "system", content: systemPrompt }, ...messages] };
   const res = await apiFetch("/api/llm-proxy", { method: "POST", body: JSON.stringify({ payload }) });
   if (isTruncatedAnswer(aiProvider.provider, res)) throw truncatedAnswerError();
   if (aiProvider.provider === "Anthropic") return res.content[0].text;

@@ -39,3 +39,17 @@ STANDARD_TO_RULE_FORMAT = {
     "DITA 1.3 Xpath2.0": "SCH-DITA",
     "DITA 1.3 Xpath3.0": "SCH-DITA",
 }
+
+# Every standard a project can be created with (AACF 1, Part 5): the 7
+# exact strings of the Create Project dropdown (src/pages/ProjectsPage.jsx
+# STANDARD_OPTIONS; tests/test_standard_consistency.py keeps both in sync).
+# S1000D 5.0/6.0 have no rule format yet, so they are not in the map above.
+SUPPORTED_STANDARDS = (
+    "S1000D 3.0.1",
+    "S1000D 4.1",
+    "S1000D 4.2",
+    "S1000D 5.0",
+    "S1000D 6.0",
+    "DITA 1.3 Xpath2.0",
+    "DITA 1.3 Xpath3.0",
+)

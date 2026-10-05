@@ -38,7 +38,7 @@ from pathlib import Path
 import openpyxl
 from openpyxl.utils.escape import unescape
 
-from app.core.config import get_settings
+from app.core.config import EXCEL_CELL_CHAR_LIMIT, get_settings
 
 # Column header -> import row key. Same 7 columns, same order, as the export
 # (ID/Title/Definition/Proposal/Proposal Status/Rule Status/Rule).
@@ -70,10 +70,9 @@ EXPORT_COLUMNS = [
 ]
 SHEET_NAME = "BRDPs"
 
-# Excel's hard limit on the text of one cell. Over it Excel refuses (or
-# truncates) the cell -- the export is refused instead, naming the BRDP and
-# the field, never cut (HR6/HR7).
-EXCEL_CELL_CHAR_LIMIT = 32767
+# Excel's hard limit on the text of one cell (app/core/config.py). Over it
+# Excel refuses (or truncates) the cell -- the export is refused instead,
+# naming the BRDP and the field, never cut (HR6/HR7).
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
