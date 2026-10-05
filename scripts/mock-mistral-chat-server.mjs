@@ -586,6 +586,30 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "One substep", expected: "reject", schema: ruleSchema, content: step(1) },
     ]);
   }
+  // Mejoras A, Part 1 (S1-00223 / S1-00224, //optionalPart/catalogSeqNumberRef
+  // and //preferredSparePart/catalogSeqNumberRef): written in ipd, along
+  // the way the prompt gives (itemSeqNumber/partSegment/partRefGroup).
+  const csn = /\/\/(optionalPart|preferredSparePart)\/catalogSeqNumberRef/.exec(rule);
+  if (csn) {
+    const first = csn[1];
+    const content = (x) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="P1"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${first}>${x}<partRef manufacturerCodeValue="12345" partNumberValue="P2"/></${first}></partRefGroup></partSegment><applicabilitySegment><usableOnCodeAssy>A</usableOnCodeAssy></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
+    return answer([
+      { label: `${first} without a CSN reference`, expected: "accept", schema: ruleSchema, content: content("") },
+      { label: `${first} with a CSN reference`, expected: "reject", schema: ruleSchema, content: content('<catalogSeqNumberRef figureNumber="02" item="003"/>') },
+    ]);
+  }
+  // Mejoras A, Part 2 (S1-00177, //commonInfo[not(ancestor::procedure)]):
+  // the prompt splits the examples by schema -- the one outside a
+  // procedure in process, the one inside in proced.
+  if (/commonInfo\[not\(ancestor::procedure\)\]/.test(rule)) {
+    const ci = "<commonInfo><para>Read the general safety information first.</para></commonInfo>";
+    const out = /^- "([\w-]+)": examples where <commonInfo> is NOT inside/m.exec(systemPrompt)?.[1] || ruleSchema;
+    const inside = /^- "([\w-]+)": examples where <commonInfo> is inside/m.exec(systemPrompt)?.[1] || ruleSchema;
+    return answer([
+      { label: "Common information outside a procedure", expected: "reject", schema: out, content: ci },
+      { label: "Common information in a procedure", expected: "accept", schema: inside, content: ci },
+    ]);
+  }
   // Mejoras A, Part 4 (rule-test-4-2-levels-off-by-one): "a maximum of
   // five levels" with count(ancestor::proceduralStep) > 5, which only
   // rejects level 7 and deeper. The examples come from the decision: five

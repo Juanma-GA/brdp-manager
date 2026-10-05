@@ -1,14 +1,16 @@
-// Verification for the "alignment" fix round: Part 1 (BRDP Records'
-// Proposal/Rule Status filters now live in a second <thead> row, in the
-// same table as their columns, instead of a separate flex row in
-// .createForm whose width had to coincidentally match the table's) and
-// Part 2 (StatusCountsSummary's numeric values get a fixed min-width
-// right-aligned span, so P/R/D/T start at the same horizontal position
-// regardless of digit count). Real browser, real backend, real Postgres
-// data -- 10 projects spanning 2 to 2819 BRDPs (seeded by
-// backend/scripts/seed_alignment_check_projects.py), including the exact
-// extremes the encargo named (a SOPTE-sized, mostly-Validated project
-// next to a 2-BRDP project).
+// Verification for the "alignment" fix round, Part 1: BRDP Records'
+// Proposal/Rule Status filters live in a second <thead> row, in the same
+// table as their columns, so each <select> lines up exactly with its
+// column header (EN and ES -- the longer Spanish option text is the edge
+// case), and the filters still work from there. Real browser, real
+// backend, real Postgres data -- 10 projects spanning 2 to 2819 BRDPs
+// (seeded by backend/scripts/seed_alignment_check_projects.py; rerun it
+// first, this script deletes them at the end).
+//
+// Part 2 of that round (the compact "V 120 · P 45 · R 3" summary in BRDP
+// Projects) no longer exists: the Projects table now has a two-level
+// header with one number per column, and its alignment is checked by
+// scripts/verify-two-level-header-and-full-labels.mjs.
 import { chromium } from "playwright-core";
 
 const BASE_URL = "http://localhost:5173";
@@ -25,13 +27,6 @@ const ALIGN_TOLERANCE_PX = 0.5;
 function assert(cond, msg) {
   if (!cond) throw new Error("ASSERTION FAILED: " + msg);
   console.log("OK:", msg);
-}
-
-function assertAllClose(values, label) {
-  const first = values[0];
-  for (const v of values) {
-    assert(Math.abs(v - first) <= ALIGN_TOLERANCE_PX, `${label}: all x-positions within ${ALIGN_TOLERANCE_PX}px of each other (got ${values.map((n) => n.toFixed(1)).join(", ")})`);
-  }
 }
 
 async function apiLogin() {
@@ -58,34 +53,6 @@ async function main() {
     // server-side, not per-browser -- see AppSettings/User.preferred_language).
     await page.locator("header select, nav select").first().selectOption("en");
     await page.waitForTimeout(400);
-
-    // ---- Part 2: BRDP Projects summary column alignment ----
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: "/tmp/projects-alignment-final.png", fullPage: true });
-
-    const rows = await page.locator("tbody tr").all();
-    assert(rows.length >= 10, `at least 10 real project rows present for the alignment check (found ${rows.length})`);
-
-    const pX = [];
-    const rX = [];
-    const dX = [];
-    const tX = [];
-    for (const row of rows) {
-      const proposalTd = row.locator("td").nth(2);
-      const ruleTd = row.locator("td").nth(3);
-      const pBox = await proposalTd.locator("span", { hasText: /^P/ }).first().boundingBox();
-      const rBox = await proposalTd.locator("span", { hasText: /^R/ }).first().boundingBox();
-      const dBox = await ruleTd.locator("span", { hasText: /^D/ }).first().boundingBox();
-      const tBox = await ruleTd.locator("span", { hasText: /^T/ }).first().boundingBox();
-      pX.push(pBox.x);
-      rX.push(rBox.x);
-      dX.push(dBox.x);
-      tX.push(tBox.x);
-    }
-    assertAllClose(pX, "Proposal Status 'P' label");
-    assertAllClose(rX, "Proposal Status 'R' label");
-    assertAllClose(dX, "Rule Status 'D' label");
-    assertAllClose(tX, "Rule Status 'T' label");
 
     // ---- Part 1: BRDP Records filter alignment with its columns ----
     const row = page.locator("tr", { hasText: "Alignment Check - Boeing-scale" });
