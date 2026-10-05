@@ -47,6 +47,12 @@
 // process and proced, each with its way down). Only rules with that kind of
 // predicate get the new text; no other case changes.
 //
+// Mejoras A, Part 4: describeRule explains a threshold on the last step
+// (count(ancestor::E), count(H), string-length(.)). Changed on purpose: the
+// one case whose rule has such a predicate,
+// ruleProposalCheck/brex-4-2-at-most-three-vs-exactly-one ("<proceduralStep>
+// with exactly 1 <proceduralStep> child must not appear"). Nothing else.
+//
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a
 // few rounds back) means expected-prompts.json is stale by design, not

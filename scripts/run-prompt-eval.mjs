@@ -399,6 +399,14 @@ async function runCheck(check, answer, ctx = {}) {
       const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
       return { status: verdict.kind === "incorrect" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
+    case "rule_test_verdict_not_correct": {
+      // Mejoras A, Part 4: a rule off by one level against its Proposal --
+      // "incorrect" or "review" both pass; only "correct" fails.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
+      return { status: verdict.kind !== "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+    }
     case "rule_test_reject_examples_contain": {
       // T3b: every example meant to be rejected carries `pattern` (e.g. the
       // attribute whose values the Proposal restricts -- never relying on

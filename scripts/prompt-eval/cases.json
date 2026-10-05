@@ -2997,6 +2997,36 @@
       ]
     },
     {
+      "id": "rule-test-4-2-levels-off-by-one",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Mejoras A, Part 4 (real case S1-00186): the Proposal allows at most five step levels, the rule forbids more than 5 <proceduralStep> ABOVE the step, i.e. level 7 and deeper. \"What the rule checks\" must say level 7, and the verdict must never be Correct.",
+      "brdp": {
+        "identifier": "BRDP-LEVELS-001",
+        "title": "Number of levels of procedural steps",
+        "definition": "Decide how many levels of procedural steps may be nested.",
+        "proposal": "There will be a maximum of five levels of procedural steps.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-LEVELS-001\"><objectPath allowedObjectFlag=\"0\">//proceduralStep[count(ancestor::proceduralStep)&gt;5]</objectPath><objectUse>No more than five levels of procedural steps.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "level 7",
+          "note": "the deterministic description explains the threshold: nested at level 7 or deeper"
+        },
+        {
+          "type": "rule_test_verdict_not_correct",
+          "note": "examples written from the decision (six levels rejected) expose the off-by-one: incorrect or review, never correct"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-nested-randomlist",
       "type": "rule-test",
       "standard": "S1000D 4.2",

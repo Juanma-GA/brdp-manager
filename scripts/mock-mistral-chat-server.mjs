@@ -586,6 +586,22 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "One substep", expected: "reject", schema: ruleSchema, content: step(1) },
     ]);
   }
+  // Mejoras A, Part 4 (rule-test-4-2-levels-off-by-one): "a maximum of
+  // five levels" with count(ancestor::proceduralStep) > 5, which only
+  // rejects level 7 and deeper. The examples come from the decision: five
+  // levels accepted, six rejected -- the engine accepts the six, so the
+  // verdict is never "Correct".
+  if (/count\(ancestor::proceduralStep\)/.test(rule) && !/examples are split by schema/.test(systemPrompt)) {
+    const nest = (depth) => {
+      let inner = "";
+      for (let level = depth; level >= 1; level -= 1) inner = `<proceduralStep><para>Level ${level} step.</para>${inner}</proceduralStep>`;
+      return inner;
+    };
+    return answer([
+      { label: "Five step levels", expected: "accept", schema: ruleSchema, content: nest(5) },
+      { label: "Six step levels", expected: "reject", schema: ruleSchema, content: nest(6) },
+    ]);
+  }
   // Pending of the test rule, Part 1: //randomList//randomList (the real
   // S1-00507 run). The first answer puts a <randomList> straight inside
   // another one (invalid). Corrected WITH the valid nesting and "Keep the

@@ -9,7 +9,7 @@
 import { DOMParser } from '@xmldom/xmldom';
 import { readPublicTemplate } from './lib/readXlsx.mjs';
 import i18n from '../src/i18n/index.js';
-import { describeRule } from '../src/utils/ruleTestEngine.js';
+import { describeRule, pathThreshold } from '../src/utils/ruleTestEngine.js';
 import { formatRuleDescription, ruleDescriptionText } from '../src/utils/ruleTestReasons.js';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { buildRuleTestExamplesPrompt, parseRuleTestResponse } from '../src/prompts/ruleTestExamplesPrompt.js';
@@ -166,6 +166,33 @@ check('review parse: ok', JSON.stringify(parseRuleTestReviewResponse('```json\n{
 check('review parse: bad cause', !parseRuleTestReviewResponse('{"cause":"both","explanation":"x"}').ok);
 check('review parse: no explanation', !parseRuleTestReviewResponse('{"cause":"example"}').ok);
 check('review parse: not JSON', !parseRuleTestReviewResponse('The rule is wrong.').ok);
+
+// ---------------------------------------------------------------------------
+// Mejoras A, Part 4: thresholds on the last step explained
+{
+  const flag0 = (p) => `<structureObjectRule id="R"><objectPath allowedObjectFlag="0">${p}</objectPath><objectUse>x</objectUse></structureObjectRule>`;
+  const one = (p, t = tEn) => lines(flag0(p), 'BREX-4.2', t).lines[0];
+  const S186 = '//proceduralStep[count(ancestor::proceduralStep)>5]';
+  check('S1-00186 EN: level 7 or deeper', one(S186) === '<proceduralStep> must not be nested at level 7 or deeper (with more than 5 <proceduralStep> above it) (path //proceduralStep[count(ancestor::proceduralStep)>5]).', one(S186));
+  check('S1-00186 ES: a partir del nivel 7', one(S186, tEs) === '<proceduralStep> no puede estar anidado a partir del nivel 7 (con más de 5 <proceduralStep> por encima) (ruta //proceduralStep[count(ancestor::proceduralStep)>5]).', one(S186, tEs));
+  check('ancestor-or-self > 5 → level 6', one('//proceduralStep[count(ancestor-or-self::proceduralStep)>5]').includes('at level 6 or deeper (with more than 4'));
+  check('ancestor = 4 → at level 5 (ES en el nivel 5)', one('//proceduralStep[count(ancestor::proceduralStep)=4]', tEs).includes('en el nivel 5 (con exactamente 4'));
+  check('number on the left (5 < count)', pathThreshold('//x[5 < count(ancestor::x)]')?.level === 7);
+  check('ancestor-or-self <= 2 → levels 1 to 2', one('//levelledPara[count(ancestor-or-self::levelledPara) &lt;= 2]').includes('at levels 1 to 2'));
+  const S187 = '//proceduralStep[count(proceduralStep) = 1]';
+  check('S1-00187 EN: exactly 1 child', one(S187).startsWith('<proceduralStep> with exactly 1 <proceduralStep> child must not appear'), one(S187));
+  check('S1-00187 ES: exactamente 1 hijo', one(S187, tEs).startsWith('<proceduralStep> con exactamente 1 <proceduralStep> hijo no puede aparecer'), one(S187, tEs));
+  check('count(H) > 3 → children plural', one('//randomList[count(listItem) > 3]').includes('more than 3 <listItem> children'));
+  const S338 = '//@assyCode[string-length(.) != 2]';
+  check('S1-00338 EN: not exactly 2 characters', one(S338).startsWith('@assyCode whose value does not have exactly 2 characters must not appear'), one(S338));
+  check('S1-00338 ES: no tenga exactamente 2 caracteres', one(S338, tEs).startsWith('@assyCode cuyo valor no tenga exactamente 2 caracteres no puede aparecer'), one(S338, tEs));
+  check('count(ancestor::OTHER): "above it", never "level"', one('//para[count(ancestor::levelledPara)>3]') === '<para> with more than 3 <levelledPara> above it must not appear (path //para[count(ancestor::levelledPara)>3]).' && !one('//para[count(ancestor::levelledPara)>3]', tEs).includes('nivel'));
+  check('threshold not on the last step → as before', one('//proceduralStep[count(ancestor::proceduralStep)>5]/para') === '<para> must not appear (path //proceduralStep[count(ancestor::proceduralStep)>5]/para).');
+  check('not a number → as before', pathThreshold('//proceduralStep[count(ancestor::proceduralStep)>last()]') === null);
+  check('flag 2 with a threshold → still "allowed"', lines(flag0(S186).replace('"0"', '"2"'), 'BREX-4.2').lines[0].startsWith('<proceduralStep> is allowed'));
+  check('threshold rule can reject', !describe(flag0(S186), 'BREX-4.2').cannotReject);
+  check('3.0.1 objappl 0 explained too', lines(`<objrule><objpath objappl="0">${S186}</objpath><objuse>x</objuse></objrule>`, 'BREX-3.0.1').lines[0].includes('level 7 or deeper'));
+}
 
 // ---------------------------------------------------------------------------
 // 5. Suggest Rule with the failed test

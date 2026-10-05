@@ -138,6 +138,13 @@ export function formatRuleStatement(statement, schemas, t) {
   if (params.values) values.values = formatValues(params.values, t);
   // Plantillas, Part 4: the names a condition looks at.
   if (Array.isArray(params.names)) values.names = params.names.join(', ');
+  // Mejoras A, Part 4: a threshold ("more than 5", "at level 7 or deeper").
+  if (params.op) {
+    values.amountText = t(`records.ruleTest.describe.amount.${params.op}`, { n: params.amount });
+    if (params.mode) values.levels = t(`records.ruleTest.describe.levels.${params.mode === 'upto' && params.level === 1 ? 'exactly' : params.mode}`, { level: params.level });
+    if (statement.code === 'describe_forbidden_children') values.childWord = t(`records.ruleTest.describe.childWord.${params.op === 'eq' && params.amount === 1 ? 'one' : 'other'}`);
+    if (statement.code === 'describe_forbidden_length') values.lengthText = t(`records.ruleTest.describe.length.${params.op}`, { n: params.amount });
+  }
   let text = t(`records.ruleTest.describe.${statement.code}`, { ...values, defaultValue: statement.code });
   // Schematron: a role="warning"/"info" check never rejects (T4).
   if (params.warning) text = t('records.ruleTest.describe.schWarning', { text });

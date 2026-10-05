@@ -640,6 +640,11 @@ function ruleFormatReason(ruleXml, format, parseXml) {
 // formatRuleDescription, records.ruleTest.describe.*):
 //   describe_forbidden {target, path}                  flag 0, no values
 //   describe_forbidden_values {target, values, path}   flag 0 with values
+//   describe_forbidden_nesting {target, name, op, amount, mode, level, path}
+//   describe_forbidden_ancestors / _children {target, name, op, amount, path}
+//   describe_forbidden_length {target, op, amount, path}
+//                                                      flag 0, a threshold on the last
+//                                                      step (pathThreshold, Mejoras A)
 //   describe_mandatory {parent, target, path}          flag 1, <parent>/<step>
 //   describe_mandatory_values {parent, target, values, path}
 //   describe_mandatory_somewhere {target, path}        flag 1, not divisible
@@ -749,9 +754,8 @@ function describePart(part, spec, parseXml) {
   const values = describeValues(part, spec);
   const withValues = values.length > 0;
   if (flag === '0') {
-    return withValues
-      ? { code: 'describe_forbidden_values', params: { target, values, path } }
-      : { code: 'describe_forbidden', params: { target, path } };
+    if (withValues) return { code: 'describe_forbidden_values', params: { target, values, path } };
+    return thresholdStatement(target, path, pathThreshold(path)) || { code: 'describe_forbidden', params: { target, path } };
   }
   if (flag === '1') {
     const split = _splitTopLevel(path);
@@ -771,7 +775,93 @@ function describePart(part, spec, parseXml) {
     : { code: 'describe_allowed', params: { target, path } };
 }
 
+// Mejoras A, Part 4: a threshold on the LAST step of a single path, alone
+// in its predicate -- count(ancestor::E) / count(ancestor-or-self::E) /
+// count(H) / string-length(.) compared with a number. BRDP-S1-00186,
+// //proceduralStep[count(ancestor::proceduralStep)>5], flag 0: the
+// description said only "<proceduralStep> must not appear", hiding that it
+// rejects from the 7th level, not the 6th. → { kind: 'nesting' | 'ancestors'
+// | 'children' | 'length', name, op, n, … } or null (anything else is
+// described as before).
+const THRESHOLD_OPS = { '>': 'gt', '>=': 'ge', '<': 'lt', '<=': 'le', '=': 'eq', '!=': 'ne', gt: 'gt', ge: 'ge', lt: 'lt', le: 'le', eq: 'eq', ne: 'ne' };
+const FLIP = { gt: 'lt', ge: 'le', lt: 'gt', le: 'ge', eq: 'eq', ne: 'ne' };
+const THRESHOLD_LHS = String.raw`count\(\s*(?:(ancestor-or-self|ancestor)::([A-Za-z_][\w.-]*)|(?:child::)?([A-Za-z_][\w.-]*))\s*\)|string-length\(\s*\.?\s*\)`;
+const THRESHOLD_OP = String.raw`(>=|<=|!=|=|>|<|\b(?:gt|ge|lt|le|eq|ne)\b)`;
+const THRESHOLD_LEFT_RE = new RegExp(`^(${THRESHOLD_LHS})\\s*${THRESHOLD_OP}\\s*(\\d+)$`);
+const THRESHOLD_RIGHT_RE = new RegExp(`^(\\d+)\\s*${THRESHOLD_OP}\\s*(${THRESHOLD_LHS})$`);
+
+function stepPredicateTexts(step) {
+  const out = [];
+  let depth = 0;
+  let quote = '';
+  let start = -1;
+  for (let i = 0; i < step.length; i += 1) {
+    const ch = step[i];
+    if (quote) { if (ch === quote) quote = ''; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    if (ch === '[') { if (depth === 0) start = i + 1; depth += 1; }
+    else if (ch === ']') { depth -= 1; if (depth === 0) out.push(step.slice(start, i).trim()); }
+  }
+  return out;
+}
+
+export function pathThreshold(path) {
+  const step = lastTopLevelStep(String(path || '').trim());
+  if (!step) return null;
+  const preds = stepPredicateTexts(step);
+  if (preds.length !== 1) return null;
+  const pred = preds[0].replace(/\s+/g, ' ');
+  let lhs;
+  let op;
+  let n;
+  const left = THRESHOLD_LEFT_RE.exec(pred);
+  const right = left ? null : THRESHOLD_RIGHT_RE.exec(pred);
+  if (left) {
+    lhs = left[1];
+    op = THRESHOLD_OPS[left[5]];
+    n = Number(left[6]);
+  } else if (right) {
+    lhs = right[3];
+    op = FLIP[THRESHOLD_OPS[right[2]]];
+    n = Number(right[1]);
+  } else {
+    return null;
+  }
+  const own = (pathTarget(step) || '').replace(/^<|>$/g, '');
+  const m = /^count\(\s*(?:(ancestor-or-self|ancestor)::([A-Za-z_][\w.-]*)|(?:child::)?([A-Za-z_][\w.-]*))\s*\)$/.exec(lhs);
+  if (!m) return { kind: 'length', op, n };
+  if (m[3]) return { kind: 'children', name: m[3], op, n };
+  const [, axis, name] = m;
+  if (name !== own) return { kind: 'ancestors', name, op, n }; // ancestor-or-self of another element = its ancestors
+  // Nesting level L of the element (1 = outermost): count(ancestor::E) =
+  // L - 1, count(ancestor-or-self::E) = L. As "E above it": L - 1.
+  const above = axis === 'ancestor' ? n : n - 1;
+  if (above < 0) return null;
+  // Levels where the condition holds (L >= 1).
+  const firstLevel = above + 1; // the level with exactly `above` above it
+  let mode;
+  let level;
+  if (op === 'gt') { mode = 'from'; level = firstLevel + 1; }
+  else if (op === 'ge') { mode = 'from'; level = firstLevel; }
+  else if (op === 'eq') { mode = 'exactly'; level = firstLevel; }
+  else if (op === 'ne') { mode = 'except'; level = firstLevel; }
+  else if (op === 'lt') { if (firstLevel - 1 < 1) return null; mode = 'upto'; level = firstLevel - 1; }
+  else { mode = 'upto'; level = firstLevel; }
+  if (mode === 'from' && level <= 1) return null; // every level: as before
+  return { kind: 'nesting', name, op, n: above, mode, level };
+}
+
+function thresholdStatement(target, path, threshold) {
+  if (!threshold || !target) return null;
+  const base = { target, path, op: threshold.op, amount: threshold.n };
+  if (threshold.kind === 'nesting') return { code: 'describe_forbidden_nesting', params: { ...base, name: `<${threshold.name}>`, mode: threshold.mode, level: threshold.level } };
+  if (threshold.kind === 'ancestors') return { code: 'describe_forbidden_ancestors', params: { ...base, name: `<${threshold.name}>` } };
+  if (threshold.kind === 'children') return { code: 'describe_forbidden_children', params: { ...base, name: `<${threshold.name}>` } };
+  return { code: 'describe_forbidden_length', params: base };
+}
+
 const CAN_REJECT = new Set([
+  'describe_forbidden_nesting', 'describe_forbidden_ancestors', 'describe_forbidden_children', 'describe_forbidden_length',
   'describe_condition_forbidden', 'describe_condition_required',
   'describe_forbidden', 'describe_forbidden_values', 'describe_mandatory', 'describe_mandatory_values',
   'describe_mandatory_somewhere', 'describe_mandatory_somewhere_values', 'describe_restricted_values',
