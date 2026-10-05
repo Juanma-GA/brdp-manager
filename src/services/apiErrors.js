@@ -110,11 +110,11 @@ export function describeErrorDetail(status, detail, t = defaultT) {
     const { code, ref, ...params } = detail;
     if (code && KNOWN_CODES.has(code)) {
       const text = t(`errors.codes.${code}`, formatParams(params));
-      return ref ? t('errors.withRef', { text, ref }) : text;
+      return ref ? t('errors.withRef', { text: text.replace(/\.$/, ''), ref }) : text;
     }
     if (typeof detail.message === 'string' && detail.message) return detail.message;
     const text = statusText(status, t);
-    return ref ? t('errors.withRef', { text, ref }) : text;
+    return ref ? t('errors.withRef', { text: text.replace(/\.$/, ''), ref }) : text;
   }
   if (typeof detail === 'string' && detail.trim()) {
     // A bare HTTP reason phrase ("Internal Server Error", from a proxy or a

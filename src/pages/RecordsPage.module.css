@@ -1601,3 +1601,18 @@
 .idText {
   white-space: nowrap;
 }
+
+/* AACF 1, Part 1: a text field whose change the server did not save. */
+.fieldUnsaved {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 1px #fecaca;
+}
+
+/* Failures not tied to the selected BRDP, above the table. */
+.pageNotices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}

@@ -557,7 +557,10 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
       if (!validateRuleXml(entry.text, vocabulary, entry.format).acceptable) return;
       if (!(await saveRuleAsDraft(entry, entry.text, 'llm'))) return;
     } else {
-      await handleUpdate(selected.id, { [entry.kind]: entry.text });
+      // AACF 1, Part 1: the text goes into its field and is saved there; if
+      // the save fails it stays in the field marked "Not saved" (with Retry),
+      // so the suggestion entry is done either way -- never lost.
+      await handleUpdate(selected.id, { [entry.kind]: entry.text }).catch(() => {});
     }
     await logSuggestionFeedback(entry, 'accepted');
     removeSuggestionEntry(selected.id);

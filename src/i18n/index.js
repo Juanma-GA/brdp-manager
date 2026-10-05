@@ -8,8 +8,9 @@ const resources = {
   en: {
     common: {
       // AACF 1, Part 3: failed requests as sentences (src/services/apiErrors.js).
+      errorNotice: { retry: 'Retry', discard: 'Discard change', dismiss: 'Close' },
       errors: {
-        withRef: '{{text}} (ref. {{ref}})',
+        withRef: '{{text}} (ref. {{ref}}).',
         network: 'Could not reach the server. Check the connection and try again.',
         sessionExpired: 'Your session has expired. Sign in again; what you typed is kept.',
         forbidden: 'You do not have permission to do this.',
@@ -460,6 +461,30 @@ const resources = {
         },
       },
       records: {
+        // AACF 1, Parts 1-2.
+        unsaved: {
+          notSaved: 'Not saved: {{reason}}',
+          notConfirmed: 'The save could not be confirmed (the session expired or the page was left).',
+          shortenFirst: 'Change the text first: the server refused it as it is.',
+          leaveConfirm: '{{identifier}} has changes that were not saved ({{fields}}). If you leave, they are lost. Leave anyway?',
+          otherBrdp: '{{identifier}}, {{field}}: not saved. {{reason}}',
+        },
+        actionErrors: {
+          status: 'Proposal Status was not changed to {{value}}: {{reason}}',
+          verify: 'The rule was not verified: {{reason}}',
+          revoke: 'The rule was not revoked: {{reason}}',
+          delete: '{{identifier}} was not deleted: {{reason}}',
+        },
+        loadErrors: {
+          list: 'The BRDP list could not be loaded: {{reason}}',
+          stats: 'The project totals could not be loaded: {{reason}}',
+          approvals: 'The rule statuses could not be loaded: {{reason}}',
+          approvalsCell: 'The rule status could not be loaded',
+          rule: 'The rule could not be loaded: {{reason}}',
+          history: 'The history could not be loaded: {{reason}}',
+          catalog: 'The catalog could not be loaded: {{reason}}',
+          vocabulary: 'The {{standard}} schema vocabulary could not be loaded, so names are not checked: {{reason}}',
+        },
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
         compare: {
           button: 'Compare',
@@ -1304,6 +1329,8 @@ const resources = {
           title: 'Trash',
           description: 'Deleted BRDPs from every project. Restore one, or delete it permanently for good.',
           loadError: 'Could not load the trash.',
+          restoreFailed: '{{identifier}} was not restored: {{reason}}',
+          deleteFailed: 'Nothing was deleted: {{reason}}',
           empty: 'The trash is empty.',
           table: {
             identifier: 'ID',
@@ -1338,8 +1365,9 @@ const resources = {
   },
   es: {
     common: {
+      errorNotice: { retry: 'Reintentar', discard: 'Descartar cambio', dismiss: 'Cerrar' },
       errors: {
-        withRef: '{{text}} (ref. {{ref}})',
+        withRef: '{{text}} (ref. {{ref}}).',
         network: 'No se pudo conectar con el servidor. Comprueba la conexión y vuelve a intentarlo.',
         sessionExpired: 'La sesión ha caducado. Vuelve a iniciar sesión; lo que has escrito se conserva.',
         forbidden: 'No tienes permiso para hacer esto.',
@@ -1774,6 +1802,29 @@ const resources = {
         },
       },
       records: {
+        unsaved: {
+          notSaved: 'No guardado: {{reason}}',
+          notConfirmed: 'No se ha podido confirmar el guardado (la sesión caducó o se salió de la página).',
+          shortenFirst: 'Cambia antes el texto: el servidor lo ha rechazado tal como está.',
+          leaveConfirm: '{{identifier}} tiene cambios sin guardar ({{fields}}). Si sales, se pierden. ¿Salir igualmente?',
+          otherBrdp: '{{identifier}}, {{field}}: no guardado. {{reason}}',
+        },
+        actionErrors: {
+          status: 'El estado de la Propuesta no se ha cambiado a {{value}}: {{reason}}',
+          verify: 'La regla no se ha verificado: {{reason}}',
+          revoke: 'La regla no se ha revocado: {{reason}}',
+          delete: '{{identifier}} no se ha borrado: {{reason}}',
+        },
+        loadErrors: {
+          list: 'No se ha podido cargar la lista de BRDP: {{reason}}',
+          stats: 'No se han podido cargar los totales del proyecto: {{reason}}',
+          approvals: 'No se han podido cargar los estados de las reglas: {{reason}}',
+          approvalsCell: 'No se ha podido cargar el estado de la regla',
+          rule: 'No se ha podido cargar la regla: {{reason}}',
+          history: 'No se ha podido cargar el historial: {{reason}}',
+          catalog: 'No se ha podido cargar el catálogo: {{reason}}',
+          vocabulary: 'No se ha podido cargar el vocabulario del esquema de {{standard}}, así que no se comprueban los nombres: {{reason}}',
+        },
         subtitle: '{{name}} · {{standard}} · {{count}} BRDPs',
         compare: {
           button: 'Comparar',
@@ -2610,6 +2661,8 @@ const resources = {
           description:
             'BRDPs eliminados de todos los proyectos. Restaura uno, o elimínalo permanentemente para siempre.',
           loadError: 'No se pudo cargar la papelera.',
+          restoreFailed: '{{identifier}} no se ha restaurado: {{reason}}',
+          deleteFailed: 'No se ha borrado nada: {{reason}}',
           empty: 'La papelera está vacía.',
           table: {
             identifier: 'ID',

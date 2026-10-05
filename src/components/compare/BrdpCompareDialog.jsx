@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authFetchJson } from '../../services/apiClient';
+import { errorMessage } from '../../services/apiErrors';
 import { compareDetails, diffRuleLines, diffText, foldEqualRows, lastTestOfDetail, ruleStateOfDetail } from '../../utils/brdpCompare.js';
 import { validateRuleXml } from '../../hooks/useSuggestions';
 import { RuleValidationWarnings } from '../assistant/RuleSuggestionPanel';
@@ -249,7 +250,7 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
         // An EXT identifier is never searched in other projects: the other tab opens.
         else if (!body.catalog_identifier) setTab('project');
       })
-      .catch((err) => !cancelled && setCandidatesError(err.message));
+      .catch((err) => !cancelled && setCandidatesError(errorMessage(err, t)));
     return () => {
       cancelled = true;
     };
@@ -259,7 +260,7 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
     let cancelled = false;
     authFetchJson(detailUrl(projectId, selected.id, selected.id))
       .then((body) => !cancelled && setLeft(body))
-      .catch((err) => !cancelled && setDetailError(err.message));
+      .catch((err) => !cancelled && setDetailError(errorMessage(err, t)));
     return () => {
       cancelled = true;
     };
@@ -273,7 +274,7 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
     setActionError(null);
     authFetchJson(detailUrl(projectId, selected.id, chosenId))
       .then((body) => !cancelled && setRight(body))
-      .catch((err) => !cancelled && setDetailError(err.message));
+      .catch((err) => !cancelled && setDetailError(errorMessage(err, t)));
     return () => {
       cancelled = true;
     };
@@ -305,7 +306,7 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
       setConfirm(null);
       setLeftToken((n) => n + 1);
     } catch (err) {
-      setActionError(err.message);
+      setActionError(errorMessage(err, t));
     } finally {
       setBusy(false);
     }
@@ -325,7 +326,7 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
       setLeftToken((n) => n + 1);
       onRuleCopied();
     } catch (err) {
-      setActionError(err.message);
+      setActionError(errorMessage(err, t));
     } finally {
       setBusy(false);
     }

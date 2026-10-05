@@ -14,6 +14,8 @@ import Button from '../components/Button';
 import ChangePasswordForm from '../components/ChangePasswordForm';
 import SortableHeader from '../components/SortableHeader';
 import TemporaryPasswordModal from '../components/TemporaryPasswordModal';
+import ErrorNotice from '../components/ErrorNotice';
+import { errorMessage } from '../services/apiErrors';
 import styles from './SettingsPage.module.css';
 
 function ProfileSection({ user, onUserUpdated }) {
@@ -629,6 +631,8 @@ function TrashSection() {
     lastClickedIndexRef.current = index;
   };
 
+  // Optimistic (useTrash.js): the row leaves at once and comes back if the
+  // server refuses, with the reason above the table.
   const handleRestore = async (entry) => {
     setError(null);
     try {
@@ -637,15 +641,19 @@ function TrashSection() {
       // Most notably the identifier-reuse 409 (docs request's own edge
       // case) -- the backend's detail message already names the
       // conflicting identifier, shown here as-is.
-      setError(err.message);
+      setError(t('settings.trash.restoreFailed', { identifier: entry.identifier, reason: errorMessage(err, t) }));
     }
   };
 
+  // Optimistic too: the dialog closes and the rows leave at once; a refusal
+  // puts them back with the reason.
   const handleConfirmDelete = async () => {
     setError(null);
+    const target = pendingDelete;
+    setPendingDelete(null);
     try {
-      if (pendingDelete.kind === 'bulk') {
-        const result = await bulkDeleteMutation.mutateAsync(pendingDelete.ids);
+      if (target.kind === 'bulk') {
+        const result = await bulkDeleteMutation.mutateAsync(target.ids);
         // A real race (docs request: "una de las filas seleccionadas fue
         // restaurada por otro admin justo antes de confirmar") -- the
         // backend still deletes everything it validly can and reports
@@ -656,11 +664,10 @@ function TrashSection() {
         }
         setSelectedIds(new Set());
       } else {
-        await deleteMutation.mutateAsync(pendingDelete.entry.id);
+        await deleteMutation.mutateAsync(target.entry.id);
       }
-      setPendingDelete(null);
     } catch (err) {
-      setError(err.message);
+      setError(t('settings.trash.deleteFailed', { reason: errorMessage(err, t) }));
     }
   };
 
@@ -674,7 +681,7 @@ function TrashSection() {
       </summary>
       <div className={styles.sectionBody}>
         <p className={styles.fieldDescription}>{t('settings.trash.description')}</p>
-        {error && <p className={styles.statusInvalid}>{error}</p>}
+        {error && <ErrorNotice testId="trash-error" message={error} onDismiss={() => setError(null)} />}
         {isLoading && <p>…</p>}
         {isError && <p className={styles.statusInvalid}>{t('settings.trash.loadError')}</p>}
         {data && data.length === 0 && <p className={styles.fieldDescription}>{t('settings.trash.empty')}</p>}

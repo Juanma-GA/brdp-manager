@@ -1,0 +1,55 @@
+/* The red callout already used by .ruleErrorText (RecordsPage.module.css):
+   border #fecaca, background #fef2f2, text #b91c1c. */
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 4px 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.text {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.action {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #b91c1c;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.action:disabled {
+  color: #c08484;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.dismiss {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  color: #b91c1c;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}

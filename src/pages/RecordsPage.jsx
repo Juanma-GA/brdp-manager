@@ -5,6 +5,28 @@ import i18n from '../i18n';
 import { Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { authFetchJson } from '../services/apiClient';
+import { errorMessage, isRetryable } from '../services/apiErrors';
+import ErrorNotice from '../components/ErrorNotice';
+import {
+  SAVED_TEXT_FIELDS,
+  blurAction,
+  canRetry,
+  discardBrdp,
+  discardField,
+  displayedValue,
+  editField,
+  failedEntries,
+  fieldKey,
+  hasUnsaved,
+  recallUnsaved,
+  reconcileWithSaved,
+  rememberUnsaved,
+  removeRow,
+  restoreRow,
+  saveFailed,
+  saveSucceeded,
+  startSave,
+} from '../utils/unsavedFields.js';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import { RULE_STATES, ruleStateOf } from '../utils/ruleState';
@@ -59,6 +81,13 @@ const ANSWER_ISSUE_TEST_IDS = {
 };
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
+// The label of each text field saved on its own (AACF 1, Part 1).
+const FIELD_LABEL_KEYS = {
+  title: 'records.fieldTitle',
+  definition: 'records.fieldDefinition',
+  proposal: 'records.fieldProposal',
+  comments: 'records.fieldRefusalReason',
+};
 const SUGGEST_KINDS = ['definition', 'proposal', 'rule'];
 
 // Live estimate from the job's OWN observed rate so far (elapsed time /
@@ -357,6 +386,58 @@ export default function RecordsPage() {
   const [brdps, setBrdps] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+
+  // AACF 1, Part 1: what was typed and not saved yet (utils/unsavedFields.js)
+  // -- `brdps` keeps only what the server saved, so the table and the rest
+  // of the page never show a text the server did not accept. Remembered in
+  // memory per project, so an expired session (the login page replaces this
+  // one, then comes back) does not lose it; the browser's own "leave the
+  // page?" protects a reload or a closed tab.
+  const [unsaved, setUnsaved] = useState(() => recallUnsaved(projectId));
+  const unsavedRef = useRef(unsaved);
+  unsavedRef.current = unsaved;
+  const unsavedOwnerRef = useRef(projectId);
+  useEffect(() => {
+    rememberUnsaved(unsavedOwnerRef.current, unsaved);
+  }, [unsaved]);
+  useEffect(() => {
+    if (unsavedOwnerRef.current === projectId) return;
+    unsavedOwnerRef.current = projectId;
+    setUnsaved(recallUnsaved(projectId));
+  }, [projectId]);
+  useEffect(() => {
+    if (!hasUnsaved(unsaved)) return undefined;
+    const warn = (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [unsaved]);
+  // Entries remembered from before (the page came back after a session
+  // expired) are checked against the BRDPs once they load.
+  const reconcileUnsavedRef = useRef(unsaved.size > 0);
+
+  // AACF 1, Part 1: the failures shown with ErrorNotice that are not a
+  // field's -- key -> { message, retry }. "status:<id>" and "rule:<id>"
+  // show under their control; the rest at the top of the page.
+  const [notices, setNotices] = useState(() => new Map());
+  const showNotice = (key, notice) =>
+    setNotices((m) => {
+      const next = new Map(m);
+      next.set(key, notice);
+      return next;
+    });
+  const clearNotice = (key) =>
+    setNotices((m) => {
+      if (!m.has(key)) return m;
+      const next = new Map(m);
+      next.delete(key);
+      return next;
+    });
+  const fieldLabel = (field) => t(FIELD_LABEL_KEYS[field]);
   const [tableSearchQuery, setTableSearchQuery] = useState('');
   const [tablePage, setTablePage] = useState(1);
   // '' = "All" -- omitted from the GET /brdps query entirely (no filter),
@@ -375,6 +456,9 @@ export default function RecordsPage() {
     proposal_status_counts: { pending: 0, validated: 0, refused: 0 },
     rule_status_counts: { to_do: 0, draft: 0, verified: 0 },
   });
+  // AACF 1, Part 2: totals that could not be refreshed are not shown as if
+  // they were current.
+  const [statsFailed, setStatsFailed] = useState(false);
   // null = unsorted (API order). Sorting is applied to the FULL filtered
   // dataset before pagination (docs request), not just the visible page.
   const [sortField, setSortField] = useState(null);
@@ -384,7 +468,12 @@ export default function RecordsPage() {
   // one call -- needed to sort the Rule Status column across the full
   // dataset; the table's per-row RuleStatusCell keeps fetching its own
   // status independently for display, this is only for sorting.
-  const [ruleApprovalsById, setRuleApprovalsById] = useState({});
+  // undefined while loading, null when the load failed (the column then
+  // shows no status -- never an invented one, AACF 1 Part 2), else a map
+  // brdp_id -> { status }. It feeds the column's dots too (one request for
+  // the whole table instead of one per row).
+  const [ruleApprovalsById, setRuleApprovalsById] = useState(undefined);
+  const [approvalsReloadToken, setApprovalsReloadToken] = useState(0);
 
   // Add BRDP creation flow -- opens this panel instead of creating
   // directly from a bare identifier field (docs request: new dedicated
@@ -410,6 +499,9 @@ export default function RecordsPage() {
   // and Edit/Verify/Revoke actions live here in the detail panel (v1's
   // large plain-text editor), not in the table cell above.
   const [ruleApproval, setRuleApproval] = useState(undefined); // undefined = loading, null = none
+  // Its load failed: said, with Retry (instead of "…" for ever).
+  const [ruleApprovalLoadError, setRuleApprovalLoadError] = useState(null);
+  const [ruleApprovalReloadToken, setRuleApprovalReloadToken] = useState(0);
   // Test de reglas T3: the warning shown before Verify (utils/ruleTestStatus
   // verifyWarning), and an error recording a test result.
   const [verifyDialog, setVerifyDialog] = useState(null);
@@ -462,6 +554,7 @@ export default function RecordsPage() {
     });
   const latestHistoryAt = history.reduce((latest, h) => (!latest || h.changed_at > latest ? h.changed_at : latest), null);
   const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
+  const [historyLoadError, setHistoryLoadError] = useState(null);
   // "Comparar dos BRDP lado a lado": the comparison dialog of the selected
   // BRDP, and the Ask question box it focuses on "Explain the differences".
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
@@ -473,22 +566,48 @@ export default function RecordsPage() {
   // a real, if partial, server-side row-count reduction. Unfiltered
   // ('' for both) is unchanged from before: the full project list, still
   // paginated client-side.
+  // A list that could not be loaded is said (with Retry), never an empty
+  // table that looks like a project without BRDPs (AACF 1, Part 1: the
+  // refresh after a save that worked fails apart from the save).
   const refresh = () => {
     const params = new URLSearchParams();
     if (proposalStatusFilter) params.set('proposal_status', proposalStatusFilter);
     if (ruleStatusFilter) params.set('rule_status', ruleStatusFilter);
     const qs = params.toString();
-    return authFetchJson(`/api/projects/${projectId}/brdps${qs ? `?${qs}` : ''}`).then((data) => {
-      setBrdps(data);
-      setIsLoading(false);
-    });
+    return authFetchJson(`/api/projects/${projectId}/brdps${qs ? `?${qs}` : ''}`)
+      .then((data) => {
+        setBrdps(data);
+        setIsLoading(false);
+        clearNotice('refresh');
+        if (reconcileUnsavedRef.current) {
+          reconcileUnsavedRef.current = false;
+          setUnsaved((current) => reconcileWithSaved(current, data, t('records.unsaved.notConfirmed')));
+          const first = [...unsavedRef.current.values()][0];
+          if (first && !selectedIdRef.current) setSelectedId(first.brdpId);
+        }
+      })
+      .catch((err) => {
+        setIsLoading(false);
+        showNotice('refresh', { message: t('records.loadErrors.list', { reason: errorMessage(err, t) }), retry: refresh });
+      });
   };
 
   // Always the project's REAL, unfiltered totals (GET .../stats never takes
   // proposalStatusFilter/ruleStatusFilter) -- the header summary must never
-  // read as "count of the currently filtered view".
+  // read as "count of the currently filtered view". Totals that could not
+  // be refreshed are hidden and said (AACF 1, Part 2), never kept as if
+  // they were current.
   const refreshStats = () =>
-    authFetchJson(`/api/projects/${projectId}/brdps/stats`).then(setStats).catch(() => {});
+    authFetchJson(`/api/projects/${projectId}/brdps/stats`)
+      .then((data) => {
+        setStats(data);
+        setStatsFailed(false);
+        clearNotice('stats');
+      })
+      .catch((err) => {
+        setStatsFailed(true);
+        showNotice('stats', { message: t('records.loadErrors.stats', { reason: errorMessage(err, t) }), retry: refreshStats });
+      });
 
   useEffect(() => {
     setProposalStatusFilter('');
@@ -571,11 +690,15 @@ export default function RecordsPage() {
         else if (sortField === 'title') cmp = (a.title || '').localeCompare(b.title || '');
         else if (sortField === 'validation') cmp = compareByFlowOrder(VALIDATION_OPTIONS, a.validation, b.validation);
         else if (sortField === 'ruleStatus') {
-          cmp = compareByFlowOrder(
-            RULE_STATES,
-            ruleStateOf(ruleApprovalsById[a.id] ?? null),
-            ruleStateOf(ruleApprovalsById[b.id] ?? null)
-          );
+          // Without the rule statuses (loading, or their load failed) there
+          // is nothing to sort by: the order stays as it is.
+          cmp = ruleApprovalsById
+            ? compareByFlowOrder(
+                RULE_STATES,
+                ruleStateOf(ruleApprovalsById[a.id] ?? null),
+                ruleStateOf(ruleApprovalsById[b.id] ?? null)
+              )
+            : 0;
         } else cmp = 0;
         return sortDir === 'asc' ? cmp : -cmp;
       });
@@ -594,16 +717,16 @@ export default function RecordsPage() {
     setTablePage((p) => Math.min(p, tableTotalPages));
   }, [tableTotalPages]);
 
-  // Bulk fetch for the Rule Status column's sort -- refetched whenever an
-  // Edit/Verify/Revoke action bumps approvalsRefreshToken, same trigger
-  // RuleStatusCell/the detail panel's own rule-status fetch already use.
-  // A standard without a rule format (e.g. DITA) just gets an empty map,
-  // so sorting by Rule Status there is a harmless no-op (every row reads
-  // as "todo", same as the column already shows "—" for them).
+  // Every BRDP's rule status in one request: the Rule Status column's dots
+  // and its sort -- refetched whenever an Edit/Verify/Revoke action bumps
+  // approvalsRefreshToken. A standard without a rule format (S1000D 5.0/6.0)
+  // gets an empty map (the column shows "—"). A failed load leaves the
+  // column without a status and says so, with Retry -- never "To Do" for
+  // every row (AACF 1, Part 2).
   useEffect(() => {
     if (!ruleFormat) {
       setRuleApprovalsById({});
-      return;
+      return undefined;
     }
     let cancelled = false;
     authFetchJson(`/api/projects/${projectId}/approvals/${ruleFormat}`)
@@ -612,14 +735,22 @@ export default function RecordsPage() {
         const byId = {};
         for (const row of rows) byId[row.brdp_id] = { status: row.status };
         setRuleApprovalsById(byId);
+        clearNotice('approvals');
       })
-      .catch(() => {
-        if (!cancelled) setRuleApprovalsById({});
+      .catch((err) => {
+        if (cancelled) return;
+        setRuleApprovalsById(null);
+        showNotice('approvals', {
+          message: t('records.loadErrors.approvals', { reason: errorMessage(err, t) }),
+          retry: () => setApprovalsReloadToken((n) => n + 1),
+        });
       });
     return () => {
       cancelled = true;
     };
-  }, [projectId, ruleFormat, approvalsRefreshToken]);
+    // showNotice/clearNotice/t are stable for this purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, ruleFormat, approvalsRefreshToken, approvalsReloadToken]);
 
   // T3: another BRDP starts without the previous one's warning or error
   // (not on an approvals refresh -- that one follows the very recording
@@ -637,14 +768,19 @@ export default function RecordsPage() {
       return;
     }
     let cancelled = false;
-    authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}`).then((data) => {
-      if (!cancelled) setRuleApproval(data);
-    });
+    setRuleApprovalLoadError(null);
+    authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}`)
+      .then((data) => {
+        if (!cancelled) setRuleApproval(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setRuleApprovalLoadError(t('records.loadErrors.rule', { reason: errorMessage(err, t) }));
+      });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, ruleFormat, approvalsRefreshToken]);
+  }, [selected?.id, ruleFormat, approvalsRefreshToken, ruleApprovalReloadToken]);
 
   // Prompt-refactor round: the vocabulary check (its own "recompute on
   // BRDP selection" effect included), the Ask panel (its own "reset on
@@ -657,35 +793,143 @@ export default function RecordsPage() {
   // red "not found" line of the selected BRDP.
   const vocabNameHints = useNameFixHints(vocabResult && vocabResult.brdpId === selected?.id ? vocabResult : null, project.standard, vocabulary);
 
-  const handleUpdate = async (brdpId, patch) => {
-    await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
+  // AACF 1, Part 1. Everything that follows a save runs only once it
+  // succeeded: history, the list (filters may move the row), the totals,
+  // the embeddings gate and -- for the selected BRDP -- the vocabulary
+  // notice, recomputed against the text the server saved.
+  const afterSave = (saved) => {
     setHistoryRefreshToken((n) => n + 1);
     refresh();
     refreshStats();
-    // An edit of Title/Definition/Proposal/validation can make this BRDP
-    // pending (or not) -- keep the Suggest gate honest right away.
     invalidatePendingEmbeddings(projectId);
-    // "Aviso ligado al texto" round, point 1: a save touching Title/
-    // Definition/Proposal invalidates whatever vocabulary notice is
-    // showing -- recompute the deterministic part immediately (no LLM
-    // call) against the text JUST saved, so the notice/Suggest-blocking
-    // update without needing another Ask/Suggest click. Covers BOTH "al
-    // guardar" (any direct field edit, which flows through this same
-    // function) and "al aceptar una sugerencia" (acceptSuggestion's
-    // Definition/Proposal branch is itself a call to handleUpdate).
-    // Merges onto the row's own pre-update fields (closure -- may be one
-    // render behind the `refresh()` just kicked off above) since `patch`
-    // alone may only carry ONE of the three fields; that's fine, only
-    // title/definition/proposal/id matter here, and `patch` always holds
-    // the authoritative new value for whichever of those three it touches.
-    if (brdpId === selectedId && ('title' in patch || 'definition' in patch || 'proposal' in patch)) {
-      const priorBrdp = brdps.find((b) => b.id === brdpId) || {};
-      recomputeVocabResult({ ...priorBrdp, ...patch, id: brdpId });
+    if (saved.id === selectedIdRef.current) recomputeVocabResult(saved);
+  };
+
+  // The saved BRDP from the server, merged into the list -- only the fields
+  // this save sent (another save or an optimistic change of the same row may
+  // be on its way).
+  const mergeSaved = (saved, fields) =>
+    setBrdps((list) =>
+      list.map((b) => (b.id === saved.id ? { ...b, ...Object.fromEntries(fields.map((f) => [f, saved[f]])), updated_at: saved.updated_at } : b))
+    );
+
+  // Only the answer to the latest send of a field may change its state.
+  const sendSeqRef = useRef(new Map());
+
+  // Saves one text field. On success the entry goes and the saved value is
+  // what the page shows; on failure the typed text stays in the field,
+  // marked "Not saved" with the reason (ErrorNotice), and nothing that
+  // follows a save runs. Returns { ok, message }.
+  const saveTextField = async (brdpId, field, value) => {
+    const key = fieldKey(brdpId, field);
+    const seq = (sendSeqRef.current.get(key) || 0) + 1;
+    sendSeqRef.current.set(key, seq);
+    setUnsaved((current) => startSave(current, brdpId, field, value));
+    try {
+      const saved = await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (sendSeqRef.current.get(key) !== seq) return { ok: true };
+      setUnsaved((current) => saveSucceeded(current, brdpId, field, value));
+      mergeSaved(saved, [field]);
+      afterSave(saved);
+      return { ok: true };
+    } catch (err) {
+      const message = errorMessage(err, t);
+      if (sendSeqRef.current.get(key) === seq) {
+        setUnsaved((current) => saveFailed(current, brdpId, field, value, { message, retryable: isRetryable(err) }));
+      }
+      return { ok: false, message };
     }
+  };
+
+  // Leaving a text field saves it (or drops an entry that is the saved
+  // text again).
+  const commitField = (brdp, field) => {
+    if (!canEdit || !brdp) return;
+    const action = blurAction(unsavedRef.current, brdp, field);
+    if (action === 'discard') setUnsaved((current) => discardField(current, brdp.id, field));
+    else if (action === 'save') saveTextField(brdp.id, field, unsavedRef.current.get(fieldKey(brdp.id, field)).value);
+  };
+
+  const typeField = (brdpId, field, value) => setUnsaved((current) => editField(current, brdpId, field, value));
+
+  const retryField = (entry) => saveTextField(entry.brdpId, entry.field, entry.value);
+  const discardFieldChange = (entry) => setUnsaved((current) => discardField(current, entry.brdpId, entry.field));
+
+  // Proposal Status, optimistic (HR20): the new value shows at once; if the
+  // server refuses it, the previous one comes back with the reason.
+  const statusSeqRef = useRef(new Map());
+  const changeValidation = async (brdpId, value) => {
+    const before = brdps.find((b) => b.id === brdpId);
+    if (!before || before.validation === value) return { ok: true };
+    const previous = before.validation;
+    const seq = (statusSeqRef.current.get(brdpId) || 0) + 1;
+    statusSeqRef.current.set(brdpId, seq);
+    clearNotice(`status:${brdpId}`);
+    setBrdps((list) => list.map((b) => (b.id === brdpId ? { ...b, validation: value } : b)));
+    try {
+      const saved = await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ validation: value }),
+      });
+      if (statusSeqRef.current.get(brdpId) !== seq) return { ok: true };
+      mergeSaved(saved, ['validation']);
+      afterSave(saved);
+      return { ok: true };
+    } catch (err) {
+      const message = errorMessage(err, t);
+      if (statusSeqRef.current.get(brdpId) === seq) {
+        setBrdps((list) => list.map((b) => (b.id === brdpId && b.validation === value ? { ...b, validation: previous } : b)));
+        showNotice(`status:${brdpId}`, {
+          message: t('records.actionErrors.status', { value: t(`records.validationOptions.${value}`), reason: message }),
+          retry: () => changeValidation(brdpId, value),
+        });
+      }
+      return { ok: false, message };
+    }
+  };
+
+  // The one entry point for a change coming from outside the fields
+  // (accepting a suggestion, Compare's "use this Proposal", "Did you mean",
+  // reverting a History entry): a text goes into its field and is saved the
+  // same way -- on failure it stays there as "Not saved" -- and Proposal
+  // Status goes the optimistic way. Throws with the reason when something
+  // did not save (the caller may show it too).
+  const handleUpdate = async (brdpId, patch) => {
+    const failures = [];
+    for (const [field, value] of Object.entries(patch)) {
+      let result;
+      if (field === 'validation') result = await changeValidation(brdpId, value);
+      else if (SAVED_TEXT_FIELDS.includes(field)) {
+        typeField(brdpId, field, value);
+        result = await saveTextField(brdpId, field, value);
+      } else continue;
+      if (!result.ok) failures.push(result.message);
+    }
+    if (failures.length) throw new Error(failures.join(' '));
+  };
+
+  // Leaving a BRDP whose change did not save asks first (and, if the user
+  // leaves, that change is dropped). Returns whether it is fine to leave.
+  const confirmLeaveSelected = () => {
+    if (!selectedId) return true;
+    const failed = failedEntries(unsavedRef.current, selectedId);
+    if (failed.length === 0) return true;
+    const identifier = brdps.find((b) => b.id === selectedId)?.identifier ?? '';
+    const fields = failed.map((e) => fieldLabel(e.field)).join(', ');
+    if (!window.confirm(t('records.unsaved.leaveConfirm', { identifier, fields }))) return false;
+    setUnsaved((current) => discardBrdp(current, selectedId, { onlyFailed: true }));
+    return true;
+  };
+
+  const selectBrdp = (brdpId) => {
+    if (brdpId === selectedId) return;
+    if (!confirmLeaveSelected()) return;
+    setSelectedId(brdpId);
   };
 
   const ask = useAskAssistant({
@@ -785,9 +1029,16 @@ export default function RecordsPage() {
       return;
     }
     let cancelled = false;
-    authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/history`).then((data) => {
-      if (!cancelled) setHistory(data);
-    });
+    setHistoryLoadError(null);
+    authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/history`)
+      .then((data) => {
+        if (!cancelled) setHistory(data);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setHistory([]);
+        setHistoryLoadError(t('records.loadErrors.history', { reason: errorMessage(err, t) }));
+      });
     return () => {
       cancelled = true;
     };
@@ -862,18 +1113,36 @@ export default function RecordsPage() {
   const ruleDraftNames = ruleEditing && ruleDraftText.trim() && vocabulary ? checkRuleNames(ruleDraftText, vocabulary) : null;
   const ruleDraftNameHints = useNameFixHints(ruleDraftNames, project.standard, vocabulary);
 
-  const doVerifyRule = async () => {
+  // Verify and Revoke, optimistic (HR20): the client knows the result
+  // beforehand -- Verified, or Draft -- so it shows at once; the server only
+  // adds the approval time, which the page does not show. If the server
+  // refuses, the previous state comes back with the reason, under the rule.
+  const changeRuleState = async (action, nextStatus) => {
+    const brdpId = selected.id;
+    const previous = ruleApproval;
+    clearNotice(`rule:${brdpId}`);
+    setRuleApproval((current) => (current ? { ...current, status: nextStatus } : current));
+    setRuleApprovalsById((m) => (m ? { ...m, [brdpId]: { status: nextStatus } } : m));
     setRuleBusy(true);
     try {
-      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}/approve`, {
-        method: 'POST',
-      });
-      setVerifyDialog(null);
+      await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/approvals/${ruleFormat}/${action}`, { method: 'POST' });
       setApprovalsRefreshToken((n) => n + 1);
       setHistoryRefreshToken((n) => n + 1);
+    } catch (err) {
+      if (selectedIdRef.current === brdpId) setRuleApproval(previous);
+      setRuleApprovalsById((m) => (m ? { ...m, [brdpId]: { status: previous?.status } } : m));
+      showNotice(`rule:${brdpId}`, {
+        message: t(action === 'approve' ? 'records.actionErrors.verify' : 'records.actionErrors.revoke', { reason: errorMessage(err, t) }),
+        retry: selectedIdRef.current === brdpId ? () => changeRuleState(action, nextStatus) : null,
+      });
     } finally {
       setRuleBusy(false);
     }
+  };
+
+  const doVerifyRule = () => {
+    setVerifyDialog(null);
+    return changeRuleState('approve', 'approved');
   };
 
   // Test de reglas T3, Part 3: moving a rule to Verified warns -- never
@@ -914,20 +1183,10 @@ export default function RecordsPage() {
     }
   };
 
-  const revokeRule = async () => {
-    setRuleBusy(true);
-    try {
-      await authFetchJson(`/api/projects/${projectId}/brdps/${selected.id}/approvals/${ruleFormat}/revoke`, {
-        method: 'POST',
-      });
-      setApprovalsRefreshToken((n) => n + 1);
-      setHistoryRefreshToken((n) => n + 1);
-    } finally {
-      setRuleBusy(false);
-    }
-  };
+  const revokeRule = () => changeRuleState('revoke', 'pending_review');
 
   const openCreatePanel = () => {
+    if (!confirmLeaveSelected()) return;
     setSelectedId(null);
     setIsCreatingNew(true);
     setCreateError(null);
@@ -938,15 +1197,26 @@ export default function RecordsPage() {
     setNewBrdpProposalStatus('Pending');
     setCatalogSearchQuery('');
     setCatalogEntries([]);
-    authFetchJson(`/api/projects/${projectId}/brdps/next-ext-identifier`).then((data) =>
-      setNewBrdpIdentifier(data.identifier)
-    );
-    // Global reference data (not project-scoped) -- naturally empty for a
-    // standard with no imported catalog, which is exactly how the picker
-    // section below decides whether to render at all.
+    authFetchJson(`/api/projects/${projectId}/brdps/next-ext-identifier`)
+      .then((data) => setNewBrdpIdentifier(data.identifier))
+      .catch((err) => setCreateError(errorMessage(err, t)));
+    loadCreateCatalog();
+  };
+
+  // Global reference data (not project-scoped) -- naturally empty for a
+  // standard with no imported catalog, which is exactly how the picker
+  // section below decides whether to render at all. A failed load is said,
+  // with Retry -- never an empty picker that looks like "no catalog"
+  // (AACF 1, Part 2).
+  const [catalogLoadError, setCatalogLoadError] = useState(null);
+  const loadCreateCatalog = () => {
+    setCatalogLoadError(null);
     authFetchJson(`/api/brdp-catalog?standard=${encodeURIComponent(project.standard)}`)
       .then(setCatalogEntries)
-      .catch(() => setCatalogEntries([]));
+      .catch((err) => {
+        setCatalogEntries([]);
+        setCatalogLoadError(t('records.loadErrors.catalog', { reason: errorMessage(err, t) }));
+      });
   };
 
   const closeCreatePanel = () => setIsCreatingNew(false);
@@ -981,7 +1251,7 @@ export default function RecordsPage() {
       // (project_id, identifier) uniqueness is enforced server-side --
       // the catalog picker already excludes identifiers the project has,
       // this is the safety net for whatever slips through (docs request).
-      setCreateError(err.message);
+      setCreateError(errorMessage(err, t));
     } finally {
       setCreatingBusy(false);
     }
@@ -1005,25 +1275,44 @@ export default function RecordsPage() {
   // with the user. This is a normal PUT through handleUpdate, so it flows
   // through record_change() like any other edit and produces its own new
   // history row; nothing about the original entry is touched.
+  // A failed revert shows where the field is ("Not saved" / the status
+  // notice): nothing else to do here.
   const revertHistoryEntry = (entry) => {
     const column = REVERTIBLE_HISTORY_FIELDS[entry.field_name];
     if (!column || !selected) return;
-    handleUpdate(selected.id, { [column]: entry.old_value });
+    handleUpdate(selected.id, { [column]: entry.old_value }).catch(() => {});
   };
 
-  const handleDelete = async (brdpId, identifier) => {
-    if (!window.confirm(t('records.deleteConfirm', { identifier }))) return;
-    await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, { method: 'DELETE' });
-    if (selectedId === brdpId) setSelectedId(null);
-    // Docs request edge case: deleting a BRDP with a pending/loaded
-    // suggestion removes it from the map immediately -- if a request was
-    // still in flight for it, requestSuggestion's own existence check
-    // (the map no longer has this brdpId) discards the response when it
-    // eventually lands, instead of resurrecting an entry for a BRDP that
-    // no longer exists.
-    suggestions.removeSuggestionEntry(brdpId);
-    refresh();
-    refreshStats();
+  // Delete (to the Trash), optimistic (HR20): the row goes at once; if the
+  // server refuses, it comes back to its place and order -- selected again
+  // if it was -- with the reason at the top of the page.
+  const handleDelete = async (brdpId, identifier, { confirmed = false } = {}) => {
+    if (!confirmed && !window.confirm(t('records.deleteConfirm', { identifier }))) return;
+    const { row, index } = removeRow(brdps, brdpId);
+    const wasSelected = selectedId === brdpId;
+    clearNotice(`delete:${brdpId}`);
+    setBrdps((list) => removeRow(list, brdpId).list);
+    if (wasSelected) setSelectedId(null);
+    try {
+      await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, { method: 'DELETE' });
+      // Docs request edge case: deleting a BRDP with a pending/loaded
+      // suggestion removes it from the map immediately -- if a request was
+      // still in flight for it, requestSuggestion's own existence check
+      // (the map no longer has this brdpId) discards the response when it
+      // eventually lands, instead of resurrecting an entry for a BRDP that
+      // no longer exists.
+      suggestions.removeSuggestionEntry(brdpId);
+      setUnsaved((current) => discardBrdp(current, brdpId));
+      refresh();
+      refreshStats();
+    } catch (err) {
+      setBrdps((list) => restoreRow(list, row, index));
+      if (wasSelected) setSelectedId((current) => current ?? brdpId);
+      showNotice(`delete:${brdpId}`, {
+        message: t('records.actionErrors.delete', { identifier, reason: errorMessage(err, t) }),
+        retry: () => handleDelete(brdpId, identifier, { confirmed: true }),
+      });
+    }
   };
 
 
@@ -1034,6 +1323,25 @@ export default function RecordsPage() {
   // .error; the mutation always invalidates the job query on settle
   // either way, so the UI reflects whatever IS actually running.
   const handleComputeEmbeddings = () => computeEmbeddings.mutate();
+
+  // A text field of the selected BRDP that did not save: a red border and,
+  // under it, "Not saved: <reason>" with Retry and "Discard change".
+  const fieldEntry = (field) => (selected ? unsaved.get(fieldKey(selected.id, field)) : undefined);
+  const fieldFailed = (field) => fieldEntry(field)?.status === 'failed';
+  const fieldClass = (base, field) => (fieldFailed(field) ? `${base} ${styles.fieldUnsaved}` : base);
+  const fieldNotice = (field) => {
+    const entry = fieldEntry(field);
+    if (entry?.status !== 'failed') return null;
+    return (
+      <ErrorNotice
+        testId={`records-unsaved-${field}`}
+        message={t('records.unsaved.notSaved', { reason: entry.error })}
+        onRetry={() => retryField(entry)}
+        retryDisabledReason={canRetry(entry) ? null : t('records.unsaved.shortenFirst')}
+        onDiscard={() => discardFieldChange(entry)}
+      />
+    );
+  };
 
   // Consolidation C1, Part 3: draggable divider between the table and the
   // detail panel (width remembered in this browser only).
@@ -1054,11 +1362,49 @@ export default function RecordsPage() {
             {t('records.subtitle', { name: project.name, standard: project.standard, count: brdps.length })}
           </p>
         </div>
-        <div className={styles.headerActions}>
-          <ProposalStatusSummary counts={stats.proposal_status_counts} />
-          <RuleStatusSummary counts={stats.rule_status_counts} />
-        </div>
+        {!statsFailed && (
+          <div className={styles.headerActions}>
+            <ProposalStatusSummary counts={stats.proposal_status_counts} />
+            <RuleStatusSummary counts={stats.rule_status_counts} />
+          </div>
+        )}
       </div>
+
+      {/* AACF 1, Part 1: what failed and is not tied to the selected BRDP --
+          the list, the totals, the rule statuses, a deletion, and a change
+          of another BRDP that did not save -- all with the same ErrorNotice. */}
+      {(() => {
+        const pageNotices = [...notices.entries()].filter(([key]) => !key.startsWith('status:') && !key.startsWith('rule:'));
+        const otherUnsaved = failedEntries(unsaved).filter((e) => e.brdpId !== selectedId);
+        if (pageNotices.length === 0 && otherUnsaved.length === 0) return null;
+        return (
+          <div className={styles.pageNotices}>
+            {pageNotices.map(([key, notice]) => (
+              <ErrorNotice
+                key={key}
+                testId={`records-notice-${key.split(':')[0]}`}
+                message={notice.message}
+                onRetry={notice.retry || undefined}
+                onDismiss={() => clearNotice(key)}
+              />
+            ))}
+            {otherUnsaved.map((entry) => (
+              <ErrorNotice
+                key={fieldKey(entry.brdpId, entry.field)}
+                testId="records-notice-unsaved-other"
+                message={t('records.unsaved.otherBrdp', {
+                  identifier: brdps.find((b) => b.id === entry.brdpId)?.identifier ?? '',
+                  field: fieldLabel(entry.field),
+                  reason: entry.error,
+                })}
+                onRetry={() => retryField(entry)}
+                retryDisabledReason={canRetry(entry) ? null : t('records.unsaved.shortenFirst')}
+                onDiscard={() => discardFieldChange(entry)}
+              />
+            ))}
+          </div>
+        );
+      })()}
 
       <div className={styles.layout} ref={split.containerRef}>
         <div className={styles.tableWrap}>
@@ -1152,7 +1498,7 @@ export default function RecordsPage() {
                     <tr
                       key={b.id}
                       className={selectedId === b.id ? styles.selectedRow : ''}
-                      onClick={() => setSelectedId(b.id)}
+                      onClick={() => selectBrdp(b.id)}
                     >
                       <td className={`${styles.mono} ${styles.idCell}`}>
                         <span className={styles.idText}>{b.identifier}</span>
@@ -1180,12 +1526,7 @@ export default function RecordsPage() {
                         </span>
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
-                        <RuleStatusCell
-                          projectId={projectId}
-                          brdpId={b.id}
-                          format={ruleFormat}
-                          refreshToken={approvalsRefreshToken}
-                        />
+                        <RuleStatusCell approvals={ruleApprovalsById} brdpId={b.id} format={ruleFormat} />
                       </td>
                       {canEdit && (
                         <td onClick={(e) => e.stopPropagation()}>
@@ -1353,6 +1694,9 @@ export default function RecordsPage() {
                 );
               })()}
 
+              {catalogLoadError && (
+                <ErrorNotice testId="records-notice-catalog" message={catalogLoadError} onRetry={loadCreateCatalog} />
+              )}
               {createError && (
                 <p className={styles.ruleErrorText} role="alert">
                   {createError}
@@ -1409,16 +1753,19 @@ export default function RecordsPage() {
               )}
               <label className={styles.fieldLabel}>{t('records.fieldTitle')}</label>
               <input
-                className={styles.input}
-                value={selected.title}
+                className={fieldClass(styles.input, 'title')}
+                value={displayedValue(unsaved, selected, 'title')}
                 disabled={!canEdit}
+                aria-invalid={fieldFailed('title') ? 'true' : undefined}
+                data-testid="records-field-title"
                 onFocus={() => triggerNamingTip('title')}
                 onChange={(e) => {
                   triggerNamingTip('title');
-                  setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, title: e.target.value } : b)));
+                  typeField(selected.id, 'title', e.target.value);
                 }}
-                onBlur={(e) => canEdit && handleUpdate(selected.id, { title: e.target.value })}
+                onBlur={() => commitField(selected, 'title')}
               />
+              {fieldNotice('title')}
               {namingTipAnchor === 'title' && (
                 <NamingTip
                   standard={project.standard}
@@ -1428,26 +1775,26 @@ export default function RecordsPage() {
               {canEdit && (
                 <RenameSuggestions
                   standard={project.standard}
-                  text={selected.title}
+                  text={displayedValue(unsaved, selected, 'title')}
                   vocabulary={vocabulary}
-                  onApply={(newText) => {
-                    setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, title: newText } : b)));
-                    handleUpdate(selected.id, { title: newText });
-                  }}
+                  onApply={(newText) => handleUpdate(selected.id, { title: newText }).catch(() => {})}
                 />
               )}
               <label className={styles.fieldLabel}>{t('records.fieldDefinition')}</label>
               <textarea
-                className={styles.textarea}
-                value={selected.definition}
+                className={fieldClass(styles.textarea, 'definition')}
+                value={displayedValue(unsaved, selected, 'definition')}
                 disabled={!canEdit}
+                aria-invalid={fieldFailed('definition') ? 'true' : undefined}
+                data-testid="records-field-definition"
                 onFocus={() => triggerNamingTip('definition')}
                 onChange={(e) => {
                   triggerNamingTip('definition');
-                  setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, definition: e.target.value } : b)));
+                  typeField(selected.id, 'definition', e.target.value);
                 }}
-                onBlur={(e) => canEdit && handleUpdate(selected.id, { definition: e.target.value })}
+                onBlur={() => commitField(selected, 'definition')}
               />
+              {fieldNotice('definition')}
               {namingTipAnchor === 'definition' && (
                 <NamingTip
                   standard={project.standard}
@@ -1457,26 +1804,26 @@ export default function RecordsPage() {
               {canEdit && (
                 <RenameSuggestions
                   standard={project.standard}
-                  text={selected.definition}
+                  text={displayedValue(unsaved, selected, 'definition')}
                   vocabulary={vocabulary}
-                  onApply={(newText) => {
-                    setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, definition: newText } : b)));
-                    handleUpdate(selected.id, { definition: newText });
-                  }}
+                  onApply={(newText) => handleUpdate(selected.id, { definition: newText }).catch(() => {})}
                 />
               )}
               <label className={styles.fieldLabel}>{t('records.fieldProposal')}</label>
               <textarea
-                className={styles.textarea}
-                value={selected.proposal}
+                className={fieldClass(styles.textarea, 'proposal')}
+                value={displayedValue(unsaved, selected, 'proposal')}
                 disabled={!canEdit}
+                aria-invalid={fieldFailed('proposal') ? 'true' : undefined}
+                data-testid="records-field-proposal"
                 onFocus={() => triggerNamingTip('proposal')}
                 onChange={(e) => {
                   triggerNamingTip('proposal');
-                  setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: e.target.value } : b)));
+                  typeField(selected.id, 'proposal', e.target.value);
                 }}
-                onBlur={(e) => canEdit && handleUpdate(selected.id, { proposal: e.target.value })}
+                onBlur={() => commitField(selected, 'proposal')}
               />
+              {fieldNotice('proposal')}
               {namingTipAnchor === 'proposal' && (
                 <NamingTip
                   standard={project.standard}
@@ -1486,12 +1833,9 @@ export default function RecordsPage() {
               {canEdit && (
                 <RenameSuggestions
                   standard={project.standard}
-                  text={selected.proposal}
+                  text={displayedValue(unsaved, selected, 'proposal')}
                   vocabulary={vocabulary}
-                  onApply={(newText) => {
-                    setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, proposal: newText } : b)));
-                    handleUpdate(selected.id, { proposal: newText });
-                  }}
+                  onApply={(newText) => handleUpdate(selected.id, { proposal: newText }).catch(() => {})}
                 />
               )}
               <p className={styles.hint}>{t('records.vocabHint')}</p>
@@ -1501,7 +1845,8 @@ export default function RecordsPage() {
                 className={styles.select}
                 value={selected.validation}
                 disabled={!canEdit}
-                onChange={(e) => handleUpdate(selected.id, { validation: e.target.value })}
+                data-testid="records-field-validation"
+                onChange={(e) => changeValidation(selected.id, e.target.value)}
               >
                 {VALIDATION_OPTIONS.map((v) => (
                   <option key={v} value={v}>
@@ -1509,6 +1854,14 @@ export default function RecordsPage() {
                   </option>
                 ))}
               </select>
+              {notices.get(`status:${selected.id}`) && (
+                <ErrorNotice
+                  testId="records-notice-status"
+                  message={notices.get(`status:${selected.id}`).message}
+                  onRetry={notices.get(`status:${selected.id}`).retry}
+                  onDismiss={() => clearNotice(`status:${selected.id}`)}
+                />
+              )}
 
               {/* Wires up brdps.comments -- already existed end-to-end in
                   the backend model/schemas (create/update/out), just never
@@ -1524,14 +1877,15 @@ export default function RecordsPage() {
                 <>
                   <label className={styles.fieldLabel}>{t('records.fieldRefusalReason')}</label>
                   <textarea
-                    className={styles.textarea}
-                    value={selected.comments}
+                    className={fieldClass(styles.textarea, 'comments')}
+                    value={displayedValue(unsaved, selected, 'comments')}
                     disabled={!canEdit}
-                    onChange={(e) =>
-                      setBrdps((prev) => prev.map((b) => (b.id === selected.id ? { ...b, comments: e.target.value } : b)))
-                    }
-                    onBlur={(e) => canEdit && handleUpdate(selected.id, { comments: e.target.value })}
+                    aria-invalid={fieldFailed('comments') ? 'true' : undefined}
+                    data-testid="records-field-comments"
+                    onChange={(e) => typeField(selected.id, 'comments', e.target.value)}
+                    onBlur={() => commitField(selected, 'comments')}
                   />
+                  {fieldNotice('comments')}
                 </>
               )}
 
@@ -1541,7 +1895,15 @@ export default function RecordsPage() {
                   —
                 </p>
               ) : ruleApproval === undefined ? (
-                <p className={styles.muted}>…</p>
+                ruleApprovalLoadError ? (
+                  <ErrorNotice
+                    testId="records-notice-rule-load"
+                    message={ruleApprovalLoadError}
+                    onRetry={() => setRuleApprovalReloadToken((n) => n + 1)}
+                  />
+                ) : (
+                  <p className={styles.muted}>…</p>
+                )
               ) : ruleEditing ? (
                 <div className={styles.ruleEditor}>
                   <textarea
@@ -1608,6 +1970,14 @@ export default function RecordsPage() {
                     <p className={styles.ruleErrorText} role="alert">
                       {t('records.ruleTest.recordError', { error: ruleTestRecordError })}
                     </p>
+                  )}
+                  {notices.get(`rule:${selected.id}`) && (
+                    <ErrorNotice
+                      testId="records-notice-rule"
+                      message={notices.get(`rule:${selected.id}`).message}
+                      onRetry={notices.get(`rule:${selected.id}`).retry || undefined}
+                      onDismiss={() => clearNotice(`rule:${selected.id}`)}
+                    />
                   )}
                   <div className={styles.suggestionActions}>
                     {ruleStateOf(ruleApproval) === 'draft' && canTestRule(ruleFormat) && (
@@ -2337,7 +2707,13 @@ export default function RecordsPage() {
                     )}
                   </button>
                 </h3>
-                {!historyOpen ? null : history.length === 0 ? (
+                {!historyOpen ? null : historyLoadError ? (
+                  <ErrorNotice
+                    testId="records-notice-history"
+                    message={historyLoadError}
+                    onRetry={() => setHistoryRefreshToken((n) => n + 1)}
+                  />
+                ) : history.length === 0 ? (
                   <p className={styles.muted}>{t('records.history.empty')}</p>
                 ) : (
                   <ul className={styles.historyList}>

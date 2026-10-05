@@ -14,11 +14,31 @@ export function useTrash() {
   });
 }
 
+// AACF 1, Part 1 (HR20): restoring and deleting for good are optimistic --
+// the rows leave the list at once; if the server refuses, the list comes
+// back as it was (the page shows the reason). The list is read again when
+// the request settles, either way.
+function optimisticRemoval(queryClient, idsOf) {
+  return {
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: TRASH_QUERY_KEY });
+      const previous = queryClient.getQueryData(TRASH_QUERY_KEY);
+      const ids = new Set(idsOf(variables));
+      if (previous) queryClient.setQueryData(TRASH_QUERY_KEY, previous.filter((e) => !ids.has(e.id)));
+      return { previous };
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(TRASH_QUERY_KEY, context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: TRASH_QUERY_KEY }),
+  };
+}
+
 export function useRestoreBrdp() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (brdpId) => authFetchJson(`/api/trash/${brdpId}/restore`, { method: 'POST' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: TRASH_QUERY_KEY }),
+    ...optimisticRemoval(queryClient, (brdpId) => [brdpId]),
   });
 }
 
@@ -26,7 +46,7 @@ export function usePermanentlyDeleteBrdp() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (brdpId) => authFetchJson(`/api/trash/${brdpId}`, { method: 'DELETE' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: TRASH_QUERY_KEY }),
+    ...optimisticRemoval(queryClient, (brdpId) => [brdpId]),
   });
 }
 
@@ -44,6 +64,6 @@ export function useBulkPermanentlyDeleteBrdps() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brdp_ids: brdpIds }),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: TRASH_QUERY_KEY }),
+    ...optimisticRemoval(queryClient, (brdpIds) => brdpIds),
   });
 }
