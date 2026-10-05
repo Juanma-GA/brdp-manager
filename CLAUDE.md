@@ -8,15 +8,15 @@ Este proyecto está sujeto al **ATEXIS AI-Assisted Coding Framework (AACF)** (re
 
 - **Hard Rules HR0–HR21** (`aacf/rules/atexis-hard-rules.md`) son no negociables — autocomprobar cualquier cambio contra ellas antes de darlo por terminado (ver también `aacf/agents/code-reviewer.agent.md` y `security-reviewer.agent.md` para el criterio de revisión). Resumen relevante para este proyecto: HR1 (nunca localStorage/sessionStorage para estado autoritativo — Postgres es la fuente de verdad), HR6 (nunca truncar contenido de calidad, resumir con LLM), HR7 (nunca un fallback que degrade silenciosamente, escalar), HR8 (nada hardcodeado), HR9 (soft-delete / confirmación explícita antes de borrar), HR10 (deep-merge, nunca shallow-merge de config anidada), HR15/HR21 (i18n + humanizar texto de UI, nunca tokens crudos), HR20 (UI de mutación optimista).
 - El framework se sirve normalmente vía el MCP `aacf_fetch` (`http://10.117.139.1:8200/mcp`, solo red corporativa/VPN); esa herramienta **no está disponible en este entorno de ejecución remoto**, así que se trabaja con la copia local del repo `cursoFSD` — puede estar desactualizada. Verificar `aacf/VERSION` contra el MCP en cuanto haya acceso, y no mezclar ficheros de versiones distintas del framework si difiere.
-- **Conflicto detectado y todavía sin resolver**: el patrón "Hooks de datos" descrito más abajo en este fichero (ver "Patrones a seguir") usa localStorage como caché de estado autoritativo, lo que viola HR1. No se ha tocado código todavía — ver "Auditoría de cumplimiento AACF (pendiente)" al final de este fichero para el detalle y el plan.
+- **Conflicto HR1 resuelto** (Barrido final 4): el patrón "Hooks de datos" de v1 (localStorage como caché de estado autoritativo) y los ficheros que lo usaban se han borrado. Ver "Auditoría de cumplimiento AACF" al final de este fichero.
 
 ## ⚠️ Rama actual: `v2-multiproyecto` — backend real distinto al descrito abajo
 
-Todo el resto de este fichero (arquitectura Express+SQLite, sin auth, un solo proyecto) describe **v1**. El trabajo activo desde hace muchas rondas vive en la rama `v2-multiproyecto`, que tiene un backend **completamente distinto**, ya en producción dentro del repo:
+El trabajo activo vive en la rama `v2-multiproyecto`. La app v1 (Express + SQLite, sin auth, un solo proyecto) se borró del repo en el Barrido final 4; lo que queda de este fichero describe v2:
 
-- **Backend real**: `backend/` — FastAPI + Postgres (`asyncpg` + SQLAlchemy async) + Alembic (`backend/alembic/versions/`, 13 migraciones a fecha de hoy). Nada de SQLite ni Express para el backend de datos (el frontend sigue siendo Vite/React).
+- **Backend real**: `backend/` — FastAPI + Postgres (`asyncpg` + SQLAlchemy async) + Alembic (`backend/alembic/versions/`, 24 migraciones a fecha de hoy). El frontend es Vite/React.
 - **Multi-proyecto real** con auth JWT: access token en el body de `/api/auth/login`, refresh token en cookie HttpOnly (nunca localStorage — ver `backend/app/api/routes/auth.py`). Roles `admin` / `editor` / `viewer` por proyecto vía `UserProjectRole` (`backend/app/models/user_project_role.py`) — un admin global puede todo, un editor solo en sus proyectos.
-- **Estructura backend**: `backend/app/models/*` (BRDP, Project, User, UserProjectRole, RuleApproval, BRDPHistory, BRDPCatalog, ImportJob, AppSettings, RefreshToken), `backend/app/api/routes/*` (un fichero por recurso: `projects.py`, `brdps.py`, `approvals.py`, `brdp_import.py`, `trash.py`, `brdp_catalog.py`, `auth.py`, `users.py`, `app_settings.py`, `similar.py`, `suggestion_feedback.py`, `llm_proxy.py`, `notes.py`, `config.py`, `validate_brex.py`), `backend/app/services/*` (`import_jobs.py`, `embeddings.py`, `history.py`, `rule_formats.py`), `backend/app/repositories/brdp_repository.py` (capa de acceso a BRDP — todas las queries pasan por aquí, incluido el filtro de soft-delete `ACTIVE_BRDP_FILTER`).
+- **Estructura backend**: `backend/app/models/*` (BRDP, Project, User, UserProjectRole, RuleApproval, BRDPHistory, BRDPCatalog, ImportJob, EmbeddingJob, RuleExtractJob, RefreshToken…), `backend/app/api/routes/*` (un fichero por recurso: `projects.py`, `brdps.py`, `approvals.py`, `brdp_import.py`, `trash.py`, `brdp_catalog.py`, `auth.py`, `users.py`, `similar.py`, `suggestion_feedback.py`, `llm_proxy.py`, `config.py`, `validate_brex.py`, `schema_cards.py`, `rule_extract.py`, `embedding_jobs.py`, `excel.py`, `brdp_compare.py`), `backend/app/services/*` (`import_jobs.py`, `embeddings.py`, `history.py`, `rule_formats.py`), `backend/app/repositories/brdp_repository.py` (capa de acceso a BRDP — todas las queries pasan por aquí, incluido el filtro de soft-delete `ACTIVE_BRDP_FILTER`).
 - **Soft-delete real**: borrar una BRDP la manda a Papelera (`deleted_at`/`deleted_by`), no la elimina. Borrado permanente vía `/api/trash/{id}` (admin, o editor si es de su proyecto).
 - **Import de Excel** (`backend/app/services/import_jobs.py` + `backend/app/schemas/brdp_import.py`) es un job asíncrono en background (`BackgroundTasks`, no bloqueante): `/import/analyze` (fase 1, solo lectura, devuelve avisos) → `/import/apply` (fase 2, devuelve `job_id`, se sondea `/import/status/{job_id}`). Un `running` job antiguo (>60 min, `STALE_JOB_MINUTES`) se marca `failed` automáticamente al leerlo (`_reap_if_stale`) — cubre crashes; una interrupción limpia (`asyncio.CancelledError`, p.ej. un `--reload` de uvicorn) tiene su propio handler explícito porque `CancelledError` hereda de `BaseException`, no de `Exception`, desde Python 3.8.
 - **Documentación de diseño original** (útil como contexto histórico, pero YA DESACTUALIZADA frente al código real tras ~106 rondas de iteración — no la trates como fuente de verdad, el código y los tests son la fuente de verdad): `docs/v2/01-arquitectura-y-estructura.md` (snapshot de v1, la base de la decisión de reescribir), `docs/v2/02-analisis-aacf-requisitos-no-cumplidos.md`, `docs/v2/03-especificacion-v2-para-claude-code.md` (spec original de v2).
@@ -925,164 +925,85 @@ Hay un proyecto de desarrollo sembrado ("Demo Project (S1000D 4.2)") y un admin 
   - **Juego de pruebas**: check nuevo `rule_proposal_check_level` (`expect`: niveles aceptados), en `rule-test-4-2-quantity-correction` (partly o yes), `rule-test-4-1-boolean-tool-cir` y `rule-test-template-4-2-applic-in-status` (yes o partly) y `rule-test-4-2-review-substeps` (no); `responses.json` guarda `proposalCheck.reason`. El simulador responde en tres niveles ("partly" para una Propuesta con `marked up with <quantity>` o `PARTLY`) y con `CTRLCHARS` escribe saltos de línea crudos dentro de las cadenas, como Mistral. **Contra el simulador, 3 pasadas**: los 7 casos tocados (los cuatro del juez, assycode, applicability y titled-context) PASS 3/3 en todos sus checks.
   - **Snapshot** (59/59): cambian los 2 casos `ruleProposalCheck` (prompt nuevo) y caso nuevo `ruleProposalCheck/brex-4-1-boolean-only-listed-elements`; el resto, idéntico.
   - **Verificación**: `test-rule-test.mjs` (793: niveles, forma antigua, casos límite del encargo con su veredicto, prompt con criterios y ejemplos, descripción EN/ES, lector JSON con salto de línea dentro y fuera de cadenas, texto que no es JSON, comillas y barras escapadas, los cinco parsers, y la pista de la sección mínima). `verify-rule-test-final-1.mjs` (Playwright real) gana el caso "partly" con `CTRLCHARS`: veredicto "Correcto", nota en EN y ES, registrado como superado; en verde junto con `verify-rule-test`. Resto de tests JS en verde; `npm run lint` 0 errores; build limpio.
+- **Barrido final 4: código muerto borrado (HR13)** (nueve commits, `32e297e`…`c006f29`; registro breve en `docs/unused-code-inventory.md`). Se ha borrado todo lo marcado "borrar en el barrido final" en el inventario de C2, comprobando antes de cada fichero que nada vivo lo usaba (grafo de imports desde `src/main.jsx` y búsqueda en `src`, `scripts`, `backend`, `index.html`, `vite.config.ts`, `package.json` y docs). Ningún comportamiento de la app cambia; ningún prompt cambia (snapshot 59/59).
+  - **Frontend v1**: cadena del chat (`ChatPanel`, `TypingDots`, `useChat`, `generateSuggestedRule`, `sendMessageStream`/`buildSystemPrompt` de `llmAPI.js`); `useAPIKey`/`AIConfigSection` (la clave del LLM en `localStorage`); `BRDPPage` y todo lo que colgaba de ella (`DetailPanel`, `BRDPTable`, `FilterPills`, `SearchBar`, `RuleApprovalCell`, `useTableLogic`, `useBRDPs`, `useLocalNotes`, `useProjectConfig`, `BRDPContext`, `ToastContext`/`ToastContainer`, `GenerateModal`, `validateBREX.js`, `BREXdocModal`, las secciones de Settings de v1, `brdpSchema.js`, `mockBRDPs.js`, `services/api.js`). Ninguno usaba i18n, así que no había claves que retirar.
+  - **Generadores**: los caminos LLM muertos (`buildBREXPromptChunk*`, `generateSingleRule*`, `extractXML`, `STRICT_RULES`, `buildSchematronPrompt`… solo los alcanzaba `generateSuggestedRule.js`) y la clave `few_shot_examples` de los `public/*-schema-summary*.json`. `public/brex-schema-summary-sch.json` también: lo único que se usaba de él (las 16 URL master reales de BRDP-A1-00100, en `test-rule-schema-context.mjs`) pasa a `scripts/rule-test-fixtures/master-schema-urls-3-0-1.json`. `scripts/test-schematron-dita.mjs` (probaba el prompt borrado) borrado.
+  - **Fuera de `src/`**: `server.js`, `src/db/`, `npm start`, las dependencias `express`, `cors`, `better-sqlite3`, `win-ca` y `dotenv` (sin imports), el proxy `/mistral-proxy` de `vite.config.ts`; lock regenerado con `npm install` normal, `npm audit` 0. `src/api/approvals.js` (apuntaba a `/api/approvals/…` de Express): los cuatro generadores exigen ahora `options.approvals` y fallan con un error si falta, en vez de degradar en silencio a "ninguna regla" (`GeneratePage.jsx` siempre las pasaba).
+  - **Backend**: las notas por BRDP (`routes/notes.py`, modelo, esquema, tests y la tabla con la migración nueva `0024_drop_notes.py`, probada arriba/abajo/arriba; 0 filas en la base de este entorno). `test_brdps_notes_approvals.py` pasa a `test_brdps_approvals.py`.
+  - **Detectores (Parte 2)**: knip (`npx`, sin añadirlo) no encuentra ficheros sin uso tras el borrado y marca 53 exports que solo usa su propio módulo: dejan de exportarse. `autoprefixer` (devDependency sin uso) fuera. vulture: `CLASSIFICATIONS`/`TEXT_SOURCES` en `rule_extract_jobs.py` y tres constantes y un contador nunca leídos en `generate_schema_cards.py` fuera; el resto son falsos positivos (handlers registrados por decorador, campos Pydantic/ORM, fixtures de pytest).
+  - **Conservado**: las ramas few-shot de `buildDeterministicBlockFromFewShot` (función viva; hoy toda entrada trae `rule_xml`), las claves `structure`/`generation_rules` de los JSON de BREX (sin lector, pero citadas como fuente por `ruleTestEngine.js`), los exports usados solo por tests, y los documentos de diseño de `docs/v2/` (históricos). `@xmldom/xmldom` y `jszip` los usan scripts sin estar en `package.json` (llegan por `mammoth`).
+  - **CLAUDE.md**: las secciones descriptivas de v1 (Express/SQLite, ficheros clave, generadores con LLM, "Hooks de datos", proxy, GenerateModal, chat) se reescriben para lo que hay hoy; el punto HR1 de la auditoría queda resuelto. El registro de cambios de más arriba conserva sus menciones históricas. README reescrito para v2.
+  - **Verificación**: lint 0 errores y 65 → 58 avisos; build limpio; todos los `scripts/test-*.mjs` en verde; snapshot 59/59; suite backend en verde; en navegador `verify-standards-rename`, `verify-dedupe-shared-lets-xpath3` y `verify-schema-location` (Generate BREX, Schematron S1000D y DITA). `localStorage`/`sessionStorage` en `src/`: solo `AppLayout.jsx`, `useResizableSplit.js` y `RecordsPage.jsx`.
 
 ## Qué es esta app
 
-BRDP Manager es una app React + Express para gestionar Business Rules Decision Points (BRDPs) de proyectos S1000D/DITA. Sus funciones principales son:
+BRDP Manager gestiona Business Rules Decision Points (BRDPs) de proyectos S1000D y DITA: frontend React (Vite) y backend FastAPI + Postgres, multiproyecto con usuarios y roles. Funciones principales:
 
-- CRUD de BRDPs con persistencia en SQLite
-- Generación de BREX DM (S1000D 4.2 y 3.0.1) y Schematron 1.0 vía LLM
-- Extracción de BRDPs desde documentos (DOCX/PDF) o texto pegado (AI Extract)
-- Asistente AI con contexto del dataset de BRDPs
+- BRDPs por proyecto (Records), con historial, papelera e import/export de Excel.
+- Reglas por BRDP (BREX 4.2/4.1/3.0.1 o Schematron DITA) con estados To Do / Draft / Verified, test de reglas con ejemplos y Generate (BREX o Schematron del proyecto, ensamblado sin IA).
+- Asistente: Ask, Suggest Definition / Proposal / Rule, Comparar y AI Extract.
 
 ## Arquitectura
 
 ```
-Browser (React) → Express server.js (puerto 3000)
-                  ├── GET /*           → sirve dist/ (Vite build)
-                  ├── POST /api/proxy  → LLM externo (Mistral/Anthropic/OpenAI)
-                  ├── /api/brdps       → SQLite (better-sqlite3)
-                  ├── /api/config      → SQLite
-                  ├── /api/settings    → SQLite
-                  └── /api/notes/:id   → SQLite
+Navegador (React, Vite) ──/api──▶ FastAPI (backend/app/main.py, puerto 8000) ──▶ Postgres
+                                   └── /api/llm-proxy ──▶ proveedor LLM (clave y endpoint solo en el servidor)
 ```
 
-### Modos de ejecución
-
-- **Desarrollo**: `npm run dev` → Vite dev server en puerto 5173, proxy Vite para Mistral
-- **Producción**: `npm run build && npm start` → Express en puerto 3000
-
-### Detección de entorno en frontend
-
-```javascript
-if (import.meta.env.PROD) {
-  // llama a /api/proxy (Express)
-} else if (import.meta.env.DEV) {
-  // llama a /mistral-proxy (Vite proxy)
-}
-```
-
-### Nota de entorno: `better-sqlite3` (módulo nativo)
-
-`better-sqlite3` se compila de forma nativa. En Node muy reciente (24+) puede no haber binario precompilado y fallar el build (requiere C++ build tools). Soluciones: `npm install better-sqlite3@latest` (trae prebuilt para Node nuevo) o usar Node LTS 20/22. No es un problema del código de la app.
+- **Desarrollo**: `npx vite` (puerto 5173) con el proxy `/api` de `vite.config.ts` hacia uvicorn en el 8000 (ver "Cómo levantar el entorno de desarrollo real" arriba).
+- **Producción**: `npm run build` genera `dist/`; los estáticos los sirve nginx (`nginx.conf`, `Dockerfile`) y la API, FastAPI.
+- El frontend nunca guarda datos ni claves en el navegador: todo va a la API (Postgres es la fuente de verdad, HR1). La autenticación es JWT (access token en memoria, refresh token en cookie HttpOnly; `src/services/apiClient.js`).
 
 ### Nota de entorno: proxy corporativo con inspección SSL (ATEXIS)
 
-Dos problemas relacionados pero distintos, ambos con la misma causa raíz (el proxy corporativo con inspección SSL — confirmado Zscaler — re-firma el tráfico HTTPS con su propio CA raíz, que ni npm ni Node reconocen por defecto). Detalle completo orientado al usuario en el README ("Troubleshooting: Corporate Network / SSL-Inspecting Proxy"):
-
-1. **`npm install` falla con `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`** — afecta a cualquier instalación o adición de dependencia futura. Es un problema de la propia herramienta npm, no del código de la app. Fix permanente: `npm config set cafile "ruta\al\certificado-corporativo.pem"` (pedir el `.pem` del CA raíz a IT, o exportarlo de `certmgr.msc` → Entidades de certificación raíz de confianza). Fix rápido/temporal si no se tiene el `.pem` a mano: `npm config set strict-ssl false` → `npm install` → `npm config set strict-ssl true` inmediatamente después — nunca dejarlo desactivado.
-2. **La propia app (`npm start`) falla con el mismo error de certificado** — problema distinto: Node en runtime no usa la config de npm ni el almacén de certificados de Windows por defecto. **Ya resuelto en el código** vía `win-ca` (`server.js`, se activa solo si `process.platform === 'win32'`, no-op en Linux/Mac) — no requiere ninguna acción manual, a diferencia del problema 1.
+`npm install` falla con `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` detrás del proxy corporativo con inspección SSL (Zscaler re-firma el tráfico HTTPS con su propio CA raíz, que npm no reconoce). No es un problema del código. Fix permanente: `npm config set cafile "ruta\al\certificado-corporativo.pem"` (pedir el `.pem` del CA raíz a IT, o exportarlo de `certmgr.msc` → Entidades de certificación raíz de confianza). Fix temporal: `npm config set strict-ssl false` → `npm install` → `npm config set strict-ssl true` inmediatamente después, nunca dejarlo desactivado. Detalle en el README ("Troubleshooting: Corporate Network / SSL-Inspecting Proxy").
 
 ## Ficheros clave
 
 | Fichero | Responsabilidad |
 |---|---|
-| `server.js` | Express: static files + proxy LLM + REST API SQLite |
-| `src/db/database.js` | Conexión SQLite con better-sqlite3, WAL mode |
-| `src/db/schema.sql` | Definición de tablas: brdps, config, settings, notes |
-| `src/services/api.js` | Capa de servicio frontend: fetch a endpoints REST |
-| `src/api/generateBREX.js` | Generador BREX S1000D 4.2 + helpers compartidos |
-| `src/api/generateBREX41.js` | Generador BREX S1000D 4.1 |
-| `src/api/generateBREX301.js` | Generador BREX S1000D 3.0.1 |
-| `src/api/generateBREXSch.js` | Generador Schematron 1.0 — S1000D (enfoque A2, ver abajo) |
-| `src/api/brexToSchematron.js` | Conversor determinista BREX → Schematron (sin LLM) |
-| `src/api/generateSchematronDITA.js` | Generador Schematron 1.0 — DITA (pipeline directo LLM, ver abajo) |
-| `src/api/buildBREXdocReport.js` | Constructor del informe BREXdoc |
-| `src/api/llmAPI.js` | Cliente LLM agnóstico (Anthropic/OpenAI/Mistral/Custom) |
-| `src/context/BRDPContext.jsx` | Estado global de BRDPs + carga desde API |
-| `src/hooks/useBRDPs.js` | Hook de BRDPs (usa BRDPContext internamente) |
-| `src/hooks/useAPIKey.js` | Hook de configuración AI (lee/escribe settings API) |
-| `src/hooks/useProjectConfig.js` | Hook de configuración del proyecto (lee/escribe config API) |
-| `src/hooks/useLocalNotes.js` | Hook de notas (sync con API, fallback localStorage) |
-| `src/components/GenerateModal.jsx` | Modal de generación: selector de formato + llamada al generador |
-| `src/components/extract/` | AI Extract: BREX/Schematron o texto/documento → candidatas → importación (v2) |
+| `src/App.jsx`, `src/layouts/` | Rutas y layouts (proyectos, Records, Configuration, Generate, Settings) |
+| `src/pages/RecordsPage.jsx` | BRDPs de un proyecto: tabla, panel de detalle, reglas, asistente |
+| `src/pages/ProjectConfigPage.jsx` | Configuración del proyecto, Excel, AI Extract, borrar datos |
+| `src/pages/GeneratePage.jsx` | Generate: carga las reglas del proyecto y llama al generador |
+| `src/services/apiClient.js` | `authFetch`/`authFetchJson` con refresco del token |
+| `src/api/llmAPI.js` | `sendMessage` a `/api/llm-proxy` |
+| `src/api/generateBREX.js`, `generateBREX41.js`, `generateBREX301.js` | Ensamblado del BREX 4.2 / 4.1 / 3.0.1 con las reglas aprobadas |
+| `src/api/generateBREXSch.js` + `brexToSchematron.js` | Schematron de un proyecto S1000D: BREX convertido sin IA |
+| `src/api/generateSchematronDITA.js` | Ensamblado del Schematron DITA con las reglas aprobadas |
+| `src/api/buildBREXdocReport.js` | Informe (Generate Report) |
+| `src/prompts/` | Todos los prompts (funciones puras; snapshot en `scripts/check-prompt-snapshot.mjs`) |
+| `src/validation/schemaValidation.js` | Comprobación de nombres, estructura, XPath y formato de regla contra el esquema |
+| `src/utils/ruleTest*.js` | Motor y montaje del test de reglas |
+| `src/hooks/` | Estado de Ask, Suggest, test de reglas, embeddings, import, vocabulario |
+| `src/components/extract/` | AI Extract: BREX/Schematron o texto/documento → candidatas → importación |
+| `backend/app/` | API, modelos, servicios y migraciones (ver "Rama actual" arriba) |
 
-## Schema JSON (few-shot para LLM)
+## Datos de esquema en `public/`
 
-Los generadores de BREX cargan su estructura + ejemplos few-shot desde `public/`:
+- `brex-schema-summary-4-2.json`, `-4-1.json`, `-3-0-1.json`: Generate usa su `dmodule_opening_tag`; `structure` y `generation_rules` ya no las lee ningún código (alimentaban los prompts de generación eliminados) y quedan como referencia citada por la tabla de semántica de `ruleTestEngine.js`.
+- `schematron-dita-schema-summary.json`: `sch_header` (esqueleto del `<sch:schema>`), `topic_types` y `vocabulary_by_domain` (content models reales de los XSD de `sources/D1.3/schema/`, usados por el lint de vocabulario).
+- `schema-vocabulary-*.json` (vocabulario por standard) y las plantillas curadas `brdp-template-*.xlsx`.
 
-- `brex-schema-summary-4-2.json` — estructura 4.2 + ejemplos few-shot
-- `brex-schema-summary-4-1.json` — estructura 4.1 + ejemplos few-shot (reutiliza los mismos few-shot examples que 4.2 — son datos planos BRDP→XPath, no dependen del issue)
-- `brex-schema-summary-3-0-1.json` — estructura 3.0.1 + ejemplos few-shot
-- `brex-schema-summary-sch.json` — **ya no se usa** (el Schematron se genera por conversión determinista, no por LLM directo). Se conserva por si se quisiera retomar la generación directa.
+## Generate: ensamblado determinista
 
-Los ejemplos few-shot van en `few_shot_examples` y se inyectan en el system prompt vía `buildBREXPrompt*()`. El schema JSON completo se serializa SIN el array few-shot (para no duplicar tokens); los ejemplos van en un bloque separado.
+Generate no llama a la IA. `GeneratePage.jsx` carga las reglas del proyecto (`/api/projects/{id}/approvals/{formato}/export`) y se las pasa al generador en `options.approvals` (obligatorio; sin él, el generador falla con un error). Entran las reglas Verified (y las Draft si se desmarca "Incluir solo reglas verificadas", `src/utils/generatePlan.js`); cada BRDP sin regla que entre deja un comentario `pendingApprovalComment` con su identificador.
 
-- `public/schematron-dita-schema-summary.json` — equivalente DITA, con estructura distinta (no hay `dmodule_opening_tag` ni `objectPath`): `sch_header` (esqueleto determinista del `<sch:schema>`), `topic_types` (mapa estructural de los 6 tipos: topic/concept/task/machineryTask/map/bookmap, confirmado contra los XSD reales de `sources/D1.3/schema/`), `vocabulary_by_domain` (content models reales por dominio DITA — hazard-d, taskreq-d, hi-d, ut-d, elementos base — usado también por el lint de vocabulario, ver abajo) y `few_shot_examples` (29 reglas Schematron reales, validadas en oXygen).
+### BREX 4.2 / 4.1 / 3.0.1
 
-## Generadores BREX / Schematron — arquitectura defensiva
+- 4.2 `<structureObjectRule>` con `brDecisionRef` y `allowedObjectFlag` en `objectPath`; 4.1 igual sin `brDecisionRef` ni `brSeverityLevel` (no existen en su XSD); 3.0.1 `<objrule>` con `objappl` (0/1) en `objpath`, y las reglas sin contexto como comentario `<!-- nonContextRule … -->` (el XSD 3.0.1 no tiene elemento).
+- Las piezas de cada regla se separan con `splitRuleXmlPieces` (`src/utils/ruleWrappers.js`, gemelo de `rule_wrappers.py`) y los bloques de contexto del mismo esquema se unen en uno (`mergeContextBlocks`). El bloque general va sin `rulesContext`/`context`.
+- Las URL de esquema siguen el "Schema location" del proyecto (`rewriteApprovedRulesSchemaUrls`, informe en la página).
+- Una pasada final (`finalizeDocument`/`41`/`301`) fuerza la cabecera del DM (`forceDmoduleTag`, `dmCode`/`avee` desde la configuración) como red de seguridad.
+- `extractXML`/`checkWellFormed` y `pendingApprovalComment` viven en `generateBREX.js` y los importan los demás generadores.
 
-Los generadores (4.2, 4.1, 3.0.1, Schematron vía 3.0.1) comparten la **misma arquitectura defensiva**, diseñada para que con datasets grandes (+400 BRDPs) el LLM no trunque el XML, no invente IDs, no salte BRDPs ni produzca XML/XPath inválido.
+### Schematron S1000D (`generateBREXSch.js` + `brexToSchematron.js`)
 
-### Patrón común
+Genera el BREX con el generador del standard del proyecto (`options.baseGenerator`) y lo convierte a Schematron ISO con `brexToSchematron()`, 100 % determinista (port del XSL de Docuneering, Apache-2.0): `_isSafePattern` valida el `context`, `_splitTopLevel` separa padre y paso respetando los corchetes, un `context` que no es patrón XSLT cae a `context="/dmodule"` con la ruta en el `test`, y `_buildHeader` declara los namespaces que use el BREX.
 
-1. **Chunking** — `CHUNK_SIZE = 10` BRDPs por llamada LLM, `MAX_RETRIES = 2`.
-   - Chunk 1: genera el DM completo (header + reglas del chunk).
-   - Chunks 2..N: generan solo las reglas.
-   - Un chunk con respuesta vacía NO se descarta: sus BRDPs pasan al reintento individual.
-2. **Verificación por chunk** — detecta reglas faltantes e inventadas; elimina inventadas; reintenta faltantes individualmente.
-3. **Barrido final de cobertura** — tras procesar todos los chunks, recalcula qué BRDPs faltan en el documento completo y los reintenta.
-4. **Red de seguridad anti-pérdida** — si un BRDP sigue sin poder generarse como regla, se emite como entrada de trazabilidad para que NUNCA desaparezca en silencio. La cobertura siempre es total.
-5. **Finalización determinista** — una pasada final que corrige de forma determinista lo que el LLM tiende a romper (ver por versión).
+### Schematron DITA (`generateSchematronDITA.js`)
 
-Helpers compartidos: `extractXML()` y `checkWellFormed()` se importan SIEMPRE desde `./generateBREX.js`. NUNCA duplicarlos.
-
-### BREX 4.2 (`generateBREX.js`)
-
-- Elemento de regla: `<structureObjectRule>`; ref BRDP: `<brDecisionRef brDecisionIdentNumber="..."/>`; flag: `allowedObjectFlag` (0/1/2) en `objectPath`.
-- Reglas sin contexto: elemento formal `<nonContextRule>` (con `simplePara`). El `id` es `xs:ID` (único en TODO el documento).
-- Red de seguridad: `<nonContextRule>` formal.
-- `finalizeDocument(xml, projectConfig, schemaSummary)` aplica, en orden:
-  - `forceDmoduleTag` — fuerza el tag de apertura de `dmodule` (evita corrupción de namespace por el LLM).
-  - `fixFlagPlacement` — mueve `allowedObjectFlag` de `structureObjectRule` a `objectPath`.
-  - `promoteOrphanSplitRules` — sufijos de split (`-b`/`-c`) sin base → renombra a base.
-  - `forceDmCodeFields` (`resolveDmCodeFields`) — fuerza atributos del `dmCode`: respeta `modelIdentCode`/`systemDiffCode` de config (en mayúsculas) y hardcodea el resto (`systemCode=00`, `disassyCodeVariant=0A`, `itemLocationCode=D`, etc.).
-  - `dropRedundantNonContextRules` — si un BRDP existe como `structureObjectRule`, elimina su `nonContextRule` homónimo (evita id `xs:ID` duplicado).
-  - `dedupeNonContextRules` — dedup de `nonContextRule` por id.
-
-### BREX 4.1 (`generateBREX41.js`)
-
-- Mismo mecanismo core que 4.2 (`<structureObjectRule>`, `allowedObjectFlag` 0/1/2 en `objectPath`, `<nonContextRule>` formal) — confirmado idéntico contra el XSD real (`sources/S4.1/brex4.1.xsd` vs `sources/S4.2/brex.xsd`).
-- **Sin `brDecisionRef` ni `brSeverityLevel`** (no existen en el XSD 4.1, confirmado con cero apariciones): la trazabilidad BRDP→regla es solo el atributo `id` de `structureObjectRule`/`nonContextRule`. Todas las funciones de `generateBREX.js` que hardcodeaban estas referencias (plantillas few-shot, `splitMultipleObjectPaths`, el fix-up de `<brDecisionIdentNumber>`, el "safety net" de `nonContextRule`) se adaptaron quitándolas por completo — NO solo renombrándolas.
-- Todas las funciones internas llevan sufijo `41` (mismo patrón que `301` en `generateBREX301.js`): `buildBREXPrompt41`, `buildBREXPromptChunk41`, `finalizeDocument41`, etc.
-- `extractXML()` y `checkWellFormed()` se importan desde `./generateBREX.js` (no se duplican), igual que hace `generateBREX301.js`.
-- `finalizeDocument41(xml, projectConfig, schemaSummary)` aplica el mismo orden que 4.2 (`forceDmoduleTag41`, `fixFlagPlacement41`, `promoteOrphanSplitRules41`, `forceDmCodeFields41`/`resolveDmCodeFields41`, `dropRedundantNonContextRules41`, `dedupeNonContextRules41`) — ninguna de estas funciones tocaba `brDecisionRef`/`brSeverityLevel` en origen, así que no necesitaron más cambio que el renombrado.
-
-### BREX 3.0.1 (`generateBREX301.js`)
-
-- Elemento de regla: `<objrule>`; flag: `objappl` (0/1, NO 2) en `objpath`; header `avee` con elementos hijos de patrón estricto.
-- NO existe `nonContextRules` en el XSD 3.0.1 → las reglas sin contexto se representan como comentarios XML `<!-- nonContextRule id="...": ... -->`.
-- Red de seguridad: comentario `nonContextRule` (no elemento).
-- `finalizeDocument301(xml, projectConfig, schemaSummary)` aplica: `forceDmoduleTag301`, `fixObjapplPlacement301`, `promoteOrphanSplitRules301`, `forceAveeFields301` (`resolveAveeFields301`), `dedupeNonContextComments301`.
-
-### Schematron 1.0 — S1000D (`generateBREXSch.js` + `brexToSchematron.js`) — enfoque A2
-
-El Schematron NO se genera con el LLM directamente (era frágil). En su lugar:
-
-1. `generateBREXSch` reutiliza internamente `generateBREX301` para producir un BREX 3.0.1 (con toda su robustez).
-2. Lo convierte a Schematron ISO con `brexToSchematron()`, que es **100% determinista** (port del XSL de referencia de Docuneering, Apache-2.0).
-
-`brexToSchematron.js` es robusto frente a XPaths complejos generados por LLM:
-
-- `_isSafePattern(ctx)` — valida que un `context` sea un patrón XSLT legal (balance de `()`/`[]`, sin `..`/ejes inversos como paso del patrón, sin operadores colgando).
-- `_splitTopLevel(path)` — split consciente de la profundidad de corchetes para separar parent/step (evita romper rutas con `/` dentro de predicados).
-- Si el `context` calculado no es un patrón válido, hace fallback a `context="/dmodule"` y mueve la ruta al `test` (donde `..`/ejes inversos SÍ son válidos como XPath).
-- `_buildHeader(brexXml)` — declara dinámicamente los namespaces que use el BREX (p. ej. `ns2`), además de los base.
-
-Opciones de `brexToSchematron(brexXml, options)`: `preserveBrdpId` (usa el id del BRDP en el assert en vez de uno secuencial) y `carryComments` (arrastra los comentarios `nonContextRule` del BREX 301 al `.sch` como trazabilidad).
-
-El motor `brexToSchematron.js` es independiente y reutilizable (p. ej. para un futuro botón de migración BREX→Schematron sobre un BREX subido por el usuario).
-
-### Schematron 1.0 — DITA (`generateSchematronDITA.js`) — pipeline directo, sin BREX
-
-DITA no tiene un equivalente a BREX, así que aquí el pipeline es **directo**: BRDP → LLM → Schematron final, sin conversión determinista intermedia (a diferencia de S1000D, que pasa por BREX 3.0.1 → `brexToSchematron()`). Esto hace que la validación post-generación sea la única red de seguridad real.
-
-- **Opción B**: un único `.sch` combinado por proyecto con múltiples `<sch:pattern>`, cada uno auto-limitado por su propio `context` XPath — no hay detección explícita de tipo de topic; una regla simplemente no dispara si su contexto no existe en el documento validado.
-- Mismo patrón de chunking/verificación/reintento/barrido de cobertura que `generateBREX.js` (`CHUNK_SIZE=10`, `MAX_RETRIES=2`), simplificado: como cada chunk solo emite bloques `<sch:pattern>` autocontenidos, no existe el caso especial "chunk 1 = documento completo" de BREX; el ensamblado es un simple array de bloques.
-- El header `<sch:schema>` se añade de forma determinista al final (`finalizeSchematronDocument`), nunca lo genera el LLM.
-- **Red de seguridad**: si un BRDP no tiene gancho estructural real en DITA, se emite un comentario XML de trazabilidad (mismo patrón real usado para desactivar `BRDP-D1-00089` en el dataset curado) — nunca se fuerza ni se inventa una regla.
-- `checkWellFormedSchematron(xml, schemaSummary)` — implementación propia sin `DOMParser` (funciona igual en navegador y en Node, útil para test scripts aislados), con 7 comprobaciones: balance de tags, `<sch:schema>` raíz correcto (namespace + `queryBinding="xslt2"`), ids de `sch:assert`/`sch:report` únicos en TODO el documento, `context` no vacío y patrón XSLT válido (reutiliza `_isSafePattern()`, exportado desde `brexToSchematron.js`), `test` no vacío + cada `sch:rule` con al menos un `sch:assert`/`sch:report`, `role` restringido a valores conocidos, sin placeholders — más un **lint de vocabulario no bloqueante**: compara los nombres de elemento/atributo usados en `context`/`test` contra `vocabulary_by_domain` del schema summary y avisa (sin bloquear) si alguno no está confirmado contra el XSD real.
-- `options.callLLM` y `options.schemaSummary` son inyectables (no solo vía `fetch`/`sendMessageStream`), pensado para poder testear el generador de forma aislada fuera de la app.
+Un único `.sch` por proyecto con un `<sch:pattern>` por regla aprobada, inyectada tal cual (`buildDeterministicBlockFromFewShot`). `dedupeSharedLets`/`collectNamespaces` declaran una vez las funciones y prefijos compartidos; `finalizeSchematronDocument` añade la cabecera con el `queryBinding` del dialecto (`xslt2`/`xslt3`); `checkWellFormedSchematron` comprueba el resultado (sin `DOMParser`) y da avisos de vocabulario no bloqueantes.
 
 ## AI Extract (Project Configuration, `src/components/extract/`)
 
@@ -1100,75 +1021,29 @@ Crea BRDPs a partir de reglas que ya existen o de un texto. La IA propone; el c�
 
 ## Patrones a seguir
 
-### Hooks de datos
-
-> ⚠️ **Este patrón viola HR1 del AACF** ("no localStorage/sessionStorage para estado autoritativo o persistente — Postgres es la fuente de verdad"). Se documenta tal cual está implementado hoy, no como recomendación a seguir en código nuevo. Ver "Auditoría de cumplimiento AACF (pendiente)" al final de este fichero — la reconciliación se hace en una ronda dedicada, no de forma ad hoc.
-
-1. Estado inicial desde localStorage (carga instantánea).
-2. `useEffect` que hace fetch a la API al montar (fuente de verdad).
-3. Saves van a la API + localStorage en paralelo.
-4. La interfaz pública del hook no cambia aunque cambie el backend.
-
-NUNCA acceder a localStorage directamente desde componentes — siempre usar los hooks.
-
-### Proxy LLM
-
-El frontend siempre manda a `/api/proxy` en producción. El body tiene esta forma:
-
-```javascript
-{ targetEndpoint, apiKey, provider, payload }
-```
-
-donde `payload` es el body ya construido. El servidor Express solo añade headers de autenticación y reenvía.
-
-### Base de datos
-
-- Motor: SQLite vía `better-sqlite3` (síncrono), WAL mode.
-- Fichero: `data/brdp.db` (ignorado en git).
-- Tablas: `brdps`, `config`, `settings`, `notes`.
-- Campo `comments` en DB = campo `comment` en frontend (compatibilidad legacy). `GET /api/brdps` devuelve ambos.
-
-### Selectores de versión en GenerateModal
-
-```javascript
-const isBREX42 = format === 'BREX — S1000D 4.2';
-const isBREX41 = format === 'BREX — S1000D 4.1';
-const isBREX301 = format === 'BREX — S1000D 3.0.1';
-const isSchS1000D = format === 'Schematron 1.0 — S1000D';
-const isSchDITA = format === 'Schematron 1.0 — DITA';
-```
-
-Schematron 1.0 se divide en dos formatos independientes en el selector: "Schematron 1.0 — S1000D" (implementado, `generateBREXSch.js`) y "Schematron 1.0 — DITA" (implementado, `generateSchematronDITA.js` — ver "Schematron 1.0 — DITA" arriba). A diferencia de S1000D, DITA no usa `xmllint-wasm` ni validación XSD/DTD en tiempo real (decisión explícita: no es necesaria); la única validación post-generación es `checkWellFormedSchematron()`.
-
-Añadir un nuevo formato BREX requiere: nuevo generador + schema JSON + rama en `handleGenerate()` + actualizar `disabled`/"Coming soon".
-
-### Guardia de validación en el chat
-
-`useChat.js` intercepta en `sendUserMessage()` los mensajes con triggers de cambio de estado (`validationTriggers`) y responde sin llamar al LLM. Segunda capa de restricción en el `basePrompt`.
+- **Datos**: todo dato vive en Postgres y se lee/escribe por la API (`authFetchJson`, React Query donde hay sondeo). Nada de `localStorage`/`sessionStorage` para estado del que dependa la app (HR1); solo preferencias de interfaz con try/catch (`sidebarCollapsed`, ancho del panel de Records, Historial abierto).
+- **LLM**: siempre `sendMessage` (`src/api/llmAPI.js`) → `POST /api/llm-proxy`; el backend elige proveedor, endpoint y clave de su propia configuración. Los prompts son funciones puras en `src/prompts/` y cualquier cambio pasa por `scripts/check-prompt-snapshot.mjs`.
+- **Generate**: un formato nuevo necesita su generador, su entrada en `BREX_STANDARDS`/`STANDARD_TO_RULE_FORMAT` y en `GeneratePage.jsx`.
 
 ## Lo que NO está implementado todavía
 
-- S1000D 5.0, 6.0 (selector existe, botón deshabilitado con "Coming soon").
+- S1000D 5.0, 6.0 (se pueden crear proyectos, pero no hay formato de reglas ni Generate).
 - Botón de migración BREX→Schematron sobre un BREX subido (el motor `brexToSchematron.js` ya está listo; falta la UI).
-- Migración automática de localStorage a SQLite en primera ejecución.
-- Autenticación (no necesaria para uso local single-user).
-- Docker con SQLite (el docker-compose actual usa nginx sin backend).
+- `docker-compose.yml`/`Dockerfile` solo sirven el frontend con nginx; falta el servicio del backend FastAPI y Postgres.
 
 ## Auditoría de cumplimiento AACF (pendiente — no tocar sin luz verde)
 
 Primera pasada de lectura completa del AACF (2026-09-18) contra el código real de `v2-multiproyecto`. Esto son **hallazgos, no fixes** — se abordarán en una ronda dedicada cuando el usuario dé la prioridad; no se ha modificado ningún fichero de código fuente en esta ronda.
 
-### HR1 — localStorage como estado autoritativo (conflicto confirmado)
+### HR1 — localStorage como estado autoritativo (resuelto en el Barrido final 4)
 
-Contradice tanto la Hard Rule HR1 como `SECURITY_CONTEXT.md` del propio framework ("no data persists in localStorage/sessionStorage — database only"). Afecta a:
+Contradecía la Hard Rule HR1 y `SECURITY_CONTEXT.md` del framework ("no data persists in localStorage/sessionStorage — database only"). Todos los casos eran código de v1 que la app ya no montaba, y se borraron en el Barrido final 4 (ver `docs/unused-code-inventory.md`):
 
-- `src/context/BRDPContext.jsx` y `src/hooks/useBRDPs.js` — cachean el dataset completo de BRDPs.
-- `src/hooks/useProjectConfig.js` — cachea la config del proyecto.
-- `src/hooks/useLocalNotes.js` — notas.
-- `src/hooks/useAPIKey.js` (y antes `src/components/AIExtractModal/AIExtractModal.jsx`, borrado en AI Extract 2/2) — **guardan la API key del LLM en localStorage** (además de HR1, roza la gestión de secretos de `ai-output-safety.mdc`: un secreto persistido sin cifrar en el navegador).
-- `src/layouts/AppLayout.jsx` (`sidebarCollapsed`) — preferencia de UI pura, probablemente el único caso defendible tal cual (no es "estado autoritativo o persistente" en el sentido de la regla).
+- `src/context/BRDPContext.jsx` y `src/hooks/useBRDPs.js` (cacheaban el dataset de BRDPs), `src/hooks/useProjectConfig.js` (config del proyecto) y `src/hooks/useLocalNotes.js` (notas): borrados.
+- `src/hooks/useAPIKey.js` y `src/components/AIConfigSection.jsx`, que guardaban la API key del LLM en `localStorage`: borrados (la clave vive solo en el servidor, `/api/llm-proxy`).
+- El patrón "Hooks de datos" de este fichero, causa raíz del conflicto, se ha quitado de "Patrones a seguir".
 
-El propio patrón "Hooks de datos" de la sección "Patrones a seguir" de este fichero es la causa raíz: documenta explícitamente el patrón que el AACF prohíbe. Al reconciliar: la API (Postgres) debe quedar como única fuente de verdad; localStorage, si se conserva para algo, solo como cache explícitamente no autoritativo (con invalidación clara), nunca como estado del que la app depende para funcionar sin red.
+Quedan tres usos, todos preferencias de interfaz (no estado autoritativo), con try/catch y sin que la app dependa de ellos: `src/layouts/AppLayout.jsx` (`sidebarCollapsed`), `src/hooks/useResizableSplit.js` (ancho del panel de Records) y `src/pages/RecordsPage.jsx` (Historial abierto, `sessionStorage`).
 
 ### Otros puntos a revisar (menor prioridad, sin confirmar aún como violación real)
 
