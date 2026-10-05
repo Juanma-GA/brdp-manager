@@ -931,4 +931,19 @@ export const ruleProposalCheckCases = [
       },
     ],
   },
+  // Barrido final 3: "only A, B, C" implemented as a prohibition of the
+  // other elements (a boolean objectPath) -- the real case read backwards.
+  // Its description now says what the condition never rejects.
+  {
+    name: 'brex-4-1-boolean-only-listed-elements',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EVAL-RT-BOOL', title: 'Elements in the tool CIR', definition: 'Decide which elements can be used in the data update file representing the tool CIR.', proposal: "Only toolSpec, toolIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the tool CIR." },
+        standard: 'S1000D 4.1',
+        format: 'BREX-4.1',
+        ruleXml: ruleToolCirBoolean,
+        ruleDescription: describeText(ruleToolCirBoolean, 'BREX-4.1'),
+      },
+    ],
+  },
 ];

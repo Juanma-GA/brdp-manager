@@ -35,6 +35,13 @@
 // given Proposal is not repeated), S2-00002 and BREX-S1-00242 asked only
 // Title and Definition. Nothing else changes.
 //
+// Barrido final 3: the Proposal check answers in three levels ("yes",
+// "partly", "no") with criteria of what is NOT a "no" and four real
+// examples; changed on purpose: the 2 ruleProposalCheck cases. New case
+// brex-4-1-boolean-only-listed-elements ("only A, B, C" as a boolean
+// prohibition of the others; its description now says that elements the
+// condition does not name are never rejected). Nothing else changes.
+//
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a
 // few rounds back) means expected-prompts.json is stale by design, not

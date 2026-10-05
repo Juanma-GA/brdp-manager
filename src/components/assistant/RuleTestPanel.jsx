@@ -697,6 +697,11 @@ export default function RuleTestPanel({
               ⚠ {t('records.ruleTest.proposalMismatch', { text: state.proposalCheck.missing })}
             </p>
           )}
+          {state.proposalCheck?.status === 'partial' && (
+            <p className={`${styles.ruleTestNote} ${styles.ruleTestToneNeutral}`} data-testid="rule-test-partial">
+              {t('records.ruleTest.proposalPartial', { text: state.proposalCheck.reason })}
+            </p>
+          )}
           <CorrectionNote correction={state.correction} />
           <UntestedNote untested={state.untested} />
           <p className={styles.hint}>{t('records.ruleTest.skeletonLegend')}</p>

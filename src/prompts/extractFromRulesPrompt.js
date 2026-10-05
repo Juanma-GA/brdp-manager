@@ -18,6 +18,8 @@
 // rule count, flags, path kinds, the first paths, the most repeated
 // objectUse and, for candidates up to 200 rules, the first rules one by one.
 
+import { readLlmJson } from './llmJson.js';
+
 export const EXTRACT_USER_MESSAGE = 'Write the texts for these BRDPs.';
 
 const TEXT_FIELDS = ['title', 'definition', 'proposal'];
@@ -162,16 +164,10 @@ export function buildExtractFromRulesPrompt({ standard, ruleFormat, candidates }
 // key → the fields asked; the Proposal when not given). A ```json fence
 // and text around the object are tolerated.
 export function parseExtractFromRulesResponse(text, expectedKeys, fieldsByKey = new Map()) {
-  const raw = String(text ?? '').trim();
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start === -1 || end <= start) throw new Error('the answer is not JSON');
-  let data;
-  try {
-    data = JSON.parse(raw.slice(start, end + 1));
-  } catch (err) {
-    throw new Error(`the answer is not valid JSON: ${err.message}`, { cause: err });
-  }
+  const read = readLlmJson(text, { allowUnclosed: false });
+  if (!read.ok && read.reason === 'no_object') throw new Error('the answer is not JSON');
+  if (!read.ok) throw new Error(`the answer is not valid JSON: ${read.message}`, { cause: read.error });
+  const { data } = read;
   if (!data || !Array.isArray(data.items)) throw new Error('the answer has no "items" list');
   const expected = new Set(expectedKeys);
   const items = new Map();

@@ -621,16 +621,30 @@ function ruleTestReply(systemPrompt, messages) {
 // call. MISMATCH and "at most three substeps" (the real "Revisar" case: the
 // rule only forbids exactly one substep) → implements false; PROPCHECKFAIL
 // → an answer that is not JSON (the check failed); anything else → true.
+// Barrido final 3: three levels with their reason ("yes" / "partly" /
+// "no"). PARTLY in the Proposal, or a Proposal that asks to mark values up
+// with <quantity> (no rule can check it), answers "partly"; CTRLCHARS
+// writes a raw line break inside the reason string.
 function ruleProposalCheckReply(systemPrompt) {
   const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
   if (/PROPCHECKFAIL/.test(proposal)) return "I think the rule is probably fine.";
+  let reply;
   if (/MISMATCH/.test(proposal)) {
-    return JSON.stringify({ implements: false, missing: "The Proposal is about CAGE codes; the rule checks <emphasis>." });
+    reply = { implements: "no", reason: "The Proposal is about CAGE codes; the rule checks <emphasis>." };
+  } else if (/at most three substeps|como m[aá]ximo tres subpasos/i.test(proposal)) {
+    reply = { implements: "no", reason: "The Proposal allows at most three substeps; the rule only rejects a step with exactly one substep, so four or more are accepted." };
+  } else if (/PARTLY|marked up with <quantity>/.test(proposal)) {
+    reply = { implements: "partly", reason: "Marking the torque values up with <quantity> cannot be checked by a rule; the rule checks the unit." };
+  } else {
+    reply = { implements: "yes", reason: "" };
   }
-  if (/at most three substeps|como m[aá]ximo tres subpasos/i.test(proposal)) {
-    return JSON.stringify({ implements: false, missing: "The Proposal allows at most three substeps; the rule only rejects a step with exactly one substep, so four or more are accepted." });
-  }
-  return JSON.stringify({ implements: true, missing: "" });
+  const text = JSON.stringify(reply);
+  return /CTRLCHARS/.test(proposal) ? rawControlChars(text.replace('"reason":"', '"reason":"First line.\\n')) : text;
+}
+
+// The JSON escapes \n and \t inside strings written as the raw characters.
+function rawControlChars(json) {
+  return json.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
 }
 
 // T3b "Review with the assistant": the cause follows the deterministic
@@ -953,6 +967,10 @@ const server = http.createServer((req, res) => {
       }
       // BRDP-EXT-00029 always at its real size (the case that was cut).
       if (/REALSIZE|\/ddn or \/dml/.test(messages.find((m) => m.role === "system")?.content || "")) reply = realSize(reply);
+      // Barrido final 3, Part 2: CTRLCHARS in the Proposal writes the line
+      // breaks inside the JSON strings raw, as Mistral did ("Bad control
+      // character in string literal"); the app's reader escapes them.
+      if (/CTRLCHARS/.test(messages.find((m) => m.role === "system")?.content || "")) reply = rawControlChars(reply);
     } else if (hasPriorTurn) {
       reply = `MOCK-FOLLOWUP: Building on my previous answer, here is more detail in response to: "${userText}"`;
     } else if (/<warning> y cu[aá]ndo conviene/.test(userText) || /SCHEMAFACTSNAME/.test(userText)) {

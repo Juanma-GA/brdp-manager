@@ -87,6 +87,9 @@ async function main() {
   const p42 = await makeProject("Final 1-2 S1000D", "S1000D 4.2");
   await makeBrdp(p42, "BREX-4.2", "BRDP-FIN-REVIEW", { title: "Substeps", definition: "Number of substeps in a step.", proposal: "A step shall have at most three substeps." }, ONE_SUBSTEP);
   await makeBrdp(p42, "BREX-4.2", "BRDP-FIN-OK", { title: R187.Title, definition: R187.Definition, proposal: R187.Proposal }, R187.Rule);
+  // Barrido final 3: the judge answers "partly" (PARTLY) and writes raw
+  // line breaks inside its JSON strings and inside the examples' (CTRLCHARS).
+  await makeBrdp(p42, "BREX-4.2", "BRDP-FIN-PARTLY", { title: R187.Title, definition: R187.Definition, proposal: `${R187.Proposal} PARTLY CTRLCHARS` }, R187.Rule);
   await makeBrdp(p42, "BREX-4.2", "BRDP-FIN-FAIL", { title: R187.Title, definition: R187.Definition, proposal: R187.Proposal }, R187.Rule);
   await makeBrdp(p42, "BREX-4.2", "BRDP-FIN-ASK", { title: "Use of warnings in procedural steps", definition: "Decide when a warning shall be placed before a procedural step.", proposal: "", validation: "Pending" });
   for (const p of projects) await embed(p);
@@ -197,6 +200,25 @@ async function main() {
     assert((await panelOk.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), "a rule that implements its Proposal: Correct, no extra Review");
     await waitIndicator("passed");
     await panelOk.getByRole("button", { name: "Close" }).click();
+
+    // "partly": the examples' verdict stands, with an informative note;
+    // both answers came with raw line breaks inside their strings.
+    await select("BRDP-FIN-PARTLY");
+    await fetch(`${MOCK}/reset`, { method: "POST" });
+    const panelPartly = await testDraft();
+    const vPartly = await panelPartly.getByTestId("rule-test-verdict").textContent();
+    assert(vPartly.startsWith("Correct"), `partly: the verdict stays Correct (${vPartly})`);
+    const note = await panelPartly.getByTestId("rule-test-partial").textContent();
+    assert(note.startsWith("The rule covers part of the Proposal: First line.") && note.includes("cannot be checked by a rule"), `partly: informative note with its reason (${note})`);
+    assert((await panelPartly.getByTestId("rule-test-mismatch").count()) === 0, "partly: no Review/indicative mismatch line");
+    await waitIndicator("passed");
+    await language().selectOption("es");
+    await page.waitForTimeout(400);
+    assert((await panels().first().getByTestId("rule-test-partial").textContent()).startsWith("La regla cubre parte de la Propuesta:"), "partly: Spanish note");
+    await panels().first().screenshot({ path: shot("rule-test-final-3-partly-es.png") });
+    await language().selectOption("en");
+    await page.waitForTimeout(300);
+    await panels().first().getByRole("button", { name: "Close" }).click();
 
     await select("BRDP-FIN-FAIL");
     await fetch(`${MOCK}/reset`, { method: "POST" });

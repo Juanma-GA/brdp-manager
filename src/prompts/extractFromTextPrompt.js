@@ -15,6 +15,8 @@
 // The text is data: an instruction written in it ("ignore the previous
 // instructions…") is content, never an order.
 
+import { readLlmJson } from './llmJson.js';
+
 export const FIND_DECISIONS_USER_MESSAGE = 'Find the decisions in this text.';
 export const EXTRACT_TEXT_USER_MESSAGE = 'Write the texts for these BRDPs.';
 
@@ -47,16 +49,10 @@ export function buildFindDecisionsPrompt({ standard, text }) {
 // not the expected JSON (a ```json fence and text around it are tolerated).
 // Items without a quote are dropped; an empty list is a valid answer.
 export function parseFindDecisionsResponse(text) {
-  const raw = String(text ?? '').trim();
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start === -1 || end <= start) throw new Error('the answer is not JSON');
-  let data;
-  try {
-    data = JSON.parse(raw.slice(start, end + 1));
-  } catch (err) {
-    throw new Error(`the answer is not valid JSON: ${err.message}`, { cause: err });
-  }
+  const read = readLlmJson(text, { allowUnclosed: false });
+  if (!read.ok && read.reason === 'no_object') throw new Error('the answer is not JSON');
+  if (!read.ok) throw new Error(`the answer is not valid JSON: ${read.message}`, { cause: read.error });
+  const { data } = read;
   if (!data || !Array.isArray(data.decisions)) throw new Error('the answer has no "decisions" list');
   return data.decisions
     .filter((d) => d && typeof d.quote === 'string' && d.quote.trim())

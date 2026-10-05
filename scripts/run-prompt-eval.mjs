@@ -364,6 +364,18 @@ async function runCheck(check, answer, ctx = {}) {
       const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
       return { status: verdict.kind === "review" && !verdict.unchecked ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
+    case "rule_proposal_check_level": {
+      // Barrido final 3: the level of the separate Proposal check ("yes",
+      // "partly", "no"). `expect`: the accepted levels -- a correct rule
+      // whose Proposal also asks something no rule can check is "partly";
+      // "yes" is never wrong there, "no" always is.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const level = { implements: "yes", partial: "partly", mismatch: "no" }[r.proposalCheck?.status] || null;
+      const expect = check.expect || ["yes", "partly"];
+      const why = r.proposalCheck?.reason || r.proposalCheck?.error || "";
+      return { status: level && expect.includes(level) ? "pass" : "fail", detail: `level: ${level || r.proposalCheck?.status || "no check"}${why ? ` (${why})` : ""}; expected ${expect.join(" or ")}` };
+    }
     case "rule_test_verdict_incorrect": {
       // T3b: a known WRONG rule -- examples written from the decision must
       // expose it.
@@ -828,7 +840,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
       status: result.status,
       error: result.error || null,
       description,
-      proposalCheck: result.proposalCheck ? { status: result.proposalCheck.status, missing: result.proposalCheck.missing ?? null, error: result.proposalCheck.error ?? null, answer: result.proposalCheck.answer ?? null } : null,
+      proposalCheck: result.proposalCheck ? { status: result.proposalCheck.status, reason: result.proposalCheck.reason ?? null, missing: result.proposalCheck.missing ?? null, error: result.proposalCheck.error ?? null, answer: result.proposalCheck.answer ?? null } : null,
       correction: result.correction ?? null,
       verdict,
       examples: (result.examples || []).map((ex, i) => ({

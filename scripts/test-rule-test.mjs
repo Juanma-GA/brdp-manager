@@ -2556,22 +2556,24 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const brdp3 = { identifier: 'BRDP-S1-00187', title: 'Substeps', definition: 'Number of substeps.', proposal: 'A step has at most three substeps.' };
   const prompt = buildRuleProposalCheckPrompt({ brdp: brdp3, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: R187, ruleDescription: description });
   check('check prompt: the Proposal, the description and the rule', prompt.includes('Proposal: A step has at most three substeps.') && prompt.includes(description) && prompt.includes(R187));
-  check('check prompt: JSON shape asked', prompt.includes('{"implements": true, "missing": ""}'));
+  check('check prompt: JSON shape asked (three levels)', prompt.includes('{"implements": "yes", "reason": ""}') && /"yes".*\n[\s\S]*"partly"[\s\S]*"no"/.test(prompt));
   check('check: temperature 0', RULE_PROPOSAL_CHECK_TEMPERATURE === 0);
-  check('check parse: true', JSON.stringify(parseRuleProposalCheckResponse('{"implements": true, "missing": ""}')) === '{"ok":true,"implements":true,"missing":""}');
-  check('check parse: false with fence', parseRuleProposalCheckResponse('```json\n{"implements": false, "missing": "Solo prohíbe uno."}\n```').missing === 'Solo prohíbe uno.');
+  check('check parse: the old boolean true → yes', JSON.stringify(parseRuleProposalCheckResponse('{"implements": true, "missing": ""}')) === '{"ok":true,"level":"yes","reason":""}');
+  check('check parse: the old boolean false with fence → no, its "missing" as the reason', JSON.stringify(parseRuleProposalCheckResponse('```json\n{"implements": false, "missing": "Solo prohíbe uno."}\n```')) === '{"ok":true,"level":"no","reason":"Solo prohíbe uno."}');
   check('check parse: not JSON → error', !parseRuleProposalCheckResponse('I think so.').ok);
-  check('check parse: implements not boolean → error', !parseRuleProposalCheckResponse('{"implements": "yes"}').ok);
+  check('check parse: an unknown level → error', !parseRuleProposalCheckResponse('{"implements": "maybe"}').ok && !parseRuleProposalCheckResponse('{"reason": "x"}').ok);
 
   const asks = [];
   const run = (answer) => checkRuleImplementsProposal({
     brdp: brdp3, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: R187, ruleDescription: description,
     ask: async (messages, sys) => { asks.push({ messages, sys }); if (answer instanceof Error) throw answer; return answer; },
   });
-  const mismatch = await run('{"implements": false, "missing": "The Proposal allows at most three substeps; the rule only rejects exactly one."}');
-  check('check: mismatch with its sentence', mismatch.status === 'mismatch' && mismatch.missing.startsWith('The Proposal allows at most three'));
+  const mismatch = await run('{"implements": "no", "reason": "The Proposal allows at most three substeps; the rule only rejects exactly one."}');
+  check('check: "no" → mismatch with its sentence', mismatch.status === 'mismatch' && mismatch.missing.startsWith('The Proposal allows at most three') && mismatch.reason === mismatch.missing);
   check('check: one user message, the fixed one', asks[0].messages.length === 1 && asks[0].messages[0].content === RULE_PROPOSAL_CHECK_USER_MESSAGE);
-  check('check: implements', (await run('{"implements": true, "missing": ""}')).status === 'implements');
+  check('check: "yes" → implements', (await run('{"implements": "yes", "reason": ""}')).status === 'implements');
+  const partial = await run('{"implements": "partly", "reason": "Marking torque values up with <quantity> cannot be checked."}');
+  check('check: "partly" → partial with its reason', partial.status === 'partial' && partial.reason.startsWith('Marking torque values'));
   const broken = await run('Looks fine to me.');
   check('check: invalid JSON → unavailable with the reason', broken.status === 'unavailable' && /no JSON object/.test(broken.error), JSON.stringify(broken));
   const thrown = await run(Object.assign(new Error('Connection error. Please try again.'), {}));
@@ -2587,6 +2589,8 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const r = testRun(R187, ex, setup187);
   const analysis187 = analyzeRule(R187, 'BREX-4.2', { parseXml });
   check('verdict: implements → correct, no extra review', ruleTestVerdict(r.materialized, r.runs, analysis187, { status: 'implements' }).kind === 'correct');
+  const en0 = i18n.getFixedT('en');
+  const es0 = i18n.getFixedT('es');
   const rv = ruleTestVerdict(r.materialized, r.runs, analysis187, mismatch);
   check('verdict: "max three" vs "exactly one" → review with what is missing', rv.kind === 'review' && !rv.unchecked && rv.mismatch === mismatch.missing, JSON.stringify(rv));
   const ru = ruleTestVerdict(r.materialized, r.runs, analysis187, broken);
@@ -2594,6 +2598,8 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const recU = verdictToTestRecord(ru);
   check('verdict: unchecked recorded as review with test_proposal_unchecked', recU.result === 'review' && recU.reason.code === 'test_proposal_unchecked' && recU.reason.params.error === broken.error);
   check('verdict: no check (saved examples) → correct as today', ruleTestVerdict(r.materialized, r.runs, analysis187, null).kind === 'correct');
+  check('verdict: "partly" → correct (the panel adds a note), never review', ruleTestVerdict(r.materialized, r.runs, analysis187, partial).kind === 'correct');
+  check('partial note EN/ES', en0('records.ruleTest.proposalPartial', { text: 'x' }) === 'The rule covers part of the Proposal: x' && es0('records.ruleTest.proposalPartial', { text: 'x' }) === 'La regla cubre parte de la Propuesta: x');
   const wrongEx = [{ ...ex[0], expected: 'reject' }, ex[1]];
   const rw = testRun(R187, wrongEx, setup187);
   check('verdict: an incorrect verdict stays incorrect whatever the check', ruleTestVerdict(rw.materialized, rw.runs, analysis187, broken).kind === 'incorrect');
@@ -2609,7 +2615,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const g = await generateRuleTestExamples({
     ruleXml: R187, format: 'BREX-4.2', standard: 'S1000D 4.2', schemaLocation: 'flat', brdp: brdp3, vocabulary, parseXml,
     ask: async () => { calls.push('examples'); return JSON.stringify({ examples: ex }); },
-    askProposalCheck: async (_m, sys) => { calls.push(sys.startsWith('You check whether') ? 'check' : '?'); return '{"implements": false, "missing": "Only exactly one substep is rejected."}'; },
+    askProposalCheck: async (_m, sys) => { calls.push(sys.startsWith('You check whether') ? 'check' : '?'); return '{"implements": "no", "reason": "Only exactly one substep is rejected."}'; },
     ruleDescription: description,
     fetchSchemaCards: async (_s, names) => ({ cards: {}, document_schemas: ['proced'], element_schemas: Object.fromEntries(names.map((n) => [n, ['proced']])) }),
     fetchStructure: async (_s, schema) => ({ available: true, ...structureOf('S1000D 4.2', schema) }),
@@ -2624,6 +2630,119 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
     fetchStructure: async (_s, schema) => ({ available: true, ...structureOf('S1000D 4.2', schema) }),
   });
   check('generate: without askProposalCheck no check (null)', g0.proposalCheck === null);
+}
+
+// ─── Barrido final 3, Part 1: the judgement in three levels ─────────────────
+{
+  const { buildRuleProposalCheckPrompt } = await import('../src/prompts/ruleProposalCheckPrompt.js');
+  const { checkRuleImplementsProposal } = await import('../src/utils/ruleTestRun.js');
+  const { ruleDescriptionText } = await import('../src/utils/ruleTestReasons.js');
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const cases = JSON.parse(fs.readFileSync(new URL('./prompt-eval/cases.json', import.meta.url), 'utf8')).cases;
+  const byId = (id) => cases.find((c) => c.id === id);
+  const boolCase = byId('rule-test-4-1-boolean-tool-cir');
+  const boolDesc = describeRule(boolCase.rule, 'BREX-4.1', { parseXml });
+  const boolText = ruleDescriptionText(boolDesc, en);
+  check('describe: a forbidden condition says what it never rejects (EN)', boolText.includes('Elements and attributes the condition does not name are never rejected by it.'), boolText);
+  check('describe: … and in Spanish', ruleDescriptionText(boolDesc, es).includes('Los elementos y atributos que la condición no nombra nunca los rechaza.'));
+  const prompt = buildRuleProposalCheckPrompt({ brdp: boolCase.brdp, standard: 'S1000D 4.1', format: 'BREX-4.1', ruleXml: boolCase.rule, ruleDescription: boolText });
+  for (const [what, needle] of [
+    ['an uncheckable part is partly', 'A part of the Proposal that no XML rule can check'],
+    ['forbidding the alternative is yes', 'rejects <y> where <x> belongs'],
+    ['a missing attribute is not by itself no', '"if it does not appear, it is not rejected"'],
+    ['only A, B, C as a prohibition of the others is yes', 'A, B and C are the allowed ones: the rule\n  must NOT reject them.'],
+    ['example: substeps → no', 'step with exactly one substep → "no"'],
+    ['example: <quantity> → partly', 'N.m → "partly"'],
+    ['example: tool CIR → yes', 'that contains <zoneSpec>, <partSpec>, … → "yes"'],
+    ['example: <applic> → yes', '<applicRef> in <dmStatus> and <pmStatus> → "yes"'],
+    ['only "no" reasons', 'These are NOT reasons for "no"'],
+  ]) check(`judge prompt: ${what}`, prompt.includes(needle), needle);
+
+  // The edge cases of the encargo, the judge's answer given: the verdict.
+  const R187 = readPublicTemplate('brdp-template-4-2.xlsx').find((r) => r.ID === 'BRDP-S1-00187').Rule;
+  const setup187 = setupFor('S1000D 4.2', R187, ['proced']);
+  const step = (n) => `<proceduralStep><para>Remove the cover.</para>${'<proceduralStep><para>Sub.</para></proceduralStep>'.repeat(n)}</proceduralStep>`;
+  const r = testRun(R187, [
+    { label: 'two', expected: 'accept', schema: 'proced', content: step(2) },
+    { label: 'one', expected: 'reject', schema: 'proced', content: step(1) },
+  ], setup187);
+  const analysis = analyzeRule(R187, 'BREX-4.2', { parseXml });
+  const judged = async (answer) => checkRuleImplementsProposal({ brdp: boolCase.brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: R187, ruleDescription: 'x', ask: async () => answer });
+  const verdictOf = async (answer) => ruleTestVerdict(r.materialized, r.runs, analysis, await judged(answer)).kind;
+  check('edge: "at most three" vs "exactly one" → no → review', (await verdictOf('{"implements": "no", "reason": "Four or more are accepted."}')) === 'review');
+  check('edge: N.m + <quantity> → partly → correct', (await verdictOf('{"implements": "partly", "reason": "<quantity> cannot be checked."}')) === 'correct');
+  check('edge: "only A, B, C" → yes → correct', (await verdictOf('{"implements": "yes", "reason": ""}')) === 'correct');
+  check('edge: a contradicting rule → no → review', (await verdictOf('{"implements": "no", "reason": "It forbids what the Proposal requires."}')) === 'review');
+  const failed = ruleTestVerdict(r.materialized, r.runs, analysis, await judged('not json at all'));
+  check('edge: the judge call fails → "the Proposal could not be checked"', failed.kind === 'review' && failed.unchecked === true);
+  const thrown = await checkRuleImplementsProposal({ brdp: boolCase.brdp, standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: R187, ruleDescription: 'x', ask: async () => { throw new Error('down'); } });
+  check('edge: the judge call throws → unavailable', thrown.status === 'unavailable' && ruleTestVerdict(r.materialized, r.runs, analysis, thrown).unchecked === true);
+  // Raw control characters in the judge's reason (Part 2) are read.
+  const raw = await judged('{"implements": "partly", "reason": "First line.\nSecond line."}');
+  check('edge: a raw line break inside the reason → read', raw.status === 'partial' && raw.reason === 'First line.\nSecond line.', JSON.stringify(raw));
+
+  // The four real eval cases carry a level check.
+  for (const [id, expect] of [['rule-test-4-2-quantity-correction', ['partly', 'yes']], ['rule-test-4-1-boolean-tool-cir', ['yes', 'partly']], ['rule-test-template-4-2-applic-in-status', ['yes', 'partly']], ['rule-test-4-2-review-substeps', ['no']]]) {
+    const c = byId(id).checks.find((k) => k.type === 'rule_proposal_check_level');
+    check(`eval: ${id} checks the level ${expect.join('/')}`, c && JSON.stringify(c.expect) === JSON.stringify(expect));
+  }
+}
+
+// ─── Barrido final 3, Part 2: one JSON reader for every LLM answer ─────────
+{
+  const { readLlmJson, escapeControlCharsInStrings } = await import('../src/prompts/llmJson.js');
+  const { parseRuleTestResponse } = await import('../src/prompts/ruleTestExamplesPrompt.js');
+  const { parseRuleTestReviewResponse } = await import('../src/prompts/ruleTestReviewPrompt.js');
+  const { parseRuleProposalCheckResponse } = await import('../src/prompts/ruleProposalCheckPrompt.js');
+  const { parseExtractFromRulesResponse } = await import('../src/prompts/extractFromRulesPrompt.js');
+  const { parseFindDecisionsResponse } = await import('../src/prompts/extractFromTextPrompt.js');
+  const nl = '\n';
+  const inString = `{"examples": [{"label": "a", "expected": "accept", "schema": "proced", "content": "<para>${nl}  Remove the cover.${nl}\t</para>"}]}`;
+  check('json: newline and tab inside a string → JSON.parse fails…', (() => { try { JSON.parse(inString); return false; } catch (e) { return /control character/i.test(e.message); } })());
+  const read = readLlmJson(inString);
+  check('json: … the reader escapes them and reads it', read.ok && read.repaired && read.data.examples[0].content === `<para>${nl}  Remove the cover.${nl}\t</para>`);
+  const outside = `{${nl}  "implements": "yes",${nl}\t"reason": ""${nl}}`;
+  const ro = readLlmJson(outside);
+  check('json: newlines outside the strings → read as always, nothing repaired', ro.ok && !ro.repaired && ro.data.implements === 'yes');
+  check('json: unchanged text when there is nothing to escape', escapeControlCharsInStrings(outside.replace(/\t/g, ' ')) === outside.replace(/\t/g, ' '));
+  check('json: an escaped quote and backslash inside a string are kept', readLlmJson('{"a": "say \\"hi\\"\\\\ ' + nl + '"}').data?.a === 'say "hi"\\ ' + nl);
+  check('json: other control characters → \\u00XX', escapeControlCharsInStrings('{"a": "x\u0001y"}') === '{"a": "x\\u0001y"}');
+  const notJson = readLlmJson('I think the rule is fine.');
+  check('json: text that is not JSON → error as today', !notJson.ok && notJson.reason === 'no_object');
+  const broken = readLlmJson(`{"a": "x${nl}", "b": }`);
+  check('json: still invalid after escaping → the first error', !broken.ok && broken.reason === 'invalid' && broken.message.length > 0);
+  check('json: fence and text around tolerated', readLlmJson('Here:\n```json\n{"a": 1}\n```\nDone.').data?.a === 1);
+  // Every parser that expects JSON reads raw line breaks inside strings.
+  check('json: rule-test examples parser', parseRuleTestResponse(inString).ok);
+  check('json: review parser', parseRuleTestReviewResponse(`{"cause": "rule", "explanation": "Line one.${nl}Line two."}`).ok);
+  check('json: proposal-check parser', parseRuleProposalCheckResponse(`{"implements": "no", "reason": "Line one.${nl}Line two."}`).reason === `Line one.${nl}Line two.`);
+  check('json: AI Extract (rules) parser', parseExtractFromRulesResponse(`{"items": [{"key": "c1", "proposal": "Shall be used.${nl}Always."}]}`, ['c1']).items.get('c1').proposal === `Shall be used.${nl}Always.`);
+  check('json: AI Extract (text) parser', parseFindDecisionsResponse(`{"decisions": [{"quote": "Line one.${nl}Line two.", "title": "T"}]}`)[0].quote === `Line one.${nl}Line two.`);
+  check('json: AI Extract parsers keep their errors', (() => { try { parseFindDecisionsResponse('nothing'); return false; } catch (e) { return e.message === 'the answer is not JSON'; } })()
+    && (() => { try { parseFindDecisionsResponse('{"decisions": [}'); return false; } catch (e) { return e.message.startsWith('the answer is not valid JSON: '); } })());
+  check('json: the old parsers keep their error texts', parseRuleTestResponse('nothing').error === 'The answer contains no JSON object.' && parseRuleTestResponse('{"examples": [}').error.startsWith('The answer is not valid JSON ('));
+}
+
+// ─── Barrido final 3, Part 3: a section element in the wrong place ─────────
+{
+  const { minimalSectionPlaces } = await import('../src/utils/ruleTest.js');
+  const { simplePaths } = await import('../src/utils/schemaPlacement.js');
+  const st = structureOf('S1000D 4.2', 'descript');
+  const paths = simplePaths(st.elements, ['dmStatus'], 'language', 5);
+  check('section: from <dmStatus> to <language> there are several ways (no unique fix)', paths.paths.length > 1, paths.paths.map((p) => p.join('/')).join(' | '));
+  const places = minimalSectionPlaces(st.skeleton.metadata.tree);
+  check('section: <language> sits once in the minimal section, in <dmIdent>', places.get('language').length === 1 && places.get('language')[0].join('/') === 'identAndStatusSection/dmAddress/dmIdent/language');
+  const problems = exampleProblems({ wellFormed: true, structure: [{ kind: 'notAllowed', element: 'language', parent: 'dmStatus' }, { kind: 'notAllowed', element: 'issueInfo', parent: 'dmStatus' }] }, { standard: 'S1000D 4.2', schema: 'descript', sectionTree: st.skeleton.metadata.tree });
+  check('section: the correction names the place of the minimal section', problems[0] === '<language> is not allowed inside <dmStatus>. In this section <language> goes inside <dmIdent> (identAndStatusSection/dmAddress/dmIdent/language), as in the minimal section; do not repeat it elsewhere.', problems[0]);
+  check('section: … and for <issueInfo>', problems[1].includes('identAndStatusSection/dmAddress/dmIdent/issueInfo'));
+  const twice = exampleProblems({ wellFormed: true, structure: [{ kind: 'notAllowed', element: 'dmCode', parent: 'dmStatus' }] }, { standard: 'S1000D 4.2', schema: 'descript', sectionTree: st.skeleton.metadata.tree });
+  check('section: an element twice in the minimal section (dmCode) gets no place hint', !twice[0].includes('as in the minimal section'), twice[0]);
+  const pm = structureOf('S1000D 4.2', 'pm');
+  const pmProblems = exampleProblems({ wellFormed: true, structure: [{ kind: 'notAllowed', element: 'language', parent: 'pmStatus' }] }, { standard: 'S1000D 4.2', schema: 'pm', sectionTree: pm.skeleton.metadata.tree });
+  check('section: pm → pmAddress/pmIdent', pmProblems[0].includes('identAndStatusSection/pmAddress/pmIdent/language'), pmProblems[0]);
+  const content = exampleProblems({ wellFormed: true, structure: [{ kind: 'notAllowed', element: 'language', parent: 'para' }] }, { standard: 'S1000D 4.2', schema: 'descript', sectionTree: st.skeleton.metadata.tree });
+  check('section: a problem outside the section gets no hint', !content[0].includes('minimal section'));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

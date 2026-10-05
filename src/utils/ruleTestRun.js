@@ -292,6 +292,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             nestings: setup?.placements?.[materialized[index].schema]?.placement?.nestings || [],
             expected: examples[index].expected,
             tableModel: Boolean(setup?.tableModel),
+            sectionTree: setup?.placements?.[materialized[index].schema]?.placement?.metadata?.tree || null,
           });
       if (problems.length > 0 && !missing && keep && examples[index].expected === 'reject') problems.push(keep);
       return { index, label: examples[index].label, problems };
@@ -310,8 +311,10 @@ export function runRuleTestExamples(examples, { ruleXml, format, setup, vocabula
 // call (ruleProposalCheckPrompt.js), given the decision and the rule's
 // deterministic description. `ask(messages, systemPrompt)` → the answer
 // text (the caller sends it at RULE_PROPOSAL_CHECK_TEMPERATURE).
-//   { status: 'implements' }
-//   { status: 'mismatch', missing }   -- missing: the LLM's sentence
+//   { status: 'implements' }                    -- "yes"
+//   { status: 'partial', reason }               -- "partly" (Barrido final 3):
+//     the examples' verdict stands, with an informative note
+//   { status: 'mismatch', missing, reason }     -- "no": the LLM's sentence
 //   { status: 'unavailable', error, truncated? } -- the call failed or did
 //     not answer valid JSON: never read as "implements" (the verdict says
 //     the Proposal could not be checked).
@@ -322,7 +325,10 @@ export async function checkRuleImplementsProposal({ brdp, standard, format, rule
     const answer = await ask([{ role: 'user', content: RULE_PROPOSAL_CHECK_USER_MESSAGE }], systemPrompt);
     const parsed = parseRuleProposalCheckResponse(answer);
     if (!parsed.ok) return { status: 'unavailable', error: parsed.error, systemPrompt, answer };
-    return parsed.implements ? { status: 'implements', systemPrompt, answer } : { status: 'mismatch', missing: cleanInternalNames(parsed.missing), systemPrompt, answer };
+    if (parsed.level === 'yes') return { status: 'implements', systemPrompt, answer };
+    const reason = cleanInternalNames(parsed.reason);
+    if (parsed.level === 'partly') return { status: 'partial', reason, systemPrompt, answer };
+    return { status: 'mismatch', missing: reason, reason, systemPrompt, answer };
   } catch (err) {
     return { status: 'unavailable', error: err?.message || String(err), truncated: err?.code === LLM_TRUNCATED, systemPrompt };
   }

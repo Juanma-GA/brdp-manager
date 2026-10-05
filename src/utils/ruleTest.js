@@ -311,7 +311,37 @@ function nestingHint(problem, nestings) {
 const TABLE_PROBLEM_KINDS = new Set(['spannedEntry', 'morerowsPastEnd', 'emptyRow', 'rowFullyCovered', 'unorderableColname', 'tooManyColumns']);
 export const TABLE_MODEL_HINT = 'Write the table like the MODEL TABLE in the instructions: every colname has its <colspec>, and the row under a morerows has no <entry> in that column but keeps at least one <entry> of its own.';
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false } = {}) {
+// Barrido final 3, Part 3: where each element sits in the minimal
+// identification and status section (placement.metadata.tree) → Map name →
+// [paths]. A real run (applicability-dm-pm-ddn-dml, 0758381) put <language>
+// and <issueInfo> directly inside <dmStatus>; relocateMisplacedElements does
+// not move them, because the schema has several ways down from <dmStatus>
+// to either (sourceDmIdent, brexDmRef/dmRef/dmRefIdent, applicRef/…) and
+// even from the section itself -- no unique fix. The correction request
+// then names the place the minimal section gives it.
+export function minimalSectionPlaces(tree) {
+  const places = new Map();
+  const walk = (node, path) => {
+    if (!node?.name) return;
+    const here = [...path, node.name];
+    if (!places.has(node.name)) places.set(node.name, []);
+    places.get(node.name).push(here);
+    for (const child of node.children || []) walk(child, here);
+  };
+  walk(tree, []);
+  return places;
+}
+
+function sectionPlaceHint(problem, places) {
+  if (!places || problem.kind !== 'notAllowed') return null;
+  const at = places.get(problem.element);
+  if (!at || at.length !== 1 || !places.has(problem.parent)) return null;
+  const path = at[0];
+  return `In this section <${problem.element}> goes inside <${path[path.length - 2]}> (${path.join('/')}), as in the minimal section; do not repeat it elsewhere`;
+}
+
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null } = {}) {
+  const places = sectionTree ? minimalSectionPlaces(sectionTree) : null;
   const ruleElements = new Set(ruleNames?.elements || []);
   const ruleAttributes = new Set(ruleNames?.attributes || []);
   const offer = (line, element, alsoAttribute = false) =>
@@ -337,6 +367,11 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     const hint = expected === 'reject' ? nestingHint(p, nestings) : null;
     if (hint) {
       out.push(`${formatStructureProblem(p, schema)}. ${hint}`);
+      continue;
+    }
+    const place = sectionPlaceHint(p, places);
+    if (place) {
+      out.push(`${formatStructureProblem(p, schema)}. ${place}.`);
       continue;
     }
     const element = ['unknownElement', 'notAllowed', 'unknownAttribute'].includes(p.kind) ? p.element : null;
@@ -406,6 +441,10 @@ export function rejectedByBrexReference(result) {
 //   { kind: 'review', unchecked: true, error } -- the check failed or did
 //     not answer valid JSON: "the Proposal could not be checked", never
 //     "correct" by default.
+// Barrido final 3: the check answers in three levels; "partly" (the rule
+// implements the main checkable restriction, it lacks a nuance or something
+// no XML rule can check) leaves "correct" -- the panel adds an informative
+// note -- and only "no" (status 'mismatch') gives "review".
 // Recorded as its own result, never "passed". null (no check made -- the
 // examples kept from a passed test, or a caller without it) leaves
 // "correct" as it is; a string is read as a mismatch (the old shape). A

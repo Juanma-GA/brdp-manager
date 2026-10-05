@@ -6,6 +6,8 @@
 // architecture as the other prompts. The answer is shown as indicative and
 // never changes the recorded test result.
 
+import { readLlmJson } from './llmJson.js';
+
 export const RULE_TEST_REVIEW_USER_MESSAGE = 'Review this failed rule test.';
 export const REVIEW_CAUSES = ['example', 'rule', 'unclear'];
 
@@ -55,17 +57,10 @@ for a technical publications author.`;
 // { ok: true, cause, explanation } | { ok: false, error } -- tolerant of a
 // markdown fence and of text around the JSON object, strict about its shape.
 export function parseRuleTestReviewResponse(raw) {
-  let text = (raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1) return { ok: false, error: 'The answer contains no JSON object.' };
-  text = end > start ? text.slice(start, end + 1) : text.slice(start);
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch (err) {
-    return { ok: false, error: `The answer is not valid JSON (${err.message}).` };
-  }
+  const read = readLlmJson(raw);
+  if (!read.ok && read.reason === 'no_object') return { ok: false, error: 'The answer contains no JSON object.' };
+  if (!read.ok) return { ok: false, error: `The answer is not valid JSON (${read.message}).` };
+  const { data } = read;
   if (!REVIEW_CAUSES.includes(data.cause)) {
     return { ok: false, error: `The answer has "cause" = ${JSON.stringify(data.cause)} (must be "example", "rule" or "unclear").` };
   }

@@ -11,6 +11,7 @@
 // (utils/ruleTestSkeleton.js; T2b: the LLM only writes the content of the
 // insertion point), checks it, runs the rule on it (utils/ruleTestEngine.js)
 // and gives the verdict.
+import { readLlmJson } from './llmJson.js';
 import { buildSchemaFactsBlock } from './shared.js';
 import { metadataXml } from '../utils/ruleTestSkeleton.js';
 
@@ -433,19 +434,12 @@ export function buildCopyableTestPrompt(systemPrompt) {
 // application builds whole (placeExample's rootOnly) -- their examples come
 // with no "content".
 export function parseRuleTestResponse(raw, { contentOptionalSchemas = [] } = {}) {
-  let text = (raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1) return { ok: false, error: 'The answer contains no JSON object.' };
   // No closing brace (a truncated answer) still reaches JSON.parse, which
   // says what is wrong.
-  text = end > start ? text.slice(start, end + 1) : text.slice(start);
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch (err) {
-    return { ok: false, error: `The answer is not valid JSON (${err.message}).` };
-  }
+  const read = readLlmJson(raw);
+  if (!read.ok && read.reason === 'no_object') return { ok: false, error: 'The answer contains no JSON object.' };
+  if (!read.ok) return { ok: false, error: `The answer is not valid JSON (${read.message}).` };
+  const { data } = read;
   if (!Array.isArray(data.examples) || data.examples.length === 0) {
     return { ok: false, error: 'The answer has no "examples" list.' };
   }
