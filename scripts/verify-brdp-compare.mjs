@@ -12,6 +12,7 @@
 //   node scripts/verify-brdp-compare.mjs
 //   cd backend && .venv/bin/python scripts/seed_compare_verification.py cleanup
 import { chromium } from "playwright-core";
+import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -120,13 +121,7 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 950 } });
   const page = await context.newPage();
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
-  await page.addInitScript(() => {
-    try {
-      sessionStorage.setItem("brdp-records-history-open", "1");
-    } catch {
-      /* not available */
-    }
-  });
+  await openHistoryOnEachLoad(page);
 
   const signIn = async (email, password) => {
     await page.goto(BASE_URL);

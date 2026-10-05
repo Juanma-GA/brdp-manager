@@ -27,6 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -85,7 +86,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 }, acceptDownloads: true })).newPage();
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
-  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
+  await openHistoryOnEachLoad(page);
   const language = (lang) => page.locator("header select, nav select").first().selectOption(lang);
   const openConfig = async (project) => {
     await page.goto(`${BASE_URL}/projects/${project.id}/config`);

@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -217,7 +218,7 @@ async function main() {
     assert(!!extBrdp && extBrdp.title.length > 0, `the new EXT got its number and title (${extBrdp?.identifier})`);
 
     // Open it in BRDP Records: Pending, Draft, history with the source.
-    await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
+    await openHistoryOnEachLoad(page);
     await page.goto(`${BASE_URL}/projects/${lh.id}/records`);
     await page.getByText("BRDP-S1-00117", { exact: true }).first().click();
     await page.getByText("Extracted from").first().waitFor();

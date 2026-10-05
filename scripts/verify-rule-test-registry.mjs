@@ -15,6 +15,7 @@
 //
 //     node scripts/verify-rule-test-registry.mjs
 import { chromium } from "playwright-core";
+import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -99,8 +100,8 @@ async function main() {
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1500 } });
   // History starts collapsed ("Historial desplegable"); this script reads
-  // its entries, so it opens it for the tab before any page loads.
-  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
+  // its entries, so it opens it with a click on each page load.
+  await openHistoryOnEachLoad(page);
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
   const indicator = () => page.getByTestId("rule-test-indicator");
   const dialog = () => page.getByTestId("verify-warning-dialog");

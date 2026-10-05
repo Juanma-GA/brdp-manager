@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, func, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -45,6 +45,13 @@ class User(Base):
     # column intentionally has no DB-level default that would erase that
     # distinction). "en" | "es", the only two languages this app ships.
     preferred_language: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Interface preferences that follow the person to any browser (AACF 3,
+    # HR1): {"sidebar_collapsed": bool, "records_detail_width": int}, both
+    # optional; {} = the app's defaults. Validated by schemas/auth.py
+    # UiPreferencesPatch and merged key by key in PATCH /api/auth/me.
+    ui_preferences: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # NULL = active; set = deleted (Settings > Users > Deleted users).
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

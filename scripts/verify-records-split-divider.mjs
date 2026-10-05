@@ -1,6 +1,9 @@
 // Verification for "Consolidación C1", Part 3: the draggable divider between
 // the BRDP Records table and the detail panel. Real Vite + backend; one
-// seeded project, deleted at the end.
+// seeded project, deleted at the end. AACF 3: the width is the person's
+// interface preference on the server (users.ui_preferences
+// .records_detail_width), read and written through /api/auth/me -- never in
+// the browser's storage -- and saved once per change, not on every pixel.
 //
 //   node scripts/verify-records-split-divider.mjs
 import { chromium } from "playwright-core";
@@ -11,7 +14,6 @@ const API = "http://localhost:8000";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
-const STORAGE_KEY = "brdp-records-detail-width";
 
 function assert(cond, msg) {
   if (!cond) throw new Error("ASSERTION FAILED: " + msg);
@@ -28,6 +30,9 @@ async function main() {
     }).then((r) => r.json())
   ).access_token;
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const setStoredWidth = (value) =>
+    fetch(`${API}/api/auth/me`, { method: "PATCH", headers: auth, body: JSON.stringify({ ui_preferences: { records_detail_width: value } }) });
+  await setStoredWidth(null);
   const suffix = Math.random().toString(36).slice(2, 8);
   const project = await fetch(`${API}/api/projects`, {
     method: "POST",
@@ -49,7 +54,6 @@ async function main() {
     await page.fill("#login-password", ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
     await page.waitForSelector("table", { timeout: 10000 });
-    await page.evaluate((k) => localStorage.removeItem(k), STORAGE_KEY);
 
     const open = async () => {
       await page.goto(`${BASE_URL}/projects/${project.id}/records`);
@@ -63,7 +67,13 @@ async function main() {
     const tableWrap = page.locator('[class*="tableWrap"]').first();
     const detail = page.locator('[class*="detailPanel"]').first();
     const widths = async () => ({ table: (await tableWrap.boundingBox()).width, detail: (await detail.boundingBox()).width });
-    const stored = () => page.evaluate((k) => localStorage.getItem(k), STORAGE_KEY);
+    const stored = async () =>
+      (await fetch(`${API}/api/auth/me`, { headers: auth }).then((r) => r.json())).ui_preferences?.records_detail_width ?? null;
+    // Every PATCH /api/auth/me the page sends (one per finished change).
+    const patches = [];
+    page.on("request", (req) => {
+      if (req.method() === "PATCH" && req.url().endsWith("/api/auth/me")) patches.push(JSON.parse(req.postData() || "{}"));
+    });
     const markColor = () => divider.evaluate((el) => getComputedStyle(el, "::before").backgroundColor);
 
     // Default split, accessible divider.
@@ -90,10 +100,13 @@ async function main() {
 
     // Drag left: the detail widens by the distance moved.
     let box = await divider.boundingBox();
+    patches.length = 0;
     await drag(box.x + box.width / 2 - 200);
     let w = await widths();
     assert(near(w.detail, 660, 2), `drag 200px left: detail 660px (${w.detail})`);
-    assert(near(Number(await stored()), 660, 2), "the new width is stored");
+    await page.waitForTimeout(300);
+    assert(patches.length === 1 && Object.keys(patches[0].ui_preferences).join() === "records_detail_width", `one save on release, only that key (${JSON.stringify(patches)})`);
+    assert(near(Number(await stored()), 660, 2), "the new width is stored on the server");
 
     // Drag to the far left: stops where the table reaches its 480px minimum.
     await drag(10);
@@ -108,6 +121,7 @@ async function main() {
 
     // Keyboard: focus + arrows.
     await divider.focus();
+    patches.length = 0;
     await page.keyboard.press("ArrowLeft");
     await page.keyboard.press("ArrowLeft");
     w = await widths();
@@ -116,7 +130,9 @@ async function main() {
     w = await widths();
     assert(near(w.detail, 376, 1.5), `ArrowRight: 376px (${w.detail})`);
     assert((await markColor()) === "rgb(37, 99, 235)", "focused divider shows the blue mark");
-    assert(near(Number(await stored()), 376, 1), "keyboard width is stored");
+    await page.waitForTimeout(300);
+    assert(patches.length === 3, `one save per finished key press (${patches.length})`);
+    assert(near(Number(await stored()), 376, 1), "keyboard width is stored on the server");
 
     // Reload keeps the chosen width.
     await open();
@@ -128,24 +144,31 @@ async function main() {
     await page.waitForTimeout(200);
     w = await widths();
     assert(near(w.detail, 460, 1.5), `double-click: back to 460px (${w.detail})`);
-    assert((await stored()) === null, "double-click forgets the stored width");
+    await page.waitForTimeout(300);
+    assert((await stored()) === null, "double-click deletes the stored width");
 
     // A stored width that no longer fits (narrower window) is clamped, never
-    // squeezes the table under its minimum.
-    await page.evaluate((k) => localStorage.setItem(k, "5000"), STORAGE_KEY);
+    // squeezes the table under its minimum, and the saved value is not
+    // changed until the person moves the divider.
+    await setStoredWidth(4000);
     await open();
     w = await widths();
-    assert(near(w.table, 480, 1.5), `stored 5000px: clamped so the table keeps 480px (${w.table})`);
-    // Garbage in storage: default split.
-    await page.evaluate((k) => localStorage.setItem(k, "not-a-number"), STORAGE_KEY);
+    assert(near(w.table, 480, 1.5), `stored 4000px: clamped so the table keeps 480px (${w.table})`);
+    assert((await stored()) === 4000, "the saved value is unchanged by showing it clipped");
+    // The server refuses a value that is not a width.
+    const bad = await setStoredWidth("not-a-number");
+    assert(bad.status === 422, `a non-integer width is refused (${bad.status})`);
+    await setStoredWidth(null);
     await open();
-    assert(near((await widths()).detail, 460, 1.5), "unreadable stored value: default 460px");
+    assert(near((await widths()).detail, 460, 1.5), "nothing stored: default 460px");
+    const storage = await page.evaluate(() => [localStorage.length, sessionStorage.length]);
+    assert(storage[0] === 0 && storage[1] === 0, `nothing in localStorage/sessionStorage (${storage})`);
     const scroll = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
     assert(scroll, "no horizontal page scroll");
 
     console.log("\nALL CHECKS PASSED\n");
   } finally {
-    await page.evaluate((k) => localStorage.removeItem(k), STORAGE_KEY).catch(() => {});
+    await setStoredWidth(null).catch(() => {});
     await fetch(`${API}/api/projects/${project.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     console.log("Cleaned up the seeded project.");
     await browser.close();

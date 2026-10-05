@@ -1,6 +1,8 @@
 import uuid
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, StrictBool, StrictInt, field_validator
+
+from app.core.config import get_settings
 
 from app.core.security import MIN_PASSWORD_LENGTH
 
@@ -31,11 +33,39 @@ class UserOut(BaseModel):
     # that predate this column, or that just haven't touched the
     # language switcher).
     preferred_language: str | None = None
+    # AACF 3: {} for a user who never changed anything (the app's defaults).
+    ui_preferences: dict = {}
 
     model_config = {"from_attributes": True}
 
 
 _SUPPORTED_LANGUAGES = {"en", "es"}
+
+
+class UiPreferencesPatch(BaseModel):
+    """The interface preferences a person can store (AACF 3, HR1). A closed
+    schema: any other key or a wrong type is a 422. A key sent as null is
+    removed (the app falls back to its default); a key not sent is left as
+    it is -- PATCH /api/auth/me merges, never replaces (HR10).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sidebar_collapsed: StrictBool | None = None
+    records_detail_width: StrictInt | None = None
+
+    @field_validator("records_detail_width")
+    @classmethod
+    def _width_in_range(cls, value: int | None) -> int | None:
+        if value is None:
+            return value
+        settings = get_settings()
+        if not settings.ui_detail_width_min <= value <= settings.ui_detail_width_max:
+            raise ValueError(
+                f"records_detail_width must be between {settings.ui_detail_width_min} "
+                f"and {settings.ui_detail_width_max}"
+            )
+        return value
 
 
 class MeUpdate(BaseModel):
@@ -49,6 +79,7 @@ class MeUpdate(BaseModel):
     # display_name -- same partial-update convention as BRDPUpdate.
     display_name: str | None = None
     preferred_language: str | None = None
+    ui_preferences: UiPreferencesPatch | None = None
 
     @field_validator("preferred_language")
     @classmethod

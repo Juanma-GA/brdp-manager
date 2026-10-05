@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { authFetchJson } from '../services/apiClient';
+import { useAuthContext } from '../context/AuthContext';
 import { errorMessage, isRetryable } from '../services/apiErrors';
 import ErrorNotice from '../components/ErrorNotice';
 import {
@@ -113,6 +114,10 @@ const TABLE_PAGE_SIZE = 15;
 // also the gap between the two (it replaces the layout's 16px gap).
 const DETAIL_PANEL_DEFAULT_WIDTH = 460;
 const DETAIL_PANEL_MIN_WIDTH = 360;
+// The largest width the server stores (backend Settings.ui_detail_width_max;
+// keep in sync). Only rules out absurd values: wider than the window is
+// clipped when shown anyway.
+const DETAIL_PANEL_MAX_SAVED_WIDTH = 4000;
 const TABLE_MIN_WIDTH = 480;
 const SPLIT_DIVIDER_WIDTH = 16;
 
@@ -277,27 +282,6 @@ function fullHistoryValue(t, fieldName, value) {
   if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   if (fieldName === 'rule_test' || fieldName === 'rule_copied' || fieldName === 'extracted_from' || fieldName === 'catalog_edition' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
   return value || '—';
-}
-
-// The History section starts collapsed ("History (N)" and the date of the
-// latest entry); open or closed is remembered for this browser tab, also
-// when another BRDP is selected -- a UI preference, never data (HR1 does
-// not apply; sessionStorage may be unavailable, so every access is
-// guarded).
-const HISTORY_OPEN_KEY = 'brdp-records-history-open';
-function readHistoryOpen() {
-  try {
-    return sessionStorage.getItem(HISTORY_OPEN_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-function writeHistoryOpen(open) {
-  try {
-    sessionStorage.setItem(HISTORY_OPEN_KEY, open ? '1' : '0');
-  } catch {
-    // not remembered: the section still works
-  }
 }
 
 // A rule test recorded as "review" (the examples passed but the rule does
@@ -540,15 +524,12 @@ export default function RecordsPage() {
   // refetched whenever the selection changes or historyRefreshToken is
   // bumped by a successful field edit or rule-status transition.
   const [history, setHistory] = useState([]);
-  // "Historial desplegable": the section starts collapsed and remembers
-  // open/closed for the tab (also across BRDPs); long entries open one by
-  // one with "Show more".
-  const [historyOpen, setHistoryOpen] = useState(readHistoryOpen);
-  const toggleHistory = () =>
-    setHistoryOpen((open) => {
-      writeHistoryOpen(!open);
-      return !open;
-    });
+  // "Historial desplegable": the section starts collapsed on every page
+  // load and keeps its state while another BRDP is selected within the
+  // page (AACF 3: nothing is stored in the browser, HR1); long entries
+  // open one by one with "Show more".
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const toggleHistory = () => setHistoryOpen((open) => !open);
   const [expandedHistoryIds, setExpandedHistoryIds] = useState(() => new Set());
   const toggleHistoryEntry = (id) =>
     setExpandedHistoryIds((prev) => {
@@ -1358,9 +1339,21 @@ export default function RecordsPage() {
   };
 
   // Consolidation C1, Part 3: draggable divider between the table and the
-  // detail panel (width remembered in this browser only).
+  // detail panel. AACF 3: the width is the person's interface preference
+  // on the server (users.ui_preferences.records_detail_width).
+  const { user: currentUser, saveUiPreference } = useAuthContext();
+  const storedDetailWidth = currentUser?.ui_preferences?.records_detail_width;
+  const saveDetailWidth = useCallback(
+    (width) =>
+      saveUiPreference(
+        'records_detail_width',
+        width === null ? null : Math.min(Math.max(width, DETAIL_PANEL_MIN_WIDTH), DETAIL_PANEL_MAX_SAVED_WIDTH)
+      ),
+    [saveUiPreference]
+  );
   const split = useResizableSplit({
-    storageKey: 'brdp-records-detail-width',
+    storedSize: Number.isInteger(storedDetailWidth) ? storedDetailWidth : null,
+    onSave: saveDetailWidth,
     defaultSize: DETAIL_PANEL_DEFAULT_WIDTH,
     minSize: DETAIL_PANEL_MIN_WIDTH,
     minOther: TABLE_MIN_WIDTH,

@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select, update
+from sqlalchemy import String, cast, func, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -144,6 +145,23 @@ async def update_me(
     for field in ("display_name", "preferred_language"):
         if field in updates:
             setattr(current_user, field, updates[field])
+    if body.ui_preferences is not None:
+        # AACF 3 (HR10): merged in one UPDATE on the stored JSON, so two
+        # tabs saving different keys never overwrite each other. A key sent
+        # as null is removed; a key not sent is left as it is.
+        patch = body.ui_preferences.model_dump(exclude_unset=True)
+        to_set = {k: v for k, v in patch.items() if v is not None}
+        to_remove = [k for k, v in patch.items() if v is None]
+        if patch:
+            await db.execute(
+                update(User)
+                .where(User.id == current_user.id)
+                .values(
+                    ui_preferences=(
+                        func.coalesce(User.ui_preferences, cast({}, JSONB)).op("-")(cast(to_remove, ARRAY(String)))
+                    ).op("||")(cast(to_set, JSONB))
+                )
+            )
     await db.commit()
     await db.refresh(current_user)
     return current_user

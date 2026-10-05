@@ -27,6 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -199,7 +200,7 @@ async function main() {
     const approvals = await Promise.all(brdps.map((b) => api(`/api/projects/${dita.id}/brdps/${b.id}/approvals/SCH-DITA`).catch(() => null)));
     assert(approvals.every((a) => !a), "none has a rule");
     const created = brdps.find((b) => b.identifier === "BRDP-D1-00020") || brdps[0];
-    await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
+    await openHistoryOnEachLoad(page);
     await page.goto(`${BASE_URL}/projects/${dita.id}/records`);
     await page.getByText(created.identifier, { exact: true }).first().click();
     await page.getByText("Extracted from").first().waitFor();

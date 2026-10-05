@@ -144,6 +144,38 @@ export function AuthProvider({ children }) {
     applyPreferredLanguage(updatedUser);
   }, []);
 
+  // AACF 3 (HR1): interface preferences (sidebar collapsed, Records panel
+  // width) live in users.ui_preferences on the server and follow the person
+  // to any browser. Optimistic: the value applies at once; the PATCH sends
+  // only the changed key and the server merges it with the rest (two tabs
+  // never overwrite each other). null removes the key (back to the
+  // default). If saving fails the value still holds for this session and a
+  // discreet, non-blocking notice is shown once (uiPreferenceSaveFailed).
+  const [uiPreferenceSaveFailed, setUiPreferenceSaveFailed] = useState(false);
+  const preferenceFailureShownRef = useRef(false);
+  const saveUiPreference = useCallback(async (key, value) => {
+    setUser((current) => {
+      if (!current) return current;
+      const next = { ...(current.ui_preferences || {}) };
+      if (value === null) delete next[key];
+      else next[key] = value;
+      return { ...current, ui_preferences: next };
+    });
+    try {
+      await authFetchJson('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ui_preferences: { [key]: value } }),
+      });
+    } catch {
+      if (!preferenceFailureShownRef.current) {
+        preferenceFailureShownRef.current = true;
+        setUiPreferenceSaveFailed(true);
+      }
+    }
+  }, []);
+  const dismissUiPreferenceNotice = useCallback(() => setUiPreferenceSaveFailed(false), []);
+
   const value = {
     user,
     accessToken,
@@ -154,6 +186,9 @@ export function AuthProvider({ children }) {
     login,
     logout,
     updateUser,
+    saveUiPreference,
+    uiPreferenceSaveFailed,
+    dismissUiPreferenceNotice,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -9,6 +9,11 @@ const resources = {
     common: {
       // AACF 1, Part 3: failed requests as sentences (src/services/apiErrors.js).
       errorNotice: { retry: 'Retry', discard: 'Discard change', dismiss: 'Close' },
+      // AACF 3, Part 1: an interface preference could not be saved.
+      uiPreferences: {
+        saveFailed: 'Your interface preferences could not be saved; they apply until you leave this session.',
+        dismiss: 'Close',
+      },
       projectLayout: {
         denied: 'You do not have access to this project, or it no longer exists.',
         loadFailed: 'The project could not be loaded: {{reason}}',
@@ -1474,6 +1479,10 @@ const resources = {
   es: {
     common: {
       errorNotice: { retry: 'Reintentar', discard: 'Descartar cambio', dismiss: 'Cerrar' },
+      uiPreferences: {
+        saveFailed: 'No se han podido guardar tus preferencias de la interfaz; se aplican hasta que salgas de esta sesión.',
+        dismiss: 'Cerrar',
+      },
       projectLayout: {
         denied: 'No tienes acceso a este proyecto, o ya no existe.',
         loadFailed: 'No se ha podido cargar el proyecto: {{reason}}',

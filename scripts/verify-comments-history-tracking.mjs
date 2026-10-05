@@ -8,6 +8,7 @@
 // BRDP (text-only change) also logs one, (c) a BRDP never marked Refused
 // has zero refusal_reason entries.
 import { chromium } from "playwright-core";
+import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -81,8 +82,8 @@ async function main() {
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   // History starts collapsed ("Historial desplegable"); this script reads
-  // its entries, so it opens it for the tab before any page loads.
-  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
+  // its entries, so it opens it with a click on each page load.
+  await openHistoryOnEachLoad(page);
   try {
     await page.goto(BASE_URL);
     await page.fill("#login-email", ADMIN_EMAIL);

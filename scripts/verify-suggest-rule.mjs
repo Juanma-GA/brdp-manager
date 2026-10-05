@@ -12,6 +12,7 @@
 //
 //     node scripts/verify-suggest-rule.mjs
 import { chromium } from "playwright-core";
+import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -204,8 +205,8 @@ async function main() {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE_URL });
   const page = await context.newPage();
   // History starts collapsed ("Historial desplegable"); this script reads
-  // its entries, so it opens it for the tab before any page loads.
-  await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
+  // its entries, so it opens it with a click on each page load.
+  await openHistoryOnEachLoad(page);
   const dialogs = [];
   page.on("dialog", (d) => {
     dialogs.push(d.message());

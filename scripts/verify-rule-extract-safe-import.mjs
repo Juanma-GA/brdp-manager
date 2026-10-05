@@ -34,6 +34,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -324,7 +325,7 @@ async function main() {
     assert(b1.catalog_edition === "S1000D 4.1" && b2.catalog_edition === "S1000D 4.1", "both carry the 4.1 edition label (the suffixed one too)");
 
     // History, Records search, Ask.
-    await page.addInitScript(() => sessionStorage.setItem("brdp-records-history-open", "1"));
+    await openHistoryOnEachLoad(page);
     await page.goto(`${BASE_URL}/projects/${ca.id}/records`);
     await page.getByPlaceholder(/Search/).first().fill("-4.1");
     await page.waitForTimeout(300);

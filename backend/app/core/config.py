@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     # refused, never lowered silently.
     llm_max_tokens: int = 16000
 
+    # --- Interface preferences (AACF 3, Part 1) ---
+    # users.ui_preferences.records_detail_width: the Records detail panel's
+    # width in px. The minimum is the divider's own (src/pages/RecordsPage.jsx
+    # DETAIL_PANEL_MIN_WIDTH); the maximum only rules out absurd values --
+    # the page clips a width that does not fit the window when it shows it.
+    ui_detail_width_min: int = 360
+    ui_detail_width_max: int = 4000
+
 
 @lru_cache
 def get_settings() -> Settings:
