@@ -120,7 +120,7 @@ async def delete_brdp_permanently(
     """The one real db.delete() left in the whole BRDP lifecycle -- only
     reachable from the Trash, and only for a row that's already trashed
     (an active BRDP must go through the normal soft-delete first). Cascades
-    for real to rule_approvals/notes/suggestion_feedback (existing ON
+    for real to rule_approvals/suggestion_feedback (existing ON
     DELETE CASCADE FKs); brdp_history survives via its ON DELETE SET NULL
     (migration 0010).
     """

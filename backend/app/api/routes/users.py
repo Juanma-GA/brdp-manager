@@ -150,7 +150,7 @@ async def delete_user(
 ) -> None:
     """Admin-only. Cascade is real DB-level ON DELETE CASCADE on
     refresh_tokens.user_id and user_project_roles.user_id (see the 0001
-    migration) -- nothing else references users.id, so brdps/notes/
+    migration) -- nothing else references users.id, so brdps/
     rule_approvals are never touched by deleting a user.
 
     Two guards, both enforced here (not just hidden in the UI):

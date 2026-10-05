@@ -231,7 +231,7 @@ async def delete_project(
     """Admin-only, deliberately stricter than editor -- an editor can
     change everything about a project's CONTENT but must never be able to
     make the project itself disappear, same reasoning as create_project.
-    The actual cascade (brdps, and from there notes/rule_approvals/
+    The actual cascade (brdps, and from there rule_approvals/
     suggestion_feedback, plus user_project_roles) is real DB-level
     ON DELETE CASCADE on those foreign keys (see the 0001 migration) --
     this just deletes the project row and lets Postgres do the rest,

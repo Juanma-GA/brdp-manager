@@ -1,4 +1,4 @@
-"""Functional correctness of the brdps/notes/approvals CRUD endpoints
+"""Functional correctness of the brdps/approvals CRUD endpoints
 (as an editor -- authorization itself is covered separately in
 test_authorization.py). Real Postgres, no mocking -- validating a BRDP no
 longer calls Mistral at all (on-demand embeddings, docs request), so
@@ -190,31 +190,6 @@ async def test_next_ext_identifier_increments_from_existing_ext_ids(client, edit
 
     response = await client.get(f"/api/projects/{project.id}/brdps/next-ext-identifier", headers=headers)
     assert response.json()["identifier"] == "BRDP-EXT-00003"
-
-
-async def test_note_defaults_to_empty_then_upserts(client, editor_and_project):
-    project, headers = editor_and_project
-    brdp = (
-        await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-NOTE-001"}, headers=headers)
-    ).json()
-
-    empty = await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/notes", headers=headers)
-    assert empty.status_code == 200
-    assert empty.json()["text"] == ""
-
-    upserted = await client.put(
-        f"/api/projects/{project.id}/brdps/{brdp['id']}/notes", json={"text": "some notes"}, headers=headers
-    )
-    assert upserted.status_code == 200
-    assert upserted.json()["text"] == "some notes"
-
-    refetched = await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/notes", headers=headers)
-    assert refetched.json()["text"] == "some notes"
-
-    overwritten = await client.put(
-        f"/api/projects/{project.id}/brdps/{brdp['id']}/notes", json={"text": "replaced"}, headers=headers
-    )
-    assert overwritten.json()["text"] == "replaced"
 
 
 async def test_approval_propose_get_approve_revoke_lifecycle(client, editor_and_project):

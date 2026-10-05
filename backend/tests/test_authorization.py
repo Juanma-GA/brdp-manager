@@ -154,21 +154,6 @@ async def test_editor_of_a_cannot_delete_brdp_belonging_to_b_via_spoofed_project
     assert response.status_code == 404
 
 
-async def test_editor_of_a_cannot_read_or_write_notes_of_b(client, scenario):
-    get_resp = await client.get(
-        f"/api/projects/{scenario['project_b'].id}/brdps/{scenario['brdp_b'].id}/notes",
-        headers=_headers(scenario["editor_a"]),
-    )
-    assert get_resp.status_code == 403
-
-    put_resp = await client.put(
-        f"/api/projects/{scenario['project_b'].id}/brdps/{scenario['brdp_b'].id}/notes",
-        json={"text": "hacked"},
-        headers=_headers(scenario["editor_a"]),
-    )
-    assert put_resp.status_code == 403
-
-
 async def test_editor_of_a_cannot_propose_approval_in_b(client, scenario):
     response = await client.put(
         f"/api/projects/{scenario['project_b'].id}/brdps/{scenario['brdp_b'].id}/approvals/BREX-4.2",

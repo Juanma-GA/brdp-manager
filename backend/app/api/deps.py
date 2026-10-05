@@ -74,7 +74,7 @@ async def has_project_role(current_user: User, project_id: uuid.UUID, min_role: 
 
 def require_project_role(min_role: str):
     """Dependency factory for project-scoped endpoints (Phase 3's
-    brdps/notes/approvals routes). `project_id` is bound from the route's
+    brdps/approvals routes). `project_id` is bound from the route's
     own path parameter of the same name -- FastAPI matches dependency
     parameters against path params by name.
 

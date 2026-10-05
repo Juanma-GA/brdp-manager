@@ -109,7 +109,7 @@ async def test_admin_can_delete_a_normal_user_and_cascade_removes_their_tokens(c
     """Real cascade check via a direct DB read afterward, not just the 204:
     refresh_tokens for the deleted user are gone (ondelete='CASCADE' on
     users.id, confirmed against the 0001 migration) -- nothing else
-    references users.id at all (brdps/notes/rule_approvals don't), so this
+    references users.id at all (brdps/rule_approvals don't), so this
     is the entire blast radius by design.
     """
     admin = await _make_user(global_role="admin")

@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
-from app.models import BRDP, Note, Project, RuleApproval, SuggestionFeedback, User, UserProjectRole
+from app.models import BRDP, Project, RuleApproval, SuggestionFeedback, User, UserProjectRole
 
 
 async def _make_user(global_role: str = "user") -> User:
@@ -171,7 +171,7 @@ async def test_rename_rejects_a_standard_field_if_sent(client):
         await _cleanup_user(editor)
 
 
-async def test_delete_cascades_to_brdps_notes_approvals_and_feedback(client):
+async def test_delete_cascades_to_brdps_approvals_and_feedback(client):
     """The real point of this test: query Postgres directly afterward for
     every child table, not just trust the 204 -- and confirm a SEPARATE
     project's data survives untouched.
@@ -185,12 +185,10 @@ async def test_delete_cascades_to_brdps_notes_approvals_and_feedback(client):
         other_brdp = BRDP(project_id=other_project.id, identifier="BRDP-KEEP-001", definition="d", proposal="p")
         session.add_all([brdp, other_brdp])
         await session.flush()
-        session.add(Note(brdp_id=brdp.id, text="a note"))
         session.add(RuleApproval(brdp_id=brdp.id, format="BREX-4.2", rule_xml="<x/>", status="approved"))
         session.add(
             SuggestionFeedback(brdp_id=brdp.id, kind="definition", suggested_text="s", outcome="discarded")
         )
-        session.add(Note(brdp_id=other_brdp.id, text="keep me"))
         await session.commit()
         await session.refresh(brdp)
         await session.refresh(other_brdp)
@@ -202,7 +200,6 @@ async def test_delete_cascades_to_brdps_notes_approvals_and_feedback(client):
         async with async_session_factory() as session:
             assert await session.get(Project, project.id) is None
             assert await session.get(BRDP, brdp.id) is None
-            assert await session.get(Note, brdp.id) is None
             assert (
                 await session.execute(select(RuleApproval).where(RuleApproval.brdp_id == brdp.id))
             ).scalar_one_or_none() is None
@@ -212,10 +209,9 @@ async def test_delete_cascades_to_brdps_notes_approvals_and_feedback(client):
                 )
             ).scalar_one_or_none() is None
 
-            # The other project and its own BRDP/note are untouched.
+            # The other project and its own BRDP are untouched.
             assert await session.get(Project, other_project.id) is not None
             assert await session.get(BRDP, other_brdp.id) is not None
-            assert await session.get(Note, other_brdp.id) is not None
     finally:
         async with async_session_factory() as session:
             db_other = await session.get(Project, other_project.id)

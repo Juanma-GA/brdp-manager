@@ -22,7 +22,7 @@ from app.services.import_jobs import STALE_JOB_MINUTES, get_running_job, run_imp
 async def editor_and_project():
     # Canonical standard string (docs/v2 §2, matches
     # STANDARD_TO_RULE_FORMAT/src/constants/ruleFormats.js exactly) --
-    # unlike test_brdps_notes_approvals.py's fixture, the actual string
+    # unlike test_brdps_approvals.py's fixture, the actual string
     # matters here: /import/analyze derives the rule format FROM
     # project.standard, it isn't passed in the URL like approvals.py's
     # routes.
