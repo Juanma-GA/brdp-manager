@@ -229,7 +229,7 @@ export function ruleRestrictsValues(ruleXml, format, parseXml = parseXmlDocument
 // does not apply to, never counts). None when one of them already has the
 // node, or when no accept example ran (the invalid ones are sent back for
 // their own problems anyway).
-export function acceptWithoutNodeIndices(examples, runs, restrictsValues) {
+function acceptWithoutNodeIndices(examples, runs, restrictsValues) {
   if (!restrictsValues) return [];
   const candidates = runs
     .map((r, index) => ({ r, index }))
@@ -243,7 +243,7 @@ export function acceptWithoutNodeIndices(examples, runs, restrictsValues) {
   return candidates.map(({ index }) => index);
 }
 
-export function acceptWithoutNodeProblem(ruleXml) {
+function acceptWithoutNodeProblem(ruleXml) {
   const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
   return `The rule checks values, so at least one example meant to be accepted must contain a node matched by: ${matched}, with a value the decision allows. No accept example contains one, so the test never shows the rule accepting a valid value.`;
 }
@@ -301,7 +301,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
 }
 
 // Materialize, validate and run every example.
-export function runRuleTestExamples(examples, { ruleXml, format, setup, vocabulary, parseXml = parseXmlDocument }) {
+function runRuleTestExamples(examples, { ruleXml, format, setup, vocabulary, parseXml = parseXmlDocument }) {
   const materialized = examples.map((ex) => materializeExample(ex, setup, parseXml));
   const runs = materialized.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml }));
   return { materialized, runs };

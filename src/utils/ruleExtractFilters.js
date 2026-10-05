@@ -4,7 +4,7 @@
 //   - all / warnings / blocking: config.ruleExtract.filters.*
 //   - a classification: config.ruleExtract.classes.* (the page adds the
 //     specification / edition when every row of it shares one).
-export const EXTRACT_CLASSES = [
+const EXTRACT_CLASSES = [
   'new_ext', 'catalog', 'catalog_edition', 'other_spec', 'default_rule', 'changed', 'same', 'empty',
 ];
 export const EXTRACT_FILTERS = ['all', ...EXTRACT_CLASSES, 'warnings', 'blocking'];

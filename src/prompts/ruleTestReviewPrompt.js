@@ -9,7 +9,7 @@
 import { readLlmJson } from './llmJson.js';
 
 export const RULE_TEST_REVIEW_USER_MESSAGE = 'Review this failed rule test.';
-export const REVIEW_CAUSES = ['example', 'rule', 'unclear'];
+const REVIEW_CAUSES = ['example', 'rule', 'unclear'];
 
 // `input`: { brdp, standard, format, ruleXml, ruleDescription (English
 // text, one "- " line per statement), mismatches: [{ label, expected,

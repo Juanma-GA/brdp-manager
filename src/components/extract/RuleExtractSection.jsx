@@ -48,7 +48,7 @@ import Button from '../Button';
 import pageStyles from '../../pages/ProjectConfigPage.module.css';
 import styles from './RuleExtractSection.module.css';
 
-export const EXTRACT_PAGE_SIZE = 25;
+const EXTRACT_PAGE_SIZE = 25;
 const POLL_MS = 1000;
 const DRAFT_CLASSES = DRAFTED_CLASSES;
 const WRITES_TITLE = new Set(['new_ext', 'other_spec', 'default_rule']);

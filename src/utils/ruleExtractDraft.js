@@ -12,8 +12,8 @@
 import { aiFieldsOf, buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../prompts/extractFromRulesPrompt.js';
 import { buildExtractFromTextPrompt, EXTRACT_TEXT_USER_MESSAGE } from '../prompts/extractFromTextPrompt.js';
 
-export const DRAFT_BATCH_SIZE = 10;
-export const DRAFT_CONCURRENCY = 3;
+const DRAFT_BATCH_SIZE = 10;
+const DRAFT_CONCURRENCY = 3;
 export const DRAFTED_CLASSES = new Set(['new_ext', 'catalog', 'catalog_edition', 'other_spec', 'default_rule']);
 
 // Same rule as the backend's text_state (rule_extract_jobs.py): from the

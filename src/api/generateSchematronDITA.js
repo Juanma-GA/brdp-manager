@@ -945,4 +945,4 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
   };
 }
 
-export { buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument, queryBindingForStandard, dedupeSharedLets, collectNamespaces };
+export { checkWellFormedSchematron, queryBindingForStandard };

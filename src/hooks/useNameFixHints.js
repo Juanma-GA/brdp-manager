@@ -35,7 +35,7 @@ function useProjectVocabulary(standard, vocabulary) {
   return loaded.standard === standard ? loaded.vocabulary : null;
 }
 
-export function useOtherStandardVocabularies(standard, needed) {
+function useOtherStandardVocabularies(standard, needed) {
   const [loaded, setLoaded] = useState({ standard: null, vocabularies: null });
   const have = loaded.standard === standard;
   useEffect(() => {

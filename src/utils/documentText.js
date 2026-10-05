@@ -24,7 +24,7 @@ export class DocumentReadError extends Error {
   }
 }
 
-export function extensionOf(name) {
+function extensionOf(name) {
   const m = /\.[^.]+$/.exec(String(name || '').toLowerCase());
   return m ? m[0] : '';
 }

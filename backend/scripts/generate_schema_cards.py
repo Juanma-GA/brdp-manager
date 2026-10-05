@@ -106,14 +106,9 @@ from lxml import etree
 XSD_NS = "http://www.w3.org/2001/XMLSchema"
 QN = lambda tag: f"{{{XSD_NS}}}{tag}"  # noqa: E731
 
-# Compact-output limits (docs request point 2) -- applied only when the
-# endpoint SERVES a card, never when generating/storing it (the generator
-# keeps the full, untruncated facts; truncation is a presentation concern
-# of the API layer). Kept here too as documented defaults so the generator
-# and the endpoint agree on what "a lot" means.
-DEFAULT_MAX_CHILDREN = 40
-DEFAULT_MAX_ATTRIBUTES = 30
-DEFAULT_MAX_ENUM_VALUES = 20
+# The generator keeps the full, untruncated facts; the compact-output
+# limits are applied only when the endpoint serves a card
+# (app/services/schema_cards.py).
 
 # Recursion guards -- real content models never need anywhere close to
 # this depth; this exists only to convert a genuine schema bug (a true
@@ -564,11 +559,9 @@ def build_cards(scopes: list[Scope]) -> dict:
     {element_name: [{schemas: [...], attributes, children, resolved}, ...]}."""
     # element_name -> signature -> {"schemas": [...], "card": {...}}
     by_element: dict[str, dict[str, dict]] = {}
-    element_count_per_scope = 0
 
     for scope in scopes:
         for name, node in scope.elements.items():
-            element_count_per_scope += 1
             card = compute_card(name, node, scope)
             sig = _card_signature(card)
             variants = by_element.setdefault(name, {})

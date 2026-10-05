@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import styles from './Button.module.css';
 
 // How long a button stays green after a successful action.
-export const BUTTON_SUCCESS_MS = 1000;
+const BUTTON_SUCCESS_MS = 1000;
 
 /**
  * Shared primary-action button (v2 pages only, e.g. SettingsPage's

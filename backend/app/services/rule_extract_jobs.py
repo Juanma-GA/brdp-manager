@@ -109,9 +109,6 @@ SPECIFICATIONS = {
 # the S1000D one).
 _OWN_CODES = {"S1000D": {"S1"}, "DITA": {"D1", "S1"}}
 
-CLASSIFICATIONS = (
-    "same", "changed", "catalog", "catalog_edition", "other_spec", "default_rule", "new_ext", "empty",
-)
 # "From catalog (S1000D 4.1)": an identifier of the project's specification
 # that is not in its own standard's catalog but is in another edition's
 # (the same number is the same decision across editions). Imported with its
@@ -126,7 +123,6 @@ CATALOG_CLASSES = ("catalog", "catalog_edition")
 # request asking for it is refused with the reason.
 RETIRED_MARKED_CLASSIFICATION = "catalog_edition_marked"
 TEXT_FIELDS = ("title", "definition", "proposal")
-TEXT_SOURCES = ("project", "catalog", "file", "ai", "manual")
 
 
 def _own_codes(standard: str) -> set[str]:

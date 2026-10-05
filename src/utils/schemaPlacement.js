@@ -196,7 +196,7 @@ export function renderNode(node, { indent = null, placeholder = '', level = 0 } 
 
 // ─── Part 1: routes from the minimal identification and status section ──────
 
-export const SECTION_ROUTE_MAX_PATHS = 3;
+const SECTION_ROUTE_MAX_PATHS = 3;
 
 function treeNodes(node, out = []) {
   out.push(node);

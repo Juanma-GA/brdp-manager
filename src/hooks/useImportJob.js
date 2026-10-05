@@ -8,7 +8,7 @@ import { authFetchJson } from '../services/apiClient';
 // responsive for a progress bar.
 const POLL_INTERVAL_MS = 3000;
 
-export function importJobQueryKey(projectId) {
+function importJobQueryKey(projectId) {
   return ['import-job', projectId];
 }
 

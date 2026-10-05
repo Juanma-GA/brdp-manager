@@ -168,7 +168,7 @@ export function attributeCardModel(owners) {
 
 // A request that never answers must not leave the card loading forever
 // (HR7): after this long it becomes a visible error with Retry.
-export const SCHEMA_NAV_TIMEOUT_MS = 20000;
+const SCHEMA_NAV_TIMEOUT_MS = 20000;
 
 function withTimeout(promise, ms) {
   let timer;

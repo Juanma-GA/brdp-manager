@@ -60,7 +60,7 @@ export const FIND_DECISIONS_TEMPERATURE = 0.1;
 // than risk silently blowing max_tokens/context on a huge prompt (HR7:
 // never degrade silently), cut it and say so explicitly IN the prompt
 // itself, never just drop it.
-export const ASK_RULE_MAX_CHARS = 6000;
+const ASK_RULE_MAX_CHARS = 6000;
 
 export function ruleTextForAsk(state, ruleXml) {
   if (state === 'todo' || !ruleXml) return 'Not yet defined';
@@ -150,7 +150,7 @@ function truncationMarker(shownCount, omitted) {
 // is the endpoint's own per-name shape ({variants, parents, ...}), used
 // here EXACTLY as returned, never reformatted a second, possibly-
 // diverging way from what the "Schema facts used" UI line renders.
-export function formatSchemaFactAttribute(attr) {
+function formatSchemaFactAttribute(attr) {
   let text = attr.required ? `@${attr.name} (required)` : `@${attr.name}`;
   if (attr.enum && attr.enum.length > 0) {
     text += ` [${attr.enum.join('|')}]`;
@@ -159,13 +159,13 @@ export function formatSchemaFactAttribute(attr) {
   return text;
 }
 
-export function formatSchemaFactNameList(names, truncated, omitted) {
+function formatSchemaFactNameList(names, truncated, omitted) {
   if (!names || names.length === 0) return 'none';
   const list = names.join(', ');
   return truncated ? list + truncationMarker(names.length, omitted) : list;
 }
 
-export function formatSchemaFactAttributeList(attrs) {
+function formatSchemaFactAttributeList(attrs) {
   if (!attrs || attrs.length === 0) return 'none';
   return attrs.map(formatSchemaFactAttribute).join(', ');
 }

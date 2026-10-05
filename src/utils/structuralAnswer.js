@@ -563,7 +563,7 @@ function ownersAnswer(name, owners, t) {
 // values/attribute parents.
 // `cuts` (optional array): collect the cut lists and write a marker instead of
 // "+N more" (the display version; see answerStructuralQuestion).
-export function buildStructuralAnswer(detection, data, { standard, vocabulary, cuts = null }) {
+function buildStructuralAnswer(detection, data, { standard, vocabulary, cuts = null }) {
   const t = cuts ? { ...T[detection.lang], cuts } : T[detection.lang];
   const { kind, name, usedAs } = detection;
   if (kind === 'relation') return data.relation ? relationAnswer(detection, data.relation, data.card || null, t) : null;

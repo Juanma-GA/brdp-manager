@@ -50,7 +50,7 @@ import { checkRuleFormat, extractRuleXPaths, formatSchemaIssue, ruleFormatIssues
 // "Must not" wording, English and Spanish (the templates mix both).
 const MUST_NOT_RE = /\b(must not|shall not|must be no|shall be no|should not|may not|cannot|can not|not allowed|forbidden|prohibited|no debe|no deben|no debe haber|no se (?:debe|deben|permite|permiten|puede|pueden|utiliza|utilizan|usa|usan)|prohibid[oa]s?)\b/i;
 
-export const LINT_KINDS = {
+const LINT_KINDS = {
   not_rule_format: 'not a rule of the format',
   not_node_path: 'not a node path',
   not_executable: 'not executable',
@@ -68,7 +68,7 @@ export const LINT_KINDS = {
 // and "cannot reject" (describeRule), the suggestion panel the rule format.
 // `panel`: what RuleTestPanel adds; `suggestion`: what the suggested /
 // pasted rule adds (it shows no description, so "cannot reject" too).
-export const LINT_CODES_FOR = {
+const LINT_CODES_FOR = {
   panel: ['must_not_allowed', 'flag1_value_predicate', 'ancestor_depth', 'duplicate_values'],
   suggestion: ['cannot_reject', 'must_not_allowed', 'flag1_value_predicate', 'ancestor_depth', 'duplicate_values'],
 };

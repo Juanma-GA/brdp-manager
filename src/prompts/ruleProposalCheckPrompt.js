@@ -20,7 +20,7 @@ export const RULE_PROPOSAL_CHECK_USER_MESSAGE = 'Check whether the rule implemen
 // elements (read backwards), and "use <applic>" implemented as a prohibition
 // of <applicRef>. "partly" keeps the examples' verdict with an informative
 // note; only "no" gives "Review" (ruleTest.js's ruleTestVerdict).
-export const PROPOSAL_CHECK_LEVELS = ['yes', 'partly', 'no'];
+const PROPOSAL_CHECK_LEVELS = ['yes', 'partly', 'no'];
 
 // `input`: { brdp, standard, format, ruleXml, ruleDescription (English
 // text, one "- " line per statement) }.

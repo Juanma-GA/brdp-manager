@@ -3,7 +3,7 @@ import { LLM_TRUNCATED, isTruncatedAnswer, truncatedAnswerError } from './llmTru
 
 // The output limit of an answer, unless the use sets its own (the rule
 // test's examples need more: src/prompts/shared.js RULE_TEST_MAX_TOKENS).
-export const DEFAULT_MAX_TOKENS = 4000;
+const DEFAULT_MAX_TOKENS = 4000;
 
 /**
  * Build request body based on provider

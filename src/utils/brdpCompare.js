@@ -22,7 +22,7 @@ import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
 // reports "all removed, all added": still a correct diff, just not a minimal
 // one, and it keeps memory bounded (the Myers trace grows with D²) for two
 // texts with nothing in common.
-export const MAX_DIFF_EDITS = 3000;
+const MAX_DIFF_EDITS = 3000;
 
 // Myers' diff of two sequences. Returns [{ op: 'equal'|'delete'|'insert',
 // a?: index in a, b?: index in b }] in order.
@@ -92,7 +92,7 @@ function myersMiddle(a, b, a0, a1, b0, b1, eq) {
 const TOKEN_RE = /\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
 const isSpace = (t) => /^\s+$/.test(t);
 
-export function tokenizeWords(text) {
+function tokenizeWords(text) {
   return String(text ?? '').replace(/\r\n?/g, '\n').match(TOKEN_RE) || [];
 }
 

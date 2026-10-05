@@ -468,7 +468,7 @@ const XPATH3_FUNCTIONS = [
 ];
 const XPATH3_FUNCTION_RE = new RegExp(`(?<![\\w.$:-])(?:fn:)?(${XPATH3_FUNCTIONS.join('|')})\\s*\\(`, 'g');
 
-export function xpath3Features(expression) {
+function xpath3Features(expression) {
   const text = stripLiterals(expression);
   const found = [];
   for (const [re, label] of XPATH3_SYNTAX) if (re.test(text)) found.push(label);
@@ -558,7 +558,7 @@ export function analyzeSchematron(ruleXml, options = {}) {
 
 // Whitespace collapsed outside string literals (the template contexts carry
 // long runs of spaces from the spreadsheet cells).
-export function collapseXPath(expression) {
+function collapseXPath(expression) {
   let out = '';
   let quote = '';
   let space = false;

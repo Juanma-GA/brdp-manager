@@ -194,7 +194,7 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
 // now carries a compact card of that element in the example's schema: its
 // allowed children and its attributes, from the same structure the check
 // used. Lists over CARD_MAX_NAMES are cut with "+N more".
-export const CARD_MAX_NAMES = 20;
+const CARD_MAX_NAMES = 20;
 
 function elementsNamed(doc, predicate) {
   const out = [];
@@ -238,14 +238,14 @@ function elementCards(doc, names, problems, structure) {
 }
 
 // "a, b, c" with at most CARD_MAX_NAMES names, then "+N more".
-export function cardNameList(names, prefix = '') {
+function cardNameList(names, prefix = '') {
   if (!names.length) return 'none';
   const shown = names.slice(0, CARD_MAX_NAMES).map((n) => `${prefix}${n}`).join(', ');
   const omitted = names.length - CARD_MAX_NAMES;
   return omitted > 0 ? `${shown}, +${omitted} more` : shown;
 }
 
-export function formatElementCard(card, schema) {
+function formatElementCard(card, schema) {
   const where = schema ? ` in the ${schema} schema` : '';
   return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}; attributes: ${cardNameList(card.attributes, '@')}`;
 }
@@ -254,7 +254,7 @@ export function formatElementCard(card, schema) {
 // not even look at (a real run: <quantity> and <dmCode> written wrong in
 // "Procedure without emphasis", for a rule about <emphasis>). The problem
 // about such an element then also offers the simplest fix.
-export const PLAIN_TEXT_HINT = 'If this element is not needed to test the rule, remove it and use plain text.';
+const PLAIN_TEXT_HINT = 'If this element is not needed to test the rule, remove it and use plain text.';
 
 // The validation problems of one example, in English (the correction
 // request to the LLM), followed by the cards of the elements involved.
@@ -411,7 +411,7 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
 // The panel says so; the verdict is not changed. A rejection that also
 // points at the DM's own nodes is not attributed to the BREX.
 const BREX_REFERENCE_PATH_RE = /\/(?:brexDmRef|brexref)\[\d+\]\//;
-export function rejectedByBrexReference(result) {
+function rejectedByBrexReference(result) {
   if (result?.status !== 'rejected') return false;
   const paths = (result.violations || []).flatMap((v) => v.nodePaths || []);
   return paths.length > 0 && paths.every((p) => BREX_REFERENCE_PATH_RE.test(p));

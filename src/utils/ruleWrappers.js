@@ -51,7 +51,7 @@ const TAG_RE = /<(\/?)([A-Za-z_][\w.:-]*)(?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*
 // The legacy containers that may be dropped: nothing but structure around the
 // rules (a <contextRules>/<contextrules> gets here only without a scope --
 // with one it is a block piece).
-export const WRAPPER_ELEMENTS = {
+const WRAPPER_ELEMENTS = {
   'BREX-4.2': new Set(['rules', 'structureObjectRuleGroup', 'nonContextRules', 'contextRules']),
   'BREX-4.1': new Set(['rules', 'structureObjectRuleGroup', 'nonContextRules', 'contextRules']),
   'BREX-3.0.1': new Set(['rules', 'structrules', 'contextrules']),

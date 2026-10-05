@@ -162,7 +162,7 @@ function splitTopLevelOperators(text, words) {
   parts.push(text.slice(start));
   return parts;
 }
-export function conditionOperands(expression) {
+function conditionOperands(expression) {
   const out = [];
   const visit = (raw) => {
     let e = raw.trim();
@@ -302,7 +302,7 @@ const decodeEntities = (text) =>
 // The @context of every Schematron rule (sch:rule, any prefix or none).
 const SCH_RULE_CONTEXT_RE = /<(?:[\w.-]+:)?rule\b[^>]*?\scontext\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 
-export function schematronContexts(ruleXml) {
+function schematronContexts(ruleXml) {
   const out = [];
   for (const m of String(ruleXml || '').matchAll(SCH_RULE_CONTEXT_RE)) out.push(decodeEntities(m[1] ?? m[2]));
   return out;
@@ -524,7 +524,7 @@ export function nestingPath(elements, from, to) {
 // <randomList> straight inside another one (invalid) and, corrected, moved
 // it out -- the reject example was no longer nested. Nothing for a pair
 // with no path in the schema.
-export function nestingPaths(structure, targets) {
+function nestingPaths(structure, targets) {
   const elements = structure.elements;
   const out = [];
   const seen = new Set();
@@ -704,7 +704,7 @@ function treeNames(node, out = new Set()) {
 // for the alternatives that can only look inside that section (never
 // written into the content: Mistral put <pmStatus> inside <content> before
 // the pm had one); all: every alternative is like that. Else null.
-export function classifyRuleTargets(structure, targets) {
+function classifyRuleTargets(structure, targets) {
   const elements = structure.elements;
   const root = structure.skeleton.path[0];
   const section = structure.skeleton.metadata || null;

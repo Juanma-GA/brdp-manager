@@ -115,7 +115,7 @@ export const VOCABULARY_FILE_LABELS = [
 
 // The label of the project's standard in the other-standard message
 // ("DITA 1.3" for both DITA flavors, the standard itself otherwise).
-export function vocabularyLabel(standard) {
+function vocabularyLabel(standard) {
   const file = STANDARD_TO_VOCABULARY_FILE[standard];
   const entry = VOCABULARY_FILE_LABELS.find(([f]) => f === file);
   return entry ? entry[1] : standard;

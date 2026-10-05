@@ -47,9 +47,9 @@
 // "flat", "master", or the custom pattern itself (a pattern always contains
 // {schema}, so it can never be mistaken for the other two). Being a plain
 // string keeps it a stable React dependency.
-export const SCHEMA_LOCATIONS = ['flat', 'master', 'custom'];
+const SCHEMA_LOCATIONS = ['flat', 'master', 'custom'];
 export const DEFAULT_SCHEMA_LOCATION = 'flat';
-export const SCHEMA_PLACEHOLDER = '{schema}';
+const SCHEMA_PLACEHOLDER = '{schema}';
 
 export const SCHEMA_CONTEXT_ISSUE = {
   'S1000D 4.2': '4-2',
@@ -57,7 +57,7 @@ export const SCHEMA_CONTEXT_ISSUE = {
   'S1000D 3.0.1': '3-0-1',
 };
 
-export const SCHEMA_LOCATION_OPTIONS = {
+const SCHEMA_LOCATION_OPTIONS = {
   'S1000D 4.2': ['flat', 'custom'],
   'S1000D 4.1': ['flat', 'custom'],
   'S1000D 3.0.1': ['flat', 'master', 'custom'],
@@ -65,7 +65,7 @@ export const SCHEMA_LOCATION_OPTIONS = {
 
 // Master folder of the schemas that aren't data modules; every other schema
 // is under dm/.
-export const MASTER_SCHEMA_FOLDER = { comment: 'comment', ddn: 'ddn', dml: 'dml', pm: 'pm' };
+const MASTER_SCHEMA_FOLDER = { comment: 'comment', ddn: 'ddn', dml: 'dml', pm: 'pm' };
 
 export function supportsSchemaContext(standard) {
   return Object.prototype.hasOwnProperty.call(SCHEMA_CONTEXT_ISSUE, standard);
@@ -75,7 +75,7 @@ export function schemaLocationOptions(standard) {
   return SCHEMA_LOCATION_OPTIONS[standard] || [];
 }
 
-export function isCustomSchemaLocation(location) {
+function isCustomSchemaLocation(location) {
   return typeof location === 'string' && location.includes(SCHEMA_PLACEHOLDER);
 }
 
@@ -147,7 +147,7 @@ export function recognizeSchemaUrl(value, standard, location = DEFAULT_SCHEMA_LO
 // (the project's current pattern, checked first), "flat" or "master".
 // Generate uses the form to leave alone a rule whose allowed values mix forms
 // on purpose (see rewriteRuleSchemaUrls).
-export function recognizeSchemaUrlForm(value, standard, location = DEFAULT_SCHEMA_LOCATION) {
+function recognizeSchemaUrlForm(value, standard, location = DEFAULT_SCHEMA_LOCATION) {
   const text = String(value ?? '').trim();
   if (!text) return null;
   if (isCustomSchemaLocation(location)) {
@@ -195,7 +195,7 @@ export function schemaNameFromContext(value, location = null) {
 const DOC_NOUN_EN = String.raw`(?:data\s+modules?|DMs?|schemas?|XSD)`;
 const DOC_NOUN_ES = String.raw`(?:modulos?\s+de\s+datos|DMs?|esquemas?)`;
 
-export const SCHEMA_MENTION_MAP = {
+const SCHEMA_MENTION_MAP = {
   appliccrossreftable: {
     strong: [
       String.raw`applicability\s+cross[-\s]reference\s+tables?`,

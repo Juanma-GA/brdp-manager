@@ -5,7 +5,7 @@ import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaCo
 
 let _schemaSummaryCache = null;
 
-export async function loadSchemaSummary() {
+async function loadSchemaSummary() {
   if (_schemaSummaryCache) return _schemaSummaryCache;
   const res = await fetch("/brex-schema-summary-4-2.json?v=" + Date.now());
   if (!res.ok) throw new Error("Could not load brex-schema-summary-4-2.json");
