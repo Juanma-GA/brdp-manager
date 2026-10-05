@@ -6,6 +6,7 @@ import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
 import { finalRuleXml, validateRuleXml } from '../../hooks/useSuggestions';
 import { NAME_HINT_TEST_IDS, extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
 import SchemaIssueLines from './SchemaIssueLines';
+import RuleLintWarnings from './RuleLintWarnings';
 import { useNameFixHints } from '../../hooks/useNameFixHints.js';
 import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
 
@@ -69,6 +70,8 @@ export function RuleValidationWarnings({ validation, standard }) {
         issues={[...ruleFormatIssues(validation.ruleFormat), ...xpathIssues(invalidXPaths), ...nameIssues(names, 'rule', { standard, hints })]}
         testIds={{ ...RULE_FORMAT_TEST_IDS, ...NAME_HINT_TEST_IDS }}
       />
+      {/* Barrido final 2/2, Part 2: the lint's warnings, never blocking. */}
+      {validation.acceptable && <RuleLintWarnings ruleXml={validation.xml} format={validation.format} place="suggestion" />}
     </>
   );
 }

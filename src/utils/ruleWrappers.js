@@ -111,6 +111,12 @@ export function splitRuleXmlPieces(xml, format) {
 export function unwrapRuleXml(xml, format) {
   const source = String(xml ?? '');
   if (!SHAPES[format] || !source.trim()) return { xml: source, changed: false };
+  // Barrido final 2/2, Part 6: malformed input is returned as it is and
+  // flagged (never an exception). Before, `<rules><structureObjectRule>…
+  // </structureObjectRule>` with no </rules> was "unwrapped" into valid XML,
+  // hiding that the stored text was broken.
+  const malformed = fragmentWellFormedProblem(source);
+  if (malformed) return { xml: source, changed: false, malformed: true, error: malformed };
   const check = checkRuleFormat(source, format);
   if (check.ok || check.problem?.code !== 'rule_format_wrapper') return { xml: source, changed: false };
   const pieces = splitRuleXmlPieces(source, format) || [];
@@ -118,6 +124,38 @@ export function unwrapRuleXml(xml, format) {
   const cleaned = pieces.map((p) => p.text).join('\n');
   if (!cleaned.trim() || !checkRuleFormat(cleaned, format).ok) return { xml: source, changed: false };
   return { xml: cleaned, changed: true };
+}
+
+// Why a rule fragment is not well-formed XML, or null. Text only (no DOM, so
+// it runs in Node and in the browser alike): every "<" must start a comment,
+// CDATA, processing instruction or tag; tags must nest; an "&" must start an
+// entity or character reference. Several top-level elements are fine (a
+// stored rule is a fragment).
+const ENTITY_RE = /^&(?:[A-Za-z_][\w.-]*|#\d+|#x[\da-fA-F]+);/;
+export function fragmentWellFormedProblem(text) {
+  const stack = [];
+  let cursor = 0;
+  const checkText = (chunk) => {
+    const lt = chunk.indexOf('<');
+    if (lt >= 0) return `"<" that does not start a tag: "${chunk.slice(lt, lt + 20)}"`;
+    for (let i = chunk.indexOf('&'); i >= 0; i = chunk.indexOf('&', i + 1)) {
+      if (!ENTITY_RE.test(chunk.slice(i))) return `"&" that does not start an entity: "${chunk.slice(i, i + 20)}"`;
+    }
+    return null;
+  };
+  for (const m of text.matchAll(TOKEN_RE)) {
+    const problem = checkText(text.slice(cursor, m.index));
+    if (problem) return problem;
+    cursor = m.index + m[0].length;
+    const name = m[3];
+    if (name === undefined) continue; // comment, CDATA, PI
+    if (m[2]) {
+      if (stack.pop() !== name) return `</${name}> does not close the open element`;
+    } else if (!m[5]) stack.push(name);
+  }
+  const problem = checkText(text.slice(cursor));
+  if (problem) return problem;
+  return stack.length ? `<${stack[stack.length - 1]}> is never closed` : null;
 }
 
 // True when what the pieces leave out is only wrapper tags and whitespace.

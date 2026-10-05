@@ -208,7 +208,7 @@ def _classify_row(
     """
     identifier = row.identifier.strip()
     if not identifier:
-        return ImportRowResult(row_number=row.row_number, identifier="", outcome="rejected", reason="Missing identifier")
+        return ImportRowResult(row_number=row.row_number, identifier="", outcome="rejected", reason="Missing identifier", reason_code="missing_identifier")
 
     rule_status = row.rule_status
     rule_xml = row.rule.strip()
@@ -219,6 +219,8 @@ def _classify_row(
             identifier=identifier,
             outcome="rejected",
             reason=f"Invalid Rule Status value {row.rule_status!r} -- must be exactly 'To Do', 'Draft', or 'Verified'",
+            reason_code="invalid_rule_status",
+            reason_params={"value": row.rule_status},
         )
 
     # This project's standard has no rule-approval format at all (S1000D
@@ -233,6 +235,7 @@ def _classify_row(
             identifier=identifier,
             outcome="rejected",
             reason="This project's standard has no rule format -- Rule must be empty and Rule Status must be 'To Do'",
+            reason_code="no_rule_format",
         )
 
     if rule_xml:
@@ -243,6 +246,8 @@ def _classify_row(
                 identifier=identifier,
                 outcome="rejected",
                 reason=f"Rule is not well-formed XML: {xml_error}",
+                reason_code="rule_not_well_formed",
+                reason_params={"error": xml_error},
             )
         if rule_status == "To Do":
             return ImportRowResult(
@@ -250,6 +255,7 @@ def _classify_row(
                 identifier=identifier,
                 outcome="rejected",
                 reason="Rule has XML content but Rule Status is 'To Do' (claims no rule exists, but one does)",
+                reason_code="rule_with_todo",
             )
     elif rule_status in ("Draft", "Verified"):
         return ImportRowResult(
@@ -257,6 +263,8 @@ def _classify_row(
             identifier=identifier,
             outcome="rejected",
             reason=f"Rule Status is {rule_status!r} but Rule is empty (claims a rule that doesn't exist)",
+            reason_code="status_without_rule",
+            reason_params={"status": rule_status},
         )
 
     action = "update" if existing_brdp is not None else "create"

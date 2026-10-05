@@ -230,6 +230,135 @@
       "expected": "<rules><sch:pattern><sch:rule context=\"note\"><sch:assert test=\"@type\">t</sch:assert></sch:rule></sch:pattern></rules>",
       "changed": false,
       "pieces": null
+    },
+    {
+      "name": "rare: a comment with a tag in it, inside the wrapper",
+      "format": "BREX-4.2",
+      "input": "<rules><!-- old: <structureObjectRule> removed, see </rules> --><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></rules>",
+      "changed": true,
+      "expected": "<!-- old: <structureObjectRule> removed, see </rules> -->\n<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "pieces": [
+        {
+          "kind": "comment",
+          "text": "<!-- old: <structureObjectRule> removed, see </rules> -->"
+        },
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "rare: CDATA with markup in objectUse, inside the wrapper",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//para[count(x) &lt; 3]</objectPath><objectUse><![CDATA[a < b and <rules> or </structureObjectRule>]]></objectUse></structureObjectRule></rules>",
+      "changed": true,
+      "expected": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//para[count(x) &lt; 3]</objectPath><objectUse><![CDATA[a < b and <rules> or </structureObjectRule>]]></objectUse></structureObjectRule>",
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//para[count(x) &lt; 3]</objectPath><objectUse><![CDATA[a < b and <rules> or </structureObjectRule>]]></objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "rare: single quotes and \">\" in an attribute value",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule id='R1'><objectPath allowedObjectFlag='2'>//@x</objectPath><objectUse>x</objectUse><objectValue valueForm='single' valueAllowed='a>b'/></structureObjectRule></rules>",
+      "changed": true,
+      "expected": "<structureObjectRule id='R1'><objectPath allowedObjectFlag='2'>//@x</objectPath><objectUse>x</objectUse><objectValue valueForm='single' valueAllowed='a>b'/></structureObjectRule>",
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule id='R1'><objectPath allowedObjectFlag='2'>//@x</objectPath><objectUse>x</objectUse><objectValue valueForm='single' valueAllowed='a>b'/></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "rare: block attributes in another order",
+      "format": "BREX-4.2",
+      "input": "<rules><contextRules id=\"c1\" rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules></rules>",
+      "changed": true,
+      "expected": "<contextRules id=\"c1\" rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "pieces": [
+        {
+          "kind": "block",
+          "text": "<contextRules id=\"c1\" rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>"
+        }
+      ]
+    },
+    {
+      "name": "rare: 3.0.1 comment and CDATA",
+      "format": "BREX-3.0.1",
+      "input": "<rules><!-- keep --><objrule><objpath objappl='0'>//emph</objpath><objuse><![CDATA[no <emph>]]></objuse></objrule></rules>",
+      "changed": true,
+      "expected": "<!-- keep -->\n<objrule><objpath objappl='0'>//emph</objpath><objuse><![CDATA[no <emph>]]></objuse></objrule>",
+      "pieces": [
+        {
+          "kind": "comment",
+          "text": "<!-- keep -->"
+        },
+        {
+          "kind": "rule",
+          "text": "<objrule><objpath objappl='0'>//emph</objpath><objuse><![CDATA[no <emph>]]></objuse></objrule>"
+        }
+      ]
+    },
+    {
+      "name": "malformed: wrapper never closed",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "changed": false,
+      "expected": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "malformed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "malformed: closing tag of another element",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></contextRules>",
+      "changed": false,
+      "expected": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></contextRules>",
+      "malformed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "malformed: a stray \"<\"",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule><</rules>",
+      "changed": false,
+      "expected": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule><</rules>",
+      "malformed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "malformed: a bare \"&\"",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule> & </rules>",
+      "changed": false,
+      "expected": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule> & </rules>",
+      "malformed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
     }
   ]
 }

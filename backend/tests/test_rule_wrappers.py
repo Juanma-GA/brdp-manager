@@ -19,7 +19,7 @@ from app.api.routes.approvals import _rule_format_problem
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPHistory, Project, RuleApproval, User, UserProjectRole
-from app.services.rule_wrappers import normalize_stored_rule_wrappers, split_rule_pieces, unwrap_rule_xml
+from app.services.rule_wrappers import normalize_stored_rule_wrappers, split_rule_pieces, unwrap_rule_xml, unwrap_rule_xml_result
 
 CASES = json.loads((Path(__file__).parent / "fixtures" / "rule_wrapper_cases.json").read_text(encoding="utf-8"))["cases"]
 REAL = {c["name"].split(":")[0].replace("real ", ""): c for c in CASES if c["name"].startswith("real ")}
@@ -33,6 +33,11 @@ def test_shared_cases(case):
     cleaned, changed = unwrap_rule_xml(case["input"], case["format"])
     assert changed == case["changed"]
     assert cleaned == case["expected"]
+    # Barrido final 2/2, Part 6: malformed input comes back as it was, flagged.
+    result = unwrap_rule_xml_result(case["input"], case["format"])
+    assert result["malformed"] == bool(case.get("malformed")), result
+    if case.get("malformed"):
+        assert result["xml"] == case["input"] and result["error"]
     pieces = split_rule_pieces(case["input"], case["format"])
     got = None if pieces is None else [{"kind": p["kind"], "text": p["text"]} for p in pieces]
     assert got == case["pieces"]

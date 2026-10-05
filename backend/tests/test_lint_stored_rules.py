@@ -36,6 +36,20 @@ RULES = {
     "BRDP-LINT-FLAG1": _sor("//@assyCode[matches(., '^\\d{2}$')]", "1", rule_id="R-FLAG1"),
     "BRDP-LINT-DEPTH": _sor("//proceduralStep[count(ancestor::*) &gt; 8]", "0"),
     "BRDP-LINT-FORMAT": "//&lt;emphasis&gt;",
+    # Barrido final 2/2: the same problem in three places of one rule is
+    # ONE finding; the same allowed value twice is a finding of its own.
+    "BRDP-LINT-THRICE": "".join(
+        _sor(f"//@{name}[matches(., '^\\d{{2}}$')]", "1", rule_id=f"R-THRICE-{name}")
+        for name in ("assyCode", "subSystemCode", "subSubSystemCode")
+    ),
+    "BRDP-LINT-DUPLICATE": _sor(
+        "//@emphasisType",
+        "2",
+        extra='<objectValue valueForm="single" valueAllowed="em01"/>'
+        '<objectValue valueForm="single" valueAllowed="em02"/>'
+        '<objectValue valueForm="single" valueAllowed="em01"/>',
+        rule_id="R-DUP",
+    ),
     # Known, not counted (Plantillas, Part 4): an informative rule -- flag 2
     # without values that does not say "must not" (a node path or a
     # condition), as in the default S1000D BREX.
@@ -111,6 +125,8 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
         "BRDP-LINT-FLAG1": "flag 1 with a value predicate",
         "BRDP-LINT-DEPTH": "count(ancestor::*) as depth",
         "BRDP-LINT-FORMAT": "not a rule of the format",
+        "BRDP-LINT-THRICE": "flag 1 with a value predicate",
+        "BRDP-LINT-DUPLICATE": "duplicate allowed value",
     }
     for identifier, kind in expected.items():
         assert any(f"| {kind} |" in line for line in _rows(out, identifier)), (identifier, out)
@@ -121,6 +137,12 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
     assert any("does not select nodes" in line and "a number" in line for line in _rows(out, "BRDP-LINT-NUMBER")), out
     assert any("XPath error" in line for line in _rows(out, "BRDP-LINT-BADBOOL")), out
     assert any("R-FLAG1" in line and "never rejected" in line for line in _rows(out, "BRDP-LINT-FLAG1")), out
+    # Once per rule: one row for the three places, every place named.
+    thrice = _rows(out, "BRDP-LINT-THRICE")
+    assert len(thrice) == 1, out
+    assert "(3 places)" in thrice[0] and all(f"R-THRICE-{n}" in thrice[0] for n in ("assyCode", "subSystemCode", "subSubSystemCode")), out
+    dup = _rows(out, "BRDP-LINT-DUPLICATE")
+    assert len(dup) == 1 and "R-DUP" in dup[0] and "em01 (2 times)" in dup[0] and "em02" not in dup[0], out
     # document() is known and accepted: listed apart, not counted.
     known = out.split("### Known and accepted (not counted)")[1]
     assert "BRDP-LINT-DOCUMENT" in known
@@ -142,9 +164,53 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
     # 8 counted findings: one per seeded rule, plus "cannot reject" next to
     # "must not" but allowed, and "not executable" next to "not a rule of the
     # format" (document() and the informative rules are known, not counted).
-    assert "Checked 15 stored rule(s) in 1 project(s); 8 finding(s)." in out
+    assert "Checked 17 stored rule(s) in 1 project(s); 10 finding(s), each problem counted once per rule." in out
+    assert "- Working projects: 17 rule(s) in 1 project(s); 10 finding(s) (12 place(s))." in out
+    assert "- Reference projects (Official Default…): 0 rule(s) in 0 project(s); 0 finding(s)." in out
 
 
 async def test_project_filter_by_name_and_unknown_project(seeded_project):
     assert f"### {seeded_project.name}" in _run(seeded_project.name)
-    assert "Checked 0 stored rule(s) in 0 project(s); 0 finding(s)." in _run(f"no such project {uuid.uuid4()}")
+    assert "Checked 0 stored rule(s) in 0 project(s); 0 finding(s)" in _run(f"no such project {uuid.uuid4()}")
+
+
+async def test_reference_projects_are_totalled_apart():
+    """An "Official Default …" project is a reference: its findings have
+    their own total and section, never mixed with the working projects'."""
+    suffix = uuid.uuid4().hex[:8]
+    names = {True: f"Official Default Lint {suffix}", False: f"Lint Working {suffix}"}
+    async with async_session_factory() as session:
+        projects = {}
+        for reference, name in names.items():
+            project = Project(name=name, standard="S1000D 4.2")
+            session.add(project)
+            await session.flush()
+            projects[reference] = project
+            for n in range(2 if reference else 1):
+                brdp = BRDP(project_id=project.id, identifier=f"BRDP-LINT-{n}", title="t", definition="d", proposal="p", validation="Validated")
+                session.add(brdp)
+                await session.flush()
+                xml = _sor("//emphasis", "2", "Emphasis must not be used.")
+                session.add(RuleApproval(brdp_id=brdp.id, format="BREX-4.2", rule_xml=xml, source="manual", status="approved"))
+        await session.commit()
+    try:
+        out = subprocess.run(
+            [sys.executable, str(SCRIPT)],
+            capture_output=True,
+            cwd=SCRIPT.parent.parent,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            check=True,
+        ).stdout.decode("utf-8")
+        working, reference = out.split("## Reference projects")
+        assert f"### {names[False]}" in working.split("## Working projects")[1] and names[True] not in working
+        assert f"### {names[True]}" in reference
+        # Totals: each rule here has two findings ("cannot reject" and
+        # "must not but allowed"); the database may hold other projects.
+        head = out.split("\n")[1:3]
+        assert head[0].startswith("- Working projects:") and head[1].startswith("- Reference projects (Official Default…):")
+    finally:
+        async with async_session_factory() as session:
+            for project in projects.values():
+                db_project = await session.get(Project, project.id)
+                await session.delete(db_project)
+            await session.commit()

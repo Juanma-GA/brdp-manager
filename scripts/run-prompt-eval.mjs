@@ -34,7 +34,8 @@
 //      to scripts/prompt-eval/report/responses.json for manual reading.
 //   6. (C3) Copies both files to scripts/prompt-eval/runs/<commit>-<time>/
 //      and compares the run with the previous run of another commit
-//      (scripts/compare-prompt-eval.mjs), printing the result.
+//      (scripts/compare-prompt-eval.mjs), printing the result and adding
+//      it to report.md as "## Comparison with the previous run".
 //      That report/ directory is gitignored -- eval output is a run
 //      artifact, never something to commit.
 //
@@ -89,7 +90,7 @@ function caseSchemaLocation(testCase) {
 import { validateXML } from "xmllint-wasm";
 import { distinctSchemaNames, languageCheck, aiFieldLanguageCheck, loadSchemaCards, parentsPresentedAsChildren, stripPlaceholders } from "./prompt-eval/checks.mjs";
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
-import { importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
+import { appendComparison, importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
 import { candidatesToDraft, draftCandidates } from "../src/utils/ruleExtractDraft.js";
 import { findDecisions } from "../src/utils/textExtract.js";
@@ -1111,7 +1112,8 @@ async function main() {
 // C3, Part 2: every run is saved to scripts/prompt-eval/runs/<commit>-<time>/
 // (gitignored), and compared right away with the previous run of another
 // commit, if there is one (scripts/prompt-eval/runs.mjs picks it). The
-// comparison is only printed: the run's own exit code does not depend on it.
+// comparison is printed and added to report.md; the run's own exit code does
+// not depend on it.
 function saveAndCompare({ gitInfo, generatedAt }) {
   importBaselines();
   const saved = saveRun({ reportDir: REPORT_DIR, commit: gitInfo.commit, generatedAt });
@@ -1119,19 +1121,14 @@ function saveAndCompare({ gitInfo, generatedAt }) {
   const runs = listRuns();
   const current = runs.find((r) => r.dir === saved);
   const previous = previousRunOfOtherCommit(runs, current);
-  if (!previous) {
-    console.log("No earlier run of another commit to compare with: this run is the reference for the next one.");
-    return;
-  }
-  console.log("");
-  console.log(`## Comparison with the previous run of another commit (${previous.name})`);
-  console.log("");
-  try {
-    const { text } = compareRunDirs(previous.dir, saved, { casesFile: CASES_PATH, beforeName: previous.name, afterName: current.name });
-    console.log(text);
-  } catch (err) {
-    console.error(`WARNING: could not compare with ${previous.name}: ${err.message}`);
-  }
+  // Barrido final 2/2, Part 7: also a section of report.md (the working copy
+  // and the saved one), not only the console.
+  const section = appendComparison({
+    reportFiles: [path.join(REPORT_DIR, "report.md"), path.join(saved, "report.md")],
+    previous,
+    compare: () => compareRunDirs(previous.dir, saved, { casesFile: CASES_PATH, beforeName: previous.name, afterName: current.name }).text,
+  });
+  console.log(section);
 }
 
 // Header shared by report.md and responses.json (Part 2 of this round):

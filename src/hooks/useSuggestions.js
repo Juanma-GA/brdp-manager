@@ -58,6 +58,9 @@ export function validateRuleXml(xml, vocabulary, format) {
     ruleFormat,
     acceptable: wellFormed.valid && invalidXPaths.length === 0 && ruleFormat.ok,
     names: checkRuleNames(xml || '', vocabulary),
+    // For the lint warnings shown under the rule (RuleLintWarnings).
+    xml: xml || '',
+    format,
   };
 }
 

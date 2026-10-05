@@ -129,3 +129,32 @@ export function saveRun({ reportDir, commit, generatedAt, runsDir = RUNS_DIR }) 
   for (const file of ["report.md", "responses.json"]) fs.copyFileSync(path.join(reportDir, file), path.join(target, file));
   return target;
 }
+
+// Barrido final 2/2, Part 7: the comparison with the previous run of another
+// commit -- Regressions, Improvements, Review by hand, prompt sizes -- as a
+// section of report.md, not only on the console. `compare()` returns the
+// comparison text (compare-prompt-eval.mjs's formatComparison) or throws.
+// Appended to every file of `reportFiles` (the working report and the saved
+// run's copy); returns the section, for the console. With no previous run
+// the section says so (this run is the reference); a comparison that fails
+// says why -- never an empty or missing section (HR7).
+export function comparisonSection({ previous, compare }) {
+  const lines = ["", "## Comparison with the previous run", ""];
+  if (!previous) {
+    lines.push("No earlier run of another commit to compare with: this run is the reference for the next one.");
+    return lines.join("\n") + "\n";
+  }
+  lines.push(`Compared with \`${previous.name}\` (the previous run of another commit).`, "");
+  try {
+    lines.push(compare().trimEnd());
+  } catch (err) {
+    lines.push(`The comparison with ${previous.name} failed: ${err.message}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+export function appendComparison({ reportFiles, previous, compare }) {
+  const section = comparisonSection({ previous, compare });
+  for (const file of reportFiles) fs.appendFileSync(file, section);
+  return section;
+}

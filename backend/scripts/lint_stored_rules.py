@@ -24,7 +24,14 @@ Reasons that are known and accepted (another file: doc-available(), doc(),
 document(); a value replaced outside the app, @@...@@; a nonContextRule), and
 informative rules (BREX flag 2 without values whose objectUse does not say
 "must not" -- they document what is allowed, s1kd-brexcheck never rejects
-them), are listed apart and not counted. A boolean objectPath is a condition
+them), are listed apart and not counted.
+
+Each problem is counted once per rule, not once per place (a rule with the
+same problem in three of its structureObjectRules is one finding; the detail
+says "(3 places)"). Reference projects -- names starting with "Official
+Default", or --reference-prefix -- are listed and totalled apart from the
+working projects. Since Barrido final 2/2 there is one more check: the same
+value twice in a rule's list of allowed values. A boolean objectPath is a condition
 evaluated like s1kd-brexcheck, not a finding. Rules in the trash are listed too, marked as
 such. Exit code 0 always (a report, not a gate).
 """
@@ -89,29 +96,77 @@ async def load_rules(project: str | None) -> list[tuple]:
         return (await session.execute(query)).all()
 
 
-def render(rows: list[tuple], findings: dict) -> str:
+# Projects whose rules are a reference (the "Official Default …" projects
+# hold the default BREX of a standard, not a project's own decisions): their
+# findings are counted apart from the working projects'. A name prefix,
+# overridable with --reference-prefix (repeatable).
+DEFAULT_REFERENCE_PREFIXES = ("Official Default",)
+
+
+def is_reference(project: str, prefixes) -> bool:
+    return any(project.startswith(prefix) for prefix in prefixes)
+
+
+def _detail(f: dict) -> str:
+    places = f.get("occurrences", 1)
+    return f"{f['detail']} ({places} places)" if places > 1 else f["detail"]
+
+
+def render(rows: list[tuple], findings: dict, reference_prefixes=DEFAULT_REFERENCE_PREFIXES) -> str:
+    """Each problem is counted once per rule (Barrido final 2/2): a rule with
+    the same problem in several places is one finding, the detail says how
+    many places. Reference projects and working projects have their own
+    totals."""
     by_project: dict[tuple, list[str]] = {}
     known: list[str] = []
-    total = 0
-    clean_projects: set[str] = set()
+    totals = {True: {"rules": 0, "findings": 0, "occurrences": 0, "projects": set()},
+              False: {"rules": 0, "findings": 0, "occurrences": 0, "projects": set()}}
     for i, (project, standard, identifier, deleted_at, format, status, _rule_xml) in enumerate(rows):
         brdp = f"{identifier} (in trash)" if deleted_at is not None else identifier
         status_label = _STATUS_LABEL.get(status, status)
+        reference = is_reference(project, reference_prefixes)
+        bucket = totals[reference]
+        bucket["rules"] += 1
+        bucket["projects"].add(project)
         lines = by_project.setdefault((project, standard), [])
         for f in findings.get(str(i), []):
             if f.get("known"):
-                known.append(f"| {_cell(project)} | {_cell(brdp)} | {_cell(format)} | {_cell(f['kind'])} | {_cell(f['detail'])} |")
+                known.append(f"| {_cell(project)} | {_cell(brdp)} | {_cell(format)} | {_cell(f['kind'])} | {_cell(_detail(f))} |")
             else:
-                lines.append(f"| {_cell(brdp)} | {_cell(format)} | {_cell(status_label)} | {_cell(f['kind'])} | {_cell(f['detail'])} |")
-                total += 1
-    out = [f"Checked {len(rows)} stored rule(s) in {len(by_project)} project(s); {total} finding(s)."]
-    for (project, standard), lines in by_project.items():
-        if not lines:
-            clean_projects.add(project)
-            continue
-        out += ["", f"### {project} — {standard}", "", "| BRDP | Format | Rule Status | Finding | Detail |", "|---|---|---|---|---|", *lines]
-    if clean_projects:
-        out += ["", "Projects with no findings: " + ", ".join(sorted(clean_projects)) + "."]
+                lines.append(f"| {_cell(brdp)} | {_cell(format)} | {_cell(status_label)} | {_cell(f['kind'])} | {_cell(_detail(f))} |")
+                bucket["findings"] += 1
+                bucket["occurrences"] += f.get("occurrences", 1)
+
+    def summary(label: str, b: dict) -> str:
+        extra = f" ({b['occurrences']} place(s))" if b["occurrences"] != b["findings"] else ""
+        return f"{label}: {b['rules']} rule(s) in {len(b['projects'])} project(s); {b['findings']} finding(s){extra}."
+
+    total_findings = totals[True]["findings"] + totals[False]["findings"]
+    out = [
+        f"Checked {len(rows)} stored rule(s) in {len(by_project)} project(s); {total_findings} finding(s), each problem counted once per rule.",
+        "- " + summary("Working projects", totals[False]),
+        "- " + summary(f"Reference projects ({', '.join(p + '…' for p in reference_prefixes)})", totals[True]),
+    ]
+
+    def section(title: str, reference: bool) -> list[str]:
+        part: list[str] = []
+        clean: list[str] = []
+        for (project, standard), lines in by_project.items():
+            if is_reference(project, reference_prefixes) != reference:
+                continue
+            if not lines:
+                clean.append(project)
+                continue
+            part += ["", f"### {project} — {standard}", "", "| BRDP | Format | Rule Status | Finding | Detail |", "|---|---|---|---|---|", *lines]
+        if not part and not clean:
+            return []
+        head = ["", f"## {title}"]
+        if clean:
+            part += ["", "Projects with no findings: " + ", ".join(sorted(clean)) + "."]
+        return head + part
+
+    out += section("Working projects", False)
+    out += section("Reference projects", True)
     out += ["", "### Known and accepted (not counted)", ""]
     if known:
         out += ["| Project | BRDP | Format | Finding | Detail |", "|---|---|---|---|---|", *known]
@@ -123,10 +178,15 @@ def render(rows: list[tuple], findings: dict) -> str:
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--project", help="only this project (name or id)")
+    parser.add_argument(
+        "--reference-prefix",
+        action="append",
+        help='a project whose name starts with this is a reference project (default: "Official Default"); repeatable',
+    )
     args = parser.parse_args()
     rows = await load_rules(args.project)
     findings = lint_with_node([{"key": str(i), "format": row[4], "rule_xml": row[6] or ""} for i, row in enumerate(rows)])
-    print(render(rows, findings))
+    print(render(rows, findings, tuple(args.reference_prefix or DEFAULT_REFERENCE_PREFIXES)))
 
 
 if __name__ == "__main__":

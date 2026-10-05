@@ -30,7 +30,7 @@ check('row EN, newer edition', en('config.dataManagement.catalogEditionRow', new
 check('counter ES', es('config.dataManagement.summaryCatalogEdition', { count: 116 }), 'De catálogo de otra edición: 116');
 check('counter EN', en('config.dataManagement.summaryCatalogEdition', { count: 116 }), "From another edition's catalog: 116");
 check('substitution ES', es('config.dataManagement.catalogOverrideRowEdition', { row: 12, identifier: 'BRDP-S1-00012', edition: 'S1000D 4.1' }),
-  'Fila 12 (BRDP-S1-00012): Title y Definition usarán los valores del catálogo S1000D 4.1, no los del fichero');
+  'Fila 12 (BRDP-S1-00012): el Título y la Definición serán los del catálogo S1000D 4.1, no los del fichero');
 // History: the same text AI Extract's event ends with.
 check('History ES', es('records.history.extractedFromCatalogEdition', { edition: 'S1000D 4.1', standard: 'S1000D 4.2' }),
   'catálogo S1000D 4.1, no existe en S1000D 4.2');

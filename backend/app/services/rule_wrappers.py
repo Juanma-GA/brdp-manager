@@ -117,6 +117,24 @@ def split_rule_pieces(xml: str, format: str) -> list[dict] | None:
 
 
 def unwrap_rule_xml(xml: str, format: str) -> tuple[str, bool]:
+    result = unwrap_rule_xml_result(xml, format)
+    return result["xml"], result["changed"]
+
+
+def unwrap_rule_xml_result(xml: str, format: str) -> dict:
+    """unwrap_rule_xml with the reason it left the text alone when the text
+    is malformed (Barrido final 2/2, Part 6): {"xml", "changed",
+    "malformed", "error"} -- never an exception, the text comes back as it
+    was."""
+    if format in _SHAPES and xml and xml.strip():
+        error = _xml_well_formed_error(xml)
+        if error is not None:
+            return {"xml": xml, "changed": False, "malformed": True, "error": error}
+    cleaned, changed = _unwrap(xml, format)
+    return {"xml": cleaned, "changed": changed, "malformed": False, "error": None}
+
+
+def _unwrap(xml: str, format: str) -> tuple[str, bool]:
     if format not in _SHAPES or not xml or not xml.strip() or _xml_well_formed_error(xml) is not None:
         return xml, False
     problem = _rule_format_problem(xml, format)

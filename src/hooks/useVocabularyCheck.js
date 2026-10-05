@@ -4,9 +4,12 @@
 // mean" suggestions) plus the deterministic notFound/wrongType check
 // (used by the big red banner and, via recomputeVocabResult, injected
 // into Ask/Suggest's prompts).
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { fetchSchemaAttribute } from '../api/schemaFacts.js';
 import {
+  attributesToCheckOnElements,
   checkAgainstVocabulary,
+  checkElementAttributePairs,
   extractContextCandidates,
   hashVocabInputText,
   loadSchemaVocabulary,
@@ -49,6 +52,32 @@ export function useVocabularyCheck(standard, selected) {
   // the BRDP's CURRENT text.
   const [vocabResult, setVocabResult] = useState(null);
 
+  // Barrido final 2/2, Part 3: the elements that declare each attribute of a
+  // `<element/@attribute>` written in the text (GET /api/schema-cards/
+  // attribute), cached per standard and attribute for the page's life. A
+  // failed read is not cached (the next check tries again) and leaves that
+  // pair "unchecked", which the banner says.
+  const ownersCacheRef = useRef(new Map());
+  const loadOwners = async (attributes) => {
+    const out = new Map();
+    await Promise.all(
+      attributes.map(async (attribute) => {
+        const key = `${standard}\u0000${attribute}`;
+        if (!ownersCacheRef.current.has(key)) {
+          try {
+            const res = await fetchSchemaAttribute(standard, attribute);
+            ownersCacheRef.current.set(key, res.available ? new Set((res.owners || []).map((o) => o.element)) : null);
+          } catch {
+            out.set(attribute, null);
+            return;
+          }
+        }
+        out.set(attribute, ownersCacheRef.current.get(key));
+      }),
+    );
+    return out;
+  };
+
   // "Aviso ligado al texto" round, point 1, simplified by the "solo
   // determinista" follow-up: the vocabulary check (context extraction +
   // comparison against the real schema, no LLM call anywhere) -- fast
@@ -57,7 +86,12 @@ export function useVocabularyCheck(standard, selected) {
   // askGeneric/requestSuggestion BEFORE building their system prompt, so
   // the unknown-names block (if any) can be included in that same call --
   // there is now only ONE vocabulary-check function, used everywhere.
+  // The owners lookup makes the check wait on the network: only the latest
+  // call may set the result (an older one finishing later would show a
+  // banner for text that has since changed).
+  const recomputeSeqRef = useRef(0);
   const recomputeVocabResult = async (brdp) => {
+    const seq = ++recomputeSeqRef.current;
     if (!brdp) {
       setVocabResult(null);
       return null;
@@ -66,6 +100,9 @@ export function useVocabularyCheck(standard, selected) {
     const vocab = await loadSchemaVocabulary(standard).catch(() => null);
     const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
     const checked = checkAgainstVocabulary(contextCandidates, vocab);
+    const pairs = contextCandidates.elementAttributePairs;
+    const toCheck = attributesToCheckOnElements(pairs, vocab);
+    const pairCheck = checkElementAttributePairs(pairs, vocab, toCheck.length ? await loadOwners(toCheck) : new Map());
     const result = {
       brdpId: brdp.id,
       hash,
@@ -73,8 +110,10 @@ export function useVocabularyCheck(standard, selected) {
       notFound: checked.notFound,
       wrongType: checked.wrongType,
       typedNotFound: checked.typedNotFound,
+      notOnElement: pairCheck.notOnElement,
+      pairsUnchecked: pairCheck.unchecked,
     };
-    setVocabResult(result);
+    if (seq === recomputeSeqRef.current) setVocabResult(result);
     return result;
   };
 

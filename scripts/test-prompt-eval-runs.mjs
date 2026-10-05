@@ -11,8 +11,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { main as compareMain, pickSavedRuns } from "./compare-prompt-eval.mjs";
+import { compareRunDirs, main as compareMain, pickSavedRuns } from "./compare-prompt-eval.mjs";
 import {
+  appendComparison,
   importBaselines,
   latestRun,
   latestRunOfCommit,
@@ -143,6 +144,40 @@ try {
   save(root, importedRuns, "after", { commit: "fffffff", generatedAt: "2026-09-30T10:00:00Z" });
   const vsBaseline = pickSavedRuns({ runsDir: importedRuns, promptEvalDir: importRoot });
   check("the next run compares with the imported baseline", vsBaseline.before?.commit === "6355e1e" && vsBaseline.after?.commit === "fffffff", JSON.stringify(vsBaseline));
+
+  // Barrido final 2/2, Part 7: the comparison goes into report.md too (the
+  // working copy and the saved run's copy), the same text the console shows.
+  console.log("comparison section in report.md");
+  const p7 = path.join(root, "part7", "runs");
+  const firstDir = save(root, p7, "before", { commit: "aaaaaaa", generatedAt: "2026-09-28T10:00:00Z" });
+  const firstRuns = listRuns({ runsDir: p7 });
+  const firstReport = path.join(firstDir, "report.md");
+  const firstBefore = fs.readFileSync(firstReport, "utf8");
+  const noPrevious = appendComparison({ reportFiles: [firstReport], previous: previousRunOfOtherCommit(firstRuns, firstRuns[0]), compare: () => { throw new Error("never called"); } });
+  const firstAfter = fs.readFileSync(firstReport, "utf8");
+  check("no previous run: report.md says so, no error", firstAfter.startsWith(firstBefore) && firstAfter.includes("## Comparison with the previous run") && firstAfter.includes("this run is the reference for the next one"), firstAfter.slice(-300));
+  check("… and the console gets the same section", firstAfter.endsWith(noPrevious));
+  const secondDir = save(root, p7, "after", { commit: "bbbbbbb", generatedAt: "2026-09-29T10:00:00Z" });
+  const runs7 = listRuns({ runsDir: p7 });
+  const current = runs7.find((r) => r.dir === secondDir);
+  const previous = previousRunOfOtherCommit(runs7, current);
+  const working = path.join(root, "part7", "report.md");
+  fs.copyFileSync(path.join(secondDir, "report.md"), working);
+  const expectedText = compareRunDirs(previous.dir, secondDir, { casesFile: path.join(FIXTURES, "cases.json"), beforeName: previous.name, afterName: current.name }).text;
+  appendComparison({
+    reportFiles: [working, path.join(secondDir, "report.md")],
+    previous,
+    compare: () => compareRunDirs(previous.dir, secondDir, { casesFile: path.join(FIXTURES, "cases.json"), beforeName: previous.name, afterName: current.name }).text,
+  });
+  for (const [name, file] of [["working report.md", working], ["saved run's report.md", path.join(secondDir, "report.md")]]) {
+    const text = fs.readFileSync(file, "utf8");
+    check(`${name}: has the comparison with the previous run`, text.includes("## Comparison with the previous run") && text.includes(previous.name) && text.includes(expectedText.trimEnd()), text.slice(-400));
+    check(`${name}: lists the regression`, /Regressions?/i.test(text.split("## Comparison with the previous run")[1] || ""));
+  }
+  const broken = path.join(root, "part7", "broken.md");
+  fs.writeFileSync(broken, "# r\n");
+  appendComparison({ reportFiles: [broken], previous, compare: () => { throw new Error("responses.json unreadable"); } });
+  check("a failed comparison says why in report.md", fs.readFileSync(broken, "utf8").includes("failed: responses.json unreadable"));
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

@@ -21,8 +21,18 @@ function check(name, condition, detail = '') {
 
 const { cases } = JSON.parse(fs.readFileSync(new URL('../backend/tests/fixtures/rule_wrapper_cases.json', import.meta.url), 'utf8'));
 for (const c of cases) {
-  const { xml, changed } = unwrapRuleXml(c.input, c.format);
+  let result;
+  try {
+    result = unwrapRuleXml(c.input, c.format);
+  } catch (err) {
+    check(`${c.name}: no exception`, false, err.message);
+    continue;
+  }
+  const { xml, changed } = result;
   check(`${c.name}: changed`, changed === c.changed, `${changed}`);
+  // Barrido final 2/2, Part 6: malformed input comes back as it was, flagged.
+  check(`${c.name}: malformed flag`, Boolean(result.malformed) === Boolean(c.malformed), JSON.stringify(result));
+  if (c.malformed) check(`${c.name}: returned as it was, with the reason`, xml === c.input && Boolean(result.error));
   check(`${c.name}: text`, xml === c.expected, xml);
   const pieces = splitRuleXmlPieces(c.input, c.format);
   const got = pieces === null ? null : pieces.map((p) => ({ kind: p.kind, text: p.text }));

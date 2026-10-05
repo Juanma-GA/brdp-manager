@@ -155,9 +155,26 @@ export async function loadOtherStandardVocabularies(standard) {
 //   properly marked up elsewhere in the same text (already present in
 //   `elements`/`attributes`).
 export function extractContextCandidates(text) {
-  const source = maskPrefixedNames(text || '');
   const elements = new Set();
   const attributes = new Set();
+  // Barrido final 2/2, Part 3: `<element/@attribute>` names an attribute of
+  // an element. Both names are checked on their own (elements/attributes)
+  // and the pair is returned in `elementAttributePairs`, so the caller can
+  // also check that the element has that attribute
+  // (checkElementAttributePairs). The notation is blanked out before the
+  // other extractions: before, `<para/@id>` also read "id>" as a
+  // half-typed element and warned "<id> is not an element".
+  const elementAttributePairs = [];
+  const seenPairs = new Set();
+  const source = maskPrefixedNames(text || '').replace(ELEMENT_ATTRIBUTE_PAIR_RE, (m, element, attribute) => {
+    elements.add(element);
+    attributes.add(attribute);
+    if (!seenPairs.has(`${element}/${attribute}`)) {
+      seenPairs.add(`${element}/${attribute}`);
+      elementAttributePairs.push({ element, attribute });
+    }
+    return ' '.repeat(m.length);
+  });
 
   let match;
   ELEMENT_ATTR_TAG_RE.lastIndex = 0;
@@ -201,7 +218,36 @@ export function extractContextCandidates(text) {
     phraseCandidates.push({ name: c.name, type: c.type });
   }
 
-  return { elements: [...elements], attributes: [...attributes], camelCase, phraseCandidates, danglingElements };
+  return { elements: [...elements], attributes: [...attributes], camelCase, phraseCandidates, danglingElements, elementAttributePairs };
+}
+
+// `<para/@id>` (spaces allowed around "/"): element name, then attribute name.
+const ELEMENT_ATTRIBUTE_PAIR_RE = /<\s*([\p{L}_][\p{L}\p{N}_.-]*)\s*\/\s*@([\p{L}_][\p{L}\p{N}_.-]*)\s*>/gu;
+
+// Barrido final 2/2, Part 3: for each `<element/@attribute>` whose element
+// and attribute both exist (a name that does not exist already has its own
+// warning), does the element have that attribute? `ownersByAttribute`:
+// Map attribute -> Set of the elements that declare it (from
+// GET /api/schema-cards/attribute), or null for an attribute whose owners
+// could not be read -- that pair is `unchecked` and the caller says so
+// (HR7), never "fine".
+export function checkElementAttributePairs(pairs, vocabulary, ownersByAttribute) {
+  const notOnElement = [];
+  const unchecked = [];
+  if (!vocabulary) return { notOnElement, unchecked };
+  for (const pair of pairs || []) {
+    if (!vocabulary.elements.has(pair.element) || !vocabulary.attributes.has(pair.attribute)) continue;
+    const owners = ownersByAttribute?.get(pair.attribute);
+    if (!owners) unchecked.push(pair);
+    else if (!owners.has(pair.element)) notOnElement.push(pair);
+  }
+  return { notOnElement, unchecked };
+}
+
+// The attributes whose owners checkElementAttributePairs needs.
+export function attributesToCheckOnElements(pairs, vocabulary) {
+  if (!vocabulary) return [];
+  return [...new Set((pairs || []).filter((p) => vocabulary.elements.has(p.element) && vocabulary.attributes.has(p.attribute)).map((p) => p.attribute))];
 }
 
 // Names with a namespace prefix ("@xsi:noNamespaceSchemaLocation",
@@ -1920,6 +1966,8 @@ export const SCHEMA_ISSUE_KEYS = {
     name_other_standard: 'records.assistant.nameInOtherStandard',
     wrong_type_as_element: 'records.assistant.vocabWrongTypeAsElement',
     wrong_type_as_attribute: 'records.assistant.vocabWrongTypeAsAttribute',
+    attribute_not_on_element: 'records.assistant.attributeNotOnElement',
+    attribute_check_unavailable: 'records.assistant.attributeCheckUnavailable',
   },
   rule: {
     names_not_found: 'records.assistant.ruleNamesNotFound',
@@ -1982,6 +2030,16 @@ export function nameIssues(result, source, { standard, hints = [] } = {}) {
         params: { name: show(hint.name), standard: vocabularyLabel(standard), standards: hint.otherStandards },
       });
     }
+  }
+  for (const pair of result.notOnElement || []) {
+    issues.push({ source, code: 'attribute_not_on_element', params: { standard, element: pair.element, attribute: pair.attribute } });
+  }
+  if ((result.pairsUnchecked || []).length > 0) {
+    issues.push({
+      source,
+      code: 'attribute_check_unavailable',
+      params: { pairs: result.pairsUnchecked.map((p) => `<${p.element}/@${p.attribute}>`).join(', ') },
+    });
   }
   if (source === 'example') {
     if (result.wrongType.length > 0) {

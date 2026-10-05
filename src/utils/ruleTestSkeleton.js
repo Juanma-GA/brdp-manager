@@ -30,6 +30,7 @@ import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js'
 import { sectionRoutes } from './schemaPlacement.js';
 import { extractRuleXPaths, extractXPathNames } from '../validation/schemaValidation.js';
 import { stripLiterals } from './ruleTestCommon.js';
+import { fragmentWellFormedProblem } from './ruleWrappers.js';
 
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -1179,6 +1180,10 @@ export function normalizeBrexReferenceCode(sectionText, sectionElement) {
   const text = String(sectionText ?? '');
   const spec = BREX_REFERENCE_CODE[sectionElement];
   if (!spec || !text.trim()) return { text, changed: false };
+  // Barrido final 2/2, Part 6: malformed text is never edited (an unclosed
+  // element moved the code it found; the section's validation says what is
+  // wrong).
+  if (fragmentWellFormedProblem(text)) return { text, changed: false };
   const brex = findCodeElement(text, spec.code, { brex: spec.brex });
   const own = findCodeElement(text, spec.code, { inside: spec.own });
   if (brex && !own && spec.code === 'dmCode') return followSharedCode(text, brex, spec.code);

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { attributeCardModel, crumbLabel, cutNames, elementCardModel, targetKey, targetLabel } from '../../utils/schemaNavigation.js';
 import styles from '../../pages/RecordsPage.module.css';
+import { InlineLinkButton } from './SchemaAnswerLinks';
 
 // "Nombres navegables en las respuestas de Ask sin IA": the floating card
 // opened from a name in an answer taken from the schema. Element cards show
@@ -35,14 +36,9 @@ function cardPosition(anchor) {
 // A name inside the card: a link to its own card.
 function NameLink({ target, onNavigate }) {
   return (
-    <button
-      type="button"
-      className={styles.schemaNavName}
-      onClick={() => onNavigate(target)}
-      data-testid={`schema-nav-link-${targetKey(target)}`}
-    >
+    <InlineLinkButton className={styles.schemaNavName} onActivate={() => onNavigate(target)} testId={`schema-nav-link-${targetKey(target)}`}>
       <code>{targetLabel(target)}</code>
-    </button>
+    </InlineLinkButton>
   );
 }
 

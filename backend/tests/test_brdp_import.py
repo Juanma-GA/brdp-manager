@@ -185,6 +185,7 @@ async def test_analyze_rejects_empty_rule_with_verified_status(client, editor_an
     (result,) = response.json()["results"]
     assert result["outcome"] == "rejected"
     assert "claims a rule that doesn't exist" in result["reason"]
+    assert result["reason_code"] == "status_without_rule" and result["reason_params"] == {"status": "Verified"}
 
     # Nothing touched Postgres -- analyze is read-only.
     listed = await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
@@ -199,6 +200,7 @@ async def test_analyze_rejects_valid_rule_with_todo_status(client, editor_and_pr
     (result,) = response.json()["results"]
     assert result["outcome"] == "rejected"
     assert "claims no rule exists, but one does" in result["reason"]
+    assert result["reason_code"] == "rule_with_todo"
 
 
 async def test_analyze_rejects_malformed_xml_regardless_of_status(client, editor_and_project):
@@ -209,6 +211,7 @@ async def test_analyze_rejects_malformed_xml_regardless_of_status(client, editor
     (result,) = response.json()["results"]
     assert result["outcome"] == "rejected"
     assert "not well-formed XML" in result["reason"]
+    assert result["reason_code"] == "rule_not_well_formed" and result["reason_params"]["error"]
     # Distinct reason from the two combination-mismatch cases above.
     assert "claims" not in result["reason"]
 
@@ -247,6 +250,7 @@ async def test_analyze_rejects_invalid_rule_status_value(client, editor_and_proj
     (result,) = response.json()["results"]
     assert result["outcome"] == "rejected"
     assert "Invalid Rule Status value" in result["reason"]
+    assert result["reason_code"] == "invalid_rule_status" and "value" in result["reason_params"]
 
 
 async def test_apply_valid_draft_and_verified_rows_write_real_postgres_state(client, editor_and_project):

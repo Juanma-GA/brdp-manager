@@ -349,7 +349,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
         const detail = await responseDetail(res);
         if (detail?.code === 'cell_too_large') {
           const ids = [...new Set(detail.cells.map((c) => c.id))];
-          const listed = detail.cells.map((c) => `${c.id} (${c.field})`).join(', ');
+          const listed = detail.cells.map((c) => t('config.dataManagement.exportCellColumn', { id: c.id, field: c.field })).join(', ');
           setExportError(t('config.dataManagement.exportCellTooLarge', { count: ids.length, ids: listed }));
         } else {
           setExportError(t('config.dataManagement.exportFailed', { message: detailText(detail) }));
@@ -477,7 +477,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
               {importErrors.length > 0 && (
                 <ul className={styles.errorList}>
                   {importErrors.map((err, i) => (
-                    <li key={i}>{err}</li>
+                    <li key={i}>{parseErrorText(err, t)}</li>
                   ))}
                 </ul>
               )}
@@ -527,7 +527,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                             {t('config.dataManagement.rowReason', {
                               row: r.row_number,
                               identifier: r.identifier || '—',
-                              reason: r.reason,
+                              reason: rejectReasonText(r, t),
                             })}
                           </li>
                         ))}
@@ -746,6 +746,25 @@ function ResetDataSection({ projectId, canEdit, onDataChanged }) {
       )}
     </div>
   );
+}
+
+// Barrido final 2/2, Part 5: the messages of POST …/import/parse
+// (backend/app/services/excel_io.py, English) in the interface language;
+// any other message is shown as it comes.
+function parseErrorText(message, t) {
+  if (message === 'Excel file is empty') return t('config.dataManagement.parseErrors.emptyFile');
+  if (message === 'No data rows found in Excel file') return t('config.dataManagement.parseErrors.noDataRows');
+  const missing = /^Missing required columns: (.+)$/.exec(message);
+  if (missing) return t('config.dataManagement.parseErrors.missingColumns', { columns: missing[1] });
+  return message;
+}
+
+// Barrido final 2/2, Part 5: a rejected row's reason in the interface
+// language, from its code; a job stored before the code existed keeps the
+// backend's English text.
+function rejectReasonText(row, t) {
+  if (!row.reason_code) return row.reason;
+  return t(`config.dataManagement.rejectReasons.${row.reason_code}`, { ...(row.reason_params || {}), defaultValue: row.reason });
 }
 
 export default function ProjectConfigPage() {

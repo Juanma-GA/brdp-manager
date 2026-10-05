@@ -31,6 +31,11 @@ class ImportRowResult(BaseModel):
     outcome: str  # "ok" | "rejected" | "conflict"
     action: str | None = None  # "create" | "update" -- set for ok/conflict only
     reason: str | None = None  # set for rejected only
+    # Barrido final 2/2: the same reason as a code the interface translates
+    # (config.dataManagement.rejectReasons.*); `reason` stays the English
+    # text (scripts, jobs stored before this field existed).
+    reason_code: str | None = None
+    reason_params: dict = {}
     existing_rule_status: str | None = None  # set for conflict only: "Draft" | "Verified"
     # True when this identifier matches brdp_catalog for the PROJECT's
     # exact standard (docs request) -- a warning, not a rejection: the row
@@ -96,6 +101,11 @@ class ImportApplyRowResult(BaseModel):
     # "created" | "updated" | "rejected" | "conflict_kept" | "conflict_cleared"
     outcome: str
     reason: str | None = None  # set for rejected only
+    # Barrido final 2/2: the same reason as a code the interface translates
+    # (config.dataManagement.rejectReasons.*); `reason` stays the English
+    # text (scripts, jobs stored before this field existed).
+    reason_code: str | None = None
+    reason_params: dict = {}
 
 
 class ImportApplyResultSummary(BaseModel):

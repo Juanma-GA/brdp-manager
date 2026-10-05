@@ -7,16 +7,38 @@ import styles from '../../pages/RecordsPage.module.css';
 // taken from the schema. A name opens the floating schema card; a "+N more"
 // expands the names its list cut, in place, each one a link as well.
 
+// Barrido final 2/2, Part 4: an INLINE element with the role of a button,
+// never a <button>. A <button> is an atomic inline box, and Chromium may
+// break the line between it and the comma that follows -- in a long list
+// ("+N more" expanded, or any list of names) a line then started with ",".
+// Text inside an inline <span> follows the normal line-breaking rules: no
+// break before a comma. Keyboard: focusable, Enter and Space open it.
+export function InlineLinkButton({ onActivate, className, testId, children }) {
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onActivate(e.currentTarget);
+    }
+  };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className={className}
+      onClick={(e) => onActivate(e.currentTarget)}
+      onKeyDown={onKeyDown}
+      data-testid={testId}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function SchemaNameLink({ target, onOpen }) {
   return (
-    <button
-      type="button"
-      className={styles.schemaNameLink}
-      onClick={(e) => onOpen(target, e.currentTarget)}
-      data-testid={`schema-link-${targetKey(target)}`}
-    >
+    <InlineLinkButton className={styles.schemaNameLink} onActivate={(el) => onOpen(target, el)} testId={`schema-link-${targetKey(target)}`}>
       <code>{targetLabel(target)}</code>
-    </button>
+    </InlineLinkButton>
   );
 }
 

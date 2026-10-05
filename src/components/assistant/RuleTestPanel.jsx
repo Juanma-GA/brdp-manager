@@ -8,6 +8,7 @@ import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTes
 import { formatRuleDescription, formatRuleTestReason } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
+import RuleLintWarnings from './RuleLintWarnings';
 
 // Test rule (T2 of 4): which rule formats can be tested (S1000D BREX since
 // T1, DITA Schematron since T4). Used by both places that show the button.
@@ -635,6 +636,7 @@ export default function RuleTestPanel({
       {state.status !== 'ready' && <ReplacePassedQuestion question={replaceQuestion} answer={replaceAnswer} onAnswer={answerReplaceQuestion} />}
 
       <RuleDescription description={description} />
+      {!notARule && <RuleLintWarnings ruleXml={ruleXml} format={format} place="panel" />}
 
       {state.status === 'idle' && !notARule && !unreachable && (
         <div className={styles.suggestionActions}>
