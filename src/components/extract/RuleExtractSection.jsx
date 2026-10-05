@@ -61,11 +61,13 @@ const TEXT_KEYS = ['title', 'definition', 'proposal'];
 // on the server (set_texts), so it owns them too.
 function ownedFields(edit) {
   const owned = new Set(Object.keys(edit).filter((k) => k !== 'key'));
+  // too_long: the server works out which texts are over the BRDP limits
+  // from the texts it saved, so a text edit owns it too.
   if (TEXT_KEYS.some((k) => owned.has(k)) || owned.has('draft_status')) {
-    ['text_sources', 'draft_status'].forEach((k) => owned.add(k));
+    ['text_sources', 'draft_status', 'too_long'].forEach((k) => owned.add(k));
   }
   if (owned.has('classification')) {
-    [...TEXT_KEYS, 'text_sources', 'ai_fields', 'draft_status', 'identifier', 'option_identifiers', 'warnings', 'base_classification'].forEach((k) =>
+    [...TEXT_KEYS, 'text_sources', 'ai_fields', 'draft_status', 'identifier', 'option_identifiers', 'warnings', 'base_classification', 'too_long'].forEach((k) =>
       owned.add(k)
     );
   }
@@ -85,6 +87,14 @@ async function detailOf(res) {
   } catch {
     return describeErrorDetail(res.status, res.statusText);
   }
+}
+
+// A text over the BRDP limit: kept whole, to be shortened before importing.
+function tooLongText(t, { field, length, max }) {
+  const label = t(`config.ruleExtract.fieldNames.${field}`, { defaultValue: field });
+  return field === 'title'
+    ? t('config.ruleExtract.tooLongTitle', { length, max })
+    : t('config.ruleExtract.tooLongField', { field: label, length, max });
 }
 
 function classLabel(t, c, classification = c.classification, textJob = false) {
@@ -139,6 +149,8 @@ function warningText(t, w) {
       return t('config.ruleExtract.warnings.default_rule', { specification: p.specification });
     case 'quote_not_found':
       return t('config.ruleExtract.warnings.quote_not_found');
+    case 'quotes_too_long':
+      return t('config.ruleExtract.warnings.quotes_too_long', { count: (p.titles || []).length, max: p.max, titles: (p.titles || []).map((x) => `«${x}»`).join(', ') });
     case 'paragraph_several_identifiers':
       return t('config.ruleExtract.warnings.paragraph_several_identifiers', { ids: (p.ids || []).join(', ') });
     case 'exists_in_project':
@@ -222,13 +234,24 @@ function RuleCell({ c, t }) {
 
 // "Fragment": the quote of the text the candidate was found in, collapsed,
 // so the reviewer can compare what was written with what the document says.
-function QuoteCell({ c }) {
+// The quote is stored whole (never cut, HR6); a long one shows its start
+// and "Show more" when opened.
+const QUOTE_FOLD_CHARS = 600;
+function QuoteCell({ c, t }) {
   const quote = c.quote || '';
+  const [whole, setWhole] = useState(false);
   const short = quote.length > 90 ? `${quote.slice(0, 90)}…` : quote;
+  const long = quote.length > QUOTE_FOLD_CHARS;
+  const shown = long && !whole ? `${quote.slice(0, QUOTE_FOLD_CHARS)}…` : quote;
   return (
     <details className={styles.ruleDetails}>
       <summary data-testid="rule-extract-quote-summary">{short}</summary>
-      <blockquote className={styles.quote} data-testid="rule-extract-quote">{quote}</blockquote>
+      <blockquote className={styles.quote} data-testid="rule-extract-quote">{shown}</blockquote>
+      {long && (
+        <button type="button" className={styles.linkButton} onClick={() => setWhole((w) => !w)} data-testid="rule-extract-quote-more">
+          {whole ? t('config.ruleExtract.quoteLess') : t('config.ruleExtract.quoteMore', { count: quote.length })}
+        </button>
+      )}
     </details>
   );
 }
@@ -694,6 +717,9 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
         if (d && typeof d === 'object' && d.code === 'texts_incomplete') {
           throw new Error(t('config.ruleExtract.applyRefusedTexts', { pending: d.pending.length, failed: d.failed.length, ids: [...d.pending, ...d.failed].join(', ') }));
         }
+        if (d && typeof d === 'object' && d.code === 'texts_too_long') {
+          throw new Error(t('config.ruleExtract.applyRefusedTooLong', { count: (d.rows || []).length, ids: (d.rows || []).map((r) => r.identifier).join(', ') }));
+        }
         if (d && typeof d === 'object' && d.code === 'count_mismatch') {
           throw new Error(t('config.ruleExtract.applyRefusedCount', { ids: (d.missing || []).join(', ') }));
         }
@@ -787,7 +813,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
         : filter === 'warnings'
         ? candidates.filter((c) => c.warnings.length || c.rule_problem || c.draft_status === 'failed')
         : filter === 'blocking'
-        ? candidates.filter((c) => c.selected && extractTextState(c) !== 'complete')
+        ? candidates.filter((c) => c.selected && (extractTextState(c) !== 'complete' || c.too_long?.length))
         : candidates.filter((c) => c.classification === filter);
     return sortRows(byFilter.filter((c) => matchesSearch(c, query)), sort);
   }, [candidates, filter, search, sort]);
@@ -817,8 +843,11 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   // restart. Checked rows with texts pending / failed block the import;
   // unchecked ones never do.
   const textCounts = useMemo(() => {
-    const out = { drafted: 0, pending: 0, failed: 0, blockingPending: 0, blockingFailed: 0 };
+    const out = { drafted: 0, pending: 0, failed: 0, blockingPending: 0, blockingFailed: 0, blockingTooLong: 0 };
     for (const c of candidates || []) {
+      // A checked row with a text over the BRDP limits blocks too: it would
+      // be refused, and it is never cut (HR6).
+      if (c.selected && c.too_long?.length) out.blockingTooLong += 1;
       const state = extractTextState(c);
       if (state === 'complete') {
         // Written by the AI: a row of the drafted classes whose AI fields
@@ -831,7 +860,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     }
     return out;
   }, [candidates]);
-  const importBlocked = textCounts.blockingPending + textCounts.blockingFailed > 0;
+  const importBlocked = textCounts.blockingPending + textCounts.blockingFailed + textCounts.blockingTooLong > 0;
   // Options valid for every shown row (bulk classify).
   const commonOptions = useMemo(() => {
     if (!visible.length) return [];
@@ -1191,6 +1220,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                     ...(c.rule_problem ? [t('config.ruleExtract.invalidRule', { reason: c.rule_problem.message })] : []),
                     ...c.warnings.map((w) => warningText(t, w)),
                     ...(c.draft_status === 'failed' ? [t('config.ruleExtract.draftFailed')] : []),
+                    ...(c.too_long || []).map((x) => tooLongText(t, x)),
                     ...vocabularyLines(t, c, vocabulary, standard),
                   ];
                   const needsDraft = editTexts && aiFieldsOf(c).length > 0 && (c.draft_status === 'pending' || c.draft_status === 'failed');
@@ -1260,7 +1290,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                         )}
                       </td>
                       <td>
-                        {textJob ? <QuoteCell c={c} /> : <RuleCell c={c} t={t} />}
+                        {textJob ? <QuoteCell c={c} t={t} /> : <RuleCell c={c} t={t} />}
                       </td>
                       <td>
                         {lines.length > 0 && (
@@ -1310,7 +1340,14 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
           </div>
           {importBlocked && (
             <p className={styles.blocked} data-testid="rule-extract-blocked">
-              {t('config.ruleExtract.importBlocked', { pending: textCounts.blockingPending, failed: textCounts.blockingFailed })}{' '}
+              {textCounts.blockingPending + textCounts.blockingFailed > 0 &&
+                t('config.ruleExtract.importBlocked', { pending: textCounts.blockingPending, failed: textCounts.blockingFailed })}
+              {textCounts.blockingTooLong > 0 && (
+                <span data-testid="rule-extract-blocked-too-long">
+                  {' '}
+                  {t('config.ruleExtract.importBlockedTooLong', { count: textCounts.blockingTooLong })}
+                </span>
+              )}{' '}
               <button type="button" className={styles.linkButton} onClick={() => setFilter('blocking')} data-testid="rule-extract-show-blocking">
                 {t('config.ruleExtract.showBlocking')}
               </button>

@@ -42,8 +42,10 @@ _WS_RUN_RE = re.compile(f"[{_WS}]+")
 _BLANK_LINE_RE = re.compile(r"\r?\n[ \t\u00a0]*\r?\n")
 _WRAPPING_QUOTES = {'"': '"', "'": "'", "“": "”", "‘": "’", "«": "»", "„": "“"}
 
-MAX_TITLE_CHARS = 300
-MAX_QUOTE_CHARS = 4000
+# No length cut here (AACF 1, Part 4): a title over the BRDP title limit is
+# kept whole and flagged by rule_extract_jobs.too_long_fields (the row cannot
+# be imported until it is shortened); a quote over
+# Settings.extract_quote_max_chars refuses its candidate with a warning.
 
 
 def count_words(text: str) -> int:
@@ -106,16 +108,25 @@ def _contains(a: str, b: str) -> bool:
     return bool(b) and b in a
 
 
-def build_text_candidates(text: str, decisions: list[dict]) -> list[dict]:
+def build_text_candidates(
+    text: str, decisions: list[dict], quote_max_chars: int | None = None, refused: list[dict] | None = None
+) -> list[dict]:
     """decisions: [{quote, title}] as the AI gave them (the route validated
-    their shape). Returns the candidates, before classification."""
+    their shape). Returns the candidates, before classification. A decision
+    whose quote is over quote_max_chars is not a candidate: it goes to
+    `refused` ({title, length, max}) for a warning -- the quote is never
+    cut."""
     source = SourceText(text)
     found: list[dict] = []
     missing: list[dict] = []
     for d in decisions:
         quote = (d.get("quote") or "").strip()
-        title = normalize_ws(d.get("title") or "")[:MAX_TITLE_CHARS]
+        title = normalize_ws(d.get("title") or "")
         if not quote:
+            continue
+        if quote_max_chars is not None and len(quote) > quote_max_chars:
+            if refused is not None:
+                refused.append({"title": title, "length": len(quote), "max": quote_max_chars})
             continue
         located = source.locate(quote)
         item = {"title": title}
@@ -167,7 +178,7 @@ def build_text_candidates(text: str, decisions: list[dict]) -> list[dict]:
                 "source": "text",
                 "origin_identifier": origin,
                 "identifier": None,
-                "quote": m["quote"][:MAX_QUOTE_CHARS],
+                "quote": m["quote"],
                 "quote_found": m["found"],
                 "paragraph": paragraph,
                 "found_title": m["title"],

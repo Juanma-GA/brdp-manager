@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
+
 
 class RuleExtractJobAccepted(BaseModel):
     job_id: uuid.UUID
@@ -96,11 +98,20 @@ class RuleExtractSourceTextOut(BaseModel):
     word_count: int
 
 
-class RuleExtractDecision(BaseModel):
-    """One decision the AI found: the literal quote and a short title."""
+_TEXT_MAX_CHARS = get_settings().extract_text_max_chars
 
-    quote: str = Field(max_length=20000)
-    title: str = Field(default="", max_length=2000)
+
+class RuleExtractDecision(BaseModel):
+    """One decision the AI found: the literal quote and a short title.
+
+    Bounded here only by the text itself (a quote must be in it); the real
+    limits are checked per decision, never by refusing the whole list: a
+    quote over Settings.extract_quote_max_chars refuses that candidate with a
+    warning, a title over the BRDP title limit is kept whole and blocks that
+    row's import until it is shortened (AACF 1, Part 4)."""
+
+    quote: str = Field(max_length=_TEXT_MAX_CHARS)
+    title: str = Field(default="", max_length=_TEXT_MAX_CHARS)
 
 
 class RuleExtractDecisions(BaseModel):

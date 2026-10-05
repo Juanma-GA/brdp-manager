@@ -528,3 +528,51 @@ async def test_stop_and_continue_writing_are_kept_on_the_job(client, users):
     assert (await client.get(f"{_base(project.id)}/jobs/active", headers=viewer)).json()["drafting_stopped"] is True
     res = await client.post(f"{url}/drafting", headers=editor, json={"stopped": False})
     assert res.json()["drafting_stopped"] is False
+
+
+# ── AACF 1, Part 4: no silent cuts ─────────────────────────────────────────
+
+
+async def test_a_long_quote_is_kept_whole_and_one_over_the_limit_is_refused_with_a_warning(client, users):
+    """The quote is stored whole (it used to be cut at 4,000 characters); a
+    quote over Settings.extract_quote_max_chars refuses that candidate only,
+    with a file warning naming it -- the other decisions go on."""
+    project, editor, _ = users
+    limit = get_settings().extract_quote_max_chars
+    long_ok = "Long rule " + "a" * 5000 + " end."
+    too_long = "Huge rule " + "b" * limit + " end."
+    text = f"{long_ok}\n\n{too_long}\n\nTables must have a title."
+    _url, job, cands = await _extract(client, project.id, editor, text, [
+        {"quote": long_ok, "title": "Long"},
+        {"quote": too_long, "title": "Huge"},
+        {"quote": "Tables must have a title.", "title": "Tables"},
+    ])
+    assert [c["found_title"] for c in cands] == ["Long", "Tables"]
+    assert cands[0]["quote"] == long_ok and len(cands[0]["quote"]) > 4000
+    [warning] = [w for w in job["warnings"] if w["code"] == "quotes_too_long"]
+    assert warning["params"] == {"titles": ["Huge"], "max": limit}
+
+
+async def test_a_long_title_is_kept_whole_and_blocks_its_import_until_shortened(client, users):
+    """A title over the BRDP title limit is never cut (it used to be cut at
+    300): the candidate keeps it, says it is too long, and cannot be
+    imported until it is shortened."""
+    project, editor, _ = users
+    limit = get_settings().brdp_title_max_chars
+    long_title = "T" * (limit + 10)
+    url, _job, cands = await _extract(client, project.id, editor, "Tables must have a title.", [
+        {"quote": "Tables must have a title.", "title": long_title},
+    ])
+    [c] = cands
+    assert c["title"] == long_title and c["found_title"] == long_title
+    assert c["too_long"] == [{"field": "title", "length": limit + 10, "max": limit}]
+    [c] = await _write_texts(client, url, editor, cands)
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"]]})
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["code"] == "texts_too_long" and detail["rows"][0]["fields"][0]["field"] == "title"
+    # Shortened by hand: imported.
+    res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [{"key": c["key"], "title": "Table titles"}]})
+    assert res.json()["candidates"][0]["too_long"] == []
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"]]})
+    assert res.status_code == 200, res.text

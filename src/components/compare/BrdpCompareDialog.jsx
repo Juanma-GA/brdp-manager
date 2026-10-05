@@ -17,6 +17,8 @@ import recordsStyles from '../../pages/RecordsPage.module.css';
 import styles from './BrdpCompareDialog.module.css';
 import CatalogEditionTag from '../CatalogEditionTag';
 
+const PROJECT_MATCHES_PAGE = 50;
+
 const detailUrl = (projectId, brdpId, otherId) => `/api/projects/${projectId}/brdps/${brdpId}/compare-detail/${otherId}`;
 
 function DiffSegments({ segments, side }) {
@@ -231,6 +233,9 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
   const [candidates, setCandidates] = useState(null);
   const [candidatesError, setCandidatesError] = useState(null);
   const [query, setQuery] = useState('');
+  // How many search results are shown: 50 at first, 50 more per "Show
+  // more". Never a silent cut: "50 of N" says how many there are.
+  const [shownCount, setShownCount] = useState(PROJECT_MATCHES_PAGE);
   const [chosenId, setChosenId] = useState(null);
   const [left, setLeft] = useState(null);
   const [right, setRight] = useState(null);
@@ -290,8 +295,7 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
     const q = query.trim().toLowerCase();
     return brdps
       .filter((b) => b.id !== selected.id)
-      .filter((b) => !q || b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q))
-      .slice(0, 50);
+      .filter((b) => !q || b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q));
   }, [brdps, query, selected.id]);
 
   const facts = left && right ? compareDetails(left, right) : null;
@@ -415,12 +419,12 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
             )
           ) : (
             <>
-              <input className={recordsStyles.input} value={query} placeholder={t('records.compare.searchPlaceholder')} onChange={(e) => setQuery(e.target.value)} data-testid="compare-project-search" autoFocus />
+              <input className={recordsStyles.input} value={query} placeholder={t('records.compare.searchPlaceholder')} onChange={(e) => { setQuery(e.target.value); setShownCount(PROJECT_MATCHES_PAGE); }} data-testid="compare-project-search" autoFocus />
               {projectMatches.length === 0 ? (
                 <p className={styles.note}>{t('records.compare.noMatches')}</p>
               ) : (
                 <ul className={styles.candidateList}>
-                  {projectMatches.map((b) => (
+                  {projectMatches.slice(0, shownCount).map((b) => (
                     <li key={b.id}>
                       <button type="button" className={chosenId === b.id ? styles.candidateActive : styles.candidate} aria-pressed={chosenId === b.id} onClick={() => setChosenId(b.id)} data-testid="compare-project-candidate">
                         <span className={styles.candidateProject}>
@@ -432,6 +436,14 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
                     </li>
                   ))}
                 </ul>
+              )}
+              {projectMatches.length > shownCount && (
+                <p className={styles.note} data-testid="compare-project-more">
+                  {t('records.compare.shownOf', { shown: shownCount, total: projectMatches.length })}{' '}
+                  <button type="button" className={recordsStyles.linkButton} onClick={() => setShownCount((n) => n + PROJECT_MATCHES_PAGE)} data-testid="compare-project-show-more">
+                    {t('records.compare.showMore')}
+                  </button>
+                </p>
               )}
             </>
           )}

@@ -77,6 +77,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.approvals import _rule_state, _wrap_rule_xml_fragment
 from app.api.routes.similar import MIN_SIMILARITY
+from app.core.config import get_settings
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, BRDPHistory, Project, RuleApproval, RuleExtractCandidate, RuleExtractJob, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
@@ -209,6 +210,24 @@ def text_state(c: dict) -> str:
     if all((c.get(f) or "").strip() for f in fields):
         return "complete"
     return "failed" if c.get("draft_status") == "failed" else "pending"
+
+
+def too_long_fields(c: dict) -> list[dict]:
+    """The texts a candidate would create a BRDP with that are over the
+    BRDP limits (Settings.brdp_title_max_chars / brdp_text_max_chars, the
+    same limits as creating it by hand): [{field, length, max}]. Such a
+    candidate keeps its whole text (never cut, HR6) and cannot be imported
+    until it is shortened. An existing BRDP ("same"/"changed") keeps the
+    project's texts and "Sin contenido" is not imported: never too long."""
+    if c.get("classification") in ("same", "changed", "empty"):
+        return []
+    settings = get_settings()
+    limits = {"title": settings.brdp_title_max_chars, "definition": settings.brdp_text_max_chars, "proposal": settings.brdp_text_max_chars}
+    return [
+        {"field": field, "length": len(c.get(field) or ""), "max": limit}
+        for field, limit in limits.items()
+        if len(c.get(field) or "") > limit
+    ]
 
 
 def _edition_version(standard: str) -> tuple[int, ...] | None:
@@ -1033,7 +1052,10 @@ async def run_text_extract_job(
     try:
         project = await work.get(Project, project_id)
         job = await work.get(RuleExtractJob, job_id)
-        candidates = build_text_candidates(job.source_text or "", decisions)
+        refused: list[dict] = []
+        candidates = build_text_candidates(
+            job.source_text or "", decisions, quote_max_chars=get_settings().extract_quote_max_chars, refused=refused
+        )
         await _progress(progress, job_id, phase="classifying", total_items=len(candidates), processed_items=0)
         await classify_text_candidates(project, candidates, work)
         await _progress(progress, job_id, processed_items=len(candidates))
@@ -1044,6 +1066,15 @@ async def run_text_extract_job(
             await _progress(progress, job_id, processed_items=done)
 
         file_warnings = []
+        if refused:
+            file_warnings.append(
+                {
+                    "code": "quotes_too_long",
+                    "params": {"titles": [r["title"] for r in refused], "max": refused[0]["max"]},
+                    "message": f"{len(refused)} decision(s) left out: their quote is over {refused[0]['max']} characters "
+                    f"({', '.join(r['title'] or '—' for r in refused)}).",
+                }
+            )
         repetition_warning = await check_repetitions(candidates, transport)
         if repetition_warning is not None:
             file_warnings.append(repetition_warning)
@@ -1115,6 +1146,7 @@ def candidate_out(row: RuleExtractCandidate) -> dict:
     if big:
         data["existing_rule_xml"] = None
     data["big"] = big
+    data["too_long"] = too_long_fields(data)
     return data
 
 
@@ -1306,6 +1338,18 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
                 "failed": failed,
                 "message": f"{len(pending)} checked rows have texts still to write and {len(failed)} have texts that failed: "
                 + ", ".join(pending + failed),
+            }
+        )
+    # A text over the BRDP limits is never cut: the row waits until it is
+    # shortened (AACF 1, Parts 4-5).
+    too_long = [{"identifier": _label(r.data), "fields": too_long_fields(r.data)} for r in rows if too_long_fields(r.data)]
+    if too_long:
+        raise ApplyRefused(
+            {
+                "code": "texts_too_long",
+                "rows": too_long,
+                "message": f"{len(too_long)} checked rows have a text over its limit: "
+                + ", ".join(t["identifier"] for t in too_long),
             }
         )
     existing = await _active_identifiers(project.id, db)
