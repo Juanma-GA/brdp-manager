@@ -311,7 +311,34 @@ function buildValueMatcher(valueEl, spec, evaluate) {
 
 // The checks that need no fragment: a path to run, no other file, a valid
 // flag. Shared by runPart and analyzeRule. Throws NotExecutable.
+// Mejoras A, Part 3: a rule element with more than one path or use is not
+// a rule of its format (the BREX XSDs allow one of each); nothing is run on
+// it -- never only its first path.
+function multipleChildren(part, spec) {
+  for (const child of [spec.path, spec.use]) {
+    const count = childElements(part.element, child).length;
+    if (count > 1) return reason('rule_format', { problem: 'rule_format_multiple', element: spec.rule, child, count });
+  }
+  return null;
+}
+
+// The rule element's children in order, one group per path: [{ path, use,
+// values }] -- a valid rule has one group; ruleStructure keeps every path
+// of an invalid one (Compare must not show only the first).
+export function pathGroups(element, spec) {
+  const groups = [];
+  for (let n = element.firstChild; n; n = n.nextSibling) {
+    if (n.nodeType !== 1) continue;
+    if (n.nodeName === spec.path) groups.push({ path: n, use: null, values: [] });
+    else if (n.nodeName === spec.use && groups.length) groups[groups.length - 1].use = n;
+    else if (n.nodeName === spec.value && groups.length) groups[groups.length - 1].values.push(n);
+  }
+  return groups;
+}
+
 function partBasics(part, spec) {
+  const multiple = multipleChildren(part, spec);
+  if (multiple) throw new NotExecutable(multiple);
   const pathEl = childElements(part.element, spec.path)[0];
   const expression = pathEl ? String(pathEl.textContent || '').trim() : '';
   if (!expression) throw new NotExecutable(REASON.emptyPath(spec.path));
@@ -668,9 +695,9 @@ function pathTarget(expression) {
   return el ? `<${el[1]}>` : null;
 }
 
-function describeValues(part, spec) {
+function describeValues(part, spec, valueElements = null) {
   const is301 = spec.value === 'objval';
-  return childElements(part.element, spec.value).map((v) => {
+  return (valueElements || childElements(part.element, spec.value)).map((v) => {
     const form = (is301 ? v.getAttribute('valtype') : v.getAttribute('valueForm')) || 'single';
     const attr = (name) => (v.hasAttribute(name) ? v.getAttribute(name) : '');
     if (form === 'single') return { form, value: is301 ? attr('val1') : attr('valueAllowed') };
@@ -860,18 +887,24 @@ export function ruleStructure(ruleXml, format, options = {}) {
   } catch {
     return { available: false };
   }
-  const parts = collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null).map((part) => {
-    if (part.kind === 'nonContext') return { ruleId: part.ruleId, kind: 'nonContext', schema: part.schema || null, path: '', flag: null, values: [] };
-    const pathEl = childElements(part.element, spec.path)[0];
-    const rawFlag = pathEl ? pathEl.getAttribute(spec.flagAttr) : null;
-    return {
-      ruleId: part.ruleId,
-      kind: 'rule',
-      schema: part.schema || null,
-      path: pathEl ? _normSpace(pathEl.textContent || '') : '',
-      flag: rawFlag === null || rawFlag === '' ? spec.defaultFlag : rawFlag.trim(),
-      values: describeValues(part, spec).map(valueToken),
+  const parts = collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null).flatMap((part) => {
+    if (part.kind === 'nonContext') return [{ ruleId: part.ruleId, kind: 'nonContext', schema: part.schema || null, path: '', flag: null, values: [] }];
+    // One structural part per path (Mejoras A, Part 3): a rule element
+    // with two objectPath shows both, each with the values after it.
+    const groups = pathGroups(part.element, spec);
+    const one = (group, i) => {
+      const pathEl = group?.path || null;
+      const rawFlag = pathEl ? pathEl.getAttribute(spec.flagAttr) : null;
+      return {
+        ruleId: groups.length > 1 ? `${part.ruleId} (${spec.path} ${i + 1})` : part.ruleId,
+        kind: 'rule',
+        schema: part.schema || null,
+        path: pathEl ? _normSpace(pathEl.textContent || '') : '',
+        flag: rawFlag === null || rawFlag === '' ? spec.defaultFlag : rawFlag.trim(),
+        values: describeValues(part, spec, group ? group.values : []).map(valueToken),
+      };
     };
+    return groups.length ? groups.map(one) : [one(null, 0)];
   });
   return { available: true, family, parts };
 }

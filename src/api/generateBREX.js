@@ -1,6 +1,7 @@
 import { ruleEnters } from '../utils/generatePlan.js';
 import { wrapRuleXmlFragment } from "../utils/ruleXmlFragment.js";
 import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { splitApprovedRulesMultiPath } from "../utils/ruleSplit.js";
 import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache = null;
@@ -512,6 +513,7 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
   // (src/utils/ruleSchemaContext.js, rewriteRuleSchemaUrls).
   const schemaLocation = schemaLocationOf(projectConfig, 'S1000D 4.2');
   let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [], mixed: [] };
+  let multiPath = { split: [], invalid: [] };
   const schemaRewrite = (list) => {
     const r = rewriteApprovedRulesSchemaUrls(
       list.map((b) => ({ id: b.id, identifier: b.identifier || b.id, xml: approvalById.get(b.id).rule_xml })),
@@ -520,7 +522,10 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
       schemaLocation
     );
     schemaUrls = r.schemaUrls;
-    return r.rules;
+    // Mejoras A, Part 3: one objectPath per rule element in the output.
+    const s = splitApprovedRulesMultiPath(r.rules, 'BREX-4.2');
+    multiPath = s.multiPath;
+    return s.rules;
   };
 
   let finalXml = buildEmptyDocument(projectConfig, schemaSummary);
@@ -555,5 +560,5 @@ export async function generateBREX(brdps, projectConfig, options = {}) {
   // attribute -- but reported if an empty one ever reaches the output.
   const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks };
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks, multiPath };
 }

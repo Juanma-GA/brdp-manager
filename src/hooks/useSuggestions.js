@@ -8,6 +8,7 @@ import { sendMessage } from '../api/llmAPI';
 import { buildSuggestDefinitionPrompt } from '../prompts/suggestDefinitionPrompt.js';
 import { buildSuggestProposalPrompt } from '../prompts/suggestProposalPrompt.js';
 import { SUGGEST_TEMPERATURE } from '../prompts/shared.js';
+import { splitMultiPathRules } from '../utils/ruleSplit.js';
 import { buildCopyablePrompt, buildSuggestRulePrompt, parseSuggestRuleResponse, SUGGEST_RULE_USER_MESSAGE } from '../prompts/suggestRulePrompt.js';
 import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
@@ -29,10 +30,21 @@ const SCHEMA_CONTEXT_MAX_NAMES = 30;
 
 // Pasted rules get the same wrapper as a generated one when schemas were
 // chosen -- unless the pasted text already carries its own context block.
+// Mejoras A, Part 3: a rule element with N objectPath and N objectUse that
+// alternate mechanically is split into N rules first (ruleSplit.js; the
+// panel says so with ruleSplitNote) -- before the wrapper, so each new rule
+// gets its context blocks.
 export function finalRuleXml(entry, ruleXml) {
+  const split = splitMultiPathRules(ruleXml, entry.format).xml;
   const schemas = entry.schemas || [];
-  if (schemas.length === 0 || hasSchemaContextBlock(ruleXml)) return ruleXml;
-  return wrapRuleInSchemaContexts(ruleXml, entry.format, entry.standard, schemas, entry.schemaLocation);
+  if (schemas.length === 0 || hasSchemaContextBlock(split)) return split;
+  return wrapRuleInSchemaContexts(split, entry.format, entry.standard, schemas, entry.schemaLocation);
+}
+
+// { count, path } when finalRuleXml split the rule, else null.
+export function ruleSplitNote(entry, ruleXml) {
+  const { total } = splitMultiPathRules(ruleXml, entry.format);
+  return total > 0 ? { count: total, path: entry.format === 'BREX-3.0.1' ? 'objpath' : 'objectPath' } : null;
 }
 import { ruleStateOf } from '../utils/ruleState';
 import { cleanInternalNames } from '../utils/answerCleanup.js';
@@ -370,10 +382,11 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
         // warning (Part 5) -- a failed fetch only loses that warning, the
         // vocabulary check still runs.
         const text = finalRuleXml(ruleBase, parsed.xml);
+        const split = ruleSplitNote(ruleBase, parsed.xml);
         const coverageByName = schemas.length
           ? await fetchMissingCoverage(extractRuleNames(parsed.xml).elements, ruleBase.coverageByName)
           : ruleBase.coverageByName;
-        commit({ ...ruleBase, coverageByName, text });
+        commit({ ...ruleBase, coverageByName, text, split });
       }
     } catch (err) {
       // Docs request's explicit edge case: an error entry still gets a

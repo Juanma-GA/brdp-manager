@@ -167,3 +167,60 @@ async def test_put_rejects_content_that_is_not_a_rule_with_422_and_the_reason(cl
         ok = await client.put(url, json={"rule_xml": good, "source": "manual"}, headers=headers)
         assert ok.status_code == 200
         assert ok.json()["rule_xml"] == good
+
+
+# Mejoras A, Part 3: one objectPath/objpath and one objectUse/objuse per rule
+# element (brex4.2.xsd, brex4.1.xsd, 3.0.1 brex.xsd). Same check as
+# checkRuleFormat's rule_format_multiple in src/validation/schemaValidation.js.
+TWO_PATHS_42 = (
+    '<structureObjectRule id="BRDP-S1-00186"><objectPath allowedObjectFlag="0">//a</objectPath>'
+    "<objectUse>u</objectUse>"
+    '<objectPath allowedObjectFlag="0">//b</objectPath><objectUse>v</objectUse></structureObjectRule>'
+)
+
+
+@pytest.mark.parametrize(
+    "xml, fmt, message",
+    [
+        (TWO_PATHS_42, "BREX-4.2", "A <structureObjectRule> can only have one <objectPath>; this one has 2"),
+        (TWO_PATHS_42, "BREX-4.1", "A <structureObjectRule> can only have one <objectPath>; this one has 2"),
+        (
+            f'<contextRules rulesContext="x.xsd"><structureObjectRuleGroup>{TWO_PATHS_42}</structureObjectRuleGroup></contextRules>',
+            "BREX-4.2",
+            "A <structureObjectRule> can only have one <objectPath>; this one has 2",
+        ),
+        (
+            '<structureObjectRule><objectPath allowedObjectFlag="0">//a</objectPath><objectUse>u</objectUse><objectUse>v</objectUse></structureObjectRule>',
+            "BREX-4.2",
+            "A <structureObjectRule> can only have one <objectUse>; this one has 2",
+        ),
+        (
+            '<objrule><objpath objappl="0">//a</objpath><objuse>u</objuse><objpath objappl="0">//b</objpath><objuse>v</objuse><objpath objappl="0">//c</objpath><objuse>w</objuse></objrule>',
+            "BREX-3.0.1",
+            "A <objrule> can only have one <objpath>; this one has 3",
+        ),
+    ],
+)
+def test_more_than_one_path_or_use_in_a_rule_is_reported(xml, fmt, message):
+    problem = _check(xml, fmt)
+    assert problem is not None
+    assert problem["code"] == "rule_format_multiple"
+    assert problem["message"] == message
+
+
+def test_several_asserts_in_a_schematron_rule_are_valid():
+    xml = (
+        '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron"><sch:rule context="note">'
+        '<sch:assert test="@type">m</sch:assert><sch:assert test="p">n</sch:assert></sch:rule></sch:pattern>'
+    )
+    assert _check(xml, "SCH-DITA") is None
+
+
+async def test_put_rejects_a_rule_with_two_object_paths(client, editor_and_project):
+    project, headers = editor_and_project
+    brdp = (await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-FMT-2"}, headers=headers)).json()
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
+    res = await client.put(url, json={"rule_xml": TWO_PATHS_42, "source": "llm"}, headers=headers)
+    assert res.status_code == 422
+    assert res.json()["detail"] == "A <structureObjectRule> can only have one <objectPath>; this one has 2"
+    assert (await client.get(url, headers=headers)).json() is None

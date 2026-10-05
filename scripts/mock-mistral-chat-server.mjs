@@ -150,6 +150,14 @@ function suggestRuleReply(systemPrompt) {
   if (/ESCAPEDPATH/.test(proposal)) {
     return `<structureObjectRule id="${id}" brSeverityLevel="brsl01"><brDecisionRef brDecisionIdentNumber="${id}"/><objectPath allowedObjectFlag="0">//&lt;emphasis&gt;</objectPath><objectUse>MOCK-RULE: &lt;emphasis&gt; is not used.</objectUse></structureObjectRule>`;
   }
+  // Mejoras A, Part 3 (real case BRDP-S1-00186): two decisions in one
+  // Proposal -- like Mistral, ONE structureObjectRule with two objectPath
+  // and two objectUse, which the app splits; "NOTSPLITTABLE" gives two
+  // paths and one use (not mechanical: the format error stays).
+  if (/maximum of five levels|NOTSPLITTABLE/.test(proposal)) {
+    const second = /NOTSPLITTABLE/.test(proposal) ? '' : '<objectUse>MOCK-RULE: the fifth level has no title.</objectUse>';
+    return `<structureObjectRule id="${id}" brSeverityLevel="brsl01">\n  <brDecisionRef brDecisionIdentNumber="${id}"/>\n  <objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep) &gt; 4]</objectPath>\n  <objectUse>MOCK-RULE: at most five levels.</objectUse>\n  <objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep) = 4]/title</objectPath>\n  ${second}\n</structureObjectRule>`;
+  }
   if (/LONGRULE/.test(proposal)) {
     return '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath><objectUse>MOCK-LONG-RULE</objectUse></structureObjectRule>';
   }

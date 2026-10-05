@@ -284,5 +284,34 @@ const block42 = (context, inner, attrs = '') => `<contextRules rulesContext="${c
   check('3.0.1: predicate only, no warning', rewriteRuleSchemaUrls(t301, 'BREX-3.0.1', 'S1000D 3.0.1', 'flat').unrecognized.length === 0);
 }
 
+// ── Mejoras A, Part 3: a stored rule with two objectPath ────────────────────
+// Before: Generate wrote it as it was (invalid against the XSD, reported as
+// valid) and the Schematron output kept only its first path. Now the output
+// is split (the stored rule never changes) and a rule that cannot be split
+// is reported.
+{
+  const two42 = '<structureObjectRule id="BRDP-S1-00186" brSeverityLevel="brsl01"><brDecisionRef brDecisionIdentNumber="BRDP-S1-00186"/><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep) &gt; 4]</objectPath><objectUse>Max five levels.</objectUse><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep) = 4]/title</objectPath><objectUse>No title on level five.</objectUse></structureObjectRule>';
+  const two41 = two42.replace(' brSeverityLevel="brsl01"', '').replace(/<brDecisionRef[^>]*\/>/, '');
+  const two301 = '<objrule id="R1"><objpath objappl="0">//step1//step1</objpath><objuse>a</objuse><objpath objappl="0">//step2/title</objpath><objuse>b</objuse></objrule>';
+  const b = [{ id: 'b1', identifier: 'BRDP-S1-00186', validation: 'Validated' }];
+  const ap = (x) => new Map([['b1', { brdp_id: 'b1', status: 'approved', rule_xml: x }]]);
+  for (const [name, gen, x, sum, dir, xsd, tag] of [
+    ['4.2', generateBREX, two42, 'brex-schema-summary-4-2.json', 'S4.2', 'brex4.2.xsd', 'structureObjectRule'],
+    ['4.1', generateBREX41, two41, 'brex-schema-summary-4-1.json', 'S4.1', 'brex4.1.xsd', 'structureObjectRule'],
+    ['3.0.1', generateBREX301, two301, 'brex-schema-summary-3-0-1.json', 'S3.0.1', 'brex.xsd', 'objrule'],
+  ]) {
+    const out = await gen(b, { modelIdentCode: 'TEST', projectName: 'x' }, { approvals: ap(x), schemaSummary: summary(sum) });
+    const errs = await xsdErrors(dir, xsd, out.xml);
+    check(`two paths, ${name}: BREX valid against ${xsd}`, errs.length === 0, errs.slice(0, 2).join(' | '));
+    check(`two paths, ${name}: two rules in the output`, (out.xml.match(new RegExp(`<${tag}\\b`, 'g')) || []).length === 2);
+    check(`two paths, ${name}: split reported`, JSON.stringify(out.multiPath) === '{"split":[{"identifier":"BRDP-S1-00186","count":2}],"invalid":[]}', JSON.stringify(out.multiPath));
+  }
+  const sch = await generateBREXSch(b, { modelIdentCode: 'TEST', projectName: 'x' }, { approvals: ap(two42), schemaSummary: summary('brex-schema-summary-4-2.json'), baseGenerator: generateBREX });
+  check('two paths, Schematron: both paths become patterns', /count\(ancestor::proceduralStep\) &gt; 4\]/.test(sch.xml) && /count\(ancestor::proceduralStep\) = 4\]\/title/.test(sch.xml) && sch.multiPath.split.length === 1);
+  const oneUse = '<structureObjectRule id="X"><objectPath allowedObjectFlag="0">//a</objectPath><objectPath allowedObjectFlag="0">//b</objectPath><objectUse>u</objectUse></structureObjectRule>';
+  const bad = await generateBREX(b, { modelIdentCode: 'TEST', projectName: 'x' }, { approvals: ap(oneUse), schemaSummary: summary('brex-schema-summary-4-2.json') });
+  check('two paths and one use: kept and reported as invalid (never silently)', bad.multiPath.invalid.length === 1 && bad.multiPath.invalid[0].child === 'objectPath' && (await xsdErrors('S4.2', 'brex4.2.xsd', bad.xml)).length > 0);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

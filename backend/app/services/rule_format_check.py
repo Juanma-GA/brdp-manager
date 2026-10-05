@@ -17,6 +17,9 @@ allowed shapes:
                 3.0.1 stand-in for a rule without context)
   SCH-DITA      <pattern> or <rule>, with or without a prefix
 
+A BREX rule element has one path and one use (rule_format_multiple, Mejoras
+A): the interface splits a mechanical one before saving (ruleSplit.js).
+
 Comments are always allowed next to the rule; loose text and any other
 top-level element are not. An unknown format is not checked. The Excel
 import does not reject a row with this check, but it stores a rule without
@@ -67,6 +70,17 @@ _MESSAGES = {
     "rule_format_empty_block": "<{element}> contains no {inner}",
     "rule_format_other_format": "<{element}> belongs to a {otherFormat} rule, not to a {format} rule",
     "rule_format_foreign": "<{element}> is not part of a {format} rule",
+    "rule_format_multiple": "A <{element}> can only have one <{child}>; this one has {count}",
+}
+
+# Mejoras A, Part 3: one path and one use per rule element (brex4.2.xsd /
+# brex4.1.xsd: structureObjectRule = brDecisionRef*, objectPath,
+# objectUse?, objectValue*; 3.0.1 brex.xsd: objrule = objpath, objuse?,
+# objval*). Mirror of multiplePathOrUse() in src/utils/ruleSplit.js.
+_SINGLE_CHILDREN = {
+    "BREX-4.2": ("structureObjectRule", ("objectPath", "objectUse")),
+    "BREX-4.1": ("structureObjectRule", ("objectPath", "objectUse")),
+    "BREX-3.0.1": ("objrule", ("objpath", "objuse")),
 }
 
 
@@ -130,6 +144,16 @@ def check_rule_format(root: etree._Element, format: str) -> dict | None:
         return fail("rule_format_foreign", element=_qualified(child))
     if rules == 0:
         return fail("rule_format_missing")
+    single = _SINGLE_CHILDREN.get(format)
+    if single:
+        rule_name, children = single
+        for el in root.iter():
+            if not isinstance(el.tag, str) or _local(el.tag) != rule_name:
+                continue
+            for child in children:
+                count = sum(1 for c in el if isinstance(c.tag, str) and _local(c.tag) == child)
+                if count > 1:
+                    return fail("rule_format_multiple", element=rule_name, child=child, count=count)
     if texts:
         return fail("rule_format_text", text=_clip(texts[0]))
     return None

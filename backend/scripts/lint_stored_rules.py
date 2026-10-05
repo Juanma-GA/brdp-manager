@@ -31,7 +31,9 @@ same problem in three of its structureObjectRules is one finding; the detail
 says "(3 places)"). Reference projects -- names starting with "Official
 Default", or --reference-prefix -- are listed and totalled apart from the
 working projects. Since Barrido final 2/2 there is one more check: the same
-value twice in a rule's list of allowed values. A boolean objectPath is a condition
+value twice in a rule's list of allowed values; since Mejoras A, a rule element with
+more than one objectPath / objectUse ("more than one objectPath in a rule" -- such a
+rule is never modified automatically). A boolean objectPath is a condition
 evaluated like s1kd-brexcheck, not a finding. Rules in the trash are listed too, marked as
 such. Exit code 0 always (a report, not a gate).
 """

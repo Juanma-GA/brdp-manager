@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
 import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
-import { finalRuleXml, validateRuleXml } from '../../hooks/useSuggestions';
+import { finalRuleXml, ruleSplitNote, validateRuleXml } from '../../hooks/useSuggestions';
 import { NAME_HINT_TEST_IDS, extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
 import SchemaIssueLines from './SchemaIssueLines';
 import RuleLintWarnings from './RuleLintWarnings';
@@ -84,6 +84,18 @@ function acceptDisabledTitle(t, canEdit, validation) {
   return undefined;
 }
 
+// Mejoras A, Part 3: the rule had N objectPath with N objectUse and the
+// application split it into N rules (ruleSplit.js).
+function RuleSplitNote({ split }) {
+  const { t } = useTranslation();
+  if (!split) return null;
+  return (
+    <p className={styles.hint} data-testid="rule-split-note">
+      {t('records.assistant.ruleSplit', { count: split.count, path: split.path })}
+    </p>
+  );
+}
+
 function ReferenceGroup({ title, candidates, entry, onToggleReference, danger, showScore }) {
   if (candidates.length === 0) return null;
   const list = (
@@ -143,6 +155,7 @@ export default function RuleSuggestionPanel({
   // wrapped in the chosen schemas' context blocks.
   const pastedFinal = pasted ? finalRuleXml(entry, pasted) : '';
   const pastedValidation = pasted ? validateRuleXml(pastedFinal, vocabulary, entry.format) : null;
+  const pastedSplit = pasted ? ruleSplitNote(entry, pasted) : null;
   const hasSchemas = (entry.schemas || []).length > 0;
 
   // Coverage of the pasted rule's element names, for the per-schema
@@ -197,6 +210,7 @@ export default function RuleSuggestionPanel({
       {entry.text && (
         <>
           <div className={styles.suggestionCode}>{entry.text}</div>
+          <RuleSplitNote split={entry.split} />
           <RuleValidationWarnings validation={generatedValidation} standard={standard} />
           <SchemaCoverageWarnings ruleXml={entry.text} entry={entry} />
         </>
@@ -284,12 +298,13 @@ export default function RuleSuggestionPanel({
             placeholder={t('records.assistant.pasteRulePlaceholder')}
             onChange={(e) => onPastedRuleChange(e.target.value)}
           />
-          {pasted && hasSchemas && pastedFinal !== pasted && (
+          {pasted && pastedFinal !== pasted && (
             <>
-              <AppliesTo entry={entry} />
+              {hasSchemas && <AppliesTo entry={entry} />}
               <div className={styles.suggestionCode}>{pastedFinal}</div>
             </>
           )}
+          <RuleSplitNote split={pastedSplit} />
           {pastedValidation && <RuleValidationWarnings validation={pastedValidation} standard={standard} />}
           {pasted && <SchemaCoverageWarnings ruleXml={pastedFinal} entry={entry} />}
           {pasted && (

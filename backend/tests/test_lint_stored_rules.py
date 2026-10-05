@@ -36,6 +36,11 @@ RULES = {
     "BRDP-LINT-FLAG1": _sor("//@assyCode[matches(., '^\\d{2}$')]", "1", rule_id="R-FLAG1"),
     "BRDP-LINT-DEPTH": _sor("//proceduralStep[count(ancestor::*) &gt; 8]", "0"),
     "BRDP-LINT-FORMAT": "//&lt;emphasis&gt;",
+    # Mejoras A, Part 3: two objectPath in one structureObjectRule.
+    "BRDP-LINT-TWOPATHS": (
+        '<structureObjectRule id="R-TWO"><objectPath allowedObjectFlag="0">//a</objectPath><objectUse>u</objectUse>'
+        '<objectPath allowedObjectFlag="0">//b</objectPath><objectUse>v</objectUse></structureObjectRule>'
+    ),
     # Barrido final 2/2: the same problem in three places of one rule is
     # ONE finding; the same allowed value twice is a finding of its own.
     "BRDP-LINT-THRICE": "".join(
@@ -125,6 +130,7 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
         "BRDP-LINT-FLAG1": "flag 1 with a value predicate",
         "BRDP-LINT-DEPTH": "count(ancestor::*) as depth",
         "BRDP-LINT-FORMAT": "not a rule of the format",
+        "BRDP-LINT-TWOPATHS": "more than one objectPath in a rule",
         "BRDP-LINT-THRICE": "flag 1 with a value predicate",
         "BRDP-LINT-DUPLICATE": "duplicate allowed value",
     }
@@ -164,8 +170,11 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
     # 8 counted findings: one per seeded rule, plus "cannot reject" next to
     # "must not" but allowed, and "not executable" next to "not a rule of the
     # format" (document() and the informative rules are known, not counted).
-    assert "Checked 17 stored rule(s) in 1 project(s); 10 finding(s), each problem counted once per rule." in out
-    assert "- Working projects: 17 rule(s) in 1 project(s); 10 finding(s) (12 place(s))." in out
+    assert any("can only have one <objectPath>; this one has 2" in line for line in _rows(out, "BRDP-LINT-TWOPATHS")), out
+    # The two-path rule also counts "not executable" (its test refuses it),
+    # like the rule that is not of the format.
+    assert "Checked 18 stored rule(s) in 1 project(s); 12 finding(s), each problem counted once per rule." in out
+    assert "- Working projects: 18 rule(s) in 1 project(s); 12 finding(s) (14 place(s))." in out
     assert "- Reference projects (Official Default…): 0 rule(s) in 0 project(s); 0 finding(s)." in out
 
 

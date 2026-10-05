@@ -845,6 +845,40 @@
       ]
     },
     {
+      "id": "rule-4-2-two-decisions-levels-and-title",
+      "description": "Mejoras A, Part 3 (real case BRDP-S1-00186): a Proposal with two decisions. The final rule (after the app's split of a structureObjectRule with two objectPath, if the LLM writes one) is a valid BREX 4.2 rule with two rules, well-formed, with valid XPath.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-rule",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RULE-186",
+        "title": "Levels of procedural steps",
+        "definition": "Decide how many levels of procedural steps may be used and how they are titled.",
+        "proposal": "There will be a maximum of five levels, while the fifth level must not have a title.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
+        },
+        {
+          "type": "rule_format_valid",
+          "note": "after the app's split: one objectPath per rule"
+        },
+        {
+          "type": "rule_count",
+          "min": 2,
+          "note": "two decisions, two rules"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false
+        }
+      ]
+    },
+    {
       "id": "rule-4-2-attribute-value-list",
       "description": "Suggest Rule, S1000D 4.2: an attribute limited to a list of values -> allowedObjectFlag=\"2\" and one objectValue per value, never a predicate.",
       "standard": "S1000D 4.2",

@@ -307,6 +307,27 @@ def test_brex_4_1_and_empty_rules_context():
     assert proced["warnings"] == []
 
 
+def test_a_rule_with_two_object_paths_is_read_whole_and_reported():
+    """Mejoras A, Part 3: one structureObjectRule with two objectPath (invalid
+    against brex4.2.xsd). The summary has both paths -- never only the first
+    -- and the rule is "not valid" with the reason, imported without it."""
+    content = (
+        '<contextRules><structureObjectRuleGroup><structureObjectRule id="BRDP-S1-00186">'
+        '<objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep) &gt; 4]</objectPath>'
+        "<objectUse>Max five levels.</objectUse>"
+        '<objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep) = 4]/title</objectPath>'
+        "<objectUse>No title on level five.</objectUse>"
+        "</structureObjectRule></structureObjectRuleGroup></contextRules>"
+    )
+    rf = read_rules_file(_brex("4.2", content), "BREX-4.2", "S1000D 4.2")
+    cand = _by_id(build_candidates(rf, "4.2")[0])["BRDP-S1-00186"]
+    paths = [r["path"] for r in cand["summary"]["rules"]]
+    assert len(paths) == 2 and paths[1].endswith("= 4]/title"), paths
+    assert [r["use"] for r in cand["summary"]["rules"]] == ["Max five levels.", "No title on level five."]
+    assert cand["rule_problem"] is not None
+    assert "can only have one <objectPath>; this one has 2" in str(cand["rule_problem"])
+
+
 def test_brex_3_0_1_objrule_context_and_noncontext_comment():
     content = (
         '<contextrules context="">'

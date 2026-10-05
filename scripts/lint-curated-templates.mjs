@@ -24,6 +24,8 @@
 //   - not a rule of the format (C2, Part 0): what Paste rule, the manual
 //     editor and PUT …/approvals/{format} would now refuse -- loose text, a
 //     wrapper such as <rules>, or an element of another format.
+//   - more than one objectPath in a rule (Mejoras A, Part 3): a rule element
+//     with two objectPath / objectUse (one of each in the BREX XSDs).
 // Output: one markdown table per template (rules with no finding are left
 // out; a template with none says so). Exit code 0 always: the lint reports,
 // it never fixes a template.

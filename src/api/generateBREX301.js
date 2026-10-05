@@ -1,6 +1,7 @@
 import { ruleEnters } from '../utils/generatePlan.js';
 import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
+import { splitApprovedRulesMultiPath } from "../utils/ruleSplit.js";
 import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache301 = null;
@@ -315,6 +316,7 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
   // (src/utils/ruleSchemaContext.js, rewriteRuleSchemaUrls).
   const schemaLocation = schemaLocationOf(projectConfig, 'S1000D 3.0.1');
   let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [], mixed: [] };
+  let multiPath = { split: [], invalid: [] };
   const schemaRewrite = (list) => {
     const r = rewriteApprovedRulesSchemaUrls(
       list.map((b) => ({ id: b.id, identifier: b.identifier || b.id, xml: approvalById.get(b.id).rule_xml })),
@@ -323,7 +325,10 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
       schemaLocation
     );
     schemaUrls = r.schemaUrls;
-    return r.rules;
+    // Mejoras A, Part 3: one objectPath per rule element in the output.
+    const s = splitApprovedRulesMultiPath(r.rules, 'BREX-3.0.1');
+    multiPath = s.multiPath;
+    return s.rules;
   };
 
   let finalXml = buildEmptyDocument301(projectConfig, schemaSummary);
@@ -351,5 +356,5 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
   // attribute -- but reported if an empty one ever reaches the output.
   const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks };
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks, multiPath };
 }

@@ -9,6 +9,9 @@
 // panel uses, no LLM -- and flags (code -> what the scripts call it):
 //   - not_rule_format ("not a rule of the format"): what Paste rule, the
 //     manual editor and PUT …/approvals/{format} would now refuse;
+//   - multiple_paths ("more than one objectPath in a rule", Mejoras A): a
+//     rule element with two objectPath / objectUse (invalid against the
+//     BREX XSD; refused on save like the previous one);
 //   - not_node_path ("not a node path"): the path returns a number or a
 //     string instead of nodes. A path that returns true/false is a
 //     condition, evaluated like s1kd-brexcheck -- not a finding;
@@ -42,7 +45,7 @@
 //     [{ code, known, items: [params, …], occurrences }]
 //   formatLintFinding(finding, t) -> { kind, detail }   (kind: the English
 //     name the scripts print; detail: translated with t)
-import { analyzeRule, describeRule, parseXmlDocument, ruleConditions } from './ruleTestEngine.js';
+import { analyzeRule, describeRule, parseXmlDocument, pathGroups, ruleConditions } from './ruleTestEngine.js';
 import { formatRuleStatement, formatRuleTestReason } from './ruleTestReasons.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
 import { checkRuleFormat, extractRuleXPaths, formatSchemaIssue, ruleFormatIssues } from '../validation/schemaValidation.js';
@@ -52,6 +55,7 @@ const MUST_NOT_RE = /\b(must not|shall not|must be no|shall be no|should not|may
 
 const LINT_KINDS = {
   not_rule_format: 'not a rule of the format',
+  multiple_paths: 'more than one objectPath in a rule',
   not_node_path: 'not a node path',
   not_executable: 'not executable',
   partially_executable: 'partially executable',
@@ -101,24 +105,30 @@ function ruleDocument(ruleXml, parseXml) {
 // objectUse/objuse text and the allowed values.
 function brexRules(doc) {
   if (!doc) return [];
-  return descendants(doc.documentElement, ['structureObjectRule', 'objrule']).map((el, i) => {
+  // Mejoras A, Part 3: one entry per path (a rule element with two
+  // objectPath is checked on both, never only the first), each with the
+  // use and values written after it.
+  return descendants(doc.documentElement, ['structureObjectRule', 'objrule']).flatMap((el, i) => {
     const is301 = localName(el) === 'objrule';
-    const pathEl = descendants(el, [is301 ? 'objpath' : 'objectPath'])[0];
+    const spec = is301
+      ? { path: 'objpath', use: 'objuse', value: 'objval' }
+      : { path: 'objectPath', use: 'objectUse', value: 'objectValue' };
     const ref = descendants(el, ['brDecisionRef'])[0];
-    const values = descendants(el, [is301 ? 'objval' : 'objectValue']).map((v) =>
-      is301
-        ? { form: v.getAttribute('valtype') || 'single', value: [v.getAttribute('val1') || '', v.getAttribute('val2') || ''].filter(Boolean).join('~') }
-        : { form: v.getAttribute('valueForm') || 'single', value: v.getAttribute('valueAllowed') || '' },
-    );
-    return {
-      id: el.getAttribute('id') || ref?.getAttribute('brDecisionIdentNumber') || `rule ${i + 1}`,
-      flag: pathEl?.getAttribute(is301 ? 'objappl' : 'allowedObjectFlag') || '',
+    const baseId = el.getAttribute('id') || ref?.getAttribute('brDecisionIdentNumber') || `rule ${i + 1}`;
+    const groups = pathGroups(el, spec);
+    return (groups.length ? groups : [{ path: null, use: null, values: [] }]).map((g) => ({
+      id: baseId,
+      flag: g.path?.getAttribute(is301 ? 'objappl' : 'allowedObjectFlag') || '',
       flagAttr: is301 ? 'objappl' : 'allowedObjectFlag',
-      valueElement: is301 ? 'objval' : 'objectValue',
-      path: (pathEl?.textContent || '').trim(),
-      use: textOf(descendants(el, ['objectUse', 'objuse'])[0]),
-      values,
-    };
+      valueElement: spec.value,
+      path: (g.path?.textContent || '').trim(),
+      use: textOf(g.use),
+      values: g.values.map((v) =>
+        is301
+          ? { form: v.getAttribute('valtype') || 'single', value: [v.getAttribute('val1') || '', v.getAttribute('val2') || ''].filter(Boolean).join('~') }
+          : { form: v.getAttribute('valueForm') || 'single', value: v.getAttribute('valueAllowed') || '' },
+      ),
+    }));
   });
 }
 
@@ -234,7 +244,11 @@ const statementOf = (s) => ({ statement: s.statement, schemas: s.schemas });
 function occurrences(ruleXml, format, parseXml) {
   const out = [];
   const add = (code, params, known = false) => out.push({ code, known, params });
-  for (const issue of ruleFormatIssues(checkRuleFormat(ruleXml, format))) add('not_rule_format', { issue });
+  // Mejoras A, Part 3: a rule element with two objectPath (or objectUse)
+  // is its own finding, not a generic "not a rule of the format".
+  for (const issue of ruleFormatIssues(checkRuleFormat(ruleXml, format))) {
+    add(issue.code === 'rule_format_multiple' ? 'multiple_paths' : 'not_rule_format', { issue });
+  }
 
   const analysis = analyzeRule(ruleXml, format, { parseXml });
   if (analysis.status === 'not_executable' && pathNotNodes(analysis.reason)) add('not_node_path', { reason: analysis.reason });
@@ -244,7 +258,8 @@ function occurrences(ruleXml, format, parseXml) {
   const isSchematron = format === 'SCH-DITA';
   const doc = ruleDocument(ruleXml, parseXml);
   const rules = isSchematron ? [] : brexRules(doc);
-  const texts = Object.fromEntries(rules.map((r) => [r.id, r.use]));
+  const texts = {};
+  for (const r of rules) texts[r.id] = texts[r.id] ? `${texts[r.id]} ${r.use}` : r.use;
   const description = describeRule(ruleXml, format, { parseXml });
   const informativeCodes = new Set(['describe_allowed', 'describe_condition_informative']);
   const saysMustNot = (s) => MUST_NOT_RE.test(s.ruleIds.map((id) => texts[id] || '').join(' '));
@@ -307,6 +322,7 @@ function formatItem(code, params, t) {
   const statement = () => formatRuleStatement(params.statement, params.schemas, t);
   switch (code) {
     case 'not_rule_format':
+    case 'multiple_paths':
       return formatSchemaIssue(params.issue, t);
     case 'not_node_path':
     case 'not_executable':

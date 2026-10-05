@@ -743,12 +743,12 @@ def _parse_piece(piece: _Piece, file_format: str) -> dict:
         info["texts"] = [a["message"] for a in asserts if a["message"]]
         return info
     if file_format == "BREX-3.0.1":
-        path_el, use_el, value_tag, flag_attr = _find(el, "objpath"), _find(el, "objuse"), "objval", "objappl"
+        path_tag, use_tag, value_tag, flag_attr = "objpath", "objuse", "objval", "objappl"
     else:
-        path_el, use_el, value_tag, flag_attr = _find(el, "objectPath"), _find(el, "objectUse"), "objectValue", "allowedObjectFlag"
+        path_tag, use_tag, value_tag, flag_attr = "objectPath", "objectUse", "objectValue", "allowedObjectFlag"
     bd = _find(el, "brDecisionRef")
-    values = []
-    for v in _find_all(el, value_tag):
+
+    def value_of(v) -> dict:
         if file_format == "BREX-3.0.1":
             form = v.get("valtype") or "single"
             allowed = v.get("val1") or ""
@@ -757,17 +757,43 @@ def _parse_piece(piece: _Piece, file_format: str) -> dict:
         else:
             form = v.get("valueForm") or "single"
             allowed = v.get("valueAllowed") or ""
-        values.append({"form": form, "value": allowed, "text": _text(v)})
-    info.update(
-        {
-            "decision_ref": (bd.get("brDecisionIdentNumber") or "").strip() if bd is not None else None,
+        return {"form": form, "value": allowed, "text": _text(v)}
+
+    # Mejoras A, Part 3: one group per path, in order (a rule element with
+    # two objectPath -- invalid against the XSD -- gives two summaries,
+    # never only the first path). A valid rule has one group.
+    rule_tag = "objrule" if file_format == "BREX-3.0.1" else "structureObjectRule"
+    rule_els = [el] if etree.QName(el).localname == rule_tag else _find_all(el, rule_tag)
+    groups: list[dict] = []
+    for rule_el in rule_els:
+        for child in rule_el:
+            if not isinstance(child.tag, str):
+                continue
+            local = etree.QName(child).localname
+            if local == path_tag:
+                groups.append({"path": child, "use": None, "values": []})
+            elif local == use_tag and groups:
+                groups[-1]["use"] = child
+            elif local == value_tag and groups:
+                groups[-1]["values"].append(value_of(child))
+    if not groups:
+        groups = [{"path": None, "use": None, "values": []}]
+
+    def summary(group: dict) -> dict:
+        path_el, use_el = group["path"], group["use"]
+        return {
             "path": (path_el.text or "") if path_el is not None else "",
             "flag": path_el.get(flag_attr) if path_el is not None else None,
             "use": _text(use_el),
-            "values": values,
+            "values": group["values"],
             "texts": [_text(use_el)] if _text(use_el) else [],
         }
-    )
+
+    info.update({"decision_ref": (bd.get("brDecisionIdentNumber") or "").strip() if bd is not None else None, **summary(groups[0])})
+    if len(groups) > 1:
+        info["more"] = [{**info, **summary(g)} for g in groups[1:]]
+        for extra in info["more"]:
+            extra.pop("more", None)
     return info
 
 
@@ -913,9 +939,9 @@ def _summary(file_format: str, rules: list[_Piece], infos: list[dict]) -> dict:
                 "use": info.get("use") or "",
                 "values": [v["value"] for v in info.get("values", [])[:MAX_VALUES_PER_RULE]],
                 "values_more": max(0, len(info.get("values", [])) - MAX_VALUES_PER_RULE),
-                "schema": _schema_of_context(piece.context) if piece.context else None,
+                "schema": _schema_of_context(info["context"]) if info.get("context") else None,
             }
-            for piece, info in list(zip(rules, infos))[:DETAILED_RULES]
+            for info in infos[:DETAILED_RULES]
         ]
         summary["rules_more"] = max(0, count - DETAILED_RULES)
     return summary
@@ -955,7 +981,8 @@ def build_candidates(rf: RulesFile, project_issue: str | None) -> tuple[list[dic
             group["noncontext_pieces"].append(piece)
         else:
             group["rules"].append(piece)
-            group["infos"].append(info)
+            for one in [info, *info.get("more", [])]:
+                group["infos"].append({**one, "context": piece.context})
 
     candidates = []
     used_lets: set[str] = set()

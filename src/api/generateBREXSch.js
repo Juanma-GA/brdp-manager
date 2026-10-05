@@ -35,5 +35,5 @@ export async function generateBREXSch(brdps, projectConfig, options = {}) {
   }
 
   const { valid, error } = checkWellFormed(sch);
-  return { xml: sch, valid, error, brdpCount: brexResult.brdpCount, ruleCount: brexResult.ruleCount, schemaUrls: brexResult.schemaUrls, emptyContextBlocks: brexResult.emptyContextBlocks };
+  return { xml: sch, valid, error, brdpCount: brexResult.brdpCount, ruleCount: brexResult.ruleCount, schemaUrls: brexResult.schemaUrls, emptyContextBlocks: brexResult.emptyContextBlocks, multiPath: brexResult.multiPath };
 }

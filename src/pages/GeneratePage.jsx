@@ -415,6 +415,35 @@ export default function GeneratePage() {
 
           {result.xml && result.schemaUrls && <SchemaUrlReport report={result.schemaUrls} />}
 
+          {result.xml && result.multiPath?.invalid?.length > 0 && (
+            <details className={styles.xsdSection} open data-testid="multi-path-invalid">
+              <summary className={styles.badgeError}>
+                ⚠ {t('generate.multiPathInvalid', { count: result.multiPath.invalid.length })}
+              </summary>
+              <p className={styles.hint}>{t('generate.multiPathInvalidHint')}</p>
+              <ul className={styles.errorList}>
+                {result.multiPath.invalid.map((r) => (
+                  <li key={r.identifier}>
+                    {t('generate.multiPathInvalidItem', { identifier: r.identifier, element: r.element, child: r.child, count: r.count })}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {result.xml && result.multiPath?.split?.length > 0 && (
+            <details className={styles.xsdSection} data-testid="multi-path-split">
+              <summary className={styles.badgePending}>
+                {t('generate.multiPathSplit', { count: result.multiPath.split.length })}
+              </summary>
+              <ul className={styles.errorList}>
+                {result.multiPath.split.map((r) => (
+                  <li key={r.identifier}>{t('generate.multiPathSplitItem', { identifier: r.identifier, count: r.count })}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {result.xml && result.emptyContextBlocks > 0 && (
             <details className={styles.xsdSection} open data-testid="empty-context-blocks">
               <summary className={styles.badgePending}>

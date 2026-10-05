@@ -78,6 +78,7 @@ import { answerStructuralQuestion } from "../src/utils/structuralAnswer.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
+import { splitMultiPathRules } from "../src/utils/ruleSplit.js";
 
 // A case's "schemaLocation" read like the project's configuration would be.
 function caseSchemaLocation(testCase) {
@@ -100,6 +101,7 @@ import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
   checkAnswerNames,
+  checkRuleFormat,
   checkRuleNames,
   extractContextCandidates,
   extractRuleXPaths,
@@ -277,6 +279,19 @@ async function runCheck(check, answer, ctx = {}) {
     case "xml_well_formed": {
       const r = await xmlWellFormed(ctx.xml);
       return { status: r.ok ? "pass" : "fail", detail: r.ok ? "well-formed" : r.error };
+    }
+    case "rule_format_valid": {
+      // Mejoras A, Part 3: the final rule (after the app's split) is a rule
+      // of the format -- the same check as Accept / PUT …/approvals.
+      const r = checkRuleFormat(ctx.finalRule || "", ctx.format);
+      return { status: r.ok ? "pass" : "fail", detail: r.ok ? `a ${ctx.format} rule${ctx.splitTotal ? ` (split by the app into ${ctx.splitTotal})` : ""}` : `${r.problem.code} ${JSON.stringify(r.problem.params)}` };
+    }
+    case "rule_count": {
+      // How many rule elements the final rule has (structureObjectRule /
+      // objrule / sch:pattern), at least `min`.
+      const count = (ctx.finalRule || "").match(/<(?:[\w.-]+:)?(?:structureObjectRule|objrule|pattern)\b/g)?.length || 0;
+      const min = check.min ?? 1;
+      return { status: count >= min ? "pass" : "fail", detail: `${count} rule element(s), expected at least ${min}` };
     }
     case "xpath_valid": {
       // Same parser and rule as the app's Accept gate (validation/schemaValidation.js):
@@ -766,13 +781,16 @@ async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
   // pattern with {schema}, default flat) -- the project's Schema location
   // setting, i.e. the context URL form.
   const location = caseSchemaLocation(testCase);
-  const finalRule = xml ? wrapRuleInSchemaContexts(xml, similar.format, testCase.standard, schemas, location) : "";
+  // Mejoras A, Part 3: like the app (useSuggestions' finalRuleXml), a rule
+  // with N objectPath and N objectUse is split first, then wrapped.
+  const split = xml ? splitMultiPathRules(xml, similar.format) : { xml: "", total: 0 };
+  const finalRule = xml ? wrapRuleInSchemaContexts(split.xml, similar.format, testCase.standard, schemas, location) : "";
   return {
     systemPrompt,
     userMessage: SUGGEST_RULE_USER_MESSAGE,
     answer,
     finalRule,
-    checkContext: { xml, finalRule, vocabulary, standard: testCase.standard },
+    checkContext: { xml, finalRule, vocabulary, standard: testCase.standard, format: similar.format, splitTotal: split.total },
   };
 }
 
