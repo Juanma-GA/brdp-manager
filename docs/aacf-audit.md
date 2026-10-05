@@ -3,6 +3,8 @@
 Rama `v2-multiproyecto`, commit `6e2c671`. Nivel objetivo: **T2** (herramienta interna aprobada por IS).
 Marco: AACF 2.0.1, copia local de `Juanma-GA/cursoFSD` (`Proyecto-CCMS-Nav/aacf/`), sin acceso al MCP `aacf_fetch` desde este entorno.
 
+> **Estado tras AACF 1** (rama `v2-multiproyecto`): resueltos HR6 (los tres recortes silenciosos, `e3052f4`), HR7 (frontend: `dd9bbac`, `3fa0c5a`; mensajes saneados del backend: `31d7daf`), HR20 (`dd9bbac`) y el punto 3 del checklist de seguridad (validación de entrada, `1c181d2`). Cada sección afectada lo dice en su sitio; lo que sigue abierto está en "Qué sigue abierto tras AACF 1", al final. El resto del informe describe el código en `6e2c671`.
+
 Auditoría **de solo lectura**: no se ha cambiado código, configuración ni migraciones. Cada afirmación lleva `ruta:línea` comprobada en el código. Lo que no se ha podido comprobar sin ejecutar algo o sin acceder a otro sistema se marca **no comprobado** y se dice qué haría falta. Los tamaños (pequeño / medio / grande) indican el alcance del cambio, no un tiempo (HR14).
 
 ---
@@ -43,8 +45,8 @@ Permisos de `/similar` · clasificación de datos del repo · rate limiting y cu
 | HR3 Verificar contra el código | CUMPLE (proceso) | Este informe. | — | — |
 | HR4 No simplificar en silencio | CUMPLE (proceso) | Los bloqueos están documentados en `CLAUDE.md`: s1kd-brexcheck sin poder instalarse aquí, `cdn.sheetjs.com` bloqueado. | — | — |
 | HR5 Despliegue por procedimiento | **NO CUMPLE** | `Dockerfile:1-23` y `docker-compose.yml` solo construyen y sirven el frontend con nginx (`nginx.conf`, sin proxy a `/api`). No hay procedimiento de despliegue del backend FastAPI ni de Postgres. | Compose con frontend, backend, Postgres con pgvector y `alembic upgrade head`; nginx con proxy `/api`. | medio |
-| HR6 Sin truncar contenido | **NO CUMPLE** | Ver tabla 1.3. Dos recortes silenciosos de contenido que ve el usuario (`backend/app/services/text_extract.py:117,170`) y un tope silencioso de resultados (`src/components/compare/BrdpCompareDialog.jsx:293`). El resto son recortes marcados de entradas para modelos. | Quitar los recortes silenciosos o decir lo que se ha cortado. Para las entradas de modelo, ver Decisión 10. | pequeño |
-| HR7 Sin fallbacks silenciosos | **NO CUMPLE** | Ver tabla 1.4. En el backend, los trabajos y servicios escalan bien. En el frontend hay 9 puntos que degradan en silencio, entre ellos el guardado de campos de Records. | Mostrar el error y deshacer el cambio local en cada punto. | medio |
+| HR6 Sin truncar contenido | **RESUELTO** (`e3052f4`; antes NO CUMPLE) | Ver tabla 1.3. Dos recortes silenciosos de contenido que ve el usuario (`backend/app/services/text_extract.py:117,170`) y un tope silencioso de resultados (`src/components/compare/BrdpCompareDialog.jsx:293`). El resto son recortes marcados de entradas para modelos. | Quitar los recortes silenciosos o decir lo que se ha cortado. Para las entradas de modelo, ver Decisión 10. | pequeño |
+| HR7 Sin fallbacks silenciosos | **RESUELTO** (`dd9bbac`, `3fa0c5a`, `31d7daf`; antes NO CUMPLE; `schemaFacts.js` aceptado) | Ver tabla 1.4. En el backend, los trabajos y servicios escalan bien. En el frontend hay 9 puntos que degradan en silencio, entre ellos el guardado de campos de Records. | Mostrar el error y deshacer el cambio local en cada punto. | medio |
 | HR8 Nada hardcodeado | **NO CUMPLE** | Ver tabla 1.5. Los ajustes del backend están bien en `Settings`, pero umbrales, lotes, reintentos, temperaturas y tiempos son constantes repartidas por el código (alguna triplicada). | Pasar los ajustes funcionales a `Settings` y servirlos al frontend. Ver Decisión 4. | medio |
 | HR9 Borrar solo con confirmación registrada | PARCIAL | Ver tabla 1.6. Las BRDP se borran con borrado lógico, confirmación y registro en el historial. En cambio, proyecto, usuario, borrado permanente desde la Papelera y quitar un rol se borran de verdad y no quedan registrados; quitar un rol ni siquiera pide confirmación. | Registro de auditoría de esos borrados y confirmación al quitar un rol. Si se quiere, borrado lógico de proyectos (Decisión 13). | medio |
 | HR10 Deep-merge | CUMPLE | `project_config` es plano (`backend/app/api/routes/projects.py:106-113`). Al crear: `{**defaults, **body}` sobre un dict plano (`:135`). Al editar se sustituye entero desde el estado completo del cliente (`projects.py:195`, `src/pages/ProjectConfigPage.jsx:774,831-835`). No hay ninguna configuración anidada. Nota: con dos editores a la vez, gana el último (sin merge). | — | — |
@@ -57,7 +59,7 @@ Permisos de `/similar` · clasificación de datos del repo · rate limiting y cu
 | HR17 | NO APLICA | No está definida en `atexis-hard-rules.md`. | Decisión 15. | — |
 | HR18 Sin timeouts duros en procesos agénticos | PARCIAL | Ver tabla 1.9. Los trabajos tienen vigilancia que escala (60 min → `failed` con mensaje). El proxy del LLM no tiene ningún límite ni vigilancia (`backend/app/api/routes/llm_proxy.py:63`, `timeout=None`; sin `AbortController` en `src/api/llmAPI.js`): una petición colgada deja la pantalla esperando indefinidamente. | Vigilancia con aviso en el proxy del LLM y en el cliente. | pequeño |
 | HR19 Igual que HR18 | PARCIAL | Ídem. | Ídem. | pequeño |
-| HR20 UI de mutación optimista | **NO CUMPLE** | Ver tabla 1.10. Los campos de texto de Records se ven al momento pero no se deshacen si el guardado falla. El estado de la Propuesta, Verify y Revoke esperan a la respuesta pese a que el resultado se conoce de antemano. AI Extract sí cumple (con deshacer). | Aplicar el cambio al momento y deshacerlo si el servidor lo rechaza, como ya hace AI Extract. | medio |
+| HR20 UI de mutación optimista | **RESUELTO** (`dd9bbac`; antes NO CUMPLE) | Ver tabla 1.10. Los campos de texto de Records se ven al momento pero no se deshacen si el guardado falla. El estado de la Propuesta, Verify y Revoke esperan a la respuesta pese a que el resultado se conoce de antemano. AI Extract sí cumple (con deshacer). | Aplicar el cambio al momento y deshacerlo si el servidor lo rechaza, como ya hace AI Extract. | medio |
 | HR21 Humanizar textos | **NO CUMPLE** | `src/components/Header.jsx:30` muestra `user.global_role` crudo ("admin"/"user"); `BrdpCompareDialog.jsx:96` muestra `p.kind` (assert/report: son nombres de elemento XML, aceptables) y las etiquetas en inglés de HR15. | Traducir el rol. | pequeño |
 | Extra: FastAPI y `from __future__ import annotations` | CUMPLE | Solo aparece en servicios (`app/services/rule_extract.py`, `rule_extract_jobs.py`, `text_extract.py`), ningún fichero de `app/api/routes/` lo usa. | — | — |
 
@@ -103,6 +105,8 @@ Permisos de `/similar` · clasificación de datos del repo · rate limiting y cu
 | `excel_io.py:76` | Celda de más de 32 767 caracteres | Export rechazado con el motivo | cumple |
 | `config.py:75-77` | Texto libre de más de 5 000 palabras | Rechazado, nunca cortado | cumple |
 
+**AACF 1 (`e3052f4`)**: la cita se guarda entera (límite `Settings.extract_quote_max_chars`, 20 000; una cita más larga deja fuera esa decisión con un aviso de fichero que la nombra) y se muestra plegada con "Ver más"; el título se guarda entero y, por encima del límite de Título de una BRDP, la fila lleva "Título demasiado largo: acórtalo" y no se importa hasta acortarlo (409 `texts_too_long` en el servidor); Comparar muestra "50 de N" y "Mostrar más". Los recortes marcados de entradas a modelos se aceptan (Decisión 10).
+
 ### 1.4 HR7 — degradaciones silenciosas
 
 | Punto | Qué pasa si falla |
@@ -116,6 +120,8 @@ Permisos de `/similar` · clasificación de datos del repo · rate limiting y cu
 | `src/api/schemaFacts.js:18` | Ask sigue sin fichas de esquema y sin decirlo (documentado como intencionado) |
 | `src/layouts/ProjectLayout.jsx:36` | Cualquier error, también de red, se muestra como "sin acceso" |
 | `src/hooks/useVocabularyCheck.js:34`, `RecordsPage.jsx:949` | Si falla la carga del vocabulario o del catálogo, se muestra "no disponible" o una lista vacía |
+
+**AACF 1**: todos los puntos de la tabla resueltos salvo `schemaFacts.js` (aceptado tal cual: Ask sigue sin fichas si fallan, Decisión del encargo). Records: los campos guardan lo escrito y lo marcan "No guardado" con el motivo, Reintentar y Descartar; Verify, Revoke, estado de la Propuesta y borrar se deshacen con el motivo (`dd9bbac`). Aprobaciones y cifras de cabecera: aviso con Reintentar y sin estado inventado (`dd9bbac`). Borrar proyecto: nunca "0 BRDP" y no se confirma sin recuento; ProjectLayout distingue "sin acceso" de "no se pudo conectar"; vocabulario y catálogo dicen que la carga falló, con Reintentar (`3fa0c5a`). Un único mecanismo de error (`src/components/ErrorNotice.jsx`, `role="alert"`).
 
 Backend: los trabajos convierten cualquier excepción en `failed` con su motivo (`import_jobs.py:735-760`, `embedding_jobs.py:348-370`, `rule_extract_jobs.py:934-945`), y el proxy del LLM registra los errores (`llm_proxy.py:65-97`). Cumple.
 
@@ -209,6 +215,8 @@ Backend: los trabajos convierten cualquier excepción en `failed` con su motivo 
 | Edición de candidatas de AI Extract | **Sí, con deshacer por campo** (`RuleExtractSection.jsx:395-420`) | — |
 | Usuarios y roles | No | Contraseña temporal: sí; roles: no |
 
+**AACF 1 (`dd9bbac`)**: campos de texto con deshacer ("No guardado" + Descartar; la tabla muestra el valor guardado), estado de la Propuesta, Verify, Revoke y borrar BRDP optimistas con deshacer y el motivo; restaurar y borrar en la Papelera también. Verify es optimista porque el cliente conoce el resultado (`approved`). Crear BRDP o proyecto y guardar la configuración siguen como estaban (excepciones válidas o decisión de diseño). Usuarios y roles no se han tocado (fuera del encargo).
+
 ---
 
 ## Parte 2 — Seguridad
@@ -219,7 +227,7 @@ Backend: los trabajos convierten cualquier excepción en `failed` con su motivo 
 |---|---|---|---|---|---|
 | 1 | OIDC | **DESVIACIÓN A DECIDIR** | Autenticación propia: JWT RS256 y bcrypt (`backend/app/core/security.py:54-115`, `auth.py`). Sin Keycloak | Decisión 8 | grande |
 | 2 | CORS restringido | CUMPLE | Orígenes explícitos (`config.py:53`, `main.py:39-45`) con `allow_credentials` | — | — |
-| 3 | Validación de entrada | PARCIAL | Pydantic en todos los cuerpos y límites en las subidas (`config.py:65-77`). Pero: `BRDPCreate.validation` es un `str` libre, sin `Literal` ni `CHECK` (`schemas/brdp.py:12`, `models/brdp.py:57`); textos sin longitud máxima; `history` escribible (`schemas/brdp.py:14,28`); `ProjectCreate.standard` sin comprobar contra la lista (`projects.py:116-139`); `project_config` es un dict libre; el `payload` del proxy del LLM es libre, así que el cliente elige modelo, `max_tokens` y cualquier parámetro (`llm_proxy.py:17-23`); `must_change_password` no se aplica en el servidor (1.2) | `Literal` y longitudes, quitar `history`, validar el standard, fijar modelo y `max_tokens` en el servidor | pequeño |
+| 3 | Validación de entrada | **RESUELTO** (`1c181d2`; antes PARCIAL; quedan `must_change_password` y las claves desconocidas de `project_config`, ver al final) | Pydantic en todos los cuerpos y límites en las subidas (`config.py:65-77`). Pero: `BRDPCreate.validation` es un `str` libre, sin `Literal` ni `CHECK` (`schemas/brdp.py:12`, `models/brdp.py:57`); textos sin longitud máxima; `history` escribible (`schemas/brdp.py:14,28`); `ProjectCreate.standard` sin comprobar contra la lista (`projects.py:116-139`); `project_config` es un dict libre; el `payload` del proxy del LLM es libre, así que el cliente elige modelo, `max_tokens` y cualquier parámetro (`llm_proxy.py:17-23`); `must_change_password` no se aplica en el servidor (1.2) | `Literal` y longitudes, quitar `history`, validar el standard, fijar modelo y `max_tokens` en el servidor | pequeño |
 | 4 | SQL parametrizado | CUMPLE | ORM; `text()` solo con constantes (`main.py:82`, `core/migrations.py:31`); las f-strings de las migraciones usan nombres de tabla del propio código (`0012…:78`, `0013…:75`) | — | — |
 | 5 | XSS | CUMPLE | Sin `dangerouslySetInnerHTML` ni `eval`. ReactMarkdown sin `rehype-raw` (`RecordsPage.jsx:1787-1791`). El informe escapa todo lo que inserta (`buildBREXdocReport.js:28, 217-226`) | — | — |
 | 6 | CSRF | CUMPLE | La API usa el token en una cabecera, no cookies. La cookie de refresh es `SameSite=lax` y solo va a `/api/auth` (`auth.py:27-41`) | — | — |
@@ -233,8 +241,8 @@ Backend: los trabajos convierten cualquier excepción en `failed` con su motivo 
 | **Suggest lee otros proyectos sin permiso** | `similar.py:73-83` y las consultas citadas en el resumen; Comparar sí filtra (`brdp_compare.py:89,141`) | **alta, explotable** |
 | **Repositorio público con datos de clientes e IP interna** | ver resumen, punto 2 | **alta** (clasificación de datos) |
 | Proxy del LLM abierto a cualquier usuario autenticado, también sin proyectos, con `payload` libre, sin cuota y sin registro | `llm_proxy.py:49-55` | media |
-| Los mensajes de error de AI Extract incluyen el texto de la excepción y la primera línea del error de base de datos | `rule_extract.py:87-99, 102-116` (choque HR7 / Global Rule 5: Decisión 12) | baja |
-| El proxy devuelve al cliente el cuerpo del error del proveedor | `llm_proxy.py:85-96` | baja |
+| ~~Los mensajes de error de AI Extract incluyen el texto de la excepción y la primera línea del error de base de datos~~ **Resuelto** (`31d7daf`): código estable y referencia; el detalle, en el log | `rule_extract.py:87-99, 102-116` (Decisión 12) | baja |
+| ~~El proxy devuelve al cliente el cuerpo del error del proveedor~~ **Resuelto** (`1c181d2`): código y referencia; el cuerpo, en el log | `llm_proxy.py:85-96` | baja |
 | `/health` sin autenticación muestra la versión de migración | `main.py:80-84` | baja |
 | El access token sigue valiendo tras el logout; un refresh reutilizado no revoca la familia | 1.2 | baja |
 | `/docs` y `/openapi.json` abiertos (por defecto de FastAPI) | `main.py:33` | baja (cumple la Global Rule 9) |
@@ -302,7 +310,7 @@ Todas son decisiones de Juanma; no se recomienda migrar.
 | Regla | Patrón | Ejemplo | Recuento |
 |---|---|---|---|
 | Global 4: rastro de auditoría | Operaciones administrativas sin registro | `projects.py:225-244` | 7 endpoints (borrar proyecto, usuario, rol, borrados permanentes, crear usuario, resetear contraseña, cambiar rol) |
-| Global 5: no exponer detalles internos | Excepción o error del proveedor devueltos al cliente | `rule_extract.py:95-99` | 2 sitios (choque con HR7, Decisión 12) |
+| Global 5: no exponer detalles internos | Excepción o error del proveedor devueltos al cliente | `rule_extract.py:95-99` | ~~2 sitios~~ resuelto (`31d7daf`, `1c181d2`): middleware `app/core/errors.py` con referencia |
 | Global 6 / python.mdc: versiones fijadas | Dependencias de Python con `>=` y sin lockfile | `backend/pyproject.toml:6-24` | 15 de 15 |
 | Global 10: paginación | Listados sin paginar en el servidor | `brdps.py:125` | 7 (BRDP, aprobaciones ×2, proyectos, usuarios, Papelera, catálogo) |
 | javascript.mdc: cliente de API centralizado y errores en la capa de servicio | Llamadas `authFetchJson` y manejo de errores en páginas y componentes | `RecordsPage.jsx:661` | 81 llamadas en 11 ficheros |
@@ -354,11 +362,11 @@ En orden: primero los bloqueantes de T2.
 | 5 | CI (lint, pytest, SCA, SAST, secret scan) y pre-commit | G1, G2, G10 | medio | **sí** |
 | 6 | Proteger `main` | G5 | pequeño | **sí** |
 | 7 | Lockfile de Python, `npm ci` en el Dockerfile, declarar `@xmldom/xmldom` y `jszip`, activar Dependabot | G3 | pequeño | sí (G3 es de T2) |
-| 8 | Guardados de Records (campos, Verify, Revoke, borrar) con error visible y deshacer | HR7, HR20 | pequeño | no |
-| 9 | Diálogo de borrar proyecto: no mostrar "0" si falla el recuento | HR7, HR9 | pequeño | no |
+| 8 | ~~Guardados de Records (campos, Verify, Revoke, borrar) con error visible y deshacer~~ **hecho** (`dd9bbac`) | HR7, HR20 | pequeño | no |
+| 9 | ~~Diálogo de borrar proyecto: no mostrar "0" si falla el recuento~~ **hecho** (`3fa0c5a`) | HR7, HR9 | pequeño | no |
 | 10 | `must_change_password` en el servidor | seguridad | pequeño | no |
-| 11 | Validación de entrada: `validation` como `Literal`, longitudes, quitar `history`, validar el standard, fijar modelo y `max_tokens` del proxy en el servidor | 2.1 #3 | pequeño | no |
-| 12 | Quitar los recortes silenciosos: cita 4 000, título 300, búsqueda de Comparar 50 | HR6 | pequeño | no |
+| 11 | ~~Validación de entrada: `validation` como `Literal`, longitudes, quitar `history`, validar el standard, fijar modelo y `max_tokens` del proxy en el servidor~~ **hecho** (`1c181d2`) | 2.1 #3 | pequeño | no |
+| 12 | ~~Quitar los recortes silenciosos: cita 4 000, título 300, búsqueda de Comparar 50~~ **hecho** (`e3052f4`) | HR6 | pequeño | no |
 | 13 | Vigilancia con aviso en el proxy del LLM y en el cliente | HR18/19 | pequeño | no |
 | 14 | Traducir el rol (`Header.jsx:30`), "context:/test:" y "Records:/Catalog"; códigos en vez de texto en los errores del backend | HR15, HR21 | medio | no |
 | 15 | Limpieza de HR13: ramas few-shot, claves sin lector, duplicados, endpoint sin uso, columna `history` | HR13 | pequeño | no |
@@ -367,3 +375,16 @@ En orden: primero los bloqueantes de T2.
 | 18 | Paginación en el servidor de los listados grandes | Global 10 | medio | no |
 | 19 | Revocar el access token al hacer logout y detectar la reutilización de un refresh | 1.2 | pequeño | no |
 | 20 | Confirmación al quitar un rol | HR9 | pequeño | no |
+
+---
+
+## Qué sigue abierto tras AACF 1
+
+- **Validación de entrada**: `must_change_password` sigue sin aplicarse en el servidor (arreglo 10). `project_config` comprueba la forma (objeto con valores de texto) pero admite claves desconocidas y no comprueba formatos ni longitudes de cada valor: decidir qué claves y formatos son válidos es una decisión de producto. `validation` es un `Literal` en la API, sin `CHECK` en la base de datos (sin migración, como pedía el encargo); el import de Excel no cambia.
+- **Longitudes**: una BRDP ya guardada por encima de los límites nuevos se lee y se exporta igual; solo al editar ese campo se pide acortarlo.
+- **Recortes marcados de entradas a modelos** (embeddings, regla en Ask, resúmenes de AI Extract, fichas): aceptados (Decisión 10).
+- **`src/api/schemaFacts.js`**: Ask sigue sin fichas de esquema si fallan, sin decirlo; aceptado en el encargo.
+- **Errores del backend en inglés**: los motivos que el backend escribe para el usuario sin código (p. ej. "A BRDP with identifier … already exists") se muestran tal cual; traducirlos es el arreglo 14.
+- **Usuarios y roles** (HR20, HR9): sin cambios.
+- Todo lo demás de "Arreglos propuestos" que no está marcado como hecho.
+

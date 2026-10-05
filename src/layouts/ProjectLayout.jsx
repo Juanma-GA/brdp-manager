@@ -45,14 +45,17 @@ export default function ProjectLayout() {
         if (cancelled) return;
         if (err.status === 403 || err.status === 404) setStatus('denied');
         else {
-          setLoadError(t('projectLayout.loadFailed', { reason: errorMessage(err, t) }));
+          setLoadError(err);
           setStatus('failed');
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [projectId, reloadToken, t]);
+    // Not keyed on the language: the error is kept and translated when shown,
+    // so switching the language never loads the project again (that would
+    // unmount the page under it, and its selection with it).
+  }, [projectId, reloadToken]);
 
   const refreshProject = useCallback(
     () =>
@@ -75,7 +78,7 @@ export default function ProjectLayout() {
   if (status === 'failed') {
     return (
       <div style={{ padding: 24 }}>
-        <ErrorNotice testId="project-load-error" message={loadError} onRetry={() => setReloadToken((n) => n + 1)} />
+        <ErrorNotice testId="project-load-error" message={t('projectLayout.loadFailed', { reason: errorMessage(loadError, t) })} onRetry={() => setReloadToken((n) => n + 1)} />
         <Link to="/projects">{t('projectLayout.backToProjects')}</Link>
       </div>
     );

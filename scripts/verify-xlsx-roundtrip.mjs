@@ -233,7 +233,7 @@ async function main() {
       await page.click('button:has-text("Export to Excel")');
       await page.waitForSelector("text=cannot be exported", { timeout: 20000 });
       const refusedText = await page.locator("body").innerText();
-      assert(refusedText.includes("BRDP-XL-BIG (Rule)"), "export refused naming the BRDP and the field: BRDP-XL-BIG (Rule)");
+      assert(refusedText.includes("BRDP-XL-BIG (Rule column)"), "export refused naming the BRDP and the field: BRDP-XL-BIG (Rule column)");
       await page.waitForTimeout(500);
       assert(!downloaded, "no file downloaded");
       await page.screenshot({ path: path.join(os.tmpdir(), "xlsx-export-cell-too-large.png") });

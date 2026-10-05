@@ -207,11 +207,11 @@ function DeleteProjectModal({ project, onDeleted, onCancel }) {
     setCountError(null);
     authFetchJson(`/api/projects/${project.id}/brdps`)
       .then((data) => !cancelled && setBrdpCount(data.length))
-      .catch((err) => !cancelled && setCountError(t('projects.delete.countFailed', { reason: errorMessage(err, t) })));
+      .catch((err) => !cancelled && setCountError(err));
     return () => {
       cancelled = true;
     };
-  }, [project.id, countToken, t]);
+  }, [project.id, countToken]);
 
   const nameMatches = confirmText === project.name;
   const countKnown = brdpCount !== null;
@@ -235,7 +235,7 @@ function DeleteProjectModal({ project, onDeleted, onCancel }) {
         <h3 className={styles.formTitle}>{t('projects.delete.title')}</h3>
         <p className={styles.projectName}>{project.name}</p>
         {error && <p className={styles.error}>{error}</p>}
-        {countError && <ErrorNotice testId="delete-project-count-error" message={countError} onRetry={() => setCountToken((n) => n + 1)} />}
+        {countError && <ErrorNotice testId="delete-project-count-error" message={t('projects.delete.countFailed', { reason: errorMessage(countError, t) })} onRetry={() => setCountToken((n) => n + 1)} />}
         {brdpCount !== null && (
           <p className={styles.warningText}>
             {t('projects.delete.warning', { count: brdpCount })}
