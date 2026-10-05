@@ -48,7 +48,7 @@ Permisos de `/similar` · clasificación de datos del repo · rate limiting y cu
 | HR6 Sin truncar contenido | **RESUELTO** (`e3052f4`; antes NO CUMPLE) | Ver tabla 1.3. Dos recortes silenciosos de contenido que ve el usuario (`backend/app/services/text_extract.py:117,170`) y un tope silencioso de resultados (`src/components/compare/BrdpCompareDialog.jsx:293`). El resto son recortes marcados de entradas para modelos. | Quitar los recortes silenciosos o decir lo que se ha cortado. Para las entradas de modelo, ver Decisión 10. | pequeño |
 | HR7 Sin fallbacks silenciosos | **RESUELTO** (`dd9bbac`, `3fa0c5a`, `31d7daf`; antes NO CUMPLE; `schemaFacts.js` aceptado) | Ver tabla 1.4. En el backend, los trabajos y servicios escalan bien. En el frontend hay 9 puntos que degradan en silencio, entre ellos el guardado de campos de Records. | Mostrar el error y deshacer el cambio local en cada punto. | medio |
 | HR8 Nada hardcodeado | **NO CUMPLE** | Ver tabla 1.5. Los ajustes del backend están bien en `Settings`, pero umbrales, lotes, reintentos, temperaturas y tiempos son constantes repartidas por el código (alguna triplicada). | Pasar los ajustes funcionales a `Settings` y servirlos al frontend. Ver Decisión 4. | medio |
-| HR9 Borrar solo con confirmación registrada | PARCIAL | Ver tabla 1.6. Las BRDP se borran con borrado lógico, confirmación y registro en el historial. En cambio, proyecto, usuario, borrado permanente desde la Papelera y quitar un rol se borran de verdad y no quedan registrados; quitar un rol ni siquiera pide confirmación. | Registro de auditoría de esos borrados y confirmación al quitar un rol. Si se quiere, borrado lógico de proyectos (Decisión 13). | medio |
+| HR9 Borrar solo con confirmación registrada | PARCIAL | Ver tabla 1.6. Desde AACF 2 (`ead5cd1`, `658db32`) proyectos y usuarios también se borran de forma lógica, con `deleted_at`/`deleted_by` y una sección en la Papelera para restaurarlos o borrarlos definitivamente; quitar un rol pide confirmación. Lo que sigue sin registro: el borrado permanente (BRDP, proyecto, usuario) y los cambios de rol. | Registro de auditoría de los borrados permanentes y de los roles (encargo de protecciones). | pequeño |
 | HR10 Deep-merge | CUMPLE | `project_config` es plano (`backend/app/api/routes/projects.py:106-113`). Al crear: `{**defaults, **body}` sobre un dict plano (`:135`). Al editar se sustituye entero desde el estado completo del cliente (`projects.py:195`, `src/pages/ProjectConfigPage.jsx:774,831-835`). No hay ninguna configuración anidada. Nota: con dos editores a la vez, gana el último (sin merge). | — | — |
 | HR11 Sin regex para decisiones críticas | **DESVIACIÓN A DECIDIR** | Ver tabla 1.7. Principio del proyecto: "lo que puede comprobar el código, lo comprueba el código". La mayoría de las expresiones son mecánicas (sintaxis de identificadores y de huecos); cuatro toman decisiones semánticas. | Decisiones 6 y 7. | — |
 | HR12 | NO APLICA | No está definida en `atexis-hard-rules.md`. | Confirmar contra la versión del MCP (Decisión 15). | — |
@@ -145,18 +145,25 @@ Backend: los trabajos convierten cualquier excepción en `failed` con su motivo 
 
 ### 1.6 HR9 — borrados
 
+Actualizada tras AACF 2. "Lógico" = queda con `deleted_at`/`deleted_by` y se puede restaurar desde la Papelera (Ajustes).
+
 | Operación | Tipo | Confirmación | ¿Queda registro? |
 |---|---|---|---|
-| Borrar BRDP (`brdps.py:282-301`) | lógico (Papelera) | `window.confirm` (`RecordsPage.jsx:1015`) | Sí, en History (`brdps.py:300`) |
-| Reset Data (`brdps.py:304-334`) | lógico | diálogo (`ProjectConfigPage.jsx:695-712`) | Sí, una entrada por BRDP |
-| Borrado permanente desde la Papelera (`trash.py:116-159`) | real | modal "irreversible" (`SettingsPage.jsx:758-767`) | **No.** History sobrevive (`ON DELETE SET NULL`), pero no queda constancia del borrado |
-| Borrar proyecto (`projects.py:225-244`) | real, en cascada | escribir el nombre (`ProjectsPage.jsx:205-212`) | **No** |
-| Borrar usuario (`users.py:145-186`) | real | `window.confirm` (`SettingsPage.jsx:263`) | **No** |
-| Quitar rol de proyecto (`users.py:214`) | real | **ninguna** (`SettingsPage.jsx:223-226`) | **No** |
-| Descartar aprobación (`approvals.py:457-475`) | real, sin History | — | **No.** No tiene llamador en el frontend (HR13) |
-| Nueva extracción con otra sin importar | sustituye las candidatas | `window.confirm` (`RuleExtractSection.jsx:519`) | Datos de trabajo, no hace falta |
+| Borrar BRDP (`brdps.py`) | lógico (Papelera) | `window.confirm` (`RecordsPage.jsx`) | Sí, en History |
+| Reset Data (`brdps.py`) | lógico | diálogo (`ProjectConfigPage.jsx`) | Sí, una entrada por BRDP |
+| Borrado permanente de BRDP desde la Papelera (`trash.py`) | real | modal "irreversible" | **No.** History sobrevive (`ON DELETE SET NULL`), pero no queda constancia del borrado |
+| Borrar proyecto (`projects.py` `delete_project`) | **lógico** desde AACF 2 (`ead5cd1`): BRDP, reglas, historial y roles intactos; bloqueado (409) mientras corre un trabajo | escribir el nombre (`ProjectsPage.jsx`), el diálogo dice que va a la Papelera | Sí: `deleted_at`, `deleted_by`, `deleted_by_email` en la fila (Papelera > Proyectos) |
+| Restaurar proyecto (`trash.py` `POST /api/trash/projects/{id}/restore`) | — | — (admin); nombre ocupado → 409 y se ofrece otro nombre | Se limpian las columnas de borrado; sin evento |
+| Borrado permanente de proyecto (`trash.py` `DELETE /api/trash/projects/{id}`) | real, en cascada | escribir el nombre (admin) | **No** |
+| Borrar usuario (`users.py`) | **lógico** desde AACF 2 (`ead5cd1`): sin login ni refresh (tokens revocados), fuera de listas y selectores; roles y History conservados | `window.confirm` (`SettingsPage.jsx`) | Sí: `deleted_at`, `deleted_by`, `deleted_by_email` (Papelera > Usuarios eliminados) |
+| Borrado permanente de usuario (`users.py` `DELETE /api/users/{id}/permanent`) | real; History conserva el correo | confirmación explícita (admin) | **No** |
+| Quitar rol de proyecto (`users.py`) | real | **confirmación** con persona, proyecto y rol desde AACF 2 (`658db32`) | **No** |
+| Descartar aprobación (`approvals.py:457-475`) | real, sin History | — | **No.** No tiene llamador en el frontend (HR13); sin tocar (encargo) |
+| Nueva extracción con otra sin importar | sustituye las candidatas | `window.confirm` (`RuleExtractSection.jsx`) | Datos de trabajo, no hace falta |
 | Migración `0024_drop_notes` | real (tabla) | — | **no comprobado** si en la base de Juanma había notas: habría que consultar `notes` en un backup previo |
 | `normalize_rule_wrappers.py` | reescribe reglas | `--dry-run` | Sí, en History |
+
+Sin purga automática de la Papelera. Los proyectos temporales de `run-prompt-eval.mjs`, los scripts `verify-*` y los tests borran definitivamente (`?permanent=true` o la ruta de la Papelera), así que no dejan nada en ella.
 
 ### 1.7 HR11 — expresiones regulares que deciden algo
 
@@ -358,7 +365,7 @@ En orden: primero los bloqueantes de T2.
 | 1 | Filtrar los precedentes de `/similar` por pertenencia al proyecto (o según la Decisión 1) | Seguridad / permisos | medio | **sí** |
 | 2 | Clasificación de datos del repo según la Decisión 2: repo privado, o fixtures de cliente fuera del repo (y del historial) | T2 clasificación | medio | **sí** |
 | 3 | Rate limiting compartido y cuotas por usuario en LLM, embeddings y login | 2.1 #7, G12 | medio | **sí** |
-| 4 | Registro de auditoría de llamadas al LLM, acciones administrativas y borrados | G7, HR9, Global 4 | medio | **sí** |
+| 4 | Registro de auditoría de llamadas al LLM, acciones administrativas y borrados (tras AACF 2, de los borrados solo faltan los permanentes y los cambios de rol) | G7, HR9, Global 4 | medio | **sí** |
 | 5 | CI (lint, pytest, SCA, SAST, secret scan) y pre-commit | G1, G2, G10 | medio | **sí** |
 | 6 | Proteger `main` | G5 | pequeño | **sí** |
 | 7 | Lockfile de Python, `npm ci` en el Dockerfile, declarar `@xmldom/xmldom` y `jszip`, activar Dependabot | G3 | pequeño | sí (G3 es de T2) |
@@ -374,7 +381,7 @@ En orden: primero los bloqueantes de T2.
 | 17 | Constantes funcionales a `Settings` (HR8) y UI de administración (HR0) | HR8, HR0 | medio / grande | no |
 | 18 | Paginación en el servidor de los listados grandes | Global 10 | medio | no |
 | 19 | Revocar el access token al hacer logout y detectar la reutilización de un refresh | 1.2 | pequeño | no |
-| 20 | Confirmación al quitar un rol | HR9 | pequeño | no |
+| 20 | ~~Confirmación al quitar un rol~~ **hecho** (`658db32`) | HR9 | pequeño | no |
 
 ---
 
@@ -385,6 +392,14 @@ En orden: primero los bloqueantes de T2.
 - **Recortes marcados de entradas a modelos** (embeddings, regla en Ask, resúmenes de AI Extract, fichas): aceptados (Decisión 10).
 - **`src/api/schemaFacts.js`**: Ask sigue sin fichas de esquema si fallan, sin decirlo; aceptado en el encargo.
 - **Errores del backend en inglés**: los motivos que el backend escribe para el usuario sin código (p. ej. "A BRDP with identifier … already exists") se muestran tal cual; traducirlos es el arreglo 14.
-- **Usuarios y roles** (HR20, HR9): sin cambios.
+- **Usuarios y roles** (HR20, HR9): resuelto en AACF 2, ver abajo.
 - Todo lo demás de "Arreglos propuestos" que no está marcado como hecho.
 
+## Qué sigue abierto tras AACF 2
+
+AACF 2 (`8500e86`, `ead5cd1`, `658db32`, `09de62b`): un servidor caído ya no se trata como "sin sesión"; proyectos y usuarios se borran de forma lógica con su sección en la Papelera; quitar un rol pide confirmación; la cabecera de Records desglosa las reglas verificadas por resultado del test.
+
+- **Registro de los borrados permanentes** (BRDP, proyecto, usuario desde la Papelera) **y de los cambios de rol** (asignar, cambiar, quitar): sin registro. Va al encargo de protecciones (arreglo 4, G7).
+- **Purga automática de la Papelera**: no hay (decisión del encargo).
+- **Restaurar un proyecto o un usuario** no deja evento en ningún historial (solo se limpian las columnas de borrado).
+- **`approvals.py:457-475`** (descartar aprobación, sin llamador): sin tocar.
