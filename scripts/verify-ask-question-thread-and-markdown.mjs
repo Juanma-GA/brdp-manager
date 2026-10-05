@@ -2,8 +2,7 @@
 // (last exchange shown above the textarea, textarea auto-clears on
 // success but keeps its text on error, dynamic follow-up placeholder,
 // Enter/Shift+Enter) and rendering the answer as real markdown via
-// react-markdown (already in package.json, used elsewhere in the dead
-// ChatPanel.jsx for reference) with its default-safe behavior (no
+// react-markdown (already in package.json) with its default-safe behavior (no
 // rehype-raw), so a literal <table>/<originator> in the answer text
 // never gets interpreted as HTML.
 //

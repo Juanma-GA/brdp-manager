@@ -1,15 +1,12 @@
 // Per-format rules for writing ONE general rule (docs request, Suggest
-// Rule round). The knowledge comes from the STRICT RULES of Generate's
-// generators -- buildBREXPromptChunk (generateBREX.js, 4.2),
-// buildBREXPromptChunk41 (generateBREX41.js), buildBREXPromptChunk301
-// (generateBREX301.js) and STRICT_RULES (generateSchematronDITA.js) --
-// narrowed to what one general rule needs: no chunking/assembly
-// instructions, no id-suffix splitting across several rules, and no
-// "can't be generated" fallback (a nonContextRule / traceability comment),
-// which Suggest Rule replaces with its own NOT_CHECKABLE answer
-// (suggestRulePrompt.js). The generators still carry their own copies;
-// they switch to this module in the final sweep that removes the dead
-// generateSuggestedRule.js/useChat.js/ChatPanel.jsx chain.
+// Rule round). The knowledge comes from the STRICT RULES of the prompts
+// Generate's generators used when they still called the LLM (removed in
+// Barrido final 4: Generate only assembles approved rules today), narrowed
+// to what one general rule needs: no chunking/assembly instructions, no
+// id-suffix splitting across several rules, and no "can't be generated"
+// fallback (a nonContextRule / traceability comment), which Suggest Rule
+// replaces with its own NOT_CHECKABLE answer (suggestRulePrompt.js). This
+// is the only source of per-format rule-writing instructions in the app.
 import { queryBindingForStandard } from '../api/generateSchematronDITA.js';
 
 // Rule 4/5 of the BREX blocks (Suggest Rule adjustments round): a real
