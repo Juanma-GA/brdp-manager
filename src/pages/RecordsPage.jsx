@@ -31,7 +31,7 @@ import { checkWellFormed } from '../api/generateBREX.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import { RULE_STATES, ruleStateOf } from '../utils/ruleState';
 import SortableHeader from '../components/SortableHeader';
-import { ProposalStatusSummary, RuleStatusSummary } from '../components/StatusCountsSummary';
+import { ProposalStatusSummary, RuleStatusSummary, VerifiedTestBreakdown } from '../components/StatusCountsSummary';
 import {
   useActiveEmbeddingJob,
   useComputeEmbeddings,
@@ -446,6 +446,10 @@ export default function RecordsPage() {
   // between the <select>'s value and the API's own query param vocabulary.
   const [proposalStatusFilter, setProposalStatusFilter] = useState('');
   const [ruleStatusFilter, setRuleStatusFilter] = useState('');
+  // AACF 2, Part 2: one category of the verified rules' test breakdown in
+  // the header ('' = none); applied by the server (test_category), with
+  // the same function as each rule's indicator.
+  const [testCategoryFilter, setTestCategoryFilter] = useState('');
   // The project's REAL totals (GET /brdps/stats) for the header summary --
   // deliberately independent of proposalStatusFilter/ruleStatusFilter
   // above (see brdps.py's get_brdp_stats docstring): the header always
@@ -455,6 +459,7 @@ export default function RecordsPage() {
   const [stats, setStats] = useState({
     proposal_status_counts: { pending: 0, validated: 0, refused: 0 },
     rule_status_counts: { to_do: 0, draft: 0, verified: 0 },
+    verified_test_counts: null,
   });
   // AACF 1, Part 2: totals that could not be refreshed are not shown as if
   // they were current.
@@ -573,6 +578,7 @@ export default function RecordsPage() {
     const params = new URLSearchParams();
     if (proposalStatusFilter) params.set('proposal_status', proposalStatusFilter);
     if (ruleStatusFilter) params.set('rule_status', ruleStatusFilter);
+    if (testCategoryFilter) params.set('test_category', testCategoryFilter);
     const qs = params.toString();
     return authFetchJson(`/api/projects/${projectId}/brdps${qs ? `?${qs}` : ''}`)
       .then((data) => {
@@ -612,6 +618,7 @@ export default function RecordsPage() {
   useEffect(() => {
     setProposalStatusFilter('');
     setRuleStatusFilter('');
+    setTestCategoryFilter('');
     authFetchJson('/api/config/ai-provider').then(setAiProvider).catch(() => setAiProvider(null));
   }, [projectId]);
 
@@ -620,7 +627,7 @@ export default function RecordsPage() {
     refreshStats();
     setTablePage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, proposalStatusFilter, ruleStatusFilter]);
+  }, [projectId, proposalStatusFilter, ruleStatusFilter, testCategoryFilter]);
 
   // Rule Status counts in the header can change from a rule-approval
   // action (Verify/Revoke/manual save/accepted suggestion) alone, with no
@@ -629,6 +636,10 @@ export default function RecordsPage() {
   // bump today (see RuleStatusCell/the detail panel's own fetch above).
   useEffect(() => {
     refreshStats();
+    // A rule that changes category (a test recorded, the rule edited,
+    // Verify/Revoke) leaves or joins the filtered table at once; with the
+    // last one gone the table is empty and the filter stays, easy to remove.
+    if (testCategoryFilter) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [approvalsRefreshToken]);
 
@@ -1369,6 +1380,12 @@ export default function RecordsPage() {
           <div className={styles.headerActions}>
             <ProposalStatusSummary counts={stats.proposal_status_counts} />
             <RuleStatusSummary counts={stats.rule_status_counts} />
+            <VerifiedTestBreakdown
+              counts={stats.verified_test_counts}
+              verified={stats.rule_status_counts.verified}
+              active={testCategoryFilter}
+              onSelect={setTestCategoryFilter}
+            />
           </div>
         )}
       </div>

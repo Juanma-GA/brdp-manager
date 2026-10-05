@@ -9,17 +9,22 @@ import { analyzeRule, RULE_TEST_FORMATS } from './ruleTestEngine.js';
 // The indicator state of a saved rule:
 //   { kind: 'not_tested' | 'outdated' | 'passed' | 'review' | 'failed' | 'inconclusive' | 'not_executable',
 //     reason, at }
-// "outdated" wins over the recorded result: a result about another rule
-// says nothing about this one.
+// The kind is the server's test_category (AACF 2, Part 2): one function,
+// backend services/rule_test_category.py, decides it for this indicator and
+// for the breakdown of the verified rules in the Records header, so the two
+// never disagree. "outdated" wins over the recorded result (a result about
+// another rule says nothing about this one); a test with no rule hash or
+// an unknown result is "not_tested".
 // editedCount: how many examples the user edited by hand to get that
 // recorded passed test (last_test_edited_examples; 0 for a test recorded
 // from the examples as the LLM wrote them).
 export function ruleTestStatus(approval) {
-  if (!approval || !approval.last_test_result) return { kind: 'not_tested', reason: null, at: null, editedCount: 0, examplesFrom: null };
+  const kind = approval?.test_category || 'not_tested';
+  if (kind === 'not_tested') return { kind, reason: null, at: null, editedCount: 0, examplesFrom: null };
   const at = approval.last_test_at || null;
+  if (kind === 'outdated') return { kind, reason: null, at, editedCount: 0, examplesFrom: null };
   const editedCount = Array.isArray(approval.last_test_edited_examples) ? approval.last_test_edited_examples.length : 0;
-  if (approval.last_test_up_to_date === false) return { kind: 'outdated', reason: null, at, editedCount: 0, examplesFrom: null };
-  return { kind: approval.last_test_result, reason: approval.last_test_reason || null, at, editedCount, examplesFrom: examplesFromOf(approval) };
+  return { kind, reason: approval.last_test_reason || null, at, editedCount, examplesFrom: examplesFromOf(approval) };
 }
 
 // A passed test run on the saved examples of an earlier test ("Probar con

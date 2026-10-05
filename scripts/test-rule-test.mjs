@@ -48,6 +48,26 @@ import { RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
 
 let passed = 0;
 let failed = 0;
+
+// The approvals these tests build stand for what the server sends, and the
+// indicator's kind is the server's test_category (AACF 2, Part 2: decided
+// by backend services/rule_test_category.py, pinned by
+// backend/tests/test_aacf2_verified_breakdown.py). This fixture fills it in
+// from the fields the tests set, the way the server would for them.
+const withCategory = (a) =>
+  a && !('test_category' in a)
+    ? { ...a, test_category: !a.last_test_result ? 'not_tested' : a.last_test_up_to_date === false ? 'outdated' : a.last_test_result }
+    : a;
+async function importRuleTestStatus() {
+  const m = await import('../src/utils/ruleTestStatus.js');
+  return {
+    ...m,
+    ruleTestStatus: (a) => m.ruleTestStatus(withCategory(a)),
+    verifyWarning: (a, ...rest) => m.verifyWarning(withCategory(a), ...rest),
+    passedTestToReplaceAt: (a, ...rest) => m.passedTestToReplaceAt(withCategory(a), ...rest),
+  };
+}
+
 function check(name, condition, detail = '') {
   if (condition) passed += 1;
   else {
@@ -353,7 +373,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
 // ─── T3: what is recorded, the indicator state and the Verify warning ──────
 {
   const { verdictToTestRecord } = await import('../src/utils/ruleTestReasons.js');
-  const { ruleTestStatus, verifyWarning } = await import('../src/utils/ruleTestStatus.js');
+  const { ruleTestStatus, verifyWarning } = await importRuleTestStatus();
   const { ruleXmlHash } = await import('../src/utils/ruleHash.js');
   const { createHash } = await import('node:crypto');
 
@@ -493,7 +513,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     placements: [{ schema: 'topic', role: 'rule', ...whole }],
   });
   check('T4 prompt: whole document', wholePrompt.includes('your "content" is the whole DITA 1.3 Xpath2.0 document') && wholePrompt.includes('the complete\n  <topic> root element') && !wholePrompt.includes('never the document root'), wholePrompt);
-  const { verifyWarning } = await import('../src/utils/ruleTestStatus.js');
+  const { verifyWarning } = await importRuleTestStatus();
   const approval = (fields) => ({ status: 'pending_review', last_test_result: null, last_test_reason: null, last_test_at: null, last_test_up_to_date: null, ...fields });
   check('T4 verify: DITA rule never tested → dialog with Test now', verifyWarning(approval({ rule_xml: NOTE }), 'SCH-DITA', { parseXml }).kind === 'not_tested');
   const docDita = '<sch:pattern><sch:rule context="map"><sch:assert test="doc-available(\'a.dita\')">x</sch:assert></sch:rule></sch:pattern>';
@@ -1830,7 +1850,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
 // Registrar la prueba corregida con ejemplos editados.
 {
   const { editedExamplesRecord } = await import('../src/utils/ruleTest.js');
-  const { ruleTestStatus, verifyWarning, parseRuleTestHistoryValue } = await import('../src/utils/ruleTestStatus.js');
+  const { ruleTestStatus, verifyWarning, parseRuleTestHistoryValue } = await importRuleTestStatus();
   const correct = { kind: 'correct' };
   const incorrect = { kind: 'incorrect' };
   const exs = [
@@ -1990,7 +2010,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
 {
   const { verdictToTestRecord, formatRuleTestReason } = await import('../src/utils/ruleTestReasons.js');
   const { editedExamplesRecord } = await import('../src/utils/ruleTest.js');
-  const { ruleTestStatus, verifyWarning, parseRuleTestHistoryValue } = await import('../src/utils/ruleTestStatus.js');
+  const { ruleTestStatus, verifyWarning, parseRuleTestHistoryValue } = await importRuleTestStatus();
   const en = i18n.getFixedT('en');
   const es = i18n.getFixedT('es');
   const S42 = 'S1000D 4.2';
@@ -2026,7 +2046,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
 // ---------------------------------------------------------------------------
 // No sobrescribir una prueba aprobada sin preguntar.
 {
-  const { passedTestToReplaceAt, parseRuleTestHistoryValue } = await import('../src/utils/ruleTestStatus.js');
+  const { passedTestToReplaceAt, parseRuleTestHistoryValue } = await importRuleTestStatus();
   const en = i18n.getFixedT('en');
   const es = i18n.getFixedT('es');
   const ap = (fields) => ({ rule_xml: '<x/>', last_test_up_to_date: true, last_test_at: '2026-09-30T10:00:00Z', ...fields });
@@ -2178,7 +2198,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
 // Guardar la prueba aprobada: the last passed test kept with its examples.
 {
   const { passedTestPayload, withPassedTest, savedPassedTest, savedExamplesDate } = await import('../src/utils/ruleTestSaved.js');
-  const { ruleTestStatus, parseRuleTestHistoryValue } = await import('../src/utils/ruleTestStatus.js');
+  const { ruleTestStatus, parseRuleTestHistoryValue } = await importRuleTestStatus();
   const { ruleXmlHash } = await import('../src/utils/ruleHash.js');
   const { verdictToTestRecord } = await import('../src/utils/ruleTestReasons.js');
   const en = i18n.getFixedT('en');
@@ -2223,7 +2243,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('saved: History value reads examples_from', parseRuleTestHistoryValue(JSON.stringify({ result: 'passed', reason: null, examples_from: '2026-09-01T10:00:00Z' })).examplesFrom === '2026-09-01T10:00:00Z' && parseRuleTestHistoryValue(JSON.stringify({ result: 'passed', reason: null })).examplesFrom === null);
   // "Probar con los ejemplos guardados": the current rule on the kept documents.
   const { runSavedTest } = await import('../src/utils/ruleTestSaved.js');
-  const { passedTestToReplaceAt } = await import('../src/utils/ruleTestStatus.js');
+  const { passedTestToReplaceAt } = await importRuleTestStatus();
   const same = runSavedTest(saved, R187, 'BREX-4.2', { vocabulary, parseXml });
   check('rerun: same rule → correct, nothing changes, recorded as passed on the saved examples',
     same.verdict.kind === 'correct' && same.changed.length === 0 && same.record.result === 'passed'

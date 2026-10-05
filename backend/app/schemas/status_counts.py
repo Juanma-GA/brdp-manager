@@ -28,3 +28,18 @@ class RuleStatusCounts(BaseModel):
     to_do: int = 0
     draft: int = 0
     verified: int = 0
+
+
+class VerifiedTestCounts(BaseModel):
+    """AACF 2, Part 2: the verified rules (rule_status_counts.verified) by
+    what their test means now -- one category per rule, so the seven add
+    up to the verified count. Decided by services/rule_test_category.py,
+    the same function as each rule's indicator."""
+
+    passed: int = 0
+    not_tested: int = 0
+    review: int = 0
+    failed: int = 0
+    inconclusive: int = 0
+    not_executable: int = 0
+    outdated: int = 0

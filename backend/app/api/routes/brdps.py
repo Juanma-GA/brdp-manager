@@ -13,13 +13,15 @@ from app.models import BRDP, BRDPHistory, Project, User
 from app.repositories.brdp_repository import (
     ACTIVE_BRDP_FILTER,
     compute_status_counts,
+    compute_verified_test_counts,
     get_active_brdp,
     get_active_brdp_by_identifier,
     list_active_brdps,
 )
 from app.schemas.brdp import BRDPCreate, BRDPOut, BRDPUpdate, NextExtIdentifierOut, ProposalStatus
 from app.schemas.brdp_history import BRDPHistoryOut
-from app.schemas.status_counts import ProposalStatusCounts, RuleStatusCounts
+from app.schemas.status_counts import ProposalStatusCounts, RuleStatusCounts, VerifiedTestCounts
+from app.services.rule_test_category import TEST_CATEGORIES
 from app.services.history import record_change
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 from pydantic import BaseModel
@@ -35,6 +37,9 @@ class BRDPStatsOut(BaseModel):
 
     proposal_status_counts: ProposalStatusCounts
     rule_status_counts: RuleStatusCounts
+    # How the verified rules are tested (AACF 2); None when the standard has
+    # no rule format (no second line in the header).
+    verified_test_counts: VerifiedTestCounts | None = None
 
 
 _PROPOSAL_STATUS_VALUES = set(get_args(ProposalStatus))
@@ -132,6 +137,11 @@ async def list_brdps(
     rule_status: str | None = Query(
         None, description="Filter by Rule Status (rule_approvals, this project's own format): todo | draft | verified"
     ),
+    test_category: str | None = Query(
+        None,
+        description="Only the verified rules of this test category (the Records header's breakdown): "
+        + " | ".join(TEST_CATEGORIES),
+    ),
     _viewer: User = Depends(require_project_role("viewer")),
     db: AsyncSession = Depends(get_db),
 ) -> list[BRDP]:
@@ -156,15 +166,26 @@ async def list_brdps(
             detail=f"rule_status must be one of {sorted(_RULE_STATUS_VALUES)}",
         )
 
+    if test_category is not None and test_category not in TEST_CATEGORIES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"test_category must be one of {list(TEST_CATEGORIES)}",
+        )
+
     rule_format = None
-    if rule_status is not None:
+    if rule_status is not None or test_category is not None:
         project = await db.get(Project, project_id)
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
         rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
 
     brdps = await list_active_brdps(
-        project_id, db, proposal_status=proposal_status, rule_status=rule_status, rule_format=rule_format
+        project_id,
+        db,
+        proposal_status=proposal_status,
+        rule_status=rule_status,
+        rule_format=rule_format,
+        test_category=test_category,
     )
     return await _with_catalog_edition(project_id, list(brdps), db)
 
@@ -198,7 +219,7 @@ async def get_brdp_stats(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     counts = (await compute_status_counts(db, [project]))[project.id]
-    return BRDPStatsOut(**counts)
+    return BRDPStatsOut(**counts, verified_test_counts=await compute_verified_test_counts(db, project))
 
 
 @router.get("/next-ext-identifier", response_model=NextExtIdentifierOut)

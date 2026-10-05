@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import BRDP, Project, RuleApproval
 from app.repositories.project_repository import ACTIVE_PROJECT_FILTER, ACTIVE_PROJECT_IDS
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
+from app.services.rule_test_category import TEST_CATEGORIES, rule_test_category
 
 # The one place `deleted_at IS NULL` is spelled out as a SQLAlchemy
 # expression -- import this into any query that needs it instead of
@@ -45,6 +46,7 @@ async def list_active_brdps(
     proposal_status: str | None = None,
     rule_status: str | None = None,
     rule_format: str | None = None,
+    test_category: str | None = None,
 ) -> list[BRDP]:
     """Every BRDP in a project that isn't trashed -- powers BRDP Records,
     Export to Excel, and the dataset Generate BREX/Schematron reads
@@ -82,8 +84,57 @@ async def list_active_brdps(
                 RuleApproval.format == rule_format, RuleApproval.status == target_status
             )
             query = query.where(BRDP.id.in_(matching_ids))
+    if test_category:
+        # AACF 2, Part 2: the verified rules of one test category -- the ids
+        # come from the same rule_test_category() the header counts with.
+        if rule_format is None:
+            return []
+        categories = await verified_rule_categories(db, project_id, rule_format)
+        ids = [brdp_id for brdp_id, category in categories.items() if category == test_category]
+        if not ids:
+            return []
+        query = query.where(BRDP.id.in_(ids))
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+async def verified_rule_categories(db: AsyncSession, project_id: uuid.UUID, rule_format: str) -> dict:
+    """{brdp_id: test category} for every verified rule of the project
+    under its own format, decided by services/rule_test_category.py -- the
+    function behind each rule's indicator. The saved rule's hash is
+    computed by Postgres (SHA-256 of the UTF-8 text, the same digest
+    rule_xml_hash() gives) so the rule texts never travel."""
+    rows = (
+        await db.execute(
+            select(
+                RuleApproval.brdp_id,
+                RuleApproval.last_test_result,
+                RuleApproval.last_test_rule_hash,
+                func.encode(func.sha256(func.convert_to(RuleApproval.rule_xml, "UTF8")), "hex"),
+            )
+            .join(BRDP, BRDP.id == RuleApproval.brdp_id)
+            .where(
+                BRDP.project_id == project_id,
+                ACTIVE_BRDP_FILTER,
+                RuleApproval.format == rule_format,
+                RuleApproval.status == "approved",
+            )
+        )
+    ).all()
+    return {brdp_id: rule_test_category(result, tested, current) for brdp_id, result, tested, current in rows}
+
+
+async def compute_verified_test_counts(db: AsyncSession, project: Project) -> dict | None:
+    """BRDP Records' second header line: how the verified rules are tested,
+    one category per rule (so the categories always add up to the verified
+    count). None for a standard with no rule format (S1000D 5.0/6.0)."""
+    rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
+    if rule_format is None:
+        return None
+    counts = dict.fromkeys(TEST_CATEGORIES, 0)
+    for category in (await verified_rule_categories(db, project.id, rule_format)).values():
+        counts[category] += 1
+    return counts
 
 
 async def compute_status_counts(db: AsyncSession, projects: list[Project]) -> dict[uuid.UUID, dict]:

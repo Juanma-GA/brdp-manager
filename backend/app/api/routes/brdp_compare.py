@@ -21,7 +21,7 @@ from app.models import BRDP, BRDPCatalog, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.repositories.project_repository import ACTIVE_PROJECT_FILTER
 from app.schemas.brdp_compare import CompareCandidateOut, CompareCandidatesOut, CompareDetailOut
-from app.schemas.rule_approval import RuleApprovalOut, rule_xml_hash
+from app.schemas.rule_approval import RuleApprovalOut
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 from app.services.rule_extract_jobs import catalog_edition_labels
 
@@ -110,9 +110,7 @@ async def get_compare_candidates(
                     rule_state=_rule_state(approval),
                     last_test_result=approval.last_test_result if approval else None,
                     last_test_up_to_date=(
-                        approval.last_test_rule_hash == rule_xml_hash(approval.rule_xml)
-                        if approval is not None and approval.last_test_result is not None
-                        else None
+                        RuleApprovalOut.model_validate(approval).last_test_up_to_date if approval is not None else None
                     ),
                 )
             )

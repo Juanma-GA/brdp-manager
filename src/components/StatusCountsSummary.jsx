@@ -81,3 +81,46 @@ export function RuleStatusSummary({ counts, variant = 'full' }) {
   const fields = useRuleStatusFields(counts);
   return variant === 'numbersOnly' ? <NumberCells fields={fields} /> : <FullSummary fields={fields} />;
 }
+
+// AACF 2, Part 2: the second line of BRDP Records' header -- how the
+// verified rules are tested, one category per rule (so the categories add
+// up to the verified count). The counts come from the server
+// (GET /brdps/stats verified_test_counts), decided by the same function as
+// each rule's indicator. "Tested ✓" always shows; the others only when not
+// zero. Each category is a button that filters the table to the verified
+// rules of that category; the active one is marked and can be removed.
+const VERIFIED_TEST_CATEGORIES = ['passed', 'not_tested', 'review', 'failed', 'inconclusive', 'not_executable', 'outdated'];
+
+export function VerifiedTestBreakdown({ counts, verified, active, onSelect }) {
+  const { t } = useTranslation();
+  if (!counts) return null;
+  const shown = verified === 0 ? [] : VERIFIED_TEST_CATEGORIES.filter((c) => c === 'passed' || counts[c] > 0);
+  return (
+    <p className={styles.breakdown} data-testid="verified-breakdown">
+      <span>{t('records.verifiedBreakdown.intro', { count: verified })}</span>
+      {shown.map((category, i) => (
+        <span key={category}>
+          {i > 0 && <span className={styles.sep}> · </span>}
+          <button
+            type="button"
+            className={`${styles.breakdownItem} ${active === category ? styles.breakdownActive : ''}`}
+            aria-pressed={active === category}
+            onClick={() => onSelect(active === category ? '' : category)}
+            title={t('records.verifiedBreakdown.filterTitle', { category: t(`records.verifiedBreakdown.labels.${category}`) })}
+            data-testid={`verified-breakdown-${category}`}
+          >
+            {t(`records.verifiedBreakdown.counts.${category}`, { count: counts[category] })}
+          </button>
+        </span>
+      ))}
+      {active && (
+        <span className={styles.breakdownChip} data-testid="verified-breakdown-filter">
+          {t('records.verifiedBreakdown.activeFilter', { category: t(`records.verifiedBreakdown.labels.${active}`) })}
+          <button type="button" onClick={() => onSelect('')} aria-label={t('records.verifiedBreakdown.removeFilter')} data-testid="verified-breakdown-clear">
+            ✕
+          </button>
+        </span>
+      )}
+    </p>
+  );
+}

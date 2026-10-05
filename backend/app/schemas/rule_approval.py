@@ -1,10 +1,11 @@
-import hashlib
 import json
 import uuid
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+
+from app.services.rule_test_category import rule_test_category, rule_xml_hash  # noqa: F401 (re-exported)
 
 # Where a rule_approvals row's rule_xml came from:
 #   "llm"          -- generated inside this app (Suggest Rule's Accept).
@@ -30,15 +31,6 @@ class RuleApprovalPropose(BaseModel):
     # "rule_copied" event naming its project and identifier (read from the
     # database, never from the client); the user must be able to see it.
     copied_from_brdp_id: uuid.UUID | None = None
-
-
-def rule_xml_hash(rule_xml: str) -> str:
-    """SHA-256 hex digest of a rule_xml, byte for byte (UTF-8) -- the same
-    digest the frontend computes (src/utils/ruleHash.js) for the rule it
-    tested. No normalisation: any change to the saved text makes an earlier
-    test outdated.
-    """
-    return hashlib.sha256(rule_xml.encode("utf-8")).hexdigest()
 
 
 # Test de reglas T3: the recorded result of the last "Test rule" run.
@@ -184,13 +176,21 @@ class RuleApprovalOut(BaseModel):
 
     @computed_field
     @property
+    def test_category(self) -> str:
+        """What the test means now, for the Rule Status indicator -- the same
+        function the Records header counts with (services/rule_test_category.py)."""
+        return rule_test_category(self.last_test_result, self.last_test_rule_hash, rule_xml_hash(self.rule_xml))
+
+    @computed_field
+    @property
     def last_test_up_to_date(self) -> bool | None:
-        """None when never tested; False when the rule changed since the
-        test ("Test outdated"); True when the tested rule is the saved one.
-        """
-        if self.last_test_result is None:
+        """None when never tested (or a test the app cannot read); False when
+        the rule changed since the test ("Test outdated"); True when the
+        tested rule is the saved one. Derived from test_category."""
+        category = self.test_category
+        if category == "not_tested":
             return None
-        return self.last_test_rule_hash == rule_xml_hash(self.rule_xml)
+        return category != "outdated"
 
 
 class BulkRuleApprovalOut(BaseModel):
