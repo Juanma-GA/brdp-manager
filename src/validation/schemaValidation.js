@@ -94,7 +94,11 @@ export async function loadSchemaVocabulary(standard) {
 async function loadVocabularyFile(file) {
   if (_vocabularyCache.has(file)) return _vocabularyCache.get(file);
   const res = await fetch(`/${file}?v=` + Date.now());
-  if (!res.ok) throw new Error(`Could not load ${file}`);
+  if (!res.ok) {
+    const err = new Error(`Could not load ${file}`);
+    err.status = res.status;
+    throw err;
+  }
   const json = await res.json();
   const parsed = { elements: new Set(json.elements || []), attributes: new Set(json.attributes || []) };
   _vocabularyCache.set(file, parsed);

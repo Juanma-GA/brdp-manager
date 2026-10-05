@@ -9,6 +9,11 @@ const resources = {
     common: {
       // AACF 1, Part 3: failed requests as sentences (src/services/apiErrors.js).
       errorNotice: { retry: 'Retry', discard: 'Discard change', dismiss: 'Close' },
+      projectLayout: {
+        denied: 'You do not have access to this project, or it no longer exists.',
+        loadFailed: 'The project could not be loaded: {{reason}}',
+        backToProjects: 'Back to the projects',
+      },
       errors: {
         withRef: '{{text}} (ref. {{ref}}).',
         network: 'Could not reach the server. Check the connection and try again.',
@@ -127,6 +132,8 @@ const resources = {
         delete: {
           button: 'Delete',
           title: 'Delete project',
+          countFailed: 'The number of BRDPs in this project could not be loaded: {{reason}}',
+          waitForCount: 'The number of BRDPs that would be deleted must be known first.',
           warning_one: 'This will permanently delete {{count}} BRDP from this project.',
           warning_other: 'This will permanently delete {{count}} BRDPs from this project.',
           irreversible: 'This action cannot be undone.',
@@ -1366,6 +1373,11 @@ const resources = {
   es: {
     common: {
       errorNotice: { retry: 'Reintentar', discard: 'Descartar cambio', dismiss: 'Cerrar' },
+      projectLayout: {
+        denied: 'No tienes acceso a este proyecto, o ya no existe.',
+        loadFailed: 'No se ha podido cargar el proyecto: {{reason}}',
+        backToProjects: 'Volver a los proyectos',
+      },
       errors: {
         withRef: '{{text}} (ref. {{ref}}).',
         network: 'No se pudo conectar con el servidor. Comprueba la conexión y vuelve a intentarlo.',
@@ -1468,6 +1480,8 @@ const resources = {
         delete: {
           button: 'Eliminar',
           title: 'Eliminar proyecto',
+          countFailed: 'No se ha podido cargar el número de BRDP de este proyecto: {{reason}}',
+          waitForCount: 'Hay que saber primero cuántas BRDP se borrarían.',
           warning_one: 'Esto borrará permanentemente {{count}} BRDP de este proyecto.',
           warning_other: 'Esto borrará permanentemente {{count}} BRDPs de este proyecto.',
           irreversible: 'Esta acción no se puede deshacer.',

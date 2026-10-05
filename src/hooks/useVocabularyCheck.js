@@ -25,19 +25,27 @@ export function useVocabularyCheck(standard, selected) {
   // caches by file internally, so this is cheap even across many BRDPs of
   // the same project.
   const [vocabulary, setVocabulary] = useState(null);
+  // AACF 1, Part 2: a vocabulary that could not be loaded is said (the
+  // page shows it with Retry), never taken for "this standard has no
+  // vocabulary" -- that notice is only for a standard without one.
+  const [vocabularyLoadError, setVocabularyLoadError] = useState(null);
+  const [vocabularyReloadToken, setVocabularyReloadToken] = useState(0);
   useEffect(() => {
     let cancelled = false;
+    setVocabularyLoadError(null);
     loadSchemaVocabulary(standard)
       .then((v) => {
         if (!cancelled) setVocabulary(v);
       })
-      .catch(() => {
-        if (!cancelled) setVocabulary(null);
+      .catch((err) => {
+        if (cancelled) return;
+        setVocabulary(null);
+        setVocabularyLoadError(err);
       });
     return () => {
       cancelled = true;
     };
-  }, [standard]);
+  }, [standard, vocabularyReloadToken]);
 
   // Docs request (schema vocabulary check round), extended by the "aviso
   // ligado al texto" round and by the "solo determinista" follow-up: the
@@ -97,7 +105,11 @@ export function useVocabularyCheck(standard, selected) {
       return null;
     }
     const hash = hashVocabInputText(brdp.title, brdp.definition, brdp.proposal);
-    const vocab = await loadSchemaVocabulary(standard).catch(() => null);
+    let loadFailed = false;
+    const vocab = await loadSchemaVocabulary(standard).catch(() => {
+      loadFailed = true;
+      return null;
+    });
     const contextCandidates = extractContextCandidates(`${brdp.title}\n${brdp.definition}\n${brdp.proposal}`);
     const checked = checkAgainstVocabulary(contextCandidates, vocab);
     const pairs = contextCandidates.elementAttributePairs;
@@ -107,6 +119,7 @@ export function useVocabularyCheck(standard, selected) {
       brdpId: brdp.id,
       hash,
       available: checked.available,
+      loadFailed,
       notFound: checked.notFound,
       wrongType: checked.wrongType,
       typedNotFound: checked.typedNotFound,
@@ -126,5 +139,11 @@ export function useVocabularyCheck(standard, selected) {
     recomputeVocabResult(selected);
   }, [selected?.id]);
 
-  return { vocabulary, vocabResult, recomputeVocabResult };
+  // Retry: loads the vocabulary again, then the notice of the selected BRDP.
+  const retryVocabularyLoad = () => {
+    setVocabularyReloadToken((n) => n + 1);
+    recomputeVocabResult(selected);
+  };
+
+  return { vocabulary, vocabResult, recomputeVocabResult, vocabularyLoadError, retryVocabularyLoad };
 }

@@ -788,7 +788,10 @@ export default function RecordsPage() {
   // now -- see src/hooks/{useVocabularyCheck,useAskAssistant,
   // useSuggestions}.js. Same behavior as before the refactor, split by
   // concern instead of one giant effect.
-  const { vocabulary, vocabResult, recomputeVocabResult } = useVocabularyCheck(project.standard, selected);
+  const { vocabulary, vocabResult, recomputeVocabResult, vocabularyLoadError, retryVocabularyLoad } = useVocabularyCheck(
+    project.standard,
+    selected
+  );
   // "Sugerencias para erratas": near names / other standards after the
   // red "not found" line of the selected BRDP.
   const vocabNameHints = useNameFixHints(vocabResult && vocabResult.brdpId === selected?.id ? vocabResult : null, project.standard, vocabulary);
@@ -2096,9 +2099,21 @@ export default function RecordsPage() {
                     kinds, both red, plus the neutral/muted "not available"
                     notice. Guarded by brdpId so a result from a PREVIOUS
                     BRDP never shows here after switching rows. */}
+                {vocabularyLoadError && (
+                  <ErrorNotice
+                    testId="records-notice-vocabulary"
+                    message={t('records.loadErrors.vocabulary', {
+                      standard: project.standard,
+                      reason: vocabularyLoadError.status
+                        ? t('errors.requestFailed', { status: vocabularyLoadError.status })
+                        : t('errors.network'),
+                    })}
+                    onRetry={retryVocabularyLoad}
+                  />
+                )}
                 {vocabResult && vocabResult.brdpId === selected.id && (
                   <div className={styles.vocabNotice}>
-                    {!vocabResult.available && (
+                    {!vocabResult.available && !vocabResult.loadFailed && (
                       <p className={styles.muted}>
                         {t('records.assistant.vocabCheckUnavailable', { standard: project.standard })}
                       </p>

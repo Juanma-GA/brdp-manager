@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
+import { errorMessage } from '../services/apiErrors';
+import ErrorNotice from '../components/ErrorNotice';
 import SortableHeader from '../components/SortableHeader';
 import { ProposalStatusSummary, RuleStatusSummary } from '../components/StatusCountsSummary';
 import styles from './ProjectsPage.module.css';
@@ -192,27 +194,37 @@ function RenameProjectForm({ project, onRenamed, onCancel }) {
 function DeleteProjectModal({ project, onDeleted, onCancel }) {
   const { t } = useTranslation();
   const [brdpCount, setBrdpCount] = useState(null);
+  // AACF 1, Part 2: a count that could not be loaded is never "0 BRDPs" --
+  // the dialog says so, with Retry, and deleting waits for the real count.
+  const [countError, setCountError] = useState(null);
+  const [countToken, setCountToken] = useState(0);
   const [confirmText, setConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
+    setCountError(null);
     authFetchJson(`/api/projects/${project.id}/brdps`)
-      .then((data) => setBrdpCount(data.length))
-      .catch(() => setBrdpCount(0));
-  }, [project.id]);
+      .then((data) => !cancelled && setBrdpCount(data.length))
+      .catch((err) => !cancelled && setCountError(t('projects.delete.countFailed', { reason: errorMessage(err, t) })));
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, countToken, t]);
 
   const nameMatches = confirmText === project.name;
+  const countKnown = brdpCount !== null;
 
   const handleDelete = async () => {
-    if (!nameMatches) return;
+    if (!nameMatches || !countKnown) return;
     setDeleting(true);
     setError(null);
     try {
       await authFetchJson(`/api/projects/${project.id}`, { method: 'DELETE' });
       onDeleted();
     } catch (err) {
-      setError(err.message);
+      setError(errorMessage(err, t));
       setDeleting(false);
     }
   };
@@ -223,6 +235,7 @@ function DeleteProjectModal({ project, onDeleted, onCancel }) {
         <h3 className={styles.formTitle}>{t('projects.delete.title')}</h3>
         <p className={styles.projectName}>{project.name}</p>
         {error && <p className={styles.error}>{error}</p>}
+        {countError && <ErrorNotice testId="delete-project-count-error" message={countError} onRetry={() => setCountToken((n) => n + 1)} />}
         {brdpCount !== null && (
           <p className={styles.warningText}>
             {t('projects.delete.warning', { count: brdpCount })}
@@ -246,7 +259,8 @@ function DeleteProjectModal({ project, onDeleted, onCancel }) {
             type="button"
             className={styles.buttonDanger}
             onClick={handleDelete}
-            disabled={!nameMatches || deleting}
+            disabled={!nameMatches || !countKnown || deleting}
+            title={!countKnown ? t('projects.delete.waitForCount') : undefined}
           >
             {deleting ? t('projects.delete.deleting') : t('projects.delete.confirmButton')}
           </button>
