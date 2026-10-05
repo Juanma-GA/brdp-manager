@@ -96,7 +96,7 @@ function StructureItem({ item }) {
   const isSch = part && 'context' in part;
   const describe = (p) =>
     isSch
-      ? `${p.kind} — context: ${p.context} — test: ${p.test}`
+      ? `${p.kind} — ${t('records.compare.structContext')}: ${p.context} — ${t('records.compare.structTest')}: ${p.test}`
       : p.kind === 'nonContext'
         ? t('records.compare.structNonContext')
         : `${p.path} — ${t('records.compare.structFlag')} ${p.flag ?? '—'}${p.schema ? ` — ${t('records.compare.structSchema')} ${p.schema}` : ''}${p.values.length ? ` — ${t('records.compare.structValues')}: ${valuesText(p.values)}` : ''}`;
@@ -111,8 +111,8 @@ function StructureItem({ item }) {
   const lines = [];
   if (c.kind) lines.push(`${c.kind[0]} → ${c.kind[1]}`);
   if (c.path) lines.push(`${t('records.compare.structPath')}: ${c.path[0]} → ${c.path[1]}`);
-  if (c.context) lines.push(`context: ${c.context[0]} → ${c.context[1]}`);
-  if (c.test) lines.push(`test: ${c.test[0]} → ${c.test[1]}`);
+  if (c.context) lines.push(`${t('records.compare.structContext')}: ${c.context[0]} → ${c.context[1]}`);
+  if (c.test) lines.push(`${t('records.compare.structTest')}: ${c.test[0]} → ${c.test[1]}`);
   if (c.flag) lines.push(`${t('records.compare.structFlag')}: ${c.flag[0] ?? '—'} → ${c.flag[1] ?? '—'}`);
   if (c.schema) lines.push(`${t('records.compare.structSchema')}: ${c.schema[0] || t('records.compare.allSchemas')} → ${c.schema[1] || t('records.compare.allSchemas')}`);
   const valueTokens = [...(c.valuesAdded || []).map((v) => `+${v}`), ...(c.valuesRemoved || []).map((v) => `−${v}`)];

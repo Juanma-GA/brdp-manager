@@ -1,6 +1,6 @@
 // Prompt-refactor round: Suggest Proposal's system prompt, moved out of
 // RecordsPage.jsx verbatim (no behavior change).
-import { buildSuggestUnknownNamesBlock } from './shared.js';
+import { buildSuggestUnknownNamesBlock, referenceSourceText } from './shared.js';
 
 // Suggest Proposal's own system prompt (docs request, Suggest Proposal
 // round) -- same architecture as buildSuggestDefinitionPrompt above, built
@@ -33,7 +33,7 @@ element names; do not mix in other versions of S1000D or DITA.
   if (sameBrdp.length > 0) {
     prompt += `SAME BRDP IN OTHER PROJECTS — how other projects decided this exact
 decision point. Use them to understand the usual options:
-${sameBrdp.map((c) => `[${c.identifier} | ${c.source}] Proposal: ${c.text}`).join('\n\n')}
+${sameBrdp.map((c) => `[${c.identifier} | ${referenceSourceText(c)}] Proposal: ${c.text}`).join('\n\n')}
 
 `;
   }
@@ -44,7 +44,7 @@ they were decided:
 ${similar
   .map(
     (c) =>
-      `[${c.identifier} | ${c.source} | similarity ${c.score.toFixed(2)}]\nDefinition: ${c.definition} / Proposal: ${c.text}`
+      `[${c.identifier} | ${referenceSourceText(c)} | similarity ${c.score.toFixed(2)}]\nDefinition: ${c.definition} / Proposal: ${c.text}`
   )
   .join('\n\n')}
 

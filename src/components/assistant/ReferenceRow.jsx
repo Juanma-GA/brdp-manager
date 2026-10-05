@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { referenceSourceLabel } from '../../utils/referenceSource';
 import styles from '../../pages/RecordsPage.module.css';
 
 // One row of Suggest Definition's reference list (docs request, readable
@@ -19,6 +20,7 @@ import styles from '../../pages/RecordsPage.module.css';
 // in monospace).
 export default function ReferenceRow({ candidate, showScore, showProposal, showRule, danger, expanded, onToggle }) {
   const { t } = useTranslation();
+  const sourceLabel = referenceSourceLabel(t, candidate);
   return (
     <li>
       <div className={styles.referenceRow}>
@@ -37,7 +39,7 @@ export default function ReferenceRow({ candidate, showScore, showProposal, showR
               carries a `source` -- the project is already implied, never
               named -- so the leading " — " is skipped rather than shown
               with nothing after it. */}
-          {candidate.source ? ` — ${candidate.source}` : ''}
+          {sourceLabel ? ` — ${sourceLabel}` : ''}
           {showScore ? ` — ${candidate.score.toFixed(2)}` : ''}
         </span>
       </div>

@@ -164,7 +164,8 @@ async function main() {
     await userRow.getByTestId("remove-role").click();
     await page.waitForTimeout(500);
     assert(dialogMessage.includes(`Role Person ${suffix}`) && dialogMessage.includes(userEmail), `names the person (${dialogMessage})`);
-    assert(dialogMessage.includes(`${projectName} restored`) && /editor/.test(dialogMessage), "the project and the role");
+    // AACF 3: the role is shown translated ("Editor"), never the raw token.
+    assert(dialogMessage.includes(`${projectName} restored`) && /the Editor role/.test(dialogMessage), "the project and the role (translated)");
     assert(deletes === 0, "Cancel: nothing sent to the server");
     assert((await userRow.getByTestId("remove-role").count()) === 1, "the role is still there");
     page.once("dialog", (d) => d.accept());

@@ -8,6 +8,7 @@ from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import error_detail
 from app.api.deps import has_project_role, require_project_role
 from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
@@ -333,12 +334,14 @@ async def register_rule_test(
     if approval is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No rule found for this BRDP/format",
+            detail=error_detail("rule_not_found", message="No rule found for this BRDP/format"),
         )
     if body.rule_hash != rule_xml_hash(approval.rule_xml):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="The tested rule is not the saved rule; test the saved rule again",
+            detail=error_detail(
+                "rule_test_outdated", message="The tested rule is not the saved rule; test the saved rule again"
+            ),
         )
     reason = body.reason.model_dump() if body.reason is not None else None
     edited = [e.model_dump() for e in body.edited_examples] if body.edited_examples else None
@@ -351,7 +354,7 @@ async def register_rule_test(
         if approval.last_test_result != "passed":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="There is no passed test of this rule to keep",
+                detail=error_detail("rule_test_nothing_to_keep", message="There is no passed test of this rule to keep"),
             )
         record_change(
             db,
@@ -413,7 +416,7 @@ async def approve_approval(
     if approval is None or approval.status != "pending_review":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No pending_review approval found for this BRDP/format",
+            detail=error_detail("rule_not_draft", message="No pending_review approval found for this BRDP/format"),
         )
     approval.status = "approved"
     approval.approved_at = datetime.now(timezone.utc)
@@ -444,7 +447,7 @@ async def revoke_approval_status(
     if approval is None or approval.status != "approved":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No approved approval found for this BRDP/format",
+            detail=error_detail("rule_not_verified", message="No approved approval found for this BRDP/format"),
         )
     approval.status = "pending_review"
     approval.approved_at = None

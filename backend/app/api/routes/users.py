@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import error_detail
 from app.api.deps import get_current_user, project_not_found
 from app.core.security import generate_temporary_password, hash_password
 from app.db.base import get_db
@@ -78,7 +79,10 @@ async def create_user(
     """
     existing = (await db.execute(select(User).where(User.email == body.email))).scalars().all()
     if any(u.deleted_at is None for u in existing):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=error_detail("user_email_registered", message="Email already registered", email=body.email),
+        )
     deleted = next((u for u in existing if u.deleted_at is not None), None)
     if deleted is not None:
         # AACF 2, Part 4.6: never a second account for the same person --
@@ -127,7 +131,7 @@ async def reset_password(
     """
     user = await get_active_user(user_id, db)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_detail("user_not_found", message="User not found"))
 
     temporary_password = generate_temporary_password()
     user.password_hash = hash_password(temporary_password)
@@ -157,13 +161,16 @@ async def update_user(
     """
     user = await get_active_user(user_id, db)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_detail("user_not_found", message="User not found"))
     if body.email != user.email:
         # Any user with that email, active or deleted: a deleted user's
         # email stays theirs, so a restore never finds it taken.
         existing = (await db.execute(select(User.id).where(User.email == body.email))).first()
         if existing is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+            raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=error_detail("user_email_registered", message="Email already registered", email=body.email),
+        )
     user.email = body.email
     user.display_name = body.display_name
     await db.commit()
@@ -196,7 +203,7 @@ async def delete_user(
     """
     user = await get_active_user(user_id, db)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_detail("user_not_found", message="User not found"))
 
     if user.global_role == "admin":
         admin_count = (
@@ -206,11 +213,15 @@ async def delete_user(
         ).scalar_one()
         if admin_count <= 1:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete the last remaining admin"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_detail("user_last_admin", message="Cannot delete the last remaining admin"),
             )
 
     if user_id == admin.id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_detail("user_cannot_delete_self", message="You cannot delete your own account"),
+        )
 
     now = datetime.now(timezone.utc)
     user.deleted_at = now
@@ -287,7 +298,7 @@ async def assign_project_role(
     if body.role not in ("viewer", "editor"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="role must be viewer or editor")
     if await get_active_user(user_id, db) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_detail("user_not_found", message="User not found"))
     if await get_active_project(body.project_id, db) is None:
         raise project_not_found()
 

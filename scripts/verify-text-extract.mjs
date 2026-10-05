@@ -321,7 +321,7 @@ async function main() {
     const direct = await fetch(`${API}/api/projects/${s42.id}/ai-extract/text`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ text: words(5001) }),
     });
-    assert(direct.status === 422 && (await direct.json()).detail.includes("5001 words; the limit is 5000"), "a direct request with 5,001 words: rejected by the server");
+    assert(direct.status === 422 && (await direct.json()).detail.message.includes("5001 words; the limit is 5000"), "a direct request with 5,001 words: rejected by the server");
     await page.getByTestId("text-extract").screenshot({ path: path.join(SHOTS, "text-extract-too-long.png") });
     await page.getByTestId("text-extract-box").fill(words(4999));
     assert((await page.getByTestId("text-extract-why-limit").count()) === 0 && (await page.getByTestId("text-extract-too-long").count()) === 0, "trimmed under the limit: message and reason gone");

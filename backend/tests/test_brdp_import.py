@@ -840,7 +840,8 @@ async def test_apply_rejects_concurrent_job_for_same_project(client, editor_and_
         headers=headers,
     )
     assert resp.status_code == 409
-    assert "already running" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "import_already_running" and "already running" in detail["message"]
 
     # The second request was rejected before doing anything -- nothing written.
     listed = await client.get(f"/api/projects/{project.id}/brdps", headers=headers)

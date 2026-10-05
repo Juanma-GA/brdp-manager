@@ -233,7 +233,7 @@ check('plain rule -> general, no schemas', eq(contextSchemasOfRule(rule42), { sc
   const brdp = { identifier: 'BRDP-P', title: 'T', definition: 'D', proposal: 'In procedural data modules, <emphasis> shall not be used.' };
   const ctxPrecedent = {
     identifier: 'BRDP-S1-00006',
-    source: 'Template',
+    source_type: 'template',
     proposal: 'Descriptive, Procedural and IPD schemas shall be used',
     text: `${rule42}\n${['condcrossreftable', 'fault', 'prdcrossreftable'].map((s) => wrapRuleInSchemaContexts(rule42, 'BREX-4.2', 'S1000D 4.2', [s])).join('\n')}`,
   };

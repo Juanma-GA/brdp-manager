@@ -22,6 +22,7 @@ import TemporaryPasswordModal from '../components/TemporaryPasswordModal';
 import ErrorNotice from '../components/ErrorNotice';
 import { errorMessage } from '../services/apiErrors';
 import styles from './SettingsPage.module.css';
+import { roleLabel } from '../utils/roles';
 
 function ProfileSection({ user, onUserUpdated }) {
   const { t } = useTranslation();
@@ -94,7 +95,7 @@ function ProfileSection({ user, onUserUpdated }) {
           </div>
           <div className={styles.formGroup}>
             <label className={styles.label}>{t('settings.profile.globalRole')}</label>
-            <input className={styles.input} value={user.global_role} disabled />
+            <input className={styles.input} value={roleLabel(t, user.global_role)} disabled />
           </div>
           {error && <p className={styles.statusInvalid}>{error}</p>}
           {/* Disabled only while the request is in flight -- same rule as
@@ -259,7 +260,7 @@ function UserManagementSection({ currentUserId }) {
   // the project and the role -- nothing reaches the server without it.
   const handleRemoveRole = async (u, role) => {
     const message = t('settings.userManagement.removeRoleConfirm', {
-      role: role.role,
+      role: roleLabel(t, role.role),
       name: u.display_name,
       email: u.email,
       project: projectName(role.project_id),
@@ -393,8 +394,8 @@ function UserManagementSection({ currentUserId }) {
             value={newUser.global_role}
             onChange={(e) => setNewUser((u) => ({ ...u, global_role: e.target.value }))}
           >
-            <option value="user">user</option>
-            <option value="admin">admin</option>
+            <option value="user">{roleLabel(t, 'user')}</option>
+            <option value="admin">{roleLabel(t, 'admin')}</option>
           </select>
         </div>
         <Button type="submit" disabled={creating}>
@@ -466,14 +467,14 @@ function UserManagementSection({ currentUserId }) {
                     u.display_name
                   )}
                 </td>
-                <td>{u.global_role}</td>
+                <td>{roleLabel(t, u.global_role)}</td>
                 <td>
                   {u.project_roles.length === 0 ? (
                     <span className={styles.fieldDescription}>—</span>
                   ) : (
                     u.project_roles.map((r) => (
                       <div key={r.project_id} className={styles.roleTag}>
-                        {projectName(r.project_id)}: {r.role}{' '}
+                        {projectName(r.project_id)}: {roleLabel(t, r.role)}{' '}
                         <button
                           type="button"
                           onClick={() => handleRemoveRole(u, r)}
@@ -507,8 +508,8 @@ function UserManagementSection({ currentUserId }) {
                     onChange={(e) => setRoleDraft((d) => ({ ...d, [u.id]: { ...d[u.id], role: e.target.value } }))}
                   >
                     <option value="">{t('settings.userManagement.rolePlaceholder')}</option>
-                    <option value="viewer">viewer</option>
-                    <option value="editor">editor</option>
+                    <option value="viewer">{roleLabel(t, 'viewer')}</option>
+                    <option value="editor">{roleLabel(t, 'editor')}</option>
                   </select>
                   <button type="button" className={styles.button} onClick={() => handleAssignRole(u.id)}>
                     {t('settings.userManagement.assignButton')}

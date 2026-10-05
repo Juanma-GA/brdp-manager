@@ -5,6 +5,7 @@ from sqlalchemy import String, cast, func, select, update
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import error_detail
 from app.api.deps import get_current_user
 from app.core.config import Settings, get_settings
 from app.core.rate_limit import clear_attempts, is_locked_out, record_failed_attempt
@@ -182,7 +183,10 @@ async def change_password(
     authenticated-but-insufficiently-privileged caller.
     """
     if not verify_password(body.current_password, current_user.password_hash):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Current password is incorrect")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=error_detail("current_password_incorrect", message="Current password is incorrect"),
+        )
 
     current_user.password_hash = hash_password(body.new_password)
     # Whatever forced this change (a fresh Create user or an admin's Reset

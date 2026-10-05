@@ -88,7 +88,14 @@ _XML_ILLEGAL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 class ExcelFileError(ValueError):
     """The uploaded file cannot be read safely: not an .xlsx, corrupt, or
-    over one of the limits. The message is the reason shown to the user."""
+    over one of the limits. AACF 3 (HR15/HR21): `code` and `params` are what
+    the interface translates (errors.codes.<code>); the English message stays
+    for scripts and tests that read it."""
+
+    def __init__(self, message: str, code: str, **params):
+        super().__init__(message)
+        self.code = code
+        self.params = params
 
 
 class ExportCellTooLarge(ValueError):
@@ -127,19 +134,22 @@ def cell_text(value) -> str:
 def _check_zip(data: bytes) -> None:
     settings = get_settings()
     if not zipfile.is_zipfile(io.BytesIO(data)):
-        raise ExcelFileError("The file is not an .xlsx workbook (only .xlsx files can be imported).")
+        raise ExcelFileError("The file is not an .xlsx workbook (only .xlsx files can be imported).", "excel_not_xlsx")
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             entries = archive.infolist()
             names = {e.filename for e in entries}
             if "[Content_Types].xml" not in names or "xl/workbook.xml" not in names:
-                raise ExcelFileError("The file is not an .xlsx workbook (only .xlsx files can be imported).")
+                raise ExcelFileError("The file is not an .xlsx workbook (only .xlsx files can be imported).", "excel_not_xlsx")
             total = sum(e.file_size for e in entries)
     except zipfile.BadZipFile as exc:
-        raise ExcelFileError(f"The file is corrupt and cannot be read: {exc}") from exc
+        raise ExcelFileError(f"The file is corrupt and cannot be read: {exc}", "excel_corrupt", error=str(exc)) from exc
     if total > settings.excel_import_max_uncompressed_bytes:
         raise ExcelFileError(
-            f"The workbook expands to {total} bytes, over the {settings.excel_import_max_uncompressed_bytes}-byte limit."
+            f"The workbook expands to {total} bytes, over the {settings.excel_import_max_uncompressed_bytes}-byte limit.",
+            "excel_too_large_uncompressed",
+            size=total,
+            limit=settings.excel_import_max_uncompressed_bytes,
         )
 
 
@@ -158,17 +168,17 @@ def parse_import_file(data: bytes, filename: str | None) -> dict:
     settings = get_settings()
     name = (filename or "").strip()
     if not name.lower().endswith(".xlsx"):
-        raise ExcelFileError(f"Only .xlsx files can be imported (got '{name or 'no file name'}').")
+        raise ExcelFileError(f"Only .xlsx files can be imported (got '{name or 'no file name'}').", "excel_wrong_extension", name=name)
     if not data:
-        raise ExcelFileError("The file is empty.")
+        raise ExcelFileError("The file is empty.", "excel_empty")
     if len(data) > settings.excel_import_max_bytes:
-        raise ExcelFileError(f"The file is {len(data)} bytes, over the {settings.excel_import_max_bytes}-byte limit.")
+        raise ExcelFileError(f"The file is {len(data)} bytes, over the {settings.excel_import_max_bytes}-byte limit.", "excel_too_large", size=len(data), limit=settings.excel_import_max_bytes)
     _check_zip(data)
 
     try:
         workbook = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except Exception as exc:  # openpyxl raises many types for a broken package
-        raise ExcelFileError(f"The file is corrupt and cannot be read: {exc}") from exc
+        raise ExcelFileError(f"The file is corrupt and cannot be read: {exc}", "excel_corrupt", error=str(exc)) from exc
     try:
         if not workbook.worksheets:
             return {"rows": [], "errors": ["Excel file is empty"]}
@@ -177,7 +187,7 @@ def parse_import_file(data: bytes, filename: str | None) -> dict:
         try:
             header_row = next(rows_iter, None)
         except Exception as exc:
-            raise ExcelFileError(f"The file is corrupt and cannot be read: {exc}") from exc
+            raise ExcelFileError(f"The file is corrupt and cannot be read: {exc}", "excel_corrupt", error=str(exc)) from exc
         if header_row is None:
             return {"rows": [], "errors": ["No data rows found in Excel file"]}
         header = [cell_text(h).strip() for h in header_row]
@@ -197,13 +207,15 @@ def parse_import_file(data: bytes, filename: str | None) -> dict:
                     continue
                 if len(rows) >= settings.excel_import_max_rows:
                     raise ExcelFileError(
-                        f"The file has more than {settings.excel_import_max_rows} data rows; split it into smaller files."
+                        f"The file has more than {settings.excel_import_max_rows} data rows; split it into smaller files.",
+                        "excel_too_many_rows",
+                        limit=settings.excel_import_max_rows,
                     )
                 rows.append({"row_number": row_number, **values})
         except ExcelFileError:
             raise
         except Exception as exc:
-            raise ExcelFileError(f"The file is corrupt and cannot be read: {exc}") from exc
+            raise ExcelFileError(f"The file is corrupt and cannot be read: {exc}", "excel_corrupt", error=str(exc)) from exc
     finally:
         workbook.close()
 

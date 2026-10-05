@@ -519,6 +519,9 @@ async def test_rule_one_similar_is_topped_up_from_standard_fallback_not_template
         assert {c["id"] for c in body["standard_fallback"]} <= {str(b.id) for b in far}
         assert all(c["score"] < 0.5 for c in body["standard_fallback"])  # below the "similar" threshold
         assert all(c["source"] == other_project.name for c in body["standard_fallback"])
+        assert all(
+            c["source_type"] == "project" and c["source_project"] == other_project.name for c in body["standard_fallback"]
+        )
         assert body["template_fallback"] == []
     finally:
         await _cleanup(project, [editor])
@@ -542,6 +545,7 @@ async def test_rule_standard_without_verified_rules_uses_template_fallback(clien
         assert [c["identifier"] for c in template] == [e.identifier for e in expected]
         assert [c["text"] for c in template] == [e.rule_xml for e in expected]
         assert all(c["proposal"] and c["source"] == "Template" for c in template)
+        assert all(c["source_type"] == "template" and c["source_project"] == "" for c in template)
         assert all("<structureObjectRule" in c["text"] for c in template)
     finally:
         await _cleanup(project, [editor])
@@ -923,6 +927,12 @@ async def test_definition_candidates_include_catalog_and_other_projects_records_
         assert set(by_identifier) == {"BRDP-OTHERPROJ-1", "BRDP-CAT-1"}
         assert by_identifier["BRDP-OTHERPROJ-1"]["source"] == f"Records: {project_b.name}"
         assert by_identifier["BRDP-CAT-1"]["source"] == "Catalog"
+        # AACF 3: the structured source the interface translates; `source`
+        # stays the English text the prompts quote.
+        assert by_identifier["BRDP-OTHERPROJ-1"]["source_type"] == "records"
+        assert by_identifier["BRDP-OTHERPROJ-1"]["source_project"] == project_b.name
+        assert by_identifier["BRDP-CAT-1"]["source_type"] == "catalog"
+        assert by_identifier["BRDP-CAT-1"]["source_project"] == ""
         assert by_identifier["BRDP-CAT-1"]["title"] == catalog_entry.title
         assert by_identifier["BRDP-CAT-1"]["text"] == catalog_entry.definition
         assert by_identifier["BRDP-CAT-1"]["definition"] == catalog_entry.definition
@@ -1263,6 +1273,7 @@ async def test_proposal_same_brdp_group_matches_other_projects_by_identifier(cli
         assert entry["text"] == match.proposal  # `text` is the Proposal for this kind
         assert entry["definition"] == "Other project's definition"
         assert entry["source"] == other_project.name  # bare project name, never "Records: "-prefixed
+        assert entry["source_type"] == "project" and entry["source_project"] == other_project.name
         assert str(match.id) not in {c["id"] for c in body["candidates"]}  # not double-counted in "Similar decisions"
     finally:
         await _cleanup(project, [editor])
@@ -1387,6 +1398,7 @@ async def test_proposal_this_project_group_capped_at_three(client):
         body = response.json()
         assert len(body["this_project"]) == 3  # PROPOSAL_THIS_PROJECT_LIMIT, not all 5
         assert body["this_project"][0]["source"] == ""  # never named -- "this project" is implied
+        assert body["this_project"][0]["source_type"] == "" and body["this_project"][0]["source_project"] == ""
         assert body["same_brdp"] == []
         assert body["candidates"] == []  # own-project candidates never leak into the "other projects" groups
     finally:

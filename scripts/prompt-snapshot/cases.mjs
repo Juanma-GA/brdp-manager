@@ -140,18 +140,18 @@ const vocabWrongType = {
 const vocabUnavailable = { available: false, notFound: [], wrongType: [] };
 
 const similarDefinitionSample = [
-  { id: 'a1', identifier: 'BRDP-S1-00001', title: 'Similar A', text: 'Definition A text.', source: 'Records: Demo Project', score: 0.91 },
-  { id: 'a2', identifier: 'BRDP-CAT-002', title: 'Similar B', text: 'Definition B text.', source: 'Catalog', score: 0.85 },
+  { id: 'a1', identifier: 'BRDP-S1-00001', title: 'Similar A', text: 'Definition A text.', source_type: 'records', source_project: 'Demo Project', score: 0.91 },
+  { id: 'a2', identifier: 'BRDP-CAT-002', title: 'Similar B', text: 'Definition B text.', source_type: 'catalog', score: 0.85 },
 ];
 const styleReferencesSample = [
-  { id: 'b1', identifier: 'BRDP-S1-00003', title: 'Style A', text: 'Style A definition text.', source: 'Records: Demo Project' },
+  { id: 'b1', identifier: 'BRDP-S1-00003', title: 'Style A', text: 'Style A definition text.', source_type: 'records', source_project: 'Demo Project' },
 ];
 
 const sameBrdpSample = [
-  { id: 'c1', identifier: 'BRDP-S1-00042', text: 'Other project decided: frame shall be "top".', source: 'Project Beta' },
-  { id: 'c2', identifier: 'BRDP-S1-00042', text: 'Other project decided: frame shall be "all".', source: 'Project Gamma' },
+  { id: 'c1', identifier: 'BRDP-S1-00042', text: 'Other project decided: frame shall be "top".', source_type: 'project', source_project: 'Project Beta' },
+  { id: 'c2', identifier: 'BRDP-S1-00042', text: 'Other project decided: frame shall be "all".', source_type: 'project', source_project: 'Project Gamma' },
 ];
-const similarProposalSample = [{ id: 'd1', identifier: 'BRDP-S1-00050', definition: 'Def D.', text: 'Proposal D.', source: 'Project Delta', score: 0.77 }];
+const similarProposalSample = [{ id: 'd1', identifier: 'BRDP-S1-00050', definition: 'Def D.', text: 'Proposal D.', source_type: 'project', source_project: 'Project Delta', score: 0.77 }];
 const thisProjectSample = [{ id: 'e1', identifier: 'BRDP-S1-00060', definition: 'Def E.', text: 'Proposal E.', score: 0.66 }];
 
 export const askCases = [
@@ -231,7 +231,7 @@ const ruleSameBrdp = [
   {
     id: 'r1',
     identifier: 'BRDP-S1-00042',
-    source: 'Project Gamma',
+    source_type: 'project', source_project: 'Project Gamma',
     proposal: 'Tables shall be framed on all sides.',
     text: '<structureObjectRule id="BRDP-S1-00042"><objectPath allowedObjectFlag="2">//table/@frame</objectPath><objectUse>Frame</objectUse><objectValue valueForm="single" valueAllowed="all">All sides</objectValue></structureObjectRule>',
   },
@@ -240,7 +240,7 @@ const ruleSimilar = [
   {
     id: 'r2',
     identifier: 'BRDP-S1-00050',
-    source: 'Project Delta',
+    source_type: 'project', source_project: 'Project Delta',
     score: 0.71,
     proposal: 'Tables shall not use @pgwide.',
     text: '<structureObjectRule id="BRDP-S1-00050"><objectPath allowedObjectFlag="0">//table/@pgwide</objectPath><objectUse>No pgwide</objectUse></structureObjectRule>',
@@ -250,7 +250,7 @@ const ruleFormatExamples = [
   {
     id: 'r3',
     identifier: 'BRDP-S1-00133',
-    source: 'Template',
+    source_type: 'template',
     proposal: 'The parameter element shall not be used.',
     text: '<structureObjectRule id="BRDP-S1-00133"><objectPath allowedObjectFlag="0">//parameter</objectPath><objectUse>Not used</objectUse></structureObjectRule>',
   },
@@ -259,7 +259,7 @@ const ruleFormatExamples301 = [
   {
     id: 'r4',
     identifier: 'BRDP-EXT-02634',
-    source: 'Template',
+    source_type: 'template',
     proposal: 'Column specifications inside table headers shall not be used.',
     text: '<objrule id="BRDP-EXT-02634"><objpath objappl="0">/dmodule/content//thead/colspec</objpath><objuse>No colspec in thead</objuse></objrule>',
   },
@@ -268,7 +268,7 @@ const ruleFormatExamplesDita = [
   {
     id: 'r5',
     identifier: 'BRDP-D1-00010',
-    source: 'Template',
+    source_type: 'template',
     proposal: 'Notes shall declare a type.',
     text: '<sch:pattern id="p-BRDP-D1-00010"><sch:rule context="note"><sch:assert id="BRDP-D1-00010" test="@type">A note must declare @type.</sch:assert></sch:rule></sch:pattern>',
   },
@@ -308,7 +308,7 @@ export const suggestRuleCases = [
         formatExamples: [
           {
             identifier: 'BRDP-S1-00006',
-            source: 'Template',
+            source_type: 'template',
             proposal: 'Descriptive, Procedural and IPD schemas shall be used as per Writing Style Guide',
             text: [
               '<structureObjectRule>\n  <objectPath allowedObjectFlag="2">//@xsi:noNamespaceSchemaLocation</objectPath>\n  <objectUse>BRDP-S1-00006. Schema location.</objectUse>\n</structureObjectRule>',

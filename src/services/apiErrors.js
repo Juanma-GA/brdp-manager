@@ -34,7 +34,7 @@ const FIELD_LABEL_KEYS = {
 
 // The codes whose sentence is in errors.codes.* (any other code falls back
 // to the server's own `message`, or to the status sentence).
-const KNOWN_CODES = new Set([
+export const KNOWN_CODES = new Set([
   'internal_error',
   'database_not_migrated',
   'llm_not_configured',
@@ -56,6 +56,53 @@ const KNOWN_CODES = new Set([
   'trashed_project_not_found',
   'user_deleted_exists',
   'user_email_taken',
+  // AACF 3, Part 3: messages seen in normal use (Records, rules, Excel,
+  // AI Extract, Papelera, users), coded so they read in the interface
+  // language.
+  'brdp_not_found',
+  'brdp_identifier_taken',
+  'brdp_restore_identifier_taken',
+  'trashed_brdp_not_found',
+  'rule_not_found',
+  'rule_test_outdated',
+  'rule_test_nothing_to_keep',
+  'rule_not_draft',
+  'rule_not_verified',
+  'embedding_job_running',
+  'embedding_unavailable',
+  'import_already_running',
+  'excel_not_xlsx',
+  'excel_corrupt',
+  'excel_too_large_uncompressed',
+  'excel_wrong_extension',
+  'excel_empty',
+  'excel_too_large',
+  'excel_too_many_rows',
+  'extract_file_too_large',
+  'extract_no_rule_format',
+  'extract_file_empty',
+  'extract_not_well_formed',
+  'extract_not_xml',
+  'extract_schematron_not_expected',
+  'extract_schematron_xpath3',
+  'extract_dm_not_brex',
+  'extract_brex_not_expected',
+  'extract_brex_other_issue',
+  'extract_brex_unknown_issue',
+  'extract_not_rules_file',
+  'extract_text_empty',
+  'extract_text_too_many_words',
+  'extract_text_too_many_chars',
+  'extract_already_running',
+  'extract_unknown_candidates',
+  'extract_not_finished',
+  'extract_already_imported',
+  'extract_none_selected',
+  'user_email_registered',
+  'user_not_found',
+  'user_last_admin',
+  'user_cannot_delete_self',
+  'current_password_incorrect',
 ]);
 
 export class ApiError extends Error {

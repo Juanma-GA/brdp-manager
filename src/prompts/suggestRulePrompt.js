@@ -10,7 +10,7 @@
 // wraps it in one context block per chosen schema
 // (utils/ruleSchemaContext.js). Precedents keep their context blocks and
 // say which schemas they apply to.
-import { buildSchemaFactsBlock } from './shared.js';
+import { buildSchemaFactsBlock, referenceSourceText } from './shared.js';
 import { ruleFormatRules } from './ruleFormatRules.js';
 import { contextSchemasOfRule } from '../utils/ruleSchemaContext.js';
 
@@ -34,7 +34,8 @@ function appliesToLine(ruleXml) {
 function precedentLines(candidates, withSource) {
   return candidates
     .map((c) => {
-      const head = withSource && c.source ? `[${c.identifier} | ${c.source}]` : `[${c.identifier}]`;
+      const source = referenceSourceText(c);
+      const head = withSource && source ? `[${c.identifier} | ${source}]` : `[${c.identifier}]`;
       return `${head}${appliesToLine(c.text)}\nProposal: ${c.proposal}\nRule:\n${c.text}`;
     })
     .join('\n\n');

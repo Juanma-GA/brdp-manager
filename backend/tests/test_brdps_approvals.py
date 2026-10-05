@@ -87,7 +87,9 @@ async def test_duplicate_identifier_rejected_within_same_project(client, editor_
         f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-DUP-001"}, headers=headers
     )
     assert duplicate.status_code == 409
-    assert "already exists" in duplicate.json()["detail"]
+    detail = duplicate.json()["detail"]
+    assert detail["code"] == "brdp_identifier_taken" and detail["identifier"] == "BRDP-DUP-001"
+    assert "already exists" in detail["message"]
 
     # the rejected duplicate must not have been saved anyway
     listed = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()

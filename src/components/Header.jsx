@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuthContext } from '../context/AuthContext';
 import LanguageSwitcher from './LanguageSwitcher';
 import styles from './Header.module.css';
+import { roleLabel } from '../utils/roles';
 
 /**
  * v2 header: app name + signed-in user + logout. The per-feature action
@@ -27,7 +28,7 @@ export default function Header() {
           {user && (
             <>
               <span className={styles.userInfo}>
-                {user.display_name} · {user.global_role}
+                {user.display_name} · {roleLabel(t, user.global_role)}
               </span>
               <button className={styles.secondaryBtn} onClick={logout}>
                 {t('logout')}

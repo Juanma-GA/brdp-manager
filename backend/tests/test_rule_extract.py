@@ -525,13 +525,15 @@ async def test_parse_requires_editor_and_reports_413_and_422(client, project_use
     project, editor, viewer = project_users
     assert (await _upload(client, project.id, viewer, _brex("4.2", ""))).status_code == 403
     res = await _upload(client, project.id, editor, b"not xml")
-    assert res.status_code == 422 and "not well-formed" in res.json()["detail"]
+    assert res.status_code == 422 and res.json()["detail"]["code"] == "extract_not_well_formed"
+    assert "not well-formed" in res.json()["detail"]["message"]
     res = await _upload(client, project.id, editor, b"")
-    assert res.status_code == 422 and res.json()["detail"] == "The file is empty."
+    assert res.status_code == 422 and res.json()["detail"] == {"code": "extract_file_empty", "message": "The file is empty."}
     monkeypatch.setattr(get_settings(), "rule_extract_max_bytes", 1000)
     res = await _upload(client, project.id, editor, b"<x>" + b" " * 2000 + b"</x>")
     assert res.status_code == 413
-    assert "limit for a BREX or Schematron" in res.json()["detail"]
+    assert res.json()["detail"]["code"] == "extract_file_too_large"
+    assert "limit for a BREX or Schematron" in res.json()["detail"]["message"]
 
 
 async def test_classification_and_import(client, project_users, synthetic_standard):

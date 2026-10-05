@@ -4,6 +4,7 @@ import { useDeletedUsers, usePermanentlyDeleteUser, useRestoreUser } from '../..
 import { errorMessage } from '../../services/apiErrors';
 import ErrorNotice from '../ErrorNotice';
 import styles from '../../pages/SettingsPage.module.css';
+import { roleLabel } from '../../utils/roles';
 
 /**
  * Settings > Users > Deleted users (AACF 2, Decisión 13; admin only). A
@@ -71,7 +72,7 @@ export default function DeletedUsers({ onRestored }) {
               <tr key={u.id} data-testid="deleted-user-row">
                 <td>{u.email}</td>
                 <td>{u.display_name}</td>
-                <td>{u.global_role}</td>
+                <td>{roleLabel(t, u.global_role)}</td>
                 <td>{u.deleted_by_email || t('settings.trash.unknownUser')}</td>
                 <td>{new Date(u.deleted_at).toLocaleString()}</td>
                 <td>

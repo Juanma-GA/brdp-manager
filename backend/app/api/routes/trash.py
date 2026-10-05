@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import error_detail
 from app.api.deps import get_current_user, has_project_role
 from app.db.base import get_db
 from app.models import BRDP, Project, User, UserProjectRole
@@ -209,7 +210,10 @@ async def restore_brdp(
 ):
     brdp = await get_trashed_brdp(brdp_id, db)
     if brdp is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trashed BRDP not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_detail("trashed_brdp_not_found", message="Trashed BRDP not found"),
+        )
     if not await has_project_role(current_user, brdp.project_id, "editor", db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this project")
 
@@ -223,10 +227,14 @@ async def restore_brdp(
     if conflict is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Cannot restore: identifier {brdp.identifier!r} is now used by another active "
-                "BRDP in this project. Resolve that conflict (rename or remove the other BRDP) "
-                "before restoring this one."
+            detail=error_detail(
+                "brdp_restore_identifier_taken",
+                message=(
+                    f"Cannot restore: identifier {brdp.identifier!r} is now used by another active "
+                    "BRDP in this project. Resolve that conflict (rename or remove the other BRDP) "
+                    "before restoring this one."
+                ),
+                identifier=brdp.identifier,
             ),
         )
 
@@ -251,7 +259,10 @@ async def delete_brdp_permanently(
     """
     brdp = await get_trashed_brdp(brdp_id, db)
     if brdp is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trashed BRDP not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_detail("trashed_brdp_not_found", message="Trashed BRDP not found"),
+        )
     if not await has_project_role(current_user, brdp.project_id, "editor", db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this project")
     await db.delete(brdp)

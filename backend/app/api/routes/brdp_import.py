@@ -15,6 +15,7 @@ from app.schemas.brdp_import import (
     ImportParseResponse,
 )
 from app.core.config import get_settings
+from app.core.errors import error_detail
 from app.services.excel_io import ExcelFileError, parse_import_file
 from app.services.import_jobs import analyze_rows, create_job, get_most_recent_job, get_running_job, run_import_job
 
@@ -43,7 +44,10 @@ async def parse_import(
     try:
         parsed = parse_import_file(data, file.filename)
     except ExcelFileError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_detail(exc.code, message=str(exc), **exc.params),
+        ) from exc
     return ImportParseResponse(**parsed)
 
 
@@ -101,7 +105,11 @@ async def apply_import(
     if active is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"An import is already running for this project (job {active.id}, started at {active.started_at.isoformat()})",
+            detail=error_detail(
+                "import_already_running",
+                message=f"An import is already running for this project (job {active.id}, started at {active.started_at.isoformat()})",
+                started_at=active.started_at.isoformat(),
+            ),
         )
 
     job = await create_job(project_id, editor.id, body.rows, db)

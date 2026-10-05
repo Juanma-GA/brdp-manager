@@ -41,6 +41,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import error_detail
 from app.api.deps import get_httpx_transport, require_project_role
 from app.core.config import get_settings
 from app.db.base import get_db
@@ -112,17 +113,25 @@ async def parse_rules(
     if len(data) > limit:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"The file is larger than {limit // (1024 * 1024)} MB, the limit for a BREX or Schematron.",
+            detail=error_detail(
+                "extract_file_too_large",
+                message=f"The file is larger than {limit // (1024 * 1024)} MB, the limit for a BREX or Schematron.",
+                limit_mb=limit // (1024 * 1024),
+            ),
         )
     try:
         rules_file = read_rules_file(data, STANDARD_TO_RULE_FORMAT.get(project.standard), project.standard)
     except RuleExtractFileError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=error_detail(exc.code, message=str(exc), **exc.params)) from exc
     running = await get_running_job(project_id, db)
     if running is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"An extraction is already running for this project (started at {running.started_at.isoformat()})",
+            detail=error_detail(
+                "extract_already_running",
+                message=f"An extraction is already running for this project (started at {running.started_at.isoformat()})",
+                started_at=running.started_at.isoformat(),
+            ),
         )
     job = await create_job(project_id, editor.id, file.filename or "", rules_file, db)
     background_tasks.add_task(run_extract_job, job.id, project_id, rules_file, transport)
@@ -150,24 +159,38 @@ async def start_text(
     text = body.text.replace("\r\n", "\n")
     words = count_words(text)
     if words == 0:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="The text is empty.")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error_detail("extract_text_empty", message="The text is empty."))
     if words > settings.extract_text_max_words:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"This text has {words} words; the limit is {settings.extract_text_max_words}. "
-            "Split it into sections and import them one by one.",
+            detail=error_detail(
+                "extract_text_too_many_words",
+                message=f"This text has {words} words; the limit is {settings.extract_text_max_words}. "
+                "Split it into sections and import them one by one.",
+                words=words,
+                limit=settings.extract_text_max_words,
+            ),
         )
     if len(text) > settings.extract_text_max_chars:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"This text has {len(text)} characters; the limit is {settings.extract_text_max_chars}. "
-            "Split it into sections and import them one by one.",
+            detail=error_detail(
+                "extract_text_too_many_chars",
+                message=f"This text has {len(text)} characters; the limit is {settings.extract_text_max_chars}. "
+                "Split it into sections and import them one by one.",
+                chars=len(text),
+                limit=settings.extract_text_max_chars,
+            ),
         )
     running = await get_running_job(project_id, db)
     if running is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"An extraction is already running for this project (started at {running.started_at.isoformat()})",
+            detail=error_detail(
+                "extract_already_running",
+                message=f"An extraction is already running for this project (started at {running.started_at.isoformat()})",
+                started_at=running.started_at.isoformat(),
+            ),
         )
     job = await create_text_job(project_id, editor.id, body.filename.strip(), text, words, db)
     return RuleExtractJobAccepted(job_id=job.id)
@@ -300,7 +323,10 @@ async def set_drafting(
     left stay pending (and block the import while checked)."""
     job = await _job(project_id, job_id, db)
     if job.applied_at is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="These candidates were already imported")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=error_detail("extract_already_imported", message="These candidates were already imported"),
+        )
     job.drafting_stopped = body.stopped
     await db.commit()
     await db.refresh(job)
@@ -319,7 +345,10 @@ async def edit_candidates(
     nothing: one invalid edit is a 422 and nothing is saved."""
     job = await _job(project_id, job_id, db)
     if job.applied_at is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="These candidates were already imported")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=error_detail("extract_already_imported", message="These candidates were already imported"),
+        )
     edits = {e.key: e.model_dump(exclude_unset=True) for e in body.items}
     rows = (
         await db.execute(
@@ -334,7 +363,14 @@ async def edit_candidates(
     ).scalars().all()
     missing = set(edits) - {r.key for r in rows}
     if missing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown candidates: {', '.join(sorted(missing))}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_detail(
+                "extract_unknown_candidates",
+                message=f"Unknown candidates: {', '.join(sorted(missing))}",
+                keys=", ".join(sorted(missing)),
+            ),
+        )
     allocate = None
     if any(e.get("classification") for e in edits.values()):
         allocate = await next_ext_allocator(job, db)
@@ -358,11 +394,20 @@ async def apply_candidates(
 ) -> dict:
     job = await _job(project_id, job_id, db)
     if job.status != "completed":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The extraction has not finished")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=error_detail("extract_not_finished", message="The extraction has not finished"),
+        )
     if job.applied_at is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="These candidates were already imported")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=error_detail("extract_already_imported", message="These candidates were already imported"),
+        )
     if not body.keys:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No candidate selected")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_detail("extract_none_selected", message="No candidate selected"),
+        )
     if job.source_kind == "text" and body.import_as != "pending":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

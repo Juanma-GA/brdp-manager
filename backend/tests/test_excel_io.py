@@ -387,17 +387,18 @@ async def test_parse_endpoint_readable_but_empty_gives_errors(client, project_an
 
 
 @pytest.mark.parametrize(
-    ("data", "filename", "reason"),
+    ("data", "filename", "reason", "code"),
     [
-        (b"not a workbook", "brdps.xls", "Only .xlsx"),
-        (b"not a workbook", "brdps.xlsx", "not an .xlsx workbook"),
+        (b"not a workbook", "brdps.xls", "Only .xlsx", "excel_wrong_extension"),
+        (b"not a workbook", "brdps.xlsx", "not an .xlsx workbook", "excel_not_xlsx"),
     ],
 )
-async def test_parse_endpoint_refuses_bad_files_with_422(client, project_and_users, data, filename, reason):
+async def test_parse_endpoint_refuses_bad_files_with_422(client, project_and_users, data, filename, reason, code):
     project_id, editor, _viewer = project_and_users
     resp = await client.post(f"/api/projects/{project_id}/brdps/import/parse", files=_upload(data, filename), headers=editor)
     assert resp.status_code == 422
-    assert reason in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == code and reason in detail["message"]
     async with async_session_factory() as session:
         from sqlalchemy import func, select
 
@@ -410,7 +411,9 @@ async def test_parse_endpoint_refuses_too_large_upload(client, project_and_users
     monkeypatch.setattr(get_settings(), "excel_import_max_bytes", 100)
     resp = await client.post(f"/api/projects/{project_id}/brdps/import/parse", files=_upload(data), headers=editor)
     assert resp.status_code == 422
-    assert "over the 100-byte limit" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "excel_too_large" and detail["limit"] == 100
+    assert "over the 100-byte limit" in detail["message"]
 
 
 async def test_parse_is_editor_only_export_is_viewer(client, project_and_users):

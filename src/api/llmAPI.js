@@ -1,5 +1,6 @@
 import { authFetch } from '../services/apiClient.js';
 import { ApiError, apiErrorFromResponse, networkError } from '../services/apiErrors.js';
+import i18n from '../i18n/index.js';
 import { LLM_TRUNCATED, isTruncatedAnswer, truncatedAnswerError } from './llmTruncation.js';
 
 // The output limit of an answer, unless the use sets its own (the rule
@@ -64,7 +65,7 @@ export async function sendMessage(
   const { temperature = 1, maxTokens = DEFAULT_MAX_TOKENS } = options;
 
   if (!modelName || !provider) {
-    throw new Error('Missing model configuration.');
+    throw new Error(i18n.t('errors.llmMissingModel'));
   }
 
   // v2: the backend resolves the real provider endpoint + API key from its
@@ -110,6 +111,6 @@ export async function sendMessage(
     if (error.code === LLM_TRUNCATED || error instanceof ApiError) {
       throw error;
     }
-    throw new Error('Connection error. Please try again.', { cause: error });
+    throw new Error(i18n.t('errors.network'), { cause: error });
   }
 }

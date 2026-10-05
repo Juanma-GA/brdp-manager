@@ -238,7 +238,7 @@ async def test_limits_and_word_count_checked_by_the_server(client, users):
     assert limits["max_words"] == 5000
     assert (await _start(client, project.id, viewer, "Tables must have a title.")).status_code == 403
     res = await _start(client, project.id, editor, "  \n\t ")
-    assert res.status_code == 422 and res.json()["detail"] == "The text is empty."
+    assert res.status_code == 422 and res.json()["detail"] == {"code": "extract_text_empty", "message": "The text is empty."}
     # Exactly 5,000 words: accepted.
     res = await _start(client, project.id, editor, _words(5000))
     assert res.status_code == 202, res.text
@@ -247,10 +247,16 @@ async def test_limits_and_word_count_checked_by_the_server(client, users):
     # 5,001: rejected with the count, never cut.
     res = await _start(client, project.id, editor, _words(5001))
     assert res.status_code == 422
-    assert res.json()["detail"] == "This text has 5001 words; the limit is 5000. Split it into sections and import them one by one."
+    assert res.json()["detail"] == {
+        "code": "extract_text_too_many_words",
+        "words": 5001,
+        "limit": 5000,
+        "message": "This text has 5001 words; the limit is 5000. Split it into sections and import them one by one.",
+    }
     # Few words, too many characters.
     res = await _start(client, project.id, editor, "x" * (get_settings().extract_text_max_chars + 1))
-    assert res.status_code == 422 and "characters" in res.json()["detail"]
+    assert res.status_code == 422 and res.json()["detail"]["code"] == "extract_text_too_many_chars"
+    assert "characters" in res.json()["detail"]["message"]
 
 
 async def test_the_source_text_is_stored_and_decisions_only_once(client, users):

@@ -170,8 +170,13 @@ class RuleExtractFileError(Exception):
     """A file that cannot be read as the project's rules. status_code 413
     (too large) or 422 (anything else); the message says why (HR7)."""
 
-    def __init__(self, message: str, status_code: int = 422):
+    def __init__(self, message: str, code: str, status_code: int = 422, **params):
         super().__init__(message)
+        # AACF 3 (HR15/HR21): what the interface translates
+        # (errors.codes.<code>); the English message stays for scripts and
+        # tests.
+        self.code = code
+        self.params = params
         self.status_code = status_code
 
 
@@ -242,18 +247,22 @@ def read_rules_file(data: bytes, rule_format: str | None, standard: str) -> Rule
     RuleExtractFileError (422) with the reason when the file is empty, is
     not XML, or is not the project's rule format."""
     if rule_format is None:
-        raise RuleExtractFileError(f"The project's standard ({standard}) has no rule format, so there are no rules to import.")
+        raise RuleExtractFileError(
+            f"The project's standard ({standard}) has no rule format, so there are no rules to import.",
+            "extract_no_rule_format",
+            standard=standard,
+        )
     if not data or not data.strip():
-        raise RuleExtractFileError("The file is empty.")
+        raise RuleExtractFileError("The file is empty.", "extract_file_empty")
     parser = etree.XMLParser(
         resolve_entities=False, no_network=True, load_dtd=False, dtd_validation=False, huge_tree=True
     )
     try:
         tree = etree.ElementTree(etree.fromstring(data, parser))
     except etree.XMLSyntaxError as exc:
-        raise RuleExtractFileError(f"The file is not well-formed XML: {exc}") from exc
+        raise RuleExtractFileError(f"The file is not well-formed XML: {exc}", "extract_not_well_formed", error=str(exc)) from exc
     except ValueError as exc:  # e.g. a str with an encoding declaration
-        raise RuleExtractFileError(f"The file is not XML: {exc}") from exc
+        raise RuleExtractFileError(f"The file is not XML: {exc}", "extract_not_xml", error=str(exc)) from exc
     root = tree.getroot()
     docinfo = tree.docinfo
     warnings: list[dict] = []
@@ -280,14 +289,18 @@ def read_rules_file(data: bytes, rule_format: str | None, standard: str) -> Rule
 
     if local == "schema" and namespace == SCHEMATRON_NS:
         if rule_format != "SCH-DITA":
-            raise RuleExtractFileError(f"This is a Schematron; this project's rules are {project_label}.")
+            raise RuleExtractFileError(
+                f"This is a Schematron; this project's rules are {project_label}.", "extract_schematron_not_expected", expected=project_label
+            )
         binding = (root.get("queryBinding") or "").strip().lower()
         expected = "xslt3" if standard == "DITA 1.3 Xpath3.0" else "xslt2"
         if binding == "xslt3" and expected == "xslt2":
             # XPath 3.0 (inline functions, let…return, "!") does not run on
             # an XPath 2.0 project's processor: refused, not warned.
             raise RuleExtractFileError(
-                f"This Schematron uses queryBinding=\"xslt3\" (XPath 3.0); this project is {standard}, which runs XPath 2.0."
+                f"This Schematron uses queryBinding=\"xslt3\" (XPath 3.0); this project is {standard}, which runs XPath 2.0.",
+                "extract_schematron_xpath3",
+                standard=standard,
             )
         if binding and binding != expected:
             warnings.append(
@@ -302,9 +315,11 @@ def read_rules_file(data: bytes, rule_format: str | None, standard: str) -> Rule
     if local == "dmodule":
         brex = root.find("content/brex")
         if brex is None:
-            raise RuleExtractFileError("This data module is not a BREX: it has no <brex> in its <content>.")
+            raise RuleExtractFileError("This data module is not a BREX: it has no <brex> in its <content>.", "extract_dm_not_brex")
         if rule_format == "SCH-DITA":
-            raise RuleExtractFileError(f"This is a BREX data module; this project's rules are {project_label}.")
+            raise RuleExtractFileError(
+                f"This is a BREX data module; this project's rules are {project_label}.", "extract_brex_not_expected", expected=project_label
+            )
         url = root.get("{http://www.w3.org/2001/XMLSchema-instance}noNamespaceSchemaLocation")
         issue = _issue_of_url(url)
         has_objrule = brex.find(".//objrule") is not None
@@ -323,12 +338,27 @@ def read_rules_file(data: bytes, rule_format: str | None, standard: str) -> Rule
                 )
         file_format = f"BREX-{issue}" if issue else None
         if file_format != rule_format:
-            found = f"S1000D {issue}" if issue else "an unknown S1000D issue"
-            raise RuleExtractFileError(f"This is a BREX for {found}; this project is {standard} ({project_label}).")
+            if issue:
+                raise RuleExtractFileError(
+                    f"This is a BREX for S1000D {issue}; this project is {standard} ({project_label}).",
+                    "extract_brex_other_issue",
+                    found=f"S1000D {issue}",
+                    standard=standard,
+                    expected=project_label,
+                )
+            raise RuleExtractFileError(
+                f"This is a BREX for an unknown S1000D issue; this project is {standard} ({project_label}).",
+                "extract_brex_unknown_issue",
+                standard=standard,
+                expected=project_label,
+            )
         return RulesFile(file_format, local, text, warnings)
 
+    root_name = root.tag if isinstance(root.tag, str) else "?"
     raise RuleExtractFileError(
-        f"This is neither a BREX data module nor a Schematron: the root element is <{root.tag if isinstance(root.tag, str) else '?'}>."
+        f"This is neither a BREX data module nor a Schematron: the root element is <{root_name}>.",
+        "extract_not_rules_file",
+        root=root_name,
     )
 
 

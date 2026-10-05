@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
+from app.core.errors import error_detail, new_error_ref
 from app.api.deps import get_httpx_transport, require_project_role
 from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
@@ -23,6 +25,7 @@ from app.services.rule_formats import STANDARD_TO_RULE_FORMAT as _STANDARD_TO_RU
 from app.services.rule_precedents import extract_format_rules
 from app.services.rule_templates import load_template_rules
 
+logger = logging.getLogger("app.errors")
 router = APIRouter(prefix="/api/projects/{project_id}/brdps/{brdp_id}/similar", tags=["similar"])
 
 # Minimum cosine similarity (1 - pgvector cosine distance) to count as a
@@ -149,9 +152,9 @@ async def get_similar(
     try:
         query_embedding = await compute_embedding(query_text, transport=transport)
     except EmbeddingUnavailable as err:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not compute query embedding: {err}"
-        )
+        ref = new_error_ref()
+        logger.error("ref=%s query embedding for Suggest failed: %s", ref, err)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error_detail("embedding_unavailable", ref))
 
     if kind == "definition":
         return await _get_definition_similar(db, project, project_id, brdp_id, query_embedding)
@@ -262,6 +265,8 @@ async def _get_definition_similar(
             # ({Records: project name | Catalog}), rendered verbatim into
             # both the LLM prompt and the UI's reference list.
             source=f"Records: {project_name}",
+            source_type="records",
+            source_project=project_name,
         )
         return (("brdp", b.id), similarity, candidate)
 
@@ -276,6 +281,7 @@ async def _get_definition_similar(
             definition=c.definition,
             score=similarity,
             source="Catalog",
+            source_type="catalog",
         )
         return (("catalog", c.id), similarity, candidate)
 
@@ -419,6 +425,8 @@ async def _get_proposal_similar(
                     # for this group), 0.0 is a pure unused placeholder.
                     score=0.0,
                     source=project_name,
+                    source_type="project",
+                    source_project=project_name,
                 )
             )
             same_brdp_ids.add(b.id)
@@ -461,6 +469,8 @@ async def _get_proposal_similar(
                     definition=b.definition,
                     score=similarity,
                     source=project_name,
+                    source_type="project",
+                    source_project=project_name,
                 )
             )
 
@@ -498,6 +508,7 @@ async def _get_proposal_similar(
                 # already implied by the group itself, never named in
                 # either the prompt block or the UI for this group.
                 source="",
+                source_type="",
             )
         )
 
@@ -579,6 +590,8 @@ def _rule_candidate(b: BRDP, rule_xml: str, score: float, source: str) -> Simila
         definition=b.definition,
         proposal=b.proposal,
         source=source,
+        source_type="project",
+        source_project=source,
     )
 
 
@@ -716,6 +729,7 @@ async def _get_rule_similar(
                     definition=entry.definition,
                     proposal=entry.proposal,
                     source="Template",
+                    source_type="template",
                 )
             )
             if len(template_fallback) >= missing:

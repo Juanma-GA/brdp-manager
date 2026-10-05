@@ -162,7 +162,8 @@ async def test_admin_deleting_own_account_is_blocked_even_with_other_admins_pres
     try:
         response = await client.delete(f"/api/users/{admin.id}", headers=_headers(admin))
         assert response.status_code == 400
-        assert "own account" in response.json()["detail"].lower()
+        assert response.json()["detail"]["code"] == "user_cannot_delete_self"
+        assert "own account" in response.json()["detail"]["message"].lower()
 
         async with async_session_factory() as session:
             assert await session.get(User, admin.id) is not None
@@ -197,7 +198,8 @@ async def test_cannot_delete_the_last_remaining_admin_in_the_system(client):
 
         response = await client.delete(f"/api/users/{sole_admin.id}", headers=_headers(sole_admin))
         assert response.status_code == 400
-        assert "last remaining admin" in response.json()["detail"].lower()
+        assert response.json()["detail"]["code"] == "user_last_admin"
+        assert "last remaining admin" in response.json()["detail"]["message"].lower()
 
         async with async_session_factory() as session:
             assert await session.get(User, sole_admin.id) is not None

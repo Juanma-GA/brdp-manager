@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import error_detail
 from app.api.deps import require_project_role
 from app.db.base import get_db
 from app.models import BRDP, BRDPHistory, Project, User
@@ -107,7 +108,9 @@ async def _get_owned_brdp(project_id: uuid.UUID, brdp_id: uuid.UUID, db: AsyncSe
     """
     brdp = await get_active_brdp(project_id, brdp_id, db)
     if brdp is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BRDP not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=error_detail("brdp_not_found", message="BRDP not found")
+        )
     return brdp
 
 
@@ -256,7 +259,11 @@ async def create_brdp(
     if await _identifier_taken(project_id, body.identifier, db):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"A BRDP with identifier {body.identifier!r} already exists in this project",
+            detail=error_detail(
+                "brdp_identifier_taken",
+                message=f"A BRDP with identifier {body.identifier!r} already exists in this project",
+                identifier=body.identifier,
+            ),
         )
     brdp = BRDP(project_id=project_id, **body.model_dump())
     # Embeddings are computed on demand by the embedding_jobs background

@@ -5,6 +5,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
+from app.core.errors import error_detail, new_error_ref
 from app.api.deps import get_httpx_transport, require_project_role
 from app.db.base import get_db
 from app.models import BRDP, EmbeddingJob, Project, User
@@ -26,6 +28,7 @@ from app.services.embedding_jobs import (
     run_embedding_job,
 )
 
+logger = logging.getLogger("app.errors")
 router = APIRouter(prefix="/api/projects/{project_id}/embeddings", tags=["embedding-jobs"])
 
 
@@ -72,15 +75,24 @@ async def embed_one_brdp(
         await db.execute(select(BRDP).where(BRDP.id == brdp_id, BRDP.project_id == project_id, ACTIVE_BRDP_FILTER))
     ).scalar_one_or_none()
     if brdp is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BRDP not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=error_detail("brdp_not_found", message="BRDP not found")
+        )
     if await get_running_job(project_id, db) is not None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Embedding computation is already running for this project"
+            status_code=status.HTTP_409_CONFLICT,
+            detail=error_detail(
+                "embedding_job_running", message="Embedding computation is already running for this project"
+            ),
         )
     try:
         embedded = await embed_single_brdp(brdp, db, transport)
     except EmbeddingUnavailable as err:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not compute the embedding: {err}")
+        # The provider's own text stays in the log under the reference
+        # (Decisión 12); the person reads a sentence.
+        ref = new_error_ref()
+        logger.error("ref=%s embedding of one BRDP failed: %s", ref, err)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error_detail("embedding_unavailable", ref))
     return SingleBrdpEmbeddingOut(embedded=embedded)
 
 
@@ -109,7 +121,11 @@ async def compute_embeddings(
     if active is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Embedding computation is already running for this project (job {active.id}, started at {active.started_at.isoformat()})",
+            detail=error_detail(
+                "embedding_job_running",
+                message=f"Embedding computation is already running for this project (job {active.id}, started at {active.started_at.isoformat()})",
+                started_at=active.started_at.isoformat(),
+            ),
         )
 
     project_pending, catalog_pending = await count_pending(project, db)

@@ -49,6 +49,16 @@ class SimilarCandidateOut(BaseModel):
     # kind='rule' (docs request, Suggest Rule round): the bare project
     # name, or "Template" for a template_fallback row.
     source: str = ""
+    # AACF 3, Part 3 (HR21): the same origin as structured data, which the
+    # interface translates and the prompts turn into the English label
+    # above (src/prompts/shared.js referenceSourceText). source_type:
+    # "records" (another project's BRDP, kind='definition'), "catalog",
+    # "project" (another project's BRDP, kind='proposal'/'rule'),
+    # "template" (a curated template row), "" (this project). source_project:
+    # the project's name for "records"/"project", otherwise "". `source`
+    # stays, in English, for scripts and tests that read it.
+    source_type: str = ""
+    source_project: str = ""
     # kind='rule' only (docs request, Suggest Rule round): each precedent
     # is a "Proposal -> rule" PAIR -- `text` is the rule_xml, this is the
     # Proposal that rule implements. Empty for the other kinds (their own

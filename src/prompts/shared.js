@@ -305,3 +305,24 @@ function kindLines(kind, mode, commonList, perVariant) {
   return out;
 }
 
+
+// AACF 3, Part 3: the origin of a Suggest reference, built from the
+// structured data /similar sends (source_type + source_project), in English
+// as the prompts have always said it: "Records: <project>" / "Catalog" for
+// Suggest Definition, the bare project name for Suggest Proposal / Rule,
+// "Template" for a curated template row, nothing for this project. The
+// interface translates the same data separately (ReferenceRow).
+export function referenceSourceText(candidate) {
+  switch (candidate?.source_type) {
+    case 'records':
+      return `Records: ${candidate.source_project}`;
+    case 'catalog':
+      return 'Catalog';
+    case 'project':
+      return candidate.source_project;
+    case 'template':
+      return 'Template';
+    default:
+      return '';
+  }
+}

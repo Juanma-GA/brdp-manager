@@ -269,7 +269,9 @@ async def test_identifier_reuse_after_delete_then_restore_conflict(client, admin
     # must be a clean, explained 409, not a raw integrity error.
     restore = await client.post(f"/api/trash/{original['id']}/restore", headers=admin_headers)
     assert restore.status_code == 409
-    assert "BRDP-REUSE-001" in restore.json()["detail"]
+    detail = restore.json()["detail"]
+    assert detail["code"] == "brdp_restore_identifier_taken" and detail["identifier"] == "BRDP-REUSE-001"
+    assert "BRDP-REUSE-001" in detail["message"]
 
 
 async def test_reset_data_bulk_soft_deletes_all_active(client, admin_editor_and_project):

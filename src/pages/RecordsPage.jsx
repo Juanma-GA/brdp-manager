@@ -240,6 +240,10 @@ function historyValueTitle(t, fieldName, value) {
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
   if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   if (fieldName === 'catalog_edition') return formatCatalogEditionValue(t, value);
+  // AACF 3, Part 3: a status value reads in the interface language in its
+  // tooltip too, never as the stored token ("verified", "draft").
+  const prefix = HISTORY_TRANSLATED_FIELDS[fieldName];
+  if (prefix) return t(`${prefix}.${value}`, { defaultValue: value });
   return fieldName === 'rule_test' ? formatRuleTestHistoryValue(t, value) : value;
 }
 

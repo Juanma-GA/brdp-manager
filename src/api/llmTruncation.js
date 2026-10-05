@@ -6,6 +6,8 @@
 // finish_reason "length" (Mistral also "model_length"); Anthropic with
 // stop_reason "max_tokens". Pure (the eval harness and the Node tests
 // import it; llmAPI.js pulls in the browser's API client).
+import i18n from '../i18n/index.js';
+
 export const LLM_TRUNCATED = 'llm_truncated';
 
 export function isTruncatedAnswer(provider, data) {
@@ -15,7 +17,9 @@ export function isTruncatedAnswer(provider, data) {
 }
 
 export function truncatedAnswerError() {
-  const error = new Error('The AI answer was cut off by its length limit.');
+  // AACF 3, Part 3: shown as is by Ask and Suggest, so in the interface
+  // language; callers that need to tell it apart use `code`.
+  const error = new Error(i18n.t('errors.llmTruncated'));
   error.code = LLM_TRUNCATED;
   return error;
 }

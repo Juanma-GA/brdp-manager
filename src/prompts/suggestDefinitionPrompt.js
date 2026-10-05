@@ -1,6 +1,6 @@
 // Prompt-refactor round: Suggest Definition's system prompt, moved out of
 // RecordsPage.jsx verbatim (no behavior change).
-import { buildSuggestUnknownNamesBlock } from './shared.js';
+import { buildSuggestUnknownNamesBlock, referenceSourceText } from './shared.js';
 
 // Suggest Definition's own system prompt (docs request, Suggest Definition
 // corpus round) -- a dedicated function, not inline in requestSuggestion,
@@ -33,7 +33,7 @@ element names; do not mix in other versions of S1000D or DITA.
     prompt += `SIMILAR BRDPs — validated decision points closest in meaning to this
 one. Follow their style, length and level of detail:
 ${similar
-  .map((c) => `[${c.identifier} | ${c.source} | similarity ${c.score.toFixed(2)}]\n${referenceBlock(c)}`)
+  .map((c) => `[${c.identifier} | ${referenceSourceText(c)} | similarity ${c.score.toFixed(2)}]\n${referenceBlock(c)}`)
   .join('\n\n')}
 
 `;
@@ -43,7 +43,7 @@ ${similar
     prompt += `STYLE REFERENCES — validated decision points that are DIFFERENT in
 content. Use them only to see how Definitions are written in this
 standard; do not copy or reuse their content:
-${styleReferences.map((c) => `[${c.identifier} | ${c.source}]\n${referenceBlock(c)}`).join('\n\n')}
+${styleReferences.map((c) => `[${c.identifier} | ${referenceSourceText(c)}]\n${referenceBlock(c)}`).join('\n\n')}
 
 `;
   }
