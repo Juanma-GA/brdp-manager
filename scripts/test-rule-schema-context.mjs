@@ -91,11 +91,9 @@ check('schemaLocationOf: master kept', schemaLocationOf({ schemaLocation: 'maste
   for (const [schema, folder] of [['comment', 'comment'], ['ddn', 'ddn'], ['dml', 'dml'], ['pm', 'pm']]) {
     check(`master ${schema} under ${folder}/`, schemaContextUrl('S1000D 3.0.1', schema, 'master') === `http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/${folder}/${schema}Schema.xsd`);
   }
-  // Real 3.0.1 master list (public/brex-schema-summary-sch.json, BRDP-A1-00100):
-  // every xml_schema_master URL there is exactly what the app writes.
-  const sch = JSON.parse(fs.readFileSync(path.join(root, 'public/brex-schema-summary-sch.json'), 'utf8'));
-  const a1 = sch.few_shot_examples.find((e) => e.id === 'BRDP-A1-00100');
-  const masterUrls = [...a1.assert_test.matchAll(/'(http[^']*xml_schema_master[^']*)'/g)].map((m) => m[1]);
+  // Real 3.0.1 master list (BRDP-A1-00100, a real project's approved
+  // locations): every xml_schema_master URL there is exactly what the app writes.
+  const masterUrls = JSON.parse(fs.readFileSync(path.join(root, 'scripts/rule-test-fixtures/master-schema-urls-3-0-1.json'), 'utf8')).urls;
   check('real 3.0.1 master list present', masterUrls.length >= 15, String(masterUrls.length));
   const mismatch = masterUrls.filter((u) => u !== schemaContextUrl('S1000D 3.0.1', schemaNameFromContext(u), 'master'));
   check('every real 3.0.1 master URL matches the app', mismatch.length === 0, mismatch.join(' '));

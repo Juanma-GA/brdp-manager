@@ -1,0 +1,21 @@
+{
+  "_comment": "Real approved xsi:noNamespaceSchemaLocation values (master form) of a real S1000D 3.0.1 project, rule BRDP-A1-00100. Kept as test data for scripts/test-rule-schema-context.mjs (it used to live in public/brex-schema-summary-sch.json, removed in Barrido final 4).",
+  "urls": [
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/appliccrossreftableSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/brexSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/comment/commentSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/condcrossreftableSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/ddn/ddnSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dml/dmlSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/faultSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/ipdSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/pm/pmSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/prdcrossreftableSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/procedSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/schedulSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/techrepSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/wrngdataSchema.xsd",
+    "http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/wrngfldsSchema.xsd"
+  ]
+}

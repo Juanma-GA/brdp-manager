@@ -14,19 +14,6 @@ export async function loadSchemaSummary() {
   return _schemaSummaryCache;
 }
 
-export function extractXML(rawResponse) {
-  if (!rawResponse) return "";
-  let text = rawResponse.trim();
-  text = text.replace(/^```(?:xml)?\s*/i, "").replace(/\s*```\s*$/, "");
-  const xmlStart = text.indexOf("<?xml");
-  if (xmlStart > 0) text = text.slice(xmlStart);
-  const lastClose = text.lastIndexOf(">");
-  if (lastClose !== -1 && lastClose < text.length - 1) {
-    text = text.slice(0, lastClose + 1);
-  }
-  return text.trim();
-}
-
 // wrapRuleXmlFragment lives in src/utils/ruleXmlFragment.js (pure, no API
 // imports) so the rule test engine can use it too; re-exported here for the
 // existing callers.
@@ -75,171 +62,6 @@ export function checkWellFormed(xmlString) {
   } catch (err) {
     return { valid: false, error: err.message };
   }
-}
-
-export function buildBREXPromptChunk(chunkBRDPs, projectConfig, schemaSummary) {
-  const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
-  const schemaJSON = JSON.stringify(schemaSummaryWithoutExamples, null, 2);
-
-  const fewShotBlock = (schemaSummary.few_shot_examples || []).map((ex, i) => {
-    const flag = ex.allowedObjectFlag;
-    const labels = [];
-    if (flag === "0") labels.push("prohibited");
-    else if (flag === "1") labels.push("mandatory");
-    else labels.push("no flag");
-    if (ex.objectPath && ex.objectPath.includes("[")) labels.push("complex XPath");
-    if (ex.objectValues && ex.objectValues.length > 1) labels.push("multi value");
-    const objectValueLines = (ex.objectValues || [])
-      .map(v => `  <objectValue valueForm="single" valueAllowed="${v}"/>`)
-      .join("\n");
-    const flagAttr = flag != null ? ` allowedObjectFlag="${flag}"` : "";
-    return `### Example ${i + 1} — ${labels.join(", ")}
-INPUT id: ${ex.id}
-OUTPUT:
-<structureObjectRule id="${ex.id}" brSeverityLevel="brsl01">
-  <brDecisionRef brDecisionIdentNumber="${ex.id}"/>
-  <objectPath${flagAttr}>${ex.objectPath}</objectPath>
-  <objectUse>${ex.objectUse}</objectUse>
-${objectValueLines}</structureObjectRule>`;
-  }).join("\n\n");
-
-  const system = `You are an S1000D Issue 4.2 expert generating structureObjectRule elements for a BREX Data Module.
-
-Follow this schema structure exactly:
-${schemaJSON}
-
-STRICT RULES:
-1. Output ONLY raw structureObjectRule XML elements — no XML declaration, no dmodule wrapper, no markdown.
-2. Each BRDP = one structureObjectRule element.
-3. Child order in structureObjectRule: brDecisionRef → objectPath → objectUse → objectValue.
-4. brDecisionRef uses ATTRIBUTE: <brDecisionRef brDecisionIdentNumber="BRDP-001"/> — NOT text content.
-5. allowedObjectFlag: "0"=prohibited, "1"=mandatory, "2"=optional.
-6. objectUse = one sentence summarising the decision.
-7. Start output directly with <structureObjectRule — no preamble.
-8. Each structureObjectRule must contain EXACTLY ONE objectPath element. If a BRDP requires multiple XPath expressions, generate multiple separate structureObjectRule elements each with the same brDecisionRef, but with UNIQUE id attributes: use suffix -b, -c, -d for the additional rules (e.g. id="BRDP-S1-00093-b", id="BRDP-S1-00093-c"). The first rule keeps the original id. NEVER repeat the same id value in more than one structureObjectRule. This also applies when multiple objectPath elements share the same allowedObjectFlag value — each objectPath must still be in its own separate structureObjectRule with a unique id.
-9. objectValue ONLY allows two attributes: valueAllowed and valueForm. valueForm MUST be one of: single, range, pattern. NEVER use list, regex, conditional, multiple or any other value. NEVER add a condition attribute or any other attribute to objectValue.
-10. If a BRDP has no clear XPath target (procedural rules, references to external standards, general policies), output it as a nonContextRule — NOT as a structureObjectRule. The exact structure to output is:
-<nonContextRule id="BRDP-xxx" brSeverityLevel="brsl01">
-  <brDecisionRef brDecisionIdentNumber="BRDP-xxx"/>
-  <simplePara>One sentence describing the rule.</simplePara>
-</nonContextRule>
-assembleChunks() will place it correctly inside <nonContextRules>.
-NEVER put nonContextRule inside structureObjectRule. NEVER generate a structureObjectRule without objectPath.
-11. The id attribute of structureObjectRule must be globally unique across the entire document. NEVER use the same id value twice. If you split a BRDP into multiple structureObjectRule elements, only the first keeps the BRDP id. Additional rules use BRDP-id-b, BRDP-id-c, etc.
-12. NEVER invent attributes not in the schema. objectPath only allows allowedObjectFlag (values: 0, 1, 2) — no other attributes allowed on objectPath. Inside <simplePara> text, NEVER use raw XML tags: escape element names as &lt;elementName&gt; instead of <elementName>.
-
-## Few-shot examples: BRDP id → structureObjectRule
-${fewShotBlock}`;
-
-  const brdpLines = chunkBRDPs
-    .map((b, i) =>
-      `${i + 1}. ID: ${b.id}\n   Definition: ${b.definition}\n   Proposal: ${b.proposal}\n   Validation: ${b.validation}`
-    )
-    .join("\n\n");
-
-  const user = `Generate structureObjectRule elements for these ${chunkBRDPs.length} BRDPs:
-
-${brdpLines}
-
-Output ONLY the structureObjectRule elements, starting directly with <structureObjectRule`;
-
-  return { system, user };
-}
-
-function escapeXMLContent(xml) {
-  const escapeText = (content) => {
-    const unescaped = content
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'");
-    return unescaped
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  };
-
-  // Escape text content of objectUse
-  xml = xml.replace(/<objectUse>([\s\S]*?)<\/objectUse>/g,
-    (_, c) => `<objectUse>${escapeText(c)}</objectUse>`);
-
-  // Escape text content of objectPath (preserving attributes)
-  xml = xml.replace(/(<objectPath[^>]*>)([\s\S]*?)(<\/objectPath>)/g,
-    (_, open, c, close) => `${open}${escapeText(c)}${close}`);
-
-  // Escape text content of objectValue valueAllowed attribute is already an attribute so skip
-  // But escape any objectValue text content if present
-  xml = xml.replace(/(<objectValue[^>]*>)([\s\S]*?)(<\/objectValue>)/g,
-    (_, open, c, close) => `${open}${escapeText(c)}${close}`);
-
-  // Escape text content of simplePara
-  xml = xml.replace(/<simplePara>([\s\S]*?)<\/simplePara>/g,
-    (_, c) => `<simplePara>${escapeText(c)}</simplePara>`);
-
-  return xml;
-}
-
-function splitMultipleObjectPaths(xml) {
-  const original = xml;
-  // (?![a-zA-Z]) anchors the opening tag so it can't also match the
-  // literal prefix "<structureObjectRule" inside "<structureObjectRuleGroup>"
-  // -- confirmed real bug (Lufthansa 78-BRDP BREX): without the anchor this
-  // swallows everything up to the next real </structureObjectRule>,
-  // corrupting the group's own closing tag. See assembleChunks() below,
-  // where the same bug caused a real "tag mismatch" well-formedness error.
-  const rulePattern = /<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/g;
-
-  const rules = [];
-  let match;
-  while ((match = rulePattern.exec(original)) !== null) {
-    rules.push({ full: match[0], start: match.index, end: match.index + match[0].length });
-  }
-
-  const replacements = [];
-  for (const rule of rules) {
-    const paths = [...rule.full.matchAll(/<objectPath[^>]*>[\s\S]*?<\/objectPath>/g)];
-    if (paths.length <= 1) continue;
-
-    const idMatch = rule.full.match(/id="([^"]+)"/);
-    const severityMatch = rule.full.match(/brSeverityLevel="([^"]+)"/);
-    const brDecisionMatch = rule.full.match(/<brDecisionRef[^>]*\/>/);
-    const objectUseMatch = rule.full.match(/<objectUse>[\s\S]*?<\/objectUse>/);
-    const objectValueMatch = rule.full.match(/<objectValue[^>]*\/>/);
-
-    if (!idMatch || !brDecisionMatch) continue;
-
-    const baseId = idMatch[1];
-    const severity = severityMatch ? severityMatch[1] : 'brsl01';
-    const brDecision = brDecisionMatch[0];
-    const objectUse = objectUseMatch ? objectUseMatch[0] : '';
-    const objectValue = objectValueMatch ? objectValueMatch[0] : '';
-    const suffixes = ['', '-b', '-c', '-d', '-e'];
-
-    const newRules = paths.map((path, i) => {
-      const newId = baseId + (suffixes[i] || `-${i}`);
-      const lines = [
-        `<structureObjectRule id="${newId}" brSeverityLevel="${severity}">`,
-        `  ${brDecision}`,
-        `  ${path[0]}`,
-      ];
-      if (objectUse) lines.push(`  ${objectUse}`);
-      if (objectValue) lines.push(`  ${objectValue}`);
-      lines.push(`</structureObjectRule>`);
-      return lines.join('\n');
-    }).join('\n');
-
-    replacements.push({ start: rule.start, end: rule.end, replacement: newRules });
-  }
-
-  // Aplicar replacements de atrás hacia adelante para no desplazar índices
-  let result = original;
-  for (let i = replacements.length - 1; i >= 0; i--) {
-    const { start, end, replacement } = replacements[i];
-    result = result.slice(0, start) + replacement + result.slice(end);
-  }
-
-  return result;
 }
 
 // Parses one approved BRDP's rule_xml fragment into a throwaway <root>
@@ -420,8 +242,6 @@ function serializeDocument(doc) {
   return xml.replace(/(<\?xml[^>]*\?>)\s*(<dmodule\b)/, '$1\n$2');
 }
 
-const MAX_RETRIES = 2;
-
 // Batch-fetches every frozen approval for the given format in one request
 // (GET /api/approvals/format/:format) instead of one call per BRDP. Same
 // safe-degrade philosophy as generateBREX301.js's fetchApprovalsMap301: a
@@ -437,39 +257,6 @@ async function fetchApprovalsMap(format) {
     console.error(`Failed to fetch rule approvals for format ${format}:`, err);
     return new Map();
   }
-}
-
-export async function generateSingleRule(brdp, projectConfig, schemaSummary, callLLM) {
-  const { system, user } = buildBREXPromptChunk([brdp], projectConfig, schemaSummary);
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const raw = await callLLM(system, user);
-    if (!raw) continue;
-    const escaped = raw.trim()
-      .replace(/\s+allowedObjectFlagContext="[^"]*"/g, '')
-      .replace(/<brDecisionIdentNumber brDecisionIdentNumber="([^"]+)"\/>/g, '<brDecisionRef brDecisionIdentNumber="$1"/>');
-    const escapedContent = escapeXMLContent(escaped);
-    const splitContent = splitMultipleObjectPaths(escapedContent);
-
-    // Intentar structureObjectRule primero (mismo ancla que splitMultipleObjectPaths/assembleChunks)
-    const ruleMatch = splitContent.match(/<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/);
-    if (ruleMatch) {
-      const idMatch = ruleMatch[0].match(/structureObjectRule id="([^"]+)"/);
-      if (idMatch && idMatch[1] === brdp.id) {
-        return { type: 'structure', xml: ruleMatch[0] };
-      }
-    }
-
-    // Aceptar nonContextRule si el LLM decide que no hay XPath claro
-    const nonContextMatch = splitContent.match(/<nonContextRule[\s\S]*?<\/nonContextRule>/);
-    if (nonContextMatch) {
-      const idMatch = nonContextMatch[0].match(/nonContextRule id="([^"]+)"/);
-      if (idMatch && idMatch[1] === brdp.id) {
-        return { type: 'nonContext', xml: nonContextMatch[0] };
-      }
-    }
-  }
-  console.warn(`Could not generate rule for ${brdp.id} after ${MAX_RETRIES} attempts`);
-  return null;
 }
 
 // ===== Finalización determinista del documento (S1000D 4.2) =====
@@ -696,10 +483,7 @@ function pruneEmptyContainers(xml) {
 // injects their rule_xml verbatim; every other Validated BRDP is left out of
 // the document as a plain XML comment (never nonContextRule -- that element
 // has a specific S1000D meaning, "no clear XPath target", which does not
-// apply here; the reason is simply "not approved yet"). generateSingleRule
-// and the prompt builders above still exist and are unchanged -- they now
-// serve only the BRDP Assistant's "Suggest Rule" mode (generateSuggestedRule.js),
-// never this function.
+// apply here; the reason is simply "not approved yet").
 export async function generateBREX(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,

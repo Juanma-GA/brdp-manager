@@ -1,4 +1,4 @@
-import { extractXML, pendingApprovalComment } from "./generateBREX.js";
+import { pendingApprovalComment } from "./generateBREX.js";
 import { ruleEnters } from "../utils/generatePlan.js";
 import { _isSafePattern } from "./brexToSchematron.js";
 import { getApprovalsForFormat } from "./approvals.js";
@@ -74,43 +74,6 @@ function renderMessage(entry) {
   return entry.messageIsRawXml ? String(entry.message == null ? "" : entry.message) : escapeXmlText(entry.message);
 }
 
-function buildFewShotBlock(schemaSummary) {
-  const examples = schemaSummary.few_shot_examples || [];
-  return examples
-    .map((ex, i) => {
-      const topics = (ex.topicTypes || []).join(", ");
-
-      if (ex.confidence_ai === "DESACTIVADA") {
-        // Teaches restraint: this looked checkable but real DITA verification
-        // proved it wrong (not just uncertain) -- the correct move is a
-        // traceability comment, never a forced/invented rule.
-        return `### Example ${i + 1} — ${ex.id} (topics: ${topics}) — WHEN TO STOP AND NOT GENERATE A RULE
-Tempting but WRONG attempt (context="${ex.context}", test="${ex.test}"):
-this assumed <revised> could contain a <comment> child. Real verification against
-the XSD showed <revised> is EMPTY (attributes only, no child elements or text) --
-the rule was structurally impossible, not just unverified.
-CORRECT output when this happens — a traceability comment, nothing else:
-<!-- ${ex.id}: no se pudo generar una regla Schematron automatable (${escapeXmlText(ex.notes.split(".")[0])}); pendiente de revision manual. -->`;
-      }
-
-      if (ex.id === "BRDP-D1-00313") {
-        return `### Example ${i + 1} — ${ex.id} (topics: ${topics}, confidence: ${ex.confidence_ai}) — MULTIPLE INDEPENDENT CHECKS IN ONE RULE
-${BRDP_00313_LITERAL}
-Note the two sch:report elements share the same sch:rule/@context but each has
-its OWN globally-unique @id, suffixed with a short descriptive slug
-(-shortdesc / -author) — never reuse the bare BRDP id twice.`;
-      }
-
-      return `### Example ${i + 1} — ${ex.id} (topics: ${topics}, confidence: ${ex.confidence_ai})
-<sch:pattern>
-  <sch:rule context="${ex.context}">
-${renderSchLets(ex.lets)}    <sch:assert role="${ex.assert_role}" id="${ex.id}" test="${ex.test}">${renderMessage(ex)}</sch:assert>
-  </sch:rule>
-</sch:pattern>`;
-    })
-    .join("\n\n");
-}
-
 // When a real project BRDP's id happens to exactly match one of the curated
 // few-shot examples, the pattern is copied here DETERMINISTICALLY instead of
 // asking the LLM to regenerate it. A real 100-BRDP run showed the LLM can get
@@ -136,121 +99,6 @@ ${renderSchLets(entry.lets)}    <sch:assert role="${entry.assert_role}" id="${en
 </sch:pattern>`;
 }
 
-// ===== STRICT RULES =====
-// Rules 4-12 map 1:1 onto the 9 real patterns identified across the 29 curated
-// few-shots (absolute prohibition, enumeration, regex-on-correct-attribute,
-// conditional/ancestor structure across topicTypes, nesting depth, unique
-// suffixed ids, assert/report polarity, error/warning mapping, when NOT to
-// generate a rule). Rules 1-3 and 13-14 are the supporting scaffolding needed
-// to make those 9 patterns actually produce valid, assemblable Schematron.
-const STRICT_RULES = `STRICT RULES:
-1. Output ONLY raw <sch:pattern>...</sch:pattern> blocks (or, when rule 12 applies, a single XML comment) — no XML declaration, no <sch:schema> wrapper, no markdown fences, no explanation, no preamble.
-2. Each BRDP produces ONE <sch:pattern> containing ONE <sch:rule context="...">. If a single BRDP needs more than one independent check (see rule 9), put all of them inside that SAME sch:rule as separate sch:assert/sch:report elements — do not create multiple patterns for one BRDP.
-3. context MUST be a valid Schematron/XSLT match pattern: an element name, a union of element names with "|", and predicates on that same node (e.g. fig[@id], topicmeta[not(data[@name='x'])]). NEVER start context with a reverse axis (ancestor::, parent::, preceding::, preceding-sibling::) — that is illegal in a match pattern. If the rule logically needs an ancestor/parent check, put that check inside test (where ancestor::/parent:: are always legal), and keep context simple.
-4. Absolute prohibition of an element with no exceptions -> context targets the forbidden element itself, test="false()".
-5. Closed list of permitted values given in the proposal -> test="@attr = ('v1','v2','v3')" (XPath enumeration). Do not use a regex for a short closed list of literal values.
-6. Attribute pattern/format constraint -> matches(@attr, '^...$', 'i') anchored with ^ and $, case-insensitive unless case clearly matters. CRITICAL: apply the regex to the attribute that ACTUALLY carries that data according to vocabulary_by_domain — verify which element/attribute really holds the value before writing the test (e.g. a filename pattern belongs on image/@href, never on fig/@id or table/@id; those are unrelated attributes on unrelated elements).
-7. Structural rule that must hold across more than one topicType (see the BRDP's topicTypes) -> the test must accept EVERY structural alternative used by those topicTypes, combined with "or". Different topicTypes can satisfy the same rule through different real elements (e.g. a generic task's prereq/context is NOT the same structure as machineryTask's formal <safety> element from taskreq-d — if a rule targets both, test must accept ancestor::safety OR the generic task structure, not just one of them). Check vocabulary_by_domain for the topicTypes involved before writing the test.
-8. Nesting-depth limit -> count(ancestor::element-name) compared with a relational operator (see rule 17 for how to escape it). Never simulate depth counting with nested positional predicates.
-9. sch:assert/@id and sch:report/@id MUST be globally unique across the ENTIRE document being assembled. If a BRDP produces more than one independent check, suffix each id with a short descriptive slug: BRDP-id-slug (e.g. BRDP-D1-00313-shortdesc, BRDP-D1-00313-author). NEVER reuse the same id twice, and never reuse a bare BRDP id for more than one assert/report.
-10. sch:assert/@test fires its message when the test evaluates to FALSE — phrase it as what MUST be true. sch:report/@test fires its message when the test evaluates to TRUE — phrase it as what must NOT happen. Pick whichever reads naturally for the rule, but never invert the polarity.
-11. role="error" for absolute prohibitions/mandates ("must", "shall not", "is required") and for closed enumerations from a fixed external standard. role="warning" for recommendations/conditional language ("should", "recommend", "discard if not necessary", "consider", "discard what is not never need").
-12. If the BRDP has no reliable structural hook in real DITA — either it is actually a process/governance decision with no XML footprint, or the element/attribute it describes is not present in vocabulary_by_domain/topic_types for the relevant topicTypes — DO NOT invent a rule. Output ONLY this XML comment instead:
-<!-- BRDP-id: no se pudo generar una regla Schematron automatable (motivo breve); pendiente de revision manual. -->
-13. NEVER use an element or attribute name that is not listed in vocabulary_by_domain or topic_types. If you are not sure an element exists in real DITA, prefer a name that IS confirmed there, or fall back to rule 12 — never guess a plausible-sounding element name (this is exactly the class of error that caused real false positives before: assuming <video>/<audio> attributes existed when only <object> is confirmed).
-14. Inside sch:assert/sch:report message text, escape angle brackets naming elements: write &lt;elementName&gt;, never a literal <elementName>.
-15. Do not add topic-type detection logic (no checking @domains, no checking the root element name) — contexts self-limit by which elements are actually present in the document being validated; this is intentional (Option B).
-16. XML comments (rule 12) must NEVER contain the two-character sequence "--" anywhere in their body, and must not end with "-" right before "-->" — both break XML well-formedness. Use ";" or an em dash "—" for a pause instead of "--".
-17. Inside test, context, and sch:let/@value attribute values — not just message text — a literal < or & must be escaped as &lt; / &amp;. This applies even to numeric comparisons: write count(...) &lt; 2, never count(...) < 2 with a raw <. Attribute values follow the same escaping requirement as element text (rule 14), it is not optional just because the value is XPath.
-18. Before writing a test, sanity-check it is not vacuous. A test comparing two nearly-identical XPath expressions (e.g. count(X[cond < 3]) >= count(X[cond <= 3]), which is true almost by construction) does not actually verify the rule's intent — treat this as a sign the BRDP has no reliable structural hook and use rule 12 instead of forcing a lookalike rule. This applies especially to BRDPs about publishing/rendering configuration (TOC depth, page layout, print pagination, PDF/output formatting) that only affect how the publishing engine (DITA-OT) renders output, not the source document's own structure — even if a real element name (e.g. the bookmap <toc> placeholder) is nearby, using it to approximate a rendering-only decision is a semantic mismatch, not a real structural check. Apply this consistently: if a BRDP is essentially the same kind of decision as one you would otherwise resolve with rule 12, resolve it the same way even if its wording makes it look superficially structural.
-19. Row-by-row cross-column check inside a DITA/CALS table (tgroup/tbody/row/entry) -> resolve the target column by its header TEXT, never by position: add an <sch:let name="colX" value="tgroup/thead/row[1]/entry[normalize-space(.) = 'Header Text']/@colname"/> as a direct child of sch:rule, placed BEFORE the sch:assert/sch:report, then reference it as $colX inside test. CALS/DITA tables identify columns by @colname, not by ordinal position — entry[2]-style positional predicates silently break if columns are reordered. Express the "for every row" condition with the XPath 2.0 quantifier "every $row in tgroup/tbody/row satisfies (...)" — never simulate this with count()/positional indexing, which cannot express a per-row condition that depends on another column's value in that same row.
-20. Cross-file consistency check (a value declared once, e.g. in the .ditamap via keydef/keyword, must match its real usage inside a topic referenced from elsewhere) -> use document($hrefExpr, .) inside an <sch:let> to resolve and read the OTHER file's content; the second argument (a node, typically ".") anchors the relative href to the document currently being validated -- never call document() with only one argument when the href is relative. Resolve which topic to open via its own reference (e.g. //topicref[@navtitle = '...' or topicmeta/navtitle = '...']/@href), never by guessing a filename. When the assert's message should show the actual mismatched values (not just "these don't match"), embed <sch:value-of select="$var"/> directly inside the message content -- this requires setting "messageIsRawXml": true on the few-shot entry (see renderMessage()), since a plain message string is XML-escaped and would turn a real <sch:value-of> into inert text. This category is inherently less portable than rule 19's: it only works when the Schematron engine validates with real file-system access to the referenced topic (e.g. validating the .ditamap, not an isolated topic file) -- note that limitation explicitly in the BRDP's own documentation rather than assuming it always applies.`;
-
-// queryBinding defaults to "xslt2": this LLM-fallback prompt builder is
-// used only by generateSingleRule() below, whose own real call chain
-// (generateSuggestedRule.js's SCH-DITA case <- useChat.js <- ChatPanel.jsx)
-// is confirmed NOT reachable from any current UI -- RecordsPage.jsx's real
-// "Suggest Rule" button builds its own generic few-shot prompt from
-// /similar precedent directly (see requestSuggestion() there) and never
-// calls this file's prompt builder at all. Fixed here anyway (the same
-// hardcoded "xslt2" bug as finalizeSchematronDocument/checkRootHeader) so
-// this dead code doesn't carry a wrong assumption if it's ever reconnected,
-// but there is no live caller today that could pass "xslt3" through it.
-function buildSchematronPrompt(chunkBRDPs, schemaSummary, queryBinding = "xslt2") {
-  const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
-  const schemaJSON = JSON.stringify(schemaSummaryWithoutExamples, null, 2);
-  const fewShotBlock = buildFewShotBlock(schemaSummary);
-
-  const system = `You are a DITA 1.3 Schematron business-rules expert. Generate sch:pattern blocks (ISO Schematron, ${queryBinding} queryBinding) implementing the given BRDPs (Business Rules Decision Points), each already classified as checkable XML structure.
-
-Reference structure (6 topic types + real confirmed element vocabulary per domain):
-${schemaJSON}
-
-${STRICT_RULES}
-
-## Few-shot examples: BRDP → sch:pattern
-Use these real, oXygen-validated examples as reference for context/test/role style and for when to decline (see the "WHEN TO STOP" example).
-
-${fewShotBlock}`;
-
-  const brdpLines = chunkBRDPs
-    .map(
-      (b, i) =>
-        `${i + 1}. ID: ${b.id}\n   Definition: ${b.definition}\n   Proposal: ${b.proposal}`
-    )
-    .join("\n\n");
-
-  const user = `Generate sch:pattern blocks for these ${chunkBRDPs.length} BRDP(s):
-
-${brdpLines}
-
-Output ONLY the sch:pattern blocks (or traceability comments per rule 12), starting directly with <sch:pattern or <!--`;
-
-  return { system, user };
-}
-
-// ===== Response parsing / verification =====
-
-const MAX_RETRIES = 2;
-
-function extractPatternBlocks(text) {
-  return [...text.matchAll(/<sch:pattern\b[\s\S]*?<\/sch:pattern>/g)].map((m) => m[0]);
-}
-
-function extractTraceabilityComments(text) {
-  return [...text.matchAll(/<!--\s*BRDP-[\s\S]*?-->/g)].map((m) => m[0]);
-}
-
-function extractCheckIds(text) {
-  return new Set(
-    [...text.matchAll(/<sch:(?:assert|report)\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1])
-  );
-}
-
-// Only counts a comment as a genuine resolution if it follows our own
-// canonical "no automatable rule" wording (STRICT RULE 12's template always
-// includes "pendiente de revision manual").
-// A real 100-BRDP run found the LLM sometimes dismisses a BRDP with an
-// off-pattern comment instead ("ya existe en few-shot ... no se genera de
-// nuevo (regla duplicada)") when its id happens to match a few-shot example
-// -- that is NOT a valid resolution, it's the model silently dropping a real
-// rule, and the old code counted ANY "BRDP-id:" comment as coverage,
-// masking the loss. Requiring the canonical phrase closes that loophole
-// without breaking the legitimate rule-12 mechanism.
-function extractCommentedIds(text) {
-  const ids = new Set();
-  for (const m of text.matchAll(/<!--\s*(BRDP-[A-Za-z0-9-]+)\s*:([\s\S]*?)-->/g)) {
-    if (/pendiente de revision manual/i.test(m[2])) ids.add(m[1]);
-  }
-  return ids;
-}
-
-// A generated id "covers" a BRDP if it equals the BRDP id, or is that id with a
-// descriptive suffix (BRDP-id-slug), matching STRICT RULE 9's suffixing scheme.
-function idCoversBRDP(id, brdpId) {
-  return id === brdpId || id.startsWith(brdpId + "-");
-}
-
 function sanitizeForXmlComment(text) {
   // XML comments must never contain "--" or end with "-" before "-->".
   return String(text == null ? "" : text)
@@ -258,43 +106,6 @@ function sanitizeForXmlComment(text) {
     .replace(/-{2,}/g, "—")
     .replace(/-+$/, "")
     .trim();
-}
-
-// Splits raw LLM output into pattern blocks (dropping any whose ids don't map
-// to a real target BRDP -- hallucinated/invented patterns) and traceability
-// comments, and reports which of the expected BRDPs remain uncovered.
-function processChunkResponse(rawText, chunkBRDPs, targetIds) {
-  const patterns = extractPatternBlocks(rawText);
-  const rawComments = extractTraceabilityComments(rawText);
-
-  const keptPatterns = patterns.filter((block) => {
-    const ids = [...extractCheckIds(block)];
-    return ids.some((id) => [...targetIds].some((t) => idCoversBRDP(id, t)));
-  });
-
-  // Discard, not just ignore-for-coverage, any comment that doesn't follow
-  // our own canonical "no automatable rule" wording (extractCommentedIds
-  // already enforces that) -- otherwise an off-pattern dismissal like "ya
-  // existe / duplicada" would still leak into the final document even after
-  // a successful retry produced the real rule for the same BRDP.
-  const keptComments = rawComments.filter((block) => {
-    const ids = [...extractCommentedIds(block)];
-    return ids.some((id) => [...targetIds].some((t) => idCoversBRDP(id, t)));
-  });
-
-  const coveredIds = new Set();
-  for (const block of keptPatterns) {
-    for (const id of extractCheckIds(block)) coveredIds.add(id);
-  }
-  for (const block of keptComments) {
-    for (const id of extractCommentedIds(block)) coveredIds.add(id);
-  }
-
-  const missing = chunkBRDPs.filter(
-    (b) => ![...coveredIds].some((id) => idCoversBRDP(id, b.id))
-  );
-
-  return { patterns: keptPatterns, comments: keptComments, missing };
 }
 
 // Batch-fetches every frozen approval for FORMAT_ID in one request (see
@@ -311,22 +122,6 @@ async function fetchApprovalsMap(format) {
     console.error(`Failed to fetch rule approvals for format ${format}:`, err);
     return new Map();
   }
-}
-
-export async function generateSingleRule(brdp, schemaSummary, callLLM, queryBinding = "xslt2") {
-  const { system, user } = buildSchematronPrompt([brdp], schemaSummary, queryBinding);
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const raw = await callLLM(system, user);
-    if (!raw) continue;
-    const extracted = extractXML(raw);
-    const { patterns, comments, missing } = processChunkResponse(extracted, [brdp], new Set([brdp.id]));
-    if (missing.length === 0) {
-      if (patterns.length > 0) return { type: "pattern", xml: patterns.join("\n") };
-      if (comments.length > 0) return { type: "comment", xml: comments.join("\n") };
-    }
-  }
-  console.warn(`Could not generate a Schematron rule for ${brdp.id} after ${MAX_RETRIES} attempts`);
-  return null;
 }
 
 // ===== Deterministic finalization (no BREX-equivalent conversion exists for
@@ -1100,8 +895,7 @@ function collectNamespaces(blocks) {
 // bypass the LLM for known examples) is intentionally NOT consulted here
 // anymore: approval is now the only gate for inclusion, so an unapproved
 // BRDP that happens to match a curated id still becomes a comment, not a
-// silently-injected rule. generateSingleRule and the prompt builders above
-// still exist, unchanged, for the BRDP Assistant's "Suggest Rule" mode.
+// silently-injected rule.
 export async function generateSchematronDITA(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,
@@ -1171,4 +965,4 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
   };
 }
 
-export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument, queryBindingForStandard, dedupeSharedLets, collectNamespaces };
+export { buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument, queryBindingForStandard, dedupeSharedLets, collectNamespaces };

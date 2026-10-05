@@ -14,161 +14,6 @@ export async function loadSchemaSummary41() {
   return _schemaSummaryCache41;
 }
 
-export function buildBREXPromptChunk41(chunkBRDPs, projectConfig, schemaSummary) {
-  const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
-  const schemaJSON = JSON.stringify(schemaSummaryWithoutExamples, null, 2);
-
-  const fewShotBlock = (schemaSummary.few_shot_examples || []).map((ex, i) => {
-    const flag = ex.allowedObjectFlag;
-    const labels = [];
-    if (flag === "0") labels.push("prohibited");
-    else if (flag === "1") labels.push("mandatory");
-    else labels.push("no flag");
-    if (ex.objectPath && ex.objectPath.includes("[")) labels.push("complex XPath");
-    if (ex.objectValues && ex.objectValues.length > 1) labels.push("multi value");
-    const objectValueLines = (ex.objectValues || [])
-      .map(v => `  <objectValue valueForm="single" valueAllowed="${v}"/>`)
-      .join("\n");
-    const flagAttr = flag != null ? ` allowedObjectFlag="${flag}"` : "";
-    return `### Example ${i + 1} — ${labels.join(", ")}
-INPUT id: ${ex.id}
-OUTPUT:
-<structureObjectRule id="${ex.id}">
-  <objectPath${flagAttr}>${ex.objectPath}</objectPath>
-  <objectUse>${ex.objectUse}</objectUse>
-${objectValueLines}</structureObjectRule>`;
-  }).join("\n\n");
-
-  const system = `You are an S1000D Issue 4.1 expert generating structureObjectRule elements for a BREX Data Module.
-
-Follow this schema structure exactly:
-${schemaJSON}
-
-STRICT RULES:
-1. Output ONLY raw structureObjectRule XML elements — no XML declaration, no dmodule wrapper, no markdown.
-2. Each BRDP = one structureObjectRule element.
-3. Child order in structureObjectRule: objectPath → objectUse → objectValue.
-4. allowedObjectFlag: "0"=prohibited, "1"=mandatory, "2"=optional.
-5. objectUse = one sentence summarising the decision.
-6. Start output directly with <structureObjectRule — no preamble.
-7. Each structureObjectRule must contain EXACTLY ONE objectPath element. If a BRDP requires multiple XPath expressions, generate multiple separate structureObjectRule elements with UNIQUE id attributes: use suffix -b, -c, -d for the additional rules (e.g. id="BRDP-S1-00093-b", id="BRDP-S1-00093-c"). The first rule keeps the original id. NEVER repeat the same id value in more than one structureObjectRule. This also applies when multiple objectPath elements share the same allowedObjectFlag value — each objectPath must still be in its own separate structureObjectRule with a unique id.
-8. objectValue ONLY allows two attributes: valueAllowed and valueForm. valueForm MUST be one of: single, range, pattern. NEVER use list, regex, conditional, multiple or any other value. NEVER add a condition attribute or any other attribute to objectValue.
-9. If a BRDP has no clear XPath target (procedural rules, references to external standards, general policies), output it as a nonContextRule — NOT as a structureObjectRule. The exact structure to output is:
-<nonContextRule id="BRDP-xxx">
-  <simplePara>One sentence describing the rule.</simplePara>
-</nonContextRule>
-assembleChunks41() will place it correctly inside <nonContextRules>.
-NEVER put nonContextRule inside structureObjectRule. NEVER generate a structureObjectRule without objectPath.
-10. The id attribute of structureObjectRule must be globally unique across the entire document. NEVER use the same id value twice. If you split a BRDP into multiple structureObjectRule elements, only the first keeps the BRDP id. Additional rules use BRDP-id-b, BRDP-id-c, etc.
-11. NEVER invent attributes not in the schema. objectPath only allows allowedObjectFlag (values: 0, 1, 2) — no other attributes allowed on objectPath. There is NO brDecisionRef element and NO brSeverityLevel attribute in S1000D 4.1. Inside <simplePara> text, NEVER use raw XML tags: escape element names as &lt;elementName&gt; instead of <elementName>.
-
-## Few-shot examples: BRDP id → structureObjectRule
-${fewShotBlock}`;
-
-  const brdpLines = chunkBRDPs
-    .map((b, i) =>
-      `${i + 1}. ID: ${b.id}\n   Definition: ${b.definition}\n   Proposal: ${b.proposal}\n   Validation: ${b.validation}`
-    )
-    .join("\n\n");
-
-  const user = `Generate structureObjectRule elements for these ${chunkBRDPs.length} BRDPs:
-
-${brdpLines}
-
-Output ONLY the structureObjectRule elements, starting directly with <structureObjectRule`;
-
-  return { system, user };
-}
-
-function escapeXMLContent41(xml) {
-  const escapeText = (content) => {
-    const unescaped = content
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'");
-    return unescaped
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  };
-
-  // Escape text content of objectUse
-  xml = xml.replace(/<objectUse>([\s\S]*?)<\/objectUse>/g,
-    (_, c) => `<objectUse>${escapeText(c)}</objectUse>`);
-
-  // Escape text content of objectPath (preserving attributes)
-  xml = xml.replace(/(<objectPath[^>]*>)([\s\S]*?)(<\/objectPath>)/g,
-    (_, open, c, close) => `${open}${escapeText(c)}${close}`);
-
-  // Escape text content of objectValue valueAllowed attribute is already an attribute so skip
-  // But escape any objectValue text content if present
-  xml = xml.replace(/(<objectValue[^>]*>)([\s\S]*?)(<\/objectValue>)/g,
-    (_, open, c, close) => `${open}${escapeText(c)}${close}`);
-
-  // Escape text content of simplePara
-  xml = xml.replace(/<simplePara>([\s\S]*?)<\/simplePara>/g,
-    (_, c) => `<simplePara>${escapeText(c)}</simplePara>`);
-
-  return xml;
-}
-
-function splitMultipleObjectPaths41(xml) {
-  const original = xml;
-  // (?![a-zA-Z]) anchors the opening tag so it can't also match the
-  // literal prefix "<structureObjectRule" inside "<structureObjectRuleGroup>"
-  // -- same real bug confirmed in generateBREX.js (Lufthansa 78-BRDP BREX,
-  // "tag mismatch" well-formedness error), same fix.
-  const rulePattern = /<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/g;
-
-  const rules = [];
-  let match;
-  while ((match = rulePattern.exec(original)) !== null) {
-    rules.push({ full: match[0], start: match.index, end: match.index + match[0].length });
-  }
-
-  const replacements = [];
-  for (const rule of rules) {
-    const paths = [...rule.full.matchAll(/<objectPath[^>]*>[\s\S]*?<\/objectPath>/g)];
-    if (paths.length <= 1) continue;
-
-    const idMatch = rule.full.match(/id="([^"]+)"/);
-    const objectUseMatch = rule.full.match(/<objectUse>[\s\S]*?<\/objectUse>/);
-    const objectValueMatch = rule.full.match(/<objectValue[^>]*\/>/);
-
-    if (!idMatch) continue;
-
-    const baseId = idMatch[1];
-    const objectUse = objectUseMatch ? objectUseMatch[0] : '';
-    const objectValue = objectValueMatch ? objectValueMatch[0] : '';
-    const suffixes = ['', '-b', '-c', '-d', '-e'];
-
-    const newRules = paths.map((path, i) => {
-      const newId = baseId + (suffixes[i] || `-${i}`);
-      const lines = [
-        `<structureObjectRule id="${newId}">`,
-        `  ${path[0]}`,
-      ];
-      if (objectUse) lines.push(`  ${objectUse}`);
-      if (objectValue) lines.push(`  ${objectValue}`);
-      lines.push(`</structureObjectRule>`);
-      return lines.join('\n');
-    }).join('\n');
-
-    replacements.push({ start: rule.start, end: rule.end, replacement: newRules });
-  }
-
-  // Aplicar replacements de atrás hacia adelante para no desplazar índices
-  let result = original;
-  for (let i = replacements.length - 1; i >= 0; i--) {
-    const { start, end, replacement } = replacements[i];
-    result = result.slice(0, start) + replacement + result.slice(end);
-  }
-
-  return result;
-}
-
 function assembleChunks41(baseXml, additionalRules) {
   // S1000D 4.1 allows multiple <contextRules rulesContext="..."> as
   // siblings under <brex> (brex4.1.xsd: contextRules maxOccurs="unbounded",
@@ -274,8 +119,6 @@ function assembleChunks41(baseXml, additionalRules) {
   return stripped + '\n' + (cleanedStructure || '') + footer;
 }
 
-const MAX_RETRIES_41 = 2;
-
 // Batch-fetches every frozen approval for the given format in one request
 // (GET /api/approvals/format/:format) instead of one call per BRDP. Same
 // safe-degrade philosophy as generateBREX301.js's fetchApprovalsMap301: a
@@ -291,38 +134,6 @@ async function fetchApprovalsMap41(format) {
     console.error(`Failed to fetch rule approvals for format ${format}:`, err);
     return new Map();
   }
-}
-
-export async function generateSingleRule41(brdp, projectConfig, schemaSummary, callLLM) {
-  const { system, user } = buildBREXPromptChunk41([brdp], projectConfig, schemaSummary);
-  for (let attempt = 0; attempt < MAX_RETRIES_41; attempt++) {
-    const raw = await callLLM(system, user);
-    if (!raw) continue;
-    const escaped = raw.trim()
-      .replace(/\s+allowedObjectFlagContext="[^"]*"/g, '');
-    const escapedContent = escapeXMLContent41(escaped);
-    const splitContent = splitMultipleObjectPaths41(escapedContent);
-
-    // Intentar structureObjectRule primero (mismo ancla que splitMultipleObjectPaths41/assembleChunks41)
-    const ruleMatch = splitContent.match(/<structureObjectRule(?![a-zA-Z])[\s\S]*?<\/structureObjectRule>/);
-    if (ruleMatch) {
-      const idMatch = ruleMatch[0].match(/structureObjectRule id="([^"]+)"/);
-      if (idMatch && idMatch[1] === brdp.id) {
-        return { type: 'structure', xml: ruleMatch[0] };
-      }
-    }
-
-    // Aceptar nonContextRule si el LLM decide que no hay XPath claro
-    const nonContextMatch = splitContent.match(/<nonContextRule[\s\S]*?<\/nonContextRule>/);
-    if (nonContextMatch) {
-      const idMatch = nonContextMatch[0].match(/nonContextRule id="([^"]+)"/);
-      if (idMatch && idMatch[1] === brdp.id) {
-        return { type: 'nonContext', xml: nonContextMatch[0] };
-      }
-    }
-  }
-  console.warn(`Could not generate rule for ${brdp.id} after ${MAX_RETRIES_41} attempts`);
-  return null;
 }
 
 // ===== Finalización determinista del documento (S1000D 4.1) =====
@@ -526,8 +337,7 @@ function pruneEmptyContainers41(xml) {
 
 // Pure deterministic assembler -- no LLM call, ever. See generateBREX.js's
 // generateBREX() for the full design rationale (identical here, only the
-// element vocabulary differs). generateSingleRule41 and the prompt builders
-// above still exist, unchanged, for the BRDP Assistant's "Suggest Rule" mode.
+// element vocabulary differs).
 export async function generateBREX41(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,

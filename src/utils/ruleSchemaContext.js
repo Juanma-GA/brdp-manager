@@ -32,12 +32,12 @@
 //   flat, 4.2   -- real rulesContext values in public/brdp-template-4-2.xlsx
 //                  (BRDP-S1-00219) and Lufthansa's BRDP-S1-00006 valueAllowed.
 //   flat, 4.1   -- real rulesContext values in public/brdp-template-4-1.xlsx.
-//   flat, 3.0.1 -- the same URL scheme the 3.0.1 BREX few-shot uses for
-//                  xsi:noNamespaceSchemaLocation (public/brex-schema-summary-3-0-1.json).
+//   flat, 3.0.1 -- the same URL scheme the 3.0.1 BREX examples used for
+//                  xsi:noNamespaceSchemaLocation.
 //   master      -- 3.0.1 only. sources/SchemasS1000D holds only the flat set;
 //                  the master names come from a real 3.0.1 project list of
-//                  approved schema locations (public/brex-schema-summary-sch.json,
-//                  BRDP-A1-00100) and a real 3.0.1 project DM
+//                  approved schema locations (BRDP-A1-00100, kept in
+//                  scripts/rule-test-fixtures/master-schema-urls-3-0-1.json) and a real 3.0.1 project DM
 //                  (…/xml_schema_master/dm/descriptSchema.xsd). Data module
 //                  schemas live under dm/; the four non-DM schemas have their
 //                  own folder: comment/commentSchema.xsd, ddn/ddnSchema.xsd,

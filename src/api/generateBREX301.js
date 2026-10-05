@@ -14,162 +14,12 @@ export async function loadSchemaSummary301() {
   return _schemaSummaryCache301;
 }
 
-export function buildBREXPromptChunk301(chunkBRDPs, projectConfig, schemaSummary) {
-  const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
-  const schemaJSON = JSON.stringify(schemaSummaryWithoutExamples, null, 2);
-
-  const fewShotBlock = (schemaSummary.few_shot_examples || []).map((ex, i) => {
-    const flag = ex.allowedObjectFlag;
-    const labels = [];
-    if (flag === "0") labels.push("prohibited");
-    else if (flag === "1") labels.push("mandatory");
-    else labels.push("no flag");
-    if (ex.objectPath && ex.objectPath.includes("[")) labels.push("complex XPath");
-    if (ex.objectValues && ex.objectValues.length > 1) labels.push("multi value");
-
-    const objvalLines = (ex.objectValues || [])
-      .map(v => `  <objval val1="${v}" valtype="single"/>`)
-      .join("\n");
-
-    const flagAttr = ex.allowedObjectFlag != null ? ` objappl="${ex.allowedObjectFlag}"` : "";
-
-    return `### Example ${i + 1} — ${labels.join(", ")}
-INPUT id: ${ex.id}
-OUTPUT:
-<objrule id="${ex.id}">
-  <objpath${flagAttr}>${ex.objectPath}</objpath>
-  <objuse>${ex.objectUse}</objuse>
-${objvalLines}</objrule>`;
-  }).join("\n\n");
-
-  const system = `You are an S1000D Issue 3.0.1 expert generating objrule elements for a BREX Data Module.
-
-Follow this schema structure exactly:
-${schemaJSON}
-
-STRICT RULES:
-1. Output ONLY raw objrule XML elements — no XML declaration, no dmodule wrapper, no markdown.
-2. Each BRDP = one objrule element.
-3. Child order in objrule: objpath -> objuse -> objval (one per allowed value).
-4. There is NO brDecisionRef in 3.0.1. The BRDP id goes in objrule @id ONLY.
-5. objappl attribute inside objpath: "0"=prohibited, "1"=mandatory. NO other values allowed.
-6. objuse = one sentence summarising the decision.
-7. Start output directly with <objrule — no preamble.
-8. Each objrule must contain EXACTLY ONE objpath element. If a BRDP requires multiple XPath
-   expressions, generate multiple separate objrule elements with UNIQUE id attributes using
-   suffixes -b, -c, -d (e.g. id="BRDP-A1-00093-b"). The first rule keeps the original id.
-   NEVER repeat the same id value in more than one objrule.
-9. objval ONLY allows attributes: val1, val2, valtype.
-   valtype MUST be "single" or "range" ONLY. NEVER use pattern, list, regex, conditional or multiple.
-   val2 is only used when valtype="range".
-   NEVER add any other attribute to objval.
-10. The id attribute of objrule must be globally unique. NEVER use the same id value twice.
-11. NEVER invent attributes not in the schema. objpath only allows objappl (values: 0 or 1).
-12. S1000D 3.0.1 does NOT have a nonContextRules element. If a BRDP has no clear XPath target,
-    generate a valid objrule with a best-effort XPath, then add an XML comment immediately after it
-    for traceability, in this exact form (one single line, NEVER use double hyphens "--" inside):
-    <!-- nonContextRule id="BRDP-xxx": one sentence describing the conceptual rule -->
-13. Inside text content of any element, NEVER use raw XML special characters.
-    Escape them as: &lt; &gt; &amp;
-
-## Few-shot examples: BRDP id -> objrule
-${fewShotBlock}`;
-
-  const brdpLines = chunkBRDPs
-    .map((b, i) =>
-      `${i + 1}. ID: ${b.id}\n   Definition: ${b.definition}\n   Proposal: ${b.proposal}\n   Validation: ${b.validation}`
-    )
-    .join("\n\n");
-
-  const user = `Generate objrule elements for these ${chunkBRDPs.length} BRDPs:
-
-${brdpLines}
-
-Output ONLY the objrule elements, starting directly with <objrule`;
-
-  return { system, user };
-}
-
 function sanitizeNonContextComments301(xml) {
   // Un comentario XML no puede contener "--". Colapsamos runs de guiones y normalizamos.
   return xml.replace(/<!--([\s\S]*?)-->/g, (full, inner) => {
     const clean = inner.replace(/--+/g, '-').trim();
     return `<!-- ${clean} -->`;
   });
-}
-
-function escapeXMLContent301(xml) {
-  const escapeText = (content) => {
-    const unescaped = content
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'");
-    return unescaped
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  };
-
-  xml = xml.replace(/<objuse>([\s\S]*?)<\/objuse>/g,
-    (_, c) => `<objuse>${escapeText(c)}</objuse>`);
-  xml = xml.replace(/(<objpath[^>]*>)([\s\S]*?)(<\/objpath>)/g,
-    (_, open, c, close) => `${open}${escapeText(c)}${close}`);
-  xml = xml.replace(/(<objval[^>]*>)([\s\S]*?)(<\/objval>)/g,
-    (_, open, c, close) => `${open}${escapeText(c)}${close}`);
-
-  return xml;
-}
-
-function splitMultipleObjPaths301(xml) {
-  const original = xml;
-  const rulePattern = /<objrule[\s\S]*?<\/objrule>/g;
-
-  const rules = [];
-  let match;
-  while ((match = rulePattern.exec(original)) !== null) {
-    rules.push({ full: match[0], start: match.index, end: match.index + match[0].length });
-  }
-
-  const replacements = [];
-  for (const rule of rules) {
-    const paths = [...rule.full.matchAll(/<objpath[^>]*>[\s\S]*?<\/objpath>/g)];
-    if (paths.length <= 1) continue;
-
-    const idMatch = rule.full.match(/id="([^"]+)"/);
-    const objuseMatch = rule.full.match(/<objuse>[\s\S]*?<\/objuse>/);
-    const objvalMatch = rule.full.match(/<objval[^>]*\/>/);
-    const suffixes = ['', '-b', '-c', '-d', '-e'];
-
-    if (!idMatch) continue;
-
-    const baseId = idMatch[1];
-    const objuse = objuseMatch ? objuseMatch[0] : '';
-    const objval = objvalMatch ? objvalMatch[0] : '';
-
-    const newRules = paths.map((path, i) => {
-      const newId = baseId + (i < suffixes.length ? suffixes[i] : `-${i}`);
-      const lines = [
-        `<objrule id="${newId}">`,
-        `  ${path[0]}`,
-      ];
-      if (objuse) lines.push(`  ${objuse}`);
-      if (objval) lines.push(`  ${objval}`);
-      lines.push(`</objrule>`);
-      return lines.join('\n');
-    }).join('\n');
-
-    replacements.push({ start: rule.start, end: rule.end, replacement: newRules });
-  }
-
-  let result = original;
-  for (let i = replacements.length - 1; i >= 0; i--) {
-    const { start, end, replacement } = replacements[i];
-    result = result.slice(0, start) + replacement + result.slice(end);
-  }
-
-  return result;
 }
 
 function assembleChunks301(baseXml, additionalRules) {
@@ -242,8 +92,6 @@ function assembleChunks301(baseXml, additionalRules) {
   );
 }
 
-const MAX_RETRIES_301 = 2;
-
 // Batch-fetches every frozen approval for the given format in one request
 // (GET /api/approvals/format/:format) instead of one call per BRDP. Same
 // safe-degrade philosophy as generateSchematronDITA.js's fetchApprovalsMap:
@@ -259,31 +107,6 @@ async function fetchApprovalsMap301(format) {
     console.error(`Failed to fetch rule approvals for format ${format}:`, err);
     return new Map();
   }
-}
-
-export async function generateSingleRule301(brdp, projectConfig, schemaSummary, callLLM) {
-  const { system, user } = buildBREXPromptChunk301([brdp], projectConfig, schemaSummary);
-  for (let attempt = 0; attempt < MAX_RETRIES_301; attempt++) {
-    const raw = await callLLM(system, user);
-    if (!raw) continue;
-    const sanitized = raw.trim()
-      .replace(/\s+allowedObjectFlagContext="[^"]*"/g, '')
-      .replace(/<brDecisionIdentNumber brDecisionIdentNumber="([^"]+)"\/>/g, '');
-    const escaped = escapeXMLContent301(sanitized);
-    const split = splitMultipleObjPaths301(escaped);
-
-    const ruleMatch = split.match(/<objrule[\s\S]*?<\/objrule>/);
-    if (ruleMatch) {
-      const idMatch = ruleMatch[0].match(/objrule id="([^"]+)"/);
-      if (idMatch && idMatch[1] === brdp.id) {
-        // Conservar tambien un comentario de trazabilidad si el LLM lo añadió
-        const commentMatch = split.match(/<!--\s*nonContextRule[\s\S]*?-->/);
-        return ruleMatch[0] + (commentMatch ? '\n' + sanitizeNonContextComments301(commentMatch[0]) : '');
-      }
-    }
-  }
-  console.warn(`Could not generate objrule for ${brdp.id} after ${MAX_RETRIES_301} attempts`);
-  return null;
 }
 
 // ===== Finalización determinista del documento (S1000D 3.0.1) =====
@@ -461,12 +284,9 @@ function pruneEmptyContainers301(xml) {
 }
 
 // Pure deterministic assembler -- no LLM call, ever. See generateBREX.js's
-// generateBREX() for the full design rationale. generateSingleRule301 and
-// the prompt builders above still exist, unchanged, for the BRDP Assistant's
-// "Suggest Rule" mode and for generateBREXSch.js (which can reuse this same
-// function, or generateBREX41/generateBREX depending on the project's real
-// standard, as its base generator -- its simplification is inherited
-// automatically from whichever one runs, nothing else needed there).
+// generateBREX() for the full design rationale. generateBREXSch.js can
+// reuse this same function, or generateBREX41/generateBREX depending on the
+// project's real standard, as its base generator.
 export async function generateBREX301(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,
