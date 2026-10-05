@@ -70,6 +70,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  /* AACF 3, Part 0: right-aligned like the counts above it. */
+  justify-content: flex-end;
   gap: 4px;
 }
 
