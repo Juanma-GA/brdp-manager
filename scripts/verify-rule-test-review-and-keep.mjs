@@ -228,7 +228,7 @@ async function main() {
     await language().selectOption("en");
     await settle(400);
   } finally {
-    await api(`/api/projects/${project.id}`, { method: "DELETE" }).catch(() => {});
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded project.");
     await browser.close();
   }

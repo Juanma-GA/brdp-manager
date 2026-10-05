@@ -564,7 +564,7 @@ async function createProject(standard) {
 }
 
 async function deleteProject(projectId) {
-  await apiFetch(`/api/projects/${projectId}`, { method: "DELETE" });
+  await apiFetch(`/api/projects/${projectId}?permanent=true`, { method: "DELETE" });
 }
 
 async function createBrdp(projectId, brdp) {

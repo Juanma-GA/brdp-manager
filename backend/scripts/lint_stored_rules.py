@@ -46,10 +46,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, or_, select
 
 from app.db.base import async_session_factory
 from app.models import BRDP, Project, RuleApproval
+
+# A project in the Papelera (AACF 2) is still listed -- its rules come back
+# with it -- marked so it is never mistaken for an active one.
+_PROJECT_LABEL = case(
+    (Project.deleted_at.is_not(None), Project.name + " (project in the Papelera)"), else_=Project.name
+).label("project")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NODE_LINT = REPO_ROOT / "scripts" / "lint-rules-stdin.mjs"
@@ -82,7 +88,7 @@ def _cell(value) -> str:
 
 async def load_rules(project: str | None) -> list[tuple]:
     query = (
-        select(Project.name, Project.standard, BRDP.identifier, BRDP.deleted_at, RuleApproval.format, RuleApproval.status, RuleApproval.rule_xml)
+        select(_PROJECT_LABEL, Project.standard, BRDP.identifier, BRDP.deleted_at, RuleApproval.format, RuleApproval.status, RuleApproval.rule_xml)
         .join(BRDP, BRDP.id == RuleApproval.brdp_id)
         .join(Project, Project.id == BRDP.project_id)
         .order_by(Project.name, BRDP.identifier, RuleApproval.format)

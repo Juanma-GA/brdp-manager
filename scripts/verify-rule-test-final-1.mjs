@@ -252,7 +252,7 @@ async function main() {
     await page.locator("div", { hasText: "sirve para avisar de un peligro" }).last().screenshot({ path: shot("ask-final-no-internal-name.png") });
   } finally {
     await browser.close();
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" });
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" });
   }
   if (failures) {
     console.error(`\n${failures} check(s) failed`);

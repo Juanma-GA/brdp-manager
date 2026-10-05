@@ -214,7 +214,7 @@ async function main() {
     }
   } finally {
     await browser.close();
-    for (const id of created) await fetch(`${API}/api/projects/${id}`, { method: 'DELETE', headers: auth });
+    for (const id of created) await fetch(`${API}/api/projects/${id}?permanent=true`, { method: 'DELETE', headers: auth });
   }
   console.log('\nAll checks passed.');
 }

@@ -203,7 +203,7 @@ async function main() {
     assert(row.endsWith(`${only42.identifier} is not in the S1000D 4.1 catalog; it is in S1000D 4.2`), "is in S1000D 4.2, no 'retired'", row);
   } finally {
     await browser.close();
-    for (const id of projects) await api(`/api/projects/${id}`, { method: "DELETE" });
+    for (const id of projects) await api(`/api/projects/${id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} FAILED` : "\nALL OK");
   process.exit(failures ? 1 : 0);

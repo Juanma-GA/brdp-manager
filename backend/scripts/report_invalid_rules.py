@@ -24,11 +24,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from lxml import etree
-from sqlalchemy import select
+from sqlalchemy import case, select
 
 from app.api.routes.approvals import _rule_format_problem
 from app.db.base import async_session_factory
 from app.models import BRDP, Project, RuleApproval
+
+# A project in the Papelera (AACF 2) is still listed -- its rules come back
+# with it -- marked so it is never mistaken for an active one.
+_PROJECT_LABEL = case(
+    (Project.deleted_at.is_not(None), Project.name + " (project in the Papelera)"), else_=Project.name
+).label("project")
 
 _STATUS_LABEL = {"approved": "Verified", "pending_review": "Draft"}
 
@@ -47,7 +53,7 @@ async def main() -> None:
     async with async_session_factory() as session:
         rows = (
             await session.execute(
-                select(Project.name, BRDP.identifier, BRDP.deleted_at, RuleApproval.format, RuleApproval.status, RuleApproval.rule_xml)
+                select(_PROJECT_LABEL, BRDP.identifier, BRDP.deleted_at, RuleApproval.format, RuleApproval.status, RuleApproval.rule_xml)
                 .join(BRDP, BRDP.id == RuleApproval.brdp_id)
                 .join(Project, Project.id == BRDP.project_id)
                 .order_by(Project.name, BRDP.identifier, RuleApproval.format)

@@ -177,7 +177,7 @@ async function main() {
     await page.screenshot({ path: `${SHOTS}/compare-show-more.png` });
   } finally {
     await browser.close();
-    await api(`/api/projects/${project.id}`, { method: "DELETE" });
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} FAILED` : "\nALL OK");
   process.exit(failures ? 1 : 0);

@@ -348,7 +348,7 @@ async function main() {
     await panels().first().screenshot({ path: "/tmp/rule-test-dita-placeholder-es.png" });
     await language().selectOption("en");
   } finally {
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" }).catch(() => {});
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded projects.");
     await browser.close();
   }

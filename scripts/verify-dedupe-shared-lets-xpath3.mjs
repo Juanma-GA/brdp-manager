@@ -236,7 +236,7 @@ async function main() {
     console.log("\nAll shared sch:let deduplication checks passed against a real Xpath3.0 project.");
   } finally {
     if (projectId) {
-      await fetch(`${API}/api/projects/${projectId}`, { method: "DELETE", headers: auth }).catch(() => {});
+      await fetch(`${API}/api/projects/${projectId}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
       console.log(`Cleaned up: deleted project ${projectId}.`);
     }
     await browser.close();

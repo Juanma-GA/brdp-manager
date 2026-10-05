@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_access_token
 from app.db.base import get_db
-from app.models import User, UserProjectRole
+from app.models import Project, User, UserProjectRole
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -45,9 +45,22 @@ async def get_current_user(
         raise unauthorized
 
     user = await db.get(User, user_id)
-    if user is None:
+    # A deleted user (AACF 2) has no session any more: their next request
+    # is a 401, and the refresh that follows is refused too (routes/auth.py),
+    # so the app sends them to /login.
+    if user is None or user.deleted_at is not None:
         raise unauthorized
     return user
+
+
+def project_not_found() -> HTTPException:
+    """The answer for a project that does not exist or is in the Papelera
+    (AACF 2): never a technical error, and the same for both, so a deleted
+    project's direct URLs read as "not found"."""
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "project_not_found", "message": "Project not found"},
+    )
 
 
 async def has_project_role(current_user: User, project_id: uuid.UUID, min_role: str, db: AsyncSession) -> bool:
@@ -59,6 +72,11 @@ async def has_project_role(current_user: User, project_id: uuid.UUID, min_role: 
     dependency signature can't bind to a param FastAPI never sees in the
     path.
     """
+    project = await db.get(Project, project_id)
+    if project is None or project.deleted_at is not None:
+        # A project in the Papelera grants nothing to anyone until it is
+        # restored (its role rows are kept for that).
+        return False
     if current_user.global_role == "admin":
         return True
 
@@ -89,6 +107,21 @@ def require_project_role(min_role: str):
         db: AsyncSession = Depends(get_db),
     ) -> User:
         if not await has_project_role(current_user, project_id, min_role, db):
+            # A deleted (or missing) project is "not found" for whoever
+            # could see it; anyone else keeps the plain 403 they always got,
+            # so the answer never tells a stranger which ids exist.
+            project = await db.get(Project, project_id)
+            if project is None or project.deleted_at is not None:
+                could_see = current_user.global_role == "admin" or (
+                    await db.execute(
+                        select(UserProjectRole.project_id).where(
+                            UserProjectRole.user_id == current_user.id,
+                            UserProjectRole.project_id == project_id,
+                        )
+                    )
+                ).first() is not None
+                if could_see:
+                    raise project_not_found()
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized for this project",

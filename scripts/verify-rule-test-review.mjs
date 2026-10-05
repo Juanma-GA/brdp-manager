@@ -267,7 +267,7 @@ async function main() {
     await testDraft();
     assert((await panels().first().getByTestId("rule-test-description").textContent()).includes("<emphasis> must not appear (path //emphasis)."), "3.0.1 objrule: described (objappl 0)");
   } finally {
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" }).catch(() => {});
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded projects.");
     await browser.close();
   }

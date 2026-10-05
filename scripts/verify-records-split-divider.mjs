@@ -146,7 +146,7 @@ async function main() {
     console.log("\nALL CHECKS PASSED\n");
   } finally {
     await page.evaluate((k) => localStorage.removeItem(k), STORAGE_KEY).catch(() => {});
-    await fetch(`${API}/api/projects/${project.id}`, { method: "DELETE", headers: auth }).catch(() => {});
+    await fetch(`${API}/api/projects/${project.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     console.log("Cleaned up the seeded project.");
     await browser.close();
   }

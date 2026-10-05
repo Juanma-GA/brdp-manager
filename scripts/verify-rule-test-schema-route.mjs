@@ -180,7 +180,7 @@ async function main() {
     assert((await verdict().textContent()).startsWith("Correct"), `3.0.1: verdict correct (${await verdict().textContent()})`);
   } finally {
     await browser.close();
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" });
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} failure(s)` : "\nAll checks passed");
   process.exit(failures ? 1 : 0);

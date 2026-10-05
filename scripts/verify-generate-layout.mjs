@@ -162,8 +162,8 @@ async function main() {
   } finally {
     await browser.close();
     // Cleanup.
-    await fetch(`${API}/api/projects/${longProject.id}`, { method: "DELETE", headers: auth });
-    await fetch(`${API}/api/projects/${shortProject.id}`, { method: "DELETE", headers: auth });
+    await fetch(`${API}/api/projects/${longProject.id}?permanent=true`, { method: "DELETE", headers: auth });
+    await fetch(`${API}/api/projects/${shortProject.id}?permanent=true`, { method: "DELETE", headers: auth });
   }
 }
 

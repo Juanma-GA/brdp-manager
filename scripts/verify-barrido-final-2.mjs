@@ -262,5 +262,5 @@ try {
   console.log(`\nAll checks passed. Screenshots in ${SHOTS}`);
 } finally {
   await browser.close();
-  await api(`/api/projects/${project.id}`, { method: 'DELETE' });
+  await api(`/api/projects/${project.id}?permanent=true`, { method: 'DELETE' });
 }

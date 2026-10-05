@@ -157,7 +157,7 @@ async function main() {
     let deleted = 0;
     for (const p of projects) {
       if (p.name.startsWith("Alignment Check - ")) {
-        await fetch(`${API}/api/projects/${p.id}`, { method: "DELETE", headers: auth });
+        await fetch(`${API}/api/projects/${p.id}?permanent=true`, { method: "DELETE", headers: auth });
         deleted++;
       }
     }

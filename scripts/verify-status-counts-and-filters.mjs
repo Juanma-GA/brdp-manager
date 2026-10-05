@@ -196,7 +196,7 @@ async function main() {
     const projectsAfter = await fetch(`${API}/api/projects`, { headers: auth }).then((r) => r.json());
     const sopte = projectsAfter.find((p) => p.name === "SOPTE Scale Verification");
     if (sopte) {
-      await fetch(`${API}/api/projects/${sopte.id}`, { method: "DELETE", headers: auth });
+      await fetch(`${API}/api/projects/${sopte.id}?permanent=true`, { method: "DELETE", headers: auth });
       console.log("Cleaned up SOPTE Scale Verification project.");
     }
 

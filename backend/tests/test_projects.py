@@ -194,7 +194,17 @@ async def test_delete_cascades_to_brdps_approvals_and_feedback(client):
         await session.refresh(other_brdp)
 
     try:
+        # AACF 2: deleting moves the project to the Papelera -- nothing is
+        # removed yet.
         response = await client.delete(f"/api/projects/{project.id}", headers=_headers(admin))
+        assert response.status_code == 204
+        async with async_session_factory() as session:
+            kept = await session.get(Project, project.id)
+            assert kept is not None and kept.deleted_at is not None
+            assert await session.get(BRDP, brdp.id) is not None
+
+        # Delete permanently from the Papelera: the real cascade.
+        response = await client.delete(f"/api/trash/projects/{project.id}", headers=_headers(admin))
         assert response.status_code == 204
 
         async with async_session_factory() as session:

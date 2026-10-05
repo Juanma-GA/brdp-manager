@@ -18,12 +18,13 @@ this used to be described as "admin-only end to end"; it no longer is.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, has_project_role
 from app.db.base import get_db
-from app.models import User, UserProjectRole
+from app.models import BRDP, Project, User, UserProjectRole
+from app.repositories.project_repository import active_project_name_taken, get_trashed_project
 from app.repositories.brdp_repository import (
     get_active_brdp_by_identifier,
     get_trashed_brdp,
@@ -31,7 +32,13 @@ from app.repositories.brdp_repository import (
     list_trashed_brdps_by_ids,
 )
 from app.schemas.brdp import BRDPOut
-from app.schemas.trash import TrashBulkDeleteRequest, TrashBulkDeleteResult, TrashedBRDPOut
+from app.schemas.trash import (
+    ProjectRestoreRequest,
+    TrashBulkDeleteRequest,
+    TrashBulkDeleteResult,
+    TrashedBRDPOut,
+    TrashedProjectOut,
+)
 from app.services.history import record_change
 
 router = APIRouter(prefix="/api/trash", tags=["trash"])
@@ -48,6 +55,124 @@ async def _editor_project_ids(current_user: User, db: AsyncSession) -> list[uuid
         )
     )
     return [row[0] for row in result.all()]
+
+
+# ── Projects (AACF 2, Decisión 13) ──────────────────────────────────────
+# Admin only, like deleting a project. A project in the Papelera keeps
+# everything (BRDPs, rules, history, roles, and its own trashed BRDPs,
+# which are hidden from the BRDP list above until it comes back).
+
+
+def _require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.global_role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return current_user
+
+
+def _trashed_project_not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "trashed_project_not_found", "message": "Project not found in the Papelera"},
+    )
+
+
+@router.get("/projects", response_model=list[TrashedProjectOut])
+async def list_trashed_projects(
+    _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
+) -> list[TrashedProjectOut]:
+    brdp_count = (
+        select(func.count())
+        .select_from(BRDP)
+        .where(BRDP.project_id == Project.id, BRDP.deleted_at.is_(None))
+        .correlate(Project)
+        .scalar_subquery()
+    )
+    rows = (
+        await db.execute(
+            select(Project, brdp_count.label("brdp_count"))
+            .where(Project.deleted_at.is_not(None))
+            .order_by(Project.deleted_at.desc())
+        )
+    ).all()
+    return [
+        TrashedProjectOut(
+            id=project.id,
+            name=project.name,
+            standard=project.standard,
+            brdp_count=count,
+            deleted_at=project.deleted_at,
+            deleted_by_email=project.deleted_by_email,
+        )
+        for project, count in rows
+    ]
+
+
+@router.post("/projects/{project_id}/restore", response_model=TrashedProjectOut)
+async def restore_project(
+    project_id: uuid.UUID,
+    body: ProjectRestoreRequest | None = None,
+    _admin: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> TrashedProjectOut:
+    """Brings the project back exactly as it was. If an active project now
+    has the same name, refused with 409 project_name_taken (never two
+    projects that look the same in the list); the caller can restore it
+    under another name (body.name), which must be free too."""
+    project = await get_trashed_project(project_id, db)
+    if project is None:
+        raise _trashed_project_not_found()
+    name = (body.name if body and body.name is not None else project.name).strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "project_name_empty", "message": "The project name cannot be empty."},
+        )
+    if await active_project_name_taken(name, db, exclude_id=project.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "project_name_taken",
+                "name": name,
+                "message": f"An active project is already called {name!r}; restore this one under another name.",
+            },
+        )
+    count = (
+        await db.execute(
+            select(func.count()).select_from(BRDP).where(BRDP.project_id == project.id, BRDP.deleted_at.is_(None))
+        )
+    ).scalar_one()
+    out = TrashedProjectOut(
+        id=project.id,
+        name=name,
+        standard=project.standard,
+        brdp_count=count,
+        deleted_at=project.deleted_at,
+        deleted_by_email=project.deleted_by_email,
+    )
+    project.name = name
+    project.deleted_at = None
+    project.deleted_by = None
+    project.deleted_by_email = None
+    await db.commit()
+    return out
+
+
+@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project_permanently(
+    project_id: uuid.UUID, _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
+) -> None:
+    """The real delete of a project already in the Papelera: ON DELETE
+    CASCADE removes its BRDPs, rules, roles and jobs; BRDP history rows
+    survive (ON DELETE SET NULL, migration 0010) with the email of whoever
+    made each change."""
+    project = await get_trashed_project(project_id, db)
+    if project is None:
+        raise _trashed_project_not_found()
+    await db.delete(project)
+    await db.commit()
+
+
+# ── BRDPs ───────────────────────────────────────────────────────────────
 
 
 @router.get("", response_model=list[TrashedBRDPOut])

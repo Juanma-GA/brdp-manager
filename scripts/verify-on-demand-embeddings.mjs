@@ -263,8 +263,8 @@ async function main() {
   } finally {
     await browser.close();
     if (!process.env.KEEP) {
-      await fetch(`${API}/api/projects/${projA.id}`, { method: "DELETE", headers: auth });
-      await fetch(`${API}/api/projects/${projB.id}`, { method: "DELETE", headers: auth });
+      await fetch(`${API}/api/projects/${projA.id}?permanent=true`, { method: "DELETE", headers: auth });
+      await fetch(`${API}/api/projects/${projB.id}?permanent=true`, { method: "DELETE", headers: auth });
       console.log("Cleaned up both test projects.");
     } else {
       console.log(`KEEP set -- left Project A (${projA.id}) and Project B (${projB.id}) in place.`);

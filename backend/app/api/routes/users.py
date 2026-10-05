@@ -5,12 +5,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, project_not_found
 from app.core.security import generate_temporary_password, hash_password
 from app.db.base import get_db
 from app.models import RefreshToken, User, UserProjectRole
+from app.repositories.project_repository import (
+    ACTIVE_PROJECT_IDS,
+    ACTIVE_USER_FILTER,
+    get_active_project,
+    get_active_user,
+    get_deleted_user,
+)
 from app.schemas.auth import UserOut
 from app.schemas.user import (
+    DeletedUserOut,
     ProjectRoleAssign,
     ProjectRoleOut,
     TemporaryPasswordOut,
@@ -31,14 +39,20 @@ def _require_admin(current_user: User = Depends(get_current_user)) -> User:
 
 @router.get("", response_model=list[UserWithRolesOut])
 async def list_users(_admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)):
-    users = (await db.execute(select(User))).scalars().all()
+    # Active users only, and only their roles on active projects (AACF 2):
+    # a deleted user is in "Deleted users" below; a role on a project in the
+    # Papelera is kept for its restore but grants nothing meanwhile.
+    users = (await db.execute(select(User).where(ACTIVE_USER_FILTER))).scalars().all()
+    # One query for every user's roles (never one per user).
+    role_rows = (
+        await db.execute(select(UserProjectRole).where(UserProjectRole.project_id.in_(ACTIVE_PROJECT_IDS)))
+    ).scalars().all()
+    roles_by_user: dict = {}
+    for role in role_rows:
+        roles_by_user.setdefault(role.user_id, []).append(role)
     out = []
     for user in users:
-        roles = (
-            (await db.execute(select(UserProjectRole).where(UserProjectRole.user_id == user.id)))
-            .scalars()
-            .all()
-        )
+        roles = roles_by_user.get(user.id, [])
         out.append(
             UserWithRolesOut(
                 id=user.id,
@@ -62,9 +76,22 @@ async def create_user(
     THIS response only. It is never stored in plaintext, never logged,
     and there is no way to retrieve it again after this call returns.
     """
-    existing = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
-    if existing is not None:
+    existing = (await db.execute(select(User).where(User.email == body.email))).scalars().all()
+    if any(u.deleted_at is None for u in existing):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    deleted = next((u for u in existing if u.deleted_at is not None), None)
+    if deleted is not None:
+        # AACF 2, Part 4.6: never a second account for the same person --
+        # the deleted one is offered for a restore instead.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "user_deleted_exists",
+                "user_id": str(deleted.id),
+                "email": deleted.email,
+                "message": "A deleted user already has this email; restore that user instead.",
+            },
+        )
 
     temporary_password = generate_temporary_password()
     user = User(
@@ -98,7 +125,7 @@ async def reset_password(
     exclude" here -- an admin resetting someone else's password is, by
     definition, acting on a session that isn't their own).
     """
-    user = await db.get(User, user_id)
+    user = await get_active_user(user_id, db)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -128,11 +155,13 @@ async def update_user(
     assignable at creation), so it can't be changed through this endpoint
     regardless of what the request body contains.
     """
-    user = await db.get(User, user_id)
+    user = await get_active_user(user_id, db)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if body.email != user.email:
-        existing = (await db.execute(select(User).where(User.email == body.email))).scalar_one_or_none()
+        # Any user with that email, active or deleted: a deleted user's
+        # email stays theirs, so a restore never finds it taken.
+        existing = (await db.execute(select(User.id).where(User.email == body.email))).first()
         if existing is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user.email = body.email
@@ -148,29 +177,32 @@ async def delete_user(
     admin: User = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Admin-only. Cascade is real DB-level ON DELETE CASCADE on
-    refresh_tokens.user_id and user_project_roles.user_id (see the 0001
-    migration) -- nothing else references users.id, so brdps/
-    rule_approvals are never touched by deleting a user.
+    """Admin-only. AACF 2 (Decisión 13): the user is marked deleted
+    (deleted_at/deleted_by/deleted_by_email) and every refresh token of
+    theirs is revoked at once -- they cannot log in, their open session ends
+    at its next request (get_current_user and /refresh refuse a deleted
+    user), and they leave the user list and role selectors. Their project
+    roles are kept for a restore; History keeps their email as always.
 
     Two guards, both enforced here (not just hidden in the UI):
-    - The last remaining admin in the system cannot be deleted -- the
-      system must always keep at least one account able to manage users.
-      Checked first: since only an admin can ever call this endpoint, the
-      one case where this fires is necessarily an admin deleting
-      themselves while they're the sole admin, so it takes priority over
-      the plain self-delete message below (more specific reason).
+    - The last remaining (active) admin cannot be deleted -- the system
+      must always keep at least one account able to manage users. Checked
+      first: since only an admin can ever call this endpoint, the one case
+      where this fires is necessarily an admin deleting themselves while
+      they're the sole admin, so it takes priority over the plain
+      self-delete message below (more specific reason).
     - An admin cannot delete their own account AT ALL, even when they are
-      not the last one -- otherwise deleting your own account mid-session
-      would work as long as another admin happens to exist.
+      not the last one.
     """
-    user = await db.get(User, user_id)
+    user = await get_active_user(user_id, db)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     if user.global_role == "admin":
         admin_count = (
-            await db.execute(select(func.count()).select_from(User).where(User.global_role == "admin"))
+            await db.execute(
+                select(func.count()).select_from(User).where(User.global_role == "admin", ACTIVE_USER_FILTER)
+            )
         ).scalar_one()
         if admin_count <= 1:
             raise HTTPException(
@@ -180,6 +212,67 @@ async def delete_user(
     if user_id == admin.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
 
+    now = datetime.now(timezone.utc)
+    user.deleted_at = now
+    user.deleted_by = admin.id
+    user.deleted_by_email = admin.email
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    await db.commit()
+
+
+@router.get("/deleted", response_model=list[DeletedUserOut])
+async def list_deleted_users(_admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)):
+    users = (
+        await db.execute(select(User).where(User.deleted_at.is_not(None)).order_by(User.deleted_at.desc()))
+    ).scalars().all()
+    return [DeletedUserOut.model_validate(u) for u in users]
+
+
+@router.post("/{user_id}/restore", response_model=UserOut)
+async def restore_user(
+    user_id: uuid.UUID, _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
+) -> User:
+    """Brings the user back with the roles they still have: a role on a
+    project deleted permanently meanwhile went with that project (ON DELETE
+    CASCADE), so they come back without it. They log in with the password
+    they had (their sessions were revoked when deleted)."""
+    user = await get_deleted_user(user_id, db)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted user not found")
+    taken = (
+        await db.execute(select(User.id).where(User.email == user.email, ACTIVE_USER_FILTER))
+    ).first()
+    if taken is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "user_email_taken",
+                "email": user.email,
+                "message": "An active user already has this email.",
+            },
+        )
+    user.deleted_at = None
+    user.deleted_by = None
+    user.deleted_by_email = None
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.delete("/{user_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user_permanently(
+    user_id: uuid.UUID, _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
+) -> None:
+    """The real delete of a user already deleted: their roles and refresh
+    tokens go with them (ON DELETE CASCADE); History keeps the email stored
+    in each entry (user_id SET NULL), as before AACF 2."""
+    user = await get_deleted_user(user_id, db)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted user not found")
     await db.delete(user)
     await db.commit()
 
@@ -193,6 +286,10 @@ async def assign_project_role(
 ) -> UserProjectRole:
     if body.role not in ("viewer", "editor"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="role must be viewer or editor")
+    if await get_active_user(user_id, db) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if await get_active_project(body.project_id, db) is None:
+        raise project_not_found()
 
     existing = (
         await db.execute(

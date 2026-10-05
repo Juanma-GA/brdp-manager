@@ -48,6 +48,14 @@ const KNOWN_CODES = new Set([
   'standard_not_supported',
   'project_config_not_object',
   'project_config_value_not_text',
+  // AACF 2: projects and users in the Papelera.
+  'project_not_found',
+  'project_has_running_job',
+  'project_name_taken',
+  'project_name_empty',
+  'trashed_project_not_found',
+  'user_deleted_exists',
+  'user_email_taken',
 ]);
 
 export class ApiError extends Error {
@@ -109,6 +117,9 @@ export function describeErrorDetail(status, detail, t = defaultT) {
   if (detail && typeof detail === 'object') {
     const { code, ref, ...params } = detail;
     if (code && KNOWN_CODES.has(code)) {
+      // Job kinds are tokens (import / embeddings / extraction): named in
+      // the interface language, never shown raw (HR21).
+      if (Array.isArray(params.jobs)) params.jobs = params.jobs.map((kind) => t(`errors.jobKinds.${kind}`, { defaultValue: kind }));
       const text = t(`errors.codes.${code}`, formatParams(params));
       return ref ? t('errors.withRef', { text: text.replace(/\.$/, ''), ref }) : text;
     }

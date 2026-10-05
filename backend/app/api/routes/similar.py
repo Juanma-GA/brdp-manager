@@ -16,6 +16,7 @@ from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
 from app.models import BRDP, BRDPCatalog, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
+from app.repositories.project_repository import ACTIVE_PROJECT_FILTER
 from app.schemas.similar import SimilarCandidateOut, SimilarOut
 from app.services.embeddings import EmbeddingUnavailable, brdp_embedding_text, compute_embedding
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT as _STANDARD_TO_RULE_FORMAT
@@ -216,6 +217,7 @@ async def _get_definition_similar(
     brdp_base = (
         select(BRDP, Project.name.label("project_name"), brdp_distance)
         .join(Project, BRDP.project_id == Project.id)
+        .where(ACTIVE_PROJECT_FILTER)
         .where(
             Project.standard == project.standard,
             BRDP.validation == "Validated",
@@ -313,6 +315,7 @@ async def _get_definition_similar(
             select(func.count())
             .select_from(BRDP)
             .join(Project, BRDP.project_id == Project.id)
+            .where(ACTIVE_PROJECT_FILTER)
             .where(
                 Project.standard == project.standard,
                 Project.id != project_id,
@@ -386,6 +389,7 @@ async def _get_proposal_similar(
             await db.execute(
                 select(BRDP, Project.name.label("project_name"))
                 .join(Project, BRDP.project_id == Project.id)
+                .where(ACTIVE_PROJECT_FILTER)
                 .where(
                     Project.standard == project.standard,
                     Project.id != project_id,
@@ -437,6 +441,7 @@ async def _get_proposal_similar(
             await db.execute(
                 select(BRDP, Project.name.label("project_name"), distance_col)
                 .join(Project, BRDP.project_id == Project.id)
+                .where(ACTIVE_PROJECT_FILTER)
                 .where(*similar_filters)
                 .order_by(distance_col, BRDP.id)
                 .limit(similar_limit)
@@ -506,6 +511,7 @@ async def _get_proposal_similar(
             select(func.count())
             .select_from(BRDP)
             .join(Project, BRDP.project_id == Project.id)
+            .where(ACTIVE_PROJECT_FILTER)
             .where(
                 Project.standard == project.standard,
                 Project.id != project_id,
@@ -622,6 +628,7 @@ async def _get_rule_similar(
         return (
             select(BRDP, RuleApproval.rule_xml, Project.name.label("project_name"), *columns)
             .join(Project, BRDP.project_id == Project.id)
+            .where(ACTIVE_PROJECT_FILTER)
             .join(RuleApproval, (RuleApproval.brdp_id == BRDP.id) & (RuleApproval.format == rule_format))
             .where(
                 Project.standard == project.standard,
@@ -721,6 +728,7 @@ async def _get_rule_similar(
             select(func.count())
             .select_from(BRDP)
             .join(Project, BRDP.project_id == Project.id)
+            .where(ACTIVE_PROJECT_FILTER)
             .where(
                 Project.standard == project.standard,
                 Project.id != project_id,

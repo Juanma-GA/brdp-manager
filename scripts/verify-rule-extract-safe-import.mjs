@@ -439,7 +439,7 @@ async function main() {
     await mock("/reset").catch(() => {});
     await browser.close();
     await login().catch(() => {});
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" }).catch(() => {});
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
   }
   console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
   process.exit(failures ? 1 : 0);

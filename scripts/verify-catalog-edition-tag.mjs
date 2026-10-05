@@ -141,7 +141,7 @@ async function main() {
     assert((await newer.getAttribute("title")) === "From the S1000D 4.2 catalog. Not in S1000D 4.1.", "no '(retired)'", await newer.getAttribute("title"));
   } finally {
     await browser.close();
-    for (const id of projects) await api(`/api/projects/${id}`, { method: "DELETE" });
+    for (const id of projects) await api(`/api/projects/${id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} FAILED` : "\nALL OK");
   process.exit(failures ? 1 : 0);

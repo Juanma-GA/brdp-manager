@@ -129,6 +129,18 @@ async def test_admin_can_delete_a_normal_user_and_cascade_removes_their_tokens(c
         response = await client.delete(f"/api/users/{target.id}", headers=_headers(admin))
         assert response.status_code == 204
 
+        # AACF 2: the user is marked deleted and their tokens revoked...
+        async with async_session_factory() as session:
+            kept = await session.get(User, target.id)
+            assert kept is not None and kept.deleted_at is not None and kept.deleted_by == admin.id
+            tokens = (
+                (await session.execute(select(RefreshToken).where(RefreshToken.user_id == target.id))).scalars().all()
+            )
+            assert tokens and all(t.revoked_at is not None for t in tokens)
+
+        # ...and "Delete permanently" removes the row and its tokens.
+        response = await client.delete(f"/api/users/{target.id}/permanent", headers=_headers(admin))
+        assert response.status_code == 204
         async with async_session_factory() as session:
             assert await session.get(User, target.id) is None
             leftover_tokens = (
@@ -211,8 +223,8 @@ async def test_deleting_one_of_two_admins_by_the_other_succeeds(client):
         assert response.status_code == 204
 
         async with async_session_factory() as session:
-            assert await session.get(User, other_admin.id) is None
-            assert await session.get(User, acting_admin.id) is not None
+            assert (await session.get(User, other_admin.id)).deleted_at is not None
+            assert (await session.get(User, acting_admin.id)).deleted_at is None
     finally:
         await _delete_user_row(acting_admin.id)
         await _delete_user_row(other_admin.id)

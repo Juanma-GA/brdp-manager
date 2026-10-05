@@ -102,7 +102,7 @@ async function main() {
         body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
       });
       const { access_token } = await loginResp.json();
-      await fetch(`${API}/api/projects/${projectId}`, {
+      await fetch(`${API}/api/projects/${projectId}?permanent=true`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${access_token}` },
       }).catch(() => {});

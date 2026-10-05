@@ -180,7 +180,7 @@ async def test_every_supported_standard_is_accepted(client, admin_headers):
             created.append(res.json()["id"])
     finally:
         for project_id in created:
-            await client.delete(f"/api/projects/{project_id}", headers=admin_headers)
+            await client.delete(f"/api/projects/{project_id}?permanent=true", headers=admin_headers)
 
 
 async def test_project_config_with_a_value_that_is_not_text_is_refused(client, admin_headers, editor_and_project):

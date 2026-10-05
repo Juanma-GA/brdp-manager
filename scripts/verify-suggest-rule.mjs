@@ -451,7 +451,7 @@ async function main() {
     assert(ditaRule.status === "pending_review" && ditaRule.rule_xml.startsWith("<sch:pattern"), "DITA rule saved as Draft under SCH-DITA");
   } finally {
     await browser.close();
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" }).catch(() => {});
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
   }
 
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);

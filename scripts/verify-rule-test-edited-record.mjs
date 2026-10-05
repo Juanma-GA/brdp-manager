@@ -208,7 +208,7 @@ async function main() {
     assert(!((await indicator().textContent()) || "").includes("edited"), "indicator without the edited mention");
     assert((await ruleTestHistory()).length === 3, "History: a third rule test entry");
   } finally {
-    await api(`/api/projects/${project.id}`, { method: "DELETE" }).catch(() => {});
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded project.");
     await browser.close();
   }

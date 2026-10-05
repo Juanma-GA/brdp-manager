@@ -19,6 +19,7 @@ from app.api.routes.brdps import _get_owned_brdp
 from app.db.base import get_db
 from app.models import BRDP, BRDPCatalog, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
+from app.repositories.project_repository import ACTIVE_PROJECT_FILTER
 from app.schemas.brdp_compare import CompareCandidateOut, CompareCandidatesOut, CompareDetailOut
 from app.schemas.rule_approval import RuleApprovalOut, rule_xml_hash
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
@@ -76,6 +77,7 @@ async def get_compare_candidates(
             await db.execute(
                 select(BRDP, Project)
                 .join(Project, BRDP.project_id == Project.id)
+                .where(ACTIVE_PROJECT_FILTER)
                 .where(Project.id != project_id, BRDP.identifier == brdp.identifier, ACTIVE_BRDP_FILTER)
                 .order_by(Project.name, BRDP.id)
             )

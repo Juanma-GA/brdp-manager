@@ -170,7 +170,7 @@ async function main() {
     await page.locator("header select, nav select").first().selectOption("en");
   } finally {
     await browser.close();
-    await api(`/api/projects/${project.id}`, { method: "DELETE" });
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL CHECKS PASSED");
   process.exit(failures ? 1 : 0);

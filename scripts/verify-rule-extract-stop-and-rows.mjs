@@ -347,7 +347,7 @@ async function main() {
   } finally {
     await setLanguage(null).catch(() => {});
     await mock("/extract-delay", { ms: 0 }).catch(() => {});
-    for (const pr of projects) await api(`/api/projects/${pr.id}`, { method: "DELETE" }).catch(() => {});
+    for (const pr of projects) await api(`/api/projects/${pr.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     await browser.close();
   }
   console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");

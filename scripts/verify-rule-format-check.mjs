@@ -164,7 +164,7 @@ async function main() {
     assert(editSaved && editSaved.rule_xml === NON_CONTEXT_42("BRDP-RF-EDIT") && editSaved.source === "manual", "editor saves the nonContextRule as Draft");
   } finally {
     await browser.close();
-    await api(`/api/projects/${project.id}`, { method: "DELETE" }).catch(() => {});
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded project.");
   }
   console.log(failures ? `\n${failures} FAILURE(S)\n` : "\nALL CHECKS PASSED\n");

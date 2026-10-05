@@ -140,8 +140,8 @@ async function main() {
   assert(callsAfter1 === 1, `1 pending BRDP made exactly 1 request, got ${callsAfter1}`);
 
   // ---- cleanup ----
-  await fetch(`${API}/api/projects/${projA.id}`, { method: "DELETE", headers: auth });
-  await fetch(`${API}/api/projects/${projB.id}`, { method: "DELETE", headers: auth });
+  await fetch(`${API}/api/projects/${projA.id}?permanent=true`, { method: "DELETE", headers: auth });
+  await fetch(`${API}/api/projects/${projB.id}?permanent=true`, { method: "DELETE", headers: auth });
   console.log("Cleaned up both test projects.");
 
   console.log("\nALL CHECKS PASSED\n");

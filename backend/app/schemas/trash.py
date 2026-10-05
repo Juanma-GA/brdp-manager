@@ -28,3 +28,22 @@ class TrashBulkDeleteResult(BaseModel):
     # deletes everything it validly can rather than aborting over it.
     deleted: list[uuid.UUID]
     not_found: list[uuid.UUID]
+
+
+class TrashedProjectOut(BaseModel):
+    """Settings > Papelera > Projects (AACF 2): a project in the Papelera
+    with what an admin needs to decide -- name, standard, how many BRDPs it
+    holds (not counting its own trashed ones), who deleted it and when."""
+
+    id: uuid.UUID
+    name: str
+    standard: str
+    brdp_count: int
+    deleted_at: datetime
+    deleted_by_email: str | None = None
+
+
+class ProjectRestoreRequest(BaseModel):
+    # Only when an active project already has this project's name: restore
+    # it under this other name instead.
+    name: str | None = None

@@ -263,7 +263,7 @@ async function main() {
 
     console.log("\nAll checks passed. Screenshots: /tmp/ask-answer-more-*.png, /tmp/ask-schema-search-*.png");
   } finally {
-    for (const p of created) await fetch(`${API}/api/projects/${p.id}`, { method: "DELETE", headers: auth }).catch(() => {});
+    for (const p of created) await fetch(`${API}/api/projects/${p.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     await browser.close();
   }
 }

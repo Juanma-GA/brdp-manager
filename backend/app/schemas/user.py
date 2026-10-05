@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, EmailStr
 
@@ -53,3 +54,16 @@ class ProjectRoleOut(BaseModel):
 
 class UserWithRolesOut(UserOut):
     project_roles: list[ProjectRoleOut] = []
+
+
+class DeletedUserOut(BaseModel):
+    """Settings > Users > Deleted users (AACF 2)."""
+
+    id: uuid.UUID
+    email: str
+    display_name: str
+    global_role: str
+    deleted_at: datetime
+    deleted_by_email: str | None = None
+
+    model_config = {"from_attributes": True}

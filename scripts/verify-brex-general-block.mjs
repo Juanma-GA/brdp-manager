@@ -201,7 +201,7 @@ async function main() {
     await language("en");
   } finally {
     await browser.close();
-    for (const pr of projects) await api(`/api/projects/${pr.id}`, { method: "DELETE" });
+    for (const pr of projects) await api(`/api/projects/${pr.id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL CHECKS PASSED");
   process.exit(failures ? 1 : 0);

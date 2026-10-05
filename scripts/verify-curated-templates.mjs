@@ -188,7 +188,7 @@ async function main() {
     console.log("\nAll curated template checks passed.");
   } finally {
     for (const id of createdProjectIds) {
-      await fetch(`${API}/api/projects/${id}`, { method: "DELETE", headers: auth }).catch(() => {});
+      await fetch(`${API}/api/projects/${id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     }
     console.log(`Cleaned up: deleted ${createdProjectIds.length} projects.`);
     await browser.close();

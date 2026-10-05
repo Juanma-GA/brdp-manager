@@ -1,15 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { ChevronRight } from 'lucide-react';
 import { useAuthContext } from '../context/AuthContext';
 import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
 import {
+  DELETED_USERS_QUERY_KEY,
   useBulkPermanentlyDeleteBrdps,
   usePermanentlyDeleteBrdp,
   useRestoreBrdp,
+  useRestoreUser,
   useTrash,
 } from '../hooks/useTrash';
+import ProjectTrash from '../components/settings/ProjectTrash';
+import DeletedUsers from '../components/settings/DeletedUsers';
 import Button from '../components/Button';
 import ChangePasswordForm from '../components/ChangePasswordForm';
 import SortableHeader from '../components/SortableHeader';
@@ -112,6 +117,11 @@ function ProfileSection({ user, onUserUpdated }) {
 function UserManagementSection({ currentUserId }) {
   const { t } = useTranslation();
   const { projects } = useProjectContext();
+  const queryClient = useQueryClient();
+  const restoreUserMutation = useRestoreUser();
+  // AACF 2, Part 4.6: creating a user whose email belongs to a deleted
+  // user offers to restore that user -- { id, email } while shown.
+  const [deletedConflict, setDeletedConflict] = useState(null);
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -176,12 +186,30 @@ function UserManagementSection({ currentUserId }) {
       });
       setNewUser({ email: '', display_name: '', global_role: 'user' });
       setCreateErrors({});
+      setDeletedConflict(null);
       setTemporaryPasswordInfo({ email: created.email, temporaryPassword: created.temporary_password });
       refresh();
     } catch (err) {
-      setError(err.message);
+      if (err?.code === 'user_deleted_exists') {
+        setDeletedConflict({ id: err.detail.user_id, email: err.detail.email });
+      } else {
+        setError(errorMessage(err, t));
+      }
     } finally {
       setCreating(false);
+    }
+  };
+
+  const restoreDeletedConflict = async () => {
+    const conflict = deletedConflict;
+    setError(null);
+    try {
+      await restoreUserMutation.mutateAsync(conflict.id);
+      setDeletedConflict(null);
+      setNewUser({ email: '', display_name: '', global_role: 'user' });
+      refresh();
+    } catch (err) {
+      setError(t('settings.userManagement.actionFailed', { reason: errorMessage(err, t) }));
     }
   };
 
@@ -214,16 +242,26 @@ function UserManagementSection({ currentUserId }) {
   const handleAssignRole = async (userId) => {
     const draft = roleDraft[userId];
     if (!draft?.project_id || !draft?.role) return;
-    await authFetchJson(`/api/users/${userId}/project-roles`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: draft.project_id, role: draft.role }),
-    });
+    setError(null);
+    try {
+      await authFetchJson(`/api/users/${userId}/project-roles`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: draft.project_id, role: draft.role }),
+      });
+    } catch (err) {
+      setError(t('settings.userManagement.actionFailed', { reason: errorMessage(err, t) }));
+    }
     refresh();
   };
 
-  const handleRemoveRole = async (userId, projectId) => {
-    await authFetchJson(`/api/users/${userId}/project-roles/${projectId}`, { method: 'DELETE' });
+  const handleRemoveRole = async (u, role) => {
+    setError(null);
+    try {
+      await authFetchJson(`/api/users/${u.id}/project-roles/${role.project_id}`, { method: 'DELETE' });
+    } catch (err) {
+      setError(t('settings.userManagement.actionFailed', { reason: errorMessage(err, t) }));
+    }
     refresh();
   };
 
@@ -266,8 +304,9 @@ function UserManagementSection({ currentUserId }) {
     try {
       await authFetchJson(`/api/users/${u.id}`, { method: 'DELETE' });
       refresh();
+      queryClient.invalidateQueries({ queryKey: DELETED_USERS_QUERY_KEY });
     } catch (err) {
-      setError(err.message);
+      setError(errorMessage(err, t));
     }
   };
 
@@ -303,6 +342,14 @@ function UserManagementSection({ currentUserId }) {
       </summary>
       <div className={styles.sectionBody}>
       {error && <p className={styles.statusInvalid}>{error}</p>}
+      {deletedConflict && (
+        <div role="alert" data-testid="deleted-user-conflict" className={styles.statusInvalid}>
+          {t('settings.userManagement.deletedExists', { email: deletedConflict.email })}{' '}
+          <button type="button" onClick={restoreDeletedConflict} disabled={restoreUserMutation.isPending} data-testid="deleted-user-conflict-restore">
+            {t('settings.userManagement.restoreDeleted', { email: deletedConflict.email })}
+          </button>
+        </div>
+      )}
 
       <form className={styles.formRow} onSubmit={handleCreate} style={{ marginBottom: 12, flexWrap: 'wrap' }}>
         <div className={styles.formGroup}>
@@ -420,8 +467,9 @@ function UserManagementSection({ currentUserId }) {
                         {projectName(r.project_id)}: {r.role}{' '}
                         <button
                           type="button"
-                          onClick={() => handleRemoveRole(u.id, r.project_id)}
+                          onClick={() => handleRemoveRole(u, r)}
                           aria-label={t('settings.userManagement.removeAria')}
+                          data-testid="remove-role"
                         >
                           ✕
                         </button>
@@ -510,6 +558,7 @@ function UserManagementSection({ currentUserId }) {
           </tbody>
         </table>
       )}
+      <DeletedUsers onRestored={refresh} />
       {temporaryPasswordInfo && (
         <TemporaryPasswordModal
           email={temporaryPasswordInfo.email}
@@ -527,7 +576,7 @@ function UserManagementSection({ currentUserId }) {
 // selected elsewhere in the app -- this page has no project context of
 // its own). Same collapsed-by-default <details>/<summary> as Import
 // Settings above.
-function TrashSection() {
+function TrashSection({ isAdmin }) {
   const { t } = useTranslation();
   const { data, isLoading, isError } = useTrash();
   const restoreMutation = useRestoreBrdp();
@@ -680,6 +729,8 @@ function TrashSection() {
         {t('settings.trash.title')}
       </summary>
       <div className={styles.sectionBody}>
+        {isAdmin && <ProjectTrash />}
+        {isAdmin && <h3 className={styles.sectionTitle}>{t('settings.trash.brdpsTitle')}</h3>}
         <p className={styles.fieldDescription}>{t('settings.trash.description')}</p>
         {error && <ErrorNotice testId="trash-error" message={error} onDismiss={() => setError(null)} />}
         {isLoading && <p>…</p>}
@@ -805,7 +856,7 @@ export default function SettingsPage() {
       <div className={styles.sectionsContainer}>
         <ProfileSection user={user} onUserUpdated={updateUser} />
         {user.global_role === 'admin' && <UserManagementSection currentUserId={user.id} />}
-        {canSeeTrash && <TrashSection />}
+        {canSeeTrash && <TrashSection isAdmin={user.global_role === 'admin'} />}
       </div>
     </div>
   );

@@ -308,7 +308,7 @@ async function main() {
     assert(direct.status === 404, "viewer: direct detail of the hidden project's BRDP is 404");
   } finally {
     await browser.close();
-    for (const p of created) await fetch(`${API}/api/projects/${p.id}`, { method: "DELETE", headers: auth }).catch(() => {});
+    for (const p of created) await fetch(`${API}/api/projects/${p.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
   }
   console.log("\nAll checks passed.");
 }

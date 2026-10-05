@@ -1,13 +1,15 @@
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, require_project_role
+from app.api.deps import get_current_user, project_not_found, require_project_role
 from app.db.base import get_db
 from app.models import BRDP, BRDPCatalog, Project, User, UserProjectRole
 from app.repositories.brdp_repository import compute_status_counts
+from app.repositories.project_repository import ACTIVE_PROJECT_FILTER, get_active_project
 from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut, ProjectRename
 from app.services.project_config import project_config_problem
 from app.services.rule_formats import SUPPORTED_STANDARDS
@@ -81,7 +83,7 @@ async def list_projects(
     optimistically -- and never has to special-case admin itself.
     """
     if current_user.global_role == "admin":
-        result = await db.execute(select(Project))
+        result = await db.execute(select(Project).where(ACTIVE_PROJECT_FILTER))
         projects = list(result.scalars().all())
         counts_by_id = await compute_status_counts(db, projects)
         return [
@@ -91,7 +93,7 @@ async def list_projects(
     result = await db.execute(
         select(Project)
         .join(UserProjectRole, UserProjectRole.project_id == Project.id)
-        .where(UserProjectRole.user_id == current_user.id)
+        .where(UserProjectRole.user_id == current_user.id, ACTIVE_PROJECT_FILTER)
     )
     projects = list(result.scalars().all())
     role_map = await _get_role_map(db, current_user.id, [p.id for p in projects])
@@ -177,9 +179,9 @@ async def get_project_config(
     current_user: User = Depends(require_project_role("viewer")),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectOut:
-    project = await db.get(Project, project_id)
+    project = await get_active_project(project_id, db)
     if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise project_not_found()
 
     # Skip the lookup entirely for admin -- _resolve_effective_role ignores
     # raw_role for them anyway (there is no user_project_roles row to find).
@@ -194,9 +196,9 @@ async def update_project_config(
     current_user: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectOut:
-    project = await db.get(Project, project_id)
+    project = await get_active_project(project_id, db)
     if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise project_not_found()
     # Same rules as the configuration page (src/utils/ruleSchemaContext.js):
     # a schema location the app could not use is never stored.
     shape = project_config_problem(body.project_config)
@@ -226,32 +228,73 @@ async def rename_project(
     rather than folding name into that body. Same editor-level gate as
     /config (project-level metadata, not the higher bar DELETE needs).
     """
-    project = await db.get(Project, project_id)
+    project = await get_active_project(project_id, db)
     if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise project_not_found()
     project.name = body.name
     await db.commit()
     await db.refresh(project)
     return await _to_out(db, project, _resolve_effective_role(current_user, "editor"))
 
 
+async def running_job_kinds(project_id: uuid.UUID, db: AsyncSession) -> list[str]:
+    """The kinds of background job running on a project right now
+    (import / embeddings / extraction) -- a project with one cannot be
+    deleted (AACF 2): the job would keep writing into a project nobody can
+    see. Each kind's own get_running_job, so a stale job is reaped exactly
+    as its own start endpoint would."""
+    from app.services import embedding_jobs, import_jobs, rule_extract_jobs
+
+    kinds = []
+    if await import_jobs.get_running_job(project_id, db) is not None:
+        kinds.append("import")
+    if await embedding_jobs.get_running_job(project_id, db) is not None:
+        kinds.append("embeddings")
+    if await rule_extract_jobs.get_running_job(project_id, db) is not None:
+        kinds.append("extraction")
+    return kinds
+
+
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     project_id: uuid.UUID,
-    _admin: User = Depends(_require_admin),
+    permanent: bool = Query(False, description="Delete for good, skipping the Papelera (scripts and tests only)."),
+    admin: User = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Admin-only, deliberately stricter than editor -- an editor can
     change everything about a project's CONTENT but must never be able to
     make the project itself disappear, same reasoning as create_project.
-    The actual cascade (brdps, and from there rule_approvals/
-    suggestion_feedback, plus user_project_roles) is real DB-level
-    ON DELETE CASCADE on those foreign keys (see the 0001 migration) --
-    this just deletes the project row and lets Postgres do the rest,
-    rather than issuing a manual DELETE per child table.
+
+    AACF 2 (Decisión 13, HR9): the project moves to the Papelera
+    (deleted_at/deleted_by/deleted_by_email); nothing else changes -- its
+    BRDPs, rules, history and roles are kept so a restore brings it back
+    whole. Refused (409 project_has_running_job) while a background job
+    runs on it.
+
+    permanent=true deletes it for good at once, the same real delete as the
+    Papelera's "Delete permanently" (ON DELETE CASCADE on brdps,
+    rule_approvals, roles and jobs). The interface never uses it; it is for
+    scripts and tests that create throwaway projects and must not leave
+    them in anyone's Papelera.
     """
     project = await db.get(Project, project_id)
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    await db.delete(project)
+    if project is None or (project.deleted_at is not None and not permanent):
+        raise project_not_found()
+    kinds = await running_job_kinds(project_id, db)
+    if kinds:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "project_has_running_job",
+                "jobs": kinds,
+                "message": f"A background job ({', '.join(kinds)}) is running on this project; wait for it to finish before deleting the project.",
+            },
+        )
+    if permanent:
+        await db.delete(project)
+    else:
+        project.deleted_at = datetime.now(timezone.utc)
+        project.deleted_by = admin.id
+        project.deleted_by_email = admin.email
     await db.commit()

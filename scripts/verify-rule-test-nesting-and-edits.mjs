@@ -154,7 +154,7 @@ async function main() {
     assert((await notice().count()) === 0, "Regenerate: notice gone");
     assert((await page.getByTestId("rule-test-edited-mark").count()) === 0, "Regenerate: marks gone");
   } finally {
-    await api(`/api/projects/${project.id}`, { method: "DELETE" }).catch(() => {});
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded project.");
     await browser.close();
   }

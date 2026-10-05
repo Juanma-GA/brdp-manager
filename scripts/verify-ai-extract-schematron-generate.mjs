@@ -376,7 +376,7 @@ async function main() {
     assert(/^498 BRDPs will be included/.test(g.counter) && (await page.getByTestId("generate-rules-included").innerText()) === "498 rules included", "counter 498 = rules included");
     await page.screenshot({ path: path.join(SHOTS, "ai-extract-generate-omitted-drafts.png") });
   } finally {
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" }).catch((e) => console.log(`cleanup: ${e.message}`));
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" }).catch((e) => console.log(`cleanup: ${e.message}`));
     await browser.close();
   }
   console.log(failures ? `\n${failures} failure(s)` : "\nall checks passed");

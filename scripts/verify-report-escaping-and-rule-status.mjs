@@ -236,7 +236,7 @@ async function main() {
     console.log("\nALL CHECKS PASSED");
   } finally {
     // cleanup: delete the synthetic verification project
-    await fetch(`${API}/api/projects/${project.id}`, { method: "DELETE", headers: auth });
+    await fetch(`${API}/api/projects/${project.id}?permanent=true`, { method: "DELETE", headers: auth });
     console.log("Cleaned up verification project.");
     await browser.close();
   }

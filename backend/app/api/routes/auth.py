@@ -65,7 +65,9 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
             detail="Too many failed login attempts. Try again later.",
         )
 
-    result = await db.execute(select(User).where(User.email == body.email))
+    # Active users only: a deleted user (AACF 2) cannot log in, and gets the
+    # same answer as an unknown email.
+    result = await db.execute(select(User).where(User.email == body.email, User.deleted_at.is_(None)))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.password_hash):
         record_failed_attempt(body.email)
@@ -94,7 +96,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
         raise invalid
 
     user = await db.get(User, stored.user_id)
-    if user is None:
+    if user is None or user.deleted_at is not None:
         raise invalid
 
     # Rotate: revoke the token that was just used, issue a fresh pair. Limits

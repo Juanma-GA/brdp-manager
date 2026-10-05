@@ -362,7 +362,7 @@ async function main() {
     assert(genericBrdps.length === 0, `nothing imported (${genericBrdps.length} BRDPs)`);
   } finally {
     await browser.close();
-    for (const id of projects) await api(`/api/projects/${id}`, { method: "DELETE" }).catch(() => {});
+    for (const id of projects) await api(`/api/projects/${id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL CHECKS PASSED");

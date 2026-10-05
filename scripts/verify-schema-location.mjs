@@ -329,7 +329,7 @@ async function main() {
     assert(storedMixed.rule_xml === MIXED_RULE, "stored EXT-02772 unchanged");
   } finally {
     await browser.close();
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" });
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL CHECKS PASSED");
   process.exit(failures ? 1 : 0);

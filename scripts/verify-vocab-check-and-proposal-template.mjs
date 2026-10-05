@@ -510,7 +510,7 @@ async function main() {
   } finally {
     await browser.close();
     for (const proj of [projD, projS, projS2, projS0]) {
-      await fetch(`${API}/api/projects/${proj.id}`, { method: "DELETE", headers: auth }).catch(() => {});
+      await fetch(`${API}/api/projects/${proj.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     }
     console.log("Cleaned up the seeded projects.");
     void brdpPokemon;

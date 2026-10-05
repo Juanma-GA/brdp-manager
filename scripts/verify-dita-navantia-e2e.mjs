@@ -414,7 +414,7 @@ async function main() {
     console.log("\nAll DITA 1.3 Navantia S80 end-to-end checks passed.");
   } finally {
     if (projectId) {
-      await fetch(`${API}/api/projects/${projectId}`, { method: "DELETE", headers: auth }).catch(() => {});
+      await fetch(`${API}/api/projects/${projectId}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
       console.log(`Cleaned up: deleted project ${projectId}.`);
     }
     await browser.close();

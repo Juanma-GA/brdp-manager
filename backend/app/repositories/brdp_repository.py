@@ -14,16 +14,24 @@ RuleApproval-joined bulk lookup) -- those still centralize the actual
 """
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import BRDP, Project, RuleApproval
+from app.repositories.project_repository import ACTIVE_PROJECT_FILTER, ACTIVE_PROJECT_IDS
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 
 # The one place `deleted_at IS NULL` is spelled out as a SQLAlchemy
 # expression -- import this into any query that needs it instead of
-# writing `BRDP.deleted_at.is_(None)` again.
-ACTIVE_BRDP_FILTER = BRDP.deleted_at.is_(None)
+# writing `BRDP.deleted_at.is_(None)` again. Since AACF 2 it also requires
+# the BRDP's project to be active (not in the Papelera), so every query
+# that uses it -- within a project or across projects (Suggest, Comparar,
+# jobs) -- never sees a deleted project's BRDPs.
+ACTIVE_BRDP_FILTER = and_(BRDP.deleted_at.is_(None), BRDP.project_id.in_(ACTIVE_PROJECT_IDS))
+# A trashed BRDP of an ACTIVE project: what the BRDP Papelera shows. A
+# deleted project's trashed BRDPs stay as they are and reappear there when
+# the project is restored.
+TRASHED_BRDP_FILTER = and_(BRDP.deleted_at.is_not(None), BRDP.project_id.in_(ACTIVE_PROJECT_IDS))
 
 # GET /brdps's Rule Status vocabulary (RULE_STATES in src/utils/ruleState.js)
 # -- "todo" isn't a rule_approvals.status value at all, it's the absence of
@@ -201,7 +209,7 @@ async def list_trashed_brdps(db: AsyncSession, project_ids: list[uuid.UUID] | No
     query = (
         select(BRDP, Project.name.label("project_name"))
         .join(Project, BRDP.project_id == Project.id)
-        .where(BRDP.deleted_at.is_not(None))
+        .where(TRASHED_BRDP_FILTER, ACTIVE_PROJECT_FILTER)
     )
     if project_ids is not None:
         query = query.where(BRDP.project_id.in_(project_ids))
@@ -215,7 +223,7 @@ async def get_trashed_brdp(brdp_id: uuid.UUID, db: AsyncSession) -> BRDP | None:
     project-scoped: the Trash spans every project, and the admin acting on
     a row already knows its id from the listing above.
     """
-    result = await db.execute(select(BRDP).where(BRDP.id == brdp_id, BRDP.deleted_at.is_not(None)))
+    result = await db.execute(select(BRDP).where(BRDP.id == brdp_id, TRASHED_BRDP_FILTER))
     return result.scalar_one_or_none()
 
 
@@ -236,7 +244,7 @@ async def list_trashed_brdps_by_ids(
     """
     if not brdp_ids:
         return []
-    query = select(BRDP).where(BRDP.id.in_(brdp_ids), BRDP.deleted_at.is_not(None))
+    query = select(BRDP).where(BRDP.id.in_(brdp_ids), TRASHED_BRDP_FILTER)
     if project_ids is not None:
         query = query.where(BRDP.project_id.in_(project_ids))
     result = await db.execute(query)

@@ -249,7 +249,7 @@ async function main() {
     await verdict().waitFor({ timeout: 20000 });
     assert(((await verdict().textContent()) || "").startsWith("Correct"), "regenerated after the cut: Correct");
   } finally {
-    await api(`/api/projects/${project.id}`, { method: "DELETE" }).catch(() => {});
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded project.");
     await browser.close();
   }

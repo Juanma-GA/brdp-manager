@@ -329,7 +329,7 @@ async function main() {
     await page.unroute(restoreUrl);
   } finally {
     await browser.close();
-    await api(`/api/projects/${project.id}`, { method: "DELETE" });
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} FAILED` : "\nALL OK");
   process.exit(failures ? 1 : 0);

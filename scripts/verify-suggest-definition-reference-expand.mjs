@@ -185,7 +185,7 @@ async function main() {
     console.log("\nALL CHECKS PASSED\n");
   } finally {
     await browser.close();
-    await fetch(`${API}/api/projects/${proj.id}`, { method: "DELETE", headers: auth }).catch(() => {});
+    await fetch(`${API}/api/projects/${proj.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     console.log("Cleaned up the seeded project.");
   }
 }

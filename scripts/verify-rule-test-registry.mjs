@@ -294,7 +294,7 @@ async function main() {
     a = await approvalOf("BRDP-T3-REGEN");
     assert(a.last_test_result === null, "regenerated then accepted: nothing recorded");
   } finally {
-    await api(`/api/projects/${project.id}`, { method: "DELETE" }).catch(() => {});
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
     console.log("Cleaned up the seeded project.");
     await browser.close();
   }

@@ -18,19 +18,19 @@ export function useTrash() {
 // the rows leave the list at once; if the server refuses, the list comes
 // back as it was (the page shows the reason). The list is read again when
 // the request settles, either way.
-function optimisticRemoval(queryClient, idsOf) {
+export function optimisticRemoval(queryClient, idsOf, queryKey = TRASH_QUERY_KEY) {
   return {
     onMutate: async (variables) => {
-      await queryClient.cancelQueries({ queryKey: TRASH_QUERY_KEY });
-      const previous = queryClient.getQueryData(TRASH_QUERY_KEY);
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData(queryKey);
       const ids = new Set(idsOf(variables));
-      if (previous) queryClient.setQueryData(TRASH_QUERY_KEY, previous.filter((e) => !ids.has(e.id)));
+      if (previous) queryClient.setQueryData(queryKey, previous.filter((e) => !ids.has(e.id)));
       return { previous };
     },
     onError: (_err, _variables, context) => {
-      if (context?.previous) queryClient.setQueryData(TRASH_QUERY_KEY, context.previous);
+      if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: TRASH_QUERY_KEY }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey }),
   };
 }
 
@@ -65,5 +65,67 @@ export function useBulkPermanentlyDeleteBrdps() {
         body: JSON.stringify({ brdp_ids: brdpIds }),
       }),
     ...optimisticRemoval(queryClient, (brdpIds) => brdpIds),
+  });
+}
+
+// ── Projects in the Papelera (AACF 2, admin only) ───────────────────────
+// Restoring a project also brings back its own trashed BRDPs into the BRDP
+// list above, so both lists are read again when a restore settles.
+const TRASH_PROJECTS_QUERY_KEY = ['trash-projects'];
+
+export function useTrashedProjects({ enabled = true } = {}) {
+  return useQuery({
+    queryKey: TRASH_PROJECTS_QUERY_KEY,
+    queryFn: () => authFetchJson('/api/trash/projects'),
+    enabled,
+  });
+}
+
+export function useRestoreProject() {
+  const queryClient = useQueryClient();
+  const removal = optimisticRemoval(queryClient, ({ projectId }) => [projectId], TRASH_PROJECTS_QUERY_KEY);
+  return useMutation({
+    mutationFn: ({ projectId, name }) =>
+      authFetchJson(`/api/trash/projects/${projectId}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(name ? { name } : {}),
+      }),
+    ...removal,
+    onSettled: () => {
+      removal.onSettled();
+      queryClient.invalidateQueries({ queryKey: TRASH_QUERY_KEY });
+    },
+  });
+}
+
+export function usePermanentlyDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (projectId) => authFetchJson(`/api/trash/projects/${projectId}`, { method: 'DELETE' }),
+    ...optimisticRemoval(queryClient, (projectId) => [projectId], TRASH_PROJECTS_QUERY_KEY),
+  });
+}
+
+// ── Deleted users (AACF 2, admin only) ─────────────────────────────────
+export const DELETED_USERS_QUERY_KEY = ['deleted-users'];
+
+export function useDeletedUsers() {
+  return useQuery({ queryKey: DELETED_USERS_QUERY_KEY, queryFn: () => authFetchJson('/api/users/deleted') });
+}
+
+export function useRestoreUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userId) => authFetchJson(`/api/users/${userId}/restore`, { method: 'POST' }),
+    ...optimisticRemoval(queryClient, (userId) => [userId], DELETED_USERS_QUERY_KEY),
+  });
+}
+
+export function usePermanentlyDeleteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userId) => authFetchJson(`/api/users/${userId}/permanent`, { method: 'DELETE' }),
+    ...optimisticRemoval(queryClient, (userId) => [userId], DELETED_USERS_QUERY_KEY),
   });
 }

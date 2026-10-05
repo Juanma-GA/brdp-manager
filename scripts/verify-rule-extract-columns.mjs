@@ -239,7 +239,7 @@ async function main() {
       }
     }
   } finally {
-    await api(`/api/projects/${project.id}`, { method: "DELETE" }).catch((e) => console.log(`cleanup: ${e.message}`));
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" }).catch((e) => console.log(`cleanup: ${e.message}`));
     await browser.close();
   }
   console.log(`\nscreenshots: ${path.join(SHOTS, `${SHOT_PREFIX}-*.png`)}`);

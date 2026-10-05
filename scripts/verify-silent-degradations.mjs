@@ -109,14 +109,14 @@ async function main() {
     await page.route(`**/api/projects/${project.id}/brdps`, (r) => r.fulfill(SERVER_ERROR));
     await page.locator("tr", { hasText: project.name }).getByRole("button", { name: "Delete" }).click();
     await notice("delete-project-count-error").waitFor({ timeout: 5000 });
-    assert((await page.getByText(/permanently delete 0 BRDP/).count()) === 0, 'never "0 BRDPs"');
+    assert((await page.getByText(/its 0 BRDP/).count()) === 0, 'never "0 BRDPs"');
     await page.getByPlaceholder("Project name").fill(project.name);
-    const confirm = page.getByRole("button", { name: "Delete permanently" });
+    const confirm = page.getByRole("button", { name: "Move to the Trash" });
     assert(await confirm.isDisabled(), "cannot confirm until the count loads");
     await page.screenshot({ path: `${SHOTS}/delete-project-count-error.png` });
     await page.unroute(`**/api/projects/${project.id}/brdps`);
     await notice("delete-project-count-error-retry").click();
-    await page.getByText(/permanently delete 3 BRDPs/).waitFor({ timeout: 5000 });
+    await page.getByText(/its 3 BRDPs move to the Trash/).waitFor({ timeout: 5000 });
     assert(!(await confirm.isDisabled()), "with the real count, it can be confirmed");
     await page.getByRole("button", { name: "Cancel" }).click();
 
@@ -135,7 +135,7 @@ async function main() {
     assert(/do not have access/.test(await page.getByTestId("project-denied").textContent()), "no access / gone: said, with a link back");
   } finally {
     await browser.close();
-    await api(`/api/projects/${project.id}`, { method: "DELETE" });
+    await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" });
   }
   console.log(failures ? `\n${failures} FAILED` : "\nALL OK");
   process.exit(failures ? 1 : 0);

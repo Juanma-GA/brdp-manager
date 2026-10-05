@@ -367,7 +367,7 @@ async function main() {
     assert((caRule.rule_xml.match(/<structureObjectRule>/g) || []).length === 4500, "S1-00007 imported with its 4500 rules");
   } finally {
     await browser.close();
-    for (const p of projects) await api(`/api/projects/${p.id}`, { method: "DELETE" }).catch(() => {});
+    for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" }).catch(() => {});
   }
   console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
   process.exit(failures ? 1 : 0);

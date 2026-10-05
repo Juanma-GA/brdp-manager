@@ -320,7 +320,7 @@ async function main() {
     console.log("\nALL CHECKS PASSED\n");
   } finally {
     for (const proj of [projS, projD, projNoSchema]) {
-      await fetch(`${API}/api/projects/${proj.id}`, { method: "DELETE", headers: auth }).catch(() => {});
+      await fetch(`${API}/api/projects/${proj.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     }
     console.log("Cleaned up the 3 seeded projects (and their BRDPs, cascade).");
     void brdpTable;
