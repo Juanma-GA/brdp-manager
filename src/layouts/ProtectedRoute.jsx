@@ -1,5 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthContext } from '../context/AuthContext';
+import ErrorNotice from '../components/ErrorNotice';
 import ForceChangePasswordPage from '../pages/ForceChangePasswordPage';
 
 /**
@@ -17,10 +19,22 @@ import ForceChangePasswordPage from '../pages/ForceChangePasswordPage';
  * the !isAuthenticated branch above it).
  */
 export default function ProtectedRoute({ children }) {
-  const { isAuthenticated, isLoading, user } = useAuthContext();
+  const { isAuthenticated, isLoading, user, connectionError, retryRestore } = useAuthContext();
   const location = useLocation();
+  const { t } = useTranslation();
 
   if (isLoading) return <div style={{ padding: 24 }}>…</div>;
+  // AACF 2, Part 1: the server did not answer, so whether there is a
+  // session is unknown -- never /login, the URL stays, and Retry restores
+  // the session in place (the same page renders once it answers).
+  if (connectionError) {
+    return (
+      <div style={{ padding: 24, maxWidth: 640 }} data-testid="connection-error-screen">
+        <h1 style={{ fontSize: 20, margin: '0 0 12px' }}>{t('auth.connectionTitle')}</h1>
+        <ErrorNotice message={t('auth.connectionFailed')} onRetry={retryRestore} testId="connection-error" />
+      </div>
+    );
+  }
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }

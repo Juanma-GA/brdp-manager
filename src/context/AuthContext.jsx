@@ -71,20 +71,40 @@ export function AuthProvider({ children }) {
   // revoked -- logging out a session that was never actually invalid.
   // refreshAccessToken() caches the in-flight promise so both callers
   // await the same network call instead of each firing their own.
+  // AACF 2, Part 1: a restore the server could not answer (no network, or
+  // a 5xx -- the backend down behind the proxy) is not "no session": the
+  // app shows "could not connect" with Retry (ProtectedRoute), keeps the
+  // URL, and never sends the person to /login. Only the server saying
+  // there is no session (refresh false, /me 401) does that. No automatic
+  // retry loop: Retry is the person's choice.
+  const [connectionError, setConnectionError] = useState(false);
+  const [restoreToken, setRestoreToken] = useState(0);
+  const retryRestore = useCallback(() => {
+    setConnectionError(false);
+    setIsLoading(true);
+    setRestoreToken((n) => n + 1);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function restore() {
       try {
         const refreshed = await refreshAccessToken();
-        if (!refreshed) throw new Error('refresh failed');
+        if (!refreshed) {
+          if (!cancelled) setAccessToken(null);
+          return;
+        }
         if (cancelled) return;
         const me = await authFetchJson('/api/auth/me');
         if (!cancelled) {
           setUser(me);
           applyPreferredLanguage(me);
         }
-      } catch {
-        if (!cancelled) {
+      } catch (err) {
+        if (cancelled) return;
+        if (err?.network || (typeof err?.status === 'number' && err.status >= 500)) {
+          setConnectionError(true);
+        } else {
           setAccessToken(null);
         }
       } finally {
@@ -95,7 +115,7 @@ export function AuthProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [setAccessToken]);
+  }, [setAccessToken, restoreToken]);
 
   const login = useCallback(
     async (email, password) => {
@@ -106,6 +126,7 @@ export function AuthProvider({ children }) {
       });
       setAccessToken(data.access_token);
       const me = await authFetchJson('/api/auth/me');
+      setConnectionError(false);
       setUser(me);
       applyPreferredLanguage(me);
       return me;
@@ -128,6 +149,8 @@ export function AuthProvider({ children }) {
     accessToken,
     isAuthenticated: !!user,
     isLoading,
+    connectionError,
+    retryRestore,
     login,
     logout,
     updateUser,

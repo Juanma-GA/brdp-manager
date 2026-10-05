@@ -11,7 +11,7 @@
  * React context.
  */
 
-import { apiErrorFromResponse, networkError } from './apiErrors.js';
+import { ApiError, apiErrorFromResponse, networkError } from './apiErrors.js';
 
 let getAccessToken = () => null;
 let setAccessToken = () => {};
@@ -42,18 +42,41 @@ export function configureAuth({ getAccessToken: get, setAccessToken: set, onSess
 // firing independent /refresh requests that would race each other.
 let refreshPromise = null;
 
+// AACF 2, Part 1: "the server says there is no session" and "the server
+// did not answer" are two different things. Only the first (a 4xx from
+// /refresh: no cookie, revoked, expired, deleted user) is "log in again";
+// a network failure or a 5xx (the backend down behind the dev proxy or
+// nginx) says nothing about the session, which may be perfectly valid.
+// That case throws a network ApiError instead of returning false, so no
+// caller ever treats it as a logout.
 async function doRefresh() {
-  const res = await fetch('/api/auth/refresh', {
-    method: 'POST',
-    credentials: 'include',
-  });
+  let res;
+  try {
+    res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch (err) {
+    throw networkError(err);
+  }
+  if (res.status >= 500) throw networkError(new Error(`refresh answered HTTP ${res.status}`));
   if (!res.ok) return false;
 
-  const data = await res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch (err) {
+    throw networkError(err);
+  }
   setAccessToken(data.access_token);
   return true;
 }
 
+/**
+ * true: a fresh access token is set. false: the server says there is no
+ * session (log in again). Throws a network ApiError when the server could
+ * not be asked at all -- the session is then unknown, never "gone".
+ */
 export async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
 
@@ -89,6 +112,8 @@ export async function authFetch(path, options = {}) {
   let response = await fetch(path, { ...options, headers, credentials: 'include' });
 
   if (response.status === 401) {
+    // A refresh the server could not answer throws (network ApiError): the
+    // caller shows the connection error and the session stays as it is.
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       const retryHeaders = { ...(options.headers || {}), Authorization: `Bearer ${getAccessToken()}` };
@@ -116,7 +141,7 @@ export async function authFetchJson(path, options = {}) {
   try {
     response = await authFetch(path, options);
   } catch (err) {
-    throw networkError(err);
+    throw err instanceof ApiError ? err : networkError(err);
   }
   if (!response.ok) throw await apiErrorFromResponse(response);
   if (response.status === 204) return null;

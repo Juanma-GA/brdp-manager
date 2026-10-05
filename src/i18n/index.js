@@ -87,6 +87,12 @@ const resources = {
         password: 'Password',
         submit: 'Sign in',
         error: 'Invalid email or password',
+        connectionError: 'Could not connect to the server. Check the connection and try again.',
+        tooManyAttempts: 'Too many failed attempts. Wait a few minutes and try again.',
+      },
+      auth: {
+        connectionTitle: 'No connection to the server',
+        connectionFailed: 'Could not connect to the server, so your session could not be checked. Retry when it is back; you will stay on this page.',
       },
       nav: {
         projects: 'BRDP Projects',
@@ -1445,6 +1451,12 @@ const resources = {
         password: 'Contraseña',
         submit: 'Entrar',
         error: 'Correo o contraseña incorrectos',
+        connectionError: 'No se pudo conectar con el servidor. Comprueba la conexión y vuelve a intentarlo.',
+        tooManyAttempts: 'Demasiados intentos fallidos. Espera unos minutos y vuelve a intentarlo.',
+      },
+      auth: {
+        connectionTitle: 'Sin conexión con el servidor',
+        connectionFailed: 'No se pudo conectar con el servidor, así que no se ha podido comprobar tu sesión. Reintenta cuando vuelva; seguirás en esta página.',
       },
       nav: {
         projects: 'Proyectos BRDP',

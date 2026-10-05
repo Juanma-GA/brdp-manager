@@ -33,8 +33,12 @@ export default function LoginPage() {
       await login(email, password);
       const from = location.state?.from || '/projects';
       navigate(from, { replace: true });
-    } catch {
-      setError(t('login.error'));
+    } catch (err) {
+      // AACF 2, Part 1: a server that did not answer is not "wrong
+      // credentials" -- only its 401 is.
+      if (err?.network || (typeof err?.status === 'number' && err.status >= 500)) setError(t('login.connectionError'));
+      else if (err?.status === 429) setError(t('login.tooManyAttempts'));
+      else setError(t('login.error'));
     } finally {
       setIsSubmitting(false);
     }
@@ -84,7 +88,7 @@ export default function LoginPage() {
           </button>
         </div>
         {fieldErrors.password && <p className={styles.fieldError}>{t('validation.required')}</p>}
-        {error && <p className={styles.error}>{error}</p>}
+        {error && <p className={styles.error} role="alert" data-testid="login-error">{error}</p>}
         <button type="submit" className={styles.submit} disabled={isSubmitting}>
           {isSubmitting ? '…' : t('login.submit')}
         </button>
