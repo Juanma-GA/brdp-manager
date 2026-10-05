@@ -129,7 +129,7 @@ async function main() {
     await page.keyboard.press("ArrowRight");
     w = await widths();
     assert(near(w.detail, 376, 1.5), `ArrowRight: 376px (${w.detail})`);
-    assert((await markColor()) === "rgb(37, 99, 235)", "focused divider shows the blue mark");
+    assert((await markColor()) === "rgb(46, 116, 181)", "focused divider shows the primary (ATEXIS blue) mark");
     await page.waitForTimeout(300);
     assert(patches.length === 3, `one save per finished key press (${patches.length})`);
     assert(near(Number(await stored()), 376, 1), "keyboard width is stored on the server");

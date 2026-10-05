@@ -1,5 +1,5 @@
 .header {
-  background: var(--surface);
+  background: var(--bg);
   border-bottom: 1.5px solid var(--border);
   height: 56px;
   flex-shrink: 0;
@@ -33,7 +33,7 @@
   display: inline-block;
   width: 30px;
   height: 30px;
-  background: var(--blue);
+  background: var(--primary);
   border-radius: 7px;
 }
 
@@ -46,7 +46,7 @@
 
 .title > span > strong {
   display: block;
-  font-family: 'IBM Plex Sans', sans-serif;
+  font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 700;
   color: var(--text);
@@ -66,15 +66,15 @@
 
 .userInfo {
   font-size: 12px;
-  color: var(--text-mid);
+  color: var(--text);
   white-space: nowrap;
 }
 
 /* Chat Button */
 .chatButton {
   background: white;
-  border: 1px solid var(--border2);
-  color: var(--text-mid);
+  border: 1px solid var(--border);
+  color: var(--text);
   font-size: 11.5px;
   padding: 4px 10px;
   border-radius: 6px;
@@ -85,9 +85,9 @@
 }
 
 .chatButton:hover:not(:disabled) {
-  border-color: var(--blue);
-  color: var(--blue);
-  background: var(--blue-light);
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-tint);
 }
 
 .chatButton:disabled {
@@ -96,16 +96,16 @@
 }
 
 .chatActive {
-  background: var(--blue);
+  background: var(--primary);
   color: white;
-  border-color: var(--blue-dark);
+  border-color: var(--primary-dark);
 }
 
 /* Secondary Buttons (Outline Style) */
 .secondaryBtn {
   background: white;
-  border: 1px solid var(--border2);
-  color: var(--text-mid);
+  border: 1px solid var(--border);
+  color: var(--text);
   font-size: 11.5px;
   padding: 6px 12px;
   border-radius: 6px;
@@ -119,9 +119,9 @@
 }
 
 .secondaryBtn:hover:not(:disabled) {
-  border-color: var(--blue);
-  color: var(--blue);
-  background: var(--blue-light);
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-tint);
 }
 
 .secondaryBtn:disabled {
@@ -140,7 +140,7 @@
   top: calc(100% + 4px);
   left: 0;
   background: white;
-  border: 1px solid var(--border2);
+  border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   z-index: 1000;
@@ -155,7 +155,7 @@
   background: none;
   text-align: left;
   font-size: 11.5px;
-  color: var(--text-mid);
+  color: var(--text);
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
@@ -170,14 +170,14 @@
 }
 
 .dropdownItem:hover {
-  background-color: var(--blue-light);
-  color: var(--blue);
+  background-color: var(--primary-tint);
+  color: var(--primary);
 }
 
 /* Generate Button */
 .generateBtn {
-  background: var(--blue);
-  border: 1px solid var(--blue-dark);
+  background: var(--primary);
+  border: 1px solid var(--primary-dark);
   color: white;
   font-weight: 600;
   font-size: 11.5px;
@@ -192,8 +192,8 @@
 }
 
 .generateBtn:hover {
-  background: var(--blue-dark);
-  border-color: #1b3fa0;
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
 }
 
 .generateBtn:disabled {

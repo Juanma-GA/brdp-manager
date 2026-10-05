@@ -222,8 +222,8 @@ async function main() {
     const mark52 = await example(2).locator("mark").allTextContents();
     assert(JSON.stringify(mark52) === JSON.stringify(['infoCode="040"']), `S1-00052: the data module's own @infoCode highlighted (${JSON.stringify(mark52)})`);
     // The section is the LLM's content (not dimmed); the body is skeleton.
-    assert((await colorOf(example(0).locator("pre span", { hasText: "<dmStatus" }).first())) !== "rgb(148, 163, 184)", "S1-00052: the written section is shown as content, not skeleton");
-    assert((await colorOf(example(0).locator("pre span", { hasText: "<levelledPara" }).first())) === "rgb(148, 163, 184)", "S1-00052: the content chain is dimmed skeleton");
+    assert((await colorOf(example(0).locator("pre span", { hasText: "<dmStatus" }).first())) !== "rgb(100, 116, 139)", "S1-00052: the written section is shown as content, not skeleton");
+    assert((await colorOf(example(0).locator("pre span", { hasText: "<levelledPara" }).first())) === "rgb(100, 116, 139)", "S1-00052: the content chain is dimmed skeleton");
     await panel().screenshot({ path: "/tmp/rule-test-metadata-infocode.png" });
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "S1-00052: recorded as passed");
 
@@ -296,7 +296,7 @@ async function main() {
     assert(!sysEmph.includes("identification and status") && sysEmph.includes("your content goes directly inside <para>"), "content-only rule: prompt as before");
     assert((await verdict().textContent()).startsWith("Correct"), `content-only rule: verdict correct (${await verdict().textContent()})`);
     assert((await example(0).locator("pre").textContent()).includes("<identAndStatusSection>"), "content-only rule: the document carries the minimal section");
-    assert((await colorOf(example(0).locator("pre span", { hasText: "<dmStatus" }).first())) === "rgb(148, 163, 184)", "content-only rule: the section is dimmed skeleton");
+    assert((await colorOf(example(0).locator("pre span", { hasText: "<dmStatus" }).first())) === "rgb(100, 116, 139)", "content-only rule: the section is dimmed skeleton");
 
     // 5. Nothing an example can contain: not executable, no LLM call.
     await fetch(`${MOCK}/reset`, { method: "POST" });

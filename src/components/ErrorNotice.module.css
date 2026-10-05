@@ -10,7 +10,7 @@
   border-radius: 6px;
   background: #fef2f2;
   border: 1px solid #fecaca;
-  color: #b91c1c;
+  color: var(--error-text);
   font-size: 13px;
   line-height: 1.4;
 }
@@ -31,7 +31,7 @@
   background: none;
   border: none;
   padding: 0;
-  color: #b91c1c;
+  color: var(--error-text);
   font: inherit;
   font-weight: 600;
   text-decoration: underline;
@@ -48,7 +48,7 @@
   background: none;
   border: none;
   padding: 0 2px;
-  color: #b91c1c;
+  color: var(--error-text);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;

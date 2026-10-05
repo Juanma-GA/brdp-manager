@@ -208,7 +208,7 @@ async function main() {
     const resultColor = await example(1).getByTestId("rule-test-result").evaluate((el) => getComputedStyle(el).color);
     assert(resultColor === "rgb(185, 28, 28)", `rejected result in red (${resultColor})`);
     const okColor = await example(0).getByTestId("rule-test-result").evaluate((el) => getComputedStyle(el).color);
-    assert(okColor === "rgb(22, 163, 74)", `accepted result in green (${okColor})`);
+    assert(okColor === "rgb(22, 101, 52)", `accepted result in green (${okColor})`);
     const approvalBefore = await api(`/api/projects/${p42.id}/brdps/${emph.id}/approvals/BREX-4.2`);
     assert(approvalBefore.status === 404 || (await approvalBefore.json()) === null, "testing a suggestion saves nothing");
     assert((await panel().getByTestId("rule-test-analysis").count()) === 0, "an executable rule shows no analysis warning");
@@ -235,7 +235,7 @@ async function main() {
     // Skeleton dimmed, content highlighted.
     const skeletonSpan = example(1).locator("pre span", { hasText: "<proceduralStep" }).first();
     const skColor = await skeletonSpan.evaluate((el) => getComputedStyle(el).color);
-    assert(skColor === "rgb(148, 163, 184)", `skeleton dimmed (${skColor})`);
+    assert(skColor === "rgb(100, 116, 139)", `skeleton dimmed (${skColor})`);
     const contentSpan = example(1).locator("pre span", { hasText: "sealant" }).first();
     const ctBg = await contentSpan.evaluate((el) => getComputedStyle(el).backgroundColor);
     assert(ctBg === "rgb(224, 242, 254)", `content highlighted (${ctBg})`);

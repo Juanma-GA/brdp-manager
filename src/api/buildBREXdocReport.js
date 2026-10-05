@@ -78,51 +78,57 @@ export function buildHTML(brdps, projectConfig) {
       table { page-break-inside: auto; }
       tr { page-break-inside: avoid; }
     }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 0; color: #111827; background: #fff; }
-    .cover { background: #1e3a5f; color: white; padding: 60px 48px 40px; }
+    /* AACF 3, Part 2: the ATEXIS brand. This report is a standalone file
+       (no app CSS, no font files), so the brand values are repeated here
+       from src/index.css -- keep them in sync -- and the font is Inter if
+       the reader has it, otherwise the system UI font. */
+    :root {
+      --primary: #2e74b5; --primary-dark: #245c90; --primary-tint: #eaf1f8;
+      --bg: #ffffff; --surface: #f8fafc; --border: #e2e8f0;
+      --text: #0f172a; --text-muted: #64748b; --text-strong-muted: #475569;
+      --success-text: #065f46; --warning-text: #92400e; --error-text: #991b1b;
+    }
+    body { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; padding: 0; color: var(--text); background: var(--bg); }
+    .cover { background: var(--primary); color: var(--bg); padding: 60px 48px 40px; }
     .cover h1 { font-size: 28px; margin: 0 0 8px; font-weight: 700; }
-    .cover h2 { font-size: 16px; margin: 0 0 32px; font-weight: 400; opacity: 0.8; }
+    .cover h2 { font-size: 16px; margin: 0 0 32px; font-weight: 400; }
     .cover-meta { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 24px; }
-    .cover-meta div { font-size: 13px; opacity: 0.85; }
-    .cover-meta strong { display: block; font-size: 15px; opacity: 1; margin-top: 2px; }
+    .cover-meta div { font-size: 13px; }
+    .cover-meta strong { display: block; font-size: 15px; margin-top: 2px; }
     .section { padding: 32px 48px; }
-    .section h2 { font-size: 18px; font-weight: 700; color: #1e3a5f; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 20px; }
+    .section h2 { font-size: 18px; font-weight: 700; color: var(--primary-dark); border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 20px; }
     .stats { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
-    .stat { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px 24px; text-align: center; min-width: 100px; }
-    .stat .num { font-size: 28px; font-weight: 700; color: #1e3a5f; }
-    .stat .lbl { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
-    .stat.green .num { color: #065f46; }
-    .stat.red .num   { color: #991b1b; }
-    .stat.amber .num { color: #92400e; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 24px; text-align: center; min-width: 100px; }
+    .stat .num { font-size: 28px; font-weight: 700; color: var(--primary-dark); }
+    .stat .lbl { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+    .stat.green .num { color: var(--success-text); }
+    .stat.red .num   { color: var(--error-text); }
+    .stat.amber .num { color: var(--warning-text); }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    thead tr { background: #1e3a5f; color: white; }
+    thead tr { background: var(--primary); color: var(--bg); }
     thead th { padding: 10px 12px; text-align: left; font-weight: 600; font-size: 12px; letter-spacing: 0.04em; }
-    tbody tr { border-bottom: 1px solid #e5e7eb; }
-    tbody tr:nth-child(even) { background: #f9fafb; }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:nth-child(even) { background: var(--surface); }
     td { padding: 10px 12px; }
+    .id-cell { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--primary-dark); white-space: nowrap; }
     .badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-    .badge-validated { background: #d1fae5; color: #065f46; }
-    .badge-refused   { background: #fee2e2; color: #991b1b; }
-    .badge-pending   { background: #fef3c7; color: #92400e; }
-    .badge-unknown   { background: #f3f4f6; color: #6b7280; }
-    /* Rule Status replaces the old Comment column (docs request). Text
-       colors are the EXACT hex values already established for Rule
-       Status in BRDP Records/Projects (StatusCountsSummary.module.css --
-       #2563eb Verified, #64748b Draft, #94a3b8 To Do), never a new
-       palette; the light background tints are just this report's own
-       existing badge-pill convention (light bg + the real status color as
-       text, already used above for Proposal Status) applied to those same
-       reused hues, not a fourth invented color scheme. */
-    .badge-rule-verified { background: #dbeafe; color: #2563eb; }
-    .badge-rule-draft    { background: #e2e8f0; color: #64748b; }
-    .badge-rule-todo     { background: #f1f5f9; color: #94a3b8; }
+    .badge-validated { background: #d1fae5; color: var(--success-text); }
+    .badge-refused   { background: #fee2e2; color: var(--error-text); }
+    .badge-pending   { background: #fef3c7; color: var(--warning-text); }
+    .badge-unknown   { background: #f1f5f9; color: var(--text-muted); }
+    /* Rule Status: the same three tones as BRDP Records (Verified in the
+       primary, Draft and To Do in two slates), each with AA contrast on
+       its pill. */
+    .badge-rule-verified { background: var(--primary-tint); color: var(--primary-dark); }
+    .badge-rule-draft    { background: var(--border); color: var(--text-strong-muted); }
+    .badge-rule-todo     { background: #f1f5f9; color: var(--text-muted); }
     .pagination { display: flex; align-items: center; gap: 8px; padding: 16px 48px; justify-content: center; }
-    .pagination button { padding: 6px 14px; border: 1px solid #e5e7eb; border-radius: 6px; background: white; cursor: pointer; font-size: 13px; color: #374151; }
-    .pagination button:hover:not(:disabled) { background: #f3f4f6; }
+    .pagination button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); cursor: pointer; font-size: 13px; color: var(--text); font-family: inherit; }
+    .pagination button:hover:not(:disabled) { background: var(--surface); }
     .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
-    .pagination button.active { background: #1e3a5f; color: white; border-color: #1e3a5f; }
-    .pagination-info { font-size: 13px; color: #6b7280; margin: 0 8px; }
-    footer { background: #f9fafb; border-top: 1px solid #e5e7eb; padding: 16px 48px; font-size: 12px; color: #9ca3af; display: flex; justify-content: space-between; }
+    .pagination button.active { background: var(--primary); color: var(--bg); border-color: var(--primary); }
+    .pagination-info { font-size: 13px; color: var(--text-muted); margin: 0 8px; }
+    footer { background: var(--surface); border-top: 1px solid var(--border); padding: 16px 48px; font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between; }
   </style>
 </head>
 <body>
@@ -216,7 +222,7 @@ export function buildHTML(brdps, projectConfig) {
     const tbody = document.getElementById('brdp-tbody');
     tbody.innerHTML = slice.map(b => \`
       <tr>
-        <td style="font-family:monospace;font-size:12px;color:#2563eb;white-space:nowrap;">\${escapeHtml(b.id)}</td>
+        <td class="id-cell">\${escapeHtml(b.id)}</td>
         <td style="font-weight:500;">\${escapeHtml(b.title)}</td>
         <td>\${escapeHtml(b.definition)}</td>
         <td>\${escapeHtml(b.proposal)}</td>

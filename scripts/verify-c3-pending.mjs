@@ -69,7 +69,7 @@ async function main() {
       return button.evaluate((el) => getComputedStyle(el).backgroundColor);
     };
     const normalBg = await bg();
-    assert(normalBg === "rgb(37, 99, 235)", `the save button is the shared primary Button (${normalBg})`);
+    assert(normalBg === "rgb(46, 116, 181)", `the save button is the shared primary Button (${normalBg})`);
     // Hold the PUT a moment so the saving state can be seen.
     let releasePut;
     const putHeld = new Promise((resolve) => (releasePut = resolve));
@@ -85,7 +85,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('[data-testid="config-save"]')?.getAttribute("data-state") === "success", null, { timeout: 5000 });
     const t0 = Date.now();
     const green = await bg();
-    assert(green === "rgb(22, 163, 74)", `after saving: the button turns green (${green})`);
+    assert(green === "rgb(22, 101, 52)", `after saving: the button turns green (${green})`);
     assert((await button.textContent()) === "✓Save Configuration", `after saving: ✓ on the button (${await button.textContent()})`);
     assert((await page.getByRole("button", { name: "Save Configuration" }).count()) === 1, "the ✓ is not part of the button's name");
     await page.locator("form").first().screenshot({ path: "/tmp/config-save-success.png" });

@@ -30,12 +30,12 @@
 }
 
 .primary {
-  background: #2563eb;
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .primary:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--primary-dark);
 }
 
 /* Success confirmation (C3b): green with a ✓ for a moment after the action
@@ -43,8 +43,10 @@
    wins over any variant regardless of order in this file. */
 .button.success,
 .button.success:hover:not(:disabled) {
-  background: #16a34a;
-  color: #fff;
+  /* AACF 3: white on the palette green (#16a34a) is 3.3:1, below AA for
+     the button's text; the darker green of the same hue is 7.1:1. */
+  background: var(--success-text);
+  color: var(--on-primary);
 }
 
 .check {

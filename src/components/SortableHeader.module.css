@@ -14,10 +14,10 @@
 }
 
 .sortHeaderBtn:hover {
-  color: #2563eb;
+  color: var(--primary);
 }
 
 .sortIndicator {
   font-size: 9px;
-  color: #2563eb;
+  color: var(--primary);
 }

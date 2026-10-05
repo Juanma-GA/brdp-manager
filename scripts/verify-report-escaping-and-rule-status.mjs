@@ -179,7 +179,7 @@ async function main() {
     const isDirectChildOfTbody = await targetRow.evaluate((el) => el.parentElement.id === "brdp-tbody");
     assert(isDirectChildOfTbody, "BRDP-S1-00123's row is still a direct child of #brdp-tbody (did NOT float outside the table)");
     const cellCount = await targetRow.locator("td").count();
-    assert(cellCount === 6, `BRDP-S1-00123's row has exactly 6 real <td> cells (got ${cellCount}) -- not corrupted by an unclosed <table> tag`);
+    assert(cellCount === 7, `BRDP-S1-00123's row has exactly 7 real <td> cells (got ${cellCount}) -- not corrupted by an unclosed <table> tag`);
 
     const titleCellText = await targetRow.locator("td").nth(1).innerText();
     assert(titleCellText.includes("<table>"), `BRDP-S1-00123's Title cell shows the literal text "<table>" visibly (got: ${titleCellText.slice(0, 80)}...)`);
@@ -230,7 +230,7 @@ async function main() {
     const pipeRow = mdContent.split("\n").find((l) => l.includes("BRDP-S1-00126"));
     console.log("Row with a literal pipe in its content:", pipeRow);
     const columnCount = pipeRow.split(/(?<!\\)\|/).length; // split on unescaped pipes only
-    assert(columnCount === 8, `The row containing a literal "|" in Title/Definition/Proposal still splits into exactly 8 markdown columns (got ${columnCount}) -- the pipe was escaped, not left to break the table`);
+    assert(columnCount === 9, `The row containing a literal "|" in Title/Definition/Proposal still splits into exactly 9 markdown columns (7 fields + the two outer pipes) (got ${columnCount}) -- the pipe was escaped, not left to break the table`);
     assert(pipeRow.includes("\\|"), "The literal pipe character was escaped as \\| in the Markdown output");
 
     console.log("\nALL CHECKS PASSED");

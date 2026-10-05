@@ -34,15 +34,15 @@
 /* Proposal Status -- exact same hex values as RecordsPage.module.css's
    .badge_Validated/.badge_Pending/.badge_Refused, never a new palette. */
 .validated {
-  color: #16a34a;
+  color: var(--success-text);
 }
 
 .pending {
-  color: #d97706;
+  color: var(--warning-text);
 }
 
 .refused {
-  color: #dc2626;
+  color: var(--error);
 }
 
 /* Rule Status -- same blue as RecordsPage.module.css's .dotCurrent /
@@ -50,15 +50,18 @@
    accent) for Verified, and two tones from the same slate family already
    used throughout for Draft/To Do. */
 .verified {
-  color: #2563eb;
+  color: var(--primary);
 }
 
+/* AACF 3: To Do was #94a3b8 (2.6:1 on white, below AA); it is now the
+   muted text colour, so Draft takes the next darker slate to stay
+   distinguishable. */
 .draft {
-  color: #64748b;
+  color: #475569;
 }
 
 .todo {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 /* AACF 2, Part 2: the verified rules' test breakdown, under the counts. */
@@ -80,7 +83,7 @@
   border: none;
   padding: 0;
   font: inherit;
-  color: #2563eb;
+  color: var(--primary);
   cursor: pointer;
   text-decoration: underline dotted;
 }
@@ -100,10 +103,10 @@
   gap: 4px;
   margin-left: 8px;
   padding: 1px 6px;
-  border: 1px solid #c7ddf0;
+  border: 1px solid var(--primary-tint-border);
   border-radius: 10px;
-  background: #eaf2fa;
-  color: #245c90;
+  background: var(--primary-tint);
+  color: var(--primary-dark);
 }
 
 .breakdownChip button {

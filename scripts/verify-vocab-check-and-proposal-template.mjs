@@ -462,7 +462,7 @@ async function main() {
       .locator("text=Schema vocabulary check not available for S1000D 5.0.")
       .first()
       .evaluate((el) => getComputedStyle(el).color);
-    assert(notAvailableColor === "rgb(148, 163, 184)", `"not available" notice stays muted, not red (got ${notAvailableColor})`);
+    assert(notAvailableColor === "rgb(100, 116, 139)", `"not available" notice stays muted, not red (got ${notAvailableColor})`);
     assert(
       (await page.locator("text=/This BRDP mentions names not found in the S1000D 5.0 schema/").count()) === 0,
       "no false 'not found' claim for a standard with no vocabulary at all"

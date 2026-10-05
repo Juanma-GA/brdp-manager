@@ -15,7 +15,7 @@
 
 .tableWrap {
   overflow-x: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 6px;
 }
 
@@ -31,7 +31,7 @@
 
 .table th,
 .table td {
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
   padding: 6px;
   vertical-align: top;
   text-align: left;
@@ -39,7 +39,7 @@
 }
 
 .table th {
-  background: #f8fafc;
+  background: var(--bg);
   font-weight: 600;
 }
 
@@ -67,7 +67,7 @@
 /* The identifier (and its "source: …" line) on its own line, whole. */
 .identifier {
   margin-top: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   white-space: pre;
   overflow-wrap: normal;
 }
@@ -93,11 +93,11 @@
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .muted {
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -110,18 +110,18 @@
 
 .ruleDetails summary {
   cursor: pointer;
-  color: #2563eb;
+  color: var(--primary);
 }
 
 .rulePre {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 240px;
   overflow: auto;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--bg);
+  border: 1px solid var(--border);
   padding: 4px;
   margin: 4px 0;
 }
@@ -146,7 +146,7 @@
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .diff_removed td:first-child,
@@ -170,7 +170,7 @@
   border: none;
   padding: 0;
   margin-top: 4px;
-  color: #2563eb;
+  color: var(--primary);
   cursor: pointer;
   font-size: 12px;
   text-decoration: underline;
@@ -192,7 +192,7 @@
 /* Where the text came from: the file, the catalog, the AI, a hand edit. */
 .sourceTag {
   margin-top: 2px;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 11px;
   font-style: italic;
 }
@@ -242,14 +242,14 @@
 .blocked {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #b91c1c;
+  color: var(--error-text);
 }
 
 /* AI Extract (2/2): "Import from text or document" */
 .textInput {
   margin-top: 20px;
   padding-top: 12px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border);
 }
 .textBox {
   width: 100%;
@@ -277,7 +277,7 @@
   color: #475569;
 }
 .wordCountOver {
-  color: #b91c1c;
+  color: var(--error-text);
   font-weight: 600;
 }
 .textHelp {
@@ -287,8 +287,8 @@
 .quote {
   margin: 6px 0 0;
   padding: 6px 8px;
-  border-left: 3px solid #94a3b8;
-  background: #f8fafc;
+  border-left: 3px solid var(--text-disabled);
+  background: var(--bg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
