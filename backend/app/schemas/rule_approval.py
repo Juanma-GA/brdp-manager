@@ -24,8 +24,7 @@ class RuleApprovalPropose(BaseModel):
     rule_xml: str
     source: RuleSource = "llm"
     # Defaults to pending_review server-side; pass "approved" only for a
-    # manually written/reviewed rule (v1 parity: DetailPanel's manual edit
-    # mode saves directly as approved, nothing left to re-review).
+    # manually written/reviewed rule (nothing left to re-review).
     status: str = "pending_review"
     # "Usar esta Regla": the BRDP the rule was copied from. History gets a
     # "rule_copied" event naming its project and identifier (read from the

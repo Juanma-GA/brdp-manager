@@ -1001,7 +1001,7 @@
   margin: 14px 0;
 }
 
-/* Same footer/pagination pattern as v1's BRDPTable.module.css. */
+/* Table footer with pagination. */
 .tableFooter {
   flex-shrink: 0;
   padding: 10px 12px;

@@ -214,8 +214,7 @@ async function main() {
 
     // ---- Case 4: a NEW rule reusing an already-shared function joins automatically ----
     await createApprovedBRDP(auth, projectId, "BRDP-EXT-NEWJOIN", sharedFnRule("BRDP-EXT-NEWJOIN"));
-    // GeneratePage.jsx's BRDP list is fetched once on page mount (via
-    // BRDPContext/useBRDPs) -- a BRDP created afterward through a raw API
+    // GeneratePage.jsx's BRDP list is fetched once on page mount -- a BRDP created afterward through a raw API
     // call, out of band from the app's own state, is invisible to it until
     // a real reload re-fetches. A plain "Regenerate" click here would just
     // re-run generation over the SAME already-loaded (stale) BRDP list.

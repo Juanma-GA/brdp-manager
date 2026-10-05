@@ -1,13 +1,9 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
-// docs/v2/03-especificacion-v2-para-claude-code.md §5: react-i18next from
-// the first NEW component onward -- not a retroactive translation of the
-// v1 UI (BRDPTable, DetailPanel, ChatPanel, etc. keep their English
-// strings for now). `en` is the base (matches v1's existing strings),
-// `es` is the structure this was built to support next. Every v2 page
-// (Projects/Config/Records/Generate/Settings) must be fully covered here
-// -- no hardcoded UI strings in those files.
+// docs/v2/03-especificacion-v2-para-claude-code.md §5: `en` is the base,
+// `es` the second language. Every page (Projects/Config/Records/Generate/
+// Settings) must be fully covered here -- no hardcoded UI strings.
 const resources = {
   en: {
     common: {

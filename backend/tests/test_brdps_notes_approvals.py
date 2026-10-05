@@ -340,8 +340,7 @@ async def test_approving_without_a_pending_review_row_404s(client, editor_and_pr
 
 
 async def test_manual_propose_can_save_directly_as_approved(client, editor_and_project):
-    """v1 parity: DetailPanel's manual edit mode saves straight to
-    'approved' -- a human who wrote/reviewed the rule themselves has
+    """A manual rule can be saved straight as 'approved' -- a human who wrote/reviewed the rule themselves has
     nothing left to re-review.
     """
     project, headers = editor_and_project

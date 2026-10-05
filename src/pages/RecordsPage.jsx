@@ -77,8 +77,7 @@ function estimateEmbeddingEtaSeconds(job) {
   const msPerItem = elapsedMs / job.processed_items;
   return Math.max(1, Math.ceil((remaining * msPerItem) / 1000));
 }
-// v1's BRDPTable/useTableLogic used 25 rows/page (see src/hooks/useTableLogic.js)
-// -- this docs request specifically asks for 15 here, same prev/next pattern.
+// 15 rows per page (docs request), prev/next pagination.
 const TABLE_PAGE_SIZE = 15;
 
 // Split between the table and the detail panel (C1, Part 3). The divider is
@@ -881,7 +880,7 @@ export default function RecordsPage() {
   // blocks (user decision) -- when its recorded test is missing, outdated,
   // failed, inconclusive or could not run. This is the only path in the
   // application that moves a rule to Verified (the Excel import is left as
-  // it is, docs request; v1's BRDPPage/DetailPanel are not routed).
+  // it is, docs request).
   const verifyRule = () => {
     const warning = verifyWarning(ruleApproval, ruleFormat);
     if (warning) setVerifyDialog(warning);

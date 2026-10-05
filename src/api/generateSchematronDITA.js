@@ -3,9 +3,8 @@ import { ruleEnters } from "../utils/generatePlan.js";
 import { _isSafePattern } from "./brexToSchematron.js";
 import { getApprovalsForFormat } from "./approvals.js";
 
-// Fixed format id this generator's frozen rule_approvals rows are stored
-// under -- see ProjectConfigSection.jsx's primaryFormat options and
-// CLAUDE.md's rule_approvals design (Phase 1).
+// Fixed format id this generator's rule_approvals rows are stored under
+// (STANDARD_TO_RULE_FORMAT in src/constants/ruleFormats.js).
 const FORMAT_ID = "SCH-DITA";
 
 // Both DITA standards (migration 0013_split_dita_xpath_standards.py) share

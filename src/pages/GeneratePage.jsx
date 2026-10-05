@@ -86,11 +86,8 @@ function useProjectApprovals(projectId, format) {
   return state;
 }
 
-// XSD validation needs a real auth header (v2's /api/validate-brex is
-// behind get_current_user, unlike v1's Express route) -- src/api/
-// validateBREX.js is part of the protected core engine (CLAUDE.md) and
-// uses a plain unauthenticated fetch, so this page talks to the same
-// endpoint directly through authFetchJson instead of importing it.
+// XSD validation needs a real auth header (/api/validate-brex is behind
+// get_current_user), so this page calls it through authFetchJson.
 async function validateAgainstXSDAuthed(xml, format) {
   return authFetchJson('/api/validate-brex', {
     method: 'POST',
