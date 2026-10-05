@@ -46,11 +46,6 @@ export function useActiveEmbeddingJob(projectId) {
   });
 }
 
-export function useInvalidateEmbeddingJob() {
-  const queryClient = useQueryClient();
-  return (projectId) => queryClient.invalidateQueries({ queryKey: embeddingJobQueryKey(projectId) });
-}
-
 // POST /compute -- launches the background job (docs request: editor-only,
 // enforced server-side regardless of what the UI shows). 409 (another job
 // already running, e.g. two editors clicking at once) surfaces via
