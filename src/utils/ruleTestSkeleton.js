@@ -451,7 +451,10 @@ export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], c
     ]),
   ].filter(known);
   const fittingSteps = fitting.filter((schema) => schemasHavingAll(allSteps, cards, [schema], elementSchemas).length > 0);
-  return { testSchema: fittingSteps[0] || fitting[0] || fallback[0] || null, otherSchema: null, groups: null };
+  // candidates: every schema the single test schema could be, in order (the
+  // relation split of prepareRuleTestSetup looks for another one there).
+  const candidates = fittingSteps.length ? fittingSteps : fitting;
+  return { testSchema: candidates[0] || fallback[0] || null, otherSchema: null, groups: null, candidates };
 }
 
 // The schemas that carry the attribute of an attribute-only alternative
@@ -685,6 +688,205 @@ function reachableSet(elements, starts) {
   return seen;
 }
 
+// ─── not(ancestor::X), ancestor::X on the checked step (Mejoras A, Part 2) ──
+
+// Splits on `sep` outside parentheses, predicates and string literals.
+function splitOutside(text, sep) {
+  const parts = [];
+  let current = '';
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = '';
+      current += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '(' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === ']') depth -= 1;
+    else if (depth === 0 && text.startsWith(sep, i)) {
+      parts.push(current);
+      current = '';
+      i += sep.length - 1;
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+// The top-level predicates of a step ("commonInfo[a][b]" → ["a", "b"]).
+function stepPredicates(step) {
+  const out = [];
+  let depth = 0;
+  let quote = '';
+  let current = '';
+  for (const ch of step) {
+    if (quote) {
+      if (depth > 0) current += ch;
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      if (depth > 0) current += ch;
+      continue;
+    }
+    if (ch === '[') {
+      if (depth > 0) current += ch;
+      depth += 1;
+    } else if (ch === ']') {
+      depth -= 1;
+      if (depth > 0) current += ch;
+      else {
+        out.push(current);
+        current = '';
+      }
+    } else if (depth > 0) current += ch;
+  }
+  return out;
+}
+
+const NEGATED_RELATION_RE = /^\s*not\s*\(\s*(ancestor|parent)::([A-Za-z_][\w.-]*)\s*\)\s*$/;
+const RELATION_RE = /^\s*(ancestor|parent)::([A-Za-z_][\w.-]*)\s*$/;
+
+// A predicate of the LAST step of an alternative that says whether the
+// checked element is inside another one: //commonInfo[not(ancestor::procedure)]
+// (BRDP-S1-00177), //x[ancestor::y], //x[not(parent::y)], //x[parent::y].
+// → [{ element, axis: 'ancestor' | 'parent', ancestor, negated }]. Only a
+// predicate that is that test alone; a step with "*", a prefix or an
+// attribute is not an element step, so it gives nothing. A BREX path that is
+// a true/false condition gives nothing either.
+export function ancestorRelations(ruleXml) {
+  const out = [];
+  const seen = new Set();
+  const contexts = schematronContexts(ruleXml);
+  for (const expression of contexts.length ? contexts : extractRuleXPaths(ruleXml || '')) {
+    if (!contexts.length && conditionOperands(stripPredicates(expression)).length !== 1) continue;
+    for (const alternative of splitOutside(expression, '|')) {
+      const steps = splitOutside(alternative.trim(), '/').filter((s) => s.trim());
+      const last = steps[steps.length - 1];
+      if (!last) continue;
+      const name = stepName(last.replace(/\[[\s\S]*$/, ''));
+      if (!name) continue;
+      for (const predicate of stepPredicates(last)) {
+        const negated = NEGATED_RELATION_RE.exec(predicate);
+        const plain = negated ? null : RELATION_RE.exec(predicate);
+        const m = negated || plain;
+        if (!m) continue;
+        const relation = { element: name, axis: m[1], ancestor: m[2], negated: Boolean(negated) };
+        const key = JSON.stringify(relation);
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(relation);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+const childrenOf = (elements, name) => elements[name]?.children || [];
+
+// Every element reachable from `starts` without going through `blocked`
+// (which can itself be reached, but is never expanded).
+function reachableAvoiding(elements, starts, blocked) {
+  const seen = new Set(starts.filter((n) => elements[n]));
+  let frontier = [...seen].filter((n) => n !== blocked);
+  while (frontier.length) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of childrenOf(elements, name)) {
+        if (!seen.has(child) && elements[child]) {
+          seen.add(child);
+          if (child !== blocked) next.push(child);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return seen;
+}
+
+// Which of the two examples a schema allows for a relation: { inside: the
+// checked element with the other one above it (parent: directly above),
+// outside: without it }. From the document's root, over the whole graph.
+export function relationCases(structure, relation) {
+  const elements = structure.elements;
+  const root = structure.skeleton.path[0];
+  const { element, ancestor, axis } = relation;
+  const all = reachableSet(elements, [root]);
+  if (!all.has(element)) return { inside: false, outside: false };
+  if (axis === 'parent') {
+    const parents = [...all].filter((n) => childrenOf(elements, n).includes(element));
+    return { inside: parents.includes(ancestor), outside: parents.some((n) => n !== ancestor) };
+  }
+  const underAncestor = all.has(ancestor) ? reachableSet(elements, childrenOf(elements, ancestor)) : new Set();
+  return {
+    inside: underAncestor.has(element),
+    outside: root !== ancestor && reachableAvoiding(elements, [root], ancestor).has(element),
+  };
+}
+
+// Can the content, put at chain[i] (with `above` the chain down to it), hold
+// the checked element inside / outside the other one?
+function relationAllowsAt(elements, above, from, relation, inside) {
+  const { element, ancestor, axis } = relation;
+  if (axis === 'parent') {
+    const parents = [...reachableSet(elements, [from])].filter((n) => childrenOf(elements, n).includes(element));
+    return inside ? parents.includes(ancestor) : parents.some((n) => n !== ancestor);
+  }
+  const ancestorAbove = above.includes(ancestor);
+  if (!inside) return !ancestorAbove && reachableAvoiding(elements, [from], ancestor).has(element) && from !== ancestor;
+  if (ancestorAbove) return reachableSet(elements, childrenOf(elements, from)).has(element);
+  return reachableSet(elements, childrenOf(elements, from)).has(ancestor)
+    && reachableSet(elements, childrenOf(elements, ancestor)).has(element);
+}
+
+// The shortest way from `from` down to the checked element, inside or
+// outside the other one -- [from, …, element] -- or null.
+function relationWay(elements, above, from, relation, inside) {
+  const { element, ancestor, axis } = relation;
+  const startSeen = axis === 'ancestor' && above.includes(ancestor);
+  const key = (name, seen) => `${name}|${seen}`;
+  const previous = new Map();
+  const start = key(from, startSeen);
+  const visited = new Set([start]);
+  let frontier = [[from, startSeen]];
+  while (frontier.length) {
+    const next = [];
+    for (const [name, seenAncestor] of frontier) {
+      for (const child of [...childrenOf(elements, name)].sort()) {
+        if (!elements[child]) continue;
+        if (child === element) {
+          const ok =
+            axis === 'parent'
+              ? inside === (name === ancestor)
+              : inside === (seenAncestor || name === ancestor);
+          if (ok) {
+            const way = [child];
+            for (let at = key(name, seenAncestor); at; at = previous.get(at)) way.push(at.split('|')[0]);
+            return way.reverse();
+          }
+        }
+        if (axis === 'ancestor' && !inside && child === ancestor) continue;
+        const seen = axis === 'ancestor' ? seenAncestor || child === ancestor : false;
+        const k = key(child, seen);
+        if (!visited.has(k)) {
+          visited.add(k);
+          previous.set(k, key(name, seenAncestor));
+          next.push([child, seen]);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
 function treeNames(node, out = new Set()) {
   out.add(node.name);
   for (const child of node.children || []) treeNames(child, out);
@@ -913,7 +1115,7 @@ function wholeDocumentMetadata(structure, targets, section) {
 // the prompt (the nearest ones from the insertion point).
 const ATTRIBUTE_CARRIER_ROUTES = 3;
 
-export function placeExample(structure, targets, { useNames = [], withRoutes = false } = {}) {
+export function placeExample(structure, targets, { useNames = [], withRoutes = false, relation = null } = {}) {
   const chain = structure.skeleton.path;
   const elements = structure.elements;
   const section = structure.skeleton.metadata || null;
@@ -1011,17 +1213,27 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   const attributeOnlyChecked = classes.contentAlternatives
     .filter((a) => !a.opaque && a.attribute && (a.steps || []).length === 0)
     .map((a) => a.attribute);
+  // Mejoras A, Part 2: the examples of this schema have the checked element
+  // inside (or outside) another one (relation, see relationCases): the
+  // insertion point must allow that too.
+  const relationOk = (i) =>
+    !relation || relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], relation, relation.inside);
   let index = limit - 1;
   for (let i = limit - 1; i >= 0; i -= 1) {
     if (
       contentChecked.every((name) => reachable(elements, chain[i], name))
       && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
+      && relationOk(i)
     ) {
       index = i;
       break;
     }
   }
   const placed = whole(chain[index], chain.slice(0, index + 1), true);
+  if (relation) {
+    const way = relationWay(elements, placed.path, placed.insertion, relation, relation.inside);
+    placed.relation = { ...relation, way: way ? [...placed.path, ...way.slice(1)] : null };
+  }
   const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n]);
   // The way down goes to where each content alternative ENTERS the example:
   // its first named step below the insertion point (//title/internalRef

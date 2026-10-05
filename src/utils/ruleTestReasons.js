@@ -30,6 +30,9 @@
 //     {names, schemas} -- what the rule looks at lives only in the
 //     identification and status section of a document the application does
 //     not build it for yet (comment, …), so that schema is not offered;
+//     example_impossible {element, other, axis, inside, standard} (Mejoras
+//     A, Part 2) -- the rule's checked element must (not) be inside another
+//     one, and no schema of the standard allows one of the two examples;
 //   analyzeRule (C3): rule_format {problem, ...params} -- the stored XML is
 //     not a rule of its format; `problem` is checkRuleFormat's code
 //     (rule_format_missing, …), shown with the same text as on save;
@@ -46,7 +49,7 @@ export const ENGINE_REASON_CODES = [
   'unsupported_format', 'fragment_not_well_formed', 'rule_not_well_formed', 'no_rule_element', 'empty_path',
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
-  'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context',
+  'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
 ];
 export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked'];
 
@@ -68,6 +71,10 @@ export function formatRuleTestReason(reason, t) {
     const { problem, ...problemParams } = params;
     const detail = formatSchemaIssue({ source: 'rule', code: problem, params: problemParams }, t);
     return t('records.ruleTest.reasons.rule_format', { detail, defaultValue: detail });
+  }
+  if (reason.code === 'example_impossible') {
+    const where = `${params.axis === 'parent' ? 'parent' : 'ancestor'}${params.inside ? 'Inside' : 'Outside'}`;
+    return t(`records.ruleTest.reasons.example_impossible.${where}`, { ...params, defaultValue: reason.code });
   }
   const values = { ...params };
   if (reason.code === 'path_not_nodes') values.kind = t(`records.ruleTest.reasons.valueKinds.${params.kind}`, { defaultValue: params.kind });

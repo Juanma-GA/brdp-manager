@@ -39,7 +39,7 @@ import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkEx
 import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, keepMatchedNodeProblem, missesRuleProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
 import { TABLE_MODEL_HINT } from '../src/utils/ruleTest.js';
-import { calsTableModel, ruleLooksAtTables } from '../src/utils/ruleTestSkeleton.js';
+import { ancestorRelations, calsTableModel, relationCases, ruleLooksAtTables } from '../src/utils/ruleTestSkeleton.js';
 import { contentRoutes, metadataXml, normalizeBrexReferenceCode, ruleLooksAtBrexReference, ruleMatchExpressions, ruleUseNames, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
 import { formatRuleDescription, formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
 import { readPublicTemplate, retiredTemplateRows } from './lib/readXlsx.mjs';
@@ -1508,6 +1508,72 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     const rule = '<structureObjectRule><objectPath allowedObjectFlag="0">//optionalPart/proceduralStep</objectPath><objectUse>x</objectUse></structureObjectRule>';
     const prep = await prepareRuleTestSetup({ ruleXml: rule, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
     check('no schema with all steps: unreachable', prep.unreachable?.code === 'unreachable_target', JSON.stringify(prep.unreachable));
+  }
+
+  // Mejoras A, Part 2: not(ancestor::X) / ancestor::X / parent::X on the
+  // checked step.
+  {
+    const rel = (path) => ancestorRelations(`<structureObjectRule><objectPath allowedObjectFlag="0">${path}</objectPath><objectUse>x</objectUse></structureObjectRule>`);
+    check('relations: not(ancestor::procedure)', JSON.stringify(rel('//commonInfo[not(ancestor::procedure)]')) === '[{"element":"commonInfo","axis":"ancestor","ancestor":"procedure","negated":true}]');
+    check('relations: ancestor::, parent::, not(parent::)', JSON.stringify(rel('//a[ancestor::b] | //c[parent::d] | //e[not( parent::f )]').map((r) => [r.element, r.axis, r.ancestor, r.negated])) === '[["a","ancestor","b",false],["c","parent","d",false],["e","parent","f",true]]');
+    check('relations: none for count(ancestor::…), an attribute, *, a prefix, a condition, a middle step',
+      [rel('//a[count(ancestor::a) > 5]'), rel('//@x[not(ancestor::b)]'), rel('//*[not(ancestor::b)]'), rel('//x:a[not(ancestor::b)]'), rel('//a and //c[not(ancestor::b)]'), rel('//a[not(ancestor::b)]/c')].every((r) => r.length === 0));
+    check('relations: inside a predicate literal does not split', rel("//a[@t = 'x | y'][not(ancestor::b)]").length === 1);
+    const proced = structureOf(S42, 'proced');
+    const processSt = structureOf(S42, 'process');
+    const r177 = { element: 'commonInfo', axis: 'ancestor', ancestor: 'procedure' };
+    check('relationCases: proced only inside <procedure>', JSON.stringify(relationCases(proced, r177)) === '{"inside":true,"outside":false}');
+    check('relationCases: process only outside', JSON.stringify(relationCases(processSt, r177)) === '{"inside":false,"outside":true}');
+    check('relationCases: parent axis', JSON.stringify(relationCases(proced, { element: 'commonInfo', axis: 'parent', ancestor: 'procedure' })) === '{"inside":true,"outside":false}');
+
+    const R177 = '<structureObjectRule id="BRDP-S1-00177"><objectPath allowedObjectFlag="0">//commonInfo[not(ancestor::procedure)]</objectPath><objectUse>Common information only in procedures.</objectUse></structureObjectRule>';
+    const p177 = await prepareRuleTestSetup({ ruleXml: R177, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+    const pl = p177.promptPlacements;
+    check('S1-00177: selected example in process, the other in proced', JSON.stringify(pl.map((x) => [x.schema, x.insertion, x.relation?.inside, x.relation?.selected])) === '[["process","process",false,true],["proced","procedure",true,false]]', JSON.stringify(pl.map((x) => [x.schema, x.insertion, x.relation])));
+    check('S1-00177: ways down', pl[0].relation.way.join('/') === 'dmodule/content/process/commonInfo' && pl[1].relation.way.join('/') === 'dmodule/content/procedure/commonInfo', JSON.stringify(pl.map((x) => x.relation.way)));
+    const prompt177 = buildRuleTestExamplesPrompt({ brdp: { identifier: 'BRDP-S1-00177', title: 'Common information', definition: 'd', proposal: 'Common information is only used in procedures.' }, standard: S42, format: 'BREX-4.2', ruleXml: R177, placements: pl });
+    check('S1-00177: prompt says which example goes in which schema and by which way',
+      prompt177.includes('- "process": examples where <commonInfo> is NOT inside <procedure>; way: dmodule/content/process/commonInfo')
+      && prompt177.includes('- "proced": examples where <commonInfo> is inside <procedure>; way: dmodule/content/procedure/commonInfo')
+      && !prompt177.includes('The rule is general: every example uses'), prompt177);
+    const ci = '<commonInfo><para>Read the general safety information first.</para></commonInfo>';
+    const r = testRun(R177, [
+      { label: 'commonInfo outside a procedure', expected: 'reject', schema: 'process', content: ci },
+      { label: 'commonInfo in a procedure', expected: 'accept', schema: 'proced', content: ci },
+    ], p177.setup);
+    check('S1-00177: both examples valid', r.runs.every((x) => x.validation.runnable), JSON.stringify(r.runs.map((x) => x.validation.structure)));
+    check('S1-00177: process rejected, proced accepted, verdict correct', r.runs.map((x) => x.result?.status).join() === 'rejected,accepted' && r.verdict.kind === 'correct', JSON.stringify([r.runs.map((x) => x.result?.status), r.verdict.kind]));
+    // Reversed: [ancestor::procedure] selects the one inside.
+    const Rin = R177.replace('not(ancestor::procedure)', 'ancestor::procedure');
+    const pIn = await prepareRuleTestSetup({ ruleXml: Rin, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+    check('[ancestor::procedure]: selected in proced, the other in process', JSON.stringify(pIn.promptPlacements.map((x) => [x.schema, x.relation?.inside])) === '[["proced",true],["process",false]]', JSON.stringify(pIn.promptPlacements.map((x) => x.schema)));
+    // No schema has <commonInfo> inside <description>: said, no LLM call.
+    const Rno = R177.replace('not(ancestor::procedure)', 'ancestor::description');
+    const pNo = await prepareRuleTestSetup({ ruleXml: Rno, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+    check('impossible example: not executable with its reason', pNo.unreachable?.code === 'example_impossible' && pNo.unreachable.params.inside === true, JSON.stringify(pNo.unreachable));
+    const gNo = await generateRuleTestExamples({
+      ruleXml: Rno, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat',
+      brdp: { identifier: 'X', title: 't', definition: 'd', proposal: 'p' }, vocabulary, parseXml,
+      ask: async () => { throw new Error('the LLM must not be called'); }, fetchSchemaCards: fetchCards, fetchStructure,
+    });
+    check('impossible example: generate is not executable, no LLM call', gNo.status === 'not_executable' && gNo.reason.code === 'example_impossible', JSON.stringify(gNo.status));
+    const en = i18n.getFixedT('en');
+    const es = i18n.getFixedT('es');
+    check('impossible example: text EN', formatRuleTestReason(pNo.unreachable, en) === 'no example can be written with <commonInfo> inside <description>: no S1000D 4.2 schema allows it.', formatRuleTestReason(pNo.unreachable, en));
+    check('impossible example: text ES', formatRuleTestReason(pNo.unreachable, es) === 'no se puede escribir un ejemplo con <commonInfo> dentro de <description>: ningún esquema de S1000D 4.2 lo permite.', formatRuleTestReason(pNo.unreachable, es));
+    check('impossible example: outside / parent texts', formatRuleTestReason({ code: 'example_impossible', params: { element: 'a', other: 'b', axis: 'parent', inside: false, standard: 'S' } }, es) === 'no se puede escribir un ejemplo con <a> directamente dentro de otro elemento que no sea <b>: ningún esquema de S lo permite.');
+    // No special treatment: the other element does not exist, both cases in one schema, a context rule.
+    for (const [label, path, schema] of [
+      ['X does not exist', '//commonInfo[not(ancestor::pokemon)]', 'proced'],
+      ['both cases in the test schema', '//para[not(ancestor::description)]', 'descript'],
+    ]) {
+      const rule = R177.replace('//commonInfo[not(ancestor::procedure)]', path);
+      const prep = await prepareRuleTestSetup({ ruleXml: rule, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+      check(`${label}: one schema as before`, prep.promptPlacements.length === 1 && prep.promptPlacements[0].schema === schema && !prep.promptPlacements[0].relation, JSON.stringify(prep.promptPlacements.map((x) => x.schema)));
+    }
+    const scoped177 = wrapRuleInSchemaContexts(R177, 'BREX-4.2', S42, ['proced']);
+    const pScoped = await prepareRuleTestSetup({ ruleXml: scoped177, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+    check('context rule: its schema, no split', pScoped.promptPlacements.filter((x) => x.role === 'rule').map((x) => x.schema).join() === 'proced' && pScoped.promptPlacements.every((x) => !x.relation), JSON.stringify(pScoped.promptPlacements.map((x) => [x.schema, x.role])));
   }
 
   // Part 2: every example invalid → the schema and the reason are named.

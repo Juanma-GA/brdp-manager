@@ -26,6 +26,8 @@ function schemaInstructions(contextSchemas, placements, dita) {
   const rulePlacement = placements.find((p) => p.role === 'rule');
   const other = placements.find((p) => p.role === 'other');
   const groups = placements.filter((p) => p.role === 'rule' && p.group);
+  const related = placements.filter((p) => p.role === 'rule' && p.relation);
+  if (related.length > 1) return relationInstructions(related, dita);
   if (groups.length > 1) {
     // One schema per part of the rule (chooseTestSchemas' groups): the parts
     // look at elements that live in different schemas (topic types in DITA).
@@ -59,6 +61,34 @@ Add a third example of the ${other.schema} schema ("schema": "${other.schema}",
 the rule does not apply there.`;
   }
   return text;
+}
+
+// Mejoras A, Part 2: the rule's checked element must (not) be inside
+// another one (//commonInfo[not(ancestor::procedure)]) and no single schema
+// allows both examples, so each case gets its own schema. Neutral on
+// purpose: whether each example follows or goes against the decision is
+// the decision's, never the rule's.
+const relationPhrase = (r, inside) =>
+  r.axis === 'parent'
+    ? inside
+      ? `directly inside <${r.ancestor}>`
+      : `directly inside an element other than <${r.ancestor}>`
+    : inside
+      ? `inside <${r.ancestor}>`
+      : `NOT inside <${r.ancestor}>`;
+
+function relationInstructions(related, dita) {
+  const kind = dita ? 'topic type' : 'schema';
+  const r = related[0].relation;
+  const lines = related.map((p) => {
+    const way = p.relation.way ? `; way: ${p.relation.way.join('/')}` : '';
+    return `- "${p.schema}": examples where <${r.element}> is ${relationPhrase(p.relation, p.relation.inside)}${way}`;
+  });
+  return `The rule's path selects <${r.element}> only when it is ${relationPhrase(r, !r.negated)}.
+No single ${kind} allows both cases, so the examples are split by ${kind}:
+${lines.join('\n')}
+Write at least one example of each, each with its "schema". Whether each one
+follows or goes against the decision is up to the decision.`;
 }
 
 // The minimal identification and status section, indented under a line.
@@ -197,8 +227,12 @@ ${metadataLine(p)}`;
       ? `
   The application already writes the <title> of ${titled.map((n) => `<${n}>`).join(', ')}; never write another one there.`
       : '';
+  const relationLine = p.relation?.way
+    ? `
+  Here <${p.relation.element}> is ${relationPhrase(p.relation, p.relation.inside)}: ${p.relation.way.join('/')}.`
+    : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
-  ${p.path.join('/')}.${titleLine}
+  ${p.path.join('/')}.${titleLine}${relationLine}
   Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''

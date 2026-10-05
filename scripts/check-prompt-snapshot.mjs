@@ -42,6 +42,11 @@
 // prohibition of the others; its description now says that elements the
 // condition does not name are never rejected). Nothing else changes.
 //
+// Mejoras A, Part 2: new case ruleTestExamples/brex-4-2-not-ancestor-commoninfo
+// (//commonInfo[not(ancestor::procedure)]: the examples split between
+// process and proced, each with its way down). Only rules with that kind of
+// predicate get the new text; no other case changes.
+//
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a
 // few rounds back) means expected-prompts.json is stale by design, not

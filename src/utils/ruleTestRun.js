@@ -19,13 +19,63 @@ import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { describeRule, parseXmlDocument, ruleConditions } from './ruleTestEngine.js';
 import { stripLiterals } from './ruleTestCommon.js';
-import { calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
+import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 import { cleanInternalNames } from './answerCleanup.js';
 
 // Same cap as the schema facts of Ask / Suggest Rule.
 const MAX_SCHEMA_FACTS = 6;
+
+// Mejoras A, Part 2: a rule whose checked element must (not) be inside
+// another one -- //x[not(ancestor::y)], //x[ancestor::y], parent:: too
+// (ancestorRelations). The test needs an example the rule selects and one it
+// does not; when the test schema allows only one of them, the other goes in
+// the first schema (by preference, among those with the rule's elements)
+// that allows it. → null (one schema, as before), { parts: [{ schema,
+// relation }] } (the selected example's schema first) or { impossible:
+// reason } when no schema allows one of them. A relation whose other
+// element is not in the standard gets nothing special.
+async function splitByRelation({ ruleXml, targets, cards, elementSchemas, testSchema, candidates, standard, fetchStructure }) {
+  const known = (name) => Boolean(cards[name]) || Boolean(elementSchemas?.[name]?.length);
+  const relation = ancestorRelations(ruleXml).find(
+    (r) => targets.checked.includes(r.element) && known(r.ancestor) && r.element !== r.ancestor
+  );
+  if (!relation) return null;
+  const structures = new Map();
+  const casesIn = async (schema) => {
+    if (!structures.has(schema)) {
+      const structure = await fetchStructure(standard, schema);
+      structures.set(schema, structure?.available ? relationCases(structure, relation) : null);
+    }
+    return structures.get(schema);
+  };
+  const here = await casesIn(testSchema);
+  if (!here || (here.inside && here.outside)) return null;
+  // The example the rule selects: outside for not(…), inside otherwise.
+  const selectedInside = !relation.negated;
+  const parts = [];
+  for (const inside of [selectedInside, !selectedInside]) {
+    let schema = null;
+    for (const candidate of [testSchema, ...(candidates || []).filter((s) => s !== testSchema)]) {
+      const cases = await casesIn(candidate);
+      if (cases && (inside ? cases.inside : cases.outside)) {
+        schema = candidate;
+        break;
+      }
+    }
+    if (!schema) {
+      return {
+        impossible: {
+          code: 'example_impossible',
+          params: { element: relation.element, other: relation.ancestor, axis: relation.axis, inside, standard },
+        },
+      };
+    }
+    parts.push({ schema, relation: { element: relation.element, ancestor: relation.ancestor, axis: relation.axis, negated: relation.negated, inside, selected: inside === selectedInside } });
+  }
+  return { parts };
+}
 
 // The schemas the examples use and where each takes the LLM's content.
 export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute }) {
@@ -58,7 +108,27 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   }
   const schemaFacts = factNames.filter((n) => cards[n]).map((name) => ({ name, entry: cards[name] }));
   const attributeSchemas = await attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, elementSchemas);
-  const { testSchema, otherSchema, groups } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets });
+  const { testSchema, otherSchema, groups, candidates } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets });
+  // Mejoras A, Part 2: //commonInfo[not(ancestor::procedure)] (BRDP-S1-00177)
+  // was tested on proced only, where every <commonInfo> is inside
+  // <procedure> -- the example the rule selects could not be written there.
+  // splitByRelation puts it in another schema (process) and keeps the other
+  // one in proced; when no schema allows one of them, the test says so
+  // before any LLM call.
+  const split =
+    contextSchemas.length === 0 && !groups && testSchema
+      ? await splitByRelation({ ruleXml, targets, cards, elementSchemas, testSchema, candidates, standard, fetchStructure })
+      : null;
+  if (split?.impossible) {
+    return {
+      contextSchemas,
+      schemaFacts,
+      promptPlacements: [],
+      untested: [],
+      unreachable: split.impossible,
+      setup: { standard, schemaLocation, placements: {}, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
+    };
+  }
   const placements = {};
   const promptPlacements = [];
   // Parts of the rule that look only inside the identification and status
@@ -69,13 +139,15 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   const untested = [];
   // One schema per part of the rule (groups), or the test schema and, for
   // a context-scoped rule, the "does not apply" one.
-  const wanted = groups
+  const wanted = split
+    ? split.parts.map((part) => ({ schema: part.schema, role: 'rule', targets, relation: part.relation }))
+    : groups
     ? groups.map((g) => ({ schema: g.schema, role: 'rule', targets: targetsForGroup(targets, g), group: g.checked }))
     : [
         { schema: testSchema, role: 'rule', targets },
         { schema: otherSchema, role: 'other', targets },
       ];
-  for (const { schema, role, targets: schemaTargets, group } of wanted) {
+  for (const { schema, role, targets: schemaTargets, group, relation } of wanted) {
     if (!schema) continue;
     const structure = await fetchStructure(standard, schema);
     if (!structure.available) continue;
@@ -87,6 +159,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       // <multimediaObject>, <supportEquipDescr> four levels below
       // <procedure> -- the skeleton reaching <para> is not enough.
       withRoutes: !String(standard).startsWith('DITA'),
+      relation: relation || null,
     });
     if (placement.sectionMissing && role === 'rule') {
       untested.push({ schema, element: placement.sectionMissing.element, names: placement.sectionMissing.names });

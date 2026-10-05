@@ -24,7 +24,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
+import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { extractRuleNames } from '../../src/validation/schemaValidation.js';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
@@ -69,6 +69,23 @@ function appPlacementsFor(standard, ruleXml, roles) {
     return { schema, role, ...placeExample(structure, targets, { useNames: ruleUseNames(ruleXml), withRoutes: true }) };
   });
 }
+// Mejoras A, Part 2: placed like prepareRuleTestSetup's relation split --
+// [schema, inside] per part, the selected example's schema first.
+function relationPlacementsFor(standard, ruleXml, parts) {
+  const targets = ruleTargets(ruleXml);
+  const r = ancestorRelations(ruleXml)[0];
+  return parts.map(([schema, inside]) => ({
+    schema,
+    role: 'rule',
+    ...placeExample(realStructures[`${standard}|${schema}`], targets, {
+      useNames: ruleUseNames(ruleXml),
+      withRoutes: true,
+      relation: { element: r.element, ancestor: r.ancestor, axis: r.axis, negated: r.negated, inside, selected: inside === !r.negated },
+    }),
+  }));
+}
+const ruleCommonInfoOutsideProcedure =
+  '<structureObjectRule id="BRDP-S1-00177"><objectPath allowedObjectFlag="0">//commonInfo[not(ancestor::procedure)]</objectPath><objectUse>Common information is only used inside procedures.</objectUse></structureObjectRule>';
 const paraEntry = realCards['S1000D 4.2'].para;
 const tableEntry = realCards['S1000D 4.2'].table;
 const identAndStatusSectionEntry = realCards['S1000D 4.2'].identAndStatusSection;
@@ -657,6 +674,22 @@ export const ruleTestExamplesCases = [
         format: 'BREX-4.2',
         ruleXml: ruleMaterialUsage,
         placements: appPlacementsFor('S1000D 4.2', ruleMaterialUsage, [['proced', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Mejoras A, Part 2 (Lufthansa S1-00177, //commonInfo[not(ancestor::procedure)]):
+    // in proced every <commonInfo> is inside <procedure>, so the example the
+    // rule selects goes in process and the other one stays in proced, each
+    // with its way down.
+    name: 'brex-4-2-not-ancestor-commoninfo',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-S1-00177', title: 'Common information', proposal: 'Common information is only used in procedures.' },
+        standard: 'S1000D 4.2',
+        format: 'BREX-4.2',
+        ruleXml: ruleCommonInfoOutsideProcedure,
+        placements: relationPlacementsFor('S1000D 4.2', ruleCommonInfoOutsideProcedure, [['process', false], ['proced', true]]),
       },
     ],
   },
