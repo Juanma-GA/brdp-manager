@@ -255,7 +255,16 @@ function UserManagementSection({ currentUserId }) {
     refresh();
   };
 
+  // AACF 2, Part 5 (HR9): removing a role asks first, naming the person,
+  // the project and the role -- nothing reaches the server without it.
   const handleRemoveRole = async (u, role) => {
+    const message = t('settings.userManagement.removeRoleConfirm', {
+      role: role.role,
+      name: u.display_name,
+      email: u.email,
+      project: projectName(role.project_id),
+    });
+    if (!window.confirm(message)) return;
     setError(null);
     try {
       await authFetchJson(`/api/users/${u.id}/project-roles/${role.project_id}`, { method: 'DELETE' });
