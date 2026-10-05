@@ -1031,27 +1031,7 @@ Crea BRDPs a partir de reglas que ya existen o de un texto. La IA propone; el c�
 - Botón de migración BREX→Schematron sobre un BREX subido (el motor `brexToSchematron.js` ya está listo; falta la UI).
 - `docker-compose.yml`/`Dockerfile` solo sirven el frontend con nginx; falta el servicio del backend FastAPI y Postgres.
 
-## Auditoría de cumplimiento AACF (pendiente — no tocar sin luz verde)
+## Auditoría de cumplimiento AACF
 
-Primera pasada de lectura completa del AACF (2026-09-18) contra el código real de `v2-multiproyecto`. Esto son **hallazgos, no fixes** — se abordarán en una ronda dedicada cuando el usuario dé la prioridad; no se ha modificado ningún fichero de código fuente en esta ronda.
-
-### HR1 — localStorage como estado autoritativo (resuelto en el Barrido final 4)
-
-Contradecía la Hard Rule HR1 y `SECURITY_CONTEXT.md` del framework ("no data persists in localStorage/sessionStorage — database only"). Todos los casos eran código de v1 que la app ya no montaba, y se borraron en el Barrido final 4 (ver `docs/unused-code-inventory.md`):
-
-- `src/context/BRDPContext.jsx` y `src/hooks/useBRDPs.js` (cacheaban el dataset de BRDPs), `src/hooks/useProjectConfig.js` (config del proyecto) y `src/hooks/useLocalNotes.js` (notas): borrados.
-- `src/hooks/useAPIKey.js` y `src/components/AIConfigSection.jsx`, que guardaban la API key del LLM en `localStorage`: borrados (la clave vive solo en el servidor, `/api/llm-proxy`).
-- El patrón "Hooks de datos" de este fichero, causa raíz del conflicto, se ha quitado de "Patrones a seguir".
-
-Quedan tres usos, todos preferencias de interfaz (no estado autoritativo), con try/catch y sin que la app dependa de ellos: `src/layouts/AppLayout.jsx` (`sidebarCollapsed`), `src/hooks/useResizableSplit.js` (ancho del panel de Records) y `src/pages/RecordsPage.jsx` (Historial abierto, `sessionStorage`).
-
-### Otros puntos a revisar (menor prioridad, sin confirmar aún como violación real)
-
-- **HR20 (UI de mutación optimista)** — no verificado todavía si las mutaciones de BRDP reflejan el cambio antes de la respuesta del servidor o esperan al round-trip completo.
-- **HR21 (humanizar texto de UI)** — parcialmente cubierto (hay capa i18n real, ver `src/i18n/index.js`), pero no se ha auditado si se renderiza en algún sitio un token crudo (enum, slug, snake_case) sin pasar por humanización.
-- **AI Extract / HR6** — el límite de 3000 caracteres en texto pegado es una validación de entrada con escalado explícito al usuario (subir como fichero en su lugar), no un truncado silencioso de contenido de calidad — probablemente conforme con HR6 tal cual está, pero pendiente de una revisión más amplia por si hay otro punto del código que sí trunque contenido en vez de resumir.
-- **Design system (`styles/design-system.md`, `ui-kit.md`, `branding.md`)** — el AACF asume shadcn/ui + Tailwind + tokens DTCG (OKLCH) + Zustand como "golden path" de UI; este proyecto no usa nada de eso. No es en sí una violación de una Hard Rule, pero es una divergencia del framework que el usuario debe decidir si adoptar (migración de UI, coste alto) o mantener como excepción documentada.
-
-### Nota de seguridad fuera del alcance de este repo (informativa)
-
-Al leer `aacf/agents/codebase-hardening.agent.md` del repo `cursoFSD` (público en GitHub) se encontró una API key en texto plano embebida en el fichero (`RAG_MCP_KEY` para el MCP de políticas corporativas en `10.117.139.1:8200`). No se ha usado ni se usará esa clave desde aquí. Se avisó directamente al usuario en la conversación; no aplica ninguna acción sobre `brdp-manager`, se deja constancia aquí solo para no perder el hallazgo.
+Informe completo (HR0–HR21, checklist de seguridad, guardrails T2, desviaciones y decisiones pendientes): [`docs/aacf-audit.md`](docs/aacf-audit.md), auditoría de solo lectura sobre `6e2c671`.
+Los arreglos se deciden uno a uno a partir de sus listas "Decisiones para Juanma" y "Arreglos propuestos"; no tocar código por esa auditoría sin luz verde.
