@@ -11,6 +11,8 @@
  * React context.
  */
 
+import { apiErrorFromResponse, networkError } from './apiErrors.js';
+
 let getAccessToken = () => null;
 let setAccessToken = () => {};
 let onSessionExpired = () => {};
@@ -102,20 +104,21 @@ export async function authFetch(path, options = {}) {
   return response;
 }
 
+/**
+ * authFetch + JSON. A failed request throws an ApiError (services/
+ * apiErrors.js) whose message is already a sentence for the user -- never
+ * the server's technical text -- with `status`, `code`, `ref` and the raw
+ * `detail` for a caller that needs them. A request that never got an
+ * answer (no network, server down) throws one with `network: true`.
+ */
 export async function authFetchJson(path, options = {}) {
-  const response = await authFetch(path, options);
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const body = await response.json();
-      detail = body.detail || detail;
-    } catch {
-      // response body wasn't JSON -- keep statusText
-    }
-    const error = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
-    error.status = response.status;
-    throw error;
+  let response;
+  try {
+    response = await authFetch(path, options);
+  } catch (err) {
+    throw networkError(err);
   }
+  if (!response.ok) throw await apiErrorFromResponse(response);
   if (response.status === 204) return null;
   return response.json();
 }

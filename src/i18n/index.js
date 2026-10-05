@@ -7,6 +7,42 @@ import { initReactI18next } from 'react-i18next';
 const resources = {
   en: {
     common: {
+      // AACF 1, Part 3: failed requests as sentences (src/services/apiErrors.js).
+      errors: {
+        withRef: '{{text}} (ref. {{ref}})',
+        network: 'Could not reach the server. Check the connection and try again.',
+        sessionExpired: 'Your session has expired. Sign in again; what you typed is kept.',
+        forbidden: 'You do not have permission to do this.',
+        notFound: 'Not found: it may have been deleted meanwhile.',
+        conflict: 'It could not be done because the data changed meanwhile. Reload and try again.',
+        tooLarge: 'The request is too large.',
+        invalidRequest: 'The server did not accept the data sent.',
+        server: 'Server error (HTTP {{status}}).',
+        requestFailed: 'The request failed (HTTP {{status}}).',
+        unknown: 'Something went wrong.',
+        validation: {
+          tooLong: '{{field}}: too long ({{length}} characters; the limit is {{max}}). Shorten it.',
+          notAllowed: '{{field}}: value not allowed. Allowed: {{allowed}}.',
+          notAccepted: '{{field}}: not accepted here.',
+          missing: '{{field}}: missing.',
+          invalid: '{{field}}: invalid value.',
+        },
+        codes: {
+          internal_error: 'Server error.',
+          database_not_migrated: 'The database is not up to date; tell the administrator.',
+          llm_not_configured: 'The AI is not configured on the server; tell the administrator.',
+          llm_request_failed: 'The AI could not be reached.',
+          llm_upstream_error: 'The AI answered with an error (HTTP {{upstream_status}}).',
+          llm_params_not_allowed: 'The AI request has parameters the server does not accept ({{params}}). Accepted: {{allowed}}.',
+          llm_messages_invalid: 'The AI request has no valid messages.',
+          llm_temperature_invalid: 'The AI request has an invalid temperature.',
+          llm_max_tokens_invalid: 'The AI request has an invalid answer length (max_tokens).',
+          llm_max_tokens_too_high: 'The AI request asks for an answer of {{requested}} tokens; the server allows at most {{max}}.',
+          standard_not_supported: 'The standard "{{standard}}" is not supported. Supported: {{supported}}.',
+          project_config_not_object: 'The project configuration is not valid.',
+          project_config_value_not_text: 'The project configuration field "{{key}}" must be text.',
+        },
+      },
       appName: 'BRDP Manager',
       validation: {
         // Replaces the native HTML `required` attribute's browser tooltip
@@ -1302,6 +1338,41 @@ const resources = {
   },
   es: {
     common: {
+      errors: {
+        withRef: '{{text}} (ref. {{ref}})',
+        network: 'No se pudo conectar con el servidor. Comprueba la conexión y vuelve a intentarlo.',
+        sessionExpired: 'La sesión ha caducado. Vuelve a iniciar sesión; lo que has escrito se conserva.',
+        forbidden: 'No tienes permiso para hacer esto.',
+        notFound: 'No se ha encontrado: puede que se haya borrado mientras tanto.',
+        conflict: 'No se ha podido hacer porque los datos han cambiado mientras tanto. Recarga y vuelve a intentarlo.',
+        tooLarge: 'La petición es demasiado grande.',
+        invalidRequest: 'El servidor no ha aceptado los datos enviados.',
+        server: 'Error en el servidor (HTTP {{status}}).',
+        requestFailed: 'La petición ha fallado (HTTP {{status}}).',
+        unknown: 'Algo ha fallado.',
+        validation: {
+          tooLong: '{{field}}: demasiado largo ({{length}} caracteres; el límite es {{max}}). Acórtalo.',
+          notAllowed: '{{field}}: valor no admitido. Admitidos: {{allowed}}.',
+          notAccepted: '{{field}}: no se admite aquí.',
+          missing: '{{field}}: falta.',
+          invalid: '{{field}}: valor no válido.',
+        },
+        codes: {
+          internal_error: 'Error en el servidor.',
+          database_not_migrated: 'La base de datos no está actualizada; avisa al administrador.',
+          llm_not_configured: 'La IA no está configurada en el servidor; avisa al administrador.',
+          llm_request_failed: 'No se ha podido contactar con la IA.',
+          llm_upstream_error: 'La IA ha respondido con un error (HTTP {{upstream_status}}).',
+          llm_params_not_allowed: 'La petición a la IA lleva parámetros que el servidor no admite ({{params}}). Admitidos: {{allowed}}.',
+          llm_messages_invalid: 'La petición a la IA no tiene mensajes válidos.',
+          llm_temperature_invalid: 'La petición a la IA tiene una temperatura no válida.',
+          llm_max_tokens_invalid: 'La petición a la IA tiene una longitud de respuesta (max_tokens) no válida.',
+          llm_max_tokens_too_high: 'La petición a la IA pide una respuesta de {{requested}} tokens; el servidor admite como máximo {{max}}.',
+          standard_not_supported: 'El estándar "{{standard}}" no está admitido. Admitidos: {{supported}}.',
+          project_config_not_object: 'La configuración del proyecto no es válida.',
+          project_config_value_not_text: 'El campo "{{key}}" de la configuración del proyecto debe ser texto.',
+        },
+      },
       appName: 'BRDP Manager',
       validation: {
         required: 'Completa todos los campos obligatorios.',

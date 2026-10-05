@@ -842,9 +842,13 @@ async def test_reclassifying_sets_the_texts_again(client, project_users, synthet
     assert c["text_sources"] == {"title": "ai", "definition": "file", "proposal": "manual"}
 
 
-async def test_parse_errors_always_have_a_reason(client, project_users, monkeypatch):
-    """HR7: an unexpected error answers with a reason, never a bare 500; a
-    missing table (the migration not applied) says so."""
+async def test_parse_errors_always_have_a_reason(client, project_users, monkeypatch, caplog):
+    """HR7 + Decisión 12: an unexpected error answers with a code and a
+    reference, never the exception's text; the text goes to the log under
+    that reference. A missing table (the migration not applied) has its own
+    code."""
+    import logging
+
     from sqlalchemy.exc import ProgrammingError
 
     from app.api.routes import rule_extract as route
@@ -855,9 +859,14 @@ async def test_parse_errors_always_have_a_reason(client, project_users, monkeypa
         raise RuntimeError("something odd")
 
     monkeypatch.setattr(route, "read_rules_file", boom)
-    res = await _upload(client, project.id, editor, _brex("4.2", ""))
+    with caplog.at_level(logging.ERROR, logger="app.errors"):
+        res = await _upload(client, project.id, editor, _brex("4.2", ""))
     assert res.status_code == 500
-    assert res.json()["detail"] == "Unexpected error (RuntimeError): something odd"
+    detail = res.json()["detail"]
+    assert detail["code"] == "internal_error" and len(detail["ref"]) == 8
+    assert "something odd" not in res.text and "RuntimeError" not in res.text
+    logged = [r for r in caplog.records if f"ref={detail['ref']}" in r.getMessage()]
+    assert logged and "something odd" in "".join(__import__("traceback").format_exception(*logged[0].exc_info))
 
     class UndefinedTableError(Exception):
         pass
@@ -869,11 +878,12 @@ async def test_parse_errors_always_have_a_reason(client, project_users, monkeypa
     monkeypatch.setattr(route, "get_running_job", missing_table)
     res = await _upload(client, project.id, editor, _brex("4.2", ""))
     assert res.status_code == 503
-    assert "migration has not been applied" in res.json()["detail"] and "alembic upgrade head" in res.json()["detail"]
+    assert res.json()["detail"]["code"] == "database_not_migrated"
+    assert "rule_extract_jobs" not in res.text and "relation" not in res.text
     # The page's first call (the latest extraction) too.
     monkeypatch.setattr(route, "get_most_recent_job", missing_table)
     res = await client.get(f"/api/projects/{project.id}/ai-extract/jobs/active", headers=editor)
-    assert res.status_code == 503 and "migration" in res.json()["detail"]
+    assert res.status_code == 503 and res.json()["detail"]["code"] == "database_not_migrated"
 
 
 # ── Real Schematron files (tests/fixtures/schematron/) ────────────────────

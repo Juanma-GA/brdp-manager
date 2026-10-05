@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authFetch, authFetchJson } from '../services/apiClient';
+import { describeErrorDetail } from '../services/apiErrors';
 import { CURATED_TEMPLATE_BY_STANDARD } from '../utils/excelUtils';
 import { ruleStateOf } from '../utils/ruleState';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
@@ -94,23 +95,23 @@ function saveBlob(blob, filename) {
   window.URL.revokeObjectURL(url);
 }
 
-// The `detail` of a failed backend response: a string, or the object the
-// export sends for cells over Excel's limit. Falls back to the status text.
+// A failed backend response: its status and `detail` (a string, or the
+// object the export sends for cells over Excel's limit; the status text when
+// the body is not JSON).
 async function responseDetail(res) {
   try {
     const body = await res.json();
-    return body.detail ?? res.statusText;
+    return { status: res.status, detail: body.detail ?? res.statusText };
   } catch {
-    return res.statusText;
+    return { status: res.status, detail: res.statusText };
   }
 }
 
-// A `detail` as one line of text (FastAPI's own validation errors are a
-// list of objects).
-function detailText(detail) {
-  if (typeof detail === 'string') return detail;
-  if (detail && typeof detail.message === 'string') return detail.message;
-  return JSON.stringify(detail);
+// A failed response as one sentence (services/apiErrors.js: a coded error
+// or FastAPI's validation list translated, the server's reference kept,
+// never its technical text).
+function detailText({ status, detail }) {
+  return describeErrorDetail(status, detail);
 }
 
 function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDataChanged }) {
@@ -346,13 +347,14 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
         body: JSON.stringify({ rows: reportRows }),
       });
       if (!res.ok) {
-        const detail = await responseDetail(res);
+        const failure = await responseDetail(res);
+        const { detail } = failure;
         if (detail?.code === 'cell_too_large') {
           const ids = [...new Set(detail.cells.map((c) => c.id))];
           const listed = detail.cells.map((c) => t('config.dataManagement.exportCellColumn', { id: c.id, field: c.field })).join(', ');
           setExportError(t('config.dataManagement.exportCellTooLarge', { count: ids.length, ids: listed }));
         } else {
-          setExportError(t('config.dataManagement.exportFailed', { message: detailText(detail) }));
+          setExportError(t('config.dataManagement.exportFailed', { message: detailText(failure) }));
         }
         return;
       }

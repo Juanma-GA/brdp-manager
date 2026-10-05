@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authFetch, authFetchJson } from '../../services/apiClient';
+import { describeErrorDetail } from '../../services/apiErrors';
 import { sendMessage } from '../../api/llmAPI.js';
 import { EXTRACT_MAX_TOKENS, FIND_DECISIONS_TEMPERATURE, SUGGEST_TEMPERATURE } from '../../prompts/shared.js';
 import { findDecisions, FIND_TRUNCATED } from '../../utils/textExtract.js';
@@ -74,12 +75,15 @@ function ownedFields(edit) {
 // catalog, the AI, a hand edit, or the project for an existing BRDP.
 const SOURCE_TAGS = new Set(['file', 'catalog', 'ai', 'manual', 'project']);
 
+// A failed response as one sentence (services/apiErrors.js): a coded error
+// or FastAPI's validation list translated, with the server's reference,
+// never its technical text.
 async function detailOf(res) {
   try {
     const body = await res.json();
-    return typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+    return describeErrorDetail(res.status, body.detail);
   } catch {
-    return res.statusText;
+    return describeErrorDetail(res.status, res.statusText);
   }
 }
 
@@ -693,7 +697,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
         if (d && typeof d === 'object' && d.code === 'count_mismatch') {
           throw new Error(t('config.ruleExtract.applyRefusedCount', { ids: (d.missing || []).join(', ') }));
         }
-        throw new Error(typeof d === 'string' ? d : d?.message || res.statusText);
+        throw new Error(describeErrorDetail(res.status, d ?? res.statusText));
       }
       const result = await res.json();
       // Checked = created + updated + omitted, or a visible error naming

@@ -25,6 +25,7 @@ from app.api.routes.rule_extract import router as rule_extract_router
 from app.api.routes.users import router as users_router
 from app.api.routes.validate_brex import router as validate_brex_router
 from app.core.config import get_settings
+from app.core.errors import SanitizedErrorMiddleware
 from app.core.migrations import get_migration_status
 from app.db.base import engine, get_db
 
@@ -32,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="BRDP Manager v2 API")
 
+# Added before CORS so it sits inside it: a sanitized error response still
+# carries the CORS headers (Starlette wraps each added middleware around the
+# previous ones).
+app.add_middleware(SanitizedErrorMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origins,
