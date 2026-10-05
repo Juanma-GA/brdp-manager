@@ -18,7 +18,7 @@ import { checkWellFormed } from "./generateBREX.js";
 // conjunto de reglas aprobadas por proyecto, bajo el formato BREX del
 // standard real (BREX-3.0.1/BREX-4.1/BREX-4.2), alimenta tanto la salida
 // BREX como su conversión a Schematron (docs request, confirmado con el
-// usuario) -- options.approvalsFormat/options.approvals se reenvían tal
+// usuario) -- options.approvals se reenvía tal
 // cual al generador base, sin forzar aquí ningún valor propio.
 export async function generateBREXSch(brdps, projectConfig, options = {}) {
   const { baseGenerator = generateBREX301, ...baseOptions } = options;

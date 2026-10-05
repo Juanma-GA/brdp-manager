@@ -1,6 +1,5 @@
 import { ruleEnters } from '../utils/generatePlan.js';
 import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
-import { getApprovalsForFormat } from "./approvals.js";
 import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
 import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
@@ -90,23 +89,6 @@ function assembleChunks301(baseXml, additionalRules) {
     contextRulesSiblings +
     '\n</brex>\n</content>\n</dmodule>'
   );
-}
-
-// Batch-fetches every frozen approval for the given format in one request
-// (GET /api/approvals/format/:format) instead of one call per BRDP. Same
-// safe-degrade philosophy as generateSchematronDITA.js's fetchApprovalsMap:
-// a fetch failure falls back to "no approvals" instead of aborting
-// generation -- affected BRDPs simply go through the normal LLM/safety-net
-// path, so coverage is never at risk, only the deterministic-injection
-// optimization for that run.
-async function fetchApprovalsMap301(format) {
-  try {
-    const rows = await getApprovalsForFormat(format);
-    return new Map(rows.map((r) => [r.brdp_id, r]));
-  } catch (err) {
-    console.error(`Failed to fetch rule approvals for format ${format}:`, err);
-    return new Map();
-  }
 }
 
 // ===== Finalización determinista del documento (S1000D 3.0.1) =====
@@ -292,7 +274,6 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
     onlyValidated = true,
     includeDrafts = false,
     approvals: approvalsOverride,
-    approvalsFormat = 'BREX-3.0.1',
     schemaSummary: schemaSummaryOverride,
   } = options;
 
@@ -314,9 +295,12 @@ export async function generateBREX301(brdps, projectConfig, options = {}) {
 
   const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary301());
 
-  const approvalById = approvalsOverride
-    ? (approvalsOverride instanceof Map ? approvalsOverride : new Map(approvalsOverride.map((a) => [a.brdp_id, a])))
-    : await fetchApprovalsMap301(approvalsFormat);
+  // The caller passes the project's rule approvals for this format
+  // (GeneratePage.jsx loads them from /api/projects/{id}/approvals/{format}/export).
+  if (!approvalsOverride) throw new Error("The project's rule approvals are required to generate.");
+  const approvalById = approvalsOverride instanceof Map
+    ? approvalsOverride
+    : new Map(approvalsOverride.map((a) => [a.brdp_id, a]));
 
   const approvedBRDPs = [];
   const unapprovedBRDPs = [];

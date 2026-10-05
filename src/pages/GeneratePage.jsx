@@ -10,10 +10,8 @@ import { generateSchematronDITA } from '../api/generateSchematronDITA.js';
 import { planGeneration, omittedByReason } from '../utils/generatePlan.js';
 import styles from './GeneratePage.module.css';
 
-// Same format ids generateBREX*.js already default to internally (see
-// each generator's `approvalsFormat` default) -- kept here explicitly
-// because this page fetches approvals itself (see below) instead of
-// letting the generator do it.
+// The rule-approval format id of each standard: this page loads the
+// project's approvals for it (see below) and passes them to the generator.
 // docs/v2 §1/§2: project.standard is fixed at project creation, is one of
 // the 6 exact display strings the Create Project dropdown offers. For the
 // three real S1000D standards it no longer maps to exactly one generation
@@ -37,11 +35,8 @@ const BREX_STANDARDS = {
 const DITA_FORMAT_DEF = { approvalsFormat: 'SCH-DITA', xsdFormat: null, run: generateSchematronDITA };
 
 // generateBREX()/generateBREX41()/generateBREX301()/generateBREXSch()/
-// generateSchematronDITA() are the untouched core engine (CLAUDE.md) --
-// they all accept an `approvals` override (a Map keyed by brdp_id) that
-// bypasses their built-in fetchApprovalsMap(), which otherwise targets
-// v1's global, unscoped GET /api/approvals/format/:format (no v2
-// equivalent: v2's approvals are per-project-BRDP).
+// generateSchematronDITA() need the project's approvals (a Map keyed by
+// brdp_id) in their `approvals` option.
 //
 // This used to be one authFetchJson call PER BRDP run in parallel
 // (Promise.all) -- fine for a handful of BRDPs, but a real 575-BRDP

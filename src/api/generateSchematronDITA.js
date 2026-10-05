@@ -1,11 +1,6 @@
 import { pendingApprovalComment } from "./generateBREX.js";
 import { ruleEnters } from "../utils/generatePlan.js";
 import { _isSafePattern } from "./brexToSchematron.js";
-import { getApprovalsForFormat } from "./approvals.js";
-
-// Fixed format id this generator's rule_approvals rows are stored under
-// (STANDARD_TO_RULE_FORMAT in src/constants/ruleFormats.js).
-const FORMAT_ID = "SCH-DITA";
 
 // Both DITA standards (migration 0013_split_dita_xpath_standards.py) share
 // this one FORMAT_ID/generator -- the only thing that genuinely differs is
@@ -82,7 +77,7 @@ function renderMessage(entry) {
 // curated pattern directly is both more reliable (no ambiguity possible) and
 // cheaper (no LLM call needed at all for these ids).
 function buildDeterministicBlockFromFewShot(entry) {
-  // A frozen rule_approvals row (see src/api/approvals.js): rule_xml is
+  // A rule_approvals row: rule_xml is
   // already the exact, previously-approved <sch:pattern>/comment block --
   // inject it verbatim, never rebuild it from separate fields.
   if (entry.rule_xml != null) return entry.rule_xml.trim();
@@ -105,22 +100,6 @@ function sanitizeForXmlComment(text) {
     .replace(/-{2,}/g, "—")
     .replace(/-+$/, "")
     .trim();
-}
-
-// Batch-fetches every frozen approval for FORMAT_ID in one request (see
-// GET /api/approvals/format/:format) instead of one call per BRDP. A fetch
-// failure degrades to "no approvals" rather than aborting generation --
-// affected BRDPs simply fall back to the LLM/safety-net path exactly as
-// before this feature existed, so coverage is never at risk, only the
-// deterministic-injection optimization for that one run.
-async function fetchApprovalsMap(format) {
-  try {
-    const rows = await getApprovalsForFormat(format);
-    return new Map(rows.map((r) => [r.brdp_id, r]));
-  } catch (err) {
-    console.error(`Failed to fetch rule approvals for format ${format}:`, err);
-    return new Map();
-  }
 }
 
 // ===== Deterministic finalization (no BREX-equivalent conversion exists for
@@ -899,7 +878,6 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
   const {
     onlyValidated = true,
     approvals: approvalsOverride,
-    approvalsFormat = FORMAT_ID,
     schemaSummary: schemaSummaryOverride,
     standard,
     includeDrafts = false,
@@ -920,9 +898,12 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
 
   const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary());
 
-  const approvalById = approvalsOverride
-    ? (approvalsOverride instanceof Map ? approvalsOverride : new Map(approvalsOverride.map((a) => [a.brdp_id, a])))
-    : await fetchApprovalsMap(approvalsFormat);
+  // The caller passes the project's rule approvals for this format
+  // (GeneratePage.jsx loads them from /api/projects/{id}/approvals/{format}/export).
+  if (!approvalsOverride) throw new Error("The project's rule approvals are required to generate.");
+  const approvalById = approvalsOverride instanceof Map
+    ? approvalsOverride
+    : new Map(approvalsOverride.map((a) => [a.brdp_id, a]));
 
   let blocks = [];
   let ruleCount = 0;
