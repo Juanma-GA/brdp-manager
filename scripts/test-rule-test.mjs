@@ -1484,6 +1484,32 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const cMixed = chooseTestSchemas({ documentSchemas: docs42, cards: (await fetchCards(S42, ['dmRef', 'proceduralStep'])).cards, targets: ruleTargets(mixed) });
   check('a schema with all that is preferred for one part: no groups (proced)', cMixed.groups === null && cMixed.testSchema === 'proced', JSON.stringify(cMixed));
 
+  // Mejoras A, Part 1: the test schema has every element step of the path.
+  for (const [id, first] of [['BRDP-S1-00223', 'optionalPart'], ['BRDP-S1-00224', 'preferredSparePart']]) {
+    const rule = `<structureObjectRule id="${id}"><objectPath allowedObjectFlag="0">//${first}/catalogSeqNumberRef</objectPath><objectUse>No CSN reference in ${first}.</objectUse></structureObjectRule>`;
+    const c = chooseTestSchemas({ documentSchemas: docs42, cards: (await fetchCards(S42, [first, 'catalogSeqNumberRef'])).cards, targets: ruleTargets(rule) });
+    check(`${id}: test schema ipd (has <${first}>), not descript`, c.groups === null && c.testSchema === 'ipd', JSON.stringify(c));
+    const prep = await prepareRuleTestSetup({ ruleXml: rule, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+    const pl = prep.promptPlacements[0];
+    check(`${id}: reachable, placed in ipd`, prep.unreachable === null && pl.schema === 'ipd', JSON.stringify([prep.unreachable, pl.schema]));
+    const way = (pl.routes?.steps || []).map((st) => st.parent).join('/');
+    check(`${id}: the way down goes to <${first}> through itemSeqNumber/partSegment/partRefGroup`, /itemSeqNumber\/partSegment\/partRefGroup$/.test(way) && pl.routes.steps.at(-1).children.includes(first), way);
+    const content = `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="P1"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${first}>__X__<partRef manufacturerCodeValue="12345" partNumberValue="P2"/></${first}></partRefGroup></partSegment><applicabilitySegment><usableOnCodeAssy>A</usableOnCodeAssy></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
+    const ex = [
+      { label: 'no reference', expected: 'accept', content: content.replace('__X__', '') },
+      { label: 'with reference', expected: 'reject', content: content.replace('__X__', '<catalogSeqNumberRef figureNumber="02" item="003"/>') },
+    ];
+    const r = testRun(rule, ex, prep.setup);
+    check(`${id}: both ipd examples valid`, r.runs.every((x) => x.validation.runnable), JSON.stringify(r.runs.map((x) => x.validation.structure)));
+    check(`${id}: accepted / rejected, verdict correct`, r.runs.map((x) => x.result?.status).join() === 'accepted,rejected' && r.verdict.kind === 'correct', JSON.stringify([r.runs.map((x) => x.result?.status), r.verdict.kind]));
+  }
+  // No schema has all the steps together: "not executable", no LLM call.
+  {
+    const rule = '<structureObjectRule><objectPath allowedObjectFlag="0">//optionalPart/proceduralStep</objectPath><objectUse>x</objectUse></structureObjectRule>';
+    const prep = await prepareRuleTestSetup({ ruleXml: rule, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards, fetchStructure });
+    check('no schema with all steps: unreachable', prep.unreachable?.code === 'unreachable_target', JSON.stringify(prep.unreachable));
+  }
+
   // Part 2: every example invalid → the schema and the reason are named.
   const sbSetup = { standard: S42, schemaLocation: 'flat', placements: { sb: { structure: structureOf(S42, 'sb'), placement: placeExample(structureOf(S42, 'sb'), ruleTargets(R120)) } } };
   const sbPlace = sbSetup.placements.sb.placement;

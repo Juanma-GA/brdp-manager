@@ -362,7 +362,7 @@ export function ruleTargets(ruleXml) {
 // ─── Which schemas the examples use ─────────────────────────────────────────
 
 // A general rule is tested on one schema: the first of these that has every
-// element the rule checks (and the root of its absolute paths).
+// element step of the rule's paths (and the root of its absolute paths).
 const TEST_SCHEMA_PREFERENCE = ['descript', 'proced', 'process', 'fault', 'ipd', 'schedul', 'crew', 'comrep', 'sb'];
 
 // `elementSchemas` (DITA): { name: [topic types whose graph has it] } --
@@ -437,7 +437,21 @@ export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], c
   const fallback = order(documentSchemas);
   const groups = schemaGroups(targets, fitting[0] || null, { known, order, cards, documentSchemas, elementSchemas, carriersOf });
   if (groups) return { testSchema: groups[0].schema, otherSchema: null, groups };
-  return { testSchema: fitting[0] || fallback[0] || null, otherSchema: null, groups: null };
+  // Mejoras A, Part 1: a single schema must also have every element step of
+  // the rule's alternatives, not only the checked (last) one.
+  // //optionalPart/catalogSeqNumberRef (BRDP-S1-00223) got descript, which
+  // has <catalogSeqNumberRef> but no <optionalPart> -- "not executable: the
+  // examples cannot contain <optionalPart>"; now ipd. When no schema has
+  // them all (//dmStatus/applicRef | //pmStatus/applicRef: no schema has
+  // both status elements), the choice by the checked elements stays.
+  const allSteps = [
+    ...new Set([
+      ...required,
+      ...(targets?.alternatives || []).filter((a) => !a.opaque).flatMap((a) => a.steps),
+    ]),
+  ].filter(known);
+  const fittingSteps = fitting.filter((schema) => schemasHavingAll(allSteps, cards, [schema], elementSchemas).length > 0);
+  return { testSchema: fittingSteps[0] || fitting[0] || fallback[0] || null, otherSchema: null, groups: null };
 }
 
 // The schemas that carry the attribute of an attribute-only alternative
