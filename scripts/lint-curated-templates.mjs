@@ -1,4 +1,5 @@
-// Test de reglas T4b, Part 4: lint of the curated Excel templates
+// Test de reglas T4b, Part 4 (npm run lint:templates; exit code 1 if there
+// is any finding): lint of the curated Excel templates
 // (public/brdp-template-*.xlsx, the files "Download Excel template" serves
 // and Suggest Rule uses as its last precedent group). For every rule of
 // every template it asks the rule-test engine -- the same describeRule /
@@ -57,3 +58,5 @@ console.log('\n### Known and accepted (not counted)\n');
 if (known.length === 0) console.log('None.');
 else console.log(['| Template | Rule | Finding | Detail |', '|---|---|---|---|', ...known].join('\n'));
 console.log(`\n${total} finding(s).`);
+// A finding fails the run (npm run lint:templates, npm run check).
+if (total > 0) process.exitCode = 1;

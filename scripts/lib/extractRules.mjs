@@ -9,18 +9,10 @@
 //     { file_warnings, candidates: [{ identifier, rule_xml, rule_count,
 //       noncontext_count, warnings }] }
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
+import { BACKEND_DIR as BACKEND, pythonCandidates } from './backendPython.mjs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const BACKEND = fileURLToPath(new URL('../../backend/', import.meta.url));
 const SCRIPT = path.join(BACKEND, 'scripts', 'extract_rules_json.py');
-
-function pythonCandidates() {
-  if (process.env.BACKEND_PYTHON) return [process.env.BACKEND_PYTHON];
-  const venv = [path.join(BACKEND, '.venv', 'bin', 'python'), path.join(BACKEND, '.venv', 'Scripts', 'python.exe')];
-  return [...venv.filter((p) => fs.existsSync(p)), 'python3', 'python'];
-}
 
 export function extractRules(file, format, standard, issue = null) {
   const args = [SCRIPT, path.resolve(file), format, standard, ...(issue ? [issue] : [])];

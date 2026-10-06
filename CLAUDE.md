@@ -33,11 +33,16 @@ El `.venv` de `backend/` ya existe con todas las dependencias instaladas. `uvico
 
 Hay un proyecto de desarrollo sembrado ("Demo Project (S1000D 4.2)") y un admin de pruebas (`admin@example.com` / `AdminTest123!`, ver `backend/scripts/seed_dev_data.py`) — usarlos para verificación con navegador real en vez de crear datos nuevos cada vez, salvo que el propio caso de prueba lo requiera (y luego limpiar lo creado).
 
-### Cómo verificar cambios (no hay test runner JS)
+### Cómo verificar cambios: `npm run check:all`
 
-- **Backend**: `cd backend && source .venv/bin/activate && python -m pytest -q` (a fecha de hoy: 208 tests, Postgres real, sin mocks salvo el transporte HTTP de Mistral).
-- **Frontend**: no existe vitest/jest ni script `test` en `package.json`. Toda verificación de UI se hace con scripts Node ad hoc usando `playwright-core` (Chromium real: el de `CHROMIUM_PATH` si está definida; si no, el navegador por defecto de Playwright -- en este entorno `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` lo resuelve solo) contra el Vite dev server real y Postgres real — login real, `fetch` con refresh de cookie, screenshots. No inventar un framework de test nuevo; seguir ese patrón.
-- `npm run lint` (ESLint) y `npm run build` (Vite) deben quedar limpios antes de dar por cerrada cualquier tarea de frontend.
+Un solo comando comprueba todo lo que no necesita navegador; igual en Linux y en PowerShell (son scripts de Node, sin sintaxis de shell):
+
+- `npm run check` -- lint, build, `test:js`, `check:prompts` y `lint:templates`, por ese orden, parando en el primer fallo.
+- `npm run check:all` -- lo mismo más `test:backend`. **Es el cierre de cada encargo**: `npm run check:all` y, además, los scripts de navegador (`scripts/verify-*.mjs`) que toquen lo cambiado. El informe del encargo incluye el resumen final de `check:all` tal cual (termina en `TODO OK` si todo pasa).
+- Por separado: `npm run lint`, `npm run build`, `npm run test:js` (todos los `scripts/test-*.mjs` uno a uno, con tiempo máximo por fichero; `-- <texto>` filtra por nombre, `-- --timeout 300` cambia el máximo), `npm run check:prompts` (snapshot de prompts), `npm run lint:templates` (plantillas curadas; falla con cualquier hallazgo), `npm run test:backend` (pytest; `-- -k similar -x` pasa argumentos a pytest).
+- Código de salida: 0 todo bien; 1 algo falla; 2 falta algo del entorno (Python del backend, base de datos de pruebas caída o sin migrar), que no es un fallo de la app pero tampoco "todo comprobado".
+- **Backend**: `test:backend` usa el Python del backend (`$BACKEND_PYTHON`, si no `backend/.venv` -- `bin/python` en Linux, `Scripts\python.exe` en Windows --, si no `python3`/`python`) y la base de `DATABASE_URL` (entorno o `backend/.env`). Antes de pytest comprueba en una línea que la base responde y está en la última migración (`backend/scripts/check_test_db.py`). Postgres real, sin mocks salvo el transporte HTTP de Mistral.
+- **Frontend**: no hay vitest/jest. La verificación de UI se hace con scripts Node ad hoc usando `playwright-core` (Chromium real: el de `CHROMIUM_PATH` si está definida; si no, el navegador por defecto de Playwright -- en este entorno `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` lo resuelve solo) contra el Vite dev server real y Postgres real -- login real, `fetch` con refresh de cookie, screenshots. No inventar un framework de test nuevo; seguir ese patrón. Un `scripts/test-*.mjs` nuevo entra solo en `test:js`.
 
 ### Últimos cambios relevantes (para no repetir investigación)
 

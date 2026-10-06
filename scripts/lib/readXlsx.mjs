@@ -10,18 +10,12 @@
 // set, else backend's virtualenv (Linux/macOS or Windows layout), else
 // python3/python on the PATH.
 import { execFileSync } from 'node:child_process';
+import { BACKEND_DIR as BACKEND, pythonCandidates } from './backendPython.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BACKEND = fileURLToPath(new URL('../../backend/', import.meta.url));
 const SCRIPT = path.join(BACKEND, 'scripts', 'read_template.py');
-
-function pythonCandidates() {
-  if (process.env.BACKEND_PYTHON) return [process.env.BACKEND_PYTHON];
-  const venv = [path.join(BACKEND, '.venv', 'bin', 'python'), path.join(BACKEND, '.venv', 'Scripts', 'python.exe')];
-  return [...venv.filter((p) => fs.existsSync(p)), 'python3', 'python'];
-}
 
 export function readXlsxRows(source) {
   const input = Buffer.isBuffer(source) ? source : fs.readFileSync(source);
