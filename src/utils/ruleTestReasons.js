@@ -196,7 +196,8 @@ export function ruleDescriptionText(description, t) {
 //   cause_predicate_path {amount, target, path},
 //   cause_attr_has / _lacks / _equals / _not_equals {count, target, childOf, attr, value},
 //   cause_values_allowed / cause_values_not_prohibited {count, values},
-//   cause_sch_context {amount, target, context}.
+//   cause_sch_context {amount, target, context},
+//   cause_condition {names, path, truth} (Remates B, Part 1).
 // null when there is no cause to give (the verdict's own text stands).
 const ATTR_CAUSE_KEYS = {
   cause_attr_has: 'attrHas',
@@ -231,6 +232,13 @@ export function formatAcceptCause(cause, t) {
       return k('valuesNotProhibited', p);
     case 'cause_sch_context':
       return k('schContext', p);
+    case 'cause_condition': {
+      // Remates B, Part 1, case b: the names the example contains, and the
+      // condition (flag 0: false; flag 1: true) as it is in the example.
+      const names = Array.isArray(p.names) ? p.names : [String(p.names || '')];
+      const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} ${t('records.assistant.listAnd')} ${names[names.length - 1]}` : names[0];
+      return k(p.truth === 'true' ? 'conditionTrue' : 'conditionFalse', { names: list, path: p.path, count: names.length });
+    }
     default: {
       const key = ATTR_CAUSE_KEYS[cause.code];
       if (!key) return null;

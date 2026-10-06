@@ -34,14 +34,14 @@ import {
   placeExample,
   ruleTargets,
 } from '../src/utils/ruleTestSkeleton.js';
-import { analyzeRule, describeRule, ruleConditions } from '../src/utils/ruleTestEngine.js';
+import { acceptanceDetails, analyzeRule, describeRule, ruleConditions, rulePathParts } from '../src/utils/ruleTestEngine.js';
 import { addMissingCalsColspecs, checkCalsColspecs, checkCalsTableSpans, checkExampleStructure, fixCalsRowSpans, extractRuleNames, formatSchemaIssue, formatStructureProblem, removeSpannedCalsEntries, structureIssues } from '../src/validation/schemaValidation.js';
 import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, keepMatchedNodeProblem, missesRuleProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
 import { TABLE_MODEL_HINT } from '../src/utils/ruleTest.js';
 import { ancestorRelations, calsTableModel, relationCases, ruleLooksAtTables } from '../src/utils/ruleTestSkeleton.js';
 import { contentRoutes, metadataXml, normalizeBrexReferenceCode, ruleLooksAtBrexReference, ruleMatchExpressions, ruleUseNames, SKELETON_TITLE_TEXT } from '../src/utils/ruleTestSkeleton.js';
-import { formatRuleDescription, formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
+import { acceptCauseText, formatRuleDescription, formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
 import { readPublicTemplate, retiredTemplateRows } from './lib/readXlsx.mjs';
 import { wrapRuleInSchemaContexts } from '../src/utils/ruleSchemaContext.js';
 import { RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
@@ -622,7 +622,8 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('MB1 EXT-00001: one correction round asked (accept example only)', asked.length === 2 && !asked[1].messages.at(-1).content.includes('Example 2 ('), asked[1]?.messages.at(-1).content);
   // C3, Part 1c: EXT-00001 checks cell values, so the accept example (title
   // on the table, so the rule selects nothing in it either) goes back.
-  check('C3 1c EXT-00001: accept example without a selected node sent back too', asked[1].messages.at(-1).content.includes('Example 1 ("quantity given"):\n- The rule checks values, so at least one example meant to be accepted must contain a node matched by: `*[title = ('), asked[1].messages.at(-1).content);
+  check('C3 1c EXT-00001: accept example without a selected node sent back too', asked[1].messages.at(-1).content.includes('Example 1 ("quantity given"):\n- The rule checks values, so at least one example meant to be accepted must contain a node matched by: `*//table/tgroup/tbody/row`, with a value'), asked[1].messages.at(-1).content);
+  check('RB1 EXT-00001: the accept message never names the predicates', !/must contain a node matched by: `[^`]*\[/.test(asked[1].messages.at(-1).content));
   check('MB1 EXT-00001: accept example fixed', result.status === 'ready' && result.correction.attempted === 1 && result.correction.fixed === 1, JSON.stringify(result.correction));
   check('MB1 EXT-00001: reject example kept as written', result.examples[1].content.startsWith('<table><title>LISTA DE MATERIAL OBLIGATORIO</title>'));
   check('MB1 EXT-00001: reject example accepted, case b', result.runs[1].result.status === 'accepted' && result.runs[1].predicateMiss === true, JSON.stringify(result.runs[1].result));
@@ -2048,19 +2049,28 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   ], set19, { format: 'BREX-4.1', vocab: vocab41 });
   check('boolean EXT-00019: condition met → rejected, not met → accepted, verdict correct', statuses(r19) === 'accepted,rejected' && r19.verdict.kind === 'correct', statuses(r19));
   check('boolean EXT-00019: the result carries the condition, no node', r19.runs[1].result.conditions[0]?.holds === true && r19.runs[1].result.selectedNodePaths.length === 0 && r19.runs[0].result.conditions[0]?.holds === false);
-  // A reject example that does not trigger the condition goes to the
-  // correction round with which way it must go.
+  // Remates B, Part 1: a reject example that does not trigger the
+  // condition but contains names it looks at (<updateCode>, <partSpec>…)
+  // is case b: never sent to the correction round, verdict incorrect.
   const r19miss = testRun(R19B, [
     { label: 'part in the parts CIR', expected: 'reject', schema: 'update', content: part, metadata: cir('00E') },
   ], set19, { format: 'BREX-4.1', vocab: vocab41 });
   const miss = missesRuleProblem({ expected: 'reject' }, r19miss.runs[0], R19B);
-  check('boolean: the correction asks the reject example to make the condition TRUE', /must make the rule's condition TRUE: `\/\/updateCode\[attribute::infoCode="00N"\] and/.test(miss || ''), miss);
-  check('boolean: never "inconclusive / nothing selected"', r19miss.verdict.kind !== 'inconclusive' || r19miss.verdict.why !== 'nothing_selected', JSON.stringify(r19miss.verdict));
+  check('RB1 boolean case b: never sent to the correction round', miss === null && r19miss.runs[0].predicateMiss === true, miss);
+  check('RB1 boolean case b: verdict incorrect (permissive)', r19miss.verdict.kind === 'incorrect' && r19miss.verdict.permissive === true, JSON.stringify(r19miss.verdict));
+  const cond19 = r19miss.runs[0].acceptance.find((d) => d.case === 'condition');
+  check('RB1 boolean case b: present names are the ones the example contains', JSON.stringify(cond19.presentNames) === JSON.stringify(['<updateCode>', '<partSpec>', '<partIdent>', '@infoCode']), JSON.stringify(cond19));
+  const cause19en = acceptCauseText(r19miss.runs[0], en);
+  const cause19es = acceptCauseText(r19miss.runs[0], es);
+  check('RB1 boolean case b: cause EN', cause19en === 'the example contains <updateCode>, <partSpec>, <partIdent> and @infoCode, and the condition `//updateCode[attribute::infoCode="00N"] and (//zoneSpec or //partSpec or //circuitBreakerSpec or //zoneIdent or //partIdent)` is false in it', cause19en);
+  check('RB1 boolean case b: cause ES', cause19es === 'el ejemplo contiene <updateCode>, <partSpec>, <partIdent> y @infoCode, y la condición `//updateCode[attribute::infoCode="00N"] and (//zoneSpec or //partSpec or //circuitBreakerSpec or //zoneIdent or //partIdent)` es falsa en él', cause19es);
   const conds = ruleConditions(R19B, 'BREX-4.1', { parseXml });
-  check('boolean: keep line speaks of the condition', keepMatchedNodeProblem(R19B, conds).startsWith('Keep what makes `//updateCode'), keepMatchedNodeProblem(R19B, conds));
+  const keep19 = keepMatchedNodeProblem(R19B, conds, rulePathParts(R19B, 'BREX-4.1', { parseXml }));
+  check('RB1 boolean: keep line is neutral, never the condition', keep19 === 'Do not change what this example shows (which elements and attributes it contains, or their values): fix only the markup named above.', keep19);
+  check('RB1 boolean: keep line without parts is neutral too', keepMatchedNodeProblem(R19B, conds) === keep19);
   check('node path: keep line unchanged', keepMatchedNodeProblem(EMPH, []) === 'Keep a node matched by `//emphasis`: fix the markup around it, do not remove it.');
   const failures = exampleFailures([{ label: 'x', expected: 'reject' }], r19miss.materialized, r19miss.runs, { ruleXml: R19B, standard: S41, format: 'BREX-4.1', setup: set19, parseXml });
-  check('boolean: exampleFailures sends the reject example back', failures.length === 1 && failures[0].problems[0].includes('condition TRUE'), JSON.stringify(failures));
+  check('RB1 boolean case b: exampleFailures sends nothing back', failures.length === 0, JSON.stringify(failures));
 
   // Flag 1: rejects when the condition is false.
   const RF1 = '<structureObjectRule><objectPath allowedObjectFlag="1">//dmStatus/applic or //dmStatus/applicRef</objectPath><objectUse>The status must state the applicability.</objectUse></structureObjectRule>';
@@ -2073,8 +2083,58 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
     { label: 'no applicability', expected: 'reject', schema: 'descript', content: '', metadata: noApplic },
   ], setF1);
   check('boolean flag 1: false → rejected, true → accepted', rF1.runs.map((r) => r.result?.status).join() === 'accepted,rejected' && rF1.verdict.kind === 'correct', JSON.stringify(rF1.runs.map((r) => r.result?.status || r.validation)));
-  const missF1 = missesRuleProblem({ expected: 'reject' }, rF1.runs[0], RF1);
-  check('boolean flag 1: the correction asks for FALSE', /condition FALSE/.test(missF1 || ''), missF1);
+  // rF1.runs[0] treated as a reject example: it contains <dmStatus> and
+  // <applic>, so it is case b, with "true in it" (flag 1).
+  const accF1 = acceptanceDetails(RF1, 'BREX-4.2', rF1.materialized[0].xml, 'descript', { parseXml });
+  const missF1 = missesRuleProblem({ expected: 'reject' }, { ...rF1.runs[0], acceptance: accF1, predicateMiss: true }, RF1);
+  check('RB1 flag 1 case b: never sent', missF1 === null);
+  const causeF1 = acceptCauseText({ acceptance: accF1 }, es);
+  check('RB1 flag 1 case b: cause ES says "verdadera"', /^el ejemplo contiene <dmStatus> y <applic>, y la condición `\/\/dmStatus\/applic or \/\/dmStatus\/applicRef` es verdadera en él$/.test(causeF1 || ''), causeF1);
+
+  // Remates B, Part 1: edge cases.
+  {
+    const CA = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis and //randomList</objectPath><objectUse>No emphasis in a document with random lists.</objectUse></structureObjectRule>';
+    const setA = setupFor(S42, CA, ['descript']);
+    const plain = testRun(CA, [{ label: 'plain', expected: 'reject', schema: 'descript', content: 'Plain text.' }], setA);
+    const mA = missesRuleProblem({ expected: 'reject' }, plain.runs[0], CA);
+    check('RB1 case a: no name of the condition → sent, naming only the names', mA === "This example must contain the elements and attributes the rule's condition looks at: <emphasis>, <randomList>. It contains none of them, so the condition says nothing about it.", mA);
+    check('RB1 case a: never the condition', !/and \/\/|condition `/.test(mA || ''));
+    check('RB1 case a: not counted as case b', plain.runs[0].predicateMiss === false);
+    const partial = testRun(CA, [{ label: 'emphasis only', expected: 'reject', schema: 'descript', content: 'Some <emphasis>text</emphasis>.' }], setA);
+    check('RB1 case b: one name present is enough', partial.runs[0].predicateMiss === true && missesRuleProblem({ expected: 'reject' }, partial.runs[0], CA) === null && partial.verdict.kind === 'incorrect');
+    check('RB1 case b: cause names only what the example contains', acceptCauseText(partial.runs[0], en) === 'the example contains <emphasis>, and the condition `//emphasis and //randomList` is false in it', acceptCauseText(partial.runs[0], en));
+    const rejected = testRun(CA, [{ label: 'both', expected: 'reject', schema: 'descript', content: 'Some <emphasis>text</emphasis>.<randomList><listItem><para>x</para></listItem></randomList>' }], setA);
+    check('RB1 already rejected → never sent', rejected.runs[0].result.status === 'rejected' && missesRuleProblem({ expected: 'reject' }, rejected.runs[0], CA) === null);
+    check('RB1 accept example with a condition: as today (never sent by missesRuleProblem)', missesRuleProblem({ expected: 'accept' }, plain.runs[0], CA) === null);
+    // Attributes only: the names are the attributes.
+    const CT = '<structureObjectRule><objectPath allowedObjectFlag="0">//@emphasisType = \'em05\'</objectPath><objectUse>em05 is not used.</objectUse></structureObjectRule>';
+    const setT = setupFor(S42, CT, ['descript']);
+    const noAttr = testRun(CT, [{ label: 'no attribute', expected: 'reject', schema: 'descript', content: 'Some <emphasis>text</emphasis>.' }], setT);
+    const mT = missesRuleProblem({ expected: 'reject' }, noAttr.runs[0], CT);
+    check('RB1 attributes only, case a: names the attribute', mT === "This example must contain the elements and attributes the rule's condition looks at: @emphasisType. It contains none of them, so the condition says nothing about it.", mT);
+    const withAttr = testRun(CT, [{ label: 'em01', expected: 'reject', schema: 'descript', content: 'Some <emphasis emphasisType="em01">text</emphasis>.' }], setT);
+    check('RB1 attributes only, case b', withAttr.runs[0].predicateMiss === true && acceptCauseText(withAttr.runs[0], es) === "el ejemplo contiene @emphasisType, y la condición `//@emphasisType = 'em05'` es falsa en él", acceptCauseText(withAttr.runs[0], es));
+    // A condition and a node path in the same rule: each its own treatment.
+    const MIX = CA + '<structureObjectRule><objectPath allowedObjectFlag="0">//footnote</objectPath><objectUse>No footnotes.</objectUse></structureObjectRule>';
+    const setM = setupFor(S42, MIX, ['descript']);
+    const mixA = testRun(MIX, [{ label: 'plain', expected: 'reject', schema: 'descript', content: 'Plain text.' }], setM);
+    const mM = missesRuleProblem({ expected: 'reject' }, mixA.runs[0], MIX);
+    check('RB1 mixed, case a: both lines', mM === "This example must contain the elements and attributes the rule's condition looks at: <emphasis>, <randomList>. It contains none of them, so the condition says nothing about it. This example must contain a node matched by: `//footnote`. Nothing in it matches, so the rule never runs.", mM);
+    const keepM = keepMatchedNodeProblem(MIX, ruleConditions(MIX, 'BREX-4.2', { parseXml }), rulePathParts(MIX, 'BREX-4.2', { parseXml }));
+    check('RB1 mixed keep: neutral line and the node path', keepM.startsWith('Do not change what this example shows') && keepM.includes('Keep the nodes matched by `//footnote`') && !/what makes/.test(keepM), keepM);
+    const mixB = testRun(MIX, [{ label: 'emphasis', expected: 'reject', schema: 'descript', content: 'Some <emphasis>text</emphasis>.' }], setM);
+    check('RB1 mixed, case b in the condition: not sent', mixB.runs[0].predicateMiss === true && missesRuleProblem({ expected: 'reject' }, mixB.runs[0], MIX) === null);
+    // Value rule: the accept message names the path without predicates.
+    const VAL = '<structureObjectRule><objectPath allowedObjectFlag="2">//emphasis[ancestor::para]/@emphasisType</objectPath><objectUse>Only em01.</objectUse><objectValue valueForm="single" valueAllowed="em01">em01</objectValue></structureObjectRule>';
+    const setV = setupFor(S42, VAL, ['descript']);
+    const vRun = testRun(VAL, [
+      { label: 'no emphasis', expected: 'accept', schema: 'descript', content: 'Plain.' },
+      { label: 'em02', expected: 'reject', schema: 'descript', content: '<emphasis emphasisType="em02">x</emphasis>' },
+    ], setV);
+    const vFail = exampleFailures([{ label: 'no emphasis', expected: 'accept' }, { label: 'em02', expected: 'reject' }], vRun.materialized, vRun.runs, { ruleXml: VAL, standard: S42, format: 'BREX-4.2', setup: setV, parseXml });
+    const vMsg = vFail.find((f) => f.index === 0)?.problems.join(' ') || '';
+    check('RB1 accept without node: the path without predicates', vMsg.includes('must contain a node matched by: `//emphasis/@emphasisType`, with a value') && !vMsg.includes('ancestor::'), vMsg);
+  }
 
   // S1-00316: "or" and "|" -- same placement, same verdict; "|" highlights
   // the node, "or" gives the condition.
@@ -3014,7 +3074,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
 
 // ─── Mejoras B, Part 3: the exact cause, one line per example ───────────────
 {
-  const { acceptCauseText, formatAcceptCause } = await import('../src/utils/ruleTestReasons.js');
+  const { formatAcceptCause } = await import('../src/utils/ruleTestReasons.js');
   const en = i18n.getFixedT('en');
   const es = i18n.getFixedT('es');
   const IPD = 'http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd';

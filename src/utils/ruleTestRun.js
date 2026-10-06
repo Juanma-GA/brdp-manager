@@ -18,7 +18,7 @@ import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROP
 import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { describeRule, parseXmlDocument, ruleConditions, rulePathParts } from './ruleTestEngine.js';
-import { stripLiterals } from './ruleTestCommon.js';
+import { stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
@@ -266,23 +266,47 @@ async function attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, el
 export function missesRuleProblem(example, run, ruleXml) {
   if (example.expected !== 'reject' || !run.result || run.result.status === 'not_executable') return null;
   if (run.result.status === 'rejected') return null;
-  if (run.result.selectedNodePaths.length > 0) return null;
-  // Plantillas, Part 4: a rule whose path is a true/false condition selects
-  // no node; a reject example it accepted did not trigger the condition.
-  const conditions = run.result.conditions || [];
-  if (conditions.length > 0) return conditions.map(conditionToMeet).join(' ');
   if (run.predicateMiss) return null;
+  // Remates B, Part 1: a rejecting condition (Plantillas, Part 4: flag 0
+  // rejects when true, flag 1 when false) selects no node. Case b -- the
+  // example contains some of the names the condition looks at and does not
+  // meet it -- is run.predicateMiss (above). Case a -- it contains none --
+  // is sent back naming only those elements and attributes, never the
+  // condition nor its values. Each part of a rule gets its own treatment:
+  // a node path of the same rule follows the lines below.
   const details = run.acceptance;
-  if (!details || details.some((d) => d.case === 'unsafe')) {
-    const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
-    return `This example must contain a node matched by: ${matched}. Nothing in it matches, so the rule never runs.`;
+  const lines = (details || [])
+    .filter((d) => d.case === 'condition' && (d.flag === '0' || d.flag === '1') && d.names?.length > 0)
+    .map((d) => conditionNamesProblem(d.names));
+  const conditionPaths = new Set(
+    (details || []).filter((d) => d.case === 'condition').map((d) => d.path)
+  );
+  const nodeDetails = details ? details.filter((d) => d.case !== 'condition') : null;
+  const hasNodeParts = nodeDetails ? nodeDetails.length > 0 || details.length === 0 : (run.result.conditions || []).length === 0;
+  if (!hasNodeParts || run.result.selectedNodePaths.length > 0) return [...new Set(lines)].join(' ') || null;
+  let nodeLine = null;
+  if (!nodeDetails || nodeDetails.some((d) => d.case === 'unsafe')) {
+    const exprs = ruleMatchExpressions(ruleXml).filter((e) => !conditionPaths.has(e.replace(/\s+/g, ' ').trim()));
+    if (exprs.length) {
+      const matched = exprs.map((e) => `\`${e}\``).join(' or ');
+      nodeLine = `This example must contain a node matched by: ${matched}. Nothing in it matches, so the rule never runs.`;
+    }
+  } else {
+    const missingParts = nodeDetails.filter((d) => d.case === 'missing' && d.flag !== '1');
+    const missing = [...new Set(missingParts.map((d) => d.stripped))];
+    if (missing.length > 0) {
+      const matched = missing.map((e) => `\`${e}\``).join(' or ');
+      const stripped = missingParts.some((d) => d.stripped !== d.path) ? " (the rule's path without its predicates)" : '';
+      nodeLine = `This example must contain a node matched by: ${matched}${stripped}. Nothing in it matches, so the rule never runs.`;
+    }
   }
-  const missingParts = details.filter((d) => d.case === 'missing' && d.flag !== '1');
-  const missing = [...new Set(missingParts.map((d) => d.stripped))];
-  if (missing.length === 0) return null;
-  const matched = missing.map((e) => `\`${e}\``).join(' or ');
-  const stripped = missingParts.some((d) => d.stripped !== d.path) ? " (the rule's path without its predicates)" : '';
-  return `This example must contain a node matched by: ${matched}${stripped}. Nothing in it matches, so the rule never runs.`;
+  return [...new Set([...lines, nodeLine].filter(Boolean))].join(' ') || null;
+}
+
+// Remates B, Part 1, case a: the names a condition looks at, none of which
+// is in the example. Never the condition nor its values.
+function conditionNamesProblem(names) {
+  return `This example must contain the elements and attributes the rule's condition looks at: ${names.join(', ')}. It contains none of them, so the condition says nothing about it.`;
 }
 
 // C3, Part 1c: a rule that restricts VALUES only shows it accepts a valid
@@ -340,8 +364,13 @@ function acceptWithoutNodeIndices(examples, runs, restrictsValues) {
   return candidates.map(({ index }) => index);
 }
 
+// Remates B, Part 1, point 3: the path WITHOUT its predicates -- naming
+// the predicates (a value, a threshold) would push the accept example
+// toward the rule instead of toward the decision.
 function acceptWithoutNodeProblem(ruleXml) {
-  const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
+  const matched = [...new Set(ruleMatchExpressions(ruleXml).map((e) => withoutPredicates(e).replace(/\s*(\/+)\s*/g, '$1')))]
+    .map((e) => `\`${e}\``)
+    .join(' or ');
   return `The rule checks values, so at least one example meant to be accepted must contain a node matched by: ${matched}, with a value the decision allows. No accept example contains one, so the test never shows the rule accepting a valid value.`;
 }
 
@@ -352,14 +381,6 @@ function acceptWithoutNodeProblem(ruleXml) {
 // the test ended inconclusive. The line comes last, after the problems it
 // has to fix. A valid reject example with no matched node gets
 // missesRuleProblem instead (it already says what it must contain).
-// Plantillas, Part 4: what a reject example must do with a condition --
-// make it true (flag 0 / objappl 0) or false (flag 1 / objappl 1).
-function conditionToMeet(c) {
-  return c.flag === '1'
-    ? `This example must make the rule's condition FALSE: \`${c.path.replace(/\s+/g, ' ').trim()}\` (the rule rejects a document where it is false); here it is true.`
-    : `This example must make the rule's condition TRUE: \`${c.path.replace(/\s+/g, ' ').trim()}\` (the rule rejects a document where it is true); here it is false.`;
-}
-
 // Mejoras B, Part 1, point 4: what an invalid example meant to be
 // rejected must keep while its markup is fixed -- never "add the node the
 // rule looks for". parts: rulePathParts (ruleTestEngine.js); without it,
@@ -368,19 +389,19 @@ function conditionToMeet(c) {
 //   flag 0 / 2 / Schematron: keep the nodes of the path without its
 //     predicates, and do not change what the example shows.
 export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null) {
-  // A rule made only of conditions: keep what triggers them.
-  if (conditions.length > 0 && conditions.length === ruleMatchExpressions(ruleXml).length) {
-    const kept = conditions
-      .map((c) => `what makes \`${c.path.replace(/\s+/g, ' ').trim()}\` ${c.flag === '1' ? 'false' : 'true'}`)
-      .join(' and ');
-    return `Keep ${kept}: fix the markup around it, do not remove it.`;
-  }
+  // Remates B, Part 1, point 2: a condition part (flag 0 / 1) never gets a
+  // "keep what makes it true / false" line -- that pushed the example
+  // toward the rule. The neutral line instead: keep what the example shows.
+  const conditionLine =
+    'Do not change what this example shows (which elements and attributes it contains, or their values): fix only the markup named above.';
+  if (!parts && conditions.length > 0 && conditions.length === ruleMatchExpressions(ruleXml).length) return conditionLine;
   if (!parts) {
     const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
     return matched ? `Keep a node matched by ${matched}: fix the markup around it, do not remove it.` : null;
   }
   const nodeParts = parts.filter((p) => !p.condition);
   const lines = [];
+  if (parts.some((p) => p.condition && (p.flag === '0' || p.flag === '1'))) lines.push(conditionLine);
   if (nodeParts.some((p) => p.flag === '1')) {
     lines.push('Do not change which elements are present or absent in this example: fix only the markup named above.');
   }

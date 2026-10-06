@@ -1173,7 +1173,19 @@ export function acceptanceDetails(ruleXml, format, fragmentXml, fragmentSchema =
       const base = { ruleId: part.ruleId, flag, path, stripped };
       const evaluated = evaluate(expression, doc, null, 'path');
       if (evaluated.condition !== undefined) {
-        out.push({ ...base, case: 'condition', holds: evaluated.condition, cause: null });
+        // Remates B, Part 1: the names the condition looks at (those
+        // describeRule gives) and which of them the example contains. A
+        // rejecting condition (flag 0 / 1) that the example names but does
+        // not meet is case b: the example shows the decision, the rule does
+        // not cover it -- never sent to the correction round.
+        const entry = { ...base, case: 'condition', holds: evaluated.condition, cause: null };
+        if (flag === '0' || flag === '1') {
+          const { names, present } = conditionNamesIn(expression, doc);
+          entry.names = names;
+          entry.presentNames = present;
+          if (present.length) entry.cause = { code: 'cause_condition', params: { names: present, path, truth: evaluated.condition ? 'true' : 'false' } };
+        }
+        out.push(entry);
         continue;
       }
       const nodes = evaluated.nodes;
@@ -1234,6 +1246,34 @@ export function acceptanceDetails(ruleXml, format, fragmentXml, fragmentSchema =
     }
   }
   return out;
+}
+
+// The element and attribute names a condition looks at ('<x>', '@y', in
+// the order describeRule gives them) and those the document contains
+// (by local name, anywhere).
+function conditionNamesIn(expression, doc) {
+  const { elements, attributes } = extractXPathNames(expression);
+  const localOf = (n) => String(n).replace(/^.*:/, '');
+  const docElements = new Set();
+  const docAttributes = new Set();
+  const all = doc.getElementsByTagName('*');
+  for (let i = 0; i < all.length; i++) {
+    const el = all[i];
+    docElements.add(el.localName || localOf(el.nodeName));
+    const attrs = el.attributes || [];
+    for (let j = 0; j < attrs.length; j++) docAttributes.add(attrs[j].localName || localOf(attrs[j].name));
+  }
+  const names = [];
+  const present = [];
+  for (const e of elements) {
+    names.push(`<${e}>`);
+    if (docElements.has(localOf(e))) present.push(`<${e}>`);
+  }
+  for (const a of attributes) {
+    names.push(`@${a}`);
+    if (docAttributes.has(localOf(a))) present.push(`@${a}`);
+  }
+  return { names, present };
 }
 
 function schematronCause(d) {

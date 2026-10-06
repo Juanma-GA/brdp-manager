@@ -412,11 +412,14 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     example.expected === 'reject' && result.status === 'accepted'
       ? acceptanceDetails(ruleXml, format, example.xml, example.schema || null, { parseXml, schemaLocation: example.schemaLocation || schemaLocation })
       : null;
+  // Remates B, Part 1: a rejecting condition the example names (some of
+  // the elements or attributes it looks at are there) but does not meet is
+  // case b too -- counted and treated the same.
+  const conditionMiss = Boolean(acceptance?.some((d) => d.case === 'condition' && d.presentNames?.length > 0));
   const predicateMiss = Boolean(
     acceptance &&
-      result.selectedNodePaths.length === 0 &&
-      !(result.conditions?.length > 0) &&
-      acceptance.some((d) => d.case === 'predicate')
+      (conditionMiss ||
+        (result.selectedNodePaths.length === 0 && !(result.conditions?.length > 0) && acceptance.some((d) => d.case === 'predicate')))
   );
   return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result), acceptance, predicateMiss };
 }
