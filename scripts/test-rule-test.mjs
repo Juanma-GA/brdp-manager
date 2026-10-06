@@ -2393,8 +2393,8 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('cause: texts ES', es('records.ruleTest.cause.examples') === 'Los ejemplos los genera la IA y a veces salen mal. Vuelve a generarlos.'
     && es('records.ruleTest.cause.rulePermissive') === 'La regla aceptó un ejemplo que debía rechazar.'
     && es('records.ruleTest.cause.ruleStrict') === 'La regla rechazó un ejemplo que debía aceptar.'
-    && es('records.ruleTest.cause.checkExample', { count: 1 }) === 'Revisa ese ejemplo: si es correcto, el problema está en la regla.');
-  check('cause: texts EN', en('records.ruleTest.cause.examples').startsWith('The examples are written by the AI') && en('records.ruleTest.cause.checkExample', { count: 2 }).startsWith('Check those examples'));
+    && es('records.ruleTest.cause.checkPermissive') === 'Si el ejemplo está mal escrito, repite la prueba o edítalo; si está bien, la regla no cubre la decisión.');
+  check('cause: texts EN', en('records.ruleTest.cause.examples').startsWith('The examples are written by the AI') && en('records.ruleTest.cause.checkPermissive') === 'If the example is badly written, repeat the test or edit it; if it is right, the rule does not cover the decision.');
   // The real S1-00187 run with expectations swapped: every example valid → the rule.
   const S42 = 'S1000D 4.2';
   const R187 = readPublicTemplate('brdp-template-4-2.xlsx').find((row) => row.ID === 'BRDP-S1-00187')?.Rule;
@@ -3010,6 +3010,45 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const rSchV = testRun(SCHV, [{ label: 'r', expected: 'reject', schema: 'topic', content: '<p>x</p>' }], setupFor(DITA, SCHV, ['topic']), { format: 'SCH-DITA', vocab: vocabDita });
   const mSchV = missesRuleProblem({ expected: 'reject' }, rSchV.runs[0], SCHV);
   check('MB1 Schematron unsafe: as before, the whole context', rSchV.runs[0].acceptance?.[0]?.case === 'unsafe' && mSchV === "This example must contain a node matched by: `$n[@type = 'danger']`. Nothing in it matches, so the rule never runs.", JSON.stringify({ a: rSchV.runs[0].acceptance, mSchV }));
+}
+
+// ─── Mejoras B, Part 3: the exact cause, one line per example ───────────────
+{
+  const { acceptCauseText, formatAcceptCause } = await import('../src/utils/ruleTestReasons.js');
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const IPD = 'http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd';
+  const S219 = `<contextRules rulesContext="${IPD}"><structureObjectRuleGroup><structureObjectRule id="BRDP-S1-00219"><objectPath allowedObjectFlag="1">//itemSeqNumber/partSegment</objectPath><objectUse>x</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+  const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+  const seg = '<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>';
+  // The fixed bad example (a <partSegment/> in the reject example).
+  const bad = testRun(S219, [{ label: 'r', expected: 'reject', schema: 'ipd', content: csn(seg) }], setupFor('S1000D 4.2', S219, ['ipd']));
+  check('MB3 mandatory: ES', acceptCauseText(bad.runs[0], es) === 'cada <itemSeqNumber> del ejemplo contiene <partSegment>', acceptCauseText(bad.runs[0], es));
+  check('MB3 mandatory: EN', acceptCauseText(bad.runs[0], en) === 'every <itemSeqNumber> in the example contains <partSegment>', acceptCauseText(bad.runs[0], en));
+  check('MB3 mandatory: verdict failed, not inconclusive', bad.runs[0].matches === false);
+  const S186 = '<structureObjectRule id="BRDP-S1-00186"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep)&gt;5]</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const nested = (n) => { let x = '<para>Do it.</para>'; for (let i = 0; i < n; i += 1) x = `<proceduralStep>${x}</proceduralStep>`; return x; };
+  const r186 = testRun(S186, [{ label: 'r', expected: 'reject', schema: 'proced', content: nested(6) }], setupFor('S1000D 4.2', S186, ['proced']));
+  check('MB3 nesting: ES', acceptCauseText(r186.runs[0], es) === 'el ejemplo tiene 6 <proceduralStep> y ninguno cumple [count(ancestor::proceduralStep)>5]; el más profundo está en el nivel 6 y la regla rechaza a partir del nivel 7', acceptCauseText(r186.runs[0], es));
+  check('MB3 nesting: EN', acceptCauseText(r186.runs[0], en) === 'the example has 6 <proceduralStep> and none meets [count(ancestor::proceduralStep)>5]; the deepest one is at level 6, and the rule rejects at level 7 or deeper', acceptCauseText(r186.runs[0], en));
+  const S123 = '<structureObjectRule><objectPath allowedObjectFlag="0">//entry/*[@applicRefId]</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const r123 = testRun(S123, [{ label: 'r', expected: 'reject', schema: 'descript', content: '<table><tgroup cols="1"><tbody><row><entry applicRefId="a3"><para>1</para></entry></row></tbody></tgroup></table>' }], setupFor('S1000D 4.2', S123, ['descript']));
+  check('MB3 attribute: ES', acceptCauseText(r123.runs[0], es) === 'el ejemplo tiene 1 hijo de <entry> y ninguno lleva @applicRefId', acceptCauseText(r123.runs[0], es));
+  check('MB3 attribute: EN', acceptCauseText(r123.runs[0], en) === 'the example has 1 child of <entry> and none has @applicRefId', acceptCauseText(r123.runs[0], en));
+  const EMPH = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const rE = testRun(EMPH, [{ label: 'r', expected: 'reject', schema: 'descript', content: 'No emphasis.' }], setupFor('S1000D 4.2', EMPH, ['descript']));
+  check('MB3 missing: ES', acceptCauseText(rE.runs[0], es) === 'el ejemplo no contiene <emphasis>', acceptCauseText(rE.runs[0], es));
+  const ETYPE2 = '<structureObjectRule><objectPath allowedObjectFlag="2">//emphasis/@emphasisType</objectPath><objectUse>x</objectUse><objectValue valueForm="single" valueAllowed="em01"/><objectValue valueForm="single" valueAllowed="em02"/></structureObjectRule>';
+  const rV = testRun(ETYPE2, [{ label: 'r', expected: 'reject', schema: 'descript', content: 'An <emphasis emphasisType="em01">x</emphasis>.' }], setupFor('S1000D 4.2', ETYPE2, ['descript']));
+  check('MB3 values: ES', acceptCauseText(rV.runs[0], es) === 'el valor «em01» está entre los permitidos', acceptCauseText(rV.runs[0], es));
+  check('MB3 values: EN', acceptCauseText(rV.runs[0], en) === 'the value «em01» is among the allowed ones', acceptCauseText(rV.runs[0], en));
+  check('MB3 other attribute forms', formatAcceptCause({ code: 'cause_attr_lacks', params: { count: 2, target: '<entry>', attr: '@a' } }, es) === 'el ejemplo tiene 2 <entry> y todos llevan @a'
+    && formatAcceptCause({ code: 'cause_attr_equals', params: { count: 1, target: '<entry>', attr: '@a', value: 'v' } }, es) === 'el ejemplo tiene 1 <entry> y ninguno tiene @a = «v»'
+    && formatAcceptCause({ code: 'cause_attr_not_equals', params: { count: 1, target: '<entry>', attr: '@a', value: 'v' } }, en) === 'the example has 1 <entry> and none has @a other than «v»');
+  check('MB3 no cause → null', acceptCauseText({ acceptance: [{ cause: null }] }, es) === null && acceptCauseText({}, es) === null);
+  check('MB3 neutral texts', es('records.ruleTest.cause.checkStrict').includes('repite la prueba o edítalo') && en('records.ruleTest.cause.checkBoth').includes('repeat the test or edit them'));
+  check('MB3 panel: accepted-because ES', es('records.ruleTest.acceptedBecause', { cause: 'x' }) === 'Por qué la regla lo aceptó: x.');
+  check('MB1 panel: skipped count ES', es('records.ruleTest.predicateSkipped', { count: 2 }).startsWith('2 ejemplos a rechazar no se mandaron'));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

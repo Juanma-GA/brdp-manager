@@ -169,3 +169,62 @@ export function ruleDescriptionText(description, t) {
   if (formatted.cannotReject) lines.push(`- ${t('records.ruleTest.describe.cannotReject')}`);
   return lines.join('\n');
 }
+
+// Mejoras B, Part 3: why the rule ACCEPTED an example meant to be rejected,
+// one line per example from the engine's acceptanceDetails (codes cause_*,
+// text: records.ruleTest.acceptCause.*). Never changes the verdict.
+//   cause_mandatory_present {parent, child}, cause_mandatory_present_values,
+//   cause_mandatory_somewhere {target}, cause_missing {target},
+//   cause_predicate {amount, target, predicate},
+//   cause_predicate_nesting {…, deepest, mode, level},
+//   cause_predicate_path {amount, target, path},
+//   cause_attr_has / _lacks / _equals / _not_equals {count, target, childOf, attr, value},
+//   cause_values_allowed / cause_values_not_prohibited {count, values},
+//   cause_sch_context {amount, target, context}.
+// null when there is no cause to give (the verdict's own text stands).
+const ATTR_CAUSE_KEYS = {
+  cause_attr_has: 'attrHas',
+  cause_attr_lacks: 'attrLacks',
+  cause_attr_equals: 'attrEquals',
+  cause_attr_not_equals: 'attrNotEquals',
+};
+export function formatAcceptCause(cause, t) {
+  if (!cause?.code) return null;
+  const p = cause.params || {};
+  const k = (key, params) => t(`records.ruleTest.acceptCause.${key}`, params);
+  switch (cause.code) {
+    case 'cause_mandatory_present':
+      return k('mandatoryPresent', p);
+    case 'cause_mandatory_present_values':
+      return k('mandatoryPresentValues', p);
+    case 'cause_mandatory_somewhere':
+      return k('mandatorySomewhere', p);
+    case 'cause_missing':
+      return k('missing', p);
+    case 'cause_predicate':
+      return k('predicate', p);
+    case 'cause_predicate_nesting': {
+      const levels = t(`records.ruleTest.describe.levels.${p.mode === 'upto' && p.level === 1 ? 'exactly' : p.mode}`, { level: p.level });
+      return `${k('predicate', p)}${k('nestingDeepest', { deepest: p.deepest, levels })}`;
+    }
+    case 'cause_predicate_path':
+      return k('predicatePath', p);
+    case 'cause_values_allowed':
+      return k('valuesAllowed', p);
+    case 'cause_values_not_prohibited':
+      return k('valuesNotProhibited', p);
+    case 'cause_sch_context':
+      return k('schContext', p);
+    default: {
+      const key = ATTR_CAUSE_KEYS[cause.code];
+      if (!key) return null;
+      return k(`${key}${p.childOf ? 'Child' : ''}`, { ...p, target: p.childOf || p.target });
+    }
+  }
+}
+
+// The line of one run: the causes of its parts joined, or null.
+export function acceptCauseText(run, t) {
+  const lines = (run?.acceptance || []).map((d) => formatAcceptCause(d.cause, t)).filter(Boolean);
+  return lines.length ? [...new Set(lines)].join('; ') : null;
+}

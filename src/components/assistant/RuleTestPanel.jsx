@@ -5,7 +5,7 @@ import VerdictCauseHint from './VerdictCauseHint';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
-import { formatRuleDescription, formatRuleTestReason } from '../../utils/ruleTestReasons.js';
+import { acceptCauseText, formatRuleDescription, formatRuleTestReason } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 import RuleLintWarnings from './RuleLintWarnings';
@@ -381,6 +381,14 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
               {t('records.ruleTest.ruleMessage', { message: v.message })}
             </p>
           ))}
+      {/* Mejoras B, Part 3: why the rule accepted an example meant to be
+          rejected -- the exact data, so the person decides whether the
+          example or the rule is wrong. */}
+      {showResult && run?.matches === false && acceptCauseText(run, t) && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-accept-cause">
+          {t('records.ruleTest.acceptedBecause', { cause: acceptCauseText(run, t) })}
+        </p>
+      )}
       {/* Plantillas, Part 4: a rule whose path is a true/false condition
           (s1kd-brexcheck) has no node to highlight -- say whether the
           condition held in this document. */}

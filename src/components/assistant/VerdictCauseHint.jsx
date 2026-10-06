@@ -21,7 +21,7 @@ export default function VerdictCauseHint({ verdict, runs }) {
   const what = both ? 'ruleBoth' : cause.permissive ? 'rulePermissive' : 'ruleStrict';
   return (
     <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-cause" data-cause="rule">
-      {t(`records.ruleTest.cause.${what}`)} {t('records.ruleTest.cause.checkExample', { count: both ? 2 : 1 })}
+      {t(`records.ruleTest.cause.${what}`)} {t(`records.ruleTest.cause.${both ? 'checkBoth' : cause.permissive ? 'checkPermissive' : 'checkStrict'}`)}
     </p>
   );
 }
