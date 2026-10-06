@@ -9,7 +9,7 @@ from app.core.errors import error_detail
 from app.api.deps import get_current_user, project_not_found, require_admin
 from app.core.security import generate_temporary_password, hash_password
 from app.db.base import get_db
-from app.models import RefreshToken, User, UserProjectRole
+from app.models import Project, RefreshToken, User, UserProjectRole
 from app.repositories.project_repository import (
     ACTIVE_PROJECT_IDS,
     ACTIVE_USER_FILTER,
@@ -18,6 +18,7 @@ from app.repositories.project_repository import (
     get_deleted_user,
 )
 from app.schemas.auth import UserOut
+from app.services.audit import record
 from app.schemas.user import (
     DeletedUserOut,
     ProjectRoleAssign,
@@ -34,6 +35,49 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 # Shared with the other admin-only routes (app/api/deps.py).
 _require_admin = require_admin
+
+
+# ── Audit log (Protecciones 2b) ─────────────────────────────────────────
+# Every write below that the app cannot undo by itself, or that changes
+# who can do what, stages one audit_log row in the same transaction.
+
+
+def _record_user(db: AsyncSession, actor: User, action: str, user: User, detail: dict | None = None) -> None:
+    """target_label is the user's email as it was before the action."""
+    record(
+        db,
+        actor,
+        action,
+        target_type="user",
+        target_id=user.id,
+        target_label=user.email,
+        detail=detail,
+    )
+
+
+def _record_role(
+    db: AsyncSession,
+    actor: User,
+    action: str,
+    user: User,
+    project: Project,
+    old_role: str | None,
+    new_role: str | None,
+) -> None:
+    """target = the user whose role changed (their email as label), with
+    the project; detail = role before and after (None when there was none
+    or there is none any more)."""
+    record(
+        db,
+        actor,
+        action,
+        target_type="project_role",
+        target_id=user.id,
+        target_label=user.email,
+        project_id=project.id,
+        project_name=project.name,
+        detail={"old_role": old_role, "new_role": new_role},
+    )
 
 
 @router.get("", response_model=list[UserWithRolesOut])
@@ -104,6 +148,8 @@ async def create_user(
         must_change_password=True,
     )
     db.add(user)
+    await db.flush()  # assigns user.id for the audit row
+    _record_user(db, _admin, "user.created", user, {"global_role": user.global_role})
     await db.commit()
     await db.refresh(user)
     return UserCreateOut(**UserOut.model_validate(user).model_dump(), temporary_password=temporary_password)
@@ -140,6 +186,8 @@ async def reset_password(
         .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
         .values(revoked_at=datetime.now(timezone.utc))
     )
+    # Never the temporary password in the audit row.
+    _record_user(db, _admin, "user.password_reset", user)
 
     await db.commit()
     return TemporaryPasswordOut(temporary_password=temporary_password)
@@ -168,6 +216,17 @@ async def update_user(
             raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=error_detail("user_email_registered", message="Email already registered", email=body.email),
+        )
+    if body.email != user.email or body.display_name != user.display_name:
+        _record_user(
+            db,
+            _admin,
+            "user.updated",
+            user,
+            {
+                "email": {"old": user.email, "new": body.email},
+                "display_name": {"old": user.display_name, "new": body.display_name},
+            },
         )
     user.email = body.email
     user.display_name = body.display_name
@@ -230,6 +289,7 @@ async def delete_user(
         .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
         .values(revoked_at=now)
     )
+    _record_user(db, admin, "user.trashed", user, {"global_role": user.global_role})
     await db.commit()
 
 
@@ -267,6 +327,7 @@ async def restore_user(
     user.deleted_at = None
     user.deleted_by = None
     user.deleted_by_email = None
+    _record_user(db, _admin, "user.restored", user)
     await db.commit()
     await db.refresh(user)
     return user
@@ -282,6 +343,23 @@ async def delete_user_permanently(
     user = await get_deleted_user(user_id, db)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted user not found")
+    # The roles go with the user (ON DELETE CASCADE): the audit row keeps
+    # which ones they had, with each project's name as it is now.
+    role_rows = (
+        await db.execute(
+            select(Project.name, UserProjectRole.role)
+            .join(Project, Project.id == UserProjectRole.project_id)
+            .where(UserProjectRole.user_id == user.id)
+            .order_by(Project.name)
+        )
+    ).all()
+    _record_user(
+        db,
+        _admin,
+        "user.deleted_permanently",
+        user,
+        {"global_role": user.global_role, "project_roles": [{"project": n, "role": r} for n, r in role_rows]},
+    )
     await db.delete(user)
     await db.commit()
 
@@ -295,9 +373,11 @@ async def assign_project_role(
 ) -> UserProjectRole:
     if body.role not in ("viewer", "editor"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="role must be viewer or editor")
-    if await get_active_user(user_id, db) is None:
+    user = await get_active_user(user_id, db)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_detail("user_not_found", message="User not found"))
-    if await get_active_project(body.project_id, db) is None:
+    project = await get_active_project(body.project_id, db)
+    if project is None:
         raise project_not_found()
 
     existing = (
@@ -308,11 +388,14 @@ async def assign_project_role(
         )
     ).scalar_one_or_none()
     if existing is not None:
+        if existing.role != body.role:
+            _record_role(db, _admin, "project_role.changed", user, project, existing.role, body.role)
         existing.role = body.role
         assignment = existing
     else:
         assignment = UserProjectRole(user_id=user_id, project_id=body.project_id, role=body.role)
         db.add(assignment)
+        _record_role(db, _admin, "project_role.assigned", user, project, None, body.role)
     await db.commit()
     return assignment
 
@@ -332,5 +415,10 @@ async def remove_project_role(
         )
     ).scalar_one_or_none()
     if existing is not None:
+        # The user and the project may be in the Papelera (a role there is
+        # kept for a restore and can still be removed): read them as rows.
+        user = await db.get(User, user_id)
+        project = await db.get(Project, project_id)
+        _record_role(db, _admin, "project_role.removed", user, project, existing.role, None)
         await db.delete(existing)
         await db.commit()

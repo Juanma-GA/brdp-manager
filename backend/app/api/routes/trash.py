@@ -40,6 +40,7 @@ from app.schemas.trash import (
     TrashedBRDPOut,
     TrashedProjectOut,
 )
+from app.services.audit import record, record_project_deleted_permanently
 from app.services.history import record_change
 
 router = APIRouter(prefix="/api/trash", tags=["trash"])
@@ -150,10 +151,22 @@ async def restore_project(
         deleted_at=project.deleted_at,
         deleted_by_email=project.deleted_by_email,
     )
+    detail = {} if name == project.name else {"previous_name": project.name}
     project.name = name
     project.deleted_at = None
     project.deleted_by = None
     project.deleted_by_email = None
+    record(
+        db,
+        _admin,
+        "project.restored",
+        target_type="project",
+        target_id=project.id,
+        target_label=name,
+        project_id=project.id,
+        project_name=name,
+        detail=detail,
+    )
     await db.commit()
     return out
 
@@ -169,11 +182,28 @@ async def delete_project_permanently(
     project = await get_trashed_project(project_id, db)
     if project is None:
         raise _trashed_project_not_found()
+    await record_project_deleted_permanently(db, _admin, project)
     await db.delete(project)
     await db.commit()
 
 
 # ── BRDPs ───────────────────────────────────────────────────────────────
+
+
+def _record_brdp_deleted(db: AsyncSession, actor: User, brdp: BRDP, project_name: str | None) -> None:
+    """One audit row per BRDP deleted for good (Protecciones 2b): its
+    history survives with brdp_id NULL, and this row says which BRDP it was."""
+    record(
+        db,
+        actor,
+        "brdp.deleted_permanently",
+        target_type="brdp",
+        target_id=brdp.id,
+        target_label=brdp.identifier,
+        project_id=brdp.project_id,
+        project_name=project_name,
+        detail={"title": brdp.title},
+    )
 
 
 @router.get("", response_model=list[TrashedBRDPOut])
@@ -265,6 +295,8 @@ async def delete_brdp_permanently(
         )
     if not await has_project_role(current_user, brdp.project_id, "editor", db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this project")
+    project = await db.get(Project, brdp.project_id)
+    _record_brdp_deleted(db, current_user, brdp, project.name if project else None)
     await db.delete(brdp)
     await db.commit()
 
@@ -292,7 +324,13 @@ async def bulk_delete_brdps_permanently(
     found = await list_trashed_brdps_by_ids(body.brdp_ids, db, project_ids=project_ids)
     found_ids = {b.id for b in found}
     not_found = [brdp_id for brdp_id in body.brdp_ids if brdp_id not in found_ids]
+    names = {}
+    if found:
+        names = dict(
+            (await db.execute(select(Project.id, Project.name).where(Project.id.in_({b.project_id for b in found})))).all()
+        )
     for brdp in found:
+        _record_brdp_deleted(db, current_user, brdp, names.get(brdp.project_id))
         await db.delete(brdp)
     await db.commit()
     return TrashBulkDeleteResult(deleted=list(found_ids), not_found=not_found)

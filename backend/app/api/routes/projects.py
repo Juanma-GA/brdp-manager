@@ -11,6 +11,7 @@ from app.models import BRDP, BRDPCatalog, Project, User, UserProjectRole
 from app.repositories.brdp_repository import compute_status_counts
 from app.repositories.project_repository import ACTIVE_PROJECT_FILTER, get_active_project
 from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut, ProjectRename
+from app.services.audit import record, record_project_deleted_permanently
 from app.services.project_config import project_config_problem
 from app.services.rule_formats import SUPPORTED_STANDARDS
 from app.services.schema_location import schema_location_problem
@@ -292,9 +293,21 @@ async def delete_project(
             },
         )
     if permanent:
+        await record_project_deleted_permanently(db, admin, project)
         await db.delete(project)
     else:
         project.deleted_at = datetime.now(timezone.utc)
         project.deleted_by = admin.id
         project.deleted_by_email = admin.email
+        record(
+            db,
+            admin,
+            "project.trashed",
+            target_type="project",
+            target_id=project.id,
+            target_label=project.name,
+            project_id=project.id,
+            project_name=project.name,
+            detail={"standard": project.standard},
+        )
     await db.commit()
