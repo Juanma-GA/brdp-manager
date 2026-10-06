@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, project_not_found, require_project_role
+from app.api.deps import get_current_user, project_not_found, require_admin, require_project_role
 from app.db.base import get_db
 from app.models import BRDP, BRDPCatalog, Project, User, UserProjectRole
 from app.repositories.brdp_repository import compute_status_counts
@@ -17,12 +17,6 @@ from app.services.rule_formats import SUPPORTED_STANDARDS
 from app.services.schema_location import schema_location_problem
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
-
-
-def _require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.global_role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
-    return current_user
 
 
 async def _to_out(db: AsyncSession, project: Project, effective_role: str, counts: dict | None = None) -> ProjectOut:
@@ -120,7 +114,7 @@ _DEFAULT_PROJECT_CONFIG = {
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 async def create_project(
-    body: ProjectCreate, _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
+    body: ProjectCreate, _admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> ProjectOut:
     """Not itemized as admin-only in docs/v2 §4.2's endpoint table or the
     §4.3 permission matrix (project creation isn't a row there at all) --
@@ -260,7 +254,7 @@ async def running_job_kinds(project_id: uuid.UUID, db: AsyncSession) -> list[str
 async def delete_project(
     project_id: uuid.UUID,
     permanent: bool = Query(False, description="Delete for good, skipping the Papelera (scripts and tests only)."),
-    admin: User = Depends(_require_admin),
+    admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Admin-only, deliberately stricter than editor -- an editor can

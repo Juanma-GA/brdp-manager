@@ -7,13 +7,12 @@ import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats';
 import { ruleStateOf } from '../utils/ruleState';
 import Button from '../components/Button';
 import styles from './GenerateBREXdocPage.module.css';
+import { RULE_STATUS_LABELS } from '../prompts/shared.js';
 
-// Plain English labels, not i18n'd -- same convention already used by
-// ProjectConfigPage's Export to Excel (RULE_STATUS_LABELS there) for the
-// exact same reason: this report is a downloaded artifact, not live UI
-// chrome, and the rest of buildBREXdocReport.js's own text (column
-// headers, section titles) is hardcoded English too.
-const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified' };
+// Plain English labels (RULE_STATUS_LABELS), not i18n'd: this report is a
+// downloaded artifact, not live UI chrome, and the rest of
+// buildBREXdocReport.js's own text (column headers, section titles) is
+// hardcoded English too.
 
 // buildHTML()/buildMarkdown()/downloadReport() (v1's untouched core
 // engine, CLAUDE.md -- no API calls, pure client-side, confirmed by

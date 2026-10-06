@@ -338,26 +338,9 @@ async def test_viewer_of_a_cannot_approve_a_pending_rule_in_a(client, scenario):
     assert response.status_code == 403
 
 
-async def test_viewer_of_a_cannot_revoke_an_approved_rule_in_a(client, scenario):
-    async with async_session_factory() as session:
-        session.add(
-            RuleApproval(
-                brdp_id=scenario["brdp_a"].id, format="BREX-4.2", rule_xml="<x/>", status="approved"
-            )
-        )
-        await session.commit()
-
-    response = await client.delete(
-        f"/api/projects/{scenario['project_a'].id}/brdps/{scenario['brdp_a'].id}/approvals/BREX-4.2",
-        headers=_headers(scenario["viewer_a"]),
-    )
-    assert response.status_code == 403
-
-
 async def test_viewer_of_a_cannot_revoke_an_approved_rule_via_new_endpoint_in_a(client, scenario):
     """The new Rule Status stepper's Revoke action (Verified -> Draft, docs
-    request item 2) -- distinct from the pre-existing DELETE endpoint above,
-    but the same editor-only gate must apply.
+    request item 2) -- editor-only.
     """
     async with async_session_factory() as session:
         session.add(

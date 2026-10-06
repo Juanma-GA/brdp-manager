@@ -22,13 +22,10 @@ import {
 import Button, { useButtonSuccessFlash } from '../components/Button';
 import RuleExtractSection from '../components/extract/RuleExtractSection';
 import styles from './ProjectConfigPage.module.css';
-
-// Plain English labels, NOT run through i18n -- Export to Excel has never
-// been translated (the server's excel_io.py, its "engine", only ever writes
-// literal English column headers/values), so this doesn't introduce i18n
-// here either. Mirrors RecordsPage's
-// i18n'd records.rule.states.* strings in their default (English) form.
-const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified' };
+// Rule Status in the Excel export: plain English labels, NOT run through
+// i18n -- Export to Excel has never been translated (the server's
+// excel_io.py only ever writes literal English column headers/values).
+import { RULE_STATUS_LABELS } from '../prompts/shared.js';
 
 // Confirmed by reading generateBREX.js/generateBREX41.js/generateBREX301.js
 // directly: all three read exactly these 9 projectConfig keys (only how

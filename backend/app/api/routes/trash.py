@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import error_detail
-from app.api.deps import get_current_user, has_project_role
+from app.api.deps import get_current_user, has_project_role, require_admin
 from app.db.base import get_db
 from app.models import BRDP, Project, User, UserProjectRole
 from app.repositories.project_repository import active_project_name_taken, get_trashed_project
@@ -65,12 +65,6 @@ async def _editor_project_ids(current_user: User, db: AsyncSession) -> list[uuid
 # which are hidden from the BRDP list above until it comes back).
 
 
-def _require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.global_role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
-    return current_user
-
-
 def _trashed_project_not_found() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -80,7 +74,7 @@ def _trashed_project_not_found() -> HTTPException:
 
 @router.get("/projects", response_model=list[TrashedProjectOut])
 async def list_trashed_projects(
-    _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
+    _admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> list[TrashedProjectOut]:
     brdp_count = (
         select(func.count())
@@ -113,7 +107,7 @@ async def list_trashed_projects(
 async def restore_project(
     project_id: uuid.UUID,
     body: ProjectRestoreRequest | None = None,
-    _admin: User = Depends(_require_admin),
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> TrashedProjectOut:
     """Brings the project back exactly as it was. If an active project now
@@ -173,7 +167,7 @@ async def restore_project(
 
 @router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project_permanently(
-    project_id: uuid.UUID, _admin: User = Depends(_require_admin), db: AsyncSession = Depends(get_db)
+    project_id: uuid.UUID, _admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> None:
     """The real delete of a project already in the Papelera: ON DELETE
     CASCADE removes its BRDPs, rules, roles and jobs; BRDP history rows

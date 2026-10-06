@@ -16,6 +16,7 @@ from app.schemas.brdp_import import (
 )
 from app.core.config import get_settings
 from app.core.errors import error_detail
+from app.services.jobs_common import get_job_in_project
 from app.services.excel_io import ExcelFileError, parse_import_file
 from app.services.import_jobs import analyze_rows, create_job, get_most_recent_job, get_running_job, run_import_job
 
@@ -118,10 +119,7 @@ async def apply_import(
 
 
 async def _get_job_in_project(project_id: uuid.UUID, job_id: uuid.UUID, db: AsyncSession) -> ImportJob:
-    job = await db.get(ImportJob, job_id)
-    if job is None or job.project_id != project_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import job not found")
-    return job
+    return await get_job_in_project(ImportJob, project_id, job_id, db, "Import job not found")
 
 
 @router.get("/status/active", response_model=ImportJobStatusOut | None)

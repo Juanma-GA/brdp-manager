@@ -59,6 +59,7 @@ from app.schemas.rule_extract import (
     RuleExtractSourceTextOut,
     RuleExtractTextRequest,
 )
+from app.services.jobs_common import get_job_in_project
 from app.services.rule_extract import RuleExtractFileError, read_rules_file
 from app.services.rule_extract_jobs import (
     RETIRED_MARKED_CLASSIFICATION,
@@ -92,10 +93,7 @@ async def _project(project_id: uuid.UUID, db: AsyncSession) -> Project:
 
 
 async def _job(project_id: uuid.UUID, job_id: uuid.UUID, db: AsyncSession) -> RuleExtractJob:
-    job = await db.get(RuleExtractJob, job_id)
-    if job is None or job.project_id != project_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Extraction not found")
-    return job
+    return await get_job_in_project(RuleExtractJob, project_id, job_id, db, "Extraction not found")
 
 
 @router.post("/parse", response_model=RuleExtractJobAccepted, status_code=status.HTTP_202_ACCEPTED)

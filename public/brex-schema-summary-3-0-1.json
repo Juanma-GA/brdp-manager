@@ -8,39 +8,5 @@
     "xsi": "http://www.w3.org/2001/XMLSchema-instance",
     "schemaLocation": "http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/brex.xsd"
   },
-  "dmodule_opening_tag": "<dmodule xmlns:ns2=\"http://www.purl.org/dc/elements/1.1/\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/brex.xsd\">",
-  "structure": {
-    "identification": "idstatus > dmaddres > dmc > avee (child elements: modelic, sdc, chapnum, section, subsect, subject, discode, discodev, incode, incodev, itemloc)",
-    "issue": "idstatus > dmaddres > issno (@issno, @inwork, @type)",
-    "issueDate": "idstatus > dmaddres > issdate (@year, @month, @day)",
-    "title": "idstatus > dmaddres > dmtitle > techname + infoname",
-    "language": "idstatus > dmaddres > language (@language, @country)",
-    "security": "idstatus > status > security (@class)",
-    "rpc": "idstatus > status > rpc (@rpcname) — text content is the RPC code",
-    "originator": "idstatus > status > orig (@origname) — text content is the orig code",
-    "brexref": "idstatus > status > brexref > refdm > avee (same child elements as dmc/avee)",
-    "qa": "idstatus > status > qa > unverif",
-    "rules_wrapper": "content > brex > contextrules > structrules",
-    "rule_element": "objrule (@id)",
-    "objectPath": "objpath (@objappl for flag)",
-    "objectUse": "objuse",
-    "objectValue": {
-      "element": "objval",
-      "attributes_required": [],
-      "attributes_optional": ["val1", "val2", "valtype"],
-      "allowed_attributes_ONLY": ["val1", "val2", "valtype"],
-      "valtype_enum": ["single", "range"],
-      "valtype_forbidden": ["pattern", "list", "regex", "conditional", "multiple"],
-      "note": "ONLY val1, val2 and valtype are allowed attributes. NO child elements. NO other attributes. valtype defaults to single if omitted. val2 only used when valtype=range. NEVER invent other valtype values. Pattern is NOT valid in S1000D 3.0.1."
-    },
-    "applic": "idstatus > status > applic > displaytext > p",
-    "nonContextRule_handling": "S1000D 3.0.1 does NOT have nonContextRules element. If a BRDP has no clear XPath target, generate a valid objrule with a best-effort XPath, then add an XML comment immediately after: <!-- nonContextRule id=\"BRDP-xxx\": one sentence describing the conceptual rule -->"
-  },
-  "generation_rules": {
-    "rule_id": "atributo id en objrule — valor igual al BRDP identifier",
-    "flag_attribute": "objappl en objpath: '0'=prohibido, '1'=obligatorio",
-    "no_brDecisionRef": "En 3.0.1 NO existe brDecisionRef — el id va directamente en el atributo id de objrule",
-    "objval_format": "<objval val1=\"VALUE\" valtype=\"single\"/>",
-    "self_reference": "brexref/refdm/avee debe tener los mismos valores que dmc/avee"
-  }
+  "dmodule_opening_tag": "<dmodule xmlns:ns2=\"http://www.purl.org/dc/elements/1.1/\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/brex.xsd\">"
 }

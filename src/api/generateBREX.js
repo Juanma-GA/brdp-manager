@@ -370,8 +370,7 @@ function finalizeDocument(xml, projectConfig, schemaSummary) {
 
 // Deterministic empty document skeleton -- everything the LLM used to author
 // in "chunk 1" (identAndStatusSection, dmStatus boilerplate, empty rule
-// containers), built directly from projectConfig + schemaSummary per the
-// structure spec in brex-schema-summary-4-2.json's "structure" key. Ident
+// containers), built directly from projectConfig + schemaSummary. Ident
 // fields go through resolveDmCodeFields() (already exists for correcting an
 // LLM-authored dmCode) so both the ident dmCode and the brexDmRef self-
 // reference dmCode always match. structureObjectRuleGroup starts empty --

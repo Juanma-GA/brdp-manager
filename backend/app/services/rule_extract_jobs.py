@@ -68,7 +68,7 @@ import math
 import re
 import unicodedata
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
 from lxml import etree
@@ -81,6 +81,7 @@ from app.core.config import get_settings
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, BRDPHistory, Project, RuleApproval, RuleExtractCandidate, RuleExtractJob, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
+from app.services.jobs_common import EMBED_BATCH_SIZE, reap_if_stale
 from app.services.embeddings import EmbeddingUnavailable, compute_embeddings_batch, truncate_for_embedding_input
 from app.services.history import record_change
 from app.services.rule_extract import BIG_CANDIDATE_RULES, DEFAULT_RULE_RE, STANDARD_ISSUE, RulesFile, build_candidates
@@ -88,9 +89,6 @@ from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
 from app.services.text_extract import build_text_candidates, normalize_ws
 from app.services.rule_wrappers import unwrap_rule_xml
 
-STALE_JOB_MINUTES = 60
-_STALE_JOB_THRESHOLD = timedelta(minutes=STALE_JOB_MINUTES)
-EMBED_BATCH_SIZE = 32
 _EXT_RE = re.compile(r"^BRDP-EXT-(\d+)$")
 _OFFICIAL_RE = re.compile(r"^BRDP-([A-Z])(\d)-\d{5}$")
 
@@ -858,13 +856,7 @@ def missing_from_manifest(job: RuleExtractJob, keys: set[str]) -> list[dict]:
 
 
 async def _reap_if_stale(job: RuleExtractJob, db: AsyncSession) -> RuleExtractJob:
-    if job.status == "running" and datetime.now(timezone.utc) - job.started_at > _STALE_JOB_THRESHOLD:
-        job.status = "failed"
-        job.error = f"Extraction likely interrupted — no progress for over {STALE_JOB_MINUTES} minutes"
-        job.finished_at = datetime.now(timezone.utc)
-        await db.commit()
-        await db.refresh(job)
-    return job
+    return await reap_if_stale(job, db, "Extraction")
 
 
 async def get_running_job(project_id: uuid.UUID, db: AsyncSession) -> RuleExtractJob | None:

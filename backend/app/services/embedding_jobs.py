@@ -47,7 +47,7 @@ committed stays committed -- never lost, never silently retried forever.
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Callable
 
 import httpx
@@ -57,6 +57,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, EmbeddingJob, Project
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
+from app.services.jobs_common import EMBED_BATCH_SIZE, STALE_JOB_MINUTES, reap_if_stale
 from app.services.embeddings import (
     EmbeddingUnavailable,
     brdp_embedding_text,
@@ -68,33 +69,12 @@ from app.services.embeddings import (
 
 logger = logging.getLogger(__name__)
 
-# Named constant per docs request, starting value 32 -- research into
-# Mistral's real per-request item limit was inconclusive from this
-# sandbox (docs.mistral.ai unreachable; secondary sources disagreed,
-# citing figures from 16 to 128), but Mistral's own official cookbook
-# example (github.com/mistralai/cookbook, mistral/embeddings/
-# embeddings.ipynb) successfully batches 1,153 real texts at a chunk size
-# of 50 -- real, current, first-party usage strictly above 32, which is
-# the closest thing to primary-source confirmation reachable here that
-# 32 is safely within the real limit. If Mistral's real limit ever turns
-# out to be lower than this, that surfaces as a real batch failure
-# through the retry-once-then-fail path below, never silently.
-EMBED_BATCH_SIZE = 32
-
 # Docs request: "reintentar ese lote una vez; si vuelve a fallar, marcar
 # el job failed" -- one retry of the WHOLE batch, separate from and on
 # top of the 429-specific retry loop already inside
 # compute_embeddings_batch (a 429 is a rate-limit signal, not a genuine
 # failure, so it doesn't consume this budget).
 _MAX_BATCH_RETRIES = 1
-
-# Same fixed margin as import_jobs.py's STALE_JOB_MINUTES, same reasoning
-# (a hard process crash with no chance to run cleanup code) -- not shared
-# via import on purpose, each background-job module owns its own copy, same
-# as generateBREX41/generateBREX301 each own their suffixed helpers rather
-# than reaching into a sibling module's internals.
-STALE_JOB_MINUTES = 60
-_STALE_JOB_THRESHOLD = timedelta(minutes=STALE_JOB_MINUTES)
 
 
 def _chunked(items: list, size: int) -> list[list]:
@@ -163,18 +143,7 @@ async def count_pending(project: Project, db: AsyncSession) -> tuple[int, int]:
 
 
 async def _reap_if_stale(job: EmbeddingJob, db: AsyncSession) -> EmbeddingJob:
-    """Same staleness reap as import_jobs.py's _reap_if_stale -- a
-    `running` job whose started_at is older than _STALE_JOB_THRESHOLD is
-    dead (hard crash with no cleanup), marked `failed` on the same read
-    that noticed it.
-    """
-    if job.status == "running" and datetime.now(timezone.utc) - job.started_at > _STALE_JOB_THRESHOLD:
-        job.status = "failed"
-        job.error = f"Embedding computation likely interrupted — no progress for over {STALE_JOB_MINUTES} minutes"
-        job.finished_at = datetime.now(timezone.utc)
-        await db.commit()
-        await db.refresh(job)
-    return job
+    return await reap_if_stale(job, db, "Embedding computation")
 
 
 async def get_running_job(project_id: uuid.UUID, db: AsyncSession) -> EmbeddingJob | None:

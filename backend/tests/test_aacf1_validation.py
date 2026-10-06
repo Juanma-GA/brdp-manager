@@ -3,7 +3,8 @@
 - BRDP create/edit: Proposal Status only takes the values the app uses;
   Title, Definition, Proposal and the refusal reason have a maximum length
   (Settings) and over it the request is refused with the limit, never cut;
-  `history` is no longer accepted in the body.
+  v1's `history` is ignored in the body and never returned (Limpieza);
+  any other unknown field is refused.
 - Project creation: the standard must be one of the supported ones; the
   project_config must have the shape the app stores.
 - An unexpected error answers with a code and a reference only; the
@@ -21,7 +22,7 @@ import pytest
 from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
-from app.models import Project, User, UserProjectRole
+from app.models import BRDP, Project, User, UserProjectRole
 from app.services.rule_formats import SUPPORTED_STANDARDS
 
 
@@ -144,13 +145,28 @@ async def test_a_brdp_saved_with_a_longer_text_reads_exports_and_edits_its_other
     assert (await client.put(url, json={"title": long_title}, headers=headers)).status_code == 422
 
 
-async def test_history_in_the_body_is_refused(client, editor_and_project):
+async def test_history_in_the_body_is_ignored_and_never_returned(client, editor_and_project):
+    """v1's `history` column stays in the database, but the API neither
+    returns it nor writes it: a body that still sends it is accepted and the
+    field ignored; any other unknown field is still a 422."""
     project, headers = editor_and_project
     res = await _create(client, project, headers, history=[{"x": 1}])
+    assert res.status_code == 201, res.text
+    brdp = res.json()
+    assert "history" not in brdp
+    async with async_session_factory() as session:
+        assert (await session.get(BRDP, uuid.UUID(brdp["id"]))).history == []
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}"
+    res = await client.put(url, json={"history": [{"y": 2}], "title": "T"}, headers=headers)
+    assert res.status_code == 200 and res.json()["title"] == "T" and "history" not in res.json()
+    res = await client.put(url, json={"history": []}, headers=headers)
+    assert res.status_code == 200
+    async with async_session_factory() as session:
+        assert (await session.get(BRDP, uuid.UUID(brdp["id"]))).history == []
+    listed = (await client.get(f"/api/projects/{project.id}/brdps", headers=headers)).json()
+    assert all("history" not in b for b in listed)
+    res = await client.put(url, json={"not_a_field": 1}, headers=headers)
     assert res.status_code == 422 and res.json()["detail"][0]["type"] == "extra_forbidden"
-    brdp = (await _create(client, project, headers)).json()
-    res = await client.put(f"/api/projects/{project.id}/brdps/{brdp['id']}", json={"history": []}, headers=headers)
-    assert res.status_code == 422 and res.json()["detail"][0]["loc"][-1] == "history"
 
 
 async def test_a_null_field_is_refused_instead_of_a_500(client, editor_and_project):

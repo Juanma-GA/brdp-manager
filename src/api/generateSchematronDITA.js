@@ -33,73 +33,11 @@ function escapeXmlText(s) {
     .replace(/>/g, "&gt;");
 }
 
-// ===== Few-shot rendering =====
-// BRDP-D1-00313 is rendered from the real literal block (schematron-dita-draft.sch)
-// instead of from its JSON fields, because its "test" field is a human-readable
-// description ("two independent reports"), not a single valid XPath expression --
-// interpolating it generically would produce broken XML.
-const BRDP_00313_LITERAL = `<sch:pattern>
-  <sch:rule context="topic | concept | task | map">
-    <sch:report role="warning" id="BRDP-D1-00313-shortdesc" test="not(shortdesc) and not(topicmeta/shortdesc)">Missing &lt;shortdesc&gt; metadata.</sch:report>
-    <sch:report role="warning" id="BRDP-D1-00313-author" test="not(.//author)">Missing &lt;author&gt; metadata.</sch:report>
-  </sch:rule>
-</sch:pattern>`;
-
-// Renders a few-shot's optional "lets" field (array of {name, value}) as
-// <sch:let> lines, one per entry, indented to sit right after <sch:rule
-// context="...">. Returns "" when absent so every existing few-shot without
-// "lets" renders byte-identical to before this field existed.
-function renderSchLets(lets) {
-  if (!lets || lets.length === 0) return "";
-  return lets.map((l) => `    <sch:let name="${l.name}" value="${l.value}"/>\n`).join("");
-}
-
-// Most few-shot "message" values are plain prose that may mention element
-// names in angle brackets for readability (e.g. "The <xref> element...") --
-// escapeXmlText() turns those into proper &lt;xref&gt; text per STRICT RULE
-// 14. But a message that needs a REAL embedded element (STRICT RULE 20's
-// <sch:value-of select="..."/> for dynamic error text) must NOT be escaped,
-// or the element becomes inert literal text instead of a real Schematron
-// node. "messageIsRawXml": true opts a few-shot out of escaping -- the
-// author is then responsible for manually writing &lt;/&gt; for any literal
-// angle bracket that ISN'T a real element. Absent/false (the default for
-// all pre-existing few-shots) keeps today's escaping behavior unchanged.
-function renderMessage(entry) {
-  return entry.messageIsRawXml ? String(entry.message == null ? "" : entry.message) : escapeXmlText(entry.message);
-}
-
-// When a real project BRDP's id happens to exactly match one of the curated
-// few-shot examples, the pattern is copied here DETERMINISTICALLY instead of
-// asking the LLM to regenerate it. A real 100-BRDP run showed the LLM can get
-// confused by seeing its own few-shot example in the prompt and dismiss the
-// actual BRDP as "already exists / duplicate" with a comment instead of
-// producing the real rule -- silently dropping coverage for it. Copying the
-// curated pattern directly is both more reliable (no ambiguity possible) and
-// cheaper (no LLM call needed at all for these ids).
-function buildDeterministicBlockFromFewShot(entry) {
-  // A rule_approvals row: rule_xml is
-  // already the exact, previously-approved <sch:pattern>/comment block --
-  // inject it verbatim, never rebuild it from separate fields.
-  if (entry.rule_xml != null) return entry.rule_xml.trim();
-  if (entry.id === "BRDP-D1-00313") return BRDP_00313_LITERAL;
-  if (entry.confidence_ai === "DESACTIVADA") {
-    const why = sanitizeForXmlComment(String(entry.notes || "").split(".")[0]);
-    return `<!-- ${entry.id}: no se pudo generar una regla Schematron automatable (${why}); pendiente de revision manual. -->`;
-  }
-  return `<sch:pattern>
-  <sch:rule context="${entry.context}">
-${renderSchLets(entry.lets)}    <sch:assert role="${entry.assert_role}" id="${entry.id}" test="${entry.test}">${renderMessage(entry)}</sch:assert>
-  </sch:rule>
-</sch:pattern>`;
-}
-
-function sanitizeForXmlComment(text) {
-  // XML comments must never contain "--" or end with "-" before "-->".
-  return String(text == null ? "" : text)
-    .replace(/[\r\n]+/g, " ")
-    .replace(/-{2,}/g, "—")
-    .replace(/-+$/, "")
-    .trim();
+// An approved rule enters the document verbatim: rule_xml is the exact
+// <sch:pattern>/comment block saved in rule_approvals (NOT NULL), never
+// rebuilt from separate fields.
+function approvedRuleBlock(approval) {
+  return approval.rule_xml.trim();
 }
 
 // ===== Deterministic finalization (no BREX-equivalent conversion exists for
@@ -144,8 +82,8 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryB
   // No document-wide "fix what the source got wrong" pass here anymore
   // (used to run escapeSchTestAttributes/sanitizeXmlCommentBodies over the
   // whole joined string) -- both block producers already guarantee valid,
-  // final content on their own: buildDeterministicBlockFromFewShot's
-  // entry.rule_xml is a verbatim passthrough of a rule_approvals row that
+  // final content on their own: approvedRuleBlock's
+  // rule_xml is a verbatim passthrough of a rule_approvals row that
   // can only ever reach status "approved" after passing the SAME
   // well-formedness check server-side (propose_approval/import_jobs.py's
   // _xml_well_formed_error) and client-side (RecordsPage's checkWellFormed
@@ -864,16 +802,10 @@ function collectNamespaces(blocks) {
 
 // Pure deterministic assembler -- no LLM call, ever. For the active format,
 // takes only the BRDPs with a frozen 'approved' rule_approvals row and
-// injects their rule_xml verbatim (via buildDeterministicBlockFromFewShot,
-// which already special-cases entry.rule_xml as a verbatim passthrough);
+// injects their rule_xml verbatim (approvedRuleBlock);
 // every other Validated BRDP becomes a pending-approval comment via
 // pendingApprovalComment() (generateBREX.js) -- the same comment the BREX
 // generators write: the BRDP identifier, never its UUID, in English.
-// The curated few-shot exact-id-match shortcut (previously also used to
-// bypass the LLM for known examples) is intentionally NOT consulted here
-// anymore: approval is now the only gate for inclusion, so an unapproved
-// BRDP that happens to match a curated id still becomes a comment, not a
-// silently-injected rule.
 export async function generateSchematronDITA(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,
@@ -911,7 +843,7 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     const approvalEntry = approvalById.get(brdp.id);
     if (ruleEnters(approvalEntry, includeDrafts)) {
       ruleCount += 1;
-      blocks.push(buildDeterministicBlockFromFewShot(approvalEntry));
+      blocks.push(approvedRuleBlock(approvalEntry));
     } else {
       // Same comment as the BREX generators (pendingApprovalComment in
       // generateBREX.js): the BRDP identifier (never its UUID), in English.

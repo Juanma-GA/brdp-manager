@@ -17,6 +17,7 @@ from app.schemas.embedding_job import (
     EmbeddingPendingOut,
     SingleBrdpEmbeddingOut,
 )
+from app.services.jobs_common import get_job_in_project
 from app.services.embeddings import EmbeddingUnavailable
 from app.services.embedding_jobs import (
     count_pending,
@@ -135,10 +136,7 @@ async def compute_embeddings(
 
 
 async def _get_job_in_project(project_id: uuid.UUID, job_id: uuid.UUID, db: AsyncSession) -> EmbeddingJob:
-    job = await db.get(EmbeddingJob, job_id)
-    if job is None or job.project_id != project_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Embedding job not found")
-    return job
+    return await get_job_in_project(EmbeddingJob, project_id, job_id, db, "Embedding job not found")
 
 
 @router.get("/status/active", response_model=EmbeddingJobStatusOut | None)

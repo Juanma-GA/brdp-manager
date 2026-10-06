@@ -53,7 +53,7 @@ async def test_brdp_create_read_update_delete(client, editor_and_project):
     assert created.status_code == 201
     brdp = created.json()
     assert brdp["validation"] == "Pending"
-    assert brdp["history"] == []
+    assert "history" not in brdp
 
     listed = await client.get(f"/api/projects/{project.id}/brdps", headers=headers)
     assert len(listed.json()) == 1
@@ -193,7 +193,7 @@ async def test_next_ext_identifier_increments_from_existing_ext_ids(client, edit
     assert response.json()["identifier"] == "BRDP-EXT-00003"
 
 
-async def test_approval_propose_get_approve_revoke_lifecycle(client, editor_and_project):
+async def test_approval_propose_get_approve_lifecycle(client, editor_and_project):
     project, headers = editor_and_project
     brdp = (
         await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-APPR-001"}, headers=headers)
@@ -217,11 +217,6 @@ async def test_approval_propose_get_approve_revoke_lifecycle(client, editor_and_
     assert approved.json()["status"] == "approved"
     assert approved.json()["approved_at"] is not None
 
-    revoked = await client.delete(url, headers=headers)
-    assert revoked.status_code == 204
-
-    gone = await client.get(url, headers=headers)
-    assert gone.json() is None
 
 
 async def test_bulk_project_approvals_lists_every_brdps_status(client, editor_and_project):

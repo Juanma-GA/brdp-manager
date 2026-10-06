@@ -8,8 +8,8 @@
 import { formatWrongTypeMessage } from '../validation/schemaValidation.js';
 import { summarizeSchemaFactEntry } from '../utils/schemaFactSummary.js';
 
-// Same local map as ProjectConfigPage.jsx/GenerateBREXdocPage.jsx (not
-// centralized -- established convention in this codebase, see CLAUDE.md).
+// Plain English Rule Status labels: the prompts, the Excel export
+// (ProjectConfigPage.jsx) and the downloaded report (GenerateBREXdocPage.jsx).
 export const RULE_STATUS_LABELS = { todo: 'To Do', draft: 'Draft', verified: 'Verified' };
 
 // "Ajustes al juego de pruebas de prompts" round: the single source of

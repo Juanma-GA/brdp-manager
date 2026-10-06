@@ -241,8 +241,7 @@ function finalizeDocument41(xml, projectConfig, schemaSummary) {
 
 // Deterministic empty document skeleton -- see buildEmptyDocument in
 // generateBREX.js for the full rationale; 4.1's header structure is
-// identical to 4.2's (confirmed against brex-schema-summary-4-1.json's
-// "structure" key), only structureObjectRule/nonContextRule differ (no
+// identical to 4.2's, only structureObjectRule/nonContextRule differ (no
 // brDecisionRef/brSeverityLevel in 4.1).
 function esc41(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

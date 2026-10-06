@@ -32,7 +32,7 @@
 // port of Docuneering's s1000d-brex-to-schematron.xsl that Generate uses for
 // its Schematron output; [TPL] the Verified rules of the curated templates
 // public/brdp-template-{4-2,4-1,3-0-1}.xlsx; [GEN] the generators' prompts
-// (generateBREX*.js, src/prompts/ruleFormatRules.js, brex-schema-summary-*.json).
+// (generateBREX*.js, src/prompts/ruleFormatRules.js).
 //
 // | Topic                          | Behaviour                                                        | Origin |
 // |--------------------------------|------------------------------------------------------------------|--------|

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.config import get_settings
 from app.core.text import NormalizedText
@@ -17,11 +17,21 @@ _TITLE_MAX = _settings.brdp_title_max_chars
 _TEXT_MAX = _settings.brdp_text_max_chars
 
 
+def _drop_legacy_history(data):
+    """v1's `history` field (the unused brdps.history column, kept in the
+    database) is neither read nor written by the API: a body that still
+    sends it is accepted and the field is ignored. Any other unknown field
+    is refused with a 422 (extra_forbidden)."""
+    if isinstance(data, dict) and "history" in data:
+        data = {k: v for k, v in data.items() if k != "history"}
+    return data
+
+
 class BRDPCreate(BaseModel):
     # Texts are stored with LF line endings (app/core/text.py).
-    # Any other field -- `history` among them, which is written only by the
-    # server -- is refused with a 422 (extra_forbidden).
     model_config = ConfigDict(extra="forbid")
+
+    _ignore_history = model_validator(mode="before")(_drop_legacy_history)
 
     identifier: str
     title: NormalizedText = Field(default="", max_length=_TITLE_MAX)
@@ -36,13 +46,15 @@ class BRDPUpdate(BaseModel):
     # its lifetime once created (BRDPCreate still takes it), never editable
     # afterward under any circumstance. Same pattern as MeUpdate leaving
     # out global_role (schemas/auth.py): structurally impossible to send,
-    # not just hidden in the UI. `history` is refused too (extra_forbidden).
+    # not just hidden in the UI. `history` is ignored (_drop_legacy_history).
     # Each field may be left out; sent, it must be a value (a null used to
     # reach the NOT NULL column as a 500). Over its limit the request is
     # refused with the limit -- never cut (HR6). A BRDP already saved with a
     # longer text is read and exported as before; only an edit of that field
     # asks to shorten it.
     model_config = ConfigDict(extra="forbid")
+
+    _ignore_history = model_validator(mode="before")(_drop_legacy_history)
 
     title: NormalizedText = Field(default=None, max_length=_TITLE_MAX)
     definition: NormalizedText = Field(default=None, max_length=_TEXT_MAX)
@@ -64,7 +76,6 @@ class BRDPOut(BaseModel):
     proposal: str
     validation: str
     comments: str
-    history: list
     created_at: datetime
     updated_at: datetime
     # The other S1000D edition whose catalog has this identifier when the

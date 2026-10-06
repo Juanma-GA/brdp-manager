@@ -55,7 +55,7 @@ better user experience than a confusing interleaved result anyway.
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from lxml import etree
@@ -63,6 +63,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.approvals import _rule_state, _wrap_rule_xml_fragment, _xml_well_formed_error
+from app.services.jobs_common import STALE_JOB_MINUTES, reap_if_stale
 from app.services.rule_wrappers import unwrap_rule_xml
 from app.api.routes.brdps import _HISTORY_FIELDS
 from app.db.base import async_session_factory
@@ -93,26 +94,11 @@ _TERMINAL_STATUSES = {"completed", "failed"}
 # Validated rows, each a Mistral embedding call) plausibly runs this long.
 # Named here, not a bare literal at each call site, so it's a single,
 # obvious place to adjust.
-STALE_JOB_MINUTES = 60
-_STALE_JOB_THRESHOLD = timedelta(minutes=STALE_JOB_MINUTES)
-
-
 async def _reap_if_stale(job: ImportJob, db: AsyncSession) -> ImportJob:
-    """A `running` job whose started_at is older than _STALE_JOB_THRESHOLD
-    is marked `failed` right here, in the same read that noticed it --
-    both get_running_job (the 409 check) and get_most_recent_job (what the
-    UI polls) call this, so neither one goes on trusting a `running` status
-    that can no longer be true, and the UI stops showing it as still alive
-    the moment anyone next asks, not only after some later Apply attempt
-    happens to trigger the fix.
-    """
-    if job.status == "running" and datetime.now(timezone.utc) - job.started_at > _STALE_JOB_THRESHOLD:
-        job.status = "failed"
-        job.error = f"Import likely interrupted — no progress for over {STALE_JOB_MINUTES} minutes"
-        job.finished_at = datetime.now(timezone.utc)
-        await db.commit()
-        await db.refresh(job)
-    return job
+    """Both get_running_job (the 409 check) and get_most_recent_job (what
+    the UI polls) call this, so the UI stops showing a dead job as alive
+    the moment anyone next asks (see jobs_common.reap_if_stale)."""
+    return await reap_if_stale(job, db, "Import")
 
 
 def _blank(text: str | None) -> bool:
