@@ -587,3 +587,34 @@ async def test_a_long_title_is_kept_whole_and_blocks_its_import_until_shortened(
     assert res.json()["candidates"][0]["too_long"] == []
     res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"]]})
     assert res.status_code == 200, res.text
+
+
+# ── Line endings (Protecciones 1c) ────────────────────────────────────────
+
+
+def test_paragraphs_with_crlf_cr_or_mixed_line_endings_are_the_same():
+    lf = TEXT
+    for text in (TEXT.replace("\n", "\r\n"), TEXT.replace("\n", "\r"), TEXT.replace("\n\n", "\r\n\r").replace("\n", "\r\n", 3)):
+        assert paragraphs(text) == paragraphs(lf)
+        assert count_words(text) == count_words(lf)
+
+
+@pytest.mark.parametrize("newline", ["\r\n", "\r"])
+async def test_a_windows_or_old_mac_text_is_stored_with_lf_and_its_quotes_found(client, users, newline):
+    """The text the AI reads is the stored one (GET .../text): LF only. A
+    quote with CRLF inside is found, and kept without "\\r"; the paragraph of
+    BRDP-S1-00150 gives its identifier as with LF."""
+    project, editor, _ = users
+    text = TEXT.replace("\n", newline)
+    decisions = [
+        {"quote": f"Warnings shall always be placed before the step they apply to,{newline}never after it.", "title": "Warning position"},
+        {"quote": "every support equipment item shall have an identifier.", "title": "Support equipment id"},
+    ]
+    url, job, cands = await _extract(client, project.id, editor, text, decisions)
+    stored = (await client.get(f"{url}/text", headers=editor)).json()
+    assert stored["text"] == TEXT.strip() or stored["text"] == TEXT, repr(stored["text"][:80])
+    assert "\r" not in stored["text"] and stored["word_count"] == count_words(TEXT)
+    assert [c["quote_found"] for c in cands] == [True, True]
+    assert all("\r" not in c["quote"] for c in cands)
+    assert cands[0]["quote"] == "Warnings shall always be placed before the step they apply to, never after it."
+    assert cands[1]["origin_identifier"] == "BRDP-S1-00150"

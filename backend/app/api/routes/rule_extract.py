@@ -156,7 +156,7 @@ async def start_text(
     the text is rejected, never cut."""
     await _project(project_id, db)
     settings = get_settings()
-    text = body.text.replace("\r\n", "\n")
+    text = body.text  # LF only: RuleExtractTextRequest normalizes CRLF and CR (app/core/text.py)
     words = count_words(text)
     if words == 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error_detail("extract_text_empty", message="The text is empty."))

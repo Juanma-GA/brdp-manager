@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.core.text import NormalizedText
+
 
 class ImportRowIn(BaseModel):
     """One parsed Excel row -- field names mirror the columns Export to
@@ -17,9 +19,11 @@ class ImportRowIn(BaseModel):
 
     row_number: int
     identifier: str = ""
-    title: str = ""
-    definition: str = ""
-    proposal: str = ""
+    # Texts with LF line endings (app/core/text.py); the Rule is kept as
+    # written, like every rule.
+    title: NormalizedText = ""
+    definition: NormalizedText = ""
+    proposal: NormalizedText = ""
     proposal_status: str = "Pending"
     rule_status: str = "To Do"
     rule: str = ""

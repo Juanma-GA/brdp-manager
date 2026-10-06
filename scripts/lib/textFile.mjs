@@ -13,10 +13,11 @@
 //                            URL.pathname, which on Windows is "/C:/..."
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+// The app's own (src/utils/textExtract.js; the server's twin is
+// backend/app/core/text.py).
+import { normalizeNewlines } from '../../src/utils/textExtract.js';
 
-export function normalizeNewlines(text) {
-  return String(text).replace(/\r\n?/g, '\n');
-}
+export { normalizeNewlines };
 
 export function toPath(file) {
   if (file instanceof URL) return fileURLToPath(file);

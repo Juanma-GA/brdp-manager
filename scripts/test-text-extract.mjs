@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as pdfjsLegacy from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { DocumentReadError, readDocumentText, pdfPageText } from '../src/utils/documentText.js';
-import { countWords, findDecisions, FIND_TRUNCATED, formatCount, splitInHalves } from '../src/utils/textExtract.js';
+import { countWords, findDecisions, FIND_TRUNCATED, formatCount, normalizeNewlines, splitInHalves } from '../src/utils/textExtract.js';
 import {
   buildExtractFromTextPrompt,
   buildFindDecisionsPrompt,
@@ -172,6 +172,27 @@ check('formatCount EN: "7,320"', formatCount(7320, 'en') === '7,320' && formatCo
   check('draft prompt: catalog texts given, only the Proposal asked', prompt.includes('Definition (official, do not rewrite): Decide cmd') && prompt.includes('Write: proposal'));
   check('draft prompt: identifier named in the document', prompt.includes('Identifier named in the document: BRDP-D1-00020'));
   check('draft prompt: language of the quote, never placeholders', prompt.includes('in the language of its quote') && prompt.includes('No placeholders'));
+}
+
+// ── Line endings (Protecciones 1c) ───────────────────────────────────────
+// A text from Windows (CRLF), an old Mac (CR) or both reaches the AI as the
+// same LF text, whatever document it came from.
+{
+  const enc = (s) => async () => new TextEncoder().encode(s).buffer;
+  const lf = 'Uno dos.\n\nTres cuatro.\nCinco.';
+  for (const [label, text] of [['CRLF', lf.replace(/\n/g, '\r\n')], ['CR', lf.replace(/\n/g, '\r')], ['mixed', 'Uno dos.\r\n\rTres cuatro.\nCinco.']]) {
+    check(`.txt with ${label}: read as LF`, (await readDocumentText({ name: 'a.txt', arrayBuffer: enc(text) })) === lf);
+    const fakeMammoth = async () => ({ extractRawText: async () => ({ value: text }) });
+    check(`.docx with ${label} inside: read as LF`, (await readDocumentText({ name: 'a.docx', arrayBuffer: enc('') }, { loadMammoth: fakeMammoth })) === lf);
+  }
+  check('normalizeNewlines: "\\n\\r" is two line breaks', normalizeNewlines('a\n\rb') === 'a\n\nb');
+  const prompts = [];
+  const ask = async ({ system }) => {
+    prompts.push(system);
+    return '{"decisions": []}';
+  };
+  for (const text of [lf, lf.replace(/\n/g, '\r\n'), lf.replace(/\n/g, '\r')]) await findDecisions({ text, standard: 'S1000D 4.2', ask });
+  check('findDecisions: the same prompt for LF, CRLF and CR', prompts.length === 3 && prompts[1] === prompts[0] && prompts[2] === prompts[0] && !prompts[0].includes('\r'));
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);

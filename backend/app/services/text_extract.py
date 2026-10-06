@@ -32,6 +32,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from app.core.text import normalize_newlines
 from app.services.rule_extract import _ID_RE
 
 # The whitespace that separates words -- the same characters as JavaScript's
@@ -57,8 +58,9 @@ def normalize_ws(text: str) -> str:
 
 
 def paragraphs(text: str) -> list[str]:
-    """Blocks separated by a blank line, without the empty ones."""
-    return [p for p in (b.strip() for b in _BLANK_LINE_RE.split(text or "")) if p]
+    """Blocks separated by a blank line, without the empty ones. CRLF and a
+    lone CR (old Mac) count as a line break too."""
+    return [p for p in (b.strip() for b in _BLANK_LINE_RE.split(normalize_newlines(text or ""))) if p]
 
 
 class _Located:

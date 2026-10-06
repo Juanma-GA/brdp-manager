@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import get_settings
+from app.core.text import NormalizedText
 
 # The Proposal Status values the app uses (AACF 1, Part 5). The column has
 # no CHECK constraint: the Excel import keeps its own handling of other
@@ -17,16 +18,17 @@ _TEXT_MAX = _settings.brdp_text_max_chars
 
 
 class BRDPCreate(BaseModel):
+    # Texts are stored with LF line endings (app/core/text.py).
     # Any other field -- `history` among them, which is written only by the
     # server -- is refused with a 422 (extra_forbidden).
     model_config = ConfigDict(extra="forbid")
 
     identifier: str
-    title: str = Field(default="", max_length=_TITLE_MAX)
-    definition: str = Field(default="", max_length=_TEXT_MAX)
-    proposal: str = Field(default="", max_length=_TEXT_MAX)
+    title: NormalizedText = Field(default="", max_length=_TITLE_MAX)
+    definition: NormalizedText = Field(default="", max_length=_TEXT_MAX)
+    proposal: NormalizedText = Field(default="", max_length=_TEXT_MAX)
     validation: ProposalStatus = "Pending"
-    comments: str = Field(default="", max_length=_TEXT_MAX)
+    comments: NormalizedText = Field(default="", max_length=_TEXT_MAX)
 
 
 class BRDPUpdate(BaseModel):
@@ -42,11 +44,11 @@ class BRDPUpdate(BaseModel):
     # asks to shorten it.
     model_config = ConfigDict(extra="forbid")
 
-    title: str = Field(default=None, max_length=_TITLE_MAX)
-    definition: str = Field(default=None, max_length=_TEXT_MAX)
-    proposal: str = Field(default=None, max_length=_TEXT_MAX)
+    title: NormalizedText = Field(default=None, max_length=_TITLE_MAX)
+    definition: NormalizedText = Field(default=None, max_length=_TEXT_MAX)
+    proposal: NormalizedText = Field(default=None, max_length=_TEXT_MAX)
     validation: ProposalStatus = None
-    comments: str = Field(default=None, max_length=_TEXT_MAX)
+    comments: NormalizedText = Field(default=None, max_length=_TEXT_MAX)
 
 
 class NextExtIdentifierOut(BaseModel):

@@ -14,6 +14,8 @@
 // The PDF library is injectable (`loadPdfjs`) so the Node tests use
 // pdf.js's legacy build; the page uses the browser build with its worker.
 
+import { normalizeNewlines } from './textExtract.js';
+
 export const DOCUMENT_EXTENSIONS = ['.txt', '.md', '.docx', '.pdf'];
 
 export class DocumentReadError extends Error {
@@ -89,21 +91,23 @@ async function readDocx(data, loadMammoth) {
   const mammoth = await loadMammoth();
   try {
     const result = await mammoth.extractRawText({ arrayBuffer: data });
-    return result.value.replace(/\n{3,}/g, '\n\n').trim();
+    return normalizeNewlines(result.value).replace(/\n{3,}/g, '\n\n').trim();
   } catch (err) {
     throw new DocumentReadError('unreadable', err?.message || String(err));
   }
 }
 
-// → the text. `file`: a File / Blob with a name (or { name, arrayBuffer() }).
+// → the text, always with LF line endings (a .txt written on Windows has
+// CRLF, one from an old Mac CR; a .docx or .pdf can carry a CR inside a
+// text run). `file`: a File / Blob with a name (or { name, arrayBuffer() }).
 export async function readDocumentText(file, { loadPdfjs = browserPdfjs, loadMammoth = () => import('mammoth') } = {}) {
   const ext = extensionOf(file.name);
   if (!DOCUMENT_EXTENSIONS.includes(ext)) throw new DocumentReadError('unsupported', ext);
   const data = await file.arrayBuffer();
-  if (ext === '.pdf') return readPdf(new Uint8Array(data), loadPdfjs);
+  if (ext === '.pdf') return normalizeNewlines(await readPdf(new Uint8Array(data), loadPdfjs));
   if (ext === '.docx') return readDocx(data, loadMammoth);
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(data).replace(/^\ufeff/, '').replace(/\r\n?/g, '\n');
+    return normalizeNewlines(new TextDecoder('utf-8', { fatal: true }).decode(data).replace(/^\ufeff/, ''));
   } catch {
     throw new DocumentReadError('unreadable', 'not UTF-8 text');
   }

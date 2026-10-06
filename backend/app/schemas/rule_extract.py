@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from app.core.text import NormalizedText
 
 
 class RuleExtractJobAccepted(BaseModel):
@@ -58,9 +59,10 @@ class RuleExtractDraftingRequest(BaseModel):
 
 class RuleExtractCandidateEdit(BaseModel):
     key: str
-    title: str | None = None
-    definition: str | None = None
-    proposal: str | None = None
+    # Texts with LF line endings (app/core/text.py).
+    title: NormalizedText | None = None
+    definition: NormalizedText | None = None
+    proposal: NormalizedText | None = None
     draft_status: str | None = None
     selected: bool | None = None
     classification: str | None = None
@@ -88,7 +90,10 @@ class RuleExtractTextRequest(BaseModel):
     """A free text (pasted, or read from a file in the browser). filename is
     the file's name; empty for a pasted text."""
 
-    text: str
+    # LF line endings (CRLF from Windows, CR from an old Mac): the text is
+    # stored as the job's source text, the AI reads that stored text and the
+    # quotes are looked for in it (app/core/text.py).
+    text: NormalizedText
     filename: str = Field(default="", max_length=255)
 
 
@@ -110,8 +115,8 @@ class RuleExtractDecision(BaseModel):
     warning, a title over the BRDP title limit is kept whole and blocks that
     row's import until it is shortened (AACF 1, Part 4)."""
 
-    quote: str = Field(max_length=_TEXT_MAX_CHARS)
-    title: str = Field(default="", max_length=_TEXT_MAX_CHARS)
+    quote: NormalizedText = Field(max_length=_TEXT_MAX_CHARS)
+    title: NormalizedText = Field(default="", max_length=_TEXT_MAX_CHARS)
 
 
 class RuleExtractDecisions(BaseModel):

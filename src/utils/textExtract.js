@@ -10,6 +10,13 @@ import { buildFindDecisionsPrompt, FIND_DECISIONS_USER_MESSAGE, parseFindDecisio
 // (backend/app/services/text_extract.py's count_words; keep in sync).
 const WORD_RE = /[^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+/g;
 
+// Line endings of a text written on Windows (CRLF) or an old Mac (CR) ->
+// LF. Same as the server's normalize_newlines (backend/app/core/text.py)
+// and scripts/lib/textFile.mjs -- keep them in sync.
+export function normalizeNewlines(text) {
+  return String(text ?? '').replace(/\r\n?/g, '\n');
+}
+
 export function countWords(text) {
   return (String(text ?? '').match(WORD_RE) || []).length;
 }
@@ -59,7 +66,11 @@ export const FIND_TRUNCATED = 'FIND_TRUNCATED';
 // text is split in two halves at a paragraph break and each half is asked
 // once; if a half is cut again, an error with code FIND_TRUNCATED (the page
 // shows a readable message). Any other error is thrown as it is.
-export async function findDecisions({ text, standard, ask }) {
+// The text is the job's stored source text (LF already, see the server's
+// RuleExtractTextRequest); it is normalized here too so that a text with
+// CRLF can never give another prompt.
+export async function findDecisions({ text: rawText, standard, ask }) {
+  const text = normalizeNewlines(rawText);
   try {
     return await askOnce(text, { standard, ask });
   } catch (err) {
