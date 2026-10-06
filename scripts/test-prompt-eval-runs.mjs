@@ -23,6 +23,7 @@ import {
   runStamp,
   saveRun,
 } from "./prompt-eval/runs.mjs";
+import { cleanupLeftoverProjects, createEvalClient, EVAL_PROJECT_PREFIX, LoginError, SessionLostError } from "./prompt-eval/session.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, "prompt-eval", "compare-fixtures");
@@ -180,6 +181,151 @@ try {
   check("a failed comparison says why in report.md", fs.readFileSync(broken, "utf8").includes("failed: responses.json unreadable"));
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
+}
+
+// ── Remates B, Part 3: the session never expires mid-pass ────────────────
+// A fake backend: tokens "t1", "t2"…; a token is valid until the test
+// expires it; /api/projects lists and deletes.
+function fakeBackend({ goodPassword = "pw", loginFailsFrom = Infinity } = {}) {
+  const state = { logins: 0, valid: new Set(), calls: [], projects: [] };
+  const json = (status, body) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  state.fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    state.calls.push(`${init.method || "GET"} ${u.pathname}`);
+    if (u.pathname === "/api/auth/login") {
+      state.logins += 1;
+      const body = JSON.parse(init.body);
+      if (body.password !== goodPassword || state.logins >= loginFailsFrom) return json(401, { detail: "Invalid email or password" });
+      const token = `t${state.logins}`;
+      state.valid.add(token);
+      return json(200, { access_token: token });
+    }
+    const token = (init.headers?.Authorization || "").replace(/^Bearer /, "");
+    if (!state.valid.has(token)) return json(401, { detail: "Not authenticated" });
+    if (u.pathname === "/api/projects" && (init.method || "GET") === "GET") return json(200, state.projects);
+    const del = /^\/api\/projects\/([^/]+)$/.exec(u.pathname);
+    if (del && init.method === "DELETE") {
+      state.projects = state.projects.filter((p) => p.id !== del[1]);
+      return json(204);
+    }
+    return json(200, { ok: true, path: u.pathname });
+  };
+  state.expireAll = () => state.valid.clear();
+  return state;
+}
+
+{
+  const be = fakeBackend();
+  const client = createEvalClient({ api: "http://fake", email: "a@x", password: "pw", fetchImpl: be.fetch });
+  await client.login();
+  check("session: first login", be.logins === 1);
+  be.expireAll();
+  const r = await client.apiFetch("/api/llm-proxy", { method: "POST", body: "{}" });
+  check("session: a 401 logs in again once and repeats the call", r.ok === true && be.logins === 2 && client.relogins === 1, JSON.stringify(be.calls));
+  check("session: the repeated call is the same request", be.calls.filter((c) => c === "POST /api/llm-proxy").length === 2);
+  be.expireAll();
+  const raw = await client.rawFetch("/api/projects/p1/ai-extract/parse", { method: "POST", body: new FormData() });
+  check("session: rawFetch (multipart upload) re-logs in too", raw.status === 200 && be.logins === 3);
+}
+{
+  // Re-login fails (the account changed mid-pass): SessionLostError, and the
+  // client remembers it so the pass stops even if a caller swallowed it.
+  const be = fakeBackend({ loginFailsFrom: 2 });
+  const client = createEvalClient({ api: "http://fake", email: "a@x", password: "pw", fetchImpl: be.fetch });
+  await client.login();
+  be.expireAll();
+  let err = null;
+  try {
+    await client.apiFetch("/api/llm-proxy", { method: "POST", body: "{}" });
+  } catch (e) {
+    err = e;
+  }
+  check("session: unrecoverable → SessionLostError", err instanceof SessionLostError && /logging in again failed/.test(err.message), err?.message);
+  check("session: lost is remembered", client.lost instanceof SessionLostError);
+  check("session: no retry loop (one re-login attempt)", be.logins === 2, String(be.logins));
+}
+{
+  // Wrong credentials at the start: a clear error, one attempt, no loop.
+  const be = fakeBackend();
+  const client = createEvalClient({ api: "http://fake", email: "a@x", password: "wrong", fetchImpl: be.fetch });
+  let err = null;
+  try {
+    await client.login();
+  } catch (e) {
+    err = e;
+  }
+  check("bad credentials: LoginError with the reason", err instanceof LoginError && /Login failed for a@x \(HTTP 401/.test(err.message) && /PROMPT_EVAL_EMAIL/.test(err.message), err?.message);
+  check("bad credentials: one login attempt only", be.logins === 1);
+  const none = createEvalClient({ api: "http://fake", email: "", password: "", fetchImpl: be.fetch });
+  let err2 = null;
+  try {
+    await none.login();
+  } catch (e) {
+    err2 = e;
+  }
+  check("missing credentials: LoginError, no request", err2 instanceof LoginError && be.logins === 1);
+}
+{
+  // --cleanup: deletes only "Prompt Eval — …" projects the user can delete,
+  // lists them; with nothing to delete it says so.
+  const be = fakeBackend();
+  be.projects = [
+    { id: "a", name: `${EVAL_PROJECT_PREFIX}S1000D 4.2 — 1`, effective_role: "editor" },
+    { id: "b", name: `${EVAL_PROJECT_PREFIX}DITA 1.3 Xpath2.0 — 2`, effective_role: "editor" },
+    { id: "c", name: "Lufthansa CMM", effective_role: "editor" },
+    { id: "d", name: `${EVAL_PROJECT_PREFIX}S1000D 4.1 — 3`, effective_role: "viewer" },
+  ];
+  const client = createEvalClient({ api: "http://fake", email: "a@x", password: "pw", fetchImpl: be.fetch });
+  await client.login();
+  be.expireAll(); // cleanup after a long pass: the token has expired
+  const logged = [];
+  const out = await cleanupLeftoverProjects(client, { log: (l) => logged.push(l) });
+  check("--cleanup: deletes the two leftovers it can delete", JSON.stringify(out.deleted) === JSON.stringify([`${EVAL_PROJECT_PREFIX}S1000D 4.2 — 1`, `${EVAL_PROJECT_PREFIX}DITA 1.3 Xpath2.0 — 2`]), JSON.stringify(out));
+  check("--cleanup: never another project", be.projects.map((p) => p.id).join() === "c,d");
+  check("--cleanup: re-logs in when the token expired", client.relogins === 1);
+  check("--cleanup: lists them", logged.filter((l) => l.startsWith("Deleted leftover project:")).length === 2 && logged.at(-1) === "Deleted 2 leftover project(s).", logged.join(" | "));
+  const logged2 = [];
+  const out2 = await cleanupLeftoverProjects(client, { log: (l) => logged2.push(l) });
+  check("--cleanup with nothing: says so and ends ok", out2.deleted.length === 0 && logged2.join() === 'No leftover "Prompt Eval — …" projects: nothing to delete.', logged2.join());
+}
+// Against the real backend, when it is up: a 401 from the real server
+// (an invalid token sent once) is recovered, and --cleanup deletes a real
+// leftover project.
+{
+  const API = process.env.PROMPT_EVAL_API_URL || "http://localhost:8000";
+  const email = process.env.PROMPT_EVAL_EMAIL || "admin@example.com";
+  const password = process.env.PROMPT_EVAL_PASSWORD || "AdminTest123!";
+  let up = false;
+  try {
+    up = (await fetch(`${API}/api/auth/login`, { method: "OPTIONS" })).status < 500;
+  } catch {
+    up = false;
+  }
+  if (!up) console.log("  (backend not reachable: real-server session checks skipped)");
+  else {
+    let spoil = false;
+    const fetchImpl = (url, init = {}) => {
+      if (spoil && init.headers?.Authorization) {
+        spoil = false;
+        return fetch(url, { ...init, headers: { ...init.headers, Authorization: "Bearer expired" } });
+      }
+      return fetch(url, init);
+    };
+    const client = createEvalClient({ api: API, email, password, fetchImpl });
+    await client.login();
+    const project = await client.apiFetch("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ name: `${EVAL_PROJECT_PREFIX}leftover check — ${Date.now()}`, standard: "S1000D 4.2", project_config: {}, seed_from_catalog: false }),
+    });
+    spoil = true;
+    const listed = await client.apiFetch("/api/projects");
+    check("real backend: a real 401 is recovered by logging in again", Array.isArray(listed) && client.relogins === 1);
+    const logged = [];
+    const out = await cleanupLeftoverProjects(client, { log: (l) => logged.push(l) });
+    check("real backend: --cleanup deletes the leftover", out.deleted.includes(project.name), JSON.stringify(out));
+    const after = await client.apiFetch("/api/projects");
+    check("real backend: it is gone (not in the Trash list either)", !after.some((p) => p.id === project.id));
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -10,6 +10,10 @@
 // Usage (see CLAUDE.md for the full write-up):
 //   PROMPT_EVAL_EMAIL=admin@example.com PROMPT_EVAL_PASSWORD=... \
 //     node scripts/run-prompt-eval.mjs --runs 3
+//   ... --cleanup   deletes the "Prompt Eval — …" projects left by earlier
+//                   passes, lists them, and ends (Remates B, Part 3).
+// A 401 mid-pass (the access token lasts 45 minutes) logs in again once and
+// repeats the request; if that fails the pass stops with a clear message.
 //
 // What it does, for real, against real endpoints -- nothing is mocked or
 // simulated by this script itself:
@@ -94,6 +98,7 @@ import { distinctSchemaNames, languageCheck, aiFieldLanguageCheck, loadSchemaCar
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
 import { appendComparison, importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
+import { cleanupLeftoverProjects, createEvalClient, LoginError, SessionLostError } from "./prompt-eval/session.mjs";
 import { candidatesToDraft, draftCandidates } from "../src/utils/ruleExtractDraft.js";
 import { findDecisions } from "../src/utils/textExtract.js";
 import { FIND_DECISIONS_USER_MESSAGE } from "../src/prompts/extractFromTextPrompt.js";
@@ -142,6 +147,7 @@ function parseArgs(argv) {
     if (argv[i] === "--runs") args.runs = parseInt(argv[++i], 10);
     else if (argv[i] === "--cases") args.casesPath = argv[++i];
     else if (argv[i] === "--only") args.only = argv[++i];
+    else if (argv[i] === "--cleanup") args.cleanup = true;
   }
   return args;
 }
@@ -578,40 +584,13 @@ function runTextCheck(check, answer, flags, ctx = {}) {
 
 // ---- Backend HTTP client ------------------------------------------------
 
-let accessToken = null;
-
-async function apiFetch(path, options = {}) {
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-  const res = await fetch(`${API}${path}`, { ...options, headers });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body.detail || detail;
-    } catch {
-      // not JSON, keep statusText
-    }
-    throw new Error(`${options.method || "GET"} ${path} -> ${res.status}: ${JSON.stringify(detail)}`);
-  }
-  if (res.status === 204) return null;
-  return res.json();
-}
-
-async function login() {
-  if (!EMAIL || !PASSWORD) {
-    throw new Error(
-      "Missing PROMPT_EVAL_EMAIL / PROMPT_EVAL_PASSWORD environment variables. " +
-        "This script never reads credentials from a file -- set both env vars " +
-        "(an admin account, since it needs to create/delete projects) before running it."
-    );
-  }
-  const data = await apiFetch("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-  });
-  accessToken = data.access_token;
-}
+// Remates B, Part 3: the session lives in scripts/prompt-eval/session.mjs
+// -- every request that gets a 401 logs in again once and repeats itself
+// (the correction round and the Proposal check too); an unrecoverable
+// session stops the pass (SessionLostError), never a case.
+const client = createEvalClient({ api: API, email: EMAIL, password: PASSWORD });
+const apiFetch = (p, options) => client.apiFetch(p, options);
+const login = () => client.login();
 
 async function createProject(standard) {
   const project = await apiFetch("/api/projects", {
@@ -969,9 +948,8 @@ async function runExtractCase(project, aiProvider, _createdBrdp, testCase) {
   const data = fs.readFileSync(path.join(REPO_ROOT, testCase.file));
   const form = new FormData();
   form.append("file", new Blob([data], { type: "application/xml" }), path.basename(testCase.file));
-  const res = await fetch(`${API}/api/projects/${project.id}/ai-extract/parse`, {
+  const res = await client.rawFetch(`/api/projects/${project.id}/ai-extract/parse`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}` },
     body: form,
   });
   if (!res.ok) throw new Error(`parse -> ${res.status}: ${await res.text()}`);
@@ -1096,6 +1074,14 @@ async function runCaseOnce(project, aiProvider, createdBrdp, testCase) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // Remates B, Part 3: --cleanup deletes the "Prompt Eval — …" projects left
+  // by earlier passes (one that stopped mid-way, an older version without
+  // re-login), lists them, and ends.
+  if (args.cleanup) {
+    await login();
+    await cleanupLeftoverProjects(client);
+    return;
+  }
   const casesFile = args.casesPath ? path.resolve(args.casesPath) : CASES_PATH;
   const { cases } = JSON.parse(fs.readFileSync(casesFile, "utf8"));
   // Templates round: a case can take its BRDP and rule from a row of a
@@ -1174,9 +1160,12 @@ async function main() {
           const failed = checkResults.filter((c) => c.result.status === "fail").length;
           console.log(failed === 0 ? "ok" : `${failed} check(s) failed`);
         } catch (err) {
+          // A lost session stops the pass: never a quality failure of the case.
+          if (err instanceof SessionLostError) throw err;
           caseResult.runs.push({ run, error: err.message });
           console.log(`ERROR: ${err.message}`);
         }
+        if (client.lost) throw client.lost;
       }
       results.push(caseResult);
     }
@@ -1187,7 +1176,7 @@ async function main() {
         await deleteProject(project.id);
         console.log(`Cleaned up temp project for ${standard}`);
       } catch (err) {
-        console.error(`WARNING: failed to delete temp project ${project.id} (${standard}): ${err.message}`);
+        console.error(`WARNING: failed to delete temp project ${project.id} (${standard}): ${err.message} -- run again with --cleanup to delete it.`);
       }
     }
   }
@@ -1341,6 +1330,10 @@ function writeReport(results, runs, meta) {
 }
 
 main().catch((err) => {
-  console.error("FATAL:", err);
+  // A login or session problem is a clear message, not a stack trace.
+  if (err instanceof LoginError || err instanceof SessionLostError) {
+    console.error(`\nSTOPPED: ${err.message}`);
+    if (err instanceof SessionLostError) console.error("The pass was stopped; no report was written for it. Run it again.");
+  } else console.error("FATAL:", err);
   process.exit(1);
 });
