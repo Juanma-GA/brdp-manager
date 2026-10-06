@@ -3,20 +3,25 @@
 // npm run check:all  -- the same plus the backend tests
 //
 // The steps run one after another and stop at the first failure (the rest
-// are listed as "not run"). Each step's own output is kept quiet while it
+// are listed as "not run"); with --keep-going every step runs and the
+// summary lists every failure (npm run check -- --keep-going). Each step's own output is kept quiet while it
 // passes; when one fails, its last lines are shown. The run ends with a
 // one-screen summary -- every step with its result, a short detail and its
 // time -- and, if everything passed, the line "TODO OK".
 //
 // Plain Node, no shell syntax: the same command on Windows (PowerShell) and
 // Linux. Exit code: 0 all passed; otherwise the failing step's (2 = the
-// environment is missing something: backend Python, test database).
+// environment is missing something: backend Python, test database; with
+// --keep-going, 1 if any step really failed, else 2). The summary also
+// says which Python ran the steps that need one (its full path, and
+// whether it is backend/.venv or a system Python).
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { duration, rule, runProcess, seconds, tail } from './lib/checkReport.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const all = process.argv.includes('--all');
+const keepGoing = process.argv.includes('--keep-going');
 const node = process.execPath;
 
 const steps = [
@@ -76,10 +81,10 @@ const command = all ? 'check:all' : 'check';
 console.log(`npm run ${command}: ${steps.map((s) => s.name).join(', ')}`);
 const started = Date.now();
 const results = [];
-let failed = null;
+const failures = [];
 
 for (const step of steps) {
-  if (failed) {
+  if (failures.length && !keepGoing) {
     results.push({ step, status: 'not run' });
     continue;
   }
@@ -94,15 +99,24 @@ for (const step of steps) {
   }
   console.log(`${status} (${seconds(res.ms)})`);
   results.push({ step, status, ms: res.ms, detail, res });
-  if (status !== 'OK') failed = results[results.length - 1];
+  if (status !== 'OK') failures.push(results[results.length - 1]);
 }
 
-if (failed) {
+for (const failed of failures) {
   console.log('');
   console.log(rule('-'));
   const lines = failed.step.failureLines?.(failed.res.output) || [];
   console.log(lines.length ? `${failed.step.name}: errors` : `${failed.step.name}: last lines of its output`);
   for (const line of (lines.length ? lines : tail(failed.res.output, 40)).slice(-40)) console.log(`  ${line}`);
+}
+
+// "Python: <path> (<kind>)" as test:js and test:backend print it.
+const pythons = [];
+for (const r of results) {
+  for (const m of (r.res?.output || '').matchAll(/^Python: (.+?)(?: -- .*)?\r?$/gm)) {
+    const line = `${m[1]}  [${r.step.name}]`;
+    if (!pythons.some((p) => p.startsWith(m[1]))) pythons.push(line);
+  }
 }
 
 const total = Date.now() - started;
@@ -116,8 +130,11 @@ for (const r of results) {
   console.log(`  ${r.step.name.padEnd(width)}  ${r.status.padEnd(9)}${time}${detail}`);
 }
 console.log(`  total: ${duration(total)}`);
-if (failed) {
-  console.log(`RESULT: FAILED at ${failed.step.name}`);
-  process.exit(failed.res.code || 1);
+for (const p of pythons) console.log(`  Python: ${p}`);
+if (failures.length) {
+  const realFailure = failures.find((f) => f.status === 'FAIL');
+  console.log(`RESULT: FAILED at ${failures.map((f) => f.step.name).join(', ')}`);
+  if (!keepGoing) process.exit(failures[0].res.code || 1);
+  process.exit(realFailure ? realFailure.res.code || 1 : 2);
 }
 console.log('TODO OK');

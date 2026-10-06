@@ -13,6 +13,9 @@
 // Options:
 //   --timeout <seconds>   per file (default 180, or $JS_TEST_TIMEOUT_SECONDS).
 //                         A file that runs longer is killed and reported.
+//                         The slowest file takes about 12 s on the Linux
+//                         dev environment; on a Windows laptop 4-5 times
+//                         that (~60 s): 180 leaves a margin of 3.
 //   <text> ...            only the files whose name contains one of them.
 //
 // Tests that read the curated Excel templates or a BREX/Schematron go
@@ -23,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findBackendPython } from './lib/backendPython.mjs';
+import { describePython, findBackendPython } from './lib/backendPython.mjs';
 import { duration, rule, runProcess, seconds, tail } from './lib/checkReport.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
@@ -83,12 +86,15 @@ if (!files.length) {
 
 const pythonFiles = new Set(files.filter((f) => needsBackendPython(path.join(SCRIPTS, f))));
 let pythonProblem = null;
+let pythonUsed = null;
 if (pythonFiles.size) {
   const found = findBackendPython({ modules: ['openpyxl', 'lxml'] });
   if (!found.python) pythonProblem = found.reason;
+  else pythonUsed = describePython(found);
 }
 
 console.log(`JS tests: ${files.length} files (scripts/test-*.mjs), up to ${seconds(timeoutMs)} each`);
+if (pythonUsed) console.log(`Python: ${pythonUsed} -- for the ${pythonFiles.size} files that read Excel or BREX/Schematron`);
 const width = Math.max(...files.map((f) => f.length));
 const results = [];
 const started = Date.now();
@@ -128,6 +134,7 @@ for (const r of failed) {
 console.log('');
 console.log(rule());
 console.log(`JS tests: ${passed.length} OK, ${failed.length} failed, ${skipped.length} not run, in ${duration(total)}`);
+if (pythonUsed) console.log(`Python: ${pythonUsed}`);
 if (failed.length) console.log(`  Failed: ${failed.map((r) => r.file + (r.status === 'timeout' ? ' (timeout)' : '')).join(', ')}`);
 if (skipped.length) {
   console.log(`  Not run (environment, not an app failure): ${skipped.length} files need the backend's Python.`);

@@ -19,12 +19,16 @@
 // (no Python with pytest, test database missing, down or not migrated) or
 // if TEST_DATABASE_URL must not be used (the app's database, no "_test").
 // A suite that runs longer than $BACKEND_TEST_TIMEOUT_SECONDS (default
-// 1800) is killed and reported.
+// 3600) is killed and reported. The suite takes about 7 min on the Linux
+// dev environment and 4-5 times that on a Windows laptop (~30-35 min):
+// one hour never cuts it falsely there, and still ends a hung run.
+// The summary says which Python ran it (the backend's virtualenv or a
+// system Python on the PATH).
 import path from 'node:path';
-import { BACKEND_DIR, findBackendPython, pythonEnv } from './lib/backendPython.mjs';
+import { BACKEND_DIR, describePython, findBackendPython, pythonEnv } from './lib/backendPython.mjs';
 import { duration, rule, runProcess, tail } from './lib/checkReport.mjs';
 
-const timeoutMs = (Number(process.env.BACKEND_TEST_TIMEOUT_SECONDS) || 1800) * 1000;
+const timeoutMs = (Number(process.env.BACKEND_TEST_TIMEOUT_SECONDS) || 3600) * 1000;
 const extraArgs = process.argv.slice(2);
 const started = Date.now();
 
@@ -45,6 +49,7 @@ if (!found.python) {
   );
 }
 
+const pythonLine = `Python: ${describePython(found)}`;
 const db = await runProcess(found.python, [path.join('scripts', 'check_test_db.py')], { cwd: BACKEND_DIR, env: pythonEnv(), timeoutMs: 60_000 });
 const dbLine = tail(db.output, 1)[0] || `exit ${db.code}`;
 if (db.code !== 0) {
@@ -55,9 +60,11 @@ if (db.code !== 0) {
   };
   const lines = [`Backend tests: not run -- ${dbLine}`];
   if (hints[db.code]) lines.push(hints[db.code]);
+  lines.push(pythonLine);
   finish(lines, 'RESULT: INCOMPLETE (environment)', 2);
 }
 console.log(dbLine);
+console.log(pythonLine);
 console.log(`Backend tests: ${found.python} -m pytest -q ${extraArgs.join(' ')}`.trimEnd());
 
 const res = await runProcess(found.python, ['-m', 'pytest', '-q', ...extraArgs], {
@@ -69,7 +76,7 @@ const res = await runProcess(found.python, ['-m', 'pytest', '-q', ...extraArgs],
 const total = Date.now() - started;
 
 if (res.timedOut) {
-  finish([`Backend tests: killed after ${duration(timeoutMs)} (BACKEND_TEST_TIMEOUT_SECONDS).`], 'RESULT: FAILED', 1);
+  finish([`Backend tests: killed after ${duration(timeoutMs)} (BACKEND_TEST_TIMEOUT_SECONDS).`, pythonLine], 'RESULT: FAILED', 1);
 }
 
 // pytest's last line: "764 passed, 3 warnings in 151.20s (0:02:31)".
@@ -77,7 +84,7 @@ const counts = tail(res.output, 15)
   .reverse()
   .find((l) => /\b\d+ (passed|failed|errors?|skipped|deselected)\b|no tests ran/.test(l));
 const summary = counts ? counts.replace(/^=+\s*|\s*=+$/g, '') : `pytest exit code ${res.code}`;
-const lines = [`Backend tests: ${summary} (total ${duration(total)})`];
+const lines = [`Backend tests: ${summary} (total ${duration(total)})`, pythonLine];
 if (res.code !== 0) {
   const failedTests = res.output
     .split(/\r?\n/)
