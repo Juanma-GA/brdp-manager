@@ -24,6 +24,13 @@ def _ids(n):
     return [f"BRDP-S1-{x:05d}" for x in numbers]
 
 
+def _own(standard):
+    """One catalog row of the project's own standard: "its catalog is
+    loaded", the precondition of the other-edition lookup."""
+    (filler,) = _ids(1)
+    return (standard, filler, "own", "d")
+
+
 @pytest.fixture
 async def catalog_rows():
     """Seeds catalog rows: list of (standard, identifier, title, definition);
@@ -149,7 +156,7 @@ async def test_identifier_only_in_another_edition_imports_with_its_texts_warning
 
 async def test_empty_excel_texts_are_filled_from_the_other_edition(client, make_project, catalog_rows):
     (other,) = _ids(1)
-    await catalog_rows([("S1000D 4.1", other, "4.1 title", "4.1 definition")])
+    await catalog_rows([_own("S1000D 4.2"), ("S1000D 4.1", other, "4.1 title", "4.1 definition")])
     project, headers = await make_project("S1000D 4.2")
     rows = [_row(2, other, title="", definition="")]
     analyzed = await _analyze(client, project, headers, rows)
@@ -161,7 +168,7 @@ async def test_empty_excel_texts_are_filled_from_the_other_edition(client, make_
 
 async def test_existing_brdp_keeps_today_rule_and_still_shows_the_edition(client, make_project, catalog_rows):
     (other,) = _ids(1)
-    await catalog_rows([("S1000D 4.1", other, "4.1 title", "4.1 definition")])
+    await catalog_rows([_own("S1000D 4.2"), ("S1000D 4.1", other, "4.1 title", "4.1 definition")])
     project, headers = await make_project("S1000D 4.2")
     async with async_session_factory() as session:
         brdp = BRDP(project_id=project.id, identifier=other, title="Old", definition="Old", proposal="Old", validation="Pending")
@@ -181,6 +188,7 @@ async def test_existing_brdp_keeps_today_rule_and_still_shows_the_edition(client
 async def test_closest_edition_and_newer_edition_in_an_older_project(client, make_project, catalog_rows):
     a, b = _ids(2)
     await catalog_rows([
+        _own("S1000D 4.1"),
         # a: in 3.0.1 and 4.2 → for a 4.1 project, 4.2 is the closest (0.1 vs 1.0x).
         ("S1000D 3.0.1", a, "3.0.1 title", "d"),
         ("S1000D 4.2", a, "4.2 title", "d"),
@@ -245,6 +253,7 @@ async def test_ai_extract_finds_the_excel_import_and_the_excel_finds_ai_extract(
     the Excel, and its History event is not repeated."""
     from_excel, from_extract = _ids(2)
     await catalog_rows([
+        _own("S1000D 4.2"),
         ("S1000D 4.1", from_excel, "4.1 A", "d A"),
         ("S1000D 4.1", from_extract, "4.1 B", "d B"),
     ])

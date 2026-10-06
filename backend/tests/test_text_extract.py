@@ -380,6 +380,10 @@ async def test_another_editions_catalog_identifier_named_in_the_text():
         project = Project(name=f"Text 4.2 {uuid.uuid4()}", standard="S1000D 4.2")
         session.add(project)
         session.add(BRDPCatalog(standard="S1000D 4.1", identifier=only41, title="Title 4.1", definition="Def 4.1"))
+        # The project's own catalog must be loaded for the other-edition
+        # lookup to run: one row of it, never relying on the real catalog.
+        own42 = f"BRDP-S1-{(n + 1) % 90000 + 10000:05d}"
+        session.add(BRDPCatalog(standard="S1000D 4.2", identifier=own42, title="Own", definition="Own"))
         await session.commit()
         try:
             candidates = build_text_candidates(f"{only41}: footnotes shall not be used.", [{"quote": "footnotes shall not be used.", "title": "Footnotes"}])
@@ -389,6 +393,7 @@ async def test_another_editions_catalog_identifier_named_in_the_text():
             assert (c["title"], c["definition"]) == ("Title 4.1", "Def 4.1") and c["ai_fields"] == ["proposal"]
         finally:
             await session.execute(BRDPCatalog.__table__.delete().where(BRDPCatalog.identifier == only41, BRDPCatalog.standard == "S1000D 4.1"))
+            await session.execute(BRDPCatalog.__table__.delete().where(BRDPCatalog.identifier == own42, BRDPCatalog.standard == "S1000D 4.2"))
             await session.delete(await session.get(Project, project.id))
             await session.commit()
 

@@ -13,6 +13,7 @@
     "check:prompts": "node scripts/check-prompt-snapshot.mjs",
     "lint:templates": "node scripts/lint-curated-templates.mjs",
     "test:backend": "node scripts/run-backend-tests.mjs",
+    "test:db:create": "node scripts/create-test-db.mjs",
     "check": "node scripts/run-checks.mjs",
     "check:all": "node scripts/run-checks.mjs --all"
   },

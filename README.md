@@ -52,6 +52,8 @@ alembic upgrade head
 python scripts/create_admin_user.py
 ```
 
+The backend tests never use that database: they need one of their own, created once from the repo root with `npm run test:db:create` (see "Comprobaciones").
+
 `requirements-dev.lock.txt` is for development and tests (pytest, `pip-system-certs`); a server installs `requirements.lock.txt` instead (no dev tools). Both are valid on Windows and Linux: platform-only packages carry a marker (`colorama` only on Windows, `uvloop` never on Windows) and every package has its hashes for all platforms. The app is not installed as a package: the backend runs from `backend/` (`uvicorn app.main:app`, `alembic`, `pytest` all start there).
 
 ### Updating the backend lockfiles
@@ -99,12 +101,34 @@ npm run check:all
 ```
 
 - `npm run check` -- lint, build, tests JS (`scripts/test-*.mjs`), snapshot de prompts y lint de las plantillas, parando en el primer fallo.
-- `npm run check:all` -- lo mismo más los tests del backend (pytest). Necesita Postgres arrancado (Linux: `service postgresql start`; Windows con Docker: `docker start brdp-postgres`) y la base migrada (`alembic upgrade head`).
+- `npm run check:all` -- lo mismo más los tests del backend (pytest), que necesitan su **propia base de datos** (abajo).
 - Por partes: `npm run lint`, `npm run build`, `npm run test:js`, `npm run check:prompts`, `npm run lint:templates`, `npm run test:backend`. Con `--` se pasan opciones: `npm run test:js -- rule-test` (solo esos ficheros), `npm run test:backend -- -k similar -x` (opciones de pytest).
 
-Cada comando termina con un resumen (qué pasó, qué falló, cuánto tardó) y, si todo pasa, con la línea `TODO OK`. Código de salida: 0 todo bien, 1 algo falla, 2 falta algo del entorno (el Python del backend o la base de datos), que no es un fallo de la app.
+Cada comando termina con un resumen (qué pasó, qué falló, cuánto tardó) y, si todo pasa, con la línea `TODO OK`. Código de salida: 0 todo bien, 1 algo falla, 2 falta algo del entorno (el Python del backend o la base de datos de tests), que no es un fallo de la app.
 
-El Python del backend se busca en `backend/.venv` (`Scripts\python.exe` en Windows, `bin/python` en Linux); otro se indica con la variable `BACKEND_PYTHON` (PowerShell: `$env:BACKEND_PYTHON = "C:\ruta\python.exe"`; Linux: `export BACKEND_PYTHON=/ruta/python`). La base de datos de los tests es la de `DATABASE_URL` (`backend/.env`).
+El Python del backend se busca en `backend/.venv` (`Scripts\python.exe` en Windows, `bin/python` en Linux); otro se indica con la variable `BACKEND_PYTHON` (PowerShell: `$env:BACKEND_PYTHON = "C:\ruta\python.exe"`; Linux: `export BACKEND_PYTHON=/ruta/python`).
+
+### La base de datos de los tests
+
+Los tests del backend crean y borran proyectos, usuarios, catálogo y reglas, así que **nunca usan la base de la app** (`DATABASE_URL`, la de trabajo, con los proyectos reales y los catálogos cargados). Usan `TEST_DATABASE_URL` (variable de entorno o `backend/.env`), y solo si su nombre termina en `_test` y no es la base de la app (también si apunta a ella con otro nombre de máquina: `localhost`, `127.0.0.1` y `::1` cuentan como la misma). Si no, no se ejecuta ningún test y se dice por qué en una línea. Lo comprueba el propio pytest (`backend/tests/conftest.py`), así que vale también al lanzar `pytest` a mano.
+
+Se crea una vez, en el mismo servidor de Postgres que la app:
+
+```bash
+npm run test:db:create
+```
+
+Crea `brdp_manager_test` (o la base de `TEST_DATABASE_URL`, si ya está definida), activa pgvector y aplica las migraciones; si ya existe, solo la pone al día (después de añadir una migración, basta volver a lanzarlo). La primera vez añade la línea `TEST_DATABASE_URL=...` a `backend/.env` (mismo servidor, usuario y contraseña que `DATABASE_URL`). Si el usuario de la base no puede crear bases de datos o activar extensiones, lo dice y muestra el SQL que debe ejecutar un administrador (también como `docker exec brdp-postgres psql ...`).
+
+Windows con Postgres en Docker (`brdp-postgres`), desde la raíz del repo, en PowerShell:
+
+```powershell
+docker start brdp-postgres
+npm run test:db:create      # solo la primera vez (o tras una migración nueva)
+npm run check:all
+```
+
+Los scripts de navegador (`scripts/verify-*.mjs`) y el juego de pruebas de prompts (`scripts/run-prompt-eval.mjs`) **no** usan la base de tests: hablan con el backend que esté arrancado, y ese backend usa su `DATABASE_URL`. Si se lanzan contra la base de trabajo, crean (y en general borran al terminar) sus propios proyectos ahí.
 
 ## Troubleshooting: Corporate Network / SSL-Inspecting Proxy
 

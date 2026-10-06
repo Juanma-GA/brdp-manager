@@ -6,14 +6,18 @@
 //    backend/.venv (bin/python on Linux, Scripts\python.exe on Windows),
 //    else python3/python (scripts/lib/backendPython.mjs).
 // 2. Checks the test database in one line (backend/scripts/check_test_db.py):
-//    the database of DATABASE_URL (environment or backend/.env), reachable
-//    and migrated. If not, says so and stops -- never hundreds of errors.
+//    TEST_DATABASE_URL (environment or backend/.env) -- never the app's
+//    DATABASE_URL --, its name ending in "_test", reachable and migrated.
+//    If not, says so and stops -- never hundreds of errors. pytest itself
+//    applies the same refusal (backend/tests/conftest.py), so a hand-run
+//    pytest is protected too.
 // 3. Runs `python -m pytest -q` in backend/, showing its output as it goes,
 //    and ends with a short summary.
 //
 // Extra arguments go to pytest: npm run test:backend -- -k similar -x
 // Exit code: pytest's (0 all passed); 2 if the environment is missing
-// (no Python with pytest, database down or not migrated).
+// (no Python with pytest, test database missing, down or not migrated) or
+// if TEST_DATABASE_URL must not be used (the app's database, no "_test").
 // A suite that runs longer than $BACKEND_TEST_TIMEOUT_SECONDS (default
 // 1800) is killed and reported.
 import path from 'node:path';
@@ -44,11 +48,14 @@ if (!found.python) {
 const db = await runProcess(found.python, [path.join('scripts', 'check_test_db.py')], { cwd: BACKEND_DIR, timeoutMs: 60_000 });
 const dbLine = tail(db.output, 1)[0] || `exit ${db.code}`;
 if (db.code !== 0) {
-  const hint =
-    db.code === 4
-      ? 'Run the migrations: cd backend; alembic upgrade head (with the backend venv active).'
-      : 'Start Postgres (Linux: service postgresql start; Windows/Docker: docker start brdp-postgres) or set DATABASE_URL.';
-  finish([`Backend tests: not run -- ${dbLine}`, hint], 'RESULT: INCOMPLETE (environment)', 2);
+  const hints = {
+    3: 'Start Postgres (Linux: service postgresql start; Windows/Docker: docker start brdp-postgres); if the test database does not exist yet: npm run test:db:create',
+    4: 'Bring the test database up to date: npm run test:db:create',
+    6: 'Point TEST_DATABASE_URL (environment or backend/.env) to a database of its own whose name ends in _test: npm run test:db:create creates brdp_manager_test.',
+  };
+  const lines = [`Backend tests: not run -- ${dbLine}`];
+  if (hints[db.code]) lines.push(hints[db.code]);
+  finish(lines, 'RESULT: INCOMPLETE (environment)', 2);
 }
 console.log(dbLine);
 console.log(`Backend tests: ${found.python} -m pytest -q ${extraArgs.join(' ')}`.trimEnd());
