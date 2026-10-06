@@ -505,6 +505,78 @@ function samePathProblem(a, b) {
   return a.kind === b.kind && a.element === b.element && a.parent === b.parent && a.attribute === b.attribute && a.ruleId === b.ruleId && a.path === b.path && a.inPredicate === b.inPredicate && a.predicate === b.predicate;
 }
 
+// ─── "any <figure>" instead of "its <figure>" (Mejoras D, Part 2) ──────────
+//
+// BRDP-EXT-02815 (3.0.1): //figure//legend/deflist/term[not(. =
+// //figure//graphic//hotspot/@apsname)]. Inside the predicate, //figure is
+// EVERY <figure> of the document, not the one that contains the <term>: in
+// a document with two figures, a <term> that only matches a hotspot of the
+// OTHER figure is accepted. The decision said "de su <figure>"
+// (ancestor::figure). Warned when, inside a predicate of a step, an
+// absolute path (/ or //) goes through an element X that is a step of the
+// main path BEFORE that step (an ancestor of the checked node) and is not
+// the document's root. BREX only (3.0.1 and 4.x); needs no schema graph.
+// Never an error: it blocks nothing and changes no verdict.
+// → [{ kind: 'anyAncestor', ancestor, looked, checked, operand, predicate,
+//      ruleId, path, fix }]
+// fix, only for the simple form -- the absolute path starts with //X (X
+// with or without its own predicate): { kind: 'ancestor_axis', from:
+// '//figure//graphic//hotspot/@apsname', to:
+// 'ancestor::figure//graphic//hotspot/@apsname' }.
+const DOCUMENT_ROOTS = new Set(['dmodule', 'pm', 'dml', 'ddn', 'comment', 'dataUpdateFile', 'scormContentPackage', 'icnMetadataFile', 'update']);
+const BREX_FORMATS = new Set(['BREX-4.2', 'BREX-4.1', 'BREX-3.0.1']);
+
+export function checkAncestorAbsolutePaths(ruleXml, format, options = {}) {
+  if (!BREX_FORMATS.has(format)) return [];
+  const out = [];
+  for (const part of rulePathParts(ruleXml, format, options)) {
+    const operands = part.condition ? pathOperands(part.path) : [part.path];
+    for (const alternative of operands.flatMap((op) => pathAlternatives(op))) {
+      const { absolute, steps } = pathSteps(alternative);
+      steps.forEach((step, i) => {
+        if (step.kind !== 'element' || step.predicates.length === 0) return;
+        const before = steps.slice(0, i).filter((s) => s.kind === 'element');
+        const rootName = absolute && steps[0]?.sep === '/' && steps[0].kind === 'element' ? steps[0].name : null;
+        const ancestors = new Set(before.map((s) => s.name).filter((n) => n !== rootName && !DOCUMENT_ROOTS.has(n)));
+        if (ancestors.size === 0) return;
+        for (const pred of step.predicates) {
+          for (const operand of pathOperands(pred)) {
+            if (!operand.startsWith('/')) continue;
+            for (const absPath of pathAlternatives(operand)) {
+              const inner = pathSteps(absPath).steps;
+              const through = inner.find((s) => s.kind === 'element' && ancestors.has(s.name) && s.name !== step.name);
+              if (!through) continue;
+              const elements = inner.filter((s) => s.kind === 'element');
+              const looked = elements.length ? elements[elements.length - 1].name : through.name;
+              const first = inner[0];
+              const simple = first && first === through && first.sep === '//' && first.kind === 'element';
+              const text = absPath.replace(/\s+/g, ' ').trim();
+              const problem = {
+                kind: 'anyAncestor',
+                ancestor: through.name,
+                looked,
+                checked: step.name,
+                operand: text,
+                predicate: pred.replace(/\s+/g, ' ').trim(),
+                ruleId: part.ruleId,
+                path: part.path,
+                fix: simple ? { kind: 'ancestor_axis', from: text, to: `ancestor::${text.slice(2)}` } : null,
+              };
+              if (!out.some((q) => q.ruleId === problem.ruleId && q.path === problem.path && q.operand === problem.operand && q.ancestor === problem.ancestor)) out.push(problem);
+            }
+          }
+        }
+      });
+    }
+  }
+  return out;
+}
+
+export function formatAncestorProblem(p, t) {
+  const key = p.looked === p.ancestor ? 'records.rulePath.anyAncestorSelf' : 'records.rulePath.anyAncestor';
+  return t(key, { ancestor: p.ancestor, looked: p.looked, checked: p.checked });
+}
+
 // ─── Fixes (a button, never on their own) ───────────────────────────────────
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -525,6 +597,8 @@ export function applyRulePathFix(ruleXml, fix) {
     const names = fix.from.split('/');
     pattern = new RegExp(`(?<![\\w.:-])${names.map(escapeRe).join('\\s*/\\s*')}(?![\\w.:-])`, 'g');
     replacement = fix.to;
+  } else if (fix.kind === 'ancestor_axis') {
+    return applyAncestorAxisFix(text, fix);
   } else return { xml: text, changed: false };
   let changed = false;
   const rewrite = (inner) =>
@@ -535,6 +609,50 @@ export function applyRulePathFix(ruleXml, fix) {
   const out = text
     .replace(/(<(?:[\w.-]+:)?(objectPath|objpath)\b[^>]*>)([\s\S]*?)(<\/(?:[\w.-]+:)?\2\s*>)/g, (_m, open, _n, inner, close) => open + rewrite(inner) + close)
     .replace(/(<(?:[\w.-]+:)?rule\b[^>]*?\scontext\s*=\s*)("[^"]*"|'[^']*')/g, (_m, before, value) => before + value[0] + rewrite(value.slice(1, -1)) + value[0]);
+  return { xml: out, changed };
+}
+
+// Mejoras D, Part 2.3: //X… → ancestor::X… inside the predicates of the
+// rule's paths only (never the main path's own //X, never objectUse). The
+// operand is matched with any whitespace and with <, >, & escaped or not.
+function applyAncestorAxisFix(text, fix) {
+  const pieces = fix.from.split('');
+  const source = pieces
+    .map((ch, i) => {
+      if (i === 0) return escapeRe(ch);
+      if (/\s/.test(ch)) return '\\s+';
+      if (ch === '<') return '(?:<|&lt;)';
+      if (ch === '>') return '(?:>|&gt;)';
+      if (ch === '&') return '(?:&|&amp;)';
+      if (ch === '/' || ch === '[' || ch === ']' || ch === '(' || ch === ')' || ch === '=') return `\\s*${escapeRe(ch)}\\s*`;
+      return escapeRe(ch);
+    })
+    .join('');
+  const pattern = new RegExp(`(?<![\\w.:/-])${source}(?![\\w.:-])`, 'g');
+  let changed = false;
+  const rewrite = (inner) => {
+    // the bracket depth at each position, outside string literals
+    const depth = [];
+    let d = 0;
+    let quote = '';
+    for (let i = 0; i < inner.length; i += 1) {
+      depth.push(d);
+      const ch = inner[i];
+      if (quote) {
+        if (ch === quote) quote = '';
+        continue;
+      }
+      if (ch === "'" || ch === '"') quote = ch;
+      else if (ch === '[') d += 1;
+      else if (ch === ']') d -= 1;
+    }
+    return inner.replace(pattern, (match, offset) => {
+      if (!(depth[offset] > 0)) return match;
+      changed = true;
+      return `ancestor::${match.replace(/^\/\s*\/\s*/, '')}`; // the match starts at the operand's first "/"
+    });
+  };
+  const out = text.replace(/(<(?:[\w.-]+:)?(objectPath|objpath)\b[^>]*>)([\s\S]*?)(<\/(?:[\w.-]+:)?\2\s*>)/g, (_m, open, _n, inner, close) => open + rewrite(inner) + close);
   return { xml: out, changed };
 }
 
@@ -587,6 +705,7 @@ export function formatPathProblem(p, t, { format = null } = {}) {
 
 export function formatPathFix(fix, t) {
   if (!fix) return '';
+  if (fix.kind === 'ancestor_axis') return t('records.rulePath.fixAncestorAxis', { from: fix.from, to: fix.to });
   if (fix.kind === 'descendant_root') return t('records.rulePath.fixDescendantRoot', { from: fix.from, to: fix.to });
   return t('records.rulePath.fixRemoveSteps', { count: fix.removed.length, removed: fix.removed.map((n) => `<${n}>`).join(', ') });
 }

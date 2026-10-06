@@ -32,13 +32,20 @@ const BREX_4X_PATH_NAMES = `6. Inside objectPath, write element and attribute na
    Correct: <objectPath allowedObjectFlag="0">//acmeElement</objectPath>
    Wrong:   <objectPath allowedObjectFlag="0">//&lt;acmeElement&gt;</objectPath>`;
 
+// Rule 7 of the BREX blocks (Mejoras D, Part 2.5): BRDP-EXT-02815 wrote
+// //figure//legend/deflist/term[not(. = //figure//graphic//hotspot/@apsname)]
+// for "de su <figure>" -- //figure inside the condition is every figure of
+// the document, not the term's own.
+const brexOwnAncestor = (pathElement) => `7. When the decision relates an element to another one of "its" X (its <figure>, the <table> it is in), reach X inside the condition of ${pathElement} with ancestor::X, never with //X: //X is every X of the document.`;
+
 const BREX_42 = `FORMAT — S1000D Issue 4.2 BREX: <structureObjectRule> elements (normally one).
 1. Normally output one <structureObjectRule id="{ID}" brSeverityLevel="brsl01">. When the Proposal makes several independent requirements, write one <structureObjectRule> per requirement, with ids {ID}-1, {ID}-2…, each with its own <objectPath> and its <objectUse>; never two <objectPath> in one rule. Never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <brDecisionRef brDecisionIdentNumber="{ID}"/> → <objectPath> → <objectUse> → <objectValue> (zero or more). brDecisionRef carries the ID as an ATTRIBUTE, never as text.
 3. Exactly ONE <objectPath> per rule. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
 ${BREX_4X_OBJECT_USE}
 ${BREX_4X_VALUE_LIST}
-${BREX_4X_PATH_NAMES}`;
+${BREX_4X_PATH_NAMES}
+${brexOwnAncestor('objectPath')}`;
 
 const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: <structureObjectRule> elements (normally one).
 1. Normally output one <structureObjectRule id="{ID}">. When the Proposal makes several independent requirements, write one <structureObjectRule> per requirement, with ids {ID}-1, {ID}-2…, each with its own <objectPath> and its <objectUse>; never two <objectPath> in one rule. Never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
@@ -46,7 +53,8 @@ const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: <structureObjectRule> element
 3. Exactly ONE <objectPath> per rule. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
 ${BREX_4X_OBJECT_USE}
 ${BREX_4X_VALUE_LIST}
-${BREX_4X_PATH_NAMES}`;
+${BREX_4X_PATH_NAMES}
+${brexOwnAncestor('objectPath')}`;
 
 // 3.0.1 gets the same reinforcement, adapted: objappl only has 0/1 (no
 // "optional") and is optional itself in the 3.0.1 BREX schema -- the real
@@ -64,7 +72,8 @@ const BREX_301 = `FORMAT — S1000D Issue 3.0.1 BREX: <objrule> elements (normal
    <objval valtype="single" val1="ac02"/>
 6. Inside objpath, write element and attribute names bare, exactly as in XPath — no angle brackets and no escaping: //emphasis, //@emph. &lt;name&gt; is only for objuse text, never for objpath. &lt; and &amp; are used in objpath only for a literal < or & that belongs to the expression itself (the less-than operator, or an & inside a string), e.g. //para[count(x) &lt; 3]. Example (invented element, not from this BRDP):
    Correct: <objpath objappl="0">//acmeElement</objpath>
-   Wrong:   <objpath objappl="0">//&lt;acmeElement&gt;</objpath>`;
+   Wrong:   <objpath objappl="0">//&lt;acmeElement&gt;</objpath>
+${brexOwnAncestor('objpath')}`;
 
 function schDita(standard) {
   const queryBinding = queryBindingForStandard(standard);
