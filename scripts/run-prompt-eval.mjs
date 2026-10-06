@@ -103,6 +103,7 @@ import { candidatesToDraft, draftCandidates } from "../src/utils/ruleExtractDraf
 import { findDecisions } from "../src/utils/textExtract.js";
 import { FIND_DECISIONS_USER_MESSAGE } from "../src/prompts/extractFromTextPrompt.js";
 import { UNFILLED_MARKER_RE } from "../src/utils/proposalMarkers.js";
+import { readTextFile } from "./lib/textFile.mjs";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
@@ -1015,7 +1016,9 @@ async function runExtractCase(project, aiProvider, _createdBrdp, testCase) {
 // The answer reported is the decisions JSON of step 1; the candidates (with
 // their texts) are in the check context.
 async function runExtractTextCase(project, aiProvider, _createdBrdp, testCase) {
-  const text = testCase.textFile ? fs.readFileSync(path.join(REPO_ROOT, testCase.textFile), "utf8") : testCase.text;
+  // readTextFile: LF however git checked the fixture out (the app sends LF:
+  // a pasted text and a .txt/.md read by documentText.js are normalized).
+  const text = testCase.textFile ? readTextFile(path.join(REPO_ROOT, testCase.textFile)) : testCase.text;
   const filename = testCase.textFile ? path.basename(testCase.textFile) : "";
   const { job_id: jobId } = await apiFetch(`/api/projects/${project.id}/ai-extract/text`, { method: "POST", body: JSON.stringify({ text, filename }) });
   let systemPrompt = "";

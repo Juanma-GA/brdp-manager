@@ -24,6 +24,7 @@ import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
 import { chromium } from "playwright-core";
+import { readTextFile } from "../../../lib/textFile.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEXTS = ["guia-estilo-dita-es", "brexdoc-s1000d-en"];
@@ -191,7 +192,7 @@ async function main() {
   try {
     const page = await browser.newPage();
     for (const name of TEXTS) {
-      const md = fs.readFileSync(path.join(HERE, `${name}.md`), "utf8");
+      const md = readTextFile(path.join(HERE, `${name}.md`));
       await writeDocx(md, path.join(HERE, `${name}.docx`));
       await page.setContent(html(md));
       await page.pdf({ path: path.join(HERE, `${name}.pdf`), format: "A4", margin: { top: "20mm", bottom: "20mm", left: "20mm", right: "20mm" } });
@@ -199,7 +200,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  const es = fs.readFileSync(path.join(HERE, `${TEXTS[0]}.md`), "utf8");
+  const es = readTextFile(path.join(HERE, `${TEXTS[0]}.md`));
   const lines = blocks(es).slice(0, 4).flatMap((b) => [...wrap(b.replace(/^#+ /, "").split("\n").join(" ")), ""]);
   protectedPdf(lines, path.join(HERE, "protected.pdf"), "secret");
   scannedPdf(path.join(HERE, "scanned.pdf"));

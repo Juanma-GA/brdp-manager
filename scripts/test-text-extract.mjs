@@ -17,6 +17,7 @@ import {
   parseFindDecisionsResponse,
 } from '../src/prompts/extractFromTextPrompt.js';
 import { LLM_TRUNCATED, truncatedAnswerError } from '../src/api/llmTruncation.js';
+import { readTextFile } from './lib/textFile.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(HERE, 'prompt-eval', 'fixtures', 'text-extract');
@@ -54,7 +55,7 @@ const norm = (s) => s.replace(/\s+/g, ' ').trim();
 
 // ── Reading documents ────────────────────────────────────────────────────
 for (const base of ['guia-estilo-dita-es', 'brexdoc-s1000d-en']) {
-  const md = fs.readFileSync(path.join(FIX, `${base}.md`), 'utf8');
+  const md = readTextFile(path.join(FIX, `${base}.md`));
   const sentences = md
     .split(/\n\s*\n/)
     .map((b) => b.replace(/^#+ /, '').trim())

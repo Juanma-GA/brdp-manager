@@ -22,6 +22,7 @@
 // regenerated, then regenerate expected-prompts.json from the new fixture
 // with `node scripts/check-prompt-snapshot.mjs --update`.
 import { readFileSync } from 'node:fs';
+import { readTextFile } from '../lib/textFile.mjs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
@@ -883,7 +884,9 @@ export const extractFromRulesCases = [
 // set_texts): a new EXT whose Title came from step 1 (the AI writes
 // Definition and Proposal), and a catalog identifier (only the Proposal).
 const TEXT_FIXTURES = new URL('../prompt-eval/fixtures/text-extract/', import.meta.url);
-const textFixture = (name) => readFileSync(new URL(name, TEXT_FIXTURES), 'utf-8');
+// readTextFile: LF however git checked the fixture out (on Windows, CRLF
+// would add a "\r" to every line of the prompt).
+const textFixture = (name) => readTextFile(new URL(name, TEXT_FIXTURES));
 export const findDecisionsCases = [
   { name: 'dita-style-guide-es', args: [{ standard: 'DITA 1.3 Xpath2.0', text: textFixture('guia-estilo-dita-es.md') }] },
   { name: 'brexdoc-en', args: [{ standard: 'S1000D 4.2', text: textFixture('brexdoc-s1000d-en.md') }] },

@@ -19,6 +19,7 @@
 // Plus the edge cases of mergeContextBlocks and of the per-rule decision.
 // Run: node scripts/test-generate-one-block-per-schema.mjs
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { validateXML } from 'xmllint-wasm';
 import { installNodeDom } from './lib/nodeDom.mjs';
 import { extractRules } from './lib/extractRules.mjs';
@@ -109,7 +110,7 @@ function selectionBySchema(doc, schemas) {
 async function roundTrip(file) {
   const path = new URL(`../backend/tests/fixtures/brex/${file}`, import.meta.url);
   const original = fs.readFileSync(path, 'utf8');
-  const extracted = extractRules(path.pathname, 'BREX-4.2', 'S1000D 4.2', '4.2');
+  const extracted = extractRules(fileURLToPath(path), 'BREX-4.2', 'S1000D 4.2', '4.2');
   const withRule = extracted.candidates.filter((c) => c.rule_xml);
   const brdps = withRule.map((c, i) => ({ id: `b${i}`, identifier: c.identifier, validation: 'Validated' }));
   const approvals = new Map(withRule.map((c, i) => [`b${i}`, { brdp_id: `b${i}`, status: 'approved', rule_xml: c.rule_xml }]));

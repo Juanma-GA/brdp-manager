@@ -1,0 +1,29 @@
+# Line endings (Protecciones 1c).
+#
+# On Windows git usually checks text files out with CRLF (core.autocrlf).
+# The files below are compared byte by byte by the checks (prompt snapshot,
+# eval fixtures, test fixtures, expected outputs) or end up in a prompt, so
+# they are LF on every checkout. The readers in scripts/lib/textFile.mjs
+# normalize anyway; this keeps the files themselves identical everywhere.
+# Only these paths: the rest of the repo keeps git's default.
+scripts/prompt-snapshot/**                       text eol=lf
+scripts/prompt-eval/cases.json                   text eol=lf
+scripts/prompt-eval/fixtures/**                  text eol=lf
+scripts/rule-test-fixtures/**                    text eol=lf
+backend/tests/fixtures/**                        text eol=lf
+backend/schema_cards/**                          text eol=lf
+backend/app/services/generic_template_rows.json  text eol=lf
+public/*.json                                    text eol=lf
+
+# Real customer files kept with CRLF on purpose (the import must normalize
+# them): checked out exactly as stored, never converted.
+backend/tests/fixtures/brex/DMC-LHTSTD-A-00-00-00-000A-022A-D_001-00_SX-US.xml  -text
+backend/tests/fixtures/schematron/BRDP-D1_schematron-xpath3.sch                 -text
+
+# Binary: never converted (scanned.pdf is plain bytes git would otherwise
+# take for text and break on Windows).
+*.pdf   binary
+*.doc   binary
+*.docx  binary
+*.xlsx  binary
+*.png   binary
