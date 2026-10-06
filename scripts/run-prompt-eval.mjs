@@ -458,6 +458,17 @@ async function runCheck(check, answer, ctx = {}) {
       const expect = check.expect || [];
       return { status: expect.includes(verdict.kind) ? "pass" : "fail", detail: `engine verdict ${verdict.kind}, expected ${expect.join(" or ")}: ${JSON.stringify(verdict)}` };
     }
+    case "rule_test_some_example_runs": {
+      // Mejoras D, Part 1.1: at least one example runs (valid in its schema)
+      // and the verdict is neither no_runnable nor not_executable -- the
+      // examples could be written where the rule's whole path fits.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: `status ${r?.status || "none"}${r?.reason ? `: ${JSON.stringify(r.reason)}` : ""}` };
+      const ran = r.runs.filter((run) => run.validation.runnable).length;
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
+      const ok = ran > 0 && !["no_runnable", "not_executable"].includes(verdict.kind);
+      return { status: ok ? "pass" : "fail", detail: `${ran}/${r.runs.length} example(s) ran; engine verdict ${verdict.kind}` };
+    }
     case "rule_test_correction_not_contains": {
       // Mejoras B, Part 1: what the correction round sent (every line of
       // every example) never matches `pattern` -- e.g. it never asks an

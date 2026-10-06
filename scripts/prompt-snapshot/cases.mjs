@@ -383,6 +383,9 @@ export const suggestRuleCases = [
 // Test rule (T2): the examples prompt -- a general flag-0 rule with schema
 // facts, a value-list rule, a proced-only rule (third example of another
 // schema), and a 3.0.1 mandatory rule on an absolute path.
+// Mejoras D, Part 1.1 (BRDP-EXT-02816, 3.0.1): <figure> does not go inside
+// <para>, so the content goes in <para0> and the prompt gives the whole way.
+const ruleFigureDef301 = '<objrule id="XML-R-2828"><objpath objappl="0">//figure//legend/deflist/def[not(normalize-space(.) = ancestor::figure//graphic//hotspot/@title)]</objpath><objuse>Prohibir &lt;def&gt; que no coincida con ningun @title de los elementos de tipo &lt;hotspot&gt; de su &lt;figure&gt;</objuse></objrule>';
 const ruleActref301 = '<objrule id="BRDP-EXT-02613"><objpath objappl="0">/dmodule[not(//actref)]</objpath><objuse>BRDP-EXT-02613. Every data module must reference its applicability cross-reference table.</objuse></objrule>';
 const brdpRuleTest = {
   identifier: 'BRDP-TEST-001',
@@ -543,6 +546,20 @@ export const ruleTestExamplesCases = [
         format: 'BREX-3.0.1',
         ruleXml: ruleActref301,
         placements: placementsFor('S1000D 3.0.1', ruleActref301, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Mejoras D, Part 1.1: the insertion point holds the outermost element
+    // of the path (<figure> in <para0>), with the whole way to <def>.
+    name: 'brex-3-0-1-figure-legend-def',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-02816', title: 'Definitions of a figure legend', definition: 'Decide which entries a figure legend may have.', proposal: 'No se admite ningún <def> que no coincida con ningun @title de los elementos de tipo <hotspot> de su <figure>.' },
+        standard: 'S1000D 3.0.1',
+        format: 'BREX-3.0.1',
+        ruleXml: ruleFigureDef301,
+        placements: placementsFor('S1000D 3.0.1', ruleFigureDef301, [['descript', 'rule']]),
       },
     ],
   },

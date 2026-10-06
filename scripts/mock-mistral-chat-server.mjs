@@ -172,6 +172,13 @@ function suggestRuleReply(systemPrompt) {
   if (/<trade>/.test(proposal) && /FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
     return `<objrule id="${id}"><objpath>//reqpers/trade</objpath><objuse>MOCK-RULE: the trade is Mechanic or Electrician.</objuse><objval valtype="single" val1="Mechanic"/><objval valtype="single" val1="Electrician"/></objrule>`;
   }
+  // Mejoras D, Part 2.5 (BRDP-EXT-02815): "de su <figure>". With the prompt's
+  // rule 7 ("reach X … with ancestor::X") the rule says ancestor::figure;
+  // without it, //figure -- the real mistake (every figure of the document).
+  if (/<term>/.test(proposal) && /<hotspot>/.test(proposal) && /FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
+    const own = /with ancestor::X, never with \/\/X/.test(systemPrompt) ? "ancestor::figure" : "//figure";
+    return `<objrule id="${id}"><objpath objappl="0">//figure//legend/deflist/term[not(. = ${own}//graphic//hotspot/@apsname)]</objpath><objuse>MOCK-RULE: every &lt;term&gt; matches a @apsname of a &lt;hotspot&gt; of its &lt;figure&gt;.</objuse></objrule>`;
+  }
   // Suggest Rule part 2: a Proposal naming one of these elements gets a
   // prohibition rule on it (schema-context verification: <emphasis> exists
   // in every 4.2 schema, <partSegment> only in ipd).
@@ -441,6 +448,17 @@ function ruleTestReply(systemPrompt, messages) {
     return answer([
       { label: "Hard time limit (category 1)", expected: "accept", schema: ruleSchema, content: limit("1") },
       { label: "Soft time limit (category 2)", expected: "reject", schema: ruleSchema, content: limit("2") },
+    ]);
+  }
+  // Mejoras D, Part 1.1 (BRDP-EXT-02816, //figure//legend/deflist/def[…]):
+  // a figure written where the prompt says the content goes; its <def>
+  // either matches the @title of a hotspot of the same figure or not.
+  if (/\/\/figure\/\/legend\/deflist\/def/.test(rule)) {
+    const schema = (systemPrompt.match(/- schema "([\w-]+)": your content goes directly inside/) || [])[1] || "descript";
+    const figure = (defs) => `<figure><title>Fuel pump</title><graphic boardno="ICN-EXAMPLE-00001"><hotspot apsid="hs-1" apsname="Pump" title="Pump"/><hotspot apsid="hs-2" apsname="Filter" title="Filter"/></graphic><legend><deflist>${defs.map((d) => `<term>${d}</term><def>${d}</def>`).join("")}</deflist></legend></figure>`;
+    return answer([
+      { label: "Every definition matches a hotspot title of its figure", expected: "accept", schema, content: figure(["Pump", "Filter"]) },
+      { label: "A definition matches no hotspot title", expected: "reject", schema, content: figure(["Pump", "Valve"]) },
     ]);
   }
   // Mejoras C (BRDP-EXT-02613, /dmodule[not(//actref)]): whole documents

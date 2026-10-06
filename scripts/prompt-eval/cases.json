@@ -1023,6 +1023,40 @@
       ]
     },
     {
+      "id": "rule-3-0-1-own-figure-hotspot",
+      "description": "Mejoras D, Part 2.5 (real case BRDP-EXT-02815): \"de su <figure>\" must be ancestor::figure inside the condition, never //figure (every figure of the document).",
+      "standard": "S1000D 3.0.1",
+      "type": "suggest-rule",
+      "brdp": {
+        "identifier": "BRDP-EVAL-MD-B",
+        "title": "Términos de la leyenda de una figura",
+        "definition": "Decidir qué términos admite la leyenda de una figura.",
+        "proposal": "No se admite ningún <term> que no coincida con algun atributo @apsname de los elementos de tipo <hotspot> de su <figure>.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false
+        },
+        {
+          "type": "not_contains",
+          "target": "xpath",
+          "pattern": "\\[[^\\]]*(?<![\\w:])//figure\\b",
+          "note": "no //figure inside a predicate (it would be every figure of the document)"
+        }
+      ]
+    },
+    {
       "id": "rule-dita-xpath2-schematron",
       "description": "Suggest Rule, DITA 1.3 Xpath2.0: one sch:pattern with an assert/report, XPath 2.0 only.",
       "standard": "DITA 1.3 Xpath2.0",
@@ -1719,6 +1753,47 @@
           "target": "description",
           "pattern": "Every document must contain at least one <actref>",
           "note": "Mejoras C, Part 3"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-figure-legend-def",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras D, Part 1.1 (real case BRDP-EXT-02816): <figure> does not go inside <para>; the content must go where <figure> fits (<para0>), with the whole way to <def>. Before, every example was \"<figure> is not allowed inside <para>\" and the verdict was no_runnable.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-MD-A",
+        "title": "Definiciones de la leyenda de una figura",
+        "definition": "Decidir qué definiciones admite la leyenda de una figura.",
+        "proposal": "No se admite ningún <def> que no coincida con ningun @title de los elementos de tipo <hotspot> de su <figure>.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"XML-R-2828\"><objpath objappl=\"0\">//figure//legend/deflist/def[not(normalize-space(.) = ancestor::figure//graphic//hotspot/@title)]</objpath><objuse>Prohibir &lt;def&gt; que no coincida con ningun @title de los elementos de tipo &lt;hotspot&gt; de su &lt;figure&gt;</objuse></objrule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "your content goes directly inside <para0>",
+          "note": "the insertion point holds <figure>"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "para0/figure/legend/deflist/def",
+          "note": "the prompt gives the whole way"
+        },
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_some_example_runs",
+          "note": "at least one example runs, and the verdict is neither no_runnable nor not_executable"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "<def> matching the condition \\[not\\(normalize-space",
+          "note": "the description says the condition"
         }
       ]
     },

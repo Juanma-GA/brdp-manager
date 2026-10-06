@@ -222,6 +222,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+//
+// Mejoras D: Suggest Rule's BREX format rules gain rule 7 ("its X" →
+// ancestor::X in the condition, never //X); changed on purpose: the 7 BREX
+// suggestRule cases. New case ruleTestExamples/brex-3-0-1-figure-legend-def
+// (BRDP-EXT-02816: the content goes in <para0>, which holds <figure>, with
+// the whole way para0/figure/legend/deflist/def). No other prompt changes:
+// no other snapshot case changes its insertion point.
 
 import { buildAskSystemPrompt } from '../src/prompts/askPrompt.js';
 import { buildSuggestDefinitionPrompt } from '../src/prompts/suggestDefinitionPrompt.js';
