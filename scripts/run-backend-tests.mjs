@@ -16,7 +16,8 @@
 //
 // Extra arguments go to pytest: npm run test:backend -- -k similar -x
 // Exit code: pytest's (0 all passed); 2 if the environment is missing
-// (no Python with pytest, test database missing, down or not migrated) or
+// (no Python with pytest, test database missing, down or not migrated, the
+// JWT key pair missing) or
 // if TEST_DATABASE_URL must not be used (the app's database, no "_test").
 // A suite that runs longer than $BACKEND_TEST_TIMEOUT_SECONDS (default
 // 3600) is killed and reported. The suite takes about 7 min on the Linux
@@ -88,7 +89,7 @@ const lines = [`Backend tests: ${summary} (total ${duration(total)})`, pythonLin
 if (res.code !== 0) {
   const failedTests = res.output
     .split(/\r?\n/)
-    .filter((l) => /^(FAILED|ERROR) /.test(l))
+    .filter((l) => /^(FAILED|ERROR) \S+\.py\b/.test(l))
     .map((l) => `  ${l}`);
   lines.push(...failedTests.slice(0, 20));
   if (failedTests.length > 20) lines.push(`  ... and ${failedTests.length - 20} more`);

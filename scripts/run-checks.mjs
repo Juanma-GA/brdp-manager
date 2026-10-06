@@ -111,13 +111,15 @@ for (const failed of failures) {
 }
 
 // "Python: <path> (<kind>)" as test:js and test:backend print it.
-const pythons = [];
+const pythonSteps = new Map();
 for (const r of results) {
   for (const m of (r.res?.output || '').matchAll(/^Python: (.+?)(?: -- .*)?\r?$/gm)) {
-    const line = `${m[1]}  [${r.step.name}]`;
-    if (!pythons.some((p) => p.startsWith(m[1]))) pythons.push(line);
+    const steps = pythonSteps.get(m[1]) || [];
+    if (!steps.includes(r.step.name)) steps.push(r.step.name);
+    pythonSteps.set(m[1], steps);
   }
 }
+const pythons = [...pythonSteps].map(([python, steps]) => `${python}  [${steps.join(', ')}]`);
 
 const total = Date.now() - started;
 const width = Math.max(...steps.map((s) => s.name.length));
