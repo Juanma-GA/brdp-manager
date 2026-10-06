@@ -628,6 +628,9 @@ function ruleFormatReason(ruleXml, format, parseXml) {
     return null;
   }
   const result = checkRuleFormat(ruleXml, format);
+  // Mejoras B, Part 4.3: repeated ids make the BREX invalid, but each rule
+  // still runs -- a stored rule with them is tested as before.
+  if (!result.ok && result.problem.code === 'rule_format_duplicate_ids') return null;
   return result.ok ? null : reason('rule_format', { problem: result.problem.code, ...result.problem.params });
 }
 
@@ -757,7 +760,11 @@ function describePart(part, spec, parseXml) {
   const withValues = values.length > 0;
   if (flag === '0') {
     if (withValues) return { code: 'describe_forbidden_values', params: { target, values, path } };
-    return thresholdStatement(target, path, pathThreshold(path)) || { code: 'describe_forbidden', params: { target, path } };
+    return (
+      thresholdStatement(target, path, pathThreshold(path)) ||
+      intermediateNestingStatement(target, path) ||
+      attributePredicateStatement(path) || { code: 'describe_forbidden', params: { target, path } }
+    );
   }
   if (flag === '1') {
     const split = _splitTopLevel(path);
@@ -902,6 +909,43 @@ export function pathThresholdAnyStep(path) {
   return { ...threshold, stepName, last: i === steps.length - 1, target: pathTarget(path) };
 }
 
+// Mejoras B, Part 4.1 a: a nesting threshold on an earlier step --
+// //proceduralStep[count(ancestor::proceduralStep)=4]/title → "<title> must
+// not appear in a <proceduralStep> at level 5". Only one threshold in one
+// step (pathThresholdAnyStep); other kinds stay as before.
+function intermediateNestingStatement(target, path) {
+  if (!target) return null;
+  const th = pathThresholdAnyStep(path);
+  if (!th || th.last || th.kind !== 'nesting') return null;
+  return { code: 'describe_forbidden_in_nesting', params: { target, path, name: `<${th.name}>`, mode: th.mode, level: th.level } };
+}
+
+// Mejoras B, Part 4.1 b: a single attribute predicate on the last step --
+// //entry[@applicRefId] → "<entry> with @applicRefId must not appear";
+// [not(@a)], [@a = 'v'], [@a != 'v']; a * step names "any child element of
+// <entry>".
+function attributePredicateStatement(path) {
+  const step = lastTopLevelStep(String(path || '').trim());
+  if (!step) return null;
+  const preds = stepPredicateTexts(step);
+  if (preds.length !== 1) return null;
+  const attr = attributePredicate(preds[0]);
+  if (!attr) return null;
+  const bare = step.replace(/\[[\s\S]*$/, '').trim().replace(/^child::/, '');
+  let target = null;
+  let childOf = null;
+  if (bare === '*') {
+    const steps = topLevelSteps(withoutPredicates(path)) || [];
+    const parent = steps.length > 1 ? steps[steps.length - 2].replace(/^(?:child|descendant|descendant-or-self)::/, '') : null;
+    if (!parent || !/^[A-Za-z_][\w.:-]*$/.test(parent)) return null;
+    childOf = `<${parent}>`;
+  } else {
+    target = pathTarget(path);
+    if (!target || target.startsWith('@')) return null;
+  }
+  return { code: 'describe_forbidden_attr', params: { target, childOf, path, attr: `@${attr.attr}`, kind: attr.kind, value: attr.value ?? '' } };
+}
+
 function thresholdStatement(target, path, threshold) {
   if (!threshold || !target) return null;
   const base = { target, path, op: threshold.op, amount: threshold.n };
@@ -912,6 +956,7 @@ function thresholdStatement(target, path, threshold) {
 }
 
 const CAN_REJECT = new Set([
+  'describe_forbidden_in_nesting', 'describe_forbidden_attr',
   'describe_forbidden_nesting', 'describe_forbidden_ancestors', 'describe_forbidden_children', 'describe_forbidden_length',
   'describe_condition_forbidden', 'describe_condition_required',
   'describe_forbidden', 'describe_forbidden_values', 'describe_mandatory', 'describe_mandatory_values',

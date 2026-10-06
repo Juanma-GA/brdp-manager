@@ -71,6 +71,7 @@ _MESSAGES = {
     "rule_format_other_format": "<{element}> belongs to a {otherFormat} rule, not to a {format} rule",
     "rule_format_foreign": "<{element}> is not part of a {format} rule",
     "rule_format_multiple": "A <{element}> can only have one <{child}>; this one has {count}",
+    "rule_format_duplicate_ids": "Several <{element}> have the same id ({ids}); each rule needs its own id",
 }
 
 # Mejoras A, Part 3: one path and one use per rule element (brex4.2.xsd /
@@ -154,6 +155,15 @@ def check_rule_format(root: etree._Element, format: str) -> dict | None:
                 count = sum(1 for c in el if isinstance(c.tag, str) and _local(c.tag) == child)
                 if count > 1:
                     return fail("rule_format_multiple", element=rule_name, child=child, count=count)
+        # Mejoras B, Part 4.3: a rule element's id is xs:ID -- one per rule.
+        # Mirror of duplicateRuleIds() in src/utils/ruleSplit.js.
+        seen: dict[str, int] = {}
+        for el in root.iter():
+            if isinstance(el.tag, str) and _local(el.tag) == rule_name and el.get("id"):
+                seen[el.get("id")] = seen.get(el.get("id"), 0) + 1
+        duplicated = [i for i, n in seen.items() if n > 1]
+        if duplicated:
+            return fail("rule_format_duplicate_ids", element=rule_name, ids=", ".join(duplicated))
     if texts:
         return fail("rule_format_text", text=_clip(texts[0]))
     return None

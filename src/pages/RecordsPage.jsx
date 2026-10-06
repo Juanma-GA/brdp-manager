@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { numberDuplicateRuleIds, splitMultiPathRules } from '../utils/ruleSplit.js';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
@@ -511,6 +512,8 @@ export default function RecordsPage() {
   // Guardar la prueba aprobada: the kept passed test shown for this BRDP.
   const [savedTestOpenFor, setSavedTestOpenFor] = useState(null);
   const [ruleDraftText, setRuleDraftText] = useState('');
+  // Mejoras B, Part 4.2-4.3: what "Split into N rules" / "Number the ids" did.
+  const [ruleEditorNote, setRuleEditorNote] = useState(null);
   const [ruleBusy, setRuleBusy] = useState(false);
   const [ruleValidationError, setRuleValidationError] = useState(null);
   // Distinct from ruleValidationError above: that one is ONLY for the
@@ -1046,6 +1049,7 @@ export default function RecordsPage() {
 
   const openRuleEditor = () => {
     setRuleDraftText(ruleApproval?.rule_xml || '');
+    setRuleEditorNote(null);
     setRuleValidationError(null);
     setRuleSaveError(null);
     setRuleEditing(true);
@@ -1105,6 +1109,7 @@ export default function RecordsPage() {
   const ruleDraftFormat =
     ruleEditing && ruleDraftText.trim() && checkWellFormed(ruleDraftText).valid ? checkRuleFormat(ruleDraftText, ruleFormat) : null;
   const ruleDraftBlocked = ruleEditing && (!ruleDraftText.trim() || (ruleDraftFormat && !ruleDraftFormat.ok));
+  const ruleDraftSplit = ruleDraftFormat?.problem?.code === 'rule_format_multiple' ? splitMultiPathRules(ruleDraftText, ruleFormat) : { total: 0 };
   // The names of the draft's XPath against the vocabulary, with the near
   // names / other standards of the ones that do not exist: warning lines
   // only, never block Save and never a one-click fix (the XML is edited by
@@ -1944,6 +1949,40 @@ export default function RecordsPage() {
                     issues={ruleFormatIssues(ruleDraftFormat)}
                     testIds={Object.fromEntries(ruleFormatIssues(ruleDraftFormat).map((i) => [i.code, 'rule-editor-format-error']))}
                   />
+                  {/* Mejoras B, Part 4.2-4.3: the fix next to the warning, never
+                      applied on its own -- the person clicks it. */}
+                  {ruleDraftFormat?.problem?.code === 'rule_format_multiple' && ruleDraftSplit.total > 0 && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      data-testid="rule-editor-split"
+                      onClick={() => {
+                        setRuleDraftText(ruleDraftSplit.xml);
+                        setRuleEditorNote(t('records.assistant.ruleSplit', { count: ruleDraftSplit.total, path: ruleFormat === 'BREX-3.0.1' ? 'objpath' : 'objectPath' }));
+                      }}
+                    >
+                      {t('records.assistant.splitRulesButton', { count: ruleDraftSplit.total })}
+                    </button>
+                  )}
+                  {ruleDraftFormat?.problem?.code === 'rule_format_duplicate_ids' && (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      data-testid="rule-editor-number-ids"
+                      onClick={() => {
+                        const numbered = numberDuplicateRuleIds(ruleDraftText, ruleFormat);
+                        setRuleDraftText(numbered.xml);
+                        setRuleEditorNote(numbered.renamed.map((r) => t('records.assistant.ruleIdsNumbered', { id: r.id, ids: r.to.join(', ') })).join(' '));
+                      }}
+                    >
+                      {t('records.assistant.numberIdsButton')}
+                    </button>
+                  )}
+                  {ruleEditorNote && (
+                    <p className={styles.hint} data-testid="rule-editor-note">
+                      {ruleEditorNote}
+                    </p>
+                  )}
                   <SchemaIssueLines
                     issues={nameIssues(ruleDraftNames, 'rule', { standard: project.standard, hints: ruleDraftNameHints })}
                     testIds={NAME_HINT_TEST_IDS}

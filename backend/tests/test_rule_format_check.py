@@ -24,9 +24,11 @@ RULE_42 = (
     "<objectUse>No emphasis.</objectUse></structureObjectRule>"
 )
 NON_CONTEXT_42 = '<nonContextRule id="BRDP-X-2"><simplePara>Follow the style guide.</simplePara></nonContextRule>'
+# Mejoras B, Part 4.3: the copy in the context block has its own id (a rule
+# id is xs:ID; wrapRuleInSchemaContexts writes {id}-{schema}).
 CONTEXT_42 = (
     '<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">'
-    f"<structureObjectRuleGroup>{RULE_42}</structureObjectRuleGroup></contextRules>"
+    f"<structureObjectRuleGroup>{RULE_42.replace('BRDP-X-1', 'BRDP-X-1-proced')}</structureObjectRuleGroup></contextRules>"
 )
 RULE_301 = '<objrule id="BRDP-X-3"><objpath objappl="0">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>'
 PATTERN_DITA = (
@@ -223,4 +225,50 @@ async def test_put_rejects_a_rule_with_two_object_paths(client, editor_and_proje
     res = await client.put(url, json={"rule_xml": TWO_PATHS_42, "source": "llm"}, headers=headers)
     assert res.status_code == 422
     assert res.json()["detail"] == "A <structureObjectRule> can only have one <objectPath>; this one has 2"
+    assert (await client.get(url, headers=headers)).json() is None
+
+
+# Mejoras B, Part 4.3: a rule element's id is xs:ID -- one per rule. Same
+# check as checkRuleFormat's rule_format_duplicate_ids (src/validation).
+DUP_IDS_42 = (
+    '<structureObjectRule id="R"><objectPath allowedObjectFlag="0">//a</objectPath><objectUse>u</objectUse></structureObjectRule>'
+    '<structureObjectRule id="R"><objectPath allowedObjectFlag="0">//b</objectPath><objectUse>v</objectUse></structureObjectRule>'
+)
+
+
+@pytest.mark.parametrize(
+    "xml, fmt, message",
+    [
+        (DUP_IDS_42, "BREX-4.2", "Several <structureObjectRule> have the same id (R); each rule needs its own id"),
+        (
+            f'<contextRules rulesContext="x.xsd"><structureObjectRuleGroup>{DUP_IDS_42}</structureObjectRuleGroup></contextRules>',
+            "BREX-4.1",
+            "Several <structureObjectRule> have the same id (R); each rule needs its own id",
+        ),
+        (
+            '<objrule id="R"><objpath objappl="0">//a</objpath><objuse>u</objuse></objrule>'
+            '<objrule id="R"><objpath objappl="0">//b</objpath><objuse>v</objuse></objrule>',
+            "BREX-3.0.1",
+            "Several <objrule> have the same id (R); each rule needs its own id",
+        ),
+    ],
+)
+def test_duplicate_rule_ids_are_reported(xml, fmt, message):
+    problem = _check(xml, fmt)
+    assert problem is not None
+    assert problem["code"] == "rule_format_duplicate_ids"
+    assert problem["message"] == message
+
+
+def test_different_rule_ids_are_fine():
+    assert _check(DUP_IDS_42.replace('id="R"', 'id="R-1"', 1), "BREX-4.2") is None
+
+
+async def test_put_rejects_a_rule_with_duplicate_ids(client, editor_and_project):
+    project, headers = editor_and_project
+    brdp = (await client.post(f"/api/projects/{project.id}/brdps", json={"identifier": "BRDP-FMT-3"}, headers=headers)).json()
+    url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-4.2"
+    res = await client.put(url, json={"rule_xml": DUP_IDS_42, "source": "llm"}, headers=headers)
+    assert res.status_code == 422
+    assert res.json()["detail"] == "Several <structureObjectRule> have the same id (R); each rule needs its own id"
     assert (await client.get(url, headers=headers)).json() is None

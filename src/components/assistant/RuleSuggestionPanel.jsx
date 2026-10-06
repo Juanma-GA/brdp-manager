@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
 import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
-import { finalRuleXml, ruleSplitNote, validateRuleXml } from '../../hooks/useSuggestions';
+import { finalRuleXml, ruleIdsNote, ruleSplitNote, validateRuleXml } from '../../hooks/useSuggestions';
 import { NAME_HINT_TEST_IDS, extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
 import SchemaIssueLines from './SchemaIssueLines';
 import RuleLintWarnings from './RuleLintWarnings';
@@ -99,6 +99,17 @@ function RuleSplitNote({ split }) {
   );
 }
 
+// Mejoras B, Part 4.3: rules with the same id were numbered {id}-1 … {id}-N.
+export function RuleIdsNote({ renamed }) {
+  const { t } = useTranslation();
+  if (!renamed || renamed.length === 0) return null;
+  return (
+    <p className={styles.hint} data-testid="rule-ids-note">
+      {renamed.map((r) => t('records.assistant.ruleIdsNumbered', { id: r.id, ids: r.to.join(', ') })).join(' ')}
+    </p>
+  );
+}
+
 function ReferenceGroup({ title, candidates, entry, onToggleReference, danger, showScore }) {
   if (candidates.length === 0) return null;
   const list = (
@@ -159,6 +170,7 @@ export default function RuleSuggestionPanel({
   const pastedFinal = pasted ? finalRuleXml(entry, pasted) : '';
   const pastedValidation = pasted ? validateRuleXml(pastedFinal, vocabulary, entry.format) : null;
   const pastedSplit = pasted ? ruleSplitNote(entry, pasted) : null;
+  const pastedIds = pasted ? ruleIdsNote(entry, pasted) : null;
   const hasSchemas = (entry.schemas || []).length > 0;
 
   // Coverage of the pasted rule's element names, for the per-schema
@@ -214,6 +226,7 @@ export default function RuleSuggestionPanel({
         <>
           <div className={styles.suggestionCode}>{entry.text}</div>
           <RuleSplitNote split={entry.split} />
+          <RuleIdsNote renamed={entry.idsRenamed} />
           <RuleValidationWarnings validation={generatedValidation} standard={standard} proposal={brdp?.proposal ?? null} />
           <SchemaCoverageWarnings ruleXml={entry.text} entry={entry} />
         </>
@@ -308,6 +321,7 @@ export default function RuleSuggestionPanel({
             </>
           )}
           <RuleSplitNote split={pastedSplit} />
+          <RuleIdsNote renamed={pastedIds} />
           {pastedValidation && <RuleValidationWarnings validation={pastedValidation} standard={standard} proposal={brdp?.proposal ?? null} />}
           {pasted && <SchemaCoverageWarnings ruleXml={pastedFinal} entry={entry} />}
           {pasted && (

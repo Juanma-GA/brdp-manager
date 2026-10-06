@@ -8,7 +8,7 @@ import { sendMessage } from '../api/llmAPI';
 import { buildSuggestDefinitionPrompt } from '../prompts/suggestDefinitionPrompt.js';
 import { buildSuggestProposalPrompt } from '../prompts/suggestProposalPrompt.js';
 import { SUGGEST_TEMPERATURE } from '../prompts/shared.js';
-import { splitMultiPathRules } from '../utils/ruleSplit.js';
+import { numberDuplicateRuleIds, splitMultiPathRules } from '../utils/ruleSplit.js';
 import { buildCopyablePrompt, buildSuggestRulePrompt, parseSuggestRuleResponse, SUGGEST_RULE_USER_MESSAGE } from '../prompts/suggestRulePrompt.js';
 import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
@@ -35,7 +35,8 @@ const SCHEMA_CONTEXT_MAX_NAMES = 30;
 // panel says so with ruleSplitNote) -- before the wrapper, so each new rule
 // gets its context blocks.
 export function finalRuleXml(entry, ruleXml) {
-  const split = splitMultiPathRules(ruleXml, entry.format).xml;
+  // Mejoras B, Part 4.3: split first, then number repeated ids.
+  const split = numberDuplicateRuleIds(splitMultiPathRules(ruleXml, entry.format).xml, entry.format).xml;
   const schemas = entry.schemas || [];
   if (schemas.length === 0 || hasSchemaContextBlock(split)) return split;
   return wrapRuleInSchemaContexts(split, entry.format, entry.standard, schemas, entry.schemaLocation);
@@ -45,6 +46,13 @@ export function finalRuleXml(entry, ruleXml) {
 export function ruleSplitNote(entry, ruleXml) {
   const { total } = splitMultiPathRules(ruleXml, entry.format);
   return total > 0 ? { count: total, path: entry.format === 'BREX-3.0.1' ? 'objpath' : 'objectPath' } : null;
+}
+
+// Mejoras B, Part 4.3: [{ id, to: [ids] }] when finalRuleXml numbered
+// repeated rule ids, else null.
+export function ruleIdsNote(entry, ruleXml) {
+  const { renamed } = numberDuplicateRuleIds(splitMultiPathRules(ruleXml, entry.format).xml, entry.format);
+  return renamed.length ? renamed : null;
 }
 import { ruleStateOf } from '../utils/ruleState';
 import { cleanInternalNames } from '../utils/answerCleanup.js';
@@ -383,10 +391,11 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
         // vocabulary check still runs.
         const text = finalRuleXml(ruleBase, parsed.xml);
         const split = ruleSplitNote(ruleBase, parsed.xml);
+        const idsRenamed = ruleIdsNote(ruleBase, parsed.xml);
         const coverageByName = schemas.length
           ? await fetchMissingCoverage(extractRuleNames(parsed.xml).elements, ruleBase.coverageByName)
           : ruleBase.coverageByName;
-        commit({ ...ruleBase, coverageByName, text, split });
+        commit({ ...ruleBase, coverageByName, text, split, idsRenamed });
       }
     } catch (err) {
       // Docs request's explicit edge case: an error entry still gets a

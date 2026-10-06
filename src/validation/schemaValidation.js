@@ -23,7 +23,7 @@
 //      table and one formatter -- the texts each panel showed before.
 import fontoxpath from 'fontoxpath';
 import { wrapRuleXmlFragment } from '../utils/ruleXmlFragment.js';
-import { multiplePathOrUse } from '../utils/ruleSplit.js';
+import { duplicateRuleIds, multiplePathOrUse } from '../utils/ruleSplit.js';
 
 // ═══ 1-3. BRDP text: vocabulary, free-text extraction, contrast ════════════
 
@@ -1914,7 +1914,8 @@ function scanTopLevel(xml) {
 // { checked, ok, problem: { code, params } | null } for a well-formed rule
 // fragment. Codes: rule_format_other_format, rule_format_wrapper,
 // rule_format_empty_block, rule_format_foreign, rule_format_missing,
-// rule_format_multiple {element, child, count}, rule_format_text.
+// rule_format_multiple {element, child, count}, rule_format_duplicate_ids
+// {element, ids}, rule_format_text.
 export function checkRuleFormat(ruleXml, format) {
   const shape = RULE_FORMAT_SHAPES[format];
   if (!shape) return { checked: false, ok: true, problem: null };
@@ -1950,6 +1951,9 @@ export function checkRuleFormat(ruleXml, format) {
   // BREX XSDs); a rule split mechanically (ruleSplit.js) never gets here.
   const multiple = multiplePathOrUse(ruleXml || '', format);
   if (multiple) return fail('rule_format_multiple', multiple);
+  // Mejoras B, Part 4.3: a rule element's id is xs:ID -- one per rule.
+  const duplicate = duplicateRuleIds(ruleXml || '', format);
+  if (duplicate) return fail('rule_format_duplicate_ids', { element: duplicate.element, ids: duplicate.ids.join(', ') });
   const text = top.find((n) => n.kind === 'text');
   if (text) return fail('rule_format_text', { text: text.text.length > 60 ? `${text.text.slice(0, 59)}…` : text.text });
   return { checked: true, ok: true, problem: null };
@@ -1992,6 +1996,7 @@ export const SCHEMA_ISSUE_KEYS = {
     rule_format_other_format: 'records.assistant.ruleFormat.otherFormat',
     rule_format_foreign: 'records.assistant.ruleFormat.foreign',
     rule_format_multiple: 'records.assistant.ruleFormat.multiple',
+    rule_format_duplicate_ids: 'records.assistant.ruleFormat.duplicateIds',
   },
   answer: {
     names_not_found: 'records.assistant.answerUnknownNames',

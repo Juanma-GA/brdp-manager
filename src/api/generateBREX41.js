@@ -1,7 +1,7 @@
 import { ruleEnters } from '../utils/generatePlan.js';
 import { checkWellFormed, pendingApprovalComment } from "./generateBREX.js";
 import { mergeContextBlocks, splitRuleXmlPieces } from "../utils/ruleWrappers.js";
-import { splitApprovedRulesMultiPath } from "../utils/ruleSplit.js";
+import { numberApprovedRulesDuplicateIds, splitApprovedRulesMultiPath } from "../utils/ruleSplit.js";
 import { countEmptySchemaContextBlocks, rewriteApprovedRulesSchemaUrls, schemaContextUrl, schemaLocationOf, setDmoduleSchemaLocation } from "../utils/ruleSchemaContext.js";
 
 let _schemaSummaryCache41 = null;
@@ -368,6 +368,7 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
   const schemaLocation = schemaLocationOf(projectConfig, 'S1000D 4.1');
   let schemaUrls = { location: schemaLocation, rewritten: [], unrecognized: [], mixed: [] };
   let multiPath = { split: [], invalid: [] };
+  let duplicateIds = { numbered: [], clashes: [] };
   const schemaRewrite = (list) => {
     const r = rewriteApprovedRulesSchemaUrls(
       list.map((b) => ({ id: b.id, identifier: b.identifier || b.id, xml: approvalById.get(b.id).rule_xml })),
@@ -379,7 +380,10 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
     // Mejoras A, Part 3: one objectPath per rule element in the output.
     const s = splitApprovedRulesMultiPath(r.rules, 'BREX-4.1');
     multiPath = s.multiPath;
-    return s.rules;
+    // Mejoras B, Part 4.3: one id per rule element (xs:ID).
+    const d = numberApprovedRulesDuplicateIds(s.rules, 'BREX-4.1');
+    duplicateIds = d.duplicateIds;
+    return d.rules;
   };
 
   let finalXml = buildEmptyDocument41(projectConfig, schemaSummary);
@@ -407,5 +411,5 @@ export async function generateBREX41(brdps, projectConfig, options = {}) {
   // attribute -- but reported if an empty one ever reaches the output.
   const emptyContextBlocks = countEmptySchemaContextBlocks(finalXml);
 
-  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks, multiPath };
+  return { xml: finalXml, valid, error, brdpCount: targetBRDPs.length, ruleCount: approvedBRDPs.length, schemaUrls, emptyContextBlocks, multiPath, duplicateIds };
 }

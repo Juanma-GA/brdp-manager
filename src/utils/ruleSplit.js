@@ -207,3 +207,92 @@ export function splitApprovedRulesMultiPath(rules, format) {
   });
   return { rules: out, multiPath: { split, invalid } };
 }
+
+// ─── Duplicate ids (Mejoras B, Part 4.3) ────────────────────────────────────
+// A rule element's id is xs:ID in the three BREX XSDs: two rules with the
+// same id make the BREX invalid. Real case: Suggest Rule on
+// rule-4-2-two-decisions-levels-and-title answered two <structureObjectRule>
+// with the same id. The ids of the rule elements of one fragment:
+//   duplicateRuleIds(ruleXml, format) → { element, ids: [id] } | null
+export function duplicateRuleIds(ruleXml, format) {
+  const shape = SHAPES[format];
+  if (!shape) return null;
+  const found = ruleElements(String(ruleXml ?? ''), shape.rule) || [];
+  const seen = new Map();
+  for (const rule of found) {
+    const id = ID_ATTR_RE.exec(rule.openTag)?.[3];
+    if (id) seen.set(id, (seen.get(id) || 0) + 1);
+  }
+  const ids = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+  return ids.length ? { element: shape.rule, ids } : null;
+}
+
+// Every rule element sharing a duplicated id gets {id}-1 … {id}-N, in
+// document order, skipping ids already used in the fragment ("next free").
+// Text-based: only those id attributes change.
+//   numberDuplicateRuleIds(ruleXml, format) → { xml, renamed: [{ id, to: [ids] }] }
+export function numberDuplicateRuleIds(ruleXml, format) {
+  const source = String(ruleXml ?? '');
+  const dup = duplicateRuleIds(source, format);
+  if (!dup) return { xml: source, renamed: [] };
+  const shape = SHAPES[format];
+  const found = (ruleElements(source, shape.rule) || []).sort((a, b) => a.start - b.start);
+  const usedIds = new Set([...source.matchAll(/\sid\s*=\s*["']([^"']*)["']/g)].map((m) => m[1]));
+  const next = new Map();
+  const renamed = new Map();
+  const edits = [];
+  for (const rule of found) {
+    const m = ID_ATTR_RE.exec(rule.openTag);
+    if (!m || !dup.ids.includes(m[3])) continue;
+    const id = m[3];
+    let n = next.get(id) || 1;
+    while (usedIds.has(`${id}-${n}`)) n += 1;
+    const newId = `${id}-${n}`;
+    usedIds.add(newId);
+    next.set(id, n + 1);
+    if (!renamed.has(id)) renamed.set(id, []);
+    renamed.get(id).push(newId);
+    const openTag = rule.openTag.replace(ID_ATTR_RE, (_x, pre, q) => `${pre}${q}${newId}${q}`);
+    edits.push({ start: rule.start, end: rule.openEnd, text: openTag });
+  }
+  let xml = '';
+  let at = 0;
+  for (const e of edits) {
+    xml += source.slice(at, e.start) + e.text;
+    at = e.end;
+  }
+  xml += source.slice(at);
+  return { xml, renamed: [...renamed].map(([id, to]) => ({ id, to })) };
+}
+
+// Generate (Mejoras B, Part 4.3): before this, a stored rule with two rule
+// elements sharing an id was written as it is and the BREX was invalid
+// against its XSD (xs:ID) while the application's own check said "valid";
+// only the server-side XSD validation showed it, as a libxml2 message. Now,
+// in the output only (the stored rule never changes): duplicates WITHIN one
+// BRDP's rule are numbered ({id}-1 …); the same id in rules of DIFFERENT
+// BRDPs is reported (never renamed -- which one to rename is the person's
+// decision): { rules, duplicateIds: { numbered: [{ identifier, ids }],
+// clashes: [{ id, identifiers }] } }.
+export function numberApprovedRulesDuplicateIds(rules, format) {
+  const numbered = [];
+  const out = rules.map((rule) => {
+    const r = numberDuplicateRuleIds(rule.xml, format);
+    if (r.renamed.length) numbered.push({ identifier: rule.identifier, ids: r.renamed.map((x) => x.id) });
+    return { ...rule, xml: r.xml };
+  });
+  const shape = SHAPES[format];
+  const owners = new Map();
+  if (shape) {
+    for (const rule of out) {
+      for (const el of ruleElements(String(rule.xml ?? ''), shape.rule) || []) {
+        const id = ID_ATTR_RE.exec(el.openTag)?.[3];
+        if (!id) continue;
+        if (!owners.has(id)) owners.set(id, new Set());
+        owners.get(id).add(rule.identifier);
+      }
+    }
+  }
+  const clashes = [...owners].filter(([, set]) => set.size > 1).map(([id, set]) => ({ id, identifiers: [...set] }));
+  return { rules: out, duplicateIds: { numbered, clashes } };
+}

@@ -149,7 +149,19 @@ export function formatRuleStatement(statement, schemas, t) {
     if (statement.code === 'describe_forbidden_children') values.childWord = t(`records.ruleTest.describe.childWord.${params.op === 'eq' && params.amount === 1 ? 'one' : 'other'}`);
     if (statement.code === 'describe_forbidden_length') values.lengthText = t(`records.ruleTest.describe.length.${params.op}`, { n: params.amount });
   }
-  let text = t(`records.ruleTest.describe.${statement.code}`, { ...values, defaultValue: statement.code });
+  // Mejoras B, Part 4.1.
+  if (statement.code === 'describe_forbidden_in_nesting') {
+    values.levels = t(`records.ruleTest.describe.inLevel.${params.mode}`, { level: params.level });
+  }
+  if (statement.code === 'describe_forbidden_attr') {
+    values.subject = params.childOf ? t('records.ruleTest.describe.anyChildOf', { parent: params.childOf }) : params.target;
+    values.condition = t(`records.ruleTest.describe.attrCondition.${params.kind}`, { attr: params.attr, value: params.value });
+  }
+  // "The nodes selected by …" is plural: its own sentence where the verb
+  // agrees (Mejoras B, Part 4.1 c).
+  const nodesKey = !params.target && 'target' in params ? `records.ruleTest.describe.${statement.code}_nodes` : null;
+  const nodesText = nodesKey ? t(nodesKey, { ...values, defaultValue: '' }) : '';
+  let text = nodesText || t(`records.ruleTest.describe.${statement.code}`, { ...values, defaultValue: statement.code });
   // Schematron: a role="warning"/"info" check never rejects (T4).
   if (params.warning) text = t('records.ruleTest.describe.schWarning', { text });
   else if (params.constant) text = t('records.ruleTest.describe.schConstant', { text });

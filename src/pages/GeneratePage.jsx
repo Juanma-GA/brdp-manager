@@ -444,6 +444,36 @@ export default function GeneratePage() {
             </details>
           )}
 
+          {/* Mejoras B, Part 4.3: rule ids are xs:ID -- the same id in two
+              BRDPs makes the BREX invalid (reported, never renamed); within
+              one BRDP the output numbers them. */}
+          {result.xml && result.duplicateIds?.clashes?.length > 0 && (
+            <details className={styles.xsdSection} open data-testid="duplicate-ids-clash">
+              <summary className={styles.badgeError}>
+                ⚠ {t('generate.duplicateIdsClash', { count: result.duplicateIds.clashes.length })}
+              </summary>
+              <p className={styles.hint}>{t('generate.duplicateIdsClashHint')}</p>
+              <ul className={styles.errorList}>
+                {result.duplicateIds.clashes.map((c) => (
+                  <li key={c.id}>{t('generate.duplicateIdsClashItem', { id: c.id, identifiers: c.identifiers.join(', ') })}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {result.xml && result.duplicateIds?.numbered?.length > 0 && (
+            <details className={styles.xsdSection} data-testid="duplicate-ids-numbered">
+              <summary className={styles.badgePending}>
+                {t('generate.duplicateIdsNumbered', { count: result.duplicateIds.numbered.length })}
+              </summary>
+              <ul className={styles.errorList}>
+                {result.duplicateIds.numbered.map((r) => (
+                  <li key={r.identifier}>{t('generate.duplicateIdsNumberedItem', { identifier: r.identifier, ids: r.ids.join(', ') })}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {result.xml && result.emptyContextBlocks > 0 && (
             <details className={styles.xsdSection} open data-testid="empty-context-blocks">
               <summary className={styles.badgePending}>

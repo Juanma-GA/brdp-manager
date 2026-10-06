@@ -86,7 +86,9 @@ for (const lang of ['en', 'es']) {
   const RULE_42 =
     '<structureObjectRule id="BRDP-X-1"><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>';
   const NON_CONTEXT_42 = '<nonContextRule id="BRDP-X-2"><simplePara>Follow the style guide.</simplePara></nonContextRule>';
-  const CONTEXT_42 = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd"><structureObjectRuleGroup>${RULE_42}</structureObjectRuleGroup></contextRules>`;
+  // Mejoras B, Part 4.3: the copy in the context block has its own id
+  // (a rule id is xs:ID; wrapRuleInSchemaContexts writes {id}-{schema}).
+  const CONTEXT_42 = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd"><structureObjectRuleGroup>${RULE_42.replace('BRDP-X-1', 'BRDP-X-1-proced')}</structureObjectRuleGroup></contextRules>`;
   const RULE_301 = '<objrule id="BRDP-X-3"><objpath objappl="0">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>';
   const PATTERN_DITA =
     '<sch:pattern id="p1"><sch:rule context="note"><sch:assert id="a1" test="@type">Type.</sch:assert></sch:rule></sch:pattern>';
@@ -199,6 +201,28 @@ check('React keys unique', new Set(keys).size === keys.length);
   const sb = splitMultiPathRules(inBlock, 'BREX-4.2');
   check('split inside a context block', sb.total === 2 && crf(sb.xml, 'BREX-4.2').ok && sb.xml.startsWith('<contextRules rulesContext="x.xsd"><structureObjectRuleGroup>'));
   check('split: Schematron untouched', splitMultiPathRules('<sch:pattern/>', 'SCH-DITA').total === 0);
+
+  // Mejoras B, Part 4.3: duplicate rule ids (xs:ID).
+  const dupIds = '<structureObjectRule id="R"><objectPath allowedObjectFlag="0">//a</objectPath><objectUse>u</objectUse></structureObjectRule>\n<structureObjectRule id="R"><objectPath allowedObjectFlag="0">//b</objectPath><objectUse>v</objectUse></structureObjectRule>';
+  const fd = crf(dupIds, 'BREX-4.2');
+  check('duplicate ids: format error', fd.problem?.code === 'rule_format_duplicate_ids' && fd.problem.params.ids === 'R', JSON.stringify(fd));
+  check('duplicate ids: text EN/ES', formatSchemaIssue(ruleFormatIssues(fd)[0], en) === 'Several <structureObjectRule> have the same id (R); each rule needs its own id' && formatSchemaIssue(ruleFormatIssues(fd)[0], es) === 'Varias <structureObjectRule> tienen el mismo id (R); cada regla necesita su propio id');
+  check('duplicate ids 3.0.1', crf('<objrule id="R"><objpath objappl="0">//a</objpath><objuse>u</objuse></objrule><objrule id="R"><objpath objappl="0">//b</objpath><objuse>v</objuse></objrule>', 'BREX-3.0.1').problem?.code === 'rule_format_duplicate_ids');
+  check('duplicate ids: two objectPath come first', crf(`${R186}${R186}`, 'BREX-4.2').problem?.code === 'rule_format_multiple');
+  const { numberDuplicateRuleIds, numberApprovedRulesDuplicateIds } = await import('../src/utils/ruleSplit.js');
+  const nd = numberDuplicateRuleIds(dupIds, 'BREX-4.2');
+  check('number ids: R-1, R-2 and valid', /id="R-1"[\s\S]*id="R-2"/.test(nd.xml) && crf(nd.xml, 'BREX-4.2').ok && JSON.stringify(nd.renamed) === '[{"id":"R","to":["R-1","R-2"]}]', JSON.stringify(nd));
+  const used = `${dupIds}<structureObjectRule id="R-1"><objectPath allowedObjectFlag="0">//c</objectPath><objectUse>w</objectUse></structureObjectRule>`;
+  const nu = numberDuplicateRuleIds(used, 'BREX-4.2');
+  check('number ids: next free when {id}-n is used', JSON.stringify(nu.renamed[0].to) === '["R-2","R-3"]' && crf(nu.xml, 'BREX-4.2').ok, JSON.stringify(nu.renamed));
+  check('number ids: single rule unchanged', numberDuplicateRuleIds('<structureObjectRule id="R"><objectPath>//a</objectPath><objectUse>u</objectUse></structureObjectRule>', 'BREX-4.2').renamed.length === 0);
+  // split first, then number: two objectPath in two rules with the same id
+  const both = `${R186}\n${R186}`;
+  const bothFixed = numberDuplicateRuleIds(splitMultiPathRules(both, 'BREX-4.2').xml, 'BREX-4.2').xml;
+  check('split then number: 4 rules, all ids different, valid', (bothFixed.match(/<structureObjectRule\b/g) || []).length === 4 && new Set([...bothFixed.matchAll(/ id="([^"]+)"/g)].map((m) => m[1])).size === 4 && crf(bothFixed, 'BREX-4.2').ok, bothFixed);
+  const gd = numberApprovedRulesDuplicateIds([{ identifier: 'A', xml: dupIds }, { identifier: 'B', xml: '<structureObjectRule id="Z"><objectPath>//a</objectPath><objectUse>u</objectUse></structureObjectRule>' }, { identifier: 'C', xml: '<structureObjectRule id="Z"><objectPath>//b</objectPath><objectUse>u</objectUse></structureObjectRule>' }], 'BREX-4.2');
+  check('Generate: within a BRDP numbered, across BRDPs reported', JSON.stringify(gd.duplicateIds) === '{"numbered":[{"identifier":"A","ids":["R"]}],"clashes":[{"id":"Z","identifiers":["B","C"]}]}', JSON.stringify(gd.duplicateIds));
+  check('analyzeRule: duplicate ids still executable', analyzeRule(dupIds, 'BREX-4.2', { parseXml }).status === 'executable');
 
   // The rule test and the lint never read only the first path.
   const a = analyzeRule(R186, 'BREX-4.2', { parseXml });

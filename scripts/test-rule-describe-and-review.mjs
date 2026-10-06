@@ -187,7 +187,15 @@ check('review parse: not JSON', !parseRuleTestReviewResponse('The rule is wrong.
   check('S1-00338 EN: not exactly 2 characters', one(S338).startsWith('@assyCode whose value does not have exactly 2 characters must not appear'), one(S338));
   check('S1-00338 ES: no tenga exactamente 2 caracteres', one(S338, tEs).startsWith('@assyCode cuyo valor no tenga exactamente 2 caracteres no puede aparecer'), one(S338, tEs));
   check('count(ancestor::OTHER): "above it", never "level"', one('//para[count(ancestor::levelledPara)>3]') === '<para> with more than 3 <levelledPara> above it must not appear (path //para[count(ancestor::levelledPara)>3]).' && !one('//para[count(ancestor::levelledPara)>3]', tEs).includes('nivel'));
-  check('threshold not on the last step → as before', one('//proceduralStep[count(ancestor::proceduralStep)>5]/para') === '<para> must not appear (path //proceduralStep[count(ancestor::proceduralStep)>5]/para).');
+  // Mejoras B, Part 4.1 a: a nesting threshold on an earlier step is explained too.
+  check('threshold not on the last step → "in a <x> at level N"', one('//proceduralStep[count(ancestor::proceduralStep)>5]/para') === '<para> must not appear in a <proceduralStep> at level 7 or deeper (path //proceduralStep[count(ancestor::proceduralStep)>5]/para).', one('//proceduralStep[count(ancestor::proceduralStep)>5]/para'));
+  check('MB4.1 =4 / ancestor-or-self =5 ES', one('//proceduralStep[count(ancestor::proceduralStep)=4]/title', tEs) === '<title> no puede aparecer en un <proceduralStep> de nivel 5 (ruta //proceduralStep[count(ancestor::proceduralStep)=4]/title).' && one('//proceduralStep[count(ancestor-or-self::proceduralStep)=5]/title', tEs).startsWith('<title> no puede aparecer en un <proceduralStep> de nivel 5'));
+  check('MB4.1 attribute predicates ES', one('//entry[@applicRefId]', tEs).startsWith('<entry> con @applicRefId no puede aparecer') && one('//entry[not(@applicRefId)]', tEs).startsWith('<entry> sin @applicRefId no puede aparecer')
+    && one("//entry[@a='v']", tEs).startsWith('<entry> con @a = «v» no puede aparecer') && one("//entry[@a != 'v']", tEs).startsWith('<entry> con @a distinto de «v» no puede aparecer'));
+  check('MB4.1 * step', one('//entry/*[@applicRefId]', tEs).startsWith('Cualquier elemento hijo de <entry> con @applicRefId no puede aparecer') && one('//entry/*[@applicRefId]').startsWith('Any child element of <entry> with @applicRefId must not appear'));
+  check('MB4.1 two predicates on one step → as before', one('//a[@x][@y]') === '<a> must not appear (path //a[@x][@y]).');
+  check('MB4.1 two thresholds on one step → as before', one('//a[count(b)>1][count(c)>2]') === '<a> must not appear (path //a[count(b)>1][count(c)>2]).');
+  check('MB4.1 c concordance ES', one('(//a | //b)[1]', tEs) === 'Los nodos que selecciona (//a | //b)[1] no pueden aparecer.', one('(//a | //b)[1]', tEs));
   check('not a number → as before', pathThreshold('//proceduralStep[count(ancestor::proceduralStep)>last()]') === null);
   check('flag 2 with a threshold → still "allowed"', lines(flag0(S186).replace('"0"', '"2"'), 'BREX-4.2').lines[0].startsWith('<proceduralStep> is allowed'));
   check('threshold rule can reject', !describe(flag0(S186), 'BREX-4.2').cannotReject);
