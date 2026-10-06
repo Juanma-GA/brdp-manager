@@ -11,6 +11,7 @@ with lxml's real filesystem-based resolution.
 """
 from pathlib import Path
 
+import uuid
 import pytest
 
 from app.core.security import hash_password
@@ -64,7 +65,7 @@ VALID_BREX_42_XML = """<?xml version="1.0" encoding="UTF-8"?>
 async def auth_headers():
     async with async_session_factory() as session:
         user = User(
-            email="validate-brex-test@example.com",
+            email=f"validate-brex-test-{uuid.uuid4().hex[:8]}@example.com",  # unique: a run cut before teardown never blocks the next
             password_hash=hash_password("irrelevant-password"),
             display_name="Validate Test",
             global_role="user",

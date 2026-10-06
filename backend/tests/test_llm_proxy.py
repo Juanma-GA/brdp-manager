@@ -9,6 +9,7 @@ real against the actual app.
 import json
 import logging
 import traceback
+import uuid
 
 import httpx
 import pytest
@@ -25,7 +26,7 @@ from app.models import User
 async def auth_headers():
     async with async_session_factory() as session:
         user = User(
-            email="llm-proxy-test@example.com",
+            email=f"llm-proxy-test-{uuid.uuid4().hex[:8]}@example.com",  # unique: a run cut before teardown never blocks the next
             password_hash="irrelevant",
             display_name="LLM Proxy Test",
             global_role="user",
