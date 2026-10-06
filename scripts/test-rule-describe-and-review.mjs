@@ -213,5 +213,38 @@ check('suggest rule: failed-test block with rule, example, diagnosis', withFaile
 check('suggest rule: block before NOT CHECKABLE', withFailed.indexOf('PREVIOUS RULE FAILED ITS TEST') < withFailed.indexOf('NOT CHECKABLE:'));
 check('suggest rule: rest of the prompt unchanged', withFailed.replace(/\n\nPREVIOUS RULE FAILED ITS TEST:[\s\S]*?Do not copy the previous rule's mistake\./, '') === base);
 
+// ─── Mejoras C, Part 3: document roots and existence predicates ──────────
+{
+  const parseXmlC = (x) => new DOMParser().parseFromString(x, 'text/xml');
+  const objrule = (path, flag = '0') => `<objrule id="R"><objpath objappl="${flag}">${path}</objpath><objuse>x</objuse></objrule>`;
+  const lines = (path, t, flag = '0') => formatRuleDescription(describeRule(objrule(path, flag), 'BREX-3.0.1', { parseXml: parseXmlC }), t).lines;
+  const cases = [
+    ['/dmodule[not(//actref)]', 'Every document must contain at least one <actref> (applies to <dmodule> documents', 'Todo documento debe contener algún <actref> (se aplica a los documentos <dmodule>'],
+    ['/dmodule[not(.//actref)]', 'Every document must contain at least one <actref>', 'Todo documento debe contener algún <actref>'],
+    ['/pm[not(//actref)]', 'applies to <pm> documents', 'se aplica a los documentos <pm>'],
+    ['/dmodule[//actref]', 'No document may contain <actref>', 'Ningún documento puede contener <actref>'],
+    ['//techstd[not(authex) or not(notes)]', '<techstd> without <authex> or without <notes> must not appear', '<techstd> sin <authex> o sin <notes> no puede aparecer'],
+    ['//techstd[authex and @id]', '<techstd> with <authex> and with @id must not appear', '<techstd> con <authex> y con @id no puede aparecer'],
+    ['//para[not(.//emphasis)]', '<para> without any <emphasis> inside must not appear', '<para> sin ningún <emphasis> dentro no puede aparecer'],
+    ['//x[not(a)]', '<x> without <a> must not appear', '<x> sin <a> no puede aparecer'],
+  ];
+  for (const [path, en, es] of cases) {
+    const le = lines(path, tEn);
+    const ls = lines(path, tEs);
+    check(`Mejoras C describe: ${path} EN`, le.length === 1 && le[0].includes(en), le.join(' | '));
+    check(`Mejoras C describe: ${path} ES`, ls.length === 1 && ls[0].includes(es), ls.join(' | '));
+  }
+  // as before: mixed and/or, a single attribute, //x off a document root,
+  // other predicates, and flags 1/2.
+  check('Mejoras C describe: mixed and/or as before', lines('//x[a and not(b) or c]', tEn)[0].startsWith('<x> must not appear'));
+  check('Mejoras C describe: single attribute as before', lines('//x[@id]', tEn)[0].startsWith('<x> with @id must not appear'));
+  check('Mejoras C describe: //y off a root as before', lines('//x[not(//y)]', tEn)[0].startsWith('<x> must not appear'));
+  check('Mejoras C describe: function predicate as before', lines("//x[starts-with(., 'a')]", tEn)[0].startsWith('<x> must not appear'));
+  check('Mejoras C describe: flag 1 as before', !lines('/dmodule[not(//actref)]', tEn, '1')[0].includes('Every document must contain'));
+  // can reject
+  const d = describeRule(objrule('/dmodule[not(//actref)]'), 'BREX-3.0.1', { parseXml: parseXmlC });
+  check('Mejoras C describe: can reject', d.cannotReject === false);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

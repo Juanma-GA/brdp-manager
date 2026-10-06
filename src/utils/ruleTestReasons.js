@@ -165,6 +165,12 @@ export function formatRuleStatement(statement, schemas, t) {
     values.subject = params.childOf ? t('records.ruleTest.describe.anyChildOf', { parent: params.childOf }) : params.target;
     values.condition = t(`records.ruleTest.describe.attrCondition.${params.kind}`, { attr: params.attr, value: params.value });
   }
+  // Mejoras C, Part 3: "<techstd> without <authex> or without <notes>".
+  if (statement.code === 'describe_forbidden_existence') {
+    values.condition = (params.conditions || [])
+      .map((c) => t(`records.ruleTest.describe.existence.${c.negated ? 'without' : 'with'}${c.kind === 'inside' ? 'Inside' : ''}`, { name: c.name }))
+      .join(t(`records.ruleTest.describe.existence.joiner.${params.joiner === 'or' ? 'or' : 'and'}`));
+  }
   // "The nodes selected by …" is plural: its own sentence where the verb
   // agrees (Mejoras B, Part 4.1 c).
   const nodesKey = !params.target && 'target' in params ? `records.ruleTest.describe.${statement.code}_nodes` : null;

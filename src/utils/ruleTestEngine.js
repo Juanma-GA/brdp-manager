@@ -644,6 +644,12 @@ function ruleFormatReason(ruleXml, format, parseXml) {
 // the not-executable reasons (utils/ruleTestReasons.js's
 // formatRuleDescription, records.ruleTest.describe.*):
 //   describe_forbidden {target, path}                  flag 0, no values
+//   describe_document_must_contain {root, target, path}  flag 0, /R[not(//x)] on a
+//                                                      document root (Mejoras C)
+//   describe_document_must_not_contain {root, target, path}  /R[//x], flag 0
+//   describe_forbidden_existence {target, path, joiner, conditions}  flag 0, a
+//                                                      predicate of existence tests
+//                                                      joined by and/or (Mejoras C)
 //   describe_forbidden_values {target, values, path}   flag 0 with values
 //   describe_forbidden_nesting {target, name, op, amount, mode, level, path}
 //   describe_forbidden_ancestors / _children {target, name, op, amount, path}
@@ -763,6 +769,8 @@ function describePart(part, spec, parseXml) {
     return (
       thresholdStatement(target, path, pathThreshold(path)) ||
       intermediateNestingStatement(target, path) ||
+      documentMustContainStatement(path) ||
+      existencePredicateStatement(target, path) ||
       attributePredicateStatement(path) || { code: 'describe_forbidden', params: { target, path } }
     );
   }
@@ -946,6 +954,116 @@ function attributePredicateStatement(path) {
   return { code: 'describe_forbidden_attr', params: { target, childOf, path, attr: `@${attr.attr}`, kind: attr.kind, value: attr.value ?? '' } };
 }
 
+// Mejoras C, Part 3: predicates that only ask whether a node is there.
+// Splits a predicate on its top-level "and"/"or" (one kind only, never
+// both) → { joiner, terms } | null.
+function splitTopLevelLogic(predicate) {
+  const text = String(predicate || '').trim();
+  const terms = [];
+  let joiner = null;
+  let depth = 0;
+  let quote = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === ']') depth -= 1;
+    else if (depth === 0 && /\s/.test(ch)) {
+      const m = /^\s+(and|or)\s+/.exec(text.slice(i));
+      if (m) {
+        if (joiner && joiner !== m[1]) return null;
+        joiner = m[1];
+        terms.push(text.slice(start, i).trim());
+        i += m[0].length - 1;
+        start = i + 1;
+      }
+    }
+  }
+  terms.push(text.slice(start).trim());
+  if (terms.some((x) => !x)) return null;
+  return { joiner: joiner || 'and', terms };
+}
+
+const NAME_RE = String.raw`[A-Za-z_][\w.-]*`;
+
+// One existence term: x / child::x (child), .//x / descendant::x (inside),
+// //x (anywhere in the document), @a / attribute::a, each optionally in
+// not(…) → { negated, kind: 'child'|'inside'|'document'|'attribute', name } | null.
+function existenceTerm(term) {
+  let t = String(term || '').replace(/\s+/g, ' ').trim();
+  let negated = false;
+  const not = /^not\(\s*([\s\S]*?)\s*\)$/.exec(t);
+  if (not) {
+    negated = true;
+    t = not[1].trim();
+  }
+  let m = new RegExp(`^(?:@|attribute::)(${NAME_RE})$`).exec(t);
+  if (m) return { negated, kind: 'attribute', name: m[1] };
+  m = new RegExp(`^(?:child::)?(${NAME_RE})$`).exec(t);
+  if (m && !['and', 'or', 'not'].includes(m[1])) return { negated, kind: 'child', name: m[1] };
+  m = new RegExp(`^(?:\\.//|\\./descendant::|descendant::)(${NAME_RE})$`).exec(t);
+  if (m) return { negated, kind: 'inside', name: m[1] };
+  m = new RegExp(`^//(${NAME_RE})$`).exec(t);
+  if (m) return { negated, kind: 'document', name: m[1] };
+  return null;
+}
+
+// The only step of the path and its single predicate, when the path is
+// /R[…] or //R[…] → { name, absolute, predicate } | null.
+function singleStepWithPredicate(path) {
+  const steps = topLevelSteps(String(path || '').trim());
+  if (!steps || steps.length !== 1) return null;
+  const preds = stepPredicateTexts(steps[0]);
+  if (preds.length !== 1) return null;
+  const bare = steps[0].replace(/\[[\s\S]*$/, '').trim();
+  if (!new RegExp(`^${NAME_RE}$`).test(bare)) return null;
+  return { name: bare, predicate: preds[0] };
+}
+
+// /dmodule[not(//actref)] (or [not(.//actref)]) with flag 0, on a document
+// root: "Every document must contain at least one <actref>"; without the
+// not(), "No document may contain <actref>".
+function documentMustContainStatement(path) {
+  const single = singleStepWithPredicate(path);
+  if (!single || !WHOLE_DOCUMENT_ROOTS.has(single.name)) return null;
+  const term = existenceTerm(single.predicate);
+  if (!term || (term.kind !== 'document' && term.kind !== 'inside')) return null;
+  const params = { root: `<${single.name}>`, target: `<${term.name}>`, path };
+  return { code: term.negated ? 'describe_document_must_contain' : 'describe_document_must_not_contain', params };
+}
+
+// //techstd[not(authex) or not(notes)] with flag 0 → "<techstd> without
+// <authex> or without <notes> must not appear". Every term must be an
+// existence test (x, not(x), .//x, @a…), joined by "and" or by "or". A
+// single attribute term stays with attributePredicateStatement; //x (the
+// whole document) only on a document root, handled above.
+function existencePredicateStatement(target, path) {
+  if (!target || target.startsWith('@')) return null;
+  const step = lastTopLevelStep(String(path || '').trim());
+  if (!step) return null;
+  const preds = stepPredicateTexts(step);
+  if (preds.length !== 1) return null;
+  const split = splitTopLevelLogic(preds[0]);
+  if (!split) return null;
+  const terms = split.terms.map(existenceTerm);
+  if (terms.some((x) => !x || x.kind === 'document')) return null;
+  if (terms.length === 1 && terms[0].kind === 'attribute') return null;
+  return {
+    code: 'describe_forbidden_existence',
+    params: {
+      target,
+      path,
+      joiner: split.joiner,
+      conditions: terms.map((x) => ({ negated: x.negated, kind: x.kind, name: x.kind === 'attribute' ? `@${x.name}` : `<${x.name}>` })),
+    },
+  };
+}
+
 function thresholdStatement(target, path, threshold) {
   if (!threshold || !target) return null;
   const base = { target, path, op: threshold.op, amount: threshold.n };
@@ -956,7 +1074,7 @@ function thresholdStatement(target, path, threshold) {
 }
 
 const CAN_REJECT = new Set([
-  'describe_forbidden_in_nesting', 'describe_forbidden_attr',
+  'describe_forbidden_in_nesting', 'describe_forbidden_attr', 'describe_document_must_contain', 'describe_document_must_not_contain', 'describe_forbidden_existence',
   'describe_forbidden_nesting', 'describe_forbidden_ancestors', 'describe_forbidden_children', 'describe_forbidden_length',
   'describe_condition_forbidden', 'describe_condition_required',
   'describe_forbidden', 'describe_forbidden_values', 'describe_mandatory', 'describe_mandatory_values',
