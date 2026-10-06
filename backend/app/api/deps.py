@@ -53,6 +53,13 @@ async def get_current_user(
     return user
 
 
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Global admins only (users, Papelera of projects, LLM usage)."""
+    if current_user.global_role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return current_user
+
+
 def project_not_found() -> HTTPException:
     """The answer for a project that does not exist or is in the Papelera
     (AACF 2): never a technical error, and the same for both, so a deleted

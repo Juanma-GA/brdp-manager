@@ -693,6 +693,7 @@ async def check_similar(
     db: AsyncSession,
     transport: httpx.AsyncBaseTransport | None = None,
     on_progress=None,
+    user_id: uuid.UUID | None = None,
 ) -> dict | None:
     """Adds a "similar_to" warning to every new_ext candidate whose origin
     text is at or above MIN_SIMILARITY of an embedded BRDP of the project.
@@ -713,7 +714,7 @@ async def check_similar(
         for start in range(0, len(targets), EMBED_BATCH_SIZE):
             batch = targets[start : start + EMBED_BATCH_SIZE]
             vectors = await compute_embeddings_batch(
-                [truncate_for_embedding_input(_similarity_text(c))[0] for c in batch], transport
+                [truncate_for_embedding_input(_similarity_text(c))[0] for c in batch], transport, user_id
             )
             for c, vector in zip(batch, vectors):
                 distance = BRDP.embedding.cosine_distance(vector)
@@ -784,7 +785,9 @@ def _mark_repetition(c: dict, first: dict, similarity: float | None) -> None:
     c["selected"] = False
 
 
-async def check_repetitions(candidates: list[dict], transport: httpx.AsyncBaseTransport | None = None) -> dict | None:
+async def check_repetitions(
+    candidates: list[dict], transport: httpx.AsyncBaseTransport | None = None, user_id: uuid.UUID | None = None
+) -> dict | None:
     """Free text (AI Extract 2/2): the same decision written twice in one
     document (a summary repeating a rule in other words) comes back as two
     candidates. Code compares them, in text order: the same title (no
@@ -809,7 +812,7 @@ async def check_repetitions(candidates: list[dict], transport: httpx.AsyncBaseTr
         for start in range(0, len(targets), EMBED_BATCH_SIZE):
             batch = targets[start : start + EMBED_BATCH_SIZE]
             vectors += await compute_embeddings_batch(
-                [truncate_for_embedding_input(_similarity_text(c))[0] for c in batch], transport
+                [truncate_for_embedding_input(_similarity_text(c))[0] for c in batch], transport, user_id
             )
     except EmbeddingUnavailable as exc:
         return {
@@ -923,6 +926,9 @@ async def run_extract_job(
     work = async_session_factory()
     try:
         project = await work.get(Project, project_id)
+        # Who started the extraction: the user its embedding calls are
+        # recorded under (Protecciones 2a, llm_calls).
+        started_by = (await work.get(RuleExtractJob, job_id)).started_by
         candidates, file_warnings = await asyncio.to_thread(build_candidates, rf, STANDARD_ISSUE.get(project.standard))
         await _progress(progress, job_id, phase="classifying", total_items=len(candidates), processed_items=0)
         await classify_candidates(project, candidates, work)
@@ -933,7 +939,7 @@ async def run_extract_job(
         async def on_progress(done):
             await _progress(progress, job_id, processed_items=done)
 
-        similarity_warning = await check_similar(project_id, candidates, work, transport, on_progress)
+        similarity_warning = await check_similar(project_id, candidates, work, transport, on_progress, started_by)
         if similarity_warning is not None:
             file_warnings.append(similarity_warning)
         for position, c in enumerate(candidates):
@@ -1051,6 +1057,9 @@ async def run_text_extract_job(
     work = async_session_factory()
     try:
         project = await work.get(Project, project_id)
+        # Who started the extraction: the user its embedding calls are
+        # recorded under (Protecciones 2a, llm_calls).
+        started_by = (await work.get(RuleExtractJob, job_id)).started_by
         job = await work.get(RuleExtractJob, job_id)
         refused: list[dict] = []
         candidates = build_text_candidates(
@@ -1075,10 +1084,10 @@ async def run_text_extract_job(
                     f"({', '.join(r['title'] or '—' for r in refused)}).",
                 }
             )
-        repetition_warning = await check_repetitions(candidates, transport)
+        repetition_warning = await check_repetitions(candidates, transport, started_by)
         if repetition_warning is not None:
             file_warnings.append(repetition_warning)
-        similarity_warning = await check_similar(project_id, candidates, work, transport, on_progress)
+        similarity_warning = await check_similar(project_id, candidates, work, transport, on_progress, started_by)
         if similarity_warning is not None:
             file_warnings.append(similarity_warning)
         for position, c in enumerate(candidates):

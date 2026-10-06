@@ -551,3 +551,31 @@ async def test_embed_single_brdp_is_editor_only_and_blocked_by_running_job(clien
         session.add(EmbeddingJob(project_id=project.id, started_by=editor.id, status="running", total_items=1))
         await session.commit()
     assert (await client.post(url, headers=editor_headers)).status_code == 409
+
+
+async def test_embedding_calls_are_recorded_under_the_user_who_asked(client, editor_and_project):
+    """Protecciones 2a: the job's calls (started_by) and the single-BRDP
+    embed (the editor who pressed Suggest) leave llm_calls rows with that
+    user and the number of texts sent."""
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import select as sa_select
+
+    from app.models import LlmCall
+
+    project, editor, editor_headers, _viewer_headers = editor_and_project
+    await _make_validated_brdp(project.id, "BRDP-USAGE-1")
+    await _make_validated_brdp(project.id, "BRDP-USAGE-2")
+    assert (await _compute_and_wait(client, project.id, editor_headers))["status"] == "completed"
+    single = await _make_validated_brdp(project.id, "BRDP-USAGE-3")
+    resp = await client.post(f"/api/projects/{project.id}/embeddings/brdps/{single.id}", headers=editor_headers)
+    assert resp.json() == {"embedded": True}
+
+    async with async_session_factory() as session:
+        rows = (
+            (await session.execute(sa_select(LlmCall).where(LlmCall.user_id == editor.id).order_by(LlmCall.created_at)))
+            .scalars()
+            .all()
+        )
+        assert [(r.kind, r.result, r.text_count) for r in rows] == [("embedding", "ok", 2), ("embedding", "ok", 1)]
+        await session.execute(sa_delete(LlmCall).where(LlmCall.user_id == editor.id))
+        await session.commit()

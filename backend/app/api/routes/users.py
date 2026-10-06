@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import error_detail
-from app.api.deps import get_current_user, project_not_found
+from app.api.deps import get_current_user, project_not_found, require_admin
 from app.core.security import generate_temporary_password, hash_password
 from app.db.base import get_db
 from app.models import RefreshToken, User, UserProjectRole
@@ -32,10 +32,8 @@ from app.schemas.user import (
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
-def _require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.global_role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
-    return current_user
+# Shared with the other admin-only routes (app/api/deps.py).
+_require_admin = require_admin
 
 
 @router.get("", response_model=list[UserWithRolesOut])

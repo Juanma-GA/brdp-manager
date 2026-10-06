@@ -60,7 +60,7 @@ async def get_pending_embeddings(
 async def embed_one_brdp(
     project_id: uuid.UUID,
     brdp_id: uuid.UUID,
-    _editor: User = Depends(require_project_role("editor")),
+    editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
     transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> SingleBrdpEmbeddingOut:
@@ -86,7 +86,7 @@ async def embed_one_brdp(
             ),
         )
     try:
-        embedded = await embed_single_brdp(brdp, db, transport)
+        embedded = await embed_single_brdp(brdp, db, transport, editor.id)
     except EmbeddingUnavailable as err:
         # The provider's own text stays in the log under the reference
         # (Decisión 12); the person reads a sentence.

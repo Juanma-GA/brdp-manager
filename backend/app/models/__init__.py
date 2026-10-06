@@ -9,6 +9,7 @@ from app.models.brdp_catalog import BRDPCatalog
 from app.models.brdp_history import BRDPHistory
 from app.models.embedding_job import EmbeddingJob
 from app.models.import_job import ImportJob
+from app.models.llm_call import LlmCall
 from app.models.project import Project
 from app.models.refresh_token import RefreshToken
 from app.models.rule_approval import RuleApproval
@@ -23,6 +24,7 @@ __all__ = [
     "BRDPHistory",
     "EmbeddingJob",
     "ImportJob",
+    "LlmCall",
     "Project",
     "RefreshToken",
     "RuleApproval",

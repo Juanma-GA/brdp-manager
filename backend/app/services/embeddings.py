@@ -22,6 +22,8 @@ request; it never re-chunks internally.
 import asyncio
 import hashlib
 import logging
+import time
+import uuid
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Protocol
@@ -29,6 +31,7 @@ from typing import Protocol
 import httpx
 
 from app.core.config import get_settings
+from app.services import llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +185,37 @@ _MAX_429_RETRIES = 5
 _DEFAULT_429_WAIT_SECONDS = 5.0
 
 
-async def _post_embeddings(texts: list[str], transport: httpx.AsyncBaseTransport | None) -> dict:
+async def _post_embeddings(
+    texts: list[str], transport: httpx.AsyncBaseTransport | None, user_id: uuid.UUID | None = None
+) -> dict:
     """Shared low-level POST for both compute_embedding and
     compute_embeddings_batch -- same endpoint, same "input" field (a
     single-element list for one, the caller's full list for the other),
     same error/429 handling either way.
+
+    Leaves one llm_calls row (Protecciones 2a) per call -- the 429 retries
+    inside it are the same call --, with the user who asked for it when
+    the caller knows it (an embedding job without a known user: None).
     """
+    started = time.monotonic()
+    outcome = {"result": llm_usage.RESULT_FAILED, "status": None}
+    try:
+        return await _post_embeddings_once(texts, transport, outcome)
+    finally:
+        await llm_usage.record_call(
+            user_id=user_id,
+            kind=llm_usage.KIND_EMBEDDING,
+            result=outcome["result"],
+            upstream_status=outcome["status"],
+            duration_ms=int((time.monotonic() - started) * 1000),
+            request_chars=sum(len(t) for t in texts),
+            text_count=len(texts),
+        )
+
+
+async def _post_embeddings_once(
+    texts: list[str], transport: httpx.AsyncBaseTransport | None, outcome: dict
+) -> dict:
     endpoint, api_key, model = _resolve_embed_provider()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     payload = {"model": model, "input": texts}
@@ -200,10 +228,12 @@ async def _post_embeddings(texts: list[str], transport: httpx.AsyncBaseTransport
                 logger.exception("Embedding request to Mistral (%s) failed", endpoint)
                 raise EmbeddingUnavailable("Embedding request failed") from None
 
+            outcome["status"] = response.status_code
             if response.status_code != 429:
                 break
 
             if attempt == _MAX_429_RETRIES:
+                outcome["result"] = llm_usage.RESULT_UPSTREAM_ERROR
                 raise EmbeddingUnavailable(
                     f"Embedding request rate-limited by Mistral (429) after {_MAX_429_RETRIES} retries"
                 )
@@ -217,6 +247,7 @@ async def _post_embeddings(texts: list[str], transport: httpx.AsyncBaseTransport
             await asyncio.sleep(wait_seconds)
 
         if response.status_code >= 400:
+            outcome["result"] = llm_usage.RESULT_UPSTREAM_ERROR
             logger.error(
                 "Mistral embeddings endpoint (%s) returned status %s: %s",
                 endpoint,
@@ -225,10 +256,13 @@ async def _post_embeddings(texts: list[str], transport: httpx.AsyncBaseTransport
             )
             raise EmbeddingUnavailable(f"Embedding request failed with status {response.status_code}")
 
+        outcome["result"] = llm_usage.RESULT_OK
         return response.json()
 
 
-async def compute_embedding(text: str, transport: httpx.AsyncBaseTransport | None = None) -> list[float]:
+async def compute_embedding(
+    text: str, transport: httpx.AsyncBaseTransport | None = None, user_id: uuid.UUID | None = None
+) -> list[float]:
     """`transport` is injectable (mirrors get_httpx_transport in
     api/deps.py) so callers under FastAPI can pass through the same
     dependency-overridable transport used for llm_proxy.py's tests --
@@ -237,7 +271,7 @@ async def compute_embedding(text: str, transport: httpx.AsyncBaseTransport | Non
     embedding (routes/similar.py) -- that call embeds one specific BRDP
     on demand, never a batch.
     """
-    body = await _post_embeddings([text], transport)
+    body = await _post_embeddings([text], transport, user_id)
     try:
         return body["data"][0]["embedding"]
     except (KeyError, IndexError, TypeError):
@@ -246,7 +280,7 @@ async def compute_embedding(text: str, transport: httpx.AsyncBaseTransport | Non
 
 
 async def compute_embeddings_batch(
-    texts: list[str], transport: httpx.AsyncBaseTransport | None = None
+    texts: list[str], transport: httpx.AsyncBaseTransport | None = None, user_id: uuid.UUID | None = None
 ) -> list[list[float]]:
     """Sends the ENTIRE `texts` list in a single request's "input" field
     and returns one vector per text, in the SAME order as `texts` --
@@ -258,7 +292,7 @@ async def compute_embeddings_batch(
     if not texts:
         return []
 
-    body = await _post_embeddings(texts, transport)
+    body = await _post_embeddings(texts, transport, user_id)
     try:
         data = body["data"]
     except (KeyError, TypeError):

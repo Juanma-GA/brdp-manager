@@ -15,6 +15,7 @@ from app.api.routes.brdps import router as brdps_router
 from app.api.routes.config import router as config_router
 from app.api.routes.embedding_jobs import router as embedding_jobs_router
 from app.api.routes.excel import router as excel_router
+from app.api.routes.admin import router as admin_router
 from app.api.routes.llm_proxy import router as llm_proxy_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.schema_cards import router as schema_cards_router
@@ -61,6 +62,7 @@ app.include_router(schema_cards_router)
 app.include_router(similar_router)
 app.include_router(suggestion_feedback_router)
 app.include_router(llm_proxy_router)
+app.include_router(admin_router)
 app.include_router(validate_brex_router)
 app.include_router(trash_router)
 app.include_router(rule_extract_router)

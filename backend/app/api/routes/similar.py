@@ -79,7 +79,7 @@ async def get_similar(
     project_id: uuid.UUID,
     brdp_id: uuid.UUID,
     kind: str = Query(..., pattern="^(definition|proposal|rule)$"),
-    _viewer: User = Depends(require_project_role("viewer")),
+    viewer: User = Depends(require_project_role("viewer")),
     db: AsyncSession = Depends(get_db),
     transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> SimilarOut:
@@ -150,7 +150,7 @@ async def get_similar(
     # cosine distance across two incompatible embedding spaces.
     query_text = brdp_embedding_text(brdp)
     try:
-        query_embedding = await compute_embedding(query_text, transport=transport)
+        query_embedding = await compute_embedding(query_text, transport=transport, user_id=viewer.id)
     except EmbeddingUnavailable as err:
         ref = new_error_ref()
         logger.error("ref=%s query embedding for Suggest failed: %s", ref, err)

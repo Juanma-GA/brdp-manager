@@ -138,7 +138,7 @@ async def pending_summary(project: Project, db: AsyncSession) -> tuple[int, int,
 
 
 async def embed_single_brdp(
-    brdp: BRDP, db: AsyncSession, transport: httpx.AsyncBaseTransport | None
+    brdp: BRDP, db: AsyncSession, transport: httpx.AsyncBaseTransport | None, user_id: uuid.UUID | None = None
 ) -> bool:
     """Embeds ONE BRDP right now (Suggest Rule adjustments round, Part 6)
     -- same text, truncation and hash as run_embedding_job, one request.
@@ -146,7 +146,7 @@ async def embed_single_brdp(
     if brdp.validation != "Validated" or not is_pending_brdp(brdp):
         return False
     texts = _texts_for_embedding([brdp], brdp_embedding_text)
-    [vector] = await compute_embeddings_batch(texts, transport)
+    [vector] = await compute_embeddings_batch(texts, transport, user_id)
     brdp.embedding = vector
     brdp.embedding_text_hash = compute_text_hash(brdp_embedding_text(brdp))
     await db.commit()
@@ -247,7 +247,7 @@ async def _finish_job(
 
 
 async def _compute_batch_with_retry(
-    texts: list[str], transport: httpx.AsyncBaseTransport | None
+    texts: list[str], transport: httpx.AsyncBaseTransport | None, user_id: uuid.UUID | None = None
 ) -> list[list[float]]:
     """One retry of the WHOLE batch on a genuine failure (docs request) --
     a 429 never reaches here as a failure at all, since
@@ -258,7 +258,7 @@ async def _compute_batch_with_retry(
     last_exc = EmbeddingUnavailable("unreachable -- loop below always returns or re-raises")
     for attempt in range(_MAX_BATCH_RETRIES + 1):
         try:
-            return await compute_embeddings_batch(texts, transport=transport)
+            return await compute_embeddings_batch(texts, transport=transport, user_id=user_id)
         except EmbeddingUnavailable as exc:
             last_exc = exc
             if attempt < _MAX_BATCH_RETRIES:
@@ -308,6 +308,10 @@ async def run_embedding_job(
     work_session = async_session_factory()
     try:
         project = await work_session.get(Project, project_id)
+        # Who asked for the job: the user its llm_calls rows are recorded
+        # under (Protecciones 2a); None if unknown.
+        job = await work_session.get(EmbeddingJob, job_id)
+        started_by = job.started_by if job is not None else None
         pending_brdps = await _pending_brdps(project_id, work_session)
         pending_catalog = await _pending_catalog(project.standard, work_session)
 
@@ -317,7 +321,7 @@ async def run_embedding_job(
 
         for batch in _chunked(pending_brdps, EMBED_BATCH_SIZE):
             texts = _texts_for_embedding(batch, brdp_embedding_text)
-            vectors = await _compute_batch_with_retry(texts, transport)
+            vectors = await _compute_batch_with_retry(texts, transport, started_by)
             for brdp, vector in zip(batch, vectors):
                 brdp.embedding = vector
                 # Hash of the FULL, untruncated text -- see
@@ -330,7 +334,7 @@ async def run_embedding_job(
 
         for batch in _chunked(pending_catalog, EMBED_BATCH_SIZE):
             texts = _texts_for_embedding(batch, catalog_embedding_text)
-            vectors = await _compute_batch_with_retry(texts, transport)
+            vectors = await _compute_batch_with_retry(texts, transport, started_by)
             for entry, vector in zip(batch, vectors):
                 entry.embedding = vector
                 entry.embedding_text_hash = compute_text_hash(catalog_embedding_text(entry))

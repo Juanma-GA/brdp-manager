@@ -1,4 +1,5 @@
 import logging
+import time
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,7 @@ from app.api.deps import get_current_user, get_httpx_transport
 from app.core.config import get_settings
 from app.core.errors import error_detail, new_error_ref
 from app.models import User
+from app.services import llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -90,21 +92,49 @@ def _resolve_provider() -> tuple[str, str]:
     return endpoint, api_key
 
 
+def _elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
 @router.post("")
 async def llm_proxy(
     body: LLMProxyRequest,
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
 ) -> StreamingResponse:
     """Byte-for-byte pass-through of the upstream response (same behavior
     as v1's server.js pump loop) -- preserves streaming SSE chunks exactly
     as the provider sent them; llmAPI.js's parsing logic doesn't change,
     only the URL it calls (docs/v2 §5.1).
+
+    Every call leaves one llm_calls row (Protecciones 2a, services/
+    llm_usage.py), also a refused or failed one: a payload refused here
+    or a server without a configured provider is "failed" (the provider
+    was never called). The row is written when the call starts and
+    finished when it ends -- for a streamed answer, when the stream ends
+    ("failed" if it is cut).
     """
+    started = time.monotonic()
+    request_chars = llm_usage.chat_request_chars(body.payload)
     problem = _payload_problem(body.payload)
     if problem:
+        await llm_usage.record_call(
+            user_id=current_user.id,
+            kind=llm_usage.KIND_CHAT,
+            result=llm_usage.RESULT_FAILED,
+            duration_ms=_elapsed_ms(started),
+            request_chars=request_chars,
+        )
         raise HTTPException(status_code=422, detail=problem)
-    endpoint, api_key = _resolve_provider()
+
+    call_id = await llm_usage.record_call(
+        user_id=current_user.id, kind=llm_usage.KIND_CHAT, result=llm_usage.RESULT_FAILED, request_chars=request_chars
+    )
+    try:
+        endpoint, api_key = _resolve_provider()
+    except HTTPException:
+        await llm_usage.finish_call(call_id, result=llm_usage.RESULT_FAILED, duration_ms=_elapsed_ms(started))
+        raise
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     upstream_payload = {"model": _model(), **body.payload}
 
@@ -122,6 +152,7 @@ async def llm_proxy(
         ref = new_error_ref()
         logger.exception("ref=%s LLM proxy request to the upstream provider (%s) failed", ref, endpoint)
         await http_client.aclose()
+        await llm_usage.finish_call(call_id, result=llm_usage.RESULT_FAILED, duration_ms=_elapsed_ms(started))
         raise HTTPException(status_code=500, detail=error_detail("llm_request_failed", ref))
 
     if upstream.status_code >= 400:
@@ -138,6 +169,12 @@ async def llm_proxy(
             upstream.status_code,
             error_body.decode(errors="replace"),
         )
+        await llm_usage.finish_call(
+            call_id,
+            result=llm_usage.RESULT_UPSTREAM_ERROR,
+            upstream_status=upstream.status_code,
+            duration_ms=_elapsed_ms(started),
+        )
         # The provider's own body stays in the log (Decisión 12). Its status
         # is kept, except 401/403: those are about the SERVER's API key, and
         # passed through they would make the browser refresh -- and then
@@ -148,9 +185,11 @@ async def llm_proxy(
         )
 
     async def _pump():
+        completed = False
         try:
             async for chunk in upstream.aiter_bytes():
                 yield chunk
+            completed = True
         except Exception:
             # Response headers are already sent by this point, so the
             # client can't be given a fresh status code -- the stream just
@@ -159,6 +198,14 @@ async def llm_proxy(
             logger.exception("LLM proxy stream from upstream provider (%s) failed mid-response", endpoint)
             raise
         finally:
+            # Not awaited: this runs while the response may be cancelled
+            # (the client went away), where an await is not safe.
+            llm_usage.finish_call_later(
+                call_id,
+                result=llm_usage.RESULT_OK if completed else llm_usage.RESULT_FAILED,
+                upstream_status=upstream.status_code,
+                duration_ms=_elapsed_ms(started),
+            )
             await upstream.aclose()
             await http_client.aclose()
 
