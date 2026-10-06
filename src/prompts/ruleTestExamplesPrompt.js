@@ -174,6 +174,17 @@ function nestingLines(p) {
 // down from the insertion point to the elements the rule checks, when they
 // are not direct children of it (contentRoutes) -- the containers on the
 // way (with their own attributes) and a short card of the elements.
+// Mejoras D, Part 1: the insertion point moved up to hold the outermost
+// element of the rule's path (<figure> for //figure//legend/deflist/def):
+// the whole way the examples write it, so the checked element is never put
+// on the shortest way of its own (para0/para/deflist/def).
+function writePathLines(p) {
+  return (p.writePaths || [])
+    .map((way) => `
+  The rule's path, written from <${way[0]}>: ${way.join('/')}. Write <${way[way.length - 1]}> by exactly this way, never on a shorter one.`)
+    .join('');
+}
+
 function routeLines(p) {
   const r = p.routes;
   if (!r) return '';
@@ -243,7 +254,7 @@ ${metadataLine(p)}${placeLines(p)}`;
     : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
   ${p.path.join('/')}.${titleLine}${relationLine}
-  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
+  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''
   }${placeLines(p)}`;

@@ -172,11 +172,8 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
         { schema: testSchema, role: 'rule', targets },
         { schema: otherSchema, role: 'other', targets },
       ];
-  for (const { schema, role, targets: schemaTargets, group, relation } of wanted) {
-    if (!schema) continue;
-    const structure = await fetchStructure(standard, schema);
-    if (!structure.available) continue;
-    const placement = placeExample(structure, schemaTargets, {
+  const place = (structure, schemaTargets, relation) =>
+    placeExample(structure, schemaTargets, {
       useNames,
       // The valid way down from the insertion point, in every S1000D schema
       // (contentRoutes gives nothing when every checked element goes
@@ -186,6 +183,35 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       withRoutes: !String(standard).startsWith('DITA'),
       relation: relation || null,
     });
+  // Mejoras D, Part 1: a schema where no insertion point holds the
+  // outermost element of the rule's path; the next candidate is tried.
+  const noRoom = [];
+  for (const item of wanted) {
+    let { schema } = item;
+    const { role, targets: schemaTargets, group, relation } = item;
+    if (!schema) continue;
+    let structure = await fetchStructure(standard, schema);
+    if (!structure.available) continue;
+    let placement = place(structure, schemaTargets, relation);
+    if (placement.entryMissing && role === 'rule' && !group && !relation && contextSchemas.length === 0) {
+      let replaced = false;
+      for (const candidate of (candidates || []).filter((c) => c !== schema && !placements[c])) {
+        const other = await fetchStructure(standard, candidate);
+        if (!other.available) continue;
+        const otherPlacement = place(other, schemaTargets, relation);
+        if (!otherPlacement.entryMissing) {
+          schema = candidate;
+          structure = other;
+          placement = otherPlacement;
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) {
+        noRoom.push(placement.entryMissing);
+        continue;
+      }
+    }
     // Mejoras C, Part 2: where each element the rule names goes, when it
     // does not fit where the LLM writes and no route above says it already.
     placement.places = placementPlaces(structure, placement, ruleXml);
@@ -210,6 +236,23 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
         },
       },
       setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
+    };
+  }
+  if (!promptPlacements.some((p) => p.role === 'rule') && noRoom.length > 0) {
+    return {
+      contextSchemas,
+      schemaFacts,
+      promptPlacements: [],
+      untested,
+      unreachable: {
+        code: 'example_no_room',
+        params: {
+          outer: [...new Set(noRoom.flatMap((n) => n.outer))].map((n) => `<${n}>`).join(', '),
+          checked: [...new Set(noRoom.flatMap((n) => n.checked))].map((n) => `<${n}>`).join(', '),
+          standard,
+        },
+      },
+      setup: { standard, schemaLocation, placements: {}, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
     };
   }
   if (promptPlacements.length === 0) throw new Error(`No schema structure is available for ${standard}.`);

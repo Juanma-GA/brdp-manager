@@ -806,6 +806,10 @@ const resources = {
           fixRemoveSteps_one: 'Remove {{removed}} from the path',
           fixRemoveSteps_other: 'Remove {{removed}} from the path',
           fixed: 'Path changed: {{from}} → {{to}}.',
+          // Mejoras D, Part 2.
+          anyAncestor: 'The condition looks at the <{{looked}}> of any <{{ancestor}}> in the document, not only those of the <{{ancestor}}> that contains <{{checked}}>. If the decision speaks of «its» <{{ancestor}}>, use ancestor::{{ancestor}}.',
+          anyAncestorSelf: 'The condition looks at any <{{ancestor}}> in the document, not only the <{{ancestor}}> that contains <{{checked}}>. If the decision speaks of «its» <{{ancestor}}>, use ancestor::{{ancestor}}.',
+          fixAncestorAxis: 'Change {{from}} to {{to}}',
         },
         ruleTest: {
           button: 'Test rule',
@@ -1009,6 +1013,15 @@ const resources = {
           describe: {
             title: 'What the rule checks',
             describe_forbidden: '{{target}} must not appear (path {{path}}).',
+            // Mejoras D, Part 1.2: the checked step's predicate.
+            qualifier: {
+              outside: '{{target}} outside {{name}}',
+              inside: '{{target}} inside {{name}}',
+              directlyInside: '{{target}} directly inside {{name}}',
+              notDirectlyInside: '{{target}} not directly inside {{name}}',
+              condition: '{{target}} matching the condition {{condition}}',
+              attrOf: '{{target}} of {{on}}',
+            },
             // Mejoras B, Part 4.1.
             describe_forbidden_in_nesting: '{{target}} must not appear in a {{name}} {{levels}} (path {{path}}).',
             inLevel: { from: 'at level {{level}} or deeper', exactly: 'at level {{level}}', upto: 'at levels 1 to {{level}}', except: 'at any level other than {{level}}' },
@@ -1098,6 +1111,7 @@ const resources = {
               parentOutside: 'no example can be written with <{{element}}> directly inside an element other than <{{other}}>: no {{standard}} schema allows it.',
             },
             section_unavailable: 'the rule looks inside the identification and status section of the {{schemas}} schema ({{names}}), and the application does not build that section yet.',
+            example_no_room: 'no {{standard}} schema has room for {{outer}} with {{checked}} inside it.',
             rule_format: 'The stored XML is not a rule of this format, so it cannot be tested: {{detail}}',
             xpath3_syntax: 'This project uses XPath 2.0, but the rule uses XPath 3.x syntax ({{features}}); an XPath 2.0 validator would refuse it. The test runs it anyway.',
             part: '{{ruleId}}: {{reason}}',
@@ -2461,6 +2475,9 @@ const resources = {
           fixRemoveSteps_one: 'Quitar {{removed}} de la ruta',
           fixRemoveSteps_other: 'Quitar {{removed}} de la ruta',
           fixed: 'Ruta cambiada: {{from}} → {{to}}.',
+          anyAncestor: 'La condición mira los <{{looked}}> de cualquier <{{ancestor}}> del documento, no solo los del <{{ancestor}}> que contiene a <{{checked}}>. Si la decisión habla de «su» <{{ancestor}}>, usa ancestor::{{ancestor}}.',
+          anyAncestorSelf: 'La condición mira cualquier <{{ancestor}}> del documento, no solo el <{{ancestor}}> que contiene a <{{checked}}>. Si la decisión habla de «su» <{{ancestor}}>, usa ancestor::{{ancestor}}.',
+          fixAncestorAxis: 'Cambiar {{from}} por {{to}}',
         },
         ruleTest: {
           button: 'Probar regla',
@@ -2657,6 +2674,14 @@ const resources = {
           describe: {
             title: 'Qué comprueba la regla',
             describe_forbidden: '{{target}} no puede aparecer (ruta {{path}}).',
+            qualifier: {
+              outside: '{{target}} fuera de {{name}}',
+              inside: '{{target}} dentro de {{name}}',
+              directlyInside: '{{target}} directamente dentro de {{name}}',
+              notDirectlyInside: '{{target}} que no esté directamente dentro de {{name}}',
+              condition: '{{target}} que cumpla la condición {{condition}}',
+              attrOf: '{{target}} de {{on}}',
+            },
             describe_forbidden_in_nesting: '{{target}} no puede aparecer en un {{name}} {{levels}} (ruta {{path}}).',
             inLevel: { from: 'de nivel {{level}} o más profundo', exactly: 'de nivel {{level}}', upto: 'de los niveles 1 a {{level}}', except: 'de cualquier nivel salvo el {{level}}' },
             describe_forbidden_attr: '{{subject}} {{condition}} no puede aparecer (ruta {{path}}).',
@@ -2750,6 +2775,7 @@ const resources = {
               parentOutside: 'no se puede escribir un ejemplo con <{{element}}> directamente dentro de otro elemento que no sea <{{other}}>: ningún esquema de {{standard}} lo permite.',
             },
             section_unavailable: 'la regla mira dentro de la sección de identificación y estado del esquema {{schemas}} ({{names}}), y la aplicación todavía no monta esa sección.',
+            example_no_room: 'en ningún esquema de {{standard}} cabe {{outer}} con {{checked}} dentro.',
             rule_format: 'El XML guardado no es una regla de este formato, así que no se puede probar: {{detail}}',
             xpath3_syntax: 'Este proyecto usa XPath 2.0, pero la regla usa sintaxis de XPath 3.x ({{features}}); un validador XPath 2.0 la rechazaría. La prueba la ejecuta igualmente.',
             part: '{{ruleId}}: {{reason}}',

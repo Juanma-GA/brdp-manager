@@ -1218,18 +1218,76 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // insertion point must allow that too.
   const relationOk = (i) =>
     !relation || relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], relation, relation.inside);
+  const fitsChecked = (i) =>
+    contentChecked.every((name) => reachable(elements, chain[i], name))
+    && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
+    && relationOk(i);
+  // Mejoras D, Part 1: the insertion point must also hold the OUTERMOST
+  // element each content alternative makes the example write -- its first
+  // element step the skeleton does not already place at or above the point.
+  // //figure//legend/deflist/def (BRDP-EXT-02816, 3.0.1 descript) checks
+  // <def>, which fits in <para> (para/deflist/def), but <figure> does not:
+  // every example was "<figure> is not allowed inside <para>". Now <para0>.
+  const below = new Map();
+  const under = (name) => {
+    if (!below.has(name)) below.set(name, reachableSet(elements, elements[name]?.children || []));
+    return below.get(name);
+  };
+  const entryAt = (alt, i) => (alt.steps || []).find((n) => elements[n] && !chain.slice(0, i + 1).includes(n)) || null;
+  // Held at chain[i]: the entry is below it and the rest of the path can be
+  // written from there (a later step that never fits is an impossible path,
+  // Mejoras C's check, not a matter of where the example starts).
+  const holds = (alt, i) => {
+    const entry = entryAt(alt, i);
+    if (!entry) return true;
+    return under(chain[i]).has(entry) && writePathOf(elements, chain[i], alt.steps.slice(alt.steps.indexOf(entry))) !== null;
+  };
+  const steppedAlternatives = classes.contentAlternatives.filter((a) => !a.opaque && (a.steps || []).length > 0);
+  // An alternative no point of the skeleton holds counts only when every
+  // alternative is like that: a union keeps testing what it can.
+  const heldSomewhere = steppedAlternatives.filter((a) => chain.slice(0, limit).some((_n, i) => holds(a, i)));
+  const pathAlternatives = heldSomewhere.length ? heldSomewhere : steppedAlternatives;
+  const missingEntries = (i) => pathAlternatives.filter((a) => !holds(a, i)).map((a) => entryAt(a, i));
   let index = limit - 1;
+  let oldIndex = null;
+  let found = false;
+  let entryMissing = null;
   for (let i = limit - 1; i >= 0; i -= 1) {
-    if (
-      contentChecked.every((name) => reachable(elements, chain[i], name))
-      && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
-      && relationOk(i)
-    ) {
+    if (!fitsChecked(i)) continue;
+    if (oldIndex === null) oldIndex = i;
+    const missing = missingEntries(i);
+    if (missing.length === 0) {
       index = i;
+      found = true;
       break;
     }
+    entryMissing = entryMissing || missing;
   }
+  // No point holds the outer element: the old point, and the caller is told
+  // (prepareRuleTestSetup tries the next schema, else "not executable").
+  if (!found && oldIndex !== null) index = oldIndex;
+  if (found || oldIndex === null) entryMissing = null;
   const placed = whole(chain[index], chain.slice(0, index + 1), true);
+  if (entryMissing) {
+    placed.entryMissing = {
+      outer: [...new Set(entryMissing)],
+      checked: [...new Set(pathAlternatives.map((a) => a.checked).filter(Boolean))],
+    };
+  }
+  // The point moved up for an outer element: the prompt gives each such
+  // alternative's whole way from it (para0/figure/legend/deflist/def), so
+  // the LLM never takes the shortest way to the checked element alone
+  // (para0/para/deflist/def).
+  if (oldIndex !== null && index < oldIndex) {
+    const writePaths = [];
+    for (const alt of pathAlternatives) {
+      const entry = entryAt(alt, oldIndex);
+      if (!entry || under(chain[oldIndex]).has(entry)) continue;
+      const way = writePathOf(elements, chain[index], alt.steps.slice(alt.steps.indexOf(entryAt(alt, index))));
+      if (way) writePaths.push(way);
+    }
+    if (writePaths.length) placed.writePaths = writePaths;
+  }
   if (relation) {
     const way = relationWay(elements, placed.path, placed.insertion, relation, relation.inside);
     placed.relation = { ...relation, way: way ? [...placed.path, ...way.slice(1)] : null };
@@ -1261,6 +1319,25 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     ? contentRoutes(structure, placed.insertion, [...new Set([...entryNames, ...predicateNames])], useNames, attributeOnlyChecked)
     : null;
   return placed;
+}
+
+// Mejoras D, Part 1: the way from `from` through every element step of an
+// alternative, in order: a step that is a child of the previous one goes
+// right inside it, otherwise by the shortest valid nesting. null when a
+// step cannot be reached.
+function writePathOf(elements, from, steps) {
+  const way = [from];
+  for (const step of steps) {
+    const previous = way[way.length - 1];
+    if ((elements[previous]?.children || []).includes(step)) {
+      way.push(step);
+      continue;
+    }
+    const nesting = nestingPath(elements, previous, step);
+    if (!nesting) return null;
+    way.push(...nesting.slice(1));
+  }
+  return way;
 }
 
 // ─── The complete fragment ──────────────────────────────────────────────────

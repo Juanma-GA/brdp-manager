@@ -193,11 +193,13 @@ check('review parse: not JSON', !parseRuleTestReviewResponse('The rule is wrong.
   check('MB4.1 attribute predicates ES', one('//entry[@applicRefId]', tEs).startsWith('<entry> con @applicRefId no puede aparecer') && one('//entry[not(@applicRefId)]', tEs).startsWith('<entry> sin @applicRefId no puede aparecer')
     && one("//entry[@a='v']", tEs).startsWith('<entry> con @a = «v» no puede aparecer') && one("//entry[@a != 'v']", tEs).startsWith('<entry> con @a distinto de «v» no puede aparecer'));
   check('MB4.1 * step', one('//entry/*[@applicRefId]', tEs).startsWith('Cualquier elemento hijo de <entry> con @applicRefId no puede aparecer') && one('//entry/*[@applicRefId]').startsWith('Any child element of <entry> with @applicRefId must not appear'));
-  check('MB4.1 two predicates on one step → as before', one('//a[@x][@y]') === '<a> must not appear (path //a[@x][@y]).');
-  check('MB4.1 two thresholds on one step → as before', one('//a[count(b)>1][count(c)>2]') === '<a> must not appear (path //a[count(b)>1][count(c)>2]).');
+  // Mejoras D, Part 1.2: never a bare prohibition when the checked step has a
+  // predicate: the literal condition, complete.
+  check('MB4.1 two predicates on one step → the literal condition', one('//a[@x][@y]') === '<a> matching the condition [@x][@y] must not appear (path //a[@x][@y]).', one('//a[@x][@y]'));
+  check('MB4.1 two thresholds on one step → the literal condition', one('//a[count(b)>1][count(c)>2]') === '<a> matching the condition [count(b)>1][count(c)>2] must not appear (path //a[count(b)>1][count(c)>2]).', one('//a[count(b)>1][count(c)>2]'));
   check('MB4.1 c concordance ES', one('(//a | //b)[1]', tEs) === 'Los nodos que selecciona (//a | //b)[1] no pueden aparecer.', one('(//a | //b)[1]', tEs));
   check('not a number → as before', pathThreshold('//proceduralStep[count(ancestor::proceduralStep)>last()]') === null);
-  check('flag 2 with a threshold → still "allowed"', lines(flag0(S186).replace('"0"', '"2"'), 'BREX-4.2').lines[0].startsWith('<proceduralStep> is allowed'));
+  check('flag 2 with a threshold → still "allowed", with its condition', lines(flag0(S186).replace('"0"', '"2"'), 'BREX-4.2').lines[0].startsWith('<proceduralStep> matching the condition [count(ancestor::proceduralStep)>5] is allowed'), lines(flag0(S186).replace('"0"', '"2"'), 'BREX-4.2').lines[0]);
   check('threshold rule can reject', !describe(flag0(S186), 'BREX-4.2').cannotReject);
   check('3.0.1 objappl 0 explained too', lines(`<objrule><objpath objappl="0">${S186}</objpath><objuse>x</objuse></objrule>`, 'BREX-3.0.1').lines[0].includes('level 7 or deeper'));
 }
@@ -236,10 +238,10 @@ check('suggest rule: rest of the prompt unchanged', withFailed.replace(/\n\nPREV
   }
   // as before: mixed and/or, a single attribute, //x off a document root,
   // other predicates, and flags 1/2.
-  check('Mejoras C describe: mixed and/or as before', lines('//x[a and not(b) or c]', tEn)[0].startsWith('<x> must not appear'));
+  check('Mejoras C describe: mixed and/or → the literal condition', lines('//x[a and not(b) or c]', tEn)[0].startsWith('<x> matching the condition [a and not(b) or c] must not appear'));
   check('Mejoras C describe: single attribute as before', lines('//x[@id]', tEn)[0].startsWith('<x> with @id must not appear'));
-  check('Mejoras C describe: //y off a root as before', lines('//x[not(//y)]', tEn)[0].startsWith('<x> must not appear'));
-  check('Mejoras C describe: function predicate as before', lines("//x[starts-with(., 'a')]", tEn)[0].startsWith('<x> must not appear'));
+  check('Mejoras C describe: //y off a root → the literal condition', lines('//x[not(//y)]', tEn)[0].startsWith('<x> matching the condition [not(//y)] must not appear'));
+  check('Mejoras C describe: function predicate → the literal condition', lines("//x[starts-with(., 'a')]", tEn)[0].startsWith("<x> matching the condition [starts-with(., 'a')] must not appear"));
   check('Mejoras C describe: flag 1 as before', !lines('/dmodule[not(//actref)]', tEn, '1')[0].includes('Every document must contain'));
   // can reject
   const d = describeRule(objrule('/dmodule[not(//actref)]'), 'BREX-3.0.1', { parseXml: parseXmlC });

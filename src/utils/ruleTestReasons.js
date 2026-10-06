@@ -33,6 +33,9 @@
 //     example_impossible {element, other, axis, inside, standard} (Mejoras
 //     A, Part 2) -- the rule's checked element must (not) be inside another
 //     one, and no schema of the standard allows one of the two examples;
+//     example_no_room {outer, checked, standard} (Mejoras D, Part 1) -- no
+//     insertion point of any candidate schema holds the outermost element
+//     of the rule's path (<figure>) with the checked one (<def>) inside;
 //   analyzeRule (C3): rule_format {problem, ...params} -- the stored XML is
 //     not a rule of its format; `problem` is checkRuleFormat's code
 //     (rule_format_missing, …), shown with the same text as on save;
@@ -54,6 +57,7 @@ export const ENGINE_REASON_CODES = [
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
+  'example_no_room',
 ];
 export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch'];
 
@@ -147,6 +151,13 @@ export function formatRuleStatement(statement, schemas, t) {
   }
   const values = { ...params };
   if ('target' in params) values.target = params.target || t('records.ruleTest.describe.nodesOf', { path: params.path });
+  // Mejoras D, Part 1.2: the checked step's predicate ("<def> matching the
+  // condition […]", "<commonInfo> outside <procedure>").
+  if (params.qualifier && params.target) {
+    const q = params.qualifier;
+    const subject = q.on ? t('records.ruleTest.describe.qualifier.attrOf', { target: params.target, on: q.on }) : params.target;
+    values.target = t(`records.ruleTest.describe.qualifier.${q.kind}`, { target: subject, name: q.name, condition: q.condition });
+  }
   if (params.values) values.values = formatValues(params.values, t);
   // Plantillas, Part 4: the names a condition looks at.
   if (Array.isArray(params.names)) values.names = params.names.join(', ');

@@ -764,32 +764,74 @@ function describePart(part, spec, parseXml) {
   const target = pathTarget(path);
   const values = describeValues(part, spec);
   const withValues = values.length > 0;
+  // Mejoras D, Part 1.2: the predicate of the checked step, said in the
+  // statement ("<def> matching the condition […] must not appear"), never a
+  // bare "<def> must not appear" that hides it.
+  const qualified = (statement) => {
+    const qualifier = target ? checkedStepQualifier(path) : null;
+    return qualifier ? { ...statement, params: { ...statement.params, qualifier } } : statement;
+  };
   if (flag === '0') {
-    if (withValues) return { code: 'describe_forbidden_values', params: { target, values, path } };
+    if (withValues) return qualified({ code: 'describe_forbidden_values', params: { target, values, path } });
     return (
       thresholdStatement(target, path, pathThreshold(path)) ||
       intermediateNestingStatement(target, path) ||
       documentMustContainStatement(path) ||
       existencePredicateStatement(target, path) ||
-      attributePredicateStatement(path) || { code: 'describe_forbidden', params: { target, path } }
+      attributePredicateStatement(path) || qualified({ code: 'describe_forbidden', params: { target, path } })
     );
   }
   if (flag === '1') {
     const split = _splitTopLevel(path);
     if (split && _isContextPattern(split.parent)) {
       const parent = pathTarget(split.parent) || split.parent;
-      return withValues
+      return qualified(withValues
         ? { code: 'describe_mandatory_values', params: { parent, target: pathTarget(split.step) || target, values, path } }
-        : { code: 'describe_mandatory', params: { parent, target: pathTarget(split.step) || target, path } };
+        : { code: 'describe_mandatory', params: { parent, target: pathTarget(split.step) || target, path } });
     }
-    return withValues
+    return qualified(withValues
       ? { code: 'describe_mandatory_somewhere_values', params: { target, values, path } }
-      : { code: 'describe_mandatory_somewhere', params: { target, path } };
+      : { code: 'describe_mandatory_somewhere', params: { target, path } });
   }
   // flag 2, or 3.0.1 without objappl: only the values are checked.
-  return withValues
+  return qualified(withValues
     ? { code: 'describe_restricted_values', params: { target, values, path } }
-    : { code: 'describe_allowed', params: { target, path } };
+    : { code: 'describe_allowed', params: { target, path } });
+}
+
+// Mejoras D, Part 1.2: what the predicates of the checked step mean, when a
+// statement would otherwise name the step alone. The checked step is the
+// last one, or, for an attribute (//x[…]/@a), the element that owns it.
+//   [not(ancestor::X)] → { kind: 'outside', name: '<X>' }
+//   [ancestor::X]      → { kind: 'inside', name: '<X>' }
+//   [not(parent::X)] / [parent::X] → 'notDirectlyInside' / 'directlyInside'
+//   anything else      → { kind: 'condition', condition: '[…]' } (literal,
+//                        every predicate of the step, complete)
+// `on` is the owner element for an attribute target, else null.
+const QUALIFIER_RELATION_RE = /^(not\(\s*)?(ancestor|parent)::([A-Za-z_][\w.-]*)(\s*\))?$/;
+function checkedStepQualifier(path) {
+  const steps = topLevelSteps(String(path || '').trim());
+  if (!steps || steps.length === 0) return null;
+  let step = steps[steps.length - 1];
+  let on = null;
+  if (/^(?:@|attribute::)/.test(step.trim())) {
+    if (stepPredicateTexts(step).length > 0 || steps.length < 2) return null;
+    step = steps[steps.length - 2];
+    const owner = step.replace(/\[[\s\S]*$/, '').trim().replace(/^(?:child|descendant|descendant-or-self)::/, '');
+    if (!/^[A-Za-z_][\w.:-]*$/.test(owner)) return null;
+    on = `<${owner}>`;
+  }
+  const preds = stepPredicateTexts(step);
+  if (preds.length === 0) return null;
+  if (preds.length === 1) {
+    const m = QUALIFIER_RELATION_RE.exec(preds[0].replace(/\s+/g, ' ').trim());
+    if (m && Boolean(m[1]) === Boolean(m[4])) {
+      const negated = Boolean(m[1]);
+      const kind = m[2] === 'ancestor' ? (negated ? 'outside' : 'inside') : (negated ? 'notDirectlyInside' : 'directlyInside');
+      return { kind, name: `<${m[3]}>`, on };
+    }
+  }
+  return { kind: 'condition', condition: preds.map((p) => `[${p.trim()}]`).join(''), on };
 }
 
 // Mejoras A, Part 4: a threshold on the LAST step of a single path, alone
