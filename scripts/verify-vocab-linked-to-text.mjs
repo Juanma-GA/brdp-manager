@@ -29,6 +29,7 @@
 // before writing this: "table" is a real element, "cocacola"/"pokemon"/
 // "step" are genuinely absent (neither element nor attribute).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 // Suggest Rule prerequisites (Suggest Rule round): Rule may be disabled
 // by its OWN reasons (no Validated/filled Proposal on these fixtures) --
@@ -178,8 +179,8 @@ async function main() {
     const notFoundColor = await notFoundLocator.evaluate((el) => getComputedStyle(el).color);
     assert(notFoundColor === "rgb(185, 28, 28)", `notice is red #b91c1c (got ${notFoundColor})`);
     await assertAllSuggestButtonsEnabled("while <cocacola> is not found (blocking is gone this round)");
-    await page.screenshot({ path: "/tmp/vocab-linked-notice-on-select.png", fullPage: true });
-    console.log("Screenshot (notice on select, no Ask needed, buttons enabled): /tmp/vocab-linked-notice-on-select.png");
+    await page.screenshot({ path: shot("vocab-linked-notice-on-select.png"), fullPage: true });
+    console.log(`Screenshot (notice on select, no Ask needed, buttons enabled): ${shot("vocab-linked-notice-on-select.png")}`);
 
     // ==== edit Title to a real element, save -- notice updates WITHOUT pressing Ask ====
     const titleInput = page.locator('label:text-is("Title") + input');
@@ -191,8 +192,8 @@ async function main() {
       "notice disappears right after saving the fix -- no Ask click involved"
     );
     await assertAllSuggestButtonsEnabled("right after the fix is saved");
-    await page.screenshot({ path: "/tmp/vocab-linked-notice-cleared-after-save.png", fullPage: true });
-    console.log("Screenshot (notice cleared after save, no Ask needed): /tmp/vocab-linked-notice-cleared-after-save.png");
+    await page.screenshot({ path: shot("vocab-linked-notice-cleared-after-save.png"), fullPage: true });
+    console.log(`Screenshot (notice cleared after save, no Ask needed): ${shot("vocab-linked-notice-cleared-after-save.png")}`);
 
     // Confirm the fix really persisted (not just optimistic local state) --
     // reload and re-select, the notice must stay gone.
@@ -220,8 +221,8 @@ async function main() {
     const stepNotFoundText = await page.locator("text=/This BRDP mentions names not found in the S1000D 4.2 schema/").first().textContent();
     assert(stepNotFoundText.includes("<step>"), `accepting the Proposal with <step> flips the notice to Not found immediately (got: ${stepNotFoundText})`);
     await assertAllSuggestButtonsEnabled("right after accepting <step> -- the notice shows, but nothing is disabled by it");
-    await page.screenshot({ path: "/tmp/vocab-linked-notice-after-accept.png", fullPage: true });
-    console.log("Screenshot (notice right after accepting a Proposal with <step>, buttons still enabled): /tmp/vocab-linked-notice-after-accept.png");
+    await page.screenshot({ path: shot("vocab-linked-notice-after-accept.png"), fullPage: true });
+    console.log(`Screenshot (notice right after accepting a Proposal with <step>, buttons still enabled): ${shot("vocab-linked-notice-after-accept.png")}`);
 
     // ==== 3. Ask/Suggest prompt blocks genuinely differ, on the SAME
     // notFound name ====

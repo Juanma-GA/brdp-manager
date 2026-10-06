@@ -8,7 +8,7 @@
 // not reachable; 1 anything else), or 2 when there is no backend Python.
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { BACKEND_DIR, findBackendPython } from './lib/backendPython.mjs';
+import { BACKEND_DIR, findBackendPython, pythonEnv } from './lib/backendPython.mjs';
 
 const found = findBackendPython({ modules: ['asyncpg', 'alembic', 'dotenv'] });
 if (!found.python) {
@@ -18,7 +18,7 @@ if (!found.python) {
 const res = spawnSync(found.python, [path.join('scripts', 'create_test_db.py')], {
   cwd: BACKEND_DIR,
   stdio: 'inherit',
-  env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+  env: pythonEnv(),
   windowsHide: true,
 });
 if (res.error) {

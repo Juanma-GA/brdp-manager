@@ -13,6 +13,7 @@
 //   cd backend && .venv/bin/python scripts/seed_compare_verification.py cleanup
 import { chromium } from "playwright-core";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -176,7 +177,7 @@ async function main() {
     assert((await dialog().getByTestId("compare-row-rule-state").textContent()).includes("Draft") && (await dialog().getByTestId("compare-row-rule-state").textContent()).includes("Verified"), "rule status row: Draft vs Verified");
     await dialog().getByTestId("compare-rule-text-tab").click();
     assert((await dialog().locator('[data-testid="compare-rule-line"][data-kind="changed"], [data-testid="compare-rule-line"][data-kind="added"]').count()) >= 2, "text view: line diff of the normalized XML");
-    await page.screenshot({ path: "/tmp/brdp-compare-s1-00052.png", fullPage: false });
+    await page.screenshot({ path: shot("brdp-compare-s1-00052.png"), fullPage: false });
 
     // Formatting only: the hidden project's rule is the same rule on one line.
     await chooseCandidate(pHidden.name);
@@ -211,7 +212,7 @@ async function main() {
     assert(await dialog().getByTestId("compare-rule-blocked").isVisible(), "bringing a 3.0.1 rule into 4.2 is blocked");
     assert((await dialog().getByTestId("rule-format-error").first().textContent()).includes("<objrule> belongs to a BREX 3.0.1 rule, not to a BREX 4.2 rule"), "…with the format reason");
     assert(await dialog().getByTestId("compare-confirm-yes").count() === 0, "…and no Replace button");
-    await page.screenshot({ path: "/tmp/brdp-compare-format-blocked.png" });
+    await page.screenshot({ path: shot("brdp-compare-format-blocked.png") });
 
     // Bring the Official Default rule and Proposal.
     await chooseCandidate(pOd.name);
@@ -234,7 +235,7 @@ async function main() {
     await page.waitForSelector('[data-testid="history-item"]');
     const copiedItem = page.locator('[data-testid="history-item"]', { hasText: "Rule copied from" });
     assert((await copiedItem.textContent()).includes(`${pOd.name} / BRDP-S1-00052`), "History shows 'Rule copied from <project> / <BRDP>'");
-    await page.screenshot({ path: "/tmp/brdp-compare-history-copied.png" });
+    await page.screenshot({ path: shot("brdp-compare-history-copied.png") });
 
     // EXT: not searched in other projects; the other tab opens.
     await open(pLh, "BRDP-EXT-CMP01");
@@ -262,7 +263,7 @@ async function main() {
     await dialog().getByTestId("compare-rule-text-tab").click();
     assert((await dialog().locator('[data-testid="compare-rule-line"][data-kind="removed"]').count()) === 2, "text view: exactly the 2 removed lines");
     assert((await dialog().getByTestId("compare-show-equal-lines").count()) >= 1, "…and the unchanged values folded, text readable");
-    await page.screenshot({ path: "/tmp/brdp-compare-155-153.png" });
+    await page.screenshot({ path: shot("brdp-compare-155-153.png") });
     await dialog().getByTestId("compare-close").click();
 
     // DITA: Schematron summary.
@@ -271,7 +272,7 @@ async function main() {
     await waitView();
     const ditaItem = await dialog().getByTestId("compare-structure-item").first().textContent();
     assert(ditaItem.includes("test: @type → @type = ('note', 'tip')"), `DITA: Schematron summary with the test change (${ditaItem})`);
-    await page.screenshot({ path: "/tmp/brdp-compare-dita.png" });
+    await page.screenshot({ path: shot("brdp-compare-dita.png") });
     await dialog().getByTestId("compare-close").click();
 
     // Spanish.
@@ -283,7 +284,7 @@ async function main() {
     assert((await dialog().getByTestId("compare-tab-same").textContent()) === "Misma BRDP en otros proyectos", "ES: tab name");
     const summaryEs = await dialog().getByTestId("compare-summary").textContent();
     assert(summaryEs.includes("Definición igual") && summaryEs.includes("Regla igual"), `ES summary: ${summaryEs}`);
-    await page.screenshot({ path: "/tmp/brdp-compare-es.png" });
+    await page.screenshot({ path: shot("brdp-compare-es.png") });
     await dialog().getByTestId("compare-close").click();
     await page.locator("header select, nav select").first().selectOption("en");
 

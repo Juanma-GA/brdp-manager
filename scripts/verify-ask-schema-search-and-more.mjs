@@ -7,6 +7,7 @@
 //
 //   node scripts/verify-ask-schema-search-and-more.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -126,7 +127,7 @@ async function main() {
     assert((await page.getByTestId("answer-more-list-1").count()) === 1 && (await list0.count()) === 1, "a second list expands on its own");
     await page.getByTestId("answer-less-1").click();
     assert((await page.getByTestId("answer-more-1").count()) === 1 && (await list0.count()) === 1, "folding the second keeps the first expanded");
-    await page.screenshot({ path: "/tmp/ask-answer-more-expanded.png" });
+    await page.screenshot({ path: shot("ask-answer-more-expanded.png") });
 
     const expandedLink = list0.locator('[data-testid^="schema-link-"]').last();
     const expandedName = (await expandedLink.getAttribute("data-testid")).replace("schema-link-element:", "");
@@ -152,7 +153,7 @@ async function main() {
     const list = page.getByTestId("schema-search-list");
     await list.waitFor();
     assert((await list.locator("li").first().innerText()).includes("<levelledPara>"), "suggestion <levelledPara>");
-    await page.screenshot({ path: "/tmp/ask-schema-search-suggestions.png" });
+    await page.screenshot({ path: shot("ask-schema-search-suggestions.png") });
     await search().press("ArrowDown");
     await search().press("ArrowUp");
     const activeLabel = await list.locator('li[aria-selected="true"]').innerText();
@@ -168,7 +169,7 @@ async function main() {
     assert((await breadcrumb()) === "levelledPara › title", "breadcrumb: levelledPara › title");
     await card().getByTestId("schema-nav-back").click();
     assert((await cardTitle()) === "<levelledPara>", "Atrás");
-    await page.screenshot({ path: "/tmp/ask-schema-search-card.png" });
+    await page.screenshot({ path: shot("ask-schema-search-card.png") });
     await page.keyboard.press("Escape");
     assert((await card().count()) === 0, "Esc closes the card");
 
@@ -215,7 +216,7 @@ async function main() {
     assert((await noMatch.innerText()) === "No existe en el esquema S1000D 4.2", "pokemon: No existe en el esquema S1000D 4.2");
     await search().press("Enter");
     assert((await card().count()) === 0, "pokemon: no card");
-    await page.screenshot({ path: "/tmp/ask-schema-search-no-match.png" });
+    await page.screenshot({ path: shot("ask-schema-search-no-match.png") });
     const req2 = await lastRequest();
     assert(!req2 || !req2.messages, "search never calls the LLM");
     assert((await exchangeText()).includes("@changeMark"), "search added nothing to the Ask thread");
@@ -254,14 +255,14 @@ async function main() {
     await search().press("Enter");
     await waitReady();
     assert((await cardTitle()) === "@outputclass", "DITA: @outputclass");
-    await page.screenshot({ path: "/tmp/ask-schema-search-dita.png" });
+    await page.screenshot({ path: shot("ask-schema-search-dita.png") });
 
     // Project change: the search box of the new project starts empty.
     await search().fill("levell");
     await open(p42, "BRDP-NAV-A");
     assert((await search().inputValue()) === "" && (await card().count()) === 0, "project change: empty search, card closed");
 
-    console.log("\nAll checks passed. Screenshots: /tmp/ask-answer-more-*.png, /tmp/ask-schema-search-*.png");
+    console.log(`\nAll checks passed. Screenshots: ${shot("ask-answer-more-*.png")}, ${shot("ask-schema-search-*.png")}`);
   } finally {
     for (const p of created) await fetch(`${API}/api/projects/${p.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     await browser.close();

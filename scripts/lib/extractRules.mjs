@@ -9,17 +9,19 @@
 //     { file_warnings, candidates: [{ identifier, rule_xml, rule_count,
 //       noncontext_count, warnings }] }
 import { execFileSync } from 'node:child_process';
-import { BACKEND_DIR as BACKEND, pythonCandidates } from './backendPython.mjs';
+import { BACKEND_DIR as BACKEND, pythonCandidates, pythonEnv } from './backendPython.mjs';
+import { toPath } from './textFile.mjs';
 import path from 'node:path';
 
 const SCRIPT = path.join(BACKEND, 'scripts', 'extract_rules_json.py');
 
 export function extractRules(file, format, standard, issue = null) {
-  const args = [SCRIPT, path.resolve(file), format, standard, ...(issue ? [issue] : [])];
+  // `file`: a path or a file: URL (never URL.pathname, "/C:/..." on Windows).
+  const args = [SCRIPT, path.resolve(toPath(file)), format, standard, ...(issue ? [issue] : [])];
   let lastError;
   for (const python of pythonCandidates()) {
     try {
-      const out = execFileSync(python, args, { cwd: BACKEND, maxBuffer: 256 * 1024 * 1024 });
+      const out = execFileSync(python, args, { cwd: BACKEND, env: pythonEnv(), maxBuffer: 256 * 1024 * 1024 });
       return JSON.parse(out.toString('utf8'));
     } catch (err) {
       lastError = err;

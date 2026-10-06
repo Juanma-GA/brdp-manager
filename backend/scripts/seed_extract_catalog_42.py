@@ -16,6 +16,9 @@ import tempfile
 import warnings
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):  # UTF-8 on any console or pipe, Windows included (Protecciones 1c)
+    _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import openpyxl  # noqa: E402
@@ -43,7 +46,7 @@ def _rows():
 async def main(cleanup: bool) -> None:
     async with async_session_factory() as db:
         if cleanup:
-            added = json.loads(ADDED.read_text()) if ADDED.exists() else []
+            added = json.loads(ADDED.read_text(encoding="utf-8")) if ADDED.exists() else []
             if added:
                 await db.execute(delete(BRDPCatalog).where(BRDPCatalog.standard == STANDARD, BRDPCatalog.identifier.in_(added)))
                 await db.commit()
@@ -51,7 +54,7 @@ async def main(cleanup: bool) -> None:
             print(f"Removed {len(added)} catalog rows")
             return
         present = set((await db.execute(select(BRDPCatalog.identifier).where(BRDPCatalog.standard == STANDARD))).scalars())
-        previous = json.loads(ADDED.read_text()) if ADDED.exists() else []
+        previous = json.loads(ADDED.read_text(encoding="utf-8")) if ADDED.exists() else []
         added = []
         for identifier, title, definition in _rows():
             if identifier in present or identifier in added:
@@ -59,7 +62,7 @@ async def main(cleanup: bool) -> None:
             db.add(BRDPCatalog(standard=STANDARD, identifier=identifier, title=title, definition=definition))
             added.append(identifier)
         await db.commit()
-        ADDED.write_text(json.dumps(previous + added))
+        ADDED.write_text(json.dumps(previous + added), encoding="utf-8")
         print(f"Added {len(added)} catalog rows ({len(present)} were already there)")
 
 

@@ -19,6 +19,7 @@
 // request happened, and deterministically detects off-topic/follow-up
 // questions to exercise those real UI paths too.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -255,8 +256,8 @@ async function main() {
     assert(!catalogBlock.includes("Proposal Status:"), "Compare block (Catalog source) has NO Proposal Status line -- the catalog has no such field, never a misleading blank");
     assert(!catalogBlock.includes("Rule Status:"), "Compare block (Catalog source) has NO Rule Status line either, same reason");
 
-    await page.screenshot({ path: "/tmp/ask-question-compare.png" });
-    console.log("Screenshot saved to /tmp/ask-question-compare.png");
+    await page.screenshot({ path: shot("ask-question-compare.png") });
+    console.log(`Screenshot saved to ${shot("ask-question-compare.png")}`);
 
     // ---- Switching BRDP resets everything (docs request bug fix) ----
     await page.locator("tr", { hasText: "BRDP-ASK-TEST-B" }).click();

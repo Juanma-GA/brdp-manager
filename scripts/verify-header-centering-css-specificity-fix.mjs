@@ -9,6 +9,7 @@
 // computed style and the ACTUAL glyph-level text position, not the cell
 // box, so it can't be fooled the same way again.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -113,8 +114,8 @@ async function main() {
       assert(Math.abs(thBox.x - tdBox.x) <= 1 && Math.abs(thBox.width - tdBox.width) <= 1, `Leaf header ${i}'s <th> occupies the exact same column x/width as the data <td> below it (th x=${thBox.x.toFixed(1)}/w=${thBox.width.toFixed(1)}, td x=${tdBox.x.toFixed(1)}/w=${tdBox.width.toFixed(1)})`);
     }
 
-    await page.screenshot({ path: "/tmp/projects-header-truly-centered.png", fullPage: true });
-    console.log("Screenshot saved to /tmp/projects-header-truly-centered.png");
+    await page.screenshot({ path: shot("projects-header-truly-centered.png"), fullPage: true });
+    console.log(`Screenshot saved to ${shot("projects-header-truly-centered.png")}`);
 
     console.log("\nALL CHECKS PASSED");
   } finally {

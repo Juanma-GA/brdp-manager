@@ -12,6 +12,7 @@
 // This script deletes the SOPTE project again at the end so it doesn't
 // linger in the projects list -- rerun the seed script to bring it back.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -51,7 +52,7 @@ async function main() {
 
     // ---- Part 1: BRDP Projects table columns ----
     await page.waitForSelector("table", { timeout: 10000 });
-    await page.screenshot({ path: "/tmp/verify-projects-page.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-projects-page.png"), fullPage: true });
 
     const sopteRow = page.locator("tr", { hasText: "SOPTE Scale Verification" });
     await sopteRow.waitFor({ timeout: 10000 });
@@ -95,7 +96,7 @@ async function main() {
     const headerText = await page.locator("h1", { hasText: /Records|Registros/i }).locator("xpath=../..").innerText();
     console.log("Records header text:\n" + headerText);
     assert(headerText.includes("1400") && headerText.includes("1500"), "Records header shows real Proposal/Rule Status summary figures");
-    await page.screenshot({ path: "/tmp/verify-records-page-sopte.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-records-page-sopte.png"), fullPage: true });
 
     // ---- Part 3: filters on SOPTE (exact ground truth) ----
     // Scoped by aria-label, not select-index -- the app shell's

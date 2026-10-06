@@ -404,7 +404,7 @@ def test_content_models_file_matches_the_xsds(standard, key, directory):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
     spec.loader.exec_module(module)
     built = module.build_models(module.build_scopes(SOURCES / directory, "isolated"))
-    stored = json.loads((Path(__file__).resolve().parents[1] / "schema_cards" / f"content-models-{key}.json").read_text())
+    stored = json.loads((Path(__file__).resolve().parents[1] / "schema_cards" / f"content-models-{key}.json").read_text(encoding="utf-8"))
     assert built["unresolved_count"] == 0
     assert built["models"] == stored["models"]
 

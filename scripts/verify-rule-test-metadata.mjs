@@ -15,11 +15,12 @@
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
-// Vite on 5173. Cleans up the projects it creates. Screenshots go to /tmp.
+// Vite on 5173. Cleans up the projects it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-metadata.mjs
 import { chromium } from "playwright-core";
 import { readPublicTemplate, retiredTemplateRows } from "./lib/readXlsx.mjs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -224,7 +225,7 @@ async function main() {
     // The section is the LLM's content (not dimmed); the body is skeleton.
     assert((await colorOf(example(0).locator("pre span", { hasText: "<dmStatus" }).first())) !== "rgb(100, 116, 139)", "S1-00052: the written section is shown as content, not skeleton");
     assert((await colorOf(example(0).locator("pre span", { hasText: "<levelledPara" }).first())) === "rgb(100, 116, 139)", "S1-00052: the content chain is dimmed skeleton");
-    await panel().screenshot({ path: "/tmp/rule-test-metadata-infocode.png" });
+    await panel().screenshot({ path: shot("rule-test-metadata-infocode.png") });
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "S1-00052: recorded as passed");
 
     // 2. S1-00070 (the former template rule): tested for real.
@@ -250,7 +251,7 @@ async function main() {
     assert((await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "S1-00342: \"A\" rejected");
     assert((await example(0).getByTestId("rule-test-brex-normalized").count()) === 1, "S1-00342: the example says the app adjusted the brexDmRef");
     assert((await page.getByTestId("rule-test-brex-rejection").count()) === 0, "S1-00342: no 'rejection from the brexDmRef' note");
-    await panel().screenshot({ path: "/tmp/rule-test-metadata-brex-follows.png" });
+    await panel().screenshot({ path: shot("rule-test-metadata-brex-follows.png") });
 
     // 2c. //dmCode/@infoCode (any dmCode) with a list without 022: the
     // brexDmRef keeps 022 and the rejection is attributed to it.
@@ -262,7 +263,7 @@ async function main() {
     const noteEn = await example(0).getByTestId("rule-test-brex-rejection").textContent();
     assert(noteEn === "The rejection comes from the brexDmRef's data module code (the project's BREX): the rule would reject the real BREX too.", `infoCode list without 022: note in EN (${noteEn})`);
     assert((await example(2).getByTestId("rule-test-brex-rejection").count()) === 0, "infoCode list without 022: no note where the own code is rejected too");
-    await panel().screenshot({ path: "/tmp/rule-test-metadata-brex-rejection.png" });
+    await panel().screenshot({ path: shot("rule-test-metadata-brex-rejection.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(400);
     const noteEs = await example(0).getByTestId("rule-test-brex-rejection").textContent();
@@ -286,7 +287,7 @@ async function main() {
     assert((await verdict().textContent()).startsWith("Correct"), `S1-00316: verdict correct (${await verdict().textContent()})`);
     assert((await example(1).locator("pre").textContent()).includes('<applicRef applicIdentValue="app-001"/>'), "S1-00316: the reject example has applicRef in dmStatus");
     assert((await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓") && (await example(0).getByTestId("rule-test-result").textContent()).includes("accepted ✓"), "S1-00316: applicRef rejected, applic accepted");
-    await panel().screenshot({ path: "/tmp/rule-test-metadata-applicref.png" });
+    await panel().screenshot({ path: shot("rule-test-metadata-applicref.png") });
 
     // 4. A content-only rule: unchanged, the minimal section dimmed.
     await select("BRDP-MD-EMPH");
@@ -310,7 +311,7 @@ async function main() {
     assert((await page.getByRole("button", { name: "Regenerate examples" }).count()) === 0 && (await page.getByTestId("rule-test-show-examples").count()) === 0, "unreachable: no regenerate, no illustrative examples");
     assert(!(await panel().textContent()).includes("Regenerate the examples"), "unreachable: never 'Regenerate the examples'");
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Not executable"), "unreachable: recorded as not executable");
-    await panel().screenshot({ path: "/tmp/rule-test-metadata-unreachable.png" });
+    await panel().screenshot({ path: shot("rule-test-metadata-unreachable.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(400);
     const analysisEs = await page.getByTestId("rule-test-analysis").textContent();
@@ -338,7 +339,7 @@ async function main() {
     assert((await verdict().textContent()).startsWith("Correct"), `EXT-00019: verdict correct (${await verdict().textContent()})`);
     assert((await example(1).locator("pre").textContent()).includes('infoCode="00N"') && (await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "EXT-00019: a part in the tool CIR rejected");
     assert((await example(2).getByTestId("rule-test-result").textContent()).includes("accepted ✓"), "EXT-00019: a part in another CIR accepted");
-    await panel().screenshot({ path: "/tmp/rule-test-template-tool-cir.png" });
+    await panel().screenshot({ path: shot("rule-test-template-tool-cir.png") });
     await select("BRDP-EXT-00014");
     await page.getByRole("button", { name: "Test rule" }).click();
     await verdict().waitFor({ timeout: 15000 });

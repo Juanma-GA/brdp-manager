@@ -14,12 +14,16 @@
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
-// Vite on 5173. Cleans up the project it creates. Screenshots go to /tmp.
+// Vite on 5173. Cleans up the project it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-c3.mjs
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { normalizeNewlines } from "./lib/textFile.mjs";
+import { backendPython, pythonEnv } from "./lib/backendPython.mjs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -57,7 +61,7 @@ async def main():
         await s.commit()
 asyncio.run(main())
 `;
-  execFileSync(".venv/bin/python", ["-c", code, brdpId, format, ruleXml], { cwd: BACKEND });
+  execFileSync(backendPython(), ["-c", code, brdpId, format, ruleXml], { cwd: BACKEND, env: pythonEnv() });
 }
 
 async function main() {
@@ -103,7 +107,7 @@ async function main() {
   });
   assert(refused.status === 422, "PUT refuses //&lt;emphasis&gt; today (422)");
   writeRuleXmlDirectly(old.id, "BREX-4.2", OLD_RULE);
-  const report = execFileSync(".venv/bin/python", ["scripts/report_invalid_rules.py"], { cwd: BACKEND }).toString();
+  const report = normalizeNewlines(execFileSync(backendPython(), [path.join("scripts", "report_invalid_rules.py")], { cwd: BACKEND, env: pythonEnv() }).toString("utf8"));
   assert(report.includes(`| Rule test C3 ${suffix} | BRDP-C3-OLD | BREX-4.2 | Draft | This is not a BREX 4.2 rule: structureObjectRule is missing |`), `report_invalid_rules.py lists the old rule (${report.trim().split("\n")[0]})`);
   assert(!report.includes("BRDP-C3-QTY"), "report_invalid_rules.py does not list a valid rule");
 
@@ -154,7 +158,7 @@ async function main() {
     assert((await verdict().textContent()).startsWith("Correct"), "verdict correct after the correction");
     const accepted = await page.getByTestId("rule-test-example-0").textContent();
     assert(accepted.includes("<quantityGroup>") && accepted.includes('quantityUnitOfMeasure="N.m"'), "the fixed accept example follows the card (quantity > quantityGroup > quantityValue)");
-    await panel().screenshot({ path: "/tmp/rule-test-c3-quantity-cards.png" });
+    await panel().screenshot({ path: shot("rule-test-c3-quantity-cards.png") });
     await page.getByRole("button", { name: "Close" }).click();
 
     // C3b. Overlapping cells: removed by the app, said in the panel, no
@@ -174,7 +178,7 @@ async function main() {
       assert((text.match(/Access panel/g) || []).length === 1, `C3b: example ${i + 1} shows the fixed table (the spanned cell is gone)`);
     }
     assert((await verdict().textContent()).startsWith("Correct"), `C3b: verdict correct (${await verdict().textContent()})`);
-    await panel().screenshot({ path: "/tmp/rule-test-c3b-spanned-cells.png" });
+    await panel().screenshot({ path: shot("rule-test-c3b-spanned-cells.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(300);
     const esNote = await page.getByTestId("rule-test-example-0").getByTestId("rule-test-app-adjusted").textContent();
@@ -203,7 +207,7 @@ async function main() {
       assert((text.match(/<colspec colname="c\d"\/>/g) || []).length === 3, `colspecs: example ${i + 1} shows the three colspecs`);
     }
     assert((await verdict().textContent()).startsWith("Correct"), `colspecs: verdict correct (${await verdict().textContent()})`);
-    await panel().screenshot({ path: "/tmp/rule-test-c3b-colspecs-added.png" });
+    await panel().screenshot({ path: shot("rule-test-c3b-colspecs-added.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(300);
     const esCols = await page.getByTestId("rule-test-example-0").getByTestId("rule-test-colspecs-added").textContent();
@@ -226,7 +230,7 @@ async function main() {
     assert(!analysis.includes("Examples could only illustrate it."), "no mention of illustrative examples for a non-rule");
     assert((await panel().getByTestId("rule-test-show-examples").count()) === 0, "no \"Show illustrative examples\" button for a non-rule");
     assert((await lastRequest()) === null, "no LLM call for a stored non-rule");
-    await panel().screenshot({ path: "/tmp/rule-test-c3-old-rule.png" });
+    await panel().screenshot({ path: shot("rule-test-c3-old-rule.png") });
     await page.getByRole("button", { name: "Close" }).click();
     await page.getByRole("button", { name: "Verify", exact: true }).click();
     const dialog = page.getByTestId("verify-warning-dialog");

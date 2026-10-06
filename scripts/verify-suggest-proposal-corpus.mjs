@@ -29,6 +29,7 @@
 // backend/scripts/seed_suggest_proposal_catalog.py already run (S1000D 4.2
 // catalog: BRDP-SPCAT-LIVE-001).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -308,8 +309,8 @@ async function main() {
     });
     assert(true, "expanded Same-BRDP reference shows BOTH Definition and Proposal, labeled");
 
-    await page.screenshot({ path: "/tmp/suggest-proposal-three-groups-expanded.png", fullPage: true });
-    console.log("Screenshot (3 groups, 1 reference expanded): /tmp/suggest-proposal-three-groups-expanded.png");
+    await page.screenshot({ path: shot("suggest-proposal-three-groups-expanded.png"), fullPage: true });
+    console.log(`Screenshot (3 groups, 1 reference expanded): ${shot("suggest-proposal-three-groups-expanded.png")}`);
 
     // While a suggestion is pending, all 3 Suggest buttons are blocked.
     assert(await page.getByRole("button", { name: "Suggest Definition" }).isDisabled(), "Suggest Definition blocked while pending");
@@ -356,8 +357,8 @@ async function main() {
     assert((await page.locator("text=Same BRDP in other projects").count()) === 0, "EXT-style BRDP: no Same BRDP group rendered");
     await page.waitForSelector("text=Similar decisions", { timeout: 5000 });
     assert((await page.locator("text=This project").count()) === 0, "Project D has no This-project group rendered");
-    await page.screenshot({ path: "/tmp/suggest-proposal-ext-no-same-brdp.png", fullPage: true });
-    console.log("Screenshot (EXT-style, no Same BRDP): /tmp/suggest-proposal-ext-no-same-brdp.png");
+    await page.screenshot({ path: shot("suggest-proposal-ext-no-same-brdp.png"), fullPage: true });
+    console.log(`Screenshot (EXT-style, no Same BRDP): ${shot("suggest-proposal-ext-no-same-brdp.png")}`);
     await page.getByRole("button", { name: "Discard" }).click();
     await page.waitForTimeout(200);
 
@@ -369,8 +370,8 @@ async function main() {
       (await disabledButton.getAttribute("title")) === "Add or accept a Definition first",
       "tooltip reads the exact docs-request text"
     );
-    await page.screenshot({ path: "/tmp/suggest-proposal-empty-definition-disabled.png", fullPage: true });
-    console.log("Screenshot (empty-Definition disabled button): /tmp/suggest-proposal-empty-definition-disabled.png");
+    await page.screenshot({ path: shot("suggest-proposal-empty-definition-disabled.png"), fullPage: true });
+    console.log(`Screenshot (empty-Definition disabled button): ${shot("suggest-proposal-empty-definition-disabled.png")}`);
 
     // ---- Refused BRDP: the prompt's rejection block ----
     await openRecords(`Suggest Proposal Verify A ${suffix}`, "BRDP-SPREFUSED-01");
@@ -407,8 +408,8 @@ async function main() {
     await noRefButton.click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     await page.waitForSelector("text=Proposal generated without reference BRDPs", { timeout: 5000 });
-    await page.screenshot({ path: "/tmp/suggest-proposal-no-references.png", fullPage: true });
-    console.log("Screenshot (no references): /tmp/suggest-proposal-no-references.png");
+    await page.screenshot({ path: shot("suggest-proposal-no-references.png"), fullPage: true });
+    console.log(`Screenshot (no references): ${shot("suggest-proposal-no-references.png")}`);
 
     const reqNoRefs = await lastMockRequest();
     const sysNoRefs = reqNoRefs.messages.find((m) => m.role === "system").content;

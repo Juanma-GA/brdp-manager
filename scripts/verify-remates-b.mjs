@@ -26,6 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { backendPython, pythonEnv } from "./lib/backendPython.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -45,14 +46,7 @@ function assert(cond, msg) {
   }
 }
 
-function python() {
-  if (process.env.BACKEND_PYTHON) return process.env.BACKEND_PYTHON;
-  for (const p of ["backend/.venv/bin/python", "backend/.venv/Scripts/python.exe"]) {
-    if (fs.existsSync(path.join(ROOT, p))) return path.join(ROOT, p);
-  }
-  return "python3";
-}
-const seed = (arg) => execFileSync(python(), ["scripts/seed_remates_b_catalog.py", ...(arg ? [arg] : [])], { cwd: path.join(ROOT, "backend"), encoding: "utf8" });
+const seed = (arg) => execFileSync(backendPython(), [path.join("scripts", "seed_remates_b_catalog.py"), ...(arg ? [arg] : [])], { cwd: path.join(ROOT, "backend"), encoding: "utf8", env: pythonEnv() });
 
 // A BREX 4.2 whose rules carry the given identifiers (one rule each).
 function brexFile(name, ids) {

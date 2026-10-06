@@ -9,6 +9,7 @@
 // Postgres, no LLM call involved in any of this (the vocabulary check is
 // 100% deterministic, no mock needed).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -116,8 +117,8 @@ async function main() {
       assert(true, 'a half-typed "<table" with NO trigger word ("elemento"/"element"/etc.) still offers "Did you mean <table>?"');
       assert((await page.locator("text=/mentions names not found/").count()) === 0, "a resolvable dangling name never triggers the red 'not found' banner");
 
-      await page.screenshot({ path: "/tmp/dangling-markup-open-suggestion.png", fullPage: true });
-      console.log("Screenshot (dangling open, suggestion visible): /tmp/dangling-markup-open-suggestion.png");
+      await page.screenshot({ path: shot("dangling-markup-open-suggestion.png"), fullPage: true });
+      console.log(`Screenshot (dangling open, suggestion visible): ${shot("dangling-markup-open-suggestion.png")}`);
 
       await suggestionButton.click();
       await page.waitForTimeout(400);
@@ -167,8 +168,8 @@ async function main() {
         .textContent();
       assert(bannerText.includes("<pokemon>"), `the red banner names <pokemon> even though the markup was never closed (got: ${bannerText})`);
       assert((await page.getByRole("button", { name: /Did you mean/ }).count()) === 0, 'no "Did you mean" completion is offered for a name that does not exist -- nothing real to complete it to');
-      await page.screenshot({ path: "/tmp/dangling-markup-unknown-banner.png", fullPage: true });
-      console.log("Screenshot (dangling, unresolvable, red banner only): /tmp/dangling-markup-unknown-banner.png");
+      await page.screenshot({ path: shot("dangling-markup-unknown-banner.png"), fullPage: true });
+      console.log(`Screenshot (dangling, unresolvable, red banner only): ${shot("dangling-markup-unknown-banner.png")}`);
       await page.close();
     }
 

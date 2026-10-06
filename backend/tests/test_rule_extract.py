@@ -411,7 +411,7 @@ def test_doctype_with_internal_subset_is_read():
 
 def test_external_entity_is_never_read(tmp_path):
     secret = tmp_path / "secret.txt"
-    secret.write_text("TOP-SECRET-CONTENT")
+    secret.write_text("TOP-SECRET-CONTENT", encoding="utf-8")
     rule = (
         '<structureObjectRule><objectPath allowedObjectFlag="0">//a</objectPath>'
         "<objectUse>BRDP-S1-00133. &x; end</objectUse></structureObjectRule>"

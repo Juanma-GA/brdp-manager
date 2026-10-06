@@ -35,6 +35,7 @@
 // Prerequisites: mock-mistral-chat-server.mjs on :8902 with uvicorn's
 // MISTRAL_ENDPOINT overridden to it, real Vite dev server, real Postgres.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 // Suggest Rule prerequisites (Suggest Rule round): Rule may be disabled
 // by its OWN reasons (no Validated/filled Proposal on these fixtures) --
@@ -253,8 +254,8 @@ async function main() {
     assert(bannerColor === "rgb(185, 28, 28)", `unknown-names banner text is red #b91c1c (got ${bannerColor})`);
     const bannerBg = await bannerLocator.evaluate((el) => getComputedStyle(el).backgroundColor);
     assert(bannerBg !== "rgba(0, 0, 0, 0)" && bannerBg !== "transparent", `unknown-names banner has a real tinted background (got ${bannerBg})`);
-    await page.screenshot({ path: "/tmp/vocab-check-unknown-name-banner.png", fullPage: true });
-    console.log("Screenshot (unknown-name banner): /tmp/vocab-check-unknown-name-banner.png");
+    await page.screenshot({ path: shot("vocab-check-unknown-name-banner.png"), fullPage: true });
+    console.log(`Screenshot (unknown-name banner): ${shot("vocab-check-unknown-name-banner.png")}`);
 
     const reqAsk = await lastMockRequest();
     const sysAsk = reqAsk.messages.find((m) => m.role === "system").content;
@@ -443,8 +444,8 @@ async function main() {
         sysWrongType.includes("<label> is not an element in S1000D 4.2 — it exists as attribute @label."),
       "Ask prompt carries the exact wrong-kind sentence for real S1000D 4.2 vocabulary"
     );
-    await page.screenshot({ path: "/tmp/vocab-check-wrong-type-banner.png", fullPage: true });
-    console.log("Screenshot (wrong-kind banner): /tmp/vocab-check-wrong-type-banner.png");
+    await page.screenshot({ path: shot("vocab-check-wrong-type-banner.png"), fullPage: true });
+    console.log(`Screenshot (wrong-kind banner): ${shot("vocab-check-wrong-type-banner.png")}`);
     await page.getByRole("button", { name: "Clear" }).click();
 
     // ==== 4. S1000D 5.0 project: genuinely no schema in this repo ->
@@ -503,8 +504,8 @@ async function main() {
       assert(similarColor !== "rgb(220, 38, 38)", `Similar decisions heading is NOT red (got ${similarColor})`);
     }
 
-    await page.screenshot({ path: "/tmp/vocab-same-brdp-highlighted-red.png", fullPage: true });
-    console.log("Screenshot (Same BRDP highlighted red): /tmp/vocab-same-brdp-highlighted-red.png");
+    await page.screenshot({ path: shot("vocab-same-brdp-highlighted-red.png"), fullPage: true });
+    console.log(`Screenshot (Same BRDP highlighted red): ${shot("vocab-same-brdp-highlighted-red.png")}`);
 
     console.log("\nALL CHECKS PASSED\n");
   } finally {

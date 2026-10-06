@@ -8,6 +8,7 @@
 //
 //     node scripts/verify-rule-format-check.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -123,8 +124,8 @@ async function main() {
     await page.waitForTimeout(250);
     const color = await formatError().evaluate((el) => getComputedStyle(el).color);
     assert(color === "rgb(185, 28, 28)", `the format error is red (${color})`);
-    await page.locator('[class*="suggestionBox"]').first().screenshot({ path: "/tmp/rule-format-paste-error.png" });
-    console.log("Screenshot: /tmp/rule-format-paste-error.png");
+    await page.locator('[class*="suggestionBox"]').first().screenshot({ path: shot("rule-format-paste-error.png") });
+    console.log(`Screenshot: ${shot("rule-format-paste-error.png")}`);
     await language.selectOption("es");
     await page.waitForTimeout(300);
     assert((await formatError().first().textContent()) === "⚠ Esto no es una regla BREX 4.2: falta structureObjectRule", "Spanish: 'Esto no es una regla BREX 4.2: falta structureObjectRule'");
@@ -148,7 +149,7 @@ async function main() {
     await editor.fill("//&lt;emphasis&gt;");
     await page.waitForTimeout(200);
     assert((await editorError().textContent()) === "⚠ This is not a BREX 4.2 rule: structureObjectRule is missing" && (await save.isDisabled()), "editor //&lt;emphasis&gt;: red error, Save disabled");
-    await page.locator('[class*="ruleEditor"]').first().screenshot({ path: "/tmp/rule-format-editor-error.png" });
+    await page.locator('[class*="ruleEditor"]').first().screenshot({ path: shot("rule-format-editor-error.png") });
     await editor.fill(`<rules>${RULE_42("BRDP-RF-EDIT")}</rules>`);
     await page.waitForTimeout(200);
     assert(/<rules> is not allowed around the rule/.test(await editorError().textContent()) && (await save.isDisabled()), "editor <rules> wrapper: error with the reason, Save disabled");

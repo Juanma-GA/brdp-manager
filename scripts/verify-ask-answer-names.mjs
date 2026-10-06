@@ -11,6 +11,7 @@
 //
 //   node scripts/verify-ask-answer-names.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -112,7 +113,7 @@ async function main() {
       "prompt: the no-facts concept instruction"
     );
     assert(!sys.includes("SCHEMA FACTS — extracted from"), "prompt: no schema facts for the NCAGE question (the real situation)");
-    await page.locator('[class*="exchange"]').first().screenshot({ path: "/tmp/ask-answer-unknown-names.png" });
+    await page.locator('[class*="exchange"]').first().screenshot({ path: shot("ask-answer-unknown-names.png") });
 
     // 2. Spanish interface.
     await language.selectOption("es");
@@ -163,7 +164,7 @@ async function main() {
     assert(cardText.includes("[comment]: commentAddress, commentStatus"), "UI card: [comment] lists commentAddress, commentStatus");
     assert(cardText.includes("attributes: none") && !cardText.includes("children: none"), "UI card: attributes none, never children none");
     assert(!cardText.includes("additional"), "UI card: no 'additional' labels");
-    await card.screenshot({ path: "/tmp/schema-card-identandstatussection.png" });
+    await card.screenshot({ path: shot("schema-card-identandstatussection.png") });
 
     // 5. Switching BRDP clears the exchange and its warning.
     await open(p301, "BRDP-AN-NCAGE");

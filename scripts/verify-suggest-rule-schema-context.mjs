@@ -23,12 +23,11 @@
 // Cleans up the projects it creates.
 //
 //     node scripts/verify-suggest-rule-schema-context.mjs
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { xsdCheck } from "./lib/xsdCheck.mjs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -170,16 +169,9 @@ async function main() {
     assert(all.length > 0 && all.every((x) => !xml.includes(x.id)), `${project.standard}: no BRDP UUID in the generated BREX`);
     assert(!xml.includes("pendiente de aprobación"), `${project.standard}: no Spanish pending-approval comment left`);
   }
-  function xmllint(xml, standard) {
-    const file = path.join(os.tmpdir(), `schema-ctx-${suffix}-${standard.replace(/\W/g, "")}.xml`);
-    fs.writeFileSync(file, xml);
-    try {
-      execFileSync("xmllint", ["--noout", "--schema", path.join(ROOT, XSD[standard]), file], { stdio: "pipe" });
-      return "valid";
-    } catch (err) {
-      return String(err.stderr || err.message).slice(0, 800);
-    }
-  }
+  // XSD check with xmllint-wasm (scripts/lib/xsdCheck.mjs): no xmllint
+  // program needed, so it runs on Windows too.
+  const xmllint = (xml, standard) => xsdCheck(path.join(ROOT, XSD[standard]), xml);
 
   try {
     await page.goto(BASE_URL);
@@ -209,7 +201,7 @@ async function main() {
     assert(await checkbox("proced").isChecked(), "proced mention: proced pre-checked");
     assert(!(await checkbox("descript").isChecked()) && !(await checkbox("descript").isDisabled()), "other schemas unchecked and enabled (<emphasis> is in every 4.2 schema)");
     assert(await page.locator("text=/Pre-checked because the BRDP mentions them: proced/").isVisible(), "the mention is explained");
-    await page.screenshot({ path: "/tmp/schema-ctx-selector-proced.png", fullPage: true });
+    await page.screenshot({ path: shot("schema-ctx-selector-proced.png"), fullPage: true });
     await selector().getByRole("button", { name: "Generate" }).click();
     await waitForRule();
     system = await lastSystemPrompt();
@@ -222,7 +214,7 @@ async function main() {
         shown.includes("<structureObjectRuleGroup>"),
       "one contextRules with the proced URL wraps the rule"
     );
-    await page.screenshot({ path: "/tmp/schema-ctx-proced-rule.png", fullPage: true });
+    await page.screenshot({ path: shot("schema-ctx-proced-rule.png"), fullPage: true });
     const procStored = await acceptAndApprove(p42, b.proc, "BREX-4.2");
     assert(procStored === shown, "saved rule_xml is exactly the wrapped rule shown");
 
@@ -257,7 +249,7 @@ async function main() {
     assert(!(await checkbox("proced").isDisabled()) && (await checkbox("ipd").isDisabled()), "<table> manual selector: proced enabled, ipd disabled");
     const ipdTitle = await selector().locator('label:has(input[value="ipd"])').getAttribute("title");
     assert(/<table>/.test(ipdTitle || ""), `disabled schema says why (${ipdTitle})`);
-    await page.screenshot({ path: "/tmp/schema-ctx-table-limit-link.png", fullPage: true });
+    await page.screenshot({ path: shot("schema-ctx-table-limit-link.png"), fullPage: true });
     await selector().getByRole("button", { name: "Cancel" }).click();
     assert((await selector().count()) === 0 && !(await ruleButton().isDisabled()), "Cancel closes the selector and unblocks Suggest");
 
@@ -268,7 +260,7 @@ async function main() {
     await selector().waitFor({ timeout: 10000 });
     assert(await checkbox("proced").isChecked(), "'In procedural data modules, <table>…': proced pre-checked");
     assert(await checkbox("ipd").isDisabled(), "... ipd (no <table>) disabled");
-    await page.screenshot({ path: "/tmp/schema-ctx-selector-partial.png", fullPage: true });
+    await page.screenshot({ path: shot("schema-ctx-selector-partial.png"), fullPage: true });
     await selector().getByRole("button", { name: "Cancel" }).click();
 
     // <partSegment> (ipd only): no selector on its own either.
@@ -298,7 +290,7 @@ async function main() {
     assert(!(await page.getByRole("button", { name: "Accept pasted rule" }).isDisabled()), "per-schema warning never blocks Accept");
     const pastedPreview = await page.locator('[class*="suggestionCode"]').nth(1).innerText();
     assert(pastedPreview.includes("xml_schema_flat/ipd.xsd"), "pasted rule is shown wrapped in the chosen schema's block");
-    await page.screenshot({ path: "/tmp/schema-ctx-pasted-warning.png", fullPage: true });
+    await page.screenshot({ path: shot("schema-ctx-pasted-warning.png"), fullPage: true });
     await page.getByRole("button", { name: "Discard" }).click();
 
     // 6. Generate BREX 4.2 with the context blocks in place.
@@ -316,8 +308,9 @@ async function main() {
     }
     const nonCtx = xml.indexOf("<nonContextRules");
     assert(nonCtx === -1 || nonCtx > xml.lastIndexOf("</contextRules>"), "4.2: no nonContextRules before a contextRules sibling");
-    assert(xmllint(xml, "S1000D 4.2") === "valid", `4.2: xmllint --schema brex4.2.xsd valid (${xmllint(xml, "S1000D 4.2")})`);
-    await page.screenshot({ path: "/tmp/schema-ctx-generate-4-2.png", fullPage: true });
+    const lint1 = await xmllint(xml, "S1000D 4.2");
+    assert(lint1 === "valid", `4.2: xmllint --schema brex4.2.xsd valid (${lint1})`);
+    await page.screenshot({ path: shot("schema-ctx-generate-4-2.png"), fullPage: true });
     await checkPendingComments(p42, xml, ["BRDP-SC-GEN", "BRDP-SC-TABLE", "BRDP-SC-TBLPROC", "BRDP-SC-PART"]);
 
     // 7. 4.1: same flow, Generate, XSD.
@@ -333,7 +326,8 @@ async function main() {
     xml = await generate(p41);
     assert(await page.locator("text=Valid against XSD schema").isVisible(), "4.1 Generate: the app's own XSD check passes");
     assert(xml.includes("S1000D_4-1/xml_schema_flat/proced.xsd"), "4.1: block present in the BREX");
-    assert(xmllint(xml, "S1000D 4.1") === "valid", `4.1: xmllint valid (${xmllint(xml, "S1000D 4.1")})`);
+    const lint2 = await xmllint(xml, "S1000D 4.1");
+    assert(lint2 === "valid", `4.1: xmllint valid (${lint2})`);
     await checkPendingComments(p41, xml, ["BRDP-SC-PEND41"]);
 
     // 8. 3.0.1 (Spanish mention): contextrules / structrules / objrule.
@@ -354,8 +348,9 @@ async function main() {
     const generic301Idx = xml.indexOf("<contextrules>");
     const proc301Idx = xml.indexOf('context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_flat/proced.xsd"');
     assert(proc301Idx > 0 && (generic301Idx === -1 || generic301Idx < proc301Idx), "3.0.1: block placed after the generic contextrules (if any)");
-    assert(xmllint(xml, "S1000D 3.0.1") === "valid", `3.0.1: xmllint valid (${xmllint(xml, "S1000D 3.0.1")})`);
-    await page.screenshot({ path: "/tmp/schema-ctx-generate-3-0-1.png", fullPage: true });
+    const lint3 = await xmllint(xml, "S1000D 3.0.1");
+    assert(lint3 === "valid", `3.0.1: xmllint valid (${lint3})`);
+    await page.screenshot({ path: shot("schema-ctx-generate-3-0-1.png"), fullPage: true });
     await checkPendingComments(p301, xml, ["BRDP-SC-301GEN"]);
 
     // 3.0.1 <emphasis> (absent from comment/ddn/dml/pm), no mention -> no selector.
@@ -380,7 +375,7 @@ async function main() {
     ]);
     assert(putRes.ok(), "Save Configuration: PUT …/config 200");
     await locSelect.waitFor({ timeout: 10000 });
-    await page.screenshot({ path: "/tmp/schema-ctx-config-master.png", fullPage: true });
+    await page.screenshot({ path: shot("schema-ctx-config-master.png"), fullPage: true });
     const savedCfg = (await api(`/api/projects/${pMaster.id}/config`).then((r) => r.json())).project_config;
     assert(savedCfg.schemaLocation === "master" && savedCfg.modelIdentCode === "SCHCTX", "Schema location saved in project_config (other fields kept)");
     await page.reload();
@@ -400,7 +395,7 @@ async function main() {
       masterShown.startsWith('<contextrules context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd">'),
       `3.0.1 master: context="…/xml_schema_master/dm/descriptSchema.xsd" (${masterShown.split("\n")[0]})`
     );
-    await page.screenshot({ path: "/tmp/schema-ctx-master-rule.png", fullPage: true });
+    await page.screenshot({ path: shot("schema-ctx-master-rule.png"), fullPage: true });
     const sMaster = await acceptAndApprove(pMaster, bMaster, "BREX-3.0.1");
     assert(sMaster === masterShown, "3.0.1 master: saved rule_xml is the wrapped rule shown");
 
@@ -423,9 +418,10 @@ async function main() {
     // follows the project's schema location too (master: dm/brexSchema.xsd,
     // as in the real 3.0.1 master list of BRDP-A1-00100).
     assert(/<dmodule\b[^>]*xsi:noNamespaceSchemaLocation="http:\/\/www\.s1000d\.org\/S1000D_3-0-1\/xml_schema_master\/dm\/brexSchema\.xsd"/.test(xml) && !xml.includes("xml_schema_flat/brex.xsd"), "3.0.1 master: the BREX's own schema URL in master form");
-    assert(xmllint(xml, "S1000D 3.0.1") === "valid", `3.0.1 master: xmllint valid (${xmllint(xml, "S1000D 3.0.1")})`);
+    const lint4 = await xmllint(xml, "S1000D 3.0.1");
+    assert(lint4 === "valid", `3.0.1 master: xmllint valid (${lint4})`);
     await checkPendingComments(pMaster, xml, ["BRDP-SC-M-NEXT", "BRDP-SC-M-PEND"]);
-    await page.screenshot({ path: "/tmp/schema-ctx-generate-master.png", fullPage: true });
+    await page.screenshot({ path: shot("schema-ctx-generate-master.png"), fullPage: true });
 
     // 9. DITA never shows the selector (nor the Schema location setting).
     await page.goto(`${BASE_URL}/projects/${pDita.id}/config`);

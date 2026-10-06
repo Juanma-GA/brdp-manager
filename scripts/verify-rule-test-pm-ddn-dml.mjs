@@ -17,10 +17,11 @@
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
-// Vite on 5173. Cleans up the project it creates. Screenshots go to /tmp.
+// Vite on 5173. Cleans up the project it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-pm-ddn-dml.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -144,9 +145,9 @@ async function main() {
     }
     const ddnXml = await example(6).locator("pre").textContent();
     assert(ddnXml.includes("<ddn ") && ddnXml.includes("<ddnStatus>") && ddnXml.includes("<authorization>"), "EXT-00029: the ddn is a whole document with its section");
-    await panel().screenshot({ path: "/tmp/rule-test-ext29-pm-ddn-dml.png" });
-    await example(6).screenshot({ path: "/tmp/rule-test-ext29-ddn-built-by-app.png" });
-    await example(5).screenshot({ path: "/tmp/rule-test-ext29-pm-rejected.png" });
+    await panel().screenshot({ path: shot("rule-test-ext29-pm-ddn-dml.png") });
+    await example(6).screenshot({ path: shot("rule-test-ext29-ddn-built-by-app.png") });
+    await example(5).screenshot({ path: shot("rule-test-ext29-pm-rejected.png") });
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "EXT-00029: recorded as passed");
 
     // 2. A node path rooted only at /pm, run on a pm.
@@ -167,7 +168,7 @@ async function main() {
     const cText = await panel().textContent();
     assert(cText.includes("looks inside the identification and status section of the comment schema"), `comment: not executable with the reason (${cText.slice(0, 300)})`);
     assert((await lastRequest()) === null || (await lastRequest()).messages === undefined, "comment: no LLM call");
-    await panel().screenshot({ path: "/tmp/rule-test-comment-section-unavailable.png" });
+    await panel().screenshot({ path: shot("rule-test-comment-section-unavailable.png") });
 
     // 4. comment OR dmStatus: tested on descript, the untested part said.
     await select("BRDP-MIXED");
@@ -180,7 +181,7 @@ async function main() {
     await page.waitForTimeout(500);
     const untestedEs = await page.getByTestId("rule-test-untested").textContent();
     assert(untestedEs.includes("Parte de la regla no probada: <commentStatus>, <commentResponse> (esquema comment)"), `mixed: untested part in Spanish (${untestedEs})`);
-    await panel().screenshot({ path: "/tmp/rule-test-untested-part-es.png" });
+    await panel().screenshot({ path: shot("rule-test-untested-part-es.png") });
     await page.locator("header select, nav select").first().selectOption("en");
   } finally {
     await browser.close();

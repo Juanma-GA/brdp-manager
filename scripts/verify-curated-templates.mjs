@@ -19,6 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { readXlsxRows } from "./lib/readXlsx.mjs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -94,7 +95,7 @@ async function main() {
 
       const savePath = path.join(os.tmpdir(), `verify-template-${standard.replace(/[^a-z0-9]/gi, "_")}.xlsx`);
       await download.saveAs(savePath);
-      await page.screenshot({ path: `/tmp/verify-template-download-${standard.replace(/[^a-z0-9]/gi, "_")}.png`, fullPage: true });
+      await page.screenshot({ path: shot(`verify-template-download-${standard.replace(/[^a-z0-9]/gi, "_")}.png`), fullPage: true });
       downloadedPaths[standard] = savePath;
 
       const buf = fs.readFileSync(savePath);

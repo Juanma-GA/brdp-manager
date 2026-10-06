@@ -17,6 +17,7 @@
 //
 // Usage: node scripts/verify-standards-rename.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
@@ -96,7 +97,7 @@ async function main() {
     }
     // Close the (now empty) create form before screenshotting the list.
     await page.click('button:has-text("Cancel")').catch(() => {});
-    await page.screenshot({ path: "/tmp/verify-1-projects-list.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-1-projects-list.png"), fullPage: true });
 
     // ---- 2. Generate-page selector: present for the 3 S1000D standards, absent for both DITA standards ----
     const projectIds = {};
@@ -199,7 +200,7 @@ async function main() {
     assert(brexOutput.includes('id="BRDP-VERIFY-4-2"'), "BREX output contains the approved rule's real content");
     const brexBadgeOk = await page.locator("text=/Well-formed XML/i").count();
     assert(brexBadgeOk > 0, "BREX output reports well-formed XML");
-    await page.screenshot({ path: "/tmp/verify-2-brex-4-2-output.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-2-brex-4-2-output.png"), fullPage: true });
 
     // Switch to Schematron -- same page, no reload -- and generate again
     // (switching the output clears the previous result, so the button reads
@@ -214,7 +215,7 @@ async function main() {
     assert(!schOutput.includes("structureObjectRule"), "Schematron output is converted, not raw BREX");
     const schBadgeOk = await page.locator("text=/Well-formed XML/i").count();
     assert(schBadgeOk > 0, "Schematron output reports well-formed XML");
-    await page.screenshot({ path: "/tmp/verify-3-schematron-4-2-output.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-3-schematron-4-2-output.png"), fullPage: true });
 
     console.log("\nAll checks passed: standards rename, selector presence/absence, and real BREX+Schematron generation from an S1000D 4.2 project.");
   } finally {

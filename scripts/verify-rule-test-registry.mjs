@@ -11,11 +11,12 @@
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
-// Vite on 5173. Cleans up the project it creates. Screenshots go to /tmp.
+// Vite on 5173. Cleans up the project it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-registry.mjs
 import { chromium } from "playwright-core";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -145,7 +146,7 @@ async function main() {
     await page.waitForTimeout(500);
     let history = await historyEntries();
     assert(history.some((h) => h.includes("Rule test") && h.includes("Not tested") && h.includes("Passed")), `History: Rule test Not tested → Passed (${history.find((h) => h.includes("Rule test"))})`);
-    await page.locator('[class*="ruleStatusRow"]').first().screenshot({ path: "/tmp/rule-test-indicator-passed.png" });
+    await page.locator('[class*="ruleStatusRow"]').first().screenshot({ path: shot("rule-test-indicator-passed.png") });
 
     // 2. "Run again" on an edited example never changes the recorded result.
     const recordedAt = a.last_test_at;
@@ -200,7 +201,7 @@ async function main() {
     assert(failedText.includes("The last test failed: the rule accepted an example meant to violate it."), `dialog: failed reason (${failedText})`);
     const buttons = await dialog().getByRole("button").allTextContents();
     assert(buttons.join("|") === "Test now|Verify anyway|Cancel", `dialog buttons: ${buttons.join(" | ")}`);
-    await dialog().screenshot({ path: "/tmp/rule-test-verify-dialog-failed.png" });
+    await dialog().screenshot({ path: shot("rule-test-verify-dialog-failed.png") });
     await dialog().getByRole("button", { name: "Cancel" }).click();
     assert((await approvalOf("BRDP-T3-FAIL")).status === "pending_review", "Cancel: still Draft");
     await page.getByRole("button", { name: "Verify", exact: true }).click();
@@ -237,7 +238,7 @@ async function main() {
       (await dialog().textContent()).includes("Esta regla no se pudo probar: La regla lee otro fichero (document()), que no está disponible en una prueba."),
       `document() dialog in Spanish (${await dialog().textContent()})`
     );
-    await dialog().screenshot({ path: "/tmp/rule-test-verify-dialog-document-es.png" });
+    await dialog().screenshot({ path: shot("rule-test-verify-dialog-document-es.png") });
     await dialog().getByRole("button", { name: "Cancelar" }).click();
     // Opening Test rule records "not executable" at once, with no LLM call.
     await page.getByRole("button", { name: "Probar regla" }).click();
@@ -264,7 +265,7 @@ async function main() {
     assert(enEntry && enEntry.includes("Not executable: The rule reads another file (document())"), `History in English (${enEntry})`);
     a = await approvalOf("BRDP-T3-DOC");
     assert(a.last_test_result === "not_executable" && a.last_test_reason.code === "external_document", "API: the reason is stored as a code");
-    await page.locator('[class*="ruleStatusRow"]').first().screenshot({ path: "/tmp/rule-test-indicator-not-executable.png" });
+    await page.locator('[class*="ruleStatusRow"]').first().screenshot({ path: shot("rule-test-indicator-not-executable.png") });
 
     // 8. Test a suggestion, then accept it → recorded as tested.
     await select("BRDP-T3-SUG");

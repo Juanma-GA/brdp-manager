@@ -22,6 +22,7 @@
 // backend/scripts/seed_suggest_definition_catalog.py and
 // seed_ask_compare_catalog.py already run (S1000D 4.2 catalog: 3 entries).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -206,8 +207,8 @@ async function main() {
     await suggestDefButton.click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     await page.waitForSelector("text=Similar", { timeout: 5000 });
-    await page.screenshot({ path: "/tmp/suggest-definition-with-references.png", fullPage: true });
-    console.log("Screenshot (with references): /tmp/suggest-definition-with-references.png");
+    await page.screenshot({ path: shot("suggest-definition-with-references.png"), fullPage: true });
+    console.log(`Screenshot (with references): ${shot("suggest-definition-with-references.png")}`);
 
     const reqWithRefs = await lastMockRequest();
     const sysWithRefs = reqWithRefs.messages.find((m) => m.role === "system").content;
@@ -237,8 +238,8 @@ async function main() {
       (await catalogButton.getAttribute("title")) === "Official definition from the standard catalog",
       "tooltip reads the exact docs-request text"
     );
-    await page.screenshot({ path: "/tmp/suggest-definition-catalog-disabled.png", fullPage: true });
-    console.log("Screenshot (catalog-disabled button): /tmp/suggest-definition-catalog-disabled.png");
+    await page.screenshot({ path: shot("suggest-definition-catalog-disabled.png"), fullPage: true });
+    console.log(`Screenshot (catalog-disabled button): ${shot("suggest-definition-catalog-disabled.png")}`);
 
     // ---- Without references: Project B / BRDP-SDEMPTY-SOURCE-01 ----
     await openRecords(`Suggest Definition Verify B ${suffix}`, "BRDP-SDEMPTY-SOURCE-01");
@@ -248,8 +249,8 @@ async function main() {
     await suggestDefButtonB.click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     await page.waitForSelector("text=Definition generated without reference BRDPs", { timeout: 5000 });
-    await page.screenshot({ path: "/tmp/suggest-definition-without-references.png", fullPage: true });
-    console.log("Screenshot (without references): /tmp/suggest-definition-without-references.png");
+    await page.screenshot({ path: shot("suggest-definition-without-references.png"), fullPage: true });
+    console.log(`Screenshot (without references): ${shot("suggest-definition-without-references.png")}`);
 
     const reqNoRefs = await lastMockRequest();
     const sysNoRefs = reqNoRefs.messages.find((m) => m.role === "system").content;

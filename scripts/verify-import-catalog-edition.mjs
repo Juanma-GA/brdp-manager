@@ -27,6 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { backendPython, pythonEnv } from "./lib/backendPython.mjs";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
@@ -45,18 +46,11 @@ function assert(condition, message, detail = "") {
   }
 }
 
-function backendPython() {
-  if (process.env.BACKEND_PYTHON) return process.env.BACKEND_PYTHON;
-  for (const p of [".venv/bin/python", ".venv/Scripts/python.exe"]) {
-    if (fs.existsSync(path.join(BACKEND, p))) return path.join(BACKEND, p);
-  }
-  return "python3";
-}
 
 async function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "catalog-edition-"));
   const lufthansa = path.join(tmp, "lufthansa.xlsx");
-  execFileSync(backendPython(), ["scripts/build_lufthansa_excel.py", lufthansa], { cwd: BACKEND, stdio: "inherit" });
+  execFileSync(backendPython(), [path.join("scripts", "build_lufthansa_excel.py"), lufthansa], { cwd: BACKEND, stdio: "inherit", env: pythonEnv() });
 
   const login = await fetch(`${API}/api/auth/login`, {
     method: "POST",

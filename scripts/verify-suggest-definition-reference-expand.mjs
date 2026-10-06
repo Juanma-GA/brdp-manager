@@ -8,6 +8,7 @@
 //      clicking again collapses it. Several rows can be open at once.
 //   3. Requesting a new suggestion resets all rows back to collapsed.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -152,8 +153,8 @@ async function main() {
     await page.waitForSelector(`text=${closeDefinition}`, { timeout: 3000 });
     assert(true, "Definition text appears after clicking the identifier");
     await closeRow.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: "/tmp/suggest-definition-reference-expanded.png", fullPage: true });
-    console.log("Screenshot (one reference expanded): /tmp/suggest-definition-reference-expanded.png");
+    await page.screenshot({ path: shot("suggest-definition-reference-expanded.png"), fullPage: true });
+    console.log(`Screenshot (one reference expanded): ${shot("suggest-definition-reference-expanded.png")}`);
 
     // Open the second row too -- confirms several can be open at once.
     const close2Row = page.locator("li", { hasText: "BRDP-REFEXP-CLOSE-2" }).first();

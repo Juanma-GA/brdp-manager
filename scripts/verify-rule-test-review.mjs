@@ -15,10 +15,11 @@
 //
 // Preconditions: uvicorn with MISTRAL_ENDPOINT=http://localhost:8902 and
 // MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running, Vite on
-// 5173. Cleans up the projects it creates. Screenshots go to /tmp.
+// 5173. Cleans up the projects it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-review.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -183,7 +184,7 @@ async function main() {
     assert((await panel.getByTestId("rule-test-regenerate-with-review").count()) === 0, "cause rule: no Regenerate examples");
     const a1 = await approvalOf("BRDP-RV-WRONG");
     assert(a1.last_test_result === "failed" && (await historyOf("BRDP-RV-WRONG")).filter((h) => h.field_name === "rule_test").length === historyBefore, "the review records nothing: still failed, no new History entry");
-    await panel.screenshot({ path: "/tmp/rule-test-review-rule.png" });
+    await panel.screenshot({ path: shot("rule-test-review-rule.png") });
     await panel.getByTestId("rule-test-suggest-corrected").click();
     await page.getByTestId("rule-corrected-note").waitFor({ timeout: 15000 });
     const sugReq = await lastRequest();
@@ -202,7 +203,7 @@ async function main() {
     assert((await sugPanel.getByTestId("rule-test-description").textContent()).includes("<emphasis> must not appear"), "corrected rule: description says it must not appear");
     assert((await sugPanel.getByTestId("rule-test-cannot-reject").count()) === 0, "corrected rule: no cannot-reject warning");
     assert((await sugPanel.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), `corrected rule: verdict correct (${await sugPanel.getByTestId("rule-test-verdict").textContent()})`);
-    await page.screenshot({ path: "/tmp/rule-test-corrected-rule.png", fullPage: true });
+    await page.screenshot({ path: shot("rule-test-corrected-rule.png"), fullPage: true });
     await page.getByRole("button", { name: "Accept", exact: true }).click();
     await waitIndicator("passed");
     const a1b = await approvalOf("BRDP-RV-WRONG");
@@ -220,7 +221,7 @@ async function main() {
     await panel2.getByTestId("rule-test-review-result").waitFor({ timeout: 15000 });
     assert((await panel2.getByTestId("rule-test-review-result").getAttribute("data-cause")) === "example", "review: cause example");
     assert((await panel2.getByTestId("rule-test-suggest-corrected").count()) === 0, "cause example: no corrected rule");
-    await panel2.screenshot({ path: "/tmp/rule-test-review-example.png" });
+    await panel2.screenshot({ path: shot("rule-test-review-example.png") });
     await panel2.getByTestId("rule-test-regenerate-with-review").click();
     await panel2.getByTestId("rule-test-verdict").waitFor({ timeout: 15000 });
     const regenPrompt = systemOf(await lastRequest());
@@ -257,7 +258,7 @@ async function main() {
     await page.waitForTimeout(300);
     const esDescription = await panels().first().getByTestId("rule-test-description").textContent();
     assert(esDescription.includes("Qué comprueba la regla") && esDescription.includes("<emphasis> no puede aparecer (ruta //emphasis). Solo en los esquemas: proced."), `proced: description in Spanish (${esDescription})`);
-    await panels().first().screenshot({ path: "/tmp/rule-test-description-proced-es.png" });
+    await panels().first().screenshot({ path: shot("rule-test-description-proced-es.png") });
     await language().selectOption("en");
     await page.waitForTimeout(300);
 

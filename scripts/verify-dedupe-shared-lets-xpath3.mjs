@@ -37,6 +37,7 @@
 //
 // Usage: node scripts/verify-dedupe-shared-lets-xpath3.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -210,7 +211,7 @@ async function main() {
     assert(wellFormedBadge > 0, "the deduped document is still reported well-formed");
     assert(xml.includes('queryBinding="xslt3"'), "queryBinding=\"xslt3\" is unaffected by dedup");
 
-    await page.screenshot({ path: "/tmp/verify-dedupe-xpath3-output.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-dedupe-xpath3-output.png"), fullPage: true });
 
     // ---- Case 4: a NEW rule reusing an already-shared function joins automatically ----
     await createApprovedBRDP(auth, projectId, "BRDP-EXT-NEWJOIN", sharedFnRule("BRDP-EXT-NEWJOIN"));

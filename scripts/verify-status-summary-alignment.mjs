@@ -12,6 +12,7 @@
 // header with one number per column, and its alignment is checked by
 // scripts/verify-two-level-header-and-full-labels.mjs.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -60,7 +61,7 @@ async function main() {
     await page.waitForURL(/\/projects\/.+\/records/, { timeout: 10000 });
     await page.waitForSelector("tbody tr", { timeout: 20000 });
     await page.waitForTimeout(600);
-    await page.screenshot({ path: "/tmp/records-alignment-en.png", fullPage: true });
+    await page.screenshot({ path: shot("records-alignment-en.png"), fullPage: true });
 
     const propHeaderBox = await page.locator("th", { hasText: "Proposal Status" }).boundingBox();
     const propSelectBox = await page.locator('select[aria-label="Filter by Proposal Status"]').boundingBox();
@@ -93,7 +94,7 @@ async function main() {
     await page.waitForTimeout(500);
     await page.waitForSelector("tbody tr", { timeout: 20000 });
     await page.waitForTimeout(400);
-    await page.screenshot({ path: "/tmp/records-alignment-es.png", fullPage: true });
+    await page.screenshot({ path: shot("records-alignment-es.png"), fullPage: true });
 
     const propHeaderEs = await page.locator("th", { hasText: "Estado de propuesta" }).boundingBox();
     const propSelectEs = await page.locator('select[aria-label="Filtrar por Estado de la propuesta"]').boundingBox();

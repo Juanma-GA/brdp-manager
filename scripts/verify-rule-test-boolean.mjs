@@ -9,10 +9,11 @@
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
-// Vite on 5173. Cleans up the projects it creates. Screenshots go to /tmp.
+// Vite on 5173. Cleans up the projects it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-boolean.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -148,12 +149,12 @@ async function main() {
     assert((await example(0).getByTestId("rule-test-condition").textContent()) === "The rule's condition does not hold in this document.", '"or": the accept example says it does not hold');
     assert((await example(1).locator("mark").count()) === 0, '"or": no node to highlight');
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), '"or": recorded as passed');
-    await panel().screenshot({ path: "/tmp/rule-test-boolean-or.png" });
+    await panel().screenshot({ path: shot("rule-test-boolean-or.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(400);
     assert((await example(1).getByTestId("rule-test-condition").textContent()) === "La condición de la regla se cumple en este documento.", '"or": condition message in ES');
     assert((await page.getByTestId("rule-test-description").textContent()).includes("La regla rechaza un documento en el que se cumple esta condición"), '"or": description in ES');
-    await panel().screenshot({ path: "/tmp/rule-test-boolean-or-es.png" });
+    await panel().screenshot({ path: shot("rule-test-boolean-or-es.png") });
     await page.locator("header select, nav select").first().selectOption("en");
     await page.waitForTimeout(300);
 
@@ -180,7 +181,7 @@ async function main() {
     assert((await example(1).locator("pre").textContent()).includes('infoCode="00N"') && (await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "EXT-00019: a part in the tool CIR (condition met) rejected");
     assert((await example(1).getByTestId("rule-test-condition").textContent()).includes("holds"), "EXT-00019: the reject example says the condition holds");
     assert((await example(0).getByTestId("rule-test-result").textContent()).includes("accepted ✓") && (await example(0).getByTestId("rule-test-condition").textContent()).includes("does not hold"), "EXT-00019: a tool in the tool CIR (condition not met) accepted");
-    await panel().screenshot({ path: "/tmp/rule-test-boolean-tool-cir.png" });
+    await panel().screenshot({ path: shot("rule-test-boolean-tool-cir.png") });
   } finally {
     await browser.close();
     for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" });

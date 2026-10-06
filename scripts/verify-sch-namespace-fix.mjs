@@ -7,16 +7,19 @@
 // instead of silently finding zero patterns because of the old hardcoded
 // "sch:" prefix requirement.
 import { chromium } from "playwright-core";
-import fs from "node:fs";
+import { readXlsxRows } from "./lib/readXlsx.mjs";
 
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
-const rows = JSON.parse(
-  fs.readFileSync(
-    "/tmp/claude-0/-home-user-brdp-manager/98dcb646-cccc-5aae-b30c-7469530ec6c5/scratchpad/verified_rules.json",
-    "utf8"
-  )
-);
+// The Verified rows of the real Navantia file, read like the app's Excel
+// import: node scripts/verify-sch-namespace-fix.mjs <nav_dtm_xpath2_import_v3.xlsx>
+if (!process.argv[2]) {
+  console.error("Usage: node scripts/verify-sch-namespace-fix.mjs <path-to-xlsx>");
+  process.exit(1);
+}
+const rows = readXlsxRows(process.argv[2])
+  .filter((r) => r["Rule Status"] === "Verified")
+  .map((r) => ({ id: r.ID, identifier: r.ID, rule: r.Rule }));
 
 function assert(cond, msg) {
   if (!cond) throw new Error("ASSERTION FAILED: " + msg);

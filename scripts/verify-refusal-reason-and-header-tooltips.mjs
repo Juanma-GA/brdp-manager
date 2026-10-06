@@ -5,6 +5,7 @@
 // header: group headers centered over their 3-column groups, and a
 // title tooltip on each of the 6 leaf letters naming its full state).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -82,7 +83,7 @@ async function main() {
     await textarea.blur();
     await page.waitForTimeout(600);
 
-    await page.screenshot({ path: "/tmp/refusal-textbox-visible.png" });
+    await page.screenshot({ path: shot("refusal-textbox-visible.png") });
 
     // Reload and confirm the save persisted server-side, not just in local state
     await page.reload();
@@ -102,7 +103,7 @@ async function main() {
     await page.waitForTimeout(500);
     textboxCount = await page.locator("text=/Reason for refusal/i").count();
     assert(textboxCount === 0, "Textbox disappears again after switching away from Refused");
-    await page.screenshot({ path: "/tmp/refusal-textbox-hidden.png" });
+    await page.screenshot({ path: shot("refusal-textbox-hidden.png") });
 
     // Confirm the comment was NOT discarded server-side (docs request edge case)
     const brdpAfter = await fetch(`${API}/api/projects/${demo.id}/brdps`, { headers: auth })
@@ -161,12 +162,12 @@ async function main() {
       assert(title === expectedTitles[i][1], `Leaf header ${i} ("${text}") has title="${expectedTitles[i][1]}" (got "${title}")`);
     }
 
-    await page.screenshot({ path: "/tmp/projects-header-centered-tooltips.png" });
+    await page.screenshot({ path: shot("projects-header-centered-tooltips.png") });
 
     // Hover one letter for a real visible tooltip in the screenshot
     await leafHeaders.nth(3).hover();
     await page.waitForTimeout(400);
-    await page.screenshot({ path: "/tmp/projects-header-tooltip-hover.png" });
+    await page.screenshot({ path: shot("projects-header-tooltip-hover.png") });
 
     console.log("\nALL CHECKS PASSED");
   } finally {

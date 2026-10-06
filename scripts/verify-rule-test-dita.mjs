@@ -21,11 +21,12 @@
 //
 // Preconditions: uvicorn with MISTRAL_ENDPOINT=http://localhost:8902 and
 // MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running, Vite on
-// 5173. Cleans up the projects it creates. Screenshots go to /tmp.
+// 5173. Cleans up the projects it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-dita.mjs
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 // T4b: two real rules of the curated DITA templates.
 const templateRule = (file, id) => {
@@ -206,7 +207,7 @@ async function main() {
     assert(/ruleTestSkeleton/.test((await titleSpan.getAttribute("class")) || ""), "T4b: the skeleton title is dimmed like the rest of the skeleton");
     await waitIndicator("passed");
     assert((await approvalOf("BRDP-DT-NOTE")).last_test_result === "passed", "DITA test recorded as passed");
-    await panel1.screenshot({ path: "/tmp/rule-test-dita-note.png" });
+    await panel1.screenshot({ path: shot("rule-test-dita-note.png") });
     await language().selectOption("es");
     await page.waitForTimeout(300);
     const desc1es = await panels().first().getByTestId("rule-test-description").textContent();
@@ -223,7 +224,7 @@ async function main() {
     const warnEx = examplesOf(panel2).nth(1);
     assert((await warnEx.getByTestId("rule-test-result").textContent()).startsWith("Result: accepted"), "role=warning: the untyped note is accepted");
     assert((await warnEx.getByTestId("rule-test-rule-warning").textContent()).includes("Rule warning (does not reject): Every note must declare its type (@type)."), "role=warning: the warning is shown");
-    await panel2.screenshot({ path: "/tmp/rule-test-dita-warning.png" });
+    await panel2.screenshot({ path: shot("rule-test-dita-warning.png") });
     await panel2.getByRole("button", { name: "Close" }).click();
 
     // 3. Whole-document rule (root context): the LLM writes the whole topic.
@@ -264,7 +265,7 @@ async function main() {
     const sugPanel = sugBox.getByTestId("rule-test-panel");
     await sugPanel.getByTestId("rule-test-verdict").waitFor({ timeout: 15000 });
     assert((await sugPanel.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), "corrected rule: verdict correct");
-    await page.screenshot({ path: "/tmp/rule-test-dita-corrected.png", fullPage: true });
+    await page.screenshot({ path: shot("rule-test-dita-corrected.png"), fullPage: true });
     await page.getByRole("button", { name: "Accept", exact: true }).click();
     await waitIndicator("passed");
     const wrongAfter = await approvalOf("BRDP-DT-WRONG");
@@ -280,7 +281,7 @@ async function main() {
     assert((await examplesOf(panel6).nth(0).textContent()).includes("Topic type: task"), "step rule: task topic type");
     assert((await examplesOf(panel6).nth(1).textContent()).includes("Rule's message: Each step has exactly one command; found 2."), "message with the evaluated sch:value-of");
     assert((await panel6.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), "sch:let + inline function: verdict correct");
-    await panel6.screenshot({ path: "/tmp/rule-test-dita-let.png" });
+    await panel6.screenshot({ path: shot("rule-test-dita-let.png") });
     await panel6.getByRole("button", { name: "Close" }).click();
 
     // 7. doc() on the ditamap: not executable from the start, explained by
@@ -300,7 +301,7 @@ async function main() {
     await waitIndicator("not_executable");
     assert((await lastRequest()) === null, "doc(): recorded without calling the LLM");
     assert((await approvalOf("BRDP-DT-DOC")).last_test_result === "not_executable", "doc(): recorded as not executable");
-    await panel7.screenshot({ path: "/tmp/rule-test-dita-doc.png" });
+    await panel7.screenshot({ path: shot("rule-test-dita-doc.png") });
     await panel7.getByRole("button", { name: "Close" }).click();
 
     // 8. T4b: the real BRDP-EXT-00001 (XPath 3.0), a context on a title.
@@ -325,7 +326,7 @@ async function main() {
     assert((await rej8.getByTestId("rule-test-accept-cause").textContent()).startsWith("Why the rule accepted it:"), `EXT-00001: exact cause under the example (${await rej8.getByTestId("rule-test-accept-cause").textContent()})`);
     assert((await panel8.getByTestId("rule-test-verdict").textContent()).startsWith("The rule accepted an example meant to violate it."), `EXT-00001: failed verdict (${await panel8.getByTestId("rule-test-verdict").textContent()})`);
     await waitIndicator("failed");
-    await panel8.screenshot({ path: "/tmp/rule-test-dita-titled-section.png" });
+    await panel8.screenshot({ path: shot("rule-test-dita-titled-section.png") });
     await panel8.getByRole("button", { name: "Close" }).click();
 
     // 9. T4b: the real BRDP-EXT-00009 (XPath 2.0), @@URI-CARPETA-DOSIER@@.
@@ -347,7 +348,7 @@ async function main() {
     await language().selectOption("es");
     await page.waitForTimeout(300);
     assert((await panels().first().getByTestId("rule-test-analysis").textContent()).includes("La regla contiene un valor que se sustituye fuera de la app (@@URI-CARPETA-DOSIER@@); no se puede probar aquí."), "@@…@@: reason in Spanish");
-    await panels().first().screenshot({ path: "/tmp/rule-test-dita-placeholder-es.png" });
+    await panels().first().screenshot({ path: shot("rule-test-dita-placeholder-es.png") });
     await language().selectOption("en");
   } finally {
     for (const p of projects) await api(`/api/projects/${p.id}?permanent=true`, { method: "DELETE" }).catch(() => {});

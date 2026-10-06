@@ -10,6 +10,7 @@ approximation that could quietly drift from production.
 
 This needs no running server and no database -- get_schema_cards() is a
 pure, in-memory lookup over backend/schema_cards/*.json, loaded once at
+import sys
 import time. Re-run this whenever generate_schema_cards.py regenerates
 those files (a schema/XSD update) so the frontend prompt-snapshot fixture
 stays honest about what the backend would actually return today:
@@ -47,4 +48,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    for _stream in (sys.stdout, sys.stderr):  # UTF-8 on any console or pipe, Windows included (Protecciones 1c)
+        _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     main()

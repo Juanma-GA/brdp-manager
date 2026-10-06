@@ -13,6 +13,7 @@
 //     node scripts/verify-suggest-rule.mjs
 import { chromium } from "playwright-core";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -260,7 +261,7 @@ async function main() {
       assert(await ruleButton().isDisabled(), `${id}: Suggest Rule disabled`);
       assert((await ruleButton().getAttribute("title")) === reason, `${id}: reason "${reason}"`);
     }
-    await page.screenshot({ path: "/tmp/suggest-rule-disabled-verified.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-disabled-verified.png"), fullPage: true });
     await select("BRDP-SR-XPATH");
     assert(!(await ruleButton().isDisabled()), "Proposal with //para[@id]: Suggest Rule enabled");
 
@@ -294,7 +295,7 @@ async function main() {
       "expanded BRDP-S1-00489 reference shows only its structureObjectRule"
     );
     assert((await page.locator("pre").count()) >= 1, "expanding a reference shows its rule XML");
-    await page.screenshot({ path: "/tmp/suggest-rule-generated.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-generated.png"), fullPage: true });
     await page.getByRole("button", { name: "Accept", exact: true }).click();
     await page.waitForTimeout(800);
     const okRule = await getRule(p42, b.ok, "BREX-4.2");
@@ -310,7 +311,7 @@ async function main() {
     const shownRule = await ruleHistory.first().locator("span[title]").last().innerText();
     const fullRule = await ruleHistory.first().locator("span[title]").last().getAttribute("title");
     assert(fullRule === okRule.rule_xml && shownRule.length <= 161 && shownRule.endsWith("…"), `rule text shortened in the list, full text on hover (${shownRule.length} chars shown)`);
-    await page.screenshot({ path: "/tmp/suggest-rule-history.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-history.png"), fullPage: true });
 
     // Draft BRDP: allowed, confirmation before replacing.
     await select("BRDP-SR-DRAFT");
@@ -345,7 +346,7 @@ async function main() {
     assert((await sameHeading.count()) === 1, "Same BRDP group shown");
     const color = await sameHeading.evaluate((el) => getComputedStyle(el).color);
     assert(color === "rgb(220, 38, 38)", `Same BRDP group heading is red (got ${color})`);
-    await page.screenshot({ path: "/tmp/suggest-rule-same-brdp-red.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-same-brdp-red.png"), fullPage: true });
     await discard();
 
     // Invented element -> red warning, Accept still available.
@@ -353,7 +354,7 @@ async function main() {
     await suggestRule();
     await page.waitForSelector("text=/uses names not found in the S1000D 4.2 schema: <pokemon>/");
     assert(!(await page.getByRole("button", { name: "Accept", exact: true }).isDisabled()), "invented element: Accept still enabled");
-    await page.screenshot({ path: "/tmp/suggest-rule-invented-name.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-invented-name.png"), fullPage: true });
     await discard();
 
     // Malformed -> Accept disabled.
@@ -361,7 +362,7 @@ async function main() {
     await suggestRule();
     await page.waitForSelector("text=/not well-formed XML/");
     assert(await page.getByRole("button", { name: "Accept", exact: true }).isDisabled(), "malformed rule: Accept disabled");
-    await page.screenshot({ path: "/tmp/suggest-rule-malformed.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-malformed.png"), fullPage: true });
     await discard();
 
     // Schema-location encargo, Part 3: well-formed XML whose objectPath is
@@ -376,7 +377,7 @@ async function main() {
     const xpColor = await page.locator("p", { hasText: "Invalid XPath expression" }).evaluate((el) => getComputedStyle(el).color);
     assert(xpColor === "rgb(185, 28, 28)", `invalid XPath warning is red (got ${xpColor})`);
     assert((await page.locator("text=/uses names not found/").count()) === 0, "//&lt;emphasis&gt;: no name warning (emphasis exists) -- only the syntax check catches it");
-    await page.screenshot({ path: "/tmp/suggest-rule-invalid-xpath.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-invalid-xpath.png"), fullPage: true });
     // The encargo's table, through Paste rule (same validation).
     const pasteBox = page.getByPlaceholder(/Paste/);
     const acceptPasted = page.getByRole("button", { name: "Accept pasted rule" });
@@ -397,7 +398,7 @@ async function main() {
     assert((await page.getByRole("button", { name: "Copy prompt" }).count()) === 1, "NOT_CHECKABLE: Copy prompt still available");
     const ncColor = await page.locator("p", { hasText: "Not checkable on the XML" }).evaluate((el) => getComputedStyle(el).color);
     assert(ncColor === "rgb(185, 28, 28)", `NOT_CHECKABLE shown in red like the vocabulary warnings (got ${ncColor})`);
-    await page.screenshot({ path: "/tmp/suggest-rule-not-checkable.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-not-checkable.png"), fullPage: true });
     const paste = page.getByPlaceholder(/Paste/);
     await paste.fill('<structureObjectRule id="BRDP-SR-CALIB"><brDecisionRef brDecisionIdentNumber="BRDP-SR-CALIB"/><objectPath allowedObjectFlag="0">//pokemon</objectPath><objectUse>External</objectUse></structureObjectRule>');
     await page.waitForSelector("text=/uses names not found in the S1000D 4.2 schema: <pokemon>/");
@@ -405,7 +406,7 @@ async function main() {
     await page.waitForSelector("text=/not well-formed XML/");
     assert(await page.getByRole("button", { name: "Accept pasted rule" }).isDisabled(), "pasted malformed rule: Accept pasted disabled");
     await paste.fill('<structureObjectRule id="BRDP-SR-CALIB"><brDecisionRef brDecisionIdentNumber="BRDP-SR-CALIB"/><objectPath allowedObjectFlag="0">//pokemon</objectPath><objectUse>External</objectUse></structureObjectRule>');
-    await page.screenshot({ path: "/tmp/suggest-rule-paste.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-paste.png"), fullPage: true });
     await page.getByRole("button", { name: "Accept pasted rule" }).click();
     await page.waitForTimeout(800);
     const pasted = await getRule(p42, b.calib, "BREX-4.2");
@@ -434,7 +435,7 @@ async function main() {
     assert(pendingAfter.project_pending === 0, "the selected BRDP was embedded before the Suggest ran");
     assert(callsAfter - callsBefore === 2, `one embedding for the BRDP + one query embedding (${callsAfter - callsBefore} calls)`);
     await page.waitForFunction(() => !document.body.innerText.includes("pending embedding"), null, { timeout: 5000 });
-    await page.screenshot({ path: "/tmp/suggest-rule-embed-selected-first.png", fullPage: true });
+    await page.screenshot({ path: shot("suggest-rule-embed-selected-first.png"), fullPage: true });
     await discard();
 
     // DITA 1.3 Xpath3.0: Schematron fragment, template format examples.

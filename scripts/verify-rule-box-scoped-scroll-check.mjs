@@ -7,6 +7,7 @@
 // chat completion (mock-mistral-chat-server.mjs) that returns a
 // deliberately long, unbroken XML line to make the difference visible.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -109,8 +110,8 @@ async function main() {
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     console.log("page scrollWidth:", scrollWidth, "(viewport 1440)");
     if (scrollWidth > 1442) throw new Error("Rule suggestion box overflowed the page horizontally!");
-    await page.screenshot({ path: "/tmp/suggest-rule-box-scoped-scroll.png", fullPage: true });
-    console.log("Screenshot: /tmp/suggest-rule-box-scoped-scroll.png");
+    await page.screenshot({ path: shot("suggest-rule-box-scoped-scroll.png"), fullPage: true });
+    console.log(`Screenshot: ${shot("suggest-rule-box-scoped-scroll.png")}`);
     console.log("ALL CHECKS PASSED");
   } finally {
     await browser.close();

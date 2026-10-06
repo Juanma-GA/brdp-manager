@@ -29,6 +29,7 @@ import { chromium } from "playwright-core";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -180,7 +181,7 @@ async function main() {
     const suggestRuleButton = page.getByRole("button", { name: "Suggest Rule" });
     assert(await suggestRuleButton.isDisabled(), "Suggest Rule is disabled while embeddings are pending");
 
-    await page.screenshot({ path: "/tmp/embeddings-pending-banner.png" });
+    await page.screenshot({ path: shot("embeddings-pending-banner.png") });
 
     // ---- 3. Launch the job: real progress + ETA while running, then completes ----
     await computeButton.click();
@@ -190,7 +191,7 @@ async function main() {
     const progressEl = page.locator("progress");
     await progressEl.waitFor({ state: "visible", timeout: 5000 });
     console.log("OK: progress bar visible");
-    await page.screenshot({ path: "/tmp/embeddings-job-running.png" });
+    await page.screenshot({ path: shot("embeddings-job-running.png") });
 
     // Since the batch-embeddings round the job commits and advances
     // progress per BATCH of EMBED_BATCH_SIZE=32, so this script's 5 rows are
@@ -248,7 +249,7 @@ async function main() {
     // Suggest buttons are now enabled (embeddings no longer pending).
     assert(!(await suggestDefButton.isDisabled()), "Suggest Definition is enabled once nothing is pending");
 
-    await page.screenshot({ path: "/tmp/embeddings-job-completed.png" });
+    await page.screenshot({ path: shot("embeddings-job-completed.png") });
 
     // ---- 4. Suggest surfaces the "other project" exclusion notice ----
     await suggestDefButton.click();
@@ -257,7 +258,7 @@ async function main() {
     console.log("Exclusion notice text:", excludedText);
     assert(/2 BRDPs from other projects excluded: pending embedding/i.test(excludedText), `exclusion notice names the real count from Project B (got "${excludedText}")`);
 
-    await page.screenshot({ path: "/tmp/embeddings-excluded-notice.png" });
+    await page.screenshot({ path: shot("embeddings-excluded-notice.png") });
 
     console.log("\nALL CHECKS PASSED\n");
   } finally {

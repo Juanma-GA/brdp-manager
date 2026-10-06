@@ -7,6 +7,7 @@
 // (mock-mistral-chat-server.mjs / GET /last-request captures the EXACT
 // prompt sent).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -167,8 +168,8 @@ async function main() {
     await tableChip.click();
     await page.waitForSelector("text=/attributes:.*frame/", { timeout: 3000 });
     assert(true, "clicking the chip expands the real card (attributes visible)");
-    await page.screenshot({ path: "/tmp/schema-facts-table-expanded.png", fullPage: true });
-    console.log("Screenshot: /tmp/schema-facts-table-expanded.png");
+    await page.screenshot({ path: shot("schema-facts-table-expanded.png"), fullPage: true });
+    console.log(`Screenshot: ${shot("schema-facts-table-expanded.png")}`);
 
     // ==== 2. Phrase-triggered, no markup: "the element table" -> same
     // real card, since "table" resolves against the vocabulary. ====
@@ -277,8 +278,8 @@ async function main() {
     assert(true, "the expanded UI card also shows the per-schema differences section");
     const allowedInsideUi = await page.locator("text=/allowed inside:/").first().textContent();
     assert(!allowedInsideUi.includes("partial list"), 'the expanded UI card also shows the full 43 parents with no "(partial list: ...)" marker');
-    await page.screenshot({ path: "/tmp/schema-facts-para-compact.png", fullPage: true });
-    console.log("Screenshot: /tmp/schema-facts-para-compact.png");
+    await page.screenshot({ path: shot("schema-facts-para-compact.png"), fullPage: true });
+    console.log(`Screenshot: ${shot("schema-facts-para-compact.png")}`);
 
     // ==== 6. DITA: <note>'s @type closed enum (a second, different
     // standard's worked example, per the docs request's own instruction

@@ -9,6 +9,7 @@
 // has zero refusal_reason entries.
 import { chromium } from "playwright-core";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -137,8 +138,8 @@ async function main() {
     assert(latestText.includes("Updated reason, same Refused status."), `Newest history entry (top of list) shows the updated reason (got: "${latestText}")`);
     assert(latestText.includes("Conflicts with an already-approved rule."), `Newest history entry shows the OLD value too, i.e. old->new (got: "${latestText}")`);
 
-    await page.screenshot({ path: "/tmp/comments-history-tracking.png", fullPage: true });
-    console.log("Screenshot saved to /tmp/comments-history-tracking.png");
+    await page.screenshot({ path: shot("comments-history-tracking.png"), fullPage: true });
+    console.log(`Screenshot saved to ${shot("comments-history-tracking.png")}`);
 
     // Cross-check directly against the API: field_name is "refusal_reason", not "comments".
     const apiHistory = await fetch(`${API}/api/projects/${demo.id}/brdps/${created.id}/history`, { headers: auth }).then((r) => r.json());

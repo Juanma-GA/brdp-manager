@@ -14,6 +14,7 @@
 //
 //     node scripts/verify-session-server-down.mjs
 import { chromium } from "playwright-core";
+import { SHOTS_DIR } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -21,7 +22,7 @@ const API = "http://localhost:8000";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = process.env.PROMPT_EVAL_EMAIL || "admin@example.com";
 const ADMIN_PASSWORD = process.env.PROMPT_EVAL_PASSWORD || "AdminTest123!";
-const SHOTS = process.env.SHOTS_DIR || "/tmp";
+const SHOTS = SHOTS_DIR;
 
 let failures = 0;
 function assert(condition, message) {

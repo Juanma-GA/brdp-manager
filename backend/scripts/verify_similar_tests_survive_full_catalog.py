@@ -94,5 +94,7 @@ async def cleanup():
 
 
 if __name__ == "__main__":
+    for _stream in (sys.stdout, sys.stderr):  # UTF-8 on any console or pipe, Windows included (Protecciones 1c)
+        _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     cmd = sys.argv[1] if len(sys.argv) > 1 else "seed"
     asyncio.run({"seed": seed, "cleanup": cleanup}[cmd]())

@@ -5,7 +5,10 @@
 // else python3/python on the PATH.
 //
 //   pythonCandidates()                  -> paths/commands, in that order
+//   backendPython()                     -> the first candidate (no check)
 //   findBackendPython({ modules })      -> { python } or { python: null, reason }
+//   pythonEnv(extra)                    -> process.env for a Python child:
+//                                          UTF-8 output on Windows too
 //
 // findBackendPython checks that the interpreter really runs AND imports the
 // given modules (e.g. ["openpyxl", "lxml"] for the readers, ["pytest"] for
@@ -27,11 +30,22 @@ export function pythonCandidates() {
   return [...venv.filter((p) => fs.existsSync(p)), 'python3', 'python'];
 }
 
+export function backendPython() {
+  return pythonCandidates()[0];
+}
+
+// A Python child writes in the console's code page on Windows (cp1252) when
+// its output is a pipe: an accent or "→" would come out wrong or fail.
+// PYTHONIOENCODING makes it UTF-8, which is what every caller decodes.
+export function pythonEnv(extra = {}) {
+  return { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', ...extra };
+}
+
 export function findBackendPython({ modules = [] } = {}) {
   const tried = [];
   const code = modules.length ? `import ${modules.join(', ')}` : 'pass';
   for (const python of pythonCandidates()) {
-    const res = spawnSync(python, ['-c', code], { cwd: BACKEND_DIR, encoding: 'utf8', timeout: 60_000 });
+    const res = spawnSync(python, ['-c', code], { cwd: BACKEND_DIR, encoding: 'utf8', env: pythonEnv(), timeout: 60_000 });
     if (res.error) {
       tried.push(`${python}: ${res.error.code === 'ENOENT' ? 'not found' : res.error.message}`);
       continue;

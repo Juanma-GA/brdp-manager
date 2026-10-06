@@ -34,14 +34,14 @@ EXPECTED_STANDARD_COUNT = 7
 
 
 def _extract_project_standards() -> list[str]:
-    source = (REPO_ROOT / "src" / "pages" / "ProjectsPage.jsx").read_text()
+    source = (REPO_ROOT / "src" / "pages" / "ProjectsPage.jsx").read_text(encoding="utf-8")
     block_match = re.search(r"const STANDARD_OPTIONS = \[(.*?)\];", source, re.DOTALL)
     assert block_match, "Could not find STANDARD_OPTIONS array in ProjectsPage.jsx -- did it get renamed/moved?"
     return re.findall(r"value:\s*'([^']+)'", block_match.group(1))
 
 
 def _extract_frontend_rule_formats() -> dict[str, str]:
-    source = (REPO_ROOT / "src" / "constants" / "ruleFormats.js").read_text()
+    source = (REPO_ROOT / "src" / "constants" / "ruleFormats.js").read_text(encoding="utf-8")
     block_match = re.search(r"export const STANDARD_TO_RULE_FORMAT = \{(.*?)\};", source, re.DOTALL)
     assert block_match, "Could not find STANDARD_TO_RULE_FORMAT object in ruleFormats.js -- did it get renamed/moved?"
     return dict(re.findall(r"'([^']+)':\s*'([^']+)'", block_match.group(1)))
@@ -106,7 +106,7 @@ def test_curated_template_mapping_matches_frontend_and_files_exist():
     both mappings must agree, and every mapped file must really exist."""
     from app.services.rule_templates import CURATED_TEMPLATE_BY_STANDARD, PUBLIC_DIR, load_template_rules
 
-    source = (REPO_ROOT / "src" / "utils" / "excelUtils.js").read_text()
+    source = (REPO_ROOT / "src" / "utils" / "excelUtils.js").read_text(encoding="utf-8")
     block = re.search(r"export const CURATED_TEMPLATE_BY_STANDARD = \{(.*?)\};", source, re.DOTALL)
     assert block, "Could not find CURATED_TEMPLATE_BY_STANDARD in excelUtils.js"
     frontend = {k: v.lstrip("/") for k, v in re.findall(r"'([^']+)':\s*'([^']+)'", block.group(1))}

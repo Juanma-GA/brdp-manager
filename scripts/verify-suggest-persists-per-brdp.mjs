@@ -14,6 +14,7 @@
 //   6. An LLM error produces an entry with a Discard button that unblocks
 //      the BRDP's Suggest buttons again (never stuck forever).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -165,8 +166,8 @@ async function main() {
     assert((await page.getByRole("button", { name: "Accept" }).count()) === 0, "B shows no Accept button (no suggestion of its own)");
     assert(await rowHasSparkle(page, "BRDP-PERSIST-A"), "row A shows the ✨ indicator while B is selected");
     assert(!(await rowHasSparkle(page, "BRDP-PERSIST-B")), "row B shows no ✨ (nothing pending there)");
-    await page.screenshot({ path: "/tmp/suggest-persist-sparkle-on-other-row.png", fullPage: true });
-    console.log("Screenshot (✨ on A, B selected, B's buttons active): /tmp/suggest-persist-sparkle-on-other-row.png");
+    await page.screenshot({ path: shot("suggest-persist-sparkle-on-other-row.png"), fullPage: true });
+    console.log(`Screenshot (✨ on A, B selected, B's buttons active): ${shot("suggest-persist-sparkle-on-other-row.png")}`);
 
     // ---- 2. Suggest on B with a delayed response, switch away, switch back ----
     // Suggest Definition again: it always calls the LLM regardless of
@@ -178,8 +179,8 @@ async function main() {
     await page.waitForTimeout(300); // request is in flight, well before the mock's 2500ms delay
     states = await suggestButtonsDisabled(page);
     assert(states.every(Boolean), "B's buttons are already blocked the instant the request starts (loading entry)");
-    await page.screenshot({ path: "/tmp/suggest-persist-blocked-tooltip.png", fullPage: true });
-    console.log("Screenshot (B's buttons blocked mid-request): /tmp/suggest-persist-blocked-tooltip.png");
+    await page.screenshot({ path: shot("suggest-persist-blocked-tooltip.png"), fullPage: true });
+    console.log(`Screenshot (B's buttons blocked mid-request): ${shot("suggest-persist-blocked-tooltip.png")}`);
 
     await page.locator("tr", { hasText: "BRDP-PERSIST-A" }).click();
     await page.waitForTimeout(200);
@@ -262,8 +263,8 @@ async function main() {
     assert(states.every(Boolean), "B's buttons are blocked while the error entry exists");
     const discardButtons = page.getByRole("button", { name: "Discard" });
     assert((await discardButtons.count()) > 0, "the error entry has a Discard button");
-    await page.screenshot({ path: "/tmp/suggest-persist-error-discard.png", fullPage: true });
-    console.log("Screenshot (error entry with Discard, buttons blocked): /tmp/suggest-persist-error-discard.png");
+    await page.screenshot({ path: shot("suggest-persist-error-discard.png"), fullPage: true });
+    console.log(`Screenshot (error entry with Discard, buttons blocked): ${shot("suggest-persist-error-discard.png")}`);
     await discardButtons.first().click();
     await page.waitForTimeout(300);
     states = await suggestButtonsDisabled(page);

@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
@@ -16,7 +17,7 @@ async function main() {
   await page.waitForSelector("text=/Settings/i", { timeout: 10000 });
   const hasImportSettings = await page.locator("text=/Import Settings/i").count();
   console.log("Import Settings section present:", hasImportSettings > 0 ? "YES (bug!)" : "NO (correctly removed)");
-  await page.screenshot({ path: "/tmp/settings-page-no-import-eta.png", fullPage: true });
+  await page.screenshot({ path: shot("settings-page-no-import-eta.png"), fullPage: true });
   await browser.close();
 }
 main();

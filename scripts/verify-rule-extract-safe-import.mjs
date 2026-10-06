@@ -28,12 +28,12 @@
 // PID and starts it again with the same mock endpoints).
 //
 //     node scripts/verify-rule-extract-safe-import.mjs
-import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { startUvicorn, uvicornPid } from "./lib/backendProcess.mjs";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
@@ -104,11 +104,6 @@ const complete = (c) =>
 
 // The backend restarted: kill uvicorn by its exact PID, start it again with
 // the same environment (the mock endpoints), wait until it answers.
-function uvicornPid() {
-  const out = execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" });
-  const line = out.split("\n").find((l) => /uvicorn app\.main:app/.test(l) && !/ps -eo/.test(l));
-  return line ? Number(line.trim().split(/\s+/)[0]) : null;
-}
 async function waitBackend(up) {
   for (let i = 0; i < 120; i += 1) {
     const ok = await fetch(`${API}/docs`).then((r) => r.ok).catch(() => false);
@@ -122,18 +117,14 @@ async function restartBackend() {
   if (!pid) throw new Error("uvicorn not found");
   process.kill(pid, "SIGTERM");
   await waitBackend(false);
-  const venv = path.join(ROOT, "backend/.venv/bin/uvicorn");
   const log = fs.openSync(path.join(os.tmpdir(), "uvicorn-restarted.log"), "a");
-  spawn(venv, ["app.main:app", "--host", "0.0.0.0", "--port", "8000"], {
-    cwd: path.join(ROOT, "backend"),
+  startUvicorn({
     env: {
-      ...process.env,
       MISTRAL_ENDPOINT: process.env.MISTRAL_ENDPOINT || "http://localhost:8902",
       MISTRAL_EMBED_ENDPOINT: process.env.MISTRAL_EMBED_ENDPOINT || "http://localhost:8901",
     },
-    detached: true,
-    stdio: ["ignore", log, log],
-  }).unref();
+    log,
+  });
   await waitBackend(true);
   return pid;
 }

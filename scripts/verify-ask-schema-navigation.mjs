@@ -8,6 +8,7 @@
 //
 //   node scripts/verify-ask-schema-navigation.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -129,7 +130,7 @@ async function main() {
     await waitReady();
     assert((await cardTitle()) === "<title>", "card of <title>");
     assert((await breadcrumb()) === "levelledPara › title", "breadcrumb: levelledPara › title");
-    await page.screenshot({ path: "/tmp/ask-schema-nav-breadcrumb.png" });
+    await page.screenshot({ path: shot("ask-schema-nav-breadcrumb.png") });
     await card().getByTestId("schema-nav-back").click();
     assert((await cardTitle()) === "<levelledPara>", "Atrás goes back to <levelledPara>");
     assert(requestsFor("names=levelledPara") === 1, "Atrás does not fetch levelledPara again");
@@ -150,7 +151,7 @@ async function main() {
     await parents.getByTestId("schema-nav-more").click();
     assert((await parents.locator('[data-testid^="schema-nav-link-"]').count()) === 43, "all 43 parents after expanding, none lost");
     assert(await inViewport(), "the <para> card does not overflow the screen (scrolls inside)");
-    await page.screenshot({ path: "/tmp/ask-schema-nav-para-parents.png" });
+    await page.screenshot({ path: shot("ask-schema-nav-para-parents.png") });
 
     // ─── 3. Esc closes; Copiar nombre ─────────────────────────────────────────
     await page.keyboard.press("Escape");
@@ -172,7 +173,7 @@ async function main() {
     assert((await breadcrumb()) === "@emphasisType › emphasis", "breadcrumb: @emphasisType › emphasis");
     await card().getByTestId("schema-nav-copy").click();
     assert((await page.evaluate(() => navigator.clipboard.readText())) === "<emphasis>", "Copiar nombre copies <emphasis>");
-    await page.screenshot({ path: "/tmp/ask-schema-nav-attribute.png" });
+    await page.screenshot({ path: shot("ask-schema-nav-attribute.png") });
     await page.keyboard.press("Escape");
     assert((await card().count()) === 0, "Esc closes the attribute path");
 
@@ -207,7 +208,7 @@ async function main() {
     await card().getByTestId("schema-nav-error").waitFor({ timeout: 10000 });
     assert((await card().getByTestId("schema-nav-error").innerText()).startsWith("No se pudo cargar esta ficha"), "error shown in the card (HR7)");
     assert((await card().getByTestId("schema-nav-loading").count()) === 0, "not stuck loading");
-    await page.screenshot({ path: "/tmp/ask-schema-nav-error.png" });
+    await page.screenshot({ path: shot("ask-schema-nav-error.png") });
     await page.unroute("**/api/schema-cards?*names=listItem*");
     await card().getByTestId("schema-nav-retry").click();
     await waitReady();
@@ -245,10 +246,10 @@ async function main() {
     await waitReady();
     assert((await breadcrumb()) === "@outputclass › p", "DITA: breadcrumb @outputclass › p");
     assert((await card().getByTestId("schema-nav-parents").locator('[data-testid^="schema-nav-link-"]').count()) > 0, "DITA: <p> parents are links");
-    await page.screenshot({ path: "/tmp/ask-schema-nav-dita.png" });
+    await page.screenshot({ path: shot("ask-schema-nav-dita.png") });
     await card().getByTestId("schema-nav-close").click();
 
-    console.log("\nAll checks passed. Screenshots: /tmp/ask-schema-nav-*.png");
+    console.log(`\nAll checks passed. Screenshots: ${shot("ask-schema-nav-")}*.png`);
   } finally {
     for (const p of created) await fetch(`${API}/api/projects/${p.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
     await browser.close();

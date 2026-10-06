@@ -10,7 +10,7 @@
 // set, else backend's virtualenv (Linux/macOS or Windows layout), else
 // python3/python on the PATH.
 import { execFileSync } from 'node:child_process';
-import { BACKEND_DIR as BACKEND, pythonCandidates } from './backendPython.mjs';
+import { BACKEND_DIR as BACKEND, pythonCandidates, pythonEnv } from './backendPython.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,7 @@ export function readXlsxRows(source) {
   let lastError;
   for (const python of pythonCandidates()) {
     try {
-      const out = execFileSync(python, [SCRIPT, '-'], { cwd: BACKEND, input, maxBuffer: 64 * 1024 * 1024 });
+      const out = execFileSync(python, [SCRIPT, '-'], { cwd: BACKEND, input, env: pythonEnv(), maxBuffer: 64 * 1024 * 1024 });
       return JSON.parse(out.toString('utf8'));
     } catch (err) {
       lastError = err;

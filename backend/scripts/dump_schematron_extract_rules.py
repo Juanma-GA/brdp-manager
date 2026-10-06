@@ -11,6 +11,9 @@ import json
 import sys
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):  # UTF-8 on any console or pipe, Windows included (Protecciones 1c)
+    _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.services.rule_extract import build_candidates, read_rules_file  # noqa: E402

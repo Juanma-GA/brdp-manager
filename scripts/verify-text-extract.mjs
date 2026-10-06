@@ -21,12 +21,12 @@
 // import_brdp_catalog.py catalog_sources/s1000d_4.1.xlsx "S1000D 4.1").
 //
 //     node scripts/verify-text-extract.mjs
-import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { startUvicorn, uvicornPid } from "./lib/backendProcess.mjs";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
 const BASE_URL = "http://localhost:5173";
@@ -82,13 +82,6 @@ function rowWithQuote(page, text) {
 }
 const words = (n) => Array.from({ length: n }, (_, i) => `palabra${i}`).join(" ");
 
-function uvicornPid() {
-  const out = execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" });
-  // The server itself (python … uvicorn app.main:app), never a shell whose
-  // command line merely mentions it.
-  const line = out.split("\n").find((l) => /^\s*\d+\s+\S*(python[\d.]*|uvicorn)\s.*uvicorn app\.main:app/.test(l));
-  return line ? Number(line.trim().split(/\s+/)[0]) : null;
-}
 async function waitBackend(up, tries = 160) {
   for (let i = 0; i < tries; i += 1) {
     const ok = await fetch(`${API}/docs`).then((r) => r.ok).catch(() => false);
@@ -109,12 +102,7 @@ async function restartBackend() {
     await waitBackend(false);
   }
   const log = fs.openSync(path.join(os.tmpdir(), "uvicorn-restarted.log"), "a");
-  spawn(path.join(ROOT, "backend/.venv/bin/uvicorn"), ["app.main:app", "--host", "0.0.0.0", "--port", "8000"], {
-    cwd: path.join(ROOT, "backend"),
-    env: { ...process.env, MISTRAL_ENDPOINT: process.env.MISTRAL_ENDPOINT || "http://localhost:8902", MISTRAL_EMBED_ENDPOINT: process.env.MISTRAL_EMBED_ENDPOINT || "http://localhost:8901" },
-    detached: true,
-    stdio: ["ignore", log, log],
-  }).unref();
+  startUvicorn({ env: { MISTRAL_ENDPOINT: process.env.MISTRAL_ENDPOINT || "http://localhost:8902", MISTRAL_EMBED_ENDPOINT: process.env.MISTRAL_EMBED_ENDPOINT || "http://localhost:8901" }, log });
   await waitBackend(true);
 }
 

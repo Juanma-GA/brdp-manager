@@ -26,6 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { backendPython, pythonEnv } from "./lib/backendPython.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -36,7 +37,7 @@ const PASSWORD = process.env.PROMPT_EVAL_EMAIL ? process.env.PROMPT_EVAL_PASSWOR
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CA = path.join(ROOT, "backend/tests/fixtures/brex/DMC-CAAA00000000AAA022AD-001-00-SX-ZZ.xml");
 const GUIDE_ES = path.join(ROOT, "scripts/prompt-eval/fixtures/text-extract/guia-estilo-dita-es.md");
-const PYTHON = fs.existsSync(path.join(ROOT, "backend/.venv/bin/python")) ? path.join(ROOT, "backend/.venv/bin/python") : path.join(ROOT, "backend/.venv/Scripts/python.exe");
+const PYTHON = backendPython();
 const SMALL = path.join(os.tmpdir(), "brex-42-five-ext-stop.xml");
 fs.writeFileSync(
   SMALL,
@@ -105,7 +106,7 @@ async def main():
         await s.commit()
 asyncio.run(main())
 `;
-  execFileSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend") });
+  execFileSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend"), env: pythonEnv() });
 }
 
 // Gives BRDPs the "-4.1" suffix of the retired "marked" option, as an
@@ -123,7 +124,7 @@ async def main():
         await s.commit()
 asyncio.run(main())
 `;
-  execFileSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend") });
+  execFileSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend"), env: pythonEnv() });
 }
 
 const complete = (c) =>

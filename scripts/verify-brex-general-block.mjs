@@ -20,13 +20,12 @@
 // Cleans up the projects it creates.
 //
 //     node scripts/verify-brex-general-block.mjs
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DOMParser } from "@xmldom/xmldom";
 import { chromium } from "playwright-core";
+import { xsdCheck } from "./lib/xsdCheck.mjs";
 import { brexcheckErrors, selectedRules } from "./lib/brexcheckEmulation.mjs";
 
 const BASE_URL = "http://localhost:5173";
@@ -125,14 +124,7 @@ async function main() {
     assert(xml.includes(`<contextRules rulesContext="${FLAT42("proced")}">`) && !general.includes("BRDP-GB-PROC"), "Generate: the proced block unchanged");
     assert(await page.locator("text=Valid against XSD schema").isVisible(), "Generate: valid against the XSD (app check)");
     assert((await page.getByTestId("empty-context-blocks").count()) === 0, "Generate: no safety-net warning");
-    const file = path.join(os.tmpdir(), `general-block-${suffix}.xml`);
-    fs.writeFileSync(file, xml);
-    let lint = "valid";
-    try {
-      execFileSync("xmllint", ["--noout", "--schema", path.join(ROOT, "sources/S4.2/brex4.2.xsd"), file], { stdio: "pipe" });
-    } catch (err) {
-      lint = String(err.stderr || err.message).slice(0, 600);
-    }
+    const lint = await xsdCheck(path.join(ROOT, "sources/S4.2/brex4.2.xsd"), xml);
     assert(lint === "valid", `xmllint against brex4.2.xsd (${lint})`);
     await page.screenshot({ path: path.join(SHOTS, "brex-general-block-generate.png"), fullPage: true });
 

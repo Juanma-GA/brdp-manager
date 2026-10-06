@@ -651,4 +651,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    for _stream in (sys.stdout, sys.stderr):  # UTF-8 on any console or pipe, Windows included (Protecciones 1c)
+        _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     main()

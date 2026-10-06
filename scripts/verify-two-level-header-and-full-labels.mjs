@@ -5,6 +5,7 @@
 // alignment round (that script is idempotent -- rerun it first if the
 // projects aren't already there).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -104,7 +105,7 @@ async function main() {
     const colNames = ["Validated", "Pending", "Refused", "Verified", "Draft", "To Do"];
     colX.forEach((xs, i) => assertAllClose(xs, `${colNames[i]} column`));
 
-    await page.screenshot({ path: "/tmp/projects-two-level-header.png", fullPage: true });
+    await page.screenshot({ path: shot("projects-two-level-header.png"), fullPage: true });
 
     // ---- Part 2: BRDP Records full-label summary ----
     const row = page.locator("tr", { hasText: "Alignment Check - Boeing-scale" });
@@ -123,7 +124,7 @@ async function main() {
     assert(headerText.includes("To Do: 300"), "Records header shows full label 'To Do: 300'");
     assert(!/\bV\s*900\b/.test(headerText), "Old compact 'V 900' format is gone");
 
-    await page.screenshot({ path: "/tmp/records-full-labels-en.png", fullPage: true });
+    await page.screenshot({ path: shot("records-full-labels-en.png"), fullPage: true });
 
     // No horizontal overflow of the header row (layout didn't break).
     const headerBox = await page.locator("h1", { hasText: /Records/i }).locator("xpath=../..").boundingBox();
@@ -151,7 +152,7 @@ async function main() {
     const titleBoxEs = await titleEs.boundingBox();
     assert(titleBoxEs.x >= 0 && titleBoxEs.x < 200, `ES: 'Registros BRDP' title stays near the left edge, not pushed off-layout (x=${titleBoxEs.x.toFixed(1)})`);
 
-    await page.screenshot({ path: "/tmp/records-full-labels-es.png", fullPage: true });
+    await page.screenshot({ path: shot("records-full-labels-es.png"), fullPage: true });
 
     // restore EN
     await page.locator("header select, nav select").first().selectOption("en");

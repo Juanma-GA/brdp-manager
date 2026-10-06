@@ -7,6 +7,7 @@
 // result panel scrolls internally), and a short result doesn't leave the
 // panel looking broken, at a typical laptop viewport (~800px tall).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -123,8 +124,8 @@ async function main() {
     const preScrollable = await page.locator("pre").evaluate((el) => el.scrollHeight > el.clientHeight + 1);
     assert(preScrollable, "the result <pre> panel itself scrolls internally (25 rules don't fit its box)");
 
-    await page.screenshot({ path: "/tmp/verify-layout-long.png", fullPage: false });
-    console.log("Screenshot (viewport only, no full-page): /tmp/verify-layout-long.png");
+    await page.screenshot({ path: shot("verify-layout-long.png"), fullPage: false });
+    console.log(`Screenshot (viewport only, no full-page): ${shot("verify-layout-long.png")}`);
 
     // ---- Short result: 1 approved rule ----
     await page.goto(`${BASE_URL}/projects/${shortProject.id}/generate`);
@@ -139,8 +140,8 @@ async function main() {
       return el.scrollHeight > el.clientHeight + 1;
     });
     assert(!shortPageScrollable, "short-result page does NOT need page-level scroll either");
-    await page.screenshot({ path: "/tmp/verify-layout-short.png", fullPage: false });
-    console.log("Screenshot (viewport only, no full-page): /tmp/verify-layout-short.png");
+    await page.screenshot({ path: shot("verify-layout-short.png"), fullPage: false });
+    console.log(`Screenshot (viewport only, no full-page): ${shot("verify-layout-short.png")}`);
 
     // ---- Resize sanity check: shrink then grow the viewport ----
     await page.setViewportSize({ width: 1000, height: 500 });
@@ -152,11 +153,11 @@ async function main() {
     assert(!resizedScrollable, "after shrinking the window to 500px tall, still no page-level scroll");
     const regenerateStillVisible = await page.locator('button:has-text("Regenerate")').isVisible();
     assert(regenerateStillVisible, "Regenerate button still present (not destroyed) after resize");
-    await page.screenshot({ path: "/tmp/verify-layout-resized-500.png", fullPage: false });
+    await page.screenshot({ path: shot("verify-layout-resized-500.png"), fullPage: false });
 
     await page.setViewportSize({ width: 1366, height: 800 });
     await page.waitForTimeout(200);
-    await page.screenshot({ path: "/tmp/verify-layout-resized-back.png", fullPage: false });
+    await page.screenshot({ path: shot("verify-layout-resized-back.png"), fullPage: false });
 
     console.log("\nAll layout checks passed.");
   } finally {

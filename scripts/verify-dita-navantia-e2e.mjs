@@ -38,8 +38,9 @@
 //
 // Usage: node scripts/verify-dita-navantia-e2e.mjs <path-to-xlsx>
 import { chromium } from "playwright-core";
+import { readXlsxRows } from "./lib/readXlsx.mjs";
 import path from "node:path";
-import fs from "node:fs";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -47,7 +48,6 @@ const API = "http://localhost:8000";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "AdminTest123!";
-const SCRATCH = "/tmp/claude-0/-home-user-brdp-manager/98dcb646-cccc-5aae-b30c-7469530ec6c5/scratchpad";
 
 // The fixture files (all_rows.json/verified_rules.json) were extracted with
 // Python's openpyxl, which -- per the XML 1.0 spec's mandatory line-ending
@@ -89,7 +89,14 @@ async function main() {
   }
   const absXlsxPath = path.resolve(xlsxPath);
 
-  const allRows = JSON.parse(fs.readFileSync(`${SCRATCH}/all_rows.json`, "utf8"));
+  // The rows of the same file, read like the app's Excel import (no file
+  // extracted beforehand into a scratch folder).
+  const allRows = readXlsxRows(absXlsxPath).map((r) => ({
+    identifier: r.ID,
+    proposal_status: r["Proposal Status"],
+    rule_status: r["Rule Status"],
+    rule: r.Rule,
+  }));
   const verifiedRows = allRows.filter((r) => r.rule_status === "Verified");
   const todoRows = allRows.filter((r) => r.rule_status === "To Do");
   assert(verifiedRows.length === 8, `fixture has exactly 8 Verified rows (got ${verifiedRows.length})`);
@@ -167,7 +174,7 @@ async function main() {
     console.log("Import result:", resultText.replace(/\n/g, " | "));
     assert(/36 BRDPs created/i.test(resultText), `import created all 36 BRDPs (got "${resultText}")`);
     await page.click('button:has-text("Close")');
-    await page.screenshot({ path: "/tmp/verify-dita-1-import-complete.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-dita-1-import-complete.png"), fullPage: true });
 
     // ---- 3. Confirm the 8 Verified rows landed as approved SCH-DITA, byte-for-byte ----
     const brdps = await (await fetch(`${API}/api/projects/${projectId}/brdps`, { headers: auth })).json();
@@ -218,7 +225,7 @@ async function main() {
     ).json();
     assert(normalizeEol(manualSavedApproval?.rule_xml || "") === normalizeEol(manualRuleXml), "the manually saved real unprefixed rule was actually persisted, verbatim");
     console.log("Manual editor round trip for", todoBrdp.identifier, "completed with no validation error.");
-    await page.screenshot({ path: "/tmp/verify-dita-2-manual-editor.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-dita-2-manual-editor.png"), fullPage: true });
 
     // ---- 5. Generate via the real Generate page ----
     await page.goto(`${BASE_URL}/projects/${projectId}/generate`);
@@ -232,7 +239,7 @@ async function main() {
     await generateBtn.click();
     await page.waitForSelector("pre", { timeout: 30000 });
     const xml = await page.locator("pre").innerText();
-    await page.screenshot({ path: "/tmp/verify-dita-3-generate-output.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-dita-3-generate-output.png"), fullPage: true });
 
     assert(xml.includes('<sch:schema') && xml.includes('queryBinding="xslt2"'), "output is a real <sch:schema> document");
     assert(!xml.includes("structureObjectRule") && !xml.includes("<objrule"), "output contains NO BREX-shaped markers -- never touched the BREX/brexToSchematron.js path");
@@ -349,7 +356,7 @@ async function main() {
     await page.waitForSelector("pre", { timeout: 30000 });
     const xmlAllRows = await page.locator("pre").innerText();
     assert(xmlAllRows.includes(edgeRule), "once 'Only include Validated' is unchecked, the Verified-but-not-Validated BRDP's approved rule IS included, verbatim, as a real pattern");
-    await page.screenshot({ path: "/tmp/verify-dita-4-edge-case.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-dita-4-edge-case.png"), fullPage: true });
 
     // ---- 8. rule_override fires on reimport with changed real unprefixed content ----
     const overrideSource = verifiedRows[1];

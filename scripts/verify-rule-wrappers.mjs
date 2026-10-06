@@ -27,6 +27,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { normalizeNewlines } from "./lib/textFile.mjs";
+import { backendPython, pythonEnv } from "./lib/backendPython.mjs";
 import { readXlsxRows } from "./lib/readXlsx.mjs";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 
@@ -50,7 +52,8 @@ function assert(condition, message, detail = "") {
   }
 }
 
-const python = (args) => execFileSync(".venv/bin/python", args, { cwd: BACKEND }).toString();
+// print() writes CRLF on Windows: lines are compared with LF.
+const python = (args) => normalizeNewlines(execFileSync(backendPython(), args, { cwd: BACKEND, env: pythonEnv() }).toString("utf8"));
 function writeRuleXmlDirectly(brdpId, format, ruleXml) {
   const code = `
 import asyncio, sys, uuid

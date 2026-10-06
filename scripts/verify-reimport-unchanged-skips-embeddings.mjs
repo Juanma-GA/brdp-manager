@@ -19,6 +19,7 @@
 // Usage: node scripts/verify-reimport-unchanged-skips-embeddings.mjs <path-to-xlsx>
 import { chromium } from "playwright-core";
 import path from "node:path";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -156,7 +157,7 @@ async function main() {
     // updated text to be present before capturing, not just for the panel
     // heading to exist.
     await page.waitForSelector("text=/36 rows unchanged/i", { timeout: 10000 });
-    await page.screenshot({ path: "/tmp/verify-reimport-unchanged-summary.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-reimport-unchanged-summary.png"), fullPage: true });
 
     const secondResultText = await page
       .locator("ul")

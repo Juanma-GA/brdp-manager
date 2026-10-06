@@ -31,6 +31,7 @@
 // Usage: node scripts/verify-dita-xpath3-real-navantia.mjs <path-to-xlsx>
 import { chromium } from "playwright-core";
 import path from "node:path";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -181,7 +182,7 @@ async function main() {
     }
     console.log("OK: zero vocabulary warnings for the real Xpath3.0 content (no warnings panel rendered)");
 
-    await page.screenshot({ path: "/tmp/verify-dita-xpath3-real-output.png", fullPage: true });
+    await page.screenshot({ path: shot("verify-dita-xpath3-real-output.png"), fullPage: true });
 
     // ---- Real download: filename uses projectName (DITA convention) ----
     const [download] = await Promise.all([

@@ -13,6 +13,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { pathToFileURL } from "url";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -214,7 +215,7 @@ async function main() {
       assert(hasClass === 1, `${id}'s Rule Status badge uses the correct class .${expectedClass}`);
     }
 
-    await reportPage.screenshot({ path: "/tmp/brexdoc-report-html-fixed.png", fullPage: true });
+    await reportPage.screenshot({ path: shot("brexdoc-report-html-fixed.png"), fullPage: true });
 
     // ---- Markdown download: confirm pipe-escaping keeps the table intact ----
     await page.locator('input[type="radio"]').nth(1).check();

@@ -16,6 +16,7 @@
 // closure list (unit test for the prompt, backend test for dedup, a
 // screenshot for the wrap fix).
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -145,8 +146,8 @@ If the Title language is unclear, use the language of the Proposal.`;
     const scrollWidthBefore = await page.evaluate(() => document.documentElement.scrollWidth);
     const viewportWidth = 1440;
     assert(scrollWidthBefore <= viewportWidth + 2, "no horizontal page overflow from the long suggestion text");
-    await page.screenshot({ path: "/tmp/suggest-definition-long-text-wrapped.png", fullPage: true });
-    console.log("Screenshot (long text wraps, no horizontal overflow): /tmp/suggest-definition-long-text-wrapped.png");
+    await page.screenshot({ path: shot("suggest-definition-long-text-wrapped.png"), fullPage: true });
+    console.log(`Screenshot (long text wraps, no horizontal overflow): ${shot("suggest-definition-long-text-wrapped.png")}`);
     console.log("Suggestion box bounding box:", box);
 
     console.log("\nALL CHECKS PASSED\n");

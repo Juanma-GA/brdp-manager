@@ -67,12 +67,12 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 @lru_cache
 def _private_key() -> str:
-    return Path(get_settings().jwt_private_key_path).read_text()
+    return Path(get_settings().jwt_private_key_path).read_text(encoding="utf-8")
 
 
 @lru_cache
 def _public_key() -> str:
-    return Path(get_settings().jwt_public_key_path).read_text()
+    return Path(get_settings().jwt_public_key_path).read_text(encoding="utf-8")
 
 
 def create_access_token(user_id: uuid.UUID, expires_delta: timedelta | None = None) -> str:

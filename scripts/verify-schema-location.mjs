@@ -20,17 +20,29 @@
 //
 // Preconditions: uvicorn with MISTRAL_ENDPOINT=http://localhost:8902 and
 // MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks, Vite on 5173,
-// psql reachable (to store the old 4.x "master" value the API now refuses).
+// the backend's Python (to store the old 4.x "master" value the API now refuses).
 // Cleans up the projects it creates.
 //
 //     node scripts/verify-schema-location.mjs
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { BACKEND_DIR, backendPython, pythonEnv } from "./lib/backendPython.mjs";
+import { xsdCheck } from "./lib/xsdCheck.mjs";
 import { retiredTemplateRows } from "./lib/readXlsx.mjs";
+
+const SET_OLD_MASTER = `
+import asyncio, sys, uuid
+from sqlalchemy import text
+from app.db.base import async_session_factory
+async def main():
+    async with async_session_factory() as s:
+        await s.execute(text("UPDATE projects SET project_config = project_config || CAST(:v AS jsonb) WHERE id = :id"), {"v": '{"schemaLocation": "master"}', "id": uuid.UUID(sys.argv[1])})
+        await s.commit()
+asyncio.run(main())
+`;
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -50,7 +62,6 @@ function assert(cond, msg) {
     console.log("OK:", msg);
   }
 }
-
 
 async function main() {
   const token = (
@@ -114,8 +125,9 @@ async function main() {
   await putApproved(p42, urn, URN_RULE);
   await embed(p42);
   const pOld = await makeProject("Schema location 4.2 old master", "S1000D 4.2");
-  execFileSync("psql", ["-h", "localhost", "-U", "brdp", "brdp_manager", "-c",
-    `UPDATE projects SET project_config = project_config || '{"schemaLocation":"master"}' WHERE id = '${pOld.id}'`], { env: { ...process.env, PGPASSWORD: "brdp" } });
+  // Through the backend's own database settings (backend/.env), with its
+  // Python: no psql program needed (Windows has none by default).
+  execFileSync(backendPython(), ["-c", SET_OLD_MASTER, pOld.id], { cwd: BACKEND_DIR, env: pythonEnv() });
   const p301 = await makeProject("Schema location 3.0.1", "S1000D 3.0.1");
   // Part 4: a 3.0.1 Master project with a rule that allows each DM schema in
   // flat AND master form (shape of BRDP-EXT-02772 of SOPTE: 17 + 17), and a
@@ -257,14 +269,7 @@ async function main() {
     assert(unrec.includes("1 rule has schema URLs that were left as written") && unrec.includes("BRDP-SL-URN") && unrec.includes("urn:csdb:proced"), `report warns about the unrecognized value (${unrec.slice(0, 120)})`);
     await page.screenshot({ path: path.join(SHOTS, "schema-location-generate-report.png"), fullPage: true });
     assert((await getRule(p42, s6)).rule_xml === S00006, "stored BRDP-S1-00006 unchanged (flat URLs)");
-    const file = path.join(os.tmpdir(), `schema-location-${suffix}.xml`);
-    fs.writeFileSync(file, xml);
-    let lint = "valid";
-    try {
-      execFileSync("xmllint", ["--noout", "--schema", path.join(ROOT, "sources/S4.2/brex4.2.xsd"), file], { stdio: "pipe" });
-    } catch (err) {
-      lint = String(err.stderr || err.message).slice(0, 600);
-    }
+    const lint = await xsdCheck(path.join(ROOT, "sources/S4.2/brex4.2.xsd"), xml);
     assert(lint === "valid", `xmllint against brex4.2.xsd (${lint})`);
     await language("es");
     await page.waitForTimeout(300);
@@ -310,14 +315,7 @@ async function main() {
     assert(rew301Text.includes("BRDP-SL-FLAT") && !rew301Text.includes("BRDP-EXT-02772"), `rewritten report lists only the flat-only rule (${rew301Text.slice(0, 160)})`);
     await mixed.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(SHOTS, "schema-location-mixed-forms.png"), fullPage: true });
-    const file301 = path.join(os.tmpdir(), `schema-location-301-${suffix}.xml`);
-    fs.writeFileSync(file301, xml301);
-    let lint301 = "valid";
-    try {
-      execFileSync("xmllint", ["--noout", "--schema", path.join(ROOT, "sources/S3.0.1/brex.xsd"), file301], { stdio: "pipe" });
-    } catch (err) {
-      lint301 = String(err.stderr || err.message).slice(0, 600);
-    }
+    const lint301 = await xsdCheck(path.join(ROOT, "sources/S3.0.1/brex.xsd"), xml301);
     assert(lint301 === "valid", `xmllint against S3.0.1/brex.xsd (${lint301})`);
     await language("es");
     await page.waitForTimeout(300);

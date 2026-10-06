@@ -13,6 +13,7 @@
 //   - EN and ES.
 // Run: node scripts/verify-name-fix-hints.mjs
 import { chromium } from 'playwright-core';
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = 'http://localhost:5173';
 const API = 'http://localhost:8000';
@@ -119,7 +120,7 @@ async function main() {
       assert(new Set(vocabRequests).size > 1, 'the other vocabularies are fetched once a name needs them');
       const chip = page.getByTestId('name-fix-suggestion').filter({ hasText: 'Did you mean <emphasis>?' });
       assert((await chip.count()) === 1, 'chip "Did you mean <emphasis>?" under the Definition');
-      await page.screenshot({ path: '/tmp/name-fix-hints-typo.png', fullPage: true });
+      await page.screenshot({ path: shot('name-fix-hints-typo.png'), fullPage: true });
       await chip.click();
       await page.waitForTimeout(800);
       const definition = page.locator('label:text-is("Definition") + textarea');
@@ -154,7 +155,7 @@ async function main() {
       const ruleChips = await page.locator('[class*="ruleEditor"] [data-testid="name-fix-suggestion"]').count();
       assert(ruleChips === 0, 'rule editor: no one-click fix');
       assert(await page.getByRole('button', { name: 'Save', exact: true }).isEnabled(), 'rule editor: Save not blocked by the hint');
-      await page.screenshot({ path: '/tmp/name-fix-hints-rule-editor.png', fullPage: true });
+      await page.screenshot({ path: shot('name-fix-hints-rule-editor.png'), fullPage: true });
       await page.close();
     }
 
@@ -172,7 +173,7 @@ async function main() {
           : '<levelledPara> no existe en S1000D 3.0.1; existe en S1000D 4.1 y 4.2.';
       assert((await line.textContent()).includes(expected), `3.0.1 (${lang}): ${expected}`);
       assert((await page.getByTestId('name-fix-suggestion').count()) === 0, `3.0.1 (${lang}): no chip, no equivalence proposed`);
-      if (lang === 'es') await page.screenshot({ path: '/tmp/name-fix-hints-301-es.png', fullPage: true });
+      if (lang === 'es') await page.screenshot({ path: shot('name-fix-hints-301-es.png'), fullPage: true });
       await page.close();
     }
 
@@ -192,7 +193,7 @@ async function main() {
       assert((await page.getByTestId('name-did-you-mean').count()) === 0, `DITA (${lang}): no did-you-mean (param/part)`);
       if (lang === 'es') {
         assert((await page.getByTestId('name-fix-suggestion').count()) === 0, 'DITA: no chip');
-        await page.screenshot({ path: '/tmp/name-fix-hints-dita-es.png', fullPage: true });
+        await page.screenshot({ path: shot('name-fix-hints-dita-es.png'), fullPage: true });
       }
       await page.close();
     }

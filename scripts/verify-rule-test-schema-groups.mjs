@@ -9,10 +9,11 @@
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
-// Vite on 5173. Cleans up the project it creates. Screenshots go to /tmp.
+// Vite on 5173. Cleans up the project it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-schema-groups.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -144,7 +145,7 @@ async function main() {
     assert(JSON.stringify(results) === '["accepted ✓","rejected ✓","rejected ✓","accepted ✓","rejected ✓","rejected ✓"]', `S1-00120: 5 levels accepted, 6 levels and a title on level 5 rejected (${JSON.stringify(results)})`);
     assert((await example(4).locator("pre").textContent()).includes("<mainProcedure>") && (await example(1).locator("pre").textContent()).includes("<description>"), "S1-00120: each example built on its own schema");
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "S1-00120: recorded as passed");
-    await panel().screenshot({ path: "/tmp/rule-test-schema-groups.png" });
+    await panel().screenshot({ path: shot("rule-test-schema-groups.png") });
 
     // 2. Every example invalid: the schema and the reason are named.
     await select("BRDP-SG-BAD");
@@ -153,7 +154,7 @@ async function main() {
     const text = await verdict().textContent();
     assert(text.startsWith("None of the examples could be run. The 2 examples of the descript schema are not valid there: ") && /sbSummary/.test(text), `no runnable: schema and reason named (${text})`);
     assert(!/^None of the examples could be run \(see each example\)/.test(text), "no runnable: not only 'regenerate'");
-    await panel().screenshot({ path: "/tmp/rule-test-no-runnable-named.png" });
+    await panel().screenshot({ path: shot("rule-test-no-runnable-named.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(400);
     const textEs = await verdict().textContent();

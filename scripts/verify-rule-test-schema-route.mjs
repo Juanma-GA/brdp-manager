@@ -13,10 +13,11 @@
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running, Vite
-// on 5173. Cleans up the projects it creates. Screenshots go to /tmp.
+// on 5173. Cleans up the projects it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test-schema-route.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -145,7 +146,7 @@ async function main() {
     assert(/<dataRestrictions>\s*<restrictionInstructions>\s*<dataDistribution>/.test(x0) && /<restrictionInfo>\s*<copyright>/.test(x0), "4.2: the example has the whole way with the required children");
     assert((await example(0).getByTestId("rule-test-result").textContent()).includes("accepted ✓") && (await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "4.2: current notice accepted, wrong year rejected");
     assert((await page.getByTestId("rule-test-relocated").count()) === 0, "4.2: nothing to move when the LLM follows the way");
-    await panel().screenshot({ path: "/tmp/rule-test-schema-route-copyright.png" });
+    await panel().screenshot({ path: shot("rule-test-schema-route-copyright.png") });
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "4.2: recorded as passed");
 
     // 2. The real run's mistake: moved by the application.
@@ -161,12 +162,12 @@ async function main() {
     const xm = await example(1).locator("pre").textContent();
     assert(/<restrictionInfo>\s*<copyright>[\s\S]*2023/.test(xm) && !/<security [^>]*\/>\s*<copyright>/.test(xm), "misplaced: <copyright> now along its way, with its text");
     assert((await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "misplaced: wrong year rejected");
-    await panel().screenshot({ path: "/tmp/rule-test-schema-route-relocated.png" });
+    await panel().screenshot({ path: shot("rule-test-schema-route-relocated.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(400);
     const noteEs = await example(0).getByTestId("rule-test-relocated").textContent();
     assert(noteEs === "Corregido por la aplicación (colocación según el esquema): <copyright> → dmStatus/dataRestrictions/restrictionInfo.", `misplaced: the note in Spanish (${noteEs})`);
-    await panel().screenshot({ path: "/tmp/rule-test-schema-route-relocated-es.png" });
+    await panel().screenshot({ path: shot("rule-test-schema-route-relocated-es.png") });
     await page.locator("header select, nav select").first().selectOption("en");
     await page.waitForTimeout(300);
 

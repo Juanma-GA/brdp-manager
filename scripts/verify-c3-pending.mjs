@@ -12,6 +12,7 @@
 //
 //     node scripts/verify-c3-pending.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -88,7 +89,7 @@ async function main() {
     assert(green === "rgb(22, 101, 52)", `after saving: the button turns green (${green})`);
     assert((await button.textContent()) === "✓Save Configuration", `after saving: ✓ on the button (${await button.textContent()})`);
     assert((await page.getByRole("button", { name: "Save Configuration" }).count()) === 1, "the ✓ is not part of the button's name");
-    await page.locator("form").first().screenshot({ path: "/tmp/config-save-success.png" });
+    await page.locator("form").first().screenshot({ path: shot("config-save-success.png") });
     await page.waitForFunction(() => !document.querySelector('[data-testid="config-save"]')?.hasAttribute("data-state"), null, { timeout: 5000 });
     const back = (Date.now() - t0) / 1000;
     assert(back <= 2, `…and goes back to normal after about a second (${back.toFixed(1)} s)`);
@@ -116,7 +117,7 @@ async function main() {
     assert(await error.isVisible(), "the error is still there 2.5 s later");
     await page.fill("#cfg-modelIdentCode", "C3FAIL2");
     assert(await error.isVisible(), "…and still there after editing a field (until the next attempt)");
-    await page.locator("form").first().screenshot({ path: "/tmp/config-save-error.png" });
+    await page.locator("form").first().screenshot({ path: shot("config-save-error.png") });
     await page.unroute(`**/api/projects/${project.id}/config`);
     await page.fill("#cfg-modelIdentCode", "C3OK");
     await button.click();
@@ -162,7 +163,7 @@ async function main() {
     const suggestDef = page.getByRole("button", { name: "Suggest Definition" });
     const title = (await suggestDef.getAttribute("title")) || "";
     assert(!title.includes("Official definition from the standard catalog"), "Suggest Definition is not reported as a catalog BRDP (the check is off, not empty)");
-    await page.screenshot({ path: "/tmp/catalog-load-warning.png" });
+    await page.screenshot({ path: shot("catalog-load-warning.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(300);
     const es = await warning.textContent();

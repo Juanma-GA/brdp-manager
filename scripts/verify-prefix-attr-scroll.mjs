@@ -90,7 +90,7 @@ async function main() {
     }
   }
   const scale = (await api("/api/projects").then((r) => r.json())).find((p) => p.name === SCALE_PROJECT);
-  if (!scale) throw new Error("Seed the scale project first: cd backend && .venv/bin/python scripts/seed_generate_report_scale.py");
+  if (!scale) throw new Error("Seed the scale project first: from backend/, with its Python, run scripts/seed_generate_report_scale.py");
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   async function login(page) {

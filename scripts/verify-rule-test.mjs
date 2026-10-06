@@ -13,10 +13,11 @@
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
-// Vite on 5173. Cleans up the projects it creates. Screenshots go to /tmp.
+// Vite on 5173. Cleans up the projects it creates. Screenshots go to SHOTS_DIR (default: the system's temp directory).
 //
 //     node scripts/verify-rule-test.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -212,7 +213,7 @@ async function main() {
     const approvalBefore = await api(`/api/projects/${p42.id}/brdps/${emph.id}/approvals/BREX-4.2`);
     assert(approvalBefore.status === 404 || (await approvalBefore.json()) === null, "testing a suggestion saves nothing");
     assert((await panel().getByTestId("rule-test-analysis").count()) === 0, "an executable rule shows no analysis warning");
-    await panel().screenshot({ path: "/tmp/rule-test-emphasis.png" });
+    await panel().screenshot({ path: shot("rule-test-emphasis.png") });
     await page.getByRole("button", { name: "Discard" }).first().click();
 
     // 2. @emphasisType em01/em02 limited to proced, on a saved Draft rule.
@@ -257,7 +258,7 @@ async function main() {
       return sel.toString();
     });
     assert(/\n {8}<proceduralStep>/.test(selectedText), "a mouse selection copies the indentation too");
-    await panel().screenshot({ path: "/tmp/rule-test-emphasis-type.png" });
+    await panel().screenshot({ path: shot("rule-test-emphasis-type.png") });
 
     // Edit the content em03 → em02 and Run again: no LLM call.
     const before = JSON.stringify(await lastRequest());
@@ -306,7 +307,7 @@ async function main() {
     assert(stubText.includes("Not run:") && stubText.includes("<content> is not allowed inside <warning>") && stubText.includes("@emphasisType does not exist on <warning>"), `structural problems shown on the example (${stubText})`);
     assert((await example(1).getByTestId("rule-test-result").count()) === 0, "the broken example is not run");
     assert((await example(1).locator("pre").count()) === 1, "the broken example stays visible");
-    await panel().screenshot({ path: "/tmp/rule-test-structure-problems.png" });
+    await panel().screenshot({ path: shot("rule-test-structure-problems.png") });
 
     // 5. document(): the whole rule is not executable -> the reason at the
     // top and a "Show illustrative examples" button; no LLM call until it
@@ -323,7 +324,7 @@ async function main() {
     assert((await lastRequest()) === null, "document(): no LLM call before the button is clicked");
     assert((await example(0).count()) === 0 && (await panel().getByText("Writing example fragments…").count()) === 0, "document(): no examples and nothing being written");
     assert((await panel().getByRole("button", { name: "Regenerate examples" }).count()) === 0, "document(): no Regenerate before the first generation");
-    await panel().screenshot({ path: "/tmp/rule-test-document-on-demand.png" });
+    await panel().screenshot({ path: shot("rule-test-document-on-demand.png") });
     await fetch(`${MOCK}/slow-next`, { method: "POST" });
     await showExamples.click();
     await panel().getByText("Writing example fragments…").waitFor({ timeout: 5000 });
@@ -334,7 +335,7 @@ async function main() {
     assert((await panel().getByTestId("rule-test-result").count()) === 0, "document(): no result lines");
     assert((await panel().getByTestId("rule-test-verdict").count()) === 0, "document(): the reason is not repeated as a verdict");
     assert((await panel().getByRole("button", { name: "Regenerate examples" }).count()) === 1, "document(): Regenerate available after the first generation");
-    await panel().screenshot({ path: "/tmp/rule-test-document-reason.png" });
+    await panel().screenshot({ path: shot("rule-test-document-reason.png") });
 
     // 5b. Only part of the rule is not executable: unchanged behaviour --
     // the examples are generated straight away and the rest is judged.

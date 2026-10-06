@@ -8,6 +8,7 @@
 //
 //   node scripts/verify-ask-structural.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -103,8 +104,8 @@ async function main() {
     assert(r.text.includes("<dmAddress>") && r.text.includes("<dmStatus>"), "data-module group: <dmAddress>, <dmStatus>");
     assert(!r.text.includes("<dmodule>") && !r.text.includes("<ddn>") && !r.text.includes("puede ir dentro"), "never the parents (<dmodule>, <ddn>, ...)");
     assert((await page.getByText("Schema facts used:").or(page.getByText("Fichas de esquema usadas:")).count()) >= 1, "the expandable card stays below the answer");
-    await page.locator('[class*="exchange"]').first().screenshot({ path: "/tmp/ask-structural-deterministic.png" });
-    console.log("Screenshot: /tmp/ask-structural-deterministic.png");
+    await page.locator('[class*="exchange"]').first().screenshot({ path: shot("ask-structural-deterministic.png") });
+    console.log(`Screenshot: ${shot("ask-structural-deterministic.png")}`);
 
     // 2. A follow-up goes to the LLM with the deterministic answer as the
     //    previous assistant turn.
@@ -153,8 +154,8 @@ async function main() {
     r = await ask("¿<para> puede contener <footnote>?");
     assert(r.deterministic && noLlmCall(r.req), "¿<para> puede contener <footnote>?: from the schema, no LLM call");
     assert(r.text.includes("Sí, en 22 de los 28 esquemas en los que existe <para>") && r.text.includes("No en: comrep, fault, frontmatter, ipd, schedul, update."), "mixed: yes in 22 schemas, not in the other 6");
-    await page.locator('[class*="exchange"]').first().screenshot({ path: "/tmp/ask-structural-relation.png" });
-    console.log("Screenshot: /tmp/ask-structural-relation.png");
+    await page.locator('[class*="exchange"]').first().screenshot({ path: shot("ask-structural-relation.png") });
+    console.log(`Screenshot: ${shot("ask-structural-relation.png")}`);
     // 7c. Reversed order, English: the parent is the name after "inside".
     await language.selectOption("en");
     r = await ask("Can <table> appear inside <para>?");

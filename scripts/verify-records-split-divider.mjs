@@ -7,6 +7,7 @@
 //
 //   node scripts/verify-records-split-divider.mjs
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -86,8 +87,8 @@ async function main() {
     await divider.hover();
     await page.waitForTimeout(200);
     assert((await markColor()) === "rgb(203, 213, 225)", "visible mark on hover");
-    await page.screenshot({ path: "/tmp/records-split-divider.png", clip: await page.locator('[class*="layout"]').first().boundingBox() });
-    console.log("Screenshot: /tmp/records-split-divider.png");
+    await page.screenshot({ path: shot("records-split-divider.png"), clip: await page.locator('[class*="layout"]').first().boundingBox() });
+    console.log(`Screenshot: ${shot("records-split-divider.png")}`);
 
     const drag = async (toX) => {
       const box = await divider.boundingBox();
@@ -112,7 +113,7 @@ async function main() {
     await drag(10);
     w = await widths();
     assert(near(w.table, 480, 1.5), `drag to the far left: table stops at 480px (${w.table})`);
-    await page.screenshot({ path: "/tmp/records-split-divider-table-min.png", fullPage: false });
+    await page.screenshot({ path: shot("records-split-divider-table-min.png"), fullPage: false });
 
     // Drag to the far right: detail stops at its 360px minimum.
     await drag(1430);

@@ -21,7 +21,7 @@
 // A suite that runs longer than $BACKEND_TEST_TIMEOUT_SECONDS (default
 // 1800) is killed and reported.
 import path from 'node:path';
-import { BACKEND_DIR, findBackendPython } from './lib/backendPython.mjs';
+import { BACKEND_DIR, findBackendPython, pythonEnv } from './lib/backendPython.mjs';
 import { duration, rule, runProcess, tail } from './lib/checkReport.mjs';
 
 const timeoutMs = (Number(process.env.BACKEND_TEST_TIMEOUT_SECONDS) || 1800) * 1000;
@@ -45,7 +45,7 @@ if (!found.python) {
   );
 }
 
-const db = await runProcess(found.python, [path.join('scripts', 'check_test_db.py')], { cwd: BACKEND_DIR, timeoutMs: 60_000 });
+const db = await runProcess(found.python, [path.join('scripts', 'check_test_db.py')], { cwd: BACKEND_DIR, env: pythonEnv(), timeoutMs: 60_000 });
 const dbLine = tail(db.output, 1)[0] || `exit ${db.code}`;
 if (db.code !== 0) {
   const hints = {
@@ -62,7 +62,7 @@ console.log(`Backend tests: ${found.python} -m pytest -q ${extraArgs.join(' ')}`
 
 const res = await runProcess(found.python, ['-m', 'pytest', '-q', ...extraArgs], {
   cwd: BACKEND_DIR,
-  env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+  env: pythonEnv({ NO_COLOR: '1' }),
   timeoutMs,
   live: true,
 });

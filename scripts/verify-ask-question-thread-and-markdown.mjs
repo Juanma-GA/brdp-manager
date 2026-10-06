@@ -13,6 +13,7 @@
 // deterministic triggers (MARKDOWN_TEST, HTML_TEST, ERROR_TEST) added to
 // the same mock for this round's specific checks.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -132,7 +133,7 @@ async function main() {
     assert((await page.locator("text=/What does this BRDP require/").count()) === 0, "The previous question is no longer visible once replaced");
     assert((await askTextarea.inputValue()) === "", "Textarea auto-clears again after the follow-up succeeds");
 
-    await page.screenshot({ path: "/tmp/ask-thread-followup.png" });
+    await page.screenshot({ path: shot("ask-thread-followup.png") });
 
     // ---- Markdown rendering: bold/list/inline code become real elements ----
     await resetMock();
@@ -150,7 +151,7 @@ async function main() {
     const rawAsterisks = await page.locator("text=/\\*\\*MOCK-MARKDOWN\\*\\*/").count();
     assert(rawAsterisks === 0, "No raw markdown syntax (**/`) leaks through as literal text");
 
-    await page.screenshot({ path: "/tmp/ask-thread-markdown-code.png" });
+    await page.screenshot({ path: shot("ask-thread-markdown-code.png") });
 
     // ---- HTML-injection edge case: <table>/<originator> in the answer
     // text render as literal text, never as real DOM elements (same
@@ -187,7 +188,7 @@ async function main() {
     const survivingTextarea = await askTextarea.inputValue();
     assert(survivingTextarea === "ERROR_TEST please", `The textarea keeps the question text after a network error (got: "${survivingTextarea}")`);
 
-    await page.screenshot({ path: "/tmp/ask-thread-error.png" });
+    await page.screenshot({ path: shot("ask-thread-error.png") });
 
     // ---- Switching BRDP resets everything, including the placeholder ----
     await page.locator("tr", { hasText: "BRDP-ASK-THREAD-B" }).click();

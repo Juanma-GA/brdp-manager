@@ -21,6 +21,7 @@
 //      ONLY for <stranger> (never for "seleccionados"), and offers no
 //      "Did you mean" suggestion for "seleccionados" either.
 import { chromium } from "playwright-core";
+import { shot } from "./lib/shots.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -127,8 +128,8 @@ async function main() {
 
       assert((await page.getByRole("button", { name: "Don't show again" }).count()) === 0, '"Don\'t show again" button no longer exists anywhere in the DOM');
       assert((await page.getByRole("button", { name: "Got it" }).count()) === 1, 'exactly one "Got it" button remains');
-      await page.screenshot({ path: "/tmp/naming-tip-shown-single-button.png", fullPage: true });
-      console.log("Screenshot (tip shown, single Got it button): /tmp/naming-tip-shown-single-button.png");
+      await page.screenshot({ path: shot("naming-tip-shown-single-button.png"), fullPage: true });
+      console.log(`Screenshot (tip shown, single Got it button): ${shot("naming-tip-shown-single-button.png")}`);
 
       const gotIt = page.getByRole("button", { name: "Got it" });
       await gotIt.click();
@@ -176,8 +177,8 @@ async function main() {
       await page.waitForSelector("text=/BRDP Assistant/i", { timeout: 5000 });
       const persisted = await page.locator('label:text-is("Definition") + textarea').inputValue();
       assert(persisted === "el atributo @applicRefId debe indicarse siempre", "the correction survives a reload -- persisted to Postgres");
-      await page.screenshot({ path: "/tmp/naming-tip-same-type-suggestion.png", fullPage: true });
-      console.log("Screenshot (same-type suggestion applied): /tmp/naming-tip-same-type-suggestion.png");
+      await page.screenshot({ path: shot("naming-tip-same-type-suggestion.png"), fullPage: true });
+      console.log(`Screenshot (same-type suggestion applied): ${shot("naming-tip-same-type-suggestion.png")}`);
       await page.close();
     }
 
@@ -196,8 +197,8 @@ async function main() {
       await page.waitForTimeout(400);
       const newValue = await page.locator('label:text-is("Definition") + textarea').inputValue();
       assert(newValue === "el atributo <table> debe existir", `clicking the suggestion wraps table in <...> despite the attribute trigger (got: "${newValue}")`);
-      await page.screenshot({ path: "/tmp/naming-tip-wrong-type-correction.png", fullPage: true });
-      console.log("Screenshot (wrong-type correction applied): /tmp/naming-tip-wrong-type-correction.png");
+      await page.screenshot({ path: shot("naming-tip-wrong-type-correction.png"), fullPage: true });
+      console.log(`Screenshot (wrong-type correction applied): ${shot("naming-tip-wrong-type-correction.png")}`);
       await page.close();
     }
 
@@ -219,8 +220,8 @@ async function main() {
         (await page.getByRole("button", { name: /Did you mean/ }).count()) === 0,
         'no "Did you mean" suggestion of any kind for this BRDP ("seleccionados" does not resolve against the real vocabulary)'
       );
-      await page.screenshot({ path: "/tmp/naming-tip-real-report-fixed.png", fullPage: true });
-      console.log("Screenshot (real report false positive fixed): /tmp/naming-tip-real-report-fixed.png");
+      await page.screenshot({ path: shot("naming-tip-real-report-fixed.png"), fullPage: true });
+      console.log(`Screenshot (real report false positive fixed): ${shot("naming-tip-real-report-fixed.png")}`);
       await page.close();
     }
 

@@ -161,7 +161,7 @@ def test_no_xsd_in_sources_declares_an_absolute_url_schemalocation():
     offenders = []
     for subdir in ("S3.0.1", "S4.1", "S4.2"):
         for xsd_file in (sources_dir / subdir).glob("*.xsd"):
-            text = xsd_file.read_text()
+            text = xsd_file.read_text(encoding="utf-8")
             for match in re.finditer(r'schemaLocation="(https?://[^"]+)"', text):
                 offenders.append(f"{xsd_file}: {match.group(1)}")
     assert offenders == [], f"Absolute-URL schemaLocation found (network dependency risk): {offenders}"
@@ -214,6 +214,8 @@ def test_xsd_schema_loading_and_validation_works_with_zero_network_access():
         ["unshare", "--net", sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=30,
     )
     if result.returncode != 0 and "Operation not permitted" in result.stderr:
