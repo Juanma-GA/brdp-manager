@@ -818,6 +818,11 @@ export default function RecordsPage() {
 
   // Only the answer to the latest send of a field may change its state.
   const sendSeqRef = useRef(new Map());
+  // The sends of one field reach the server one after another: leaving the
+  // field (blur) and a "Did you mean" chip clicked right after sent two PUTs
+  // at once, the server could apply the chip's first and the typed text
+  // last, and the saved field went back to the uncorrected text.
+  const sendChainRef = useRef(new Map());
 
   // Saves one text field. On success the entry goes and the saved value is
   // what the page shows; on failure the typed text stays in the field,
@@ -828,12 +833,17 @@ export default function RecordsPage() {
     const seq = (sendSeqRef.current.get(key) || 0) + 1;
     sendSeqRef.current.set(key, seq);
     setUnsaved((current) => startSave(current, brdpId, field, value));
-    try {
-      const saved = await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, {
+    const previous = sendChainRef.current.get(key) || Promise.resolve();
+    const send = previous.then(() =>
+      authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: value }),
-      });
+      })
+    );
+    sendChainRef.current.set(key, send.catch(() => {}));
+    try {
+      const saved = await send;
       if (sendSeqRef.current.get(key) !== seq) return { ok: true };
       setUnsaved((current) => saveSucceeded(current, brdpId, field, value));
       mergeSaved(saved, [field]);
@@ -959,7 +969,9 @@ export default function RecordsPage() {
   const schemaNavOpen = schemaNav.isOpen;
   useEffect(() => {
     if (schemaNavOpen) closeSchemaNav();
-    // Only a change of the answer shown closes the card.
+    // Only a change of the answer shown closes the card: listing the card's
+    // own state (open, close) would close it the moment it opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask.answer, ask.lastAsked]);
   // In an answer taken from the schema, each `<x>`/`@y` that exists in the
   // vocabulary as that kind is a link; anything else stays plain code, and

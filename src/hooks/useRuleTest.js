@@ -89,11 +89,15 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   }, []);
   const setupRef = useRef(null);
   // Latest callback, so a generation that lands later reports to it.
+  // Read only when a generation lands, never to render.
   const onResultRef = useRef(onResult);
+  // eslint-disable-next-line react-hooks/refs
   onResultRef.current = onResult;
   const onKeepPreviousRef = useRef(onKeepPrevious);
+  // eslint-disable-next-line react-hooks/refs
   onKeepPreviousRef.current = onKeepPrevious;
   const approvalRef = useRef(approval);
+  // eslint-disable-next-line react-hooks/refs
   approvalRef.current = approval;
   // The question before replacing a passed test: { record, at } | null;
   // and what the user answered last: null | { kept: true, at }.
@@ -222,6 +226,8 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     openedRef.current = true;
     if (onDemand) report({ result: 'not_executable', reason: analysis.reason });
     else generate();
+    // Once per panel on purpose (see above); a later Regenerate calls generate() itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // "Run again" on an edited example's content (and, for a rule on the

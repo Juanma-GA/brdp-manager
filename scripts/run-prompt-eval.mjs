@@ -12,6 +12,13 @@
 //     node scripts/run-prompt-eval.mjs --runs 3
 //   ... --cleanup   deletes the "Prompt Eval — …" projects left by earlier
 //                   passes, lists them, and ends (Remates B, Part 3).
+//   ... --with-similar  keeps the similar decisions of OTHER projects and
+//                   the catalog in the /similar answers (Limpieza). By
+//                   default the pass is isolated: only the decisions of its
+//                   own temporary project reach the prompts (plus the
+//                   curated template rows of Suggest Rule, which are files
+//                   in the repo, the same everywhere), so a pass never
+//                   depends on what else the database holds.
 // A 401 mid-pass (the access token lasts 45 minutes) logs in again once and
 // repeats the request; if that fails the pass stops with a clear message.
 //
@@ -150,6 +157,7 @@ function parseArgs(argv) {
     else if (argv[i] === "--cases") args.casesPath = argv[++i];
     else if (argv[i] === "--only") args.only = argv[++i];
     else if (argv[i] === "--cleanup") args.cleanup = true;
+    else if (argv[i] === "--with-similar") args.withSimilar = true;
   }
   return args;
 }
@@ -631,6 +639,26 @@ function runTextCheck(check, answer, flags, ctx = {}) {
 // session stops the pass (SessionLostError), never a case.
 const client = createEvalClient({ api: API, email: EMAIL, password: PASSWORD });
 const apiFetch = (p, options) => client.apiFetch(p, options);
+
+// Limpieza, Part 2.3: an isolated pass (the default) keeps, of a /similar
+// answer, only the BRDPs of the eval's own temporary project -- a real
+// project's corrected decision of the same BRDP must not make a case pass.
+// The server is not changed: the filtering happens here. Suggest Rule's
+// template_fallback (the curated templates in public/) is kept. Set from
+// --with-similar in main().
+let withSimilar = false;
+const SIMILAR_LISTS = ["candidates", "style_references", "same_brdp", "this_project", "standard_fallback"];
+
+async function similarFor(project, brdpId, kind) {
+  const similar = await apiFetch(`/api/projects/${project.id}/brdps/${brdpId}/similar?kind=${kind}`);
+  if (withSimilar) return similar;
+  const own = new Set((await apiFetch(`/api/projects/${project.id}/brdps`)).map((b) => b.id));
+  const isolated = { ...similar };
+  for (const list of SIMILAR_LISTS) {
+    if (Array.isArray(similar[list])) isolated[list] = similar[list].filter((c) => own.has(c.id));
+  }
+  return isolated;
+}
 const login = () => client.login();
 
 async function createProject(standard) {
@@ -788,7 +816,7 @@ async function runAskCase(project, aiProvider, createdBrdp, testCase) {
 }
 
 async function runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCase) {
-  const similar = await apiFetch(`/api/projects/${project.id}/brdps/${createdBrdp.id}/similar?kind=definition`);
+  const similar = await similarFor(project, createdBrdp.id, "definition");
   const vocabCheck = computeVocabResult(createdBrdp, testCase.standard);
   const systemPrompt = buildSuggestDefinitionPrompt(
     createdBrdp,
@@ -803,7 +831,7 @@ async function runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCa
 }
 
 async function runSuggestProposalCase(project, aiProvider, createdBrdp, testCase) {
-  const similar = await apiFetch(`/api/projects/${project.id}/brdps/${createdBrdp.id}/similar?kind=proposal`);
+  const similar = await similarFor(project, createdBrdp.id, "proposal");
   const vocabCheck = computeVocabResult(createdBrdp, testCase.standard);
   const systemPrompt = buildSuggestProposalPrompt(
     createdBrdp,
@@ -825,7 +853,7 @@ async function runSuggestProposalCase(project, aiProvider, createdBrdp, testCase
 // app would save it (in the case's optional `schemaLocation` URL form,
 // "flat" by default), for checks with "target": "final".
 async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
-  const similar = await apiFetch(`/api/projects/${project.id}/brdps/${createdBrdp.id}/similar?kind=rule`);
+  const similar = await similarFor(project, createdBrdp.id, "rule");
   const vocabulary = loadSchemaVocabulary(testCase.standard);
   const names = selectSchemaFactNames([createdBrdp.proposal, createdBrdp.definition], vocabulary, 6).map((c) => c.name);
   const schemaFacts = await fetchSchemaFacts(testCase.standard, names);
@@ -1125,6 +1153,7 @@ async function runCaseOnce(project, aiProvider, createdBrdp, testCase) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  withSimilar = Boolean(args.withSimilar);
   // Remates B, Part 3: --cleanup deletes the "Prompt Eval — …" projects left
   // by earlier passes (one that stopped mid-way, an older version without
   // re-login), lists them, and ends.
@@ -1236,7 +1265,7 @@ async function main() {
   // A run of only some cases (--only / --cases) is saved too, marked
   // partial, so it never becomes the reference of a later full pass.
   const partial = Boolean(args.only || args.casesPath);
-  writeReport(results, args.runs, { aiProvider, gitInfo, generatedAt, partial });
+  writeReport(results, args.runs, { aiProvider, gitInfo, generatedAt, partial, withSimilar });
   saveAndCompare({ gitInfo, generatedAt });
 }
 
@@ -1279,6 +1308,8 @@ function buildReportHeader(meta, runs) {
     generatedAt: meta.generatedAt,
     // C3: only some cases were run (--only / --cases).
     partial: Boolean(meta.partial),
+    // Limpieza: whether /similar kept other projects' decisions (--with-similar).
+    similar: meta.withSimilar ? "all projects (--with-similar)" : "own temporary project only (isolated)",
   };
 }
 
@@ -1296,6 +1327,7 @@ function writeReport(results, runs, meta) {
     `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}, rule-proposal-check=${header.temperatures["rule-proposal-check"]}, extract-from-rules=${header.temperatures["extract-from-rules"]}, extract-from-text=${header.temperatures["extract-from-text"]} (texts ${SUGGEST_TEMPERATURE})`
   );
   lines.push(`- Runs per case: ${header.runs}`);
+  lines.push(`- Similar decisions: ${header.similar}`);
   lines.push(`- Generated: ${header.generatedAt}`);
   lines.push("");
   lines.push("| Case | Check | Result | Detail |");

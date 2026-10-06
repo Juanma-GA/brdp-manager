@@ -137,6 +137,10 @@ export function useVocabularyCheck(standard, selected) {
   // buttons are already blocked, the moment it's opened).
   useEffect(() => {
     recomputeVocabResult(selected);
+    // Only a change of BRDP: an edit recomputes from handleUpdate after the
+    // save (RecordsPage), so re-running here on every keystroke would check
+    // text that is not saved yet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id]);
 
   // Retry: loads the vocabulary again, then the notice of the selected BRDP.

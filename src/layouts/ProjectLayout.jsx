@@ -29,6 +29,8 @@ export default function ProjectLayout() {
   const [loadError, setLoadError] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
   const currentId = useRef(projectId);
+  // Read only when a reload answers (to drop one for a project left since), never to render.
+  // eslint-disable-next-line react-hooks/refs
   currentId.current = projectId;
 
   useEffect(() => {

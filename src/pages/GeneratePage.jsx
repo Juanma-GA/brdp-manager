@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authFetchJson } from '../services/apiClient';
@@ -133,18 +133,24 @@ export default function GeneratePage() {
   // The approvals format is always the project's BREX format id, regardless
   // of outputKind -- a single approved-rules set feeds both outputs (docs
   // request), so switching the selector never re-fetches or invalidates it.
-  const formatDef = isDITA
-    ? DITA_FORMAT_DEF
-    : !brexDef
-    ? undefined
-    : isSchematronOutput
-    ? {
-        approvalsFormat: brexDef.approvalsFormat,
-        xsdFormat: null,
-        run: (brdpsArg, projectConfigArg, options) =>
-          generateBREXSch(brdpsArg, projectConfigArg, { ...options, baseGenerator: brexDef.run }),
-      }
-    : brexDef;
+  // Memoized so handleGenerate's useCallback keeps its identity between
+  // renders (the Schematron definition used to be a new object each time).
+  const formatDef = useMemo(
+    () =>
+      isDITA
+        ? DITA_FORMAT_DEF
+        : !brexDef
+        ? undefined
+        : isSchematronOutput
+        ? {
+            approvalsFormat: brexDef.approvalsFormat,
+            xsdFormat: null,
+            run: (brdpsArg, projectConfigArg, options) =>
+              generateBREXSch(brdpsArg, projectConfigArg, { ...options, baseGenerator: brexDef.run }),
+          }
+        : brexDef,
+    [isDITA, brexDef, isSchematronOutput]
+  );
   const isImplemented = !!formatDef;
 
   // Loaded once on page entry (docs request), not just at Generate time --

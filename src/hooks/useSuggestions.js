@@ -155,11 +155,16 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     // even before the (now-cleared) map's own existence check would.
     setSuggestionsByBrdpId(new Map());
     suggestGenerationRef.current = new Map();
+    // The standard is the project's: it changes only with projectId, and
+    // a re-run on its own would wipe the pending suggestions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const selectedSuggestion = selected ? suggestionsByBrdpId.get(selected.id) || null : null;
   // Latest map, for checks after an await (the closure's copy is stale).
   const suggestionsRef = useRef(suggestionsByBrdpId);
+  // Read only after an await, never to render.
+  // eslint-disable-next-line react-hooks/refs
   suggestionsRef.current = suggestionsByBrdpId;
 
   const setSuggestionEntry = (brdpId, entry) =>

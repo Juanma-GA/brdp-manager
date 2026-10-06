@@ -259,6 +259,8 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
     return () => {
       cancelled = true;
     };
+    // t only words an error when it happens; a language change must not fetch again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selected.id]);
 
   useEffect(() => {
@@ -269,6 +271,8 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
     return () => {
       cancelled = true;
     };
+    // t only words an error when it happens; a language change must not fetch again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selected.id, leftToken]);
 
   useEffect(() => {
@@ -283,6 +287,8 @@ export default function BrdpCompareDialog({ projectId, project, selected, brdps,
     return () => {
       cancelled = true;
     };
+    // t only words an error when it happens; a language change must not fetch again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selected.id, chosenId]);
 
   useEffect(() => {

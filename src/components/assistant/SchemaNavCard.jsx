@@ -251,19 +251,25 @@ export default function SchemaNavCard({ nav, standard }) {
     };
   }, [isOpen, anchor]);
 
-  // Focus on open; Esc closes like Cerrar.
+  // Focus on open; Esc closes like Cerrar. The listener calls the latest
+  // close: the one from the render that opened the card returned focus to
+  // that card's link even after another link (or the search box) had
+  // replaced it.
+  const closeRef = useRef(nav.close);
+  useEffect(() => {
+    closeRef.current = nav.close;
+  });
   useEffect(() => {
     if (!isOpen) return undefined;
     cardRef.current?.focus();
     const onKey = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        nav.close();
+        closeRef.current();
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-    // nav.close is recreated every render; the listener only needs the open state.
   }, [isOpen]);
 
   // The "copied" note belongs to the card on screen.
