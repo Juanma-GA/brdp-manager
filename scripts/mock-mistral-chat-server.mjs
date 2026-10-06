@@ -569,6 +569,43 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Support equipment without id", expected: "reject", schema: ruleSchema, content: rqmts("") },
     ]);
   }
+  // Mejoras B, Part 6: S1-00219 as Lufthansa writes it (flag 1,
+  // //itemSeqNumber/partSegment). The reject example is minimal (an item
+  // with a part reference only): the rule already rejects it. If a
+  // correction ever named the rule's path ("must contain a node matched by
+  // `//itemSeqNumber/partSegment`") the simulator would add the
+  // <partSegment>, as a real LLM did, and the example would no longer be a
+  // reject -- the test proves it never receives that line. BADEXAMPLE in
+  // the title: the reject example has <partSegment/> in every item (a bad
+  // example: the rule accepts it, and the panel says why).
+  if (/\/\/itemSeqNumber\/partSegment/.test(rule)) {
+    const title = (systemPrompt.match(/\nTitle: (.*)\n/) || [])[1] || "";
+    const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+    const segment = "<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>";
+    const pushed = correcting && /matched by: `\/\/itemSeqNumber\/partSegment`/.test(lastUser);
+    const reject = /BADEXAMPLE/.test(title) ? csn('<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"/><partSegment/>')
+      : pushed ? csn(segment) : csn('<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"/>');
+    const examples = [
+      { label: "Item with its part data", expected: "accept", schema: ruleSchema, content: csn(segment) },
+      { label: "Item with a part reference only", expected: "reject", schema: ruleSchema, content: reject },
+    ];
+    if (otherSchema) examples.push({ label: "Description without parts data", expected: "accept", schema: otherSchema, content: "The pump is held by four bolts." });
+    return answer(examples);
+  }
+  // Mejoras B, Part 6: S1-00123 (//entry/*[@applicRefId]). Written from the
+  // decision ("no applicability at entry level"), the reject example puts
+  // @applicRefId on the <entry> itself: the rule, which looks at the
+  // entry's children, accepts it. If a correction named the rule's full
+  // path the simulator would move the attribute to the child <para> (and
+  // hide that the rule misses the decision); it never receives it.
+  if (/\/\/entry\/\*\[@applicRefId\]/.test(rule)) {
+    const moved = correcting && /entry\/\*\[@applicRefId\]/.test(lastUser);
+    const table = (cell) => `<table><title>Torque values</title><tgroup cols="2"><colspec colname="c1"/><colspec colname="c2"/><tbody><row><entry colname="c1"><para>M6</para></entry>${cell}</row></tbody></tgroup></table>`;
+    return answer([
+      { label: "Applicability on the whole table", expected: "accept", schema: ruleSchema, content: table('<entry colname="c2"><para>10 N.m</para></entry>') },
+      { label: "Applicability on one entry", expected: "reject", schema: ruleSchema, content: table(moved ? '<entry colname="c2"><para applicRefId="app-0001">12 N.m</para></entry>' : '<entry colname="c2" applicRefId="app-0001"><para>12 N.m</para></entry>') },
+    ]);
+  }
   if (/itemSeqNumber\[not\(partSegment\)\]/.test(rule)) {
     const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
     const segment = "<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>";
@@ -621,9 +658,14 @@ function ruleTestReply(systemPrompt, messages) {
       for (let level = depth; level >= 1; level -= 1) inner = `<proceduralStep><para>Level ${level} step.</para>${inner}</proceduralStep>`;
       return inner;
     };
+    // Mejoras B, Part 6: a correction naming the rule's full path (with its
+    // count(ancestor::…) threshold) would make the simulator add a seventh
+    // level, so the reject example would pass and hide the off-by-one; it
+    // never receives that line (case b: kept out of the correction round).
+    const pushed = correcting && /count\(ancestor::proceduralStep\)/.test(lastUser);
     return answer([
       { label: "Five step levels", expected: "accept", schema: ruleSchema, content: nest(5) },
-      { label: "Six step levels", expected: "reject", schema: ruleSchema, content: nest(6) },
+      { label: "Six step levels", expected: "reject", schema: ruleSchema, content: nest(pushed ? 7 : 6) },
     ]);
   }
   // Pending of the test rule, Part 1: //randomList//randomList (the real

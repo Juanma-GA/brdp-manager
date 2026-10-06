@@ -538,7 +538,9 @@ export async function generateRuleTestExamples({
     const predicateSkipped = runs.filter((r, i) => examples[i].expected === 'reject' && r.predicateMiss).length;
     let correction = null;
     if (failures.length > 0) {
-      correction = { attempted: failures.length, fixed: 0, failed: null };
+      // `problems`: the exact lines sent for each example (the eval reads
+      // them; Mejoras B, Part 6).
+      correction = { attempted: failures.length, fixed: 0, failed: null, problems: failures.map((f) => ({ label: f.label, problems: f.problems })) };
       try {
         const again = await ask(
           [...first, { role: 'assistant', content: answer }, { role: 'user', content: buildRuleTestCorrectionMessage(failures) }],

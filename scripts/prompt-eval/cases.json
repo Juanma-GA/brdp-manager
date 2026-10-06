@@ -875,6 +875,11 @@
         {
           "type": "not_checkable",
           "expect": false
+        },
+        {
+          "type": "rule_ids_distinct",
+          "min": 2,
+          "note": "Mejoras B, Parts 4-5: one rule per requirement, each with its own id"
         }
       ]
     },
@@ -1783,7 +1788,7 @@
       "id": "rule-test-dita-xpath3-titled-context",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",
-      "description": "Test rule (T4b) on the real template rule BRDP-EXT-00001 (DITA XPath 3.0): its context depends on an element title (*[title = (...)]//table/.../row). The real run put the title on the table (table/title), nothing matched and the test was inconclusive; the prompt now asks for a titled <section> around the table, and a reject example that matches nothing goes to the one correction round.",
+      "description": "Test rule (T4b) on the real template rule BRDP-EXT-00001 (DITA XPath 3.0): its context depends on an element title (*[title = (...)]//table/.../row). The real run put the title on the table (table/title), nothing matched and the test was inconclusive; the prompt now asks for a titled <section> around the table. Since Mejoras B, a reject example whose table rows exist but whose title does not match is NOT sent to the correction round (case b: only the rule's predicates leave it out), so this case measures whether the first answer follows the THE RULE DEPENDS ON A TITLE block. The simulator repeats the real failure, so against it the verdict is incorrect (expected).",
       "brdp": {
         "identifier": "BRDP-EVAL-RT-DT",
         "title": "Campo cantidad de repuestos no vacío",
@@ -1813,7 +1818,7 @@
           "type": "not_contains",
           "target": "reject_examples",
           "pattern": "<table\\b[^>]*>\\s*<title\\b",
-          "note": "the reject example never puts the title on the table itself (after the correction round)"
+          "note": "the reject example never puts the title on the table itself (no correction round moves it since Mejoras B)"
         }
       ]
     },
@@ -2513,6 +2518,11 @@
         {
           "type": "rule_test_other_schema_accepted",
           "note": "the example of another schema is accepted (the rule does not apply there)"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<itemSeqNumber[\\s>](?:(?!</itemSeqNumber>)(?!<partSegment[\\s/>])[\\s\\S])*</itemSeqNumber>",
+          "note": "Mejoras B: every final reject example has at least one <itemSeqNumber> without <partSegment> (the correction never pushed it toward the rule)"
         }
       ]
     },
@@ -2962,6 +2972,11 @@
         {
           "type": "rule_test_other_schema_accepted",
           "note": "the example of another schema is accepted (the rule does not apply there)"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<itemSeqNumber[\\s>](?:(?!</itemSeqNumber>)(?!<partSegment[\\s/>])[\\s\\S])*</itemSeqNumber>",
+          "note": "Mejoras B: every final reject example has at least one <itemSeqNumber> without <partSegment> (the correction never pushed it toward the rule)"
         }
       ]
     },
@@ -3023,6 +3038,152 @@
         {
           "type": "rule_test_verdict_not_correct",
           "note": "examples written from the decision (six levels rejected) expose the off-by-one: incorrect or review, never correct"
+        },
+        {
+          "type": "rule_test_verdict_in",
+          "expect": [
+            "incorrect",
+            "review"
+          ],
+          "note": "Mejoras B: six levels accepted -> incorrect (case b), or review from the threshold warning"
+        },
+        {
+          "type": "rule_test_correction_not_contains",
+          "pattern": "count\\(ancestor",
+          "note": "Mejoras B, Part 1: the six-level example is never sent to the correction round with the rule's threshold"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-mandatory-minimal-reject",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "schemas": [
+        "ipd"
+      ],
+      "description": "Mejoras B, Part 1 (real case BRDP-S1-00219, Lufthansa, flag 1): the reject example is minimal (an item without <partSegment>) and the rule already rejects it with nothing selected -- it must never go to the correction round asking it to contain //itemSeqNumber/partSegment (which would turn it into an accepted example).",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-219",
+        "title": "Part data in the IPD",
+        "definition": "Decide whether the element <partSegment> is used to store the part data in the IPD data module.",
+        "proposal": "The element <partSegment> shall be used to store the part data in the IPD data module each time the part is listed.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-S1-00219\"><objectPath allowedObjectFlag=\"1\">//itemSeqNumber/partSegment</objectPath><objectUse>BRDP-S1-00219. The element partSegment shall be used to store the part data each time the part is listed.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_accept_and_reject"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule is correct; nothing pushes the reject example toward it"
+        },
+        {
+          "type": "rule_test_correction_not_contains",
+          "pattern": "must contain a node matched by",
+          "note": "Mejoras B, Part 1: no example is ever asked to contain the rule's path"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-applic-entry-level",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Mejoras B, Parts 1 and 3 (real case BRDP-S1-00123): the rule looks at the CHILDREN of <entry> (//entry/*[@applicRefId]); an example written from the decision puts @applicRefId on the <entry> itself and the rule accepts it. It is never sent to the correction round (case b), so the verdict shows the rule misses the decision, with its exact cause.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-123",
+        "title": "Applicability at entry level",
+        "definition": "Decide whether applicability may be given at the level of a table entry.",
+        "proposal": "Applicability shall not be given at entry level in tables.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-S1-00123\"><objectPath allowedObjectFlag=\"0\">//entry/*[@applicRefId]</objectPath><objectUse>BRDP-S1-00123. No applicability at entry level.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_verdict_in",
+          "expect": [
+            "incorrect",
+            "review"
+          ],
+          "note": "never correct: the rule does not reject applicability on the entry itself"
+        },
+        {
+          "type": "rule_test_correction_not_contains",
+          "pattern": "applicRefId\\]",
+          "note": "never asked to match the rule's predicate"
+        },
+        {
+          "type": "manual",
+          "note": "if a reject example was accepted, its cause line names how many children of <entry> and that none has @applicRefId"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-partsegment-bad-example",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "schemas": [
+        "ipd"
+      ],
+      "description": "Mejoras B, Part 3: a fixed bad example (no LLM for the examples): the reject example has <partSegment/> in every <itemSeqNumber>, so the flag-1 rule S1-00219 accepts it. The verdict is failed and the panel says exactly why.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-219B",
+        "title": "Part data in the IPD",
+        "definition": "Decide whether the element <partSegment> is used to store the part data in the IPD data module.",
+        "proposal": "The element <partSegment> shall be used to store the part data in the IPD data module each time the part is listed.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-S1-00219\"><objectPath allowedObjectFlag=\"1\">//itemSeqNumber/partSegment</objectPath><objectUse>BRDP-S1-00219. The element partSegment shall be used to store the part data each time the part is listed.</objectUse></structureObjectRule>",
+      "fixedExamples": [
+        {
+          "label": "Item with its part data",
+          "expected": "accept",
+          "schema": "ipd",
+          "content": "<catalogSeqNumber figureNumber=\"01\" item=\"001\"><itemSeqNumber itemSeqNumberValue=\"00A\"><partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment></itemSeqNumber></catalogSeqNumber>"
+        },
+        {
+          "label": "Item without part data (bad example)",
+          "expected": "reject",
+          "schema": "ipd",
+          "content": "<catalogSeqNumber figureNumber=\"01\" item=\"001\"><itemSeqNumber itemSeqNumberValue=\"00A\"><partRef manufacturerCodeValue=\"K0001\" partNumberValue=\"P-100\"/><partSegment/></itemSeqNumber></catalogSeqNumber>"
+        }
+      ],
+      "checks": [
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_verdict_incorrect",
+          "note": "the rule accepts the bad reject example"
+        },
+        {
+          "type": "rule_test_accept_cause",
+          "lang": "es",
+          "contains": "cada <itemSeqNumber> del ejemplo contiene <partSegment>",
+          "note": "exact cause, Spanish"
+        },
+        {
+          "type": "rule_test_accept_cause",
+          "lang": "en",
+          "contains": "every <itemSeqNumber> in the example contains <partSegment>",
+          "note": "exact cause, English"
+        },
+        {
+          "type": "rule_test_correction_not_contains",
+          "pattern": "must contain a node matched by",
+          "note": "Mejoras B, Part 1: no example is ever asked to contain the rule's path"
         }
       ]
     },

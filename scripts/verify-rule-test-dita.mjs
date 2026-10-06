@@ -9,9 +9,9 @@
 // PREVIOUS RULE FAILED ITS TEST block) → correct test → Accept records it.
 // T4b: the topic's own <title> in the skeleton (dimmed), the real template
 // rule BRDP-EXT-00001 (XPath 3.0, context on a title): the first answer
-// puts the title on the table, nothing matches, the correction round asks
-// for a node the rule matches and the reject example ends in a titled
-// <section> -- verdict correct; and the real BRDP-EXT-00009 (XPath 2.0,
+// puts the title on the table; since Mejoras B that reject example is not
+// sent to the correction round (its rows exist, only the title predicate
+// leaves them out), so the verdict is failed with the exact cause; and the real BRDP-EXT-00009 (XPath 2.0,
 // @@URI-CARPETA-DOSIER@@): not executable from the start with its reason.
 //
 // Against the real app (Vite + FastAPI + Postgres); only the Mistral
@@ -311,18 +311,20 @@ async function main() {
     const sys8 = systemOf(req8);
     assert(sys8.includes("THE RULE DEPENDS ON A TITLE") && sys8.includes("<section><title>Parts list</title><table>…</table></section>"), "EXT-00001: prompt asks for a titled section, generic example");
     const correction8 = req8.messages.filter((m) => m.role === "user").at(-1).content;
-    assert(correction8.startsWith("Some examples are not valid.") && correction8.includes('Example 2 ("Part row without quantity")') && correction8.includes("This example must contain a node matched by: `*[title = ('LISTA DE MATERIAL OBLIGATORIO',") && correction8.includes("Nothing in it matches, so the rule never runs."), `EXT-00001: one correction round, for the reject example (${correction8})`);
-    // C3, Part 1c: EXT-00001 checks cell values, so the accept example (the
-    // title on the table: nothing selected in it either) goes back too.
+    // Mejoras B, Part 1: the reject example puts the title on the table --
+    // its rows exist, only the rule's title predicate leaves them out (case
+    // b) -- so it is NOT sent to the correction round (before Mejoras B it
+    // was told to contain the rule's full context, which pushed it toward
+    // the rule). Only the accept example goes back (C3, Part 1c: a value rule
+    // needs an accepted example with a selected node).
+    assert(correction8.startsWith("Some examples are not valid.") && !correction8.includes('Example 2 ("Part row without quantity")') && !correction8.includes("This example must contain a node matched by"), `EXT-00001: the reject example is not sent to the correction round (${correction8})`);
     assert(correction8.includes('Example 1 ("Part row with quantity"):\n- The rule checks values, so at least one example meant to be accepted must contain a node matched by:'), "EXT-00001: the accept example without a selected node is sent back (value rule)");
-    assert((await panel8.getByTestId("rule-test-correction").textContent()).includes("2 examples were corrected automatically."), "EXT-00001: 2 of 2 corrected");
+    assert((await panel8.getByTestId("rule-test-predicate-skipped").textContent()).startsWith("1 example meant to be rejected was not sent to the automatic correction"), "EXT-00001: the panel says the reject example was kept out of the correction");
     const rej8 = examplesOf(panel8).nth(1);
-    const rej8Text = await rej8.textContent();
-    assert(rej8Text.includes("<section>") && rej8Text.includes("<title>LISTA DE MATERIAL OBLIGATORIO</title>") && rej8Text.includes("<title>Example topic</title>"), "EXT-00001: reject example in a titled section inside the titled topic");
-    assert((await rej8.getByTestId("rule-test-result").textContent()).startsWith("Result: rejected"), "EXT-00001: the row without quantity is rejected");
-    assert(rej8Text.includes("Rule's message: En tablas con columna"), "EXT-00001: the rule's own message");
-    assert((await panel8.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), `EXT-00001: verdict correct (${await panel8.getByTestId("rule-test-verdict").textContent()})`);
-    await waitIndicator("passed");
+    assert((await rej8.getByTestId("rule-test-result").textContent()).startsWith("Result: accepted"), "EXT-00001: the row on the untitled-section table is accepted (the rule never reaches it)");
+    assert((await rej8.getByTestId("rule-test-accept-cause").textContent()).startsWith("Why the rule accepted it:"), `EXT-00001: exact cause under the example (${await rej8.getByTestId("rule-test-accept-cause").textContent()})`);
+    assert((await panel8.getByTestId("rule-test-verdict").textContent()).startsWith("The rule accepted an example meant to violate it."), `EXT-00001: failed verdict (${await panel8.getByTestId("rule-test-verdict").textContent()})`);
+    await waitIndicator("failed");
     await panel8.screenshot({ path: "/tmp/rule-test-dita-titled-section.png" });
     await panel8.getByRole("button", { name: "Close" }).click();
 

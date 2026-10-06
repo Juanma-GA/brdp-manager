@@ -68,7 +68,7 @@ import {
   RULE_TEST_REVIEW_USER_MESSAGE,
 } from "../src/prompts/ruleTestReviewPrompt.js";
 import i18n from "../src/i18n/index.js";
-import { ruleDescriptionText } from "../src/utils/ruleTestReasons.js";
+import { acceptCauseText, ruleDescriptionText } from "../src/utils/ruleTestReasons.js";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import { analyzeRule, describeRule } from "../src/utils/ruleTestEngine.js";
 import { exampleProblems, ruleTestVerdict } from "../src/utils/ruleTest.js";
@@ -79,7 +79,7 @@ import { answerStructuralQuestion } from "../src/utils/structuralAnswer.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
 import { schemaLocationOf, wrapRuleInSchemaContexts } from "../src/utils/ruleSchemaContext.js";
-import { splitMultiPathRules } from "../src/utils/ruleSplit.js";
+import { numberDuplicateRuleIds, splitMultiPathRules } from "../src/utils/ruleSplit.js";
 
 // A case's "schemaLocation" read like the project's configuration would be.
 function caseSchemaLocation(testCase) {
@@ -294,6 +294,14 @@ async function runCheck(check, answer, ctx = {}) {
       const min = check.min ?? 1;
       return { status: count >= min ? "pass" : "fail", detail: `${count} rule element(s), expected at least ${min}` };
     }
+    case "rule_ids_distinct": {
+      // Mejoras B, Part 6: every rule element of the final rule has its own
+      // id (an xs:ID in the BREX XSD), at least `min` rules.
+      const ids = [...(ctx.finalRule || "").matchAll(/<(?:structureObjectRule|objrule)\b[^>]*\bid\s*=\s*["']([^"']*)["']/g)].map((m) => m[1]);
+      const min = check.min ?? 2;
+      const distinct = new Set(ids).size === ids.length;
+      return { status: ids.length >= min && distinct ? "pass" : "fail", detail: `ids: ${ids.join(", ") || "none"}${distinct ? "" : " (repeated)"}` };
+    }
     case "xpath_valid": {
       // Same parser and rule as the app's Accept gate (validation/schemaValidation.js):
       // every objectPath/objpath / @context / @test, entity-decoded, must parse.
@@ -407,6 +415,37 @@ async function runCheck(check, answer, ctx = {}) {
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
       return { status: verdict.kind !== "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+    }
+    case "rule_test_verdict_in": {
+      // Mejoras B, Part 6: the verdict is one of `expect` (e.g. incorrect or
+      // review for a rule off by one level).
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
+      const expect = check.expect || [];
+      return { status: expect.includes(verdict.kind) ? "pass" : "fail", detail: `engine verdict ${verdict.kind}, expected ${expect.join(" or ")}: ${JSON.stringify(verdict)}` };
+    }
+    case "rule_test_correction_not_contains": {
+      // Mejoras B, Part 1: what the correction round sent (every line of
+      // every example) never matches `pattern` -- e.g. it never asks an
+      // example to contain the rule's full path. No correction round passes.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      if (!r.correction) return { status: "pass", detail: "no correction round" };
+      const re = new RegExp(check.pattern, flags);
+      const hits = (r.correction.problems || []).flatMap((f) => f.problems.filter((line) => re.test(line)).map((line) => `"${f.label}": ${line}`));
+      return { status: hits.length ? "fail" : "pass", detail: hits.length ? `sent: ${hits.join(" | ").slice(0, 400)}` : `correction round (${r.correction.attempted} example(s)) without /${check.pattern}/` };
+    }
+    case "rule_test_accept_cause": {
+      // Mejoras B, Part 3: why the rule accepted an example meant to be
+      // rejected, in the language `lang` -- some reject example's cause
+      // line contains `contains`.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const t = i18n.getFixedT(check.lang || "en");
+      const causes = r.runs.map((run, i) => (r.examples[i].expected === "reject" ? acceptCauseText(run, t) : null)).filter(Boolean);
+      const ok = causes.some((c) => c.includes(check.contains));
+      return { status: ok ? "pass" : "fail", detail: causes.length ? `causes: ${causes.join(" | ")}` : "no reject example accepted" };
     }
     case "rule_test_reject_examples_contain": {
       // T3b: every example meant to be rejected carries `pattern` (e.g. the
@@ -793,7 +832,10 @@ async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
   // Mejoras A, Part 3: like the app (useSuggestions' finalRuleXml), a rule
   // with N objectPath and N objectUse is split first, then wrapped.
   const split = xml ? splitMultiPathRules(xml, similar.format) : { xml: "", total: 0 };
-  const finalRule = xml ? wrapRuleInSchemaContexts(split.xml, similar.format, testCase.standard, schemas, location) : "";
+  // Mejoras B, Part 4: as the app (useSuggestions.finalRuleXml) -- split,
+  // then number repeated ids, then wrap.
+  const numbered = xml ? numberDuplicateRuleIds(split.xml, similar.format) : { xml: "" };
+  const finalRule = xml ? wrapRuleInSchemaContexts(numbered.xml, similar.format, testCase.standard, schemas, location) : "";
   return {
     systemPrompt,
     userMessage: SUGGEST_RULE_USER_MESSAGE,
@@ -848,7 +890,13 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
     schemaLocation: location,
     brdp: createdBrdp,
     vocabulary,
-    ask: (messages, systemPrompt) => sendMessagesToLlm(aiProvider, systemPrompt, messages, RULE_TEST_TEMPERATURE, RULE_TEST_MAX_TOKENS),
+    // Mejoras B, Part 6: "fixedExamples" -- the case gives the examples
+    // itself (a known bad example), so the answer to the examples call is
+    // fixed and nothing goes to the LLM for them; everything else (assembly,
+    // validation, engine, correction round, Proposal check) is the app's.
+    ask: testCase.fixedExamples
+      ? async () => JSON.stringify({ examples: testCase.fixedExamples })
+      : (messages, systemPrompt) => sendMessagesToLlm(aiProvider, systemPrompt, messages, RULE_TEST_TEMPERATURE, RULE_TEST_MAX_TOKENS),
     fetchSchemaCards: (standard, names) =>
       apiFetch(`/api/schema-cards?standard=${encodeURIComponent(standard)}&names=${encodeURIComponent(names.join(","))}`),
     fetchStructure: (standard, schema) =>
