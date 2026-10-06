@@ -373,6 +373,20 @@ function ruleTestReply(systemPrompt, messages) {
     return '{"examples": [ {"label": "cut", "expected": "accept", "content": "<para>';
   }
   const answer = (examples) => JSON.stringify({ examples });
+  // Remates B, Part 1: a rule whose path is a condition
+  // (//emphasis and //randomList, flag 0). Written from the decision ("no
+  // emphasis"), the reject example has an <emphasis> and no random list:
+  // the condition is false there, the example contains a name it looks at
+  // (case b) -- never sent to the correction round. If a correction ever
+  // asked to make the condition TRUE, the simulator would add the
+  // <randomList> (pushing the example toward the rule).
+  if (/\/\/emphasis and \/\/randomList/.test(rule)) {
+    const pushed = correcting && /condition TRUE/.test(lastUser);
+    return answer([
+      { label: "Step without emphasis", expected: "accept", schema: ruleSchema, content: "Remove the four bolts from the access panel." },
+      { label: "Step with emphasis", expected: "reject", schema: ruleSchema, content: pushed ? "Remove the <emphasis>four</emphasis> bolts.<randomList><listItem><para>Panel</para></listItem></randomList>" : "Remove the <emphasis>four</emphasis> bolts from the access panel." },
+    ]);
+  }
   if (/ALLINVALID/.test(proposal)) {
     const bad = "<sbSummary><levelledPara><para>Remove the panel.</para></levelledPara></sbSummary>";
     return answer([

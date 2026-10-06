@@ -295,12 +295,7 @@ function fakeBackend({ goodPassword = "pw", loginFailsFrom = Infinity } = {}) {
   const API = process.env.PROMPT_EVAL_API_URL || "http://localhost:8000";
   const email = process.env.PROMPT_EVAL_EMAIL || "admin@example.com";
   const password = process.env.PROMPT_EVAL_PASSWORD || "AdminTest123!";
-  let up = false;
-  try {
-    up = (await fetch(`${API}/api/auth/login`, { method: "OPTIONS" })).status < 500;
-  } catch {
-    up = false;
-  }
+  const up = await fetch(`${API}/api/auth/login`, { method: "OPTIONS" }).then((r) => r.status < 500, () => false);
   if (!up) console.log("  (backend not reachable: real-server session checks skipped)");
   else {
     let spoil = false;
