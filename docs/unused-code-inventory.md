@@ -19,10 +19,9 @@ Ninguna pieza borrada tenía relación con el login: la autenticación de v2 (JW
 
 ## Conservado, y por qué
 
-- `buildDeterministicBlockFromFewShot` (`generateSchematronDITA.js`) y sus ayudantes: el ensamblado vivo la usa para inyectar cada regla aprobada. Sus ramas de "few-shot" (`BRDP-D1-00313`, `DESACTIVADA`) solo se alcanzan con una entrada sin `rule_xml`, cosa que hoy no ocurre; no se tocan porque son parte de una función viva.
-- Las claves `structure` y `generation_rules` de `public/brex-schema-summary-*.json`: ya no las lee ningún código (alimentaban los prompts borrados), pero la tabla de semántica de `ruleTestEngine.js` las cita como fuente. Dudoso; se quedan hasta revisarlo.
+- (Borradas en la Limpieza, `9a64e12`: las ramas few-shot de `buildDeterministicBlockFromFewShot`, ahora `approvedRuleBlock`, y las claves `structure`/`generation_rules` de `public/brex-schema-summary-*.json`.)
 - `src/api/llmAPI.js` (`sendMessage`), `mammoth` y `pdfjs-dist`: vivos (Ask, Suggest, test de reglas, AI Extract; lectura de .docx/.pdf).
 - Exports usados solo por los tests de `scripts/` (p. ej. `answerNameCheckHasWarnings`, `ENGINE_REASON_CODES`): la convención del repo es exportar para poder probar desde Node.
-- Endpoints de backend: todos tienen al menos un llamador en `src/` (las notas eran el único sin llamador y se retiraron).
+- Endpoints de backend: todos tienen al menos un llamador en `src/` (las notas y, en la Limpieza, `DELETE …/approvals/{format}` no lo tenían y se retiraron).
 - `backend/scripts/*`: herramientas de operación, generación de datos y verificación; no forman parte de la app.
 - `@xmldom/xmldom` y `jszip`: los usan scripts de `scripts/` sin estar en `package.json` (llegan como dependencias de `mammoth`). No es código muerto; queda anotado.
