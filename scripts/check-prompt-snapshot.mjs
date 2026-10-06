@@ -388,6 +388,14 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // dita-xpath3-title-dependent-context) gain the MODEL TABLE block, a valid
 // CALS table with a merged row built from the schema. Ask, Suggest, review
 // and AI Extract prompts are unchanged.
+//
+// Mejoras B, Part 5: the BREX format rules (4.2, 4.1, 3.0.1) no longer say
+// "exactly ONE <structureObjectRule>/<objrule>": normally one, and one rule
+// per independent requirement with ids {ID}-1, {ID}-2…, each with its own
+// path and use, never two paths in one rule; the TASK line says "ONE rule
+// (or one rule per independent requirement, see format rule 1)". Only the 7
+// BREX suggestRule cases change; the SCH-DITA ones and every other group are
+// unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

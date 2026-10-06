@@ -65,6 +65,15 @@ document type. Example (invented names, not from this BRDP):
    Wrong:   //acmeSchema//acmeElement`;
 }
 
+// Mejoras B, Part 5: a BREX Proposal with several independent requirements
+// gets one rule per requirement (format rule 1); Schematron unchanged.
+function taskRuleWord(format, schemaContext) {
+  const general = schemaContext?.schemas?.length ? '' : 'general ';
+  return /^BREX-/.test(format)
+    ? `ONE ${general}rule (or one rule per independent requirement, see format rule 1)`
+    : `ONE ${general}rule`;
+}
+
 // `references` is { sameBrdp, similar, formatExamples } -- formatExamples
 // being /similar's standard_fallback followed by template_fallback.
 // `schemaContext` (optional): { schemas: [...] } -- the schemas the user
@@ -79,7 +88,7 @@ export function buildSuggestRulePrompt(brdp, standard, format, references, schem
   let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
 Decision Points), assisting in BRDP Manager.
 
-TASK: implement, as ONE ${schemaContext?.schemas?.length ? '' : 'general '}rule in the ${standard} rule format below,
+TASK: implement, as ${taskRuleWord(format, schemaContext)} in the ${standard} rule format below,
 the decision already taken in the BRDP's Proposal. Do not change the
 decision, do not widen or narrow it, and do not add checks the Proposal
 does not ask for. ${scopeText(schemaContext, format)}

@@ -388,8 +388,10 @@ function indent(text, spaces) {
     .join('\n');
 }
 
+// Every rule of the fragment (Mejoras B Part 5: a Proposal with several
+// requirements gives several rules), so no two copies share an id.
 function withSchemaId(ruleXml, element, schema) {
-  const startRe = new RegExp(String.raw`<${element}\b[^>]*>`);
+  const startRe = new RegExp(String.raw`<${element}\b[^>]*>`, 'g');
   return ruleXml.replace(startRe, (tag) =>
     tag.replace(/(\sid\s*=\s*)(["'])([^"']*)\2/, (_, pre, q, id) => `${pre}${q}${id}-${schema}${q}`)
   );

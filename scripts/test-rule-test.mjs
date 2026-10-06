@@ -3091,5 +3091,33 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('MB2 an incorrect verdict stays incorrect', vInc.kind === 'incorrect');
 }
 
+// ---- Mejoras B, Part 5: a Suggest Rule answer with one rule per requirement.
+{
+  const { parseSuggestRuleResponse } = await import('../src/prompts/suggestRulePrompt.js');
+  const { ruleFormatRules } = await import('../src/prompts/ruleFormatRules.js');
+  const { checkRuleFormat } = await import('../src/validation/schemaValidation.js');
+  const { runRuleOnFragment } = await import('../src/utils/ruleTestEngine.js');
+  const answer = '```xml\n<structureObjectRule id="BRDP-S1-00120-1" brSeverityLevel="brsl01"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep)&gt;5]</objectPath><objectUse>No more than six levels.</objectUse></structureObjectRule>\n<structureObjectRule id="BRDP-S1-00120-2" brSeverityLevel="brsl01"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep)=4]/title</objectPath><objectUse>No title on level 5.</objectUse></structureObjectRule>\n```';
+  const { xml } = parseSuggestRuleResponse(answer);
+  check('MB5 parse keeps both rules', (xml.match(/<structureObjectRule\b/g) || []).length === 2);
+  check('MB5 format check accepts two rules with distinct ids', checkRuleFormat(xml, 'BREX-4.2').ok, JSON.stringify(checkRuleFormat(xml, 'BREX-4.2')));
+  const wrapped = wrapRuleInSchemaContexts(xml, 'BREX-4.2', 'S1000D 4.2', ['proced', 'process']);
+  const ids = [...wrapped.matchAll(/<structureObjectRule\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
+  check('MB5 wrapper: every rule in every block gets its own id', ids.join() === 'BRDP-S1-00120-1-proced,BRDP-S1-00120-2-proced,BRDP-S1-00120-1-process,BRDP-S1-00120-2-process', ids.join());
+  check('MB5 wrapped fragment passes the format check', checkRuleFormat(wrapped, 'BREX-4.2').ok, JSON.stringify(checkRuleFormat(wrapped, 'BREX-4.2')));
+  check('MB5 one-schema wrapper keeps the ids', /id="BRDP-S1-00120-2"/.test(wrapRuleInSchemaContexts(xml, 'BREX-4.2', 'S1000D 4.2', ['proced'])));
+  const deep = '<dmodule><content><procedure><mainProcedure><proceduralStep><proceduralStep><proceduralStep><proceduralStep><proceduralStep><title>T</title><para>x</para></proceduralStep></proceduralStep></proceduralStep></proceduralStep></proceduralStep></mainProcedure></procedure></content></dmodule>';
+  const run = runRuleOnFragment(xml, 'BREX-4.2', deep, 'proced', { parseXml });
+  check('MB5 test: one rule rejecting is enough', run.status === 'rejected' && run.violations.length === 1 && run.violations[0].ruleId === 'BRDP-S1-00120-2', JSON.stringify(run.violations));
+  const analysis = analyzeRule(xml, 'BREX-4.2', { parseXml });
+  check('MB5 analyzeRule: executable', analysis.status === 'executable', JSON.stringify(analysis));
+  for (const fmt of ['BREX-4.2', 'BREX-4.1', 'BREX-3.0.1']) {
+    const text = ruleFormatRules(fmt, fmt === 'BREX-3.0.1' ? 'S1000D 3.0.1' : fmt === 'BREX-4.1' ? 'S1000D 4.1' : 'S1000D 4.2');
+    check(`MB5 ${fmt} format rules: one rule per requirement, never two paths`, /one rule per requirement|per requirement/.test(text) && /\{ID\}-1, \{ID\}-2/.test(text) && /never two <obj(ectPath|path)> in one rule/.test(text) && !/exactly ONE <(structureObjectRule|objrule)>/.test(text));
+  }
+  const sch = ruleFormatRules('SCH-DITA', 'DITA 1.3 Xpath2.0');
+  check('MB5 Schematron format rules unchanged (no per-requirement line)', !/per requirement/.test(sch));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

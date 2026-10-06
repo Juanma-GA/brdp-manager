@@ -32,18 +32,18 @@ const BREX_4X_PATH_NAMES = `6. Inside objectPath, write element and attribute na
    Correct: <objectPath allowedObjectFlag="0">//acmeElement</objectPath>
    Wrong:   <objectPath allowedObjectFlag="0">//&lt;acmeElement&gt;</objectPath>`;
 
-const BREX_42 = `FORMAT — S1000D Issue 4.2 BREX: exactly ONE <structureObjectRule> element.
-1. Output exactly one <structureObjectRule id="{ID}" brSeverityLevel="brsl01"> — never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
+const BREX_42 = `FORMAT — S1000D Issue 4.2 BREX: <structureObjectRule> elements (normally one).
+1. Normally output one <structureObjectRule id="{ID}" brSeverityLevel="brsl01">. When the Proposal makes several independent requirements, write one <structureObjectRule> per requirement, with ids {ID}-1, {ID}-2…, each with its own <objectPath> and its <objectUse>; never two <objectPath> in one rule. Never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <brDecisionRef brDecisionIdentNumber="{ID}"/> → <objectPath> → <objectUse> → <objectValue> (zero or more). brDecisionRef carries the ID as an ATTRIBUTE, never as text.
-3. Exactly ONE <objectPath>. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
+3. Exactly ONE <objectPath> per rule. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
 ${BREX_4X_OBJECT_USE}
 ${BREX_4X_VALUE_LIST}
 ${BREX_4X_PATH_NAMES}`;
 
-const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: exactly ONE <structureObjectRule> element.
-1. Output exactly one <structureObjectRule id="{ID}"> — never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
+const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: <structureObjectRule> elements (normally one).
+1. Normally output one <structureObjectRule id="{ID}">. When the Proposal makes several independent requirements, write one <structureObjectRule> per requirement, with ids {ID}-1, {ID}-2…, each with its own <objectPath> and its <objectUse>; never two <objectPath> in one rule. Never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <objectPath> → <objectUse> → <objectValue> (zero or more). There is NO brDecisionRef element and NO brSeverityLevel attribute in S1000D 4.1.
-3. Exactly ONE <objectPath>. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
+3. Exactly ONE <objectPath> per rule. Its only attribute is allowedObjectFlag: "0" = the selected nodes are prohibited, "1" = mandatory, "2" = optional. No other attribute on objectPath.
 ${BREX_4X_OBJECT_USE}
 ${BREX_4X_VALUE_LIST}
 ${BREX_4X_PATH_NAMES}`;
@@ -52,10 +52,10 @@ ${BREX_4X_PATH_NAMES}`;
 // "optional") and is optional itself in the 3.0.1 BREX schema -- the real
 // value-list rules of the curated 3.0.1 template omit it unless the node
 // is also mandatory.
-const BREX_301 = `FORMAT — S1000D Issue 3.0.1 BREX: exactly ONE <objrule> element.
-1. Output exactly one <objrule id="{ID}"> — never a context block (<contextrules>: when the rule is limited to some schemas, the application adds it) or a dmodule wrapper. {ID} is the BRDP's ID. There is NO brDecisionRef in 3.0.1.
+const BREX_301 = `FORMAT — S1000D Issue 3.0.1 BREX: <objrule> elements (normally one).
+1. Normally output one <objrule id="{ID}">. When the Proposal makes several independent requirements, write one <objrule> per requirement, with ids {ID}-1, {ID}-2…, each with its own <objpath> and its <objuse>; never two <objpath> in one rule. Never a context block (<contextrules>: when the rule is limited to some schemas, the application adds it) or a dmodule wrapper. {ID} is the BRDP's ID. There is NO brDecisionRef in 3.0.1.
 2. Child order: <objpath> → <objuse> → <objval> (one per allowed value, zero or more).
-3. Exactly ONE <objpath>. Its only attribute is objappl: "0" = the selected nodes are prohibited, "1" = mandatory. NO other values (there is no "optional" in 3.0.1).
+3. Exactly ONE <objpath> per rule. Its only attribute is objappl: "0" = the selected nodes are prohibited, "1" = mandatory. NO other values (there is no "optional" in 3.0.1).
 4. <objuse> = one sentence stating the decision. Inside it, write attribute names as @name and element names as &lt;name&gt; — never a raw tag, never a bare name. Escape &lt; &gt; &amp;.
 5. When the Proposal limits an attribute or element to a list of values: objpath selects that attribute/element, and there is one <objval valtype="single" val1="…"> per allowed value, with ONLY the attributes val1, val2 and valtype; valtype is "single" or "range" (val2 only for "range") — never pattern, list, regex, conditional or multiple. Leave objappl out unless the Proposal also makes the node mandatory (then objappl="1"). Never express the list as a predicate in objpath (such as [. != 'a' and . != 'b']). Minimal example (invented attribute, not from this BRDP) for "@acmecode shall only take ac01 or ac02":
    <objpath>//@acmecode</objpath>
