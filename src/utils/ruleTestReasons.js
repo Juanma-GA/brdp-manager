@@ -51,7 +51,7 @@ export const ENGINE_REASON_CODES = [
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
 ];
-export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked'];
+export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -66,6 +66,9 @@ export function formatRuleTestReason(reason, t) {
   if (reason.code === 'test_incorrect') {
     const which = params.permissive && params.strict ? 'both' : params.permissive ? 'permissive' : 'strict';
     return t(`records.ruleTest.reasons.test_incorrect.${which}`);
+  }
+  if (reason.code === 'test_threshold_mismatch') {
+    return t('records.ruleTest.reasons.test_threshold_mismatch', { detail: formatThresholdMismatch(params, t) || '' });
   }
   if (reason.code === 'rule_format') {
     const { problem, ...problemParams } = params;
@@ -94,6 +97,7 @@ export function verdictToTestRecord(verdict) {
     case 'correct':
       return { result: 'passed', reason: null };
     case 'review':
+      if (verdict.threshold) return { result: 'review', reason: { code: 'test_threshold_mismatch', params: { numbers: verdict.threshold.numbers, thresholds: verdict.threshold.thresholds } } };
       return verdict.unchecked
         ? { result: 'review', reason: { code: 'test_proposal_unchecked', params: { error: verdict.error || '' } } }
         : { result: 'review', reason: { code: 'test_proposal_mismatch', params: { mismatch: verdict.mismatch } } };
@@ -227,4 +231,26 @@ export function formatAcceptCause(cause, t) {
 export function acceptCauseText(run, t) {
   const lines = (run?.acceptance || []).map((d) => formatAcceptCause(d.cause, t)).filter(Boolean);
   return lines.length ? [...new Set(lines)].join('; ') : null;
+}
+
+// Mejoras B, Part 2: the threshold warning. "The Proposal speaks of 5; the
+// rule allows up to 6 levels and rejects from level 7 on." One sentence
+// per threshold (the first one is enough in practice), in the language of t.
+export function thresholdRuleText(th, t) {
+  const k = (key, params) => t(`records.ruleTest.threshold.${key}`, params);
+  if (th.kind === 'nesting') {
+    const name = `<${th.name}>`;
+    if (th.mode === 'from') return k('nesting.from', { allowed: th.level - 1, level: th.level, name });
+    return k(`nesting.${th.mode}`, { level: th.level, name });
+  }
+  const what =
+    th.kind === 'children' ? k('what.children', { name: `<${th.name}>` })
+    : th.kind === 'ancestors' ? k('what.ancestors', { name: `<${th.name}>` })
+    : k('what.length');
+  return k(`amount.${th.op}`, { n: th.n, prev: th.n - 1, next: th.n + 1, what });
+}
+export function formatThresholdMismatch(mismatch, t) {
+  if (!mismatch) return null;
+  const numbers = mismatch.numbers.join(', ');
+  return t('records.ruleTest.threshold.mismatch', { numbers, rule: thresholdRuleText(mismatch.thresholds[0], t) });
 }

@@ -74,6 +74,7 @@ import { analyzeRule, describeRule } from "../src/utils/ruleTestEngine.js";
 import { exampleProblems, ruleTestVerdict } from "../src/utils/ruleTest.js";
 import { cleanInternalNames } from "../src/utils/answerCleanup.js";
 import { generateRuleTestExamples } from "../src/utils/ruleTestRun.js";
+import { thresholdMismatch } from "../src/utils/ruleThreshold.js";
 import { answerStructuralQuestion } from "../src/utils/structuralAnswer.js";
 import { STANDARD_TO_RULE_FORMAT } from "../src/constants/ruleFormats.js";
 import { wrapRuleXmlFragment } from "../src/api/generateBREX.js";
@@ -365,7 +366,7 @@ async function runCheck(check, answer, ctx = {}) {
     case "rule_test_verdict_correct": {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
       return { status: verdict.kind === "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_verdict_review": {
@@ -376,7 +377,7 @@ async function runCheck(check, answer, ctx = {}) {
       // not the answer this case expects.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
       return { status: verdict.kind === "review" && !verdict.unchecked ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_proposal_check_level": {
@@ -396,7 +397,7 @@ async function runCheck(check, answer, ctx = {}) {
       // expose it.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
       return { status: verdict.kind === "incorrect" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_verdict_not_correct": {
@@ -404,7 +405,7 @@ async function runCheck(check, answer, ctx = {}) {
       // "incorrect" or "review" both pass; only "correct" fails.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
       return { status: verdict.kind !== "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_reject_examples_contain": {
@@ -838,6 +839,8 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
   const vocabulary = loadSchemaVocabulary(testCase.standard);
   const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse, standard: testCase.standard });
   const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));
+  // Mejoras B, Part 2: the rule's threshold against the Proposal's numbers, as in the app.
+  const threshold = thresholdMismatch(ruleXml, format, createdBrdp?.proposal ?? testCase.brdp?.proposal ?? "", { parseXml: xmldomParse });
   const result = await generateRuleTestExamples({
     ruleXml,
     format,
@@ -858,7 +861,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
     ruleDescription: description,
     askProposalCheck: (messages, systemPrompt) => sendMessagesToLlm(aiProvider, systemPrompt, messages, RULE_PROPOSAL_CHECK_TEMPERATURE),
   });
-  const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalCheck) : null;
+  const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalCheck, threshold) : null;
   return {
     systemPrompt: result.systemPrompt,
     userMessage: "Write the test examples for this rule.",
@@ -883,7 +886,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
         result: result.runs[i].result?.status ?? null,
       })),
     },
-    checkContext: { ruleTest: result, analysis, description, ruleSchemas: schemas, standard: testCase.standard, systemPrompt: result.systemPrompt },
+    checkContext: { ruleTest: result, analysis, threshold, description, ruleSchemas: schemas, standard: testCase.standard, systemPrompt: result.systemPrompt },
   };
 }
 

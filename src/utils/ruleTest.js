@@ -466,7 +466,11 @@ function rejectedByBrexReference(result) {
 // examples kept from a passed test, or a caller without it) leaves
 // "correct" as it is; a string is read as a mismatch (the old shape). A
 // failed or inconclusive verdict is left as it is.
-export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck = null) {
+// Mejoras B, Part 2: `threshold` (ruleThreshold.js's thresholdMismatch):
+// the Proposal's numbers match no border of the rule's threshold -- a
+// verdict that would be "correct" becomes { kind: 'review', threshold }
+// (before the Proposal check: it is a deterministic fact).
+export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck = null, threshold = null) {
   if (analysis?.status === 'not_executable') return { kind: 'not_executable', reason: analysis.reason };
   const ran = runs.filter((r) => r.result);
   const notExecutable = ran.find((r) => r.result.status === 'not_executable');
@@ -501,6 +505,7 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
     };
   }
   if (!ranExpectations.has('accept') || !ranExpectations.has('reject')) return { kind: 'inconclusive', why: 'missing_expectation' };
+  if (threshold) return { kind: 'review', threshold };
   if (typeof proposalCheck === 'string' && proposalCheck.trim()) return { kind: 'review', mismatch: proposalCheck.trim() };
   if (proposalCheck?.status === 'mismatch') return { kind: 'review', mismatch: proposalCheck.missing || '' };
   if (proposalCheck?.status === 'unavailable') return { kind: 'review', unchecked: true, error: proposalCheck.error || '' };

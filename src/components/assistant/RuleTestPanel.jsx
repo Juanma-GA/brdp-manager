@@ -5,10 +5,11 @@ import VerdictCauseHint from './VerdictCauseHint';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
-import { acceptCauseText, formatRuleDescription, formatRuleTestReason } from '../../utils/ruleTestReasons.js';
+import { acceptCauseText, formatRuleDescription, formatRuleTestReason, formatThresholdMismatch } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 import RuleLintWarnings from './RuleLintWarnings';
+import RuleThresholdWarning from './RuleThresholdWarning';
 
 // Test rule (T2 of 4): which rule formats can be tested (S1000D BREX since
 // T1, DITA Schematron since T4). Used by both places that show the button.
@@ -37,6 +38,7 @@ export function verdictView(t, verdict, standard) {
     case 'correct':
       return { tone: 'ok', text: t('records.ruleTest.verdicts.correct') };
     case 'review':
+      if (verdict.threshold) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewThreshold', { detail: formatThresholdMismatch(verdict.threshold, t) }) };
       return verdict.unchecked
         ? { tone: 'warn', text: t('records.ruleTest.verdicts.reviewUnchecked', { error: verdict.error }) }
         : { tone: 'warn', text: t('records.ruleTest.verdicts.review', { mismatch: verdict.mismatch }) };
@@ -645,6 +647,8 @@ export default function RuleTestPanel({
 
       <RuleDescription description={description} />
       {!notARule && <RuleLintWarnings ruleXml={ruleXml} format={format} place="panel" />}
+      {/* Mejoras B, Part 2: shown here unless the verdict already says it. */}
+      {!notARule && !verdict?.threshold && <RuleThresholdWarning ruleXml={ruleXml} format={format} proposal={brdp?.proposal} />}
 
       {state.status === 'idle' && !notARule && !unreachable && (
         <div className={styles.suggestionActions}>

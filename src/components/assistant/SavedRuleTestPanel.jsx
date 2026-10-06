@@ -45,7 +45,7 @@ export default function SavedRuleTestPanel({ saved, format, standard, schemaLoca
     setRecorded(ok ? rec : null);
   };
   const runOnSaved = () => {
-    const result = runSavedTest(saved, rerun.ruleXml, format, { vocabulary, schemaLocation });
+    const result = runSavedTest(saved, rerun.ruleXml, format, { vocabulary, schemaLocation, proposal: rerun.proposal });
     setLastRun({ ...result, ruleXml: rerun.ruleXml, examplesDate });
     setQuestion(null);
     setAnswer(null);

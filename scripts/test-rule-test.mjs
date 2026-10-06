@@ -3051,5 +3051,45 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('MB1 panel: skipped count ES', es('records.ruleTest.predicateSkipped', { count: 2 }).startsWith('2 ejemplos a rechazar no se mandaron'));
 }
 
+// ─── Mejoras B, Part 2: threshold vs the Proposal's numbers ─────────────────
+{
+  const { proposalNumbers, thresholdMismatch } = await import('../src/utils/ruleThreshold.js');
+  const { formatThresholdMismatch, verdictToTestRecord, formatRuleTestReason } = await import('../src/utils/ruleTestReasons.js');
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const rule = (path, flag = '0') => `<structureObjectRule id="R"><objectPath allowedObjectFlag="${flag}">${path}</objectPath><objectUse>x</objectUse></structureObjectRule>`;
+  const five = 'There will be a maximum of five levels of procedural steps.';
+  const m = (path, proposal) => thresholdMismatch(rule(path), 'BREX-4.2', proposal, { parseXml });
+  const gt5 = m('//proceduralStep[count(ancestor::proceduralStep)&gt;5]', five);
+  check('MB2 five levels + >5 → warning', gt5 && gt5.numbers.join() === '5', JSON.stringify(gt5));
+  check('MB2 text ES', formatThresholdMismatch(gt5, es) === 'La Propuesta habla de 5; la regla permite hasta 6 niveles de <proceduralStep> y rechaza a partir del 7.', formatThresholdMismatch(gt5, es));
+  check('MB2 text EN', formatThresholdMismatch(gt5, en) === 'The Proposal speaks of 5; the rule allows up to 6 levels of <proceduralStep> and rejects from level 7 on.', formatThresholdMismatch(gt5, en));
+  check('MB2 >=5 → none', m('//proceduralStep[count(ancestor::proceduralStep)&gt;=5]', five) === null);
+  check('MB2 ancestor-or-self>5 → none', m('//proceduralStep[count(ancestor-or-self::proceduralStep)&gt;5]', five) === null);
+  check('MB2 fifth level + [count(ancestor)=4]/title → none', m('//proceduralStep[count(ancestor::proceduralStep)=4]/title', 'The fifth level of procedural steps must not have a title.') === null);
+  check('MB2 at least two substeps + count()=1 → none', m('//proceduralStep[count(proceduralStep)=1]', 'A step must have at least two substeps.') === null);
+  check('MB2 two-letter code + string-length != 2 → none', m('//@assyCode[string-length(.) != 2]', 'The assembly code is a two-letter code.') === null);
+  check('MB2 no numbers → none', m('//proceduralStep[count(proceduralStep)=1]', 'A step must not have a single substep.') === null);
+  check('MB2 several numbers, one matches → none', m('//proceduralStep[count(ancestor::proceduralStep)&gt;5]', 'Use 3 warnings and at most 6 levels.') === null);
+  check('MB2 two thresholds in one step → none', m('//proceduralStep[count(ancestor::proceduralStep)&gt;5][count(proceduralStep)=1]', five) === null);
+  check('MB2 = prohibited → exact and next allowed', m('//proceduralStep[count(proceduralStep)=1]', 'two substeps') === null && m('//proceduralStep[count(proceduralStep)=1]', 'one substep') === null && m('//proceduralStep[count(proceduralStep)=1]', 'three substeps') !== null);
+  check('MB2 Spanish words', m('//proceduralStep[count(ancestor::proceduralStep)&gt;5]', 'Habrá un máximo de cinco niveles de pasos.') !== null && m('//proceduralStep[count(ancestor::proceduralStep)&gt;=5]', 'Habrá un máximo de cinco niveles.') === null && m('//proceduralStep[count(ancestor::proceduralStep)=4]/title', 'El quinto nivel no lleva título.') === null);
+  check('MB2 numbers left out', proposalNumbers('BRDP-S1-00186 in S1000D 4.2, chap 3.9.5.2.1, dated 2024-05-01, codes em02 and brsl01') .length === 0, JSON.stringify(proposalNumbers('BRDP-S1-00186 in S1000D 4.2, chap 3.9.5.2.1, dated 2024-05-01, codes em02 and brsl01')));
+  check('MB2 numbers kept', proposalNumbers('at most 5 levels, the 7th, one table, quinto, dos').join() === '1,2,5,7');
+  check('MB2 flag 2 / values → no threshold', thresholdMismatch(rule('//proceduralStep[count(ancestor::proceduralStep)&gt;5]', '2'), 'BREX-4.2', five, { parseXml }) === null);
+  check('MB2 Schematron → none', thresholdMismatch('<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron"><sch:rule context="p"><sch:assert test="count(*) &lt; 5">x</sch:assert></sch:rule></sch:pattern>', 'SCH-DITA', 'at most 3', { parseXml }) === null);
+  // Verdict: review, recorded with its own reason.
+  const v = ruleTestVerdict([{ expected: 'accept' }, { expected: 'reject' }], [
+    { validation: { runnable: true }, result: { status: 'accepted', selectedNodePaths: ['/a'], conditions: [] }, matches: true },
+    { validation: { runnable: true }, result: { status: 'rejected', selectedNodePaths: ['/b'], conditions: [] }, matches: true },
+  ], null, null, gt5);
+  check('MB2 verdict review with the threshold', v.kind === 'review' && v.threshold === gt5);
+  const rec = verdictToTestRecord(v);
+  check('MB2 recorded as review / test_threshold_mismatch', rec.result === 'review' && rec.reason.code === 'test_threshold_mismatch');
+  check('MB2 recorded reason text ES', formatRuleTestReason(rec.reason, es) === 'los números de la Propuesta no coinciden con el umbral de la regla: La Propuesta habla de 5; la regla permite hasta 6 niveles de <proceduralStep> y rechaza a partir del 7.', formatRuleTestReason(rec.reason, es));
+  const vInc = ruleTestVerdict([{ expected: 'reject' }], [{ validation: { runnable: true }, result: { status: 'accepted', selectedNodePaths: ['/a'], conditions: [] }, matches: false }], null, null, gt5);
+  check('MB2 an incorrect verdict stays incorrect', vInc.kind === 'incorrect');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

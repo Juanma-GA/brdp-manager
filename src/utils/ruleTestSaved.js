@@ -9,6 +9,7 @@
 import { ruleXmlHash } from './ruleHash.js';
 import { runExample, ruleTestVerdict } from './ruleTest.js';
 import { analyzeRule } from './ruleTestEngine.js';
+import { thresholdMismatch } from './ruleThreshold.js';
 import { verdictToTestRecord } from './ruleTestReasons.js';
 
 // The examples of a passed test, as they ran: only the examples the engine
@@ -87,12 +88,15 @@ export function savedExamplesDate(saved) {
 // gave in the kept test (what the panel marks). record: what to register --
 // a pass keeps the same examples again, dated with the test they came from
 // (examples_from), and the Proposal they were written for.
-export function runSavedTest(saved, ruleXml, format, { vocabulary = null, parseXml, schemaLocation = null } = {}) {
+// proposal (Mejoras B, Part 2): the BRDP's current Proposal, for the
+// threshold check (defaults to the one the examples were written for).
+export function runSavedTest(saved, ruleXml, format, { vocabulary = null, parseXml, schemaLocation = null, proposal = undefined } = {}) {
   const opts = parseXml ? { vocabulary, parseXml, schemaLocation } : { vocabulary, schemaLocation };
   const examples = saved.examples;
   const runs = examples.map((ex) => runExample(ruleXml, format, ex, opts));
   const analysis = analyzeRule(ruleXml, format, parseXml ? { parseXml } : {});
-  const verdict = ruleTestVerdict(examples, runs, analysis);
+  const threshold = thresholdMismatch(ruleXml, format, proposal === undefined ? saved.proposal : proposal, parseXml ? { parseXml } : {});
+  const verdict = ruleTestVerdict(examples, runs, analysis, null, threshold);
   const changed = [];
   runs.forEach((run, i) => {
     if ((run.result?.status || null) !== examples[i].saved?.result) changed.push(i);

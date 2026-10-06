@@ -32,6 +32,7 @@ import {
 import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
 import { editExample, editedExamplesRecord, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
 import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
+import { thresholdMismatch } from '../utils/ruleThreshold.js';
 import { passedTestToReplaceAt } from '../utils/ruleTestStatus.js';
 import { withPassedTest } from '../utils/ruleTestSaved.js';
 import { ruleDescriptionText, verdictToTestRecord } from '../utils/ruleTestReasons.js';
@@ -57,6 +58,8 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // T3b: what the rule checks, read from its XML -- shown in place of an
   // explanation by the LLM, and the ground truth the review is given.
   const description = useMemo(() => describeRule(ruleXml, format, { schemaLocation }), [ruleXml, format, schemaLocation]);
+  // Mejoras B, Part 2: the rule's threshold against the Proposal's numbers.
+  const threshold = useMemo(() => thresholdMismatch(ruleXml, format, brdp?.proposal), [ruleXml, format, brdp?.proposal]);
   // "Ejemplos bajo demanda en reglas no ejecutables": when the WHOLE rule
   // cannot be executed, the examples could only illustrate it (and a real
   // run produced broken ones) -- they are not generated until the user
@@ -179,11 +182,11 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     setState({ status: 'ready', proposalCheck, examples, runs, correction, predicateSkipped, untested });
     if (!onDemand) {
       // A passed test keeps its examples (Guardar la prueba aprobada).
-      const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalCheck)), examples, runs, brdp?.proposal);
+      const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalCheck, threshold)), examples, runs, brdp?.proposal);
       recordedRef.current = record;
       report(record);
     }
-  }, [ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, analysis, description, onDemand]);
+  }, [ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, analysis, description, onDemand, threshold]);
 
   // Generate once when the panel opens (it is remounted for another rule),
   // unless the rule is not executable at all: then only on request. The ref
@@ -226,7 +229,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
             recorded: recordedRef.current,
             alreadyRecorded: editsRecordedRef.current,
             examples,
-            verdict: ruleTestVerdict(examples, runs, analysis, state.proposalCheck),
+            verdict: ruleTestVerdict(examples, runs, analysis, state.proposalCheck, threshold),
           }),
           examples,
           runs,
@@ -251,7 +254,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     setEditNotice({ kind: 'recorded', count: record.editedExamples.length });
   };
 
-  const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck) : null;
+  const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck, threshold) : null;
   const shownAnalysis = lateAnalysis || analysis;
 
   // T3b "Review with the assistant" (incorrect verdict only): the Proposal,

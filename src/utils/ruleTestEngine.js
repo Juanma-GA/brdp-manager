@@ -810,6 +810,13 @@ function stepPredicateTexts(step) {
 export function pathThreshold(path) {
   const step = lastTopLevelStep(String(path || '').trim());
   if (!step) return null;
+  return stepThreshold(step);
+}
+
+// The threshold of one step ("proceduralStep[count(ancestor::proceduralStep)>5]"),
+// or null: a single predicate comparing a count / string-length with a
+// number. The nesting level is the step's own element's.
+function stepThreshold(step) {
   const preds = stepPredicateTexts(step);
   if (preds.length !== 1) return null;
   const pred = preds[0].replace(/\s+/g, ' ');
@@ -851,6 +858,48 @@ export function pathThreshold(path) {
   else { mode = 'upto'; level = firstLevel; }
   if (mode === 'from' && level <= 1) return null; // every level: as before
   return { kind: 'nesting', name, op, n: above, mode, level };
+}
+
+// The top-level steps of a single path ("//a[x]/b" → ["a[x]", "b"]), or null
+// when the path has alternatives or no step.
+function topLevelSteps(expression) {
+  const text = String(expression || '').trim();
+  const steps = [];
+  let depth = 0;
+  let quote = '';
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) { if (ch === quote) quote = ''; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    if (ch === '[' || ch === '(') depth += 1;
+    else if (ch === ']' || ch === ')') depth -= 1;
+    else if (ch === '|' && depth === 0) return null;
+    else if (ch === '/' && depth === 0) { steps.push(text.slice(start, i)); start = i + 1; }
+  }
+  steps.push(text.slice(start));
+  const out = steps.map((st) => st.trim()).filter(Boolean);
+  return out.length ? out : null;
+}
+
+// Mejoras B, Part 4.1: the one threshold of a path on any step --
+// //proceduralStep[count(ancestor::proceduralStep)=4]/title → { …threshold,
+// stepName: 'proceduralStep', last: false, target: '<title>' }. null with
+// alternatives, with no threshold, or with more than one step (or one step
+// with more than one predicate) that has one.
+export function pathThresholdAnyStep(path) {
+  const steps = topLevelSteps(path);
+  if (!steps) return null;
+  const found = [];
+  steps.forEach((step, i) => {
+    if (stepPredicateTexts(step).length === 0) return;
+    const threshold = stepThreshold(step);
+    found.push({ i, threshold, step });
+  });
+  if (found.length !== 1 || !found[0].threshold) return null;
+  const { i, threshold, step } = found[0];
+  const stepName = (pathTarget(step) || '').replace(/^<|>$/g, '');
+  return { ...threshold, stepName, last: i === steps.length - 1, target: pathTarget(path) };
 }
 
 function thresholdStatement(target, path, threshold) {
@@ -1146,6 +1195,36 @@ function schematronCause(d) {
   if (d.case === 'missing') return { code: 'cause_missing', params: { target: d.target || d.stripped } };
   if (d.case === 'predicate') return { code: 'cause_sch_context', params: { amount: d.amount, target: d.target || d.stripped, context: d.path } };
   return null;
+}
+
+// Mejoras B, Part 2: the thresholds of a rule's prohibitions (flag 0 /
+// objappl 0 without values, a node path -- the parts describeRule explains
+// with a threshold), for the comparison with the Proposal's numbers:
+//   ruleThresholds(ruleXml, format, options) → [{ ruleId, path, …threshold }]
+export function ruleThresholds(ruleXml, format, options = {}) {
+  const spec = FORMATS[format];
+  if (!spec) return [];
+  const parseXml = options.parseXml || parseXmlDocument;
+  let ruleDoc;
+  try {
+    ruleDoc = parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
+    if (part.kind !== 'rule' || part.emptyContext) continue;
+    try {
+      const { expression, flag } = partBasics(part, spec);
+      if (flag !== '0' || childElements(part.element, spec.value).length) continue;
+      if (isConditionPath(expression, parseXml)) continue;
+      const threshold = pathThresholdAnyStep(expression.replace(/\s+/g, ' ').trim());
+      if (threshold) out.push({ ruleId: part.ruleId, path: expression.replace(/\s+/g, ' ').trim(), ...threshold });
+    } catch (err) {
+      if (!(err instanceof NotExecutable)) throw err;
+    }
+  }
+  return out;
 }
 
 // "Comparar dos BRDP lado a lado": the structure of a rule, for the

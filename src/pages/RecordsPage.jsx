@@ -2042,6 +2042,7 @@ export default function RecordsPage() {
                         ruleStateOf(ruleApproval) === 'draft'
                           ? {
                               ruleXml: ruleApproval.rule_xml,
+                              proposal: selected.proposal,
                               approval: canEdit ? ruleApproval : null,
                               onRecord: (record) => recordDraftRuleTest(selected.id, ruleApproval.rule_xml, record),
                               onKeepPrevious: (record) => recordDraftRuleTest(selected.id, ruleApproval.rule_xml, record, { keepPrevious: true }),

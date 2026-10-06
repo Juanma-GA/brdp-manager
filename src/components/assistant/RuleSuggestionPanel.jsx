@@ -7,6 +7,7 @@ import { finalRuleXml, ruleSplitNote, validateRuleXml } from '../../hooks/useSug
 import { NAME_HINT_TEST_IDS, extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
 import SchemaIssueLines from './SchemaIssueLines';
 import RuleLintWarnings from './RuleLintWarnings';
+import RuleThresholdWarning from './RuleThresholdWarning';
 import { useNameFixHints } from '../../hooks/useNameFixHints.js';
 import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
 
@@ -53,7 +54,7 @@ const RULE_FORMAT_TEST_IDS = Object.fromEntries(
 // Part 4) -- same style as the BRDP text's vocabulary warning. Malformed
 // XML, an invalid XPath expression and content that is not a rule of the
 // project's format (C2, Part 0) disable Accept; name warnings never do.
-export function RuleValidationWarnings({ validation, standard }) {
+export function RuleValidationWarnings({ validation, standard, proposal = null }) {
   const { t } = useTranslation();
   const { wellFormed, wellFormedError, invalidXPaths, names } = validation;
   // Near names / other standards for the rule's names: a line only, no
@@ -72,6 +73,8 @@ export function RuleValidationWarnings({ validation, standard }) {
       />
       {/* Barrido final 2/2, Part 2: the lint's warnings, never blocking. */}
       {validation.acceptable && <RuleLintWarnings ruleXml={validation.xml} format={validation.format} place="suggestion" />}
+      {/* Mejoras B, Part 2: the rule's threshold against the Proposal's numbers (amber). */}
+      {validation.acceptable && proposal != null && <RuleThresholdWarning ruleXml={validation.xml} format={validation.format} proposal={proposal} />}
     </>
   );
 }
@@ -211,7 +214,7 @@ export default function RuleSuggestionPanel({
         <>
           <div className={styles.suggestionCode}>{entry.text}</div>
           <RuleSplitNote split={entry.split} />
-          <RuleValidationWarnings validation={generatedValidation} standard={standard} />
+          <RuleValidationWarnings validation={generatedValidation} standard={standard} proposal={brdp?.proposal ?? null} />
           <SchemaCoverageWarnings ruleXml={entry.text} entry={entry} />
         </>
       )}
@@ -305,7 +308,7 @@ export default function RuleSuggestionPanel({
             </>
           )}
           <RuleSplitNote split={pastedSplit} />
-          {pastedValidation && <RuleValidationWarnings validation={pastedValidation} standard={standard} />}
+          {pastedValidation && <RuleValidationWarnings validation={pastedValidation} standard={standard} proposal={brdp?.proposal ?? null} />}
           {pasted && <SchemaCoverageWarnings ruleXml={pastedFinal} entry={entry} />}
           {pasted && (
             <div className={styles.suggestionActions}>

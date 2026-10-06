@@ -791,6 +791,7 @@ const resources = {
             correct: 'Correct: every example gave the expected result.',
             review: 'Review: the examples pass, but the rule does not seem to implement the Proposal. {{mismatch}}',
             reviewUnchecked: 'Review: the examples pass, but the Proposal could not be checked ({{error}}). Regenerate to try again.',
+            reviewThreshold: 'Review: {{detail}}',
             permissive: "The rule accepted an example meant to violate it. Either the rule is too permissive or the example doesn't really break the decision. Check both.",
             strict: "The rule rejected an example meant to comply with it. Either the rule is too strict or the example doesn't really follow the decision. Check both.",
             nothingSelected: "Inconclusive: the rule's path selected nothing in any example, so the examples don't contain what the rule checks. Regenerate the examples.",
@@ -833,6 +834,25 @@ const resources = {
           conditionNotHolds: "The rule's condition does not hold in this document.",
           // Mejoras B, Part 3: why the rule accepted an example meant to be rejected.
           acceptedBecause: 'Why the rule accepted it: {{cause}}.',
+          // Mejoras B, Part 2: the rule's threshold vs the Proposal's numbers.
+          threshold: {
+            mismatch: 'The Proposal speaks of {{numbers}}; the rule {{rule}}.',
+            nesting: {
+              from: 'allows up to {{allowed}} levels of {{name}} and rejects from level {{level}} on',
+              exactly: 'only rejects level {{level}} of {{name}}',
+              upto: 'rejects levels 1 to {{level}} of {{name}}',
+              except: 'rejects every level of {{name}} except level {{level}}',
+            },
+            what: { children: 'child {{name}}', ancestors: '{{name}} above', length: 'characters' },
+            amount: {
+              gt: 'allows up to {{n}} {{what}} and rejects {{next}} or more',
+              ge: 'allows up to {{prev}} {{what}} and rejects {{n}} or more',
+              lt: 'rejects fewer than {{n}} {{what}}',
+              le: 'rejects {{n}} {{what}} or fewer',
+              eq: 'only rejects exactly {{n}} {{what}}',
+              ne: 'rejects any number of {{what}} other than {{n}}',
+            },
+          },
           acceptCause: {
             mandatoryPresent: 'every {{parent}} in the example contains {{child}}',
             mandatoryPresentValues: 'every {{parent}} in the example contains {{child}} with an allowed value',
@@ -1034,6 +1054,7 @@ const resources = {
             test_missing_expectation: 'an example meant to be accepted and one meant to be rejected could not both be run',
             test_no_runnable: 'none of the examples could be run',
             test_proposal_mismatch: 'the examples pass, but the rule does not seem to implement the Proposal ({{mismatch}})',
+            test_threshold_mismatch: 'the numbers of the Proposal do not match the rule\'s threshold: {{detail}}',
             test_proposal_unchecked: 'the examples pass, but the Proposal could not be checked ({{error}})',
           },
           // T3 Part 1: the recorded result, in History ("Rule test").
@@ -2360,6 +2381,7 @@ const resources = {
             correct: 'Correcto: cada ejemplo dio el resultado esperado.',
             review: 'Revisar: los ejemplos pasan, pero la regla no parece implementar la Propuesta. {{mismatch}}',
             reviewUnchecked: 'Revisar: los ejemplos pasan, pero no se pudo comprobar la Propuesta ({{error}}). Vuelve a generar para intentarlo de nuevo.',
+            reviewThreshold: 'Revisar: {{detail}}',
             permissive: 'La regla aceptó un ejemplo pensado para incumplirla. O la regla es demasiado permisiva o el ejemplo no incumple de verdad la decisión. Revisa ambos.',
             strict: 'La regla rechazó un ejemplo pensado para cumplirla. O la regla es demasiado estricta o el ejemplo no sigue de verdad la decisión. Revisa ambos.',
             nothingSelected: 'No concluyente: la ruta de la regla no seleccionó nada en ningún ejemplo, así que los ejemplos no contienen lo que la regla comprueba. Regenera los ejemplos.',
@@ -2399,6 +2421,24 @@ const resources = {
           conditionHolds: 'La condición de la regla se cumple en este documento.',
           conditionNotHolds: 'La condición de la regla no se cumple en este documento.',
           acceptedBecause: 'Por qué la regla lo aceptó: {{cause}}.',
+          threshold: {
+            mismatch: 'La Propuesta habla de {{numbers}}; la regla {{rule}}.',
+            nesting: {
+              from: 'permite hasta {{allowed}} niveles de {{name}} y rechaza a partir del {{level}}',
+              exactly: 'solo rechaza el nivel {{level}} de {{name}}',
+              upto: 'rechaza los niveles 1 a {{level}} de {{name}}',
+              except: 'rechaza todos los niveles de {{name}} salvo el {{level}}',
+            },
+            what: { children: '{{name}} hijos', ancestors: '{{name}} por encima', length: 'caracteres' },
+            amount: {
+              gt: 'permite hasta {{n}} {{what}} y rechaza a partir de {{next}}',
+              ge: 'permite hasta {{prev}} {{what}} y rechaza a partir de {{n}}',
+              lt: 'rechaza menos de {{n}} {{what}}',
+              le: 'rechaza {{n}} {{what}} o menos',
+              eq: 'solo rechaza exactamente {{n}} {{what}}',
+              ne: 'rechaza cualquier número de {{what}} distinto de {{n}}',
+            },
+          },
           acceptCause: {
             mandatoryPresent: 'cada {{parent}} del ejemplo contiene {{child}}',
             mandatoryPresentValues: 'cada {{parent}} del ejemplo contiene {{child}} con un valor permitido',
@@ -2597,6 +2637,7 @@ const resources = {
             test_missing_expectation: 'no se pudieron ejecutar a la vez un ejemplo que se acepta y otro que se rechaza',
             test_no_runnable: 'no se pudo ejecutar ningún ejemplo',
             test_proposal_mismatch: 'los ejemplos pasan, pero la regla no parece implementar la Propuesta ({{mismatch}})',
+            test_threshold_mismatch: 'los números de la Propuesta no coinciden con el umbral de la regla: {{detail}}',
             test_proposal_unchecked: 'los ejemplos pasan, pero no se pudo comprobar la Propuesta ({{error}})',
           },
           results: {
