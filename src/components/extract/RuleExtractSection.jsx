@@ -36,7 +36,7 @@ import { findDecisions, FIND_TRUNCATED } from '../../utils/textExtract.js';
 import TextExtractInput from './TextExtractInput';
 import { candidatesToDraft, draftCandidates, DRAFTED_CLASSES, extractTextState } from '../../utils/ruleExtractDraft.js';
 import { aiFieldsOf } from '../../prompts/extractFromRulesPrompt.js';
-import { EXTRACT_FILTERS, filterLabelKey, isClassFilter } from '../../utils/ruleExtractFilters.js';
+import { classLabel, EXTRACT_FILTERS, filterLabelKey, groupClassLabel, isClassFilter } from '../../utils/ruleExtractFilters.js';
 import { diffRuleLines, normalizeRuleXml } from '../../utils/brdpCompare.js';
 import {
   checkAgainstVocabulary,
@@ -97,18 +97,6 @@ function tooLongText(t, { field, length, max }) {
     : t('config.ruleExtract.tooLongField', { field: label, length, max });
 }
 
-function classLabel(t, c, classification = c.classification, textJob = false) {
-  // A free text never brings a rule: an identifier of the project is just
-  // "Already exists".
-  if (textJob && classification === 'same') return t('config.ruleExtract.classes.exists');
-  if (classification === 'other_spec' || classification === 'default_rule') {
-    return t(`config.ruleExtract.classes.${classification}`, { spec: c.specification || '' });
-  }
-  if (classification === 'catalog_edition') {
-    return t(`config.ruleExtract.classes.${classification}`, { edition: c.catalog_edition || '' });
-  }
-  return t(`config.ruleExtract.classes.${classification}`);
-}
 
 function warningText(t, w) {
   const p = w.params || {};
@@ -825,14 +813,13 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   const sortMark = (key) => (sort?.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
   const ariaSort = (key) => (sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
 
-  // A classification's name for the counts and the filter: with its
+  // A classification's name for the counts and the filter. Remates B,
+  // Part 2: always distinguishable from the others -- with its
   // specification / edition when every row of it shares one ("From catalog
-  // (S1000D 4.1)"), without it otherwise.
-  const groupLabel = (k) => {
-    const rows = (candidates || []).filter((c) => c.classification === k || c.options?.includes(k));
-    const one = (field) => (rows.length && rows.every((c) => c[field] === rows[0][field]) ? rows[0][field] : '');
-    return classLabel(t, { specification: one('specification'), catalog_edition: one('catalog_edition') }, k, textJob).replace(/\s*\(\)/, '');
-  };
+  // (S1000D 4.1)"), and a generic name of its own otherwise (no rows, or
+  // rows of several editions / specifications: "From catalog (another
+  // edition)"), never the bare "From catalog" of the project's own catalog.
+  const groupLabel = (k) => groupClassLabel(t, candidates || [], k, textJob);
   const counts = useMemo(() => {
     const out = {};
     for (const c of candidates || []) out[c.classification] = (out[c.classification] || 0) + 1;

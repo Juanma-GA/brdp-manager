@@ -389,6 +389,13 @@ const resources = {
             exists: 'Already exists',
             empty: 'No content',
           },
+          // Remates B, Part 2: a class's name in the filter and the counts
+          // when its rows have no single edition / specification.
+          classesGeneric: {
+            catalog_edition: 'From catalog (another edition)',
+            other_spec: 'Other specification',
+            default_rule: 'Default rule of the standard',
+          },
           sources: {
             file: 'from the file',
             catalog: 'from the catalog',
@@ -2001,6 +2008,11 @@ const resources = {
             catalog_edition: 'De catálogo ({{edition}})',
             exists: 'Ya existe',
             empty: 'Sin contenido',
+          },
+          classesGeneric: {
+            catalog_edition: 'De catálogo (otra edición)',
+            other_spec: 'Otra especificación',
+            default_rule: 'Regla por defecto del estándar',
           },
           sources: {
             file: 'del fichero',

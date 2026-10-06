@@ -1532,3 +1532,56 @@ async def test_an_old_extraction_with_marked_rows_reads_as_catalog_edition(clien
         async with async_session_factory() as session:
             await session.delete(await session.get(BRDPCatalog, catalog_id))
             await session.commit()
+
+
+@pytest.fixture
+async def project_41_users():
+    async with async_session_factory() as session:
+        project = Project(name=f"Extract 4.1 {uuid.uuid4()}", standard="S1000D 4.1")
+        editor = User(email=f"extract-ed-{uuid.uuid4()}@example.com", password_hash=hash_password("x"), display_name="Ed", global_role="user")
+        session.add_all([project, editor])
+        await session.flush()
+        session.add(UserProjectRole(user_id=editor.id, project_id=project.id, role="editor"))
+        await session.commit()
+        await session.refresh(project)
+        await session.refresh(editor)
+    yield project, {"Authorization": f"Bearer {create_access_token(str(editor.id))}"}
+    async with async_session_factory() as session:
+        await session.delete(await session.get(Project, project.id))
+        await session.commit()
+
+
+async def test_project_41_own_catalog_and_42_only_identifier(client, project_41_users):
+    """Remates B, Part 2.3: in a 4.1 project, an identifier of the 4.1
+    catalog is "From catalog" (the project's own), and one only in the 4.2
+    catalog is "From catalog (S1000D 4.2)" with its warning -- the two
+    classes the filter must tell apart."""
+    project, editor = project_41_users
+    n = uuid.uuid4().int % 90000 + 10000
+    in41, only42 = (f"BRDP-S1-{(n + i) % 100000:05d}" for i in range(2))
+    added = []
+    async with async_session_factory() as session:
+        for standard, identifier, title in (("S1000D 4.1", in41, "Title 4.1"), ("S1000D 4.2", only42, "Title 4.2")):
+            row = BRDPCatalog(standard=standard, identifier=identifier, title=title, definition=f"Def {title}")
+            session.add(row)
+            added.append(row)
+        await session.commit()
+    try:
+        content = "".join(
+            f'<structureObjectRule id="{i}"><brDecisionRef brDecisionIdentNumber="{i}"/><objectPath allowedObjectFlag="0">//x{k}</objectPath>'
+            f"<objectUse>{i}. Rule {k} text.</objectUse></structureObjectRule>"
+            for k, i in enumerate((in41, only42))
+        )
+        _, cands = await _extract(client, project.id, editor, _brex("4.1", content))
+        by = _by_id(cands)
+        assert (by[in41]["classification"], by[in41]["title"]) == ("catalog", "Title 4.1")
+        assert not by[in41].get("catalog_edition")
+        c42 = by[only42]
+        assert (c42["classification"], c42["catalog_edition"], c42["title"]) == ("catalog_edition", "S1000D 4.2", "Title 4.2")
+        w = next(w for w in c42["warnings"] if w["code"] == "catalog_other_edition")
+        assert w["params"] == {"identifier": only42, "standard": "S1000D 4.1", "edition": "S1000D 4.2"}
+    finally:
+        async with async_session_factory() as session:
+            for row in added:
+                await session.delete(await session.get(BRDPCatalog, row.id))
+            await session.commit()

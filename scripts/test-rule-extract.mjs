@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../src/prompts/extractFromRulesPrompt.js';
 import { candidatesToDraft, draftCandidates, extractTextState } from '../src/utils/ruleExtractDraft.js';
 import { LLM_TRUNCATED } from '../src/api/llmTruncation.js';
-import { EXTRACT_FILTERS, filterLabelKey } from '../src/utils/ruleExtractFilters.js';
+import { classLabel, EXTRACT_FILTERS, filterLabelKey, groupClassLabel } from '../src/utils/ruleExtractFilters.js';
 import i18n from '../src/i18n/index.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./rule-test-fixtures/extract-candidates.json', import.meta.url), 'utf-8'));
@@ -235,6 +235,40 @@ const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), 
   }
   check('"blocking" label EN', i18n.getFixedT('en')(filterLabelKey('blocking')) === 'Blocking the import');
   check('"blocking" label ES', i18n.getFixedT('es')(filterLabelKey('blocking')) === 'Bloquean la importación');
+}
+
+// ── Remates B, Part 2: "From catalog" classes always told apart ──────────
+{
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const row = (classification, extra = {}) => ({ classification, options: [classification, 'new_ext'], ...extra });
+  const one = [row('catalog'), row('catalog_edition', { catalog_edition: 'S1000D 4.2' }), row('catalog_edition', { catalog_edition: 'S1000D 4.2' })];
+  const several = [row('catalog_edition', { catalog_edition: 'S1000D 4.1' }), row('catalog_edition', { catalog_edition: 'S1000D 5.0' })];
+  check('one edition: ES "De catálogo (S1000D 4.2)"', groupClassLabel(es, one, 'catalog_edition') === 'De catálogo (S1000D 4.2)', groupClassLabel(es, one, 'catalog_edition'));
+  check('one edition: EN', groupClassLabel(en, one, 'catalog_edition') === 'From catalog (S1000D 4.2)');
+  check('several editions: ES "De catálogo (otra edición)"', groupClassLabel(es, several, 'catalog_edition') === 'De catálogo (otra edición)');
+  check('several editions: EN', groupClassLabel(en, several, 'catalog_edition') === 'From catalog (another edition)');
+  check('no rows: still distinguishable', groupClassLabel(es, [row('catalog')], 'catalog_edition') === 'De catálogo (otra edición)' && groupClassLabel(es, [], 'catalog_edition') === 'De catálogo (otra edición)');
+  check('own catalog: plain "De catálogo"', groupClassLabel(es, one, 'catalog') === 'De catálogo');
+  for (const [name, rows] of [['one', one], ['several', several], ['none', []]]) {
+    for (const t of [en, es]) {
+      check(`catalog vs catalog_edition differ (${name}, ${t === en ? 'EN' : 'ES'})`, groupClassLabel(t, rows, 'catalog') !== groupClassLabel(t, rows, 'catalog_edition'));
+    }
+  }
+  check('rows reclassified away still give the edition (option)', groupClassLabel(es, [{ classification: 'new_ext', options: ['catalog_edition', 'new_ext'], catalog_edition: 'S1000D 4.2' }], 'catalog_edition') === 'De catálogo (S1000D 4.2)');
+  check('several editions: each row keeps its own', classLabel(es, several[0]) === 'De catálogo (S1000D 4.1)' && classLabel(es, several[1]) === 'De catálogo (S1000D 5.0)');
+  const s2 = [row('other_spec', { specification: 'S2000M' })];
+  const sMany = [row('other_spec', { specification: 'S2000M' }), row('other_spec', { specification: 'S3000L' })];
+  check('other_spec one: "Otra especificación (S2000M)"', groupClassLabel(es, s2, 'other_spec') === 'Otra especificación (S2000M)');
+  check('other_spec several / none: "Otra especificación", never "()"', groupClassLabel(es, sMany, 'other_spec') === 'Otra especificación' && groupClassLabel(en, [], 'other_spec') === 'Other specification');
+  check('default_rule one: "Regla por defecto de S1000D"', groupClassLabel(es, [row('default_rule', { specification: 'S1000D' })], 'default_rule') === 'Regla por defecto de S1000D');
+  check('default_rule none: never a dangling "de"', groupClassLabel(es, [], 'default_rule') === 'Regla por defecto del estándar' && groupClassLabel(en, [], 'default_rule') === 'Default rule of the standard');
+  check('free text job: same labels', groupClassLabel(es, several, 'catalog_edition', true) === 'De catálogo (otra edición)' && groupClassLabel(es, one, 'catalog_edition', true) === 'De catálogo (S1000D 4.2)');
+  const labels = (t, rows) => EXTRACT_FILTERS.filter((f) => !['all', 'warnings', 'blocking'].includes(f)).map((f) => groupClassLabel(t, rows, f));
+  for (const t of [en, es]) {
+    const l = labels(t, []);
+    check(`no two class labels alike with zero rows (${t === en ? 'EN' : 'ES'})`, new Set(l).size === l.length, l.join(' | '));
+  }
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);
