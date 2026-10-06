@@ -116,8 +116,12 @@ async function main() {
   const countCalls = () => {
     calls = 0;
   };
+  // The examples calls only: the Proposal check (a separate call since
+  // "Barrido final 1/2") is not part of what this script measures.
   page.on("request", (req) => {
-    if (req.url().includes("/api/llm-proxy")) calls += 1;
+    if (!req.url().includes("/api/llm-proxy")) return;
+    if ((req.postData() || "").includes("Check whether the rule implements the Proposal.")) return;
+    calls += 1;
   });
   const lastRequest = () => fetch(`${MOCK}/last-request`).then((r) => r.json());
   const systemOf = (req) => req.messages.find((m) => m.role === "system").content;

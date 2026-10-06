@@ -104,6 +104,7 @@ import { findDecisions } from "../src/utils/textExtract.js";
 import { FIND_DECISIONS_USER_MESSAGE } from "../src/prompts/extractFromTextPrompt.js";
 import { UNFILLED_MARKER_RE } from "../src/utils/proposalMarkers.js";
 import { readTextFile } from "./lib/textFile.mjs";
+import { checkRulePaths, formatPathProblem } from "../src/validation/rulePathCheck.js";
 import {
   STANDARD_TO_VOCABULARY_FILE,
   checkAgainstVocabulary,
@@ -317,6 +318,19 @@ async function runCheck(check, answer, ctx = {}) {
       if (invalid.length) return { status: "fail", detail: `invalid XPath: ${invalid.join(" | ").slice(0, 200)}` };
       return { status: "pass", detail: count ? `${count} XPath expression(s), all valid` : "no XPath expression in the answer" };
     }
+    case "rule_path_possible": {
+      // Mejoras C: every path of the final rule can exist in the standard's
+      // schemas (the same check as the amber warning in Suggest Rule).
+      const graph = await apiFetch(`/api/schema-cards/graph?standard=${encodeURIComponent(ctx.standard)}`);
+      if (!graph?.available) return { status: "manual", detail: `no schema graph for ${ctx.standard}` };
+      const result = checkRulePaths(ctx.finalRule || ctx.xml || "", ctx.format, graph, { schemaLocation: ctx.schemaLocation ?? null, parseXml: xmldomParse });
+      const t = i18n.getFixedT("en");
+      if (!result.available) return { status: "manual", detail: "the path check does not apply" };
+      if (result.parts.length === 0) return { status: "manual", detail: "no rule path to check in the answer" };
+      return result.problems.length
+        ? { status: "fail", detail: result.problems.map((p) => formatPathProblem(p, t, { format: ctx.format })).join(" | ").slice(0, 300) }
+        : { status: "pass", detail: "every path can exist" };
+    }
     case "names_in_vocabulary": {
       const names = checkRuleNames(ctx.xml || "", ctx.vocabulary);
       if (!names.available) return { status: "manual", detail: `no schema vocabulary for ${ctx.standard}` };
@@ -466,6 +480,7 @@ async function runCheck(check, answer, ctx = {}) {
       const ok = causes.some((c) => c.includes(check.contains));
       return { status: ok ? "pass" : "fail", detail: causes.length ? `causes: ${causes.join(" | ")}` : "no reject example accepted" };
     }
+    case "rule_test_accept_examples_contain":
     case "rule_test_reject_examples_contain": {
       // T3b: every example meant to be rejected carries `pattern` (e.g. the
       // attribute whose values the Proposal restricts -- never relying on
@@ -475,7 +490,9 @@ async function runCheck(check, answer, ctx = {}) {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       const re = new RegExp(check.pattern, flags);
-      const rejects = r.examples.filter((ex) => ex.expected === "reject");
+      // Mejoras C: the same check on the examples meant to be accepted.
+      const expected = check.type === "rule_test_accept_examples_contain" ? "accept" : "reject";
+      const rejects = r.examples.filter((ex) => ex.expected === expected);
       // "target": "metadata" -- the identification and status section the
       // LLM wrote (rule test on DM metadata); "all" -- the section and the
       // content (a value that may be in the DM's own code or in a
@@ -483,8 +500,8 @@ async function runCheck(check, answer, ctx = {}) {
       const text = (ex) => (check.target === "metadata" ? ex.metadata || ""
         : check.target === "all" ? `${ex.metadata || ""}\n${ex.content || ""}` : ex.content);
       const bad = rejects.filter((ex) => !re.test(text(ex)));
-      if (rejects.length === 0) return { status: "fail", detail: "no reject example" };
-      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `without /${check.pattern}/: ${bad.map((ex) => ex.label).join(", ")}` : `all ${rejects.length} reject example(s) match /${check.pattern}/` };
+      if (rejects.length === 0) return { status: "fail", detail: `no ${expected} example` };
+      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `without /${check.pattern}/: ${bad.map((ex) => ex.label).join(", ")}` : `all ${rejects.length} ${expected} example(s) match /${check.pattern}/` };
     }
     // T3b "Review with the assistant" (rule-review).
     case "review_json_valid": {
@@ -833,7 +850,7 @@ async function runSuggestRuleCase(project, aiProvider, createdBrdp, testCase) {
     userMessage: SUGGEST_RULE_USER_MESSAGE,
     answer,
     finalRule,
-    checkContext: { xml, finalRule, vocabulary, standard: testCase.standard, format: similar.format, splitTotal: split.total },
+    checkContext: { xml, finalRule, vocabulary, standard: testCase.standard, format: similar.format, splitTotal: split.total, schemaLocation: location },
   };
 }
 

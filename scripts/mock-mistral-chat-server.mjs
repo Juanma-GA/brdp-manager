@@ -161,6 +161,17 @@ function suggestRuleReply(systemPrompt) {
   if (/LONGRULE/.test(proposal)) {
     return '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath><objectUse>MOCK-LONG-RULE</objectUse></structureObjectRule>';
   }
+  // Mejoras C: the real rule BRDP-EXT-00087, whose path cannot exist
+  // (/techstd is never a document root) -- for the amber warning and its
+  // "Change /techstd to //techstd" button.
+  if (/<techstd>/.test(proposal) && /FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
+    return `<objrule id="${id}"><objpath objappl="0">/techstd[not(authex) or not(notes)]</objpath><objuse>MOCK-RULE: a technical standard record gives its exceptions and notes.</objuse></objrule>`;
+  }
+  // Mejoras C: the values of <trade> (BRDP-EXT-00013) -- a 3.0.1 rule
+  // whose path the schemas allow (<trade> inside <reqpers>).
+  if (/<trade>/.test(proposal) && /FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
+    return `<objrule id="${id}"><objpath>//reqpers/trade</objpath><objuse>MOCK-RULE: the trade is Mechanic or Electrician.</objuse><objval valtype="single" val1="Mechanic"/><objval valtype="single" val1="Electrician"/></objrule>`;
+  }
   // Suggest Rule part 2: a Proposal naming one of these elements gets a
   // prohibition rule on it (schema-context verification: <emphasis> exists
   // in every 4.2 schema, <partSegment> only in ipd).
@@ -430,6 +441,25 @@ function ruleTestReply(systemPrompt, messages) {
     return answer([
       { label: "Hard time limit (category 1)", expected: "accept", schema: ruleSchema, content: limit("1") },
       { label: "Soft time limit (category 2)", expected: "reject", schema: ruleSchema, content: limit("2") },
+    ]);
+  }
+  // Mejoras C (BRDP-EXT-02613, /dmodule[not(//actref)]): whole documents
+  // from the minimal section the prompt quotes. With the prompt's "<actref>
+  // goes inside <status>" the reference goes there; without it, inside the
+  // content -- the real run's mistake, which the application now moves.
+  if (/not\(\/\/actref\)/.test(rule)) {
+    const schema = (systemPrompt.match(/- schema "([\w-]+)": your content is the WHOLE document/) || [])[1] || "descript";
+    const lines = systemPrompt.split("\n");
+    const at = lines.findIndex((l) => l.includes("this minimal, valid one:"));
+    const section = [];
+    for (let i = at + 1; at !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) section.push(lines[i].slice(4));
+    const base = section.join("\n");
+    const actref = "<actref><refdm><avee><modelic>EXAMPLE</modelic><sdc>A</sdc><chapnum>00</chapnum><section>0</section><subsect>0</subsect><subject>00</subject><discode>00</discode><discodev>A</discodev><incode>00W</incode><incodev>A</incodev><itemloc>A</itemloc></avee></refdm></actref>";
+    const told = /<actref> goes inside <status>/.test(systemPrompt);
+    const doc = (withRef) => `<dmodule>\n${withRef && told ? base.replace(/(<\/orig>)/, `$1\n${actref}`) : base}\n<content><descript><para0><title>Removal</title><para>Remove the cover.</para>${withRef && !told ? actref : ""}</para0></descript></content>\n</dmodule>`;
+    return answer([
+      { label: "Data module with its ACT reference", expected: "accept", schema, content: doc(true) },
+      { label: "Data module without an ACT reference", expected: "reject", schema, content: doc(false) },
     ]);
   }
   const metadata = metadataReply(systemPrompt, rule, answer);
