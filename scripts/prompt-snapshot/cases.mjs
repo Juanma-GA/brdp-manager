@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { readTextFile } from '../lib/textFile.mjs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { placementPlaces } from '../../src/utils/ruleTestRun.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { extractRuleNames } from '../../src/validation/schemaValidation.js';
 import { DOMParser } from '@xmldom/xmldom';
@@ -41,9 +42,14 @@ const realCards = JSON.parse(readFileSync(path.join(__dirname, 'schema-cards-fix
 // (backend/scripts/dump_rule_test_structures.py), so the examples prompt's
 // placements come from the same code as in the app.
 const realStructures = JSON.parse(readFileSync(path.join(__dirname, '..', 'rule-test-fixtures', 'structures.json'), 'utf-8'));
+// Mejoras C, Part 2: every placement gets the app's "where each element of
+// the rule goes" (placementPlaces), like prepareRuleTestSetup.
+function withPlaces(standard, schema, ruleXml, placement) {
+  return { ...placement, places: placementPlaces(realStructures[`${standard}|${schema}`], placement, ruleXml) };
+}
 function placementsFor(standard, ruleXml, roles) {
   const targets = ruleTargets(ruleXml);
-  return roles.map(([schema, role]) => ({ schema, role, ...placeExample(realStructures[`${standard}|${schema}`], targets) }));
+  return roles.map(([schema, role]) => ({ schema, role, ...withPlaces(standard, schema, ruleXml, placeExample(realStructures[`${standard}|${schema}`], targets)) }));
 }
 // One schema per part of the rule (S1-00120): the groups chooseTestSchemas
 // makes, placed like prepareRuleTestSetup does. The cards say where each
@@ -55,7 +61,7 @@ function groupPlacementsFor(standard, ruleXml, cards, documentSchemas) {
   return groups.map((g) => ({
     schema: g.schema,
     role: 'rule',
-    ...placeExample(realStructures[`${standard}|${g.schema}`], targetsForGroup(targets, g)),
+    ...withPlaces(standard, g.schema, ruleXml, placeExample(realStructures[`${standard}|${g.schema}`], targetsForGroup(targets, g))),
     group: g.checked,
   }));
 }
@@ -67,7 +73,7 @@ function appPlacementsFor(standard, ruleXml, roles) {
   const targets = ruleTargets(ruleXml);
   return roles.map(([schema, role]) => {
     const structure = realStructures[`${standard}|${schema}`];
-    return { schema, role, ...placeExample(structure, targets, { useNames: ruleUseNames(ruleXml), withRoutes: true }) };
+    return { schema, role, ...withPlaces(standard, schema, ruleXml, placeExample(structure, targets, { useNames: ruleUseNames(ruleXml), withRoutes: true })) };
   });
 }
 // Mejoras A, Part 2: placed like prepareRuleTestSetup's relation split --
@@ -78,11 +84,11 @@ function relationPlacementsFor(standard, ruleXml, parts) {
   return parts.map(([schema, inside]) => ({
     schema,
     role: 'rule',
-    ...placeExample(realStructures[`${standard}|${schema}`], targets, {
+    ...withPlaces(standard, schema, ruleXml, placeExample(realStructures[`${standard}|${schema}`], targets, {
       useNames: ruleUseNames(ruleXml),
       withRoutes: true,
       relation: { element: r.element, ancestor: r.ancestor, axis: r.axis, negated: r.negated, inside, selected: inside === !r.negated },
-    }),
+    })),
   }));
 }
 const ruleCommonInfoOutsideProcedure =
@@ -377,6 +383,7 @@ export const suggestRuleCases = [
 // Test rule (T2): the examples prompt -- a general flag-0 rule with schema
 // facts, a value-list rule, a proced-only rule (third example of another
 // schema), and a 3.0.1 mandatory rule on an absolute path.
+const ruleActref301 = '<objrule id="BRDP-EXT-02613"><objpath objappl="0">/dmodule[not(//actref)]</objpath><objuse>BRDP-EXT-02613. Every data module must reference its applicability cross-reference table.</objuse></objrule>';
 const brdpRuleTest = {
   identifier: 'BRDP-TEST-001',
   title: 'Use of the element <emphasis>',
@@ -416,7 +423,7 @@ function appGroupPlacementsFor(standard, ruleXml, documentSchemas) {
   return groups.map((g) => ({
     schema: g.schema,
     role: 'rule',
-    ...placeExample(realStructures[`${standard}|${g.schema}`], targetsForGroup(targets, g), { useNames: ruleUseNames(ruleXml), withRoutes: true }),
+    ...withPlaces(standard, g.schema, ruleXml, placeExample(realStructures[`${standard}|${g.schema}`], targetsForGroup(targets, g), { useNames: ruleUseNames(ruleXml), withRoutes: true })),
     group: g.checked,
   }));
 }
@@ -521,6 +528,21 @@ export const ruleTestExamplesCases = [
         format: 'BREX-4.2',
         ruleXml: ruleCopyright,
         placements: placementsFor('S1000D 4.2', ruleCopyright, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Mejoras C, Part 2 (BRDP-EXT-02613, 3.0.1): /dmodule[not(//actref)] --
+    // the example is the whole document, and <actref> only goes inside
+    // <status>, between <orig> and <applic>: the prompt says where.
+    name: 'brex-3-0-1-actref-in-status',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-02613', title: 'Applicability cross-reference table', definition: 'Decide whether data modules reference the applicability cross-reference table.', proposal: 'Every data module shall reference its applicability cross-reference table (<actref>).' },
+        standard: 'S1000D 3.0.1',
+        format: 'BREX-3.0.1',
+        ruleXml: ruleActref301,
+        placements: placementsFor('S1000D 3.0.1', ruleActref301, [['descript', 'rule']]),
       },
     ],
   },

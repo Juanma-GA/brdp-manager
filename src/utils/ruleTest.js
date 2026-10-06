@@ -30,7 +30,7 @@ import {
   removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
 import { SKELETON_TEXT_SUFFIX, assembleExample, normalizeBrexReferenceCode } from './ruleTestSkeleton.js';
-import { relocateMisplacedElements } from './schemaPlacement.js';
+import { placeSentence, relocateMisplacedElements, relocateToOnlyParent } from './schemaPlacement.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
 // names (xsi:…, xlink:…) and namespace declarations are not schema
@@ -92,6 +92,39 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     }
     if (entry.placement.metadata?.insertion && example.metadata != null) {
       const inSection = relocateMisplacedElements(example.metadata, entry.structure, entry.placement.root);
+      if (inSection.moved.length) {
+        adjusted.metadata = inSection.text;
+        relocated.push(...inSection.moved);
+      }
+    }
+  }
+  // Mejoras C, Part 2: an element the RULE names, put where the schema does
+  // not allow it, with ONE possible parent in this schema that is already
+  // in the same text (the whole document, the content or the section): it
+  // is moved there, at its place by the XSD's order -- only when the move
+  // does not change what the rule selects or decides on the example (then
+  // the correction round gets the place instead).
+  const rule = setup.rule;
+  if (rule?.names?.length && entry.structure?.elements) {
+    const decides = (content, metadata) => {
+      const { xml } = assembleExample({ standard: setup.standard, schema, schemaLocation: setup.schemaLocation, placement: entry.placement, content, metadata });
+      if (!xml) return null;
+      const r = runRuleOnFragment(rule.ruleXml, rule.format, xml, schema, { parseXml, schemaLocation: setup.schemaLocation });
+      return JSON.stringify([r.status, r.selectedNodePaths.length, (r.conditions || []).map((c) => c.holds), (r.violations || []).length]);
+    };
+    const inContent = relocateToOnlyParent(adjusted.content, entry.structure, entry.placement.insertion || null, rule.names, (before, after) => {
+      const a = decides(before, adjusted.metadata);
+      return a !== null && a === decides(after, adjusted.metadata);
+    });
+    if (inContent.moved.length) {
+      adjusted.content = inContent.text;
+      relocated.push(...inContent.moved);
+    }
+    if (entry.placement.metadata?.insertion && adjusted.metadata != null) {
+      const inSection = relocateToOnlyParent(adjusted.metadata, entry.structure, entry.placement.root, rule.names, (before, after) => {
+        const a = decides(adjusted.content, before);
+        return a !== null && a === decides(adjusted.content, after);
+      });
       if (inSection.moved.length) {
         adjusted.metadata = inSection.text;
         relocated.push(...inSection.moved);
@@ -340,7 +373,7 @@ function sectionPlaceHint(problem, places) {
   return `In this section <${problem.element}> goes inside <${path[path.length - 2]}> (${path.join('/')}), as in the minimal section; do not repeat it elsewhere`;
 }
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null } = {}) {
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, places: rulePlaces = [] } = {}) {
   const places = sectionTree ? minimalSectionPlaces(sectionTree) : null;
   const ruleElements = new Set(ruleNames?.elements || []);
   const ruleAttributes = new Set(ruleNames?.attributes || []);
@@ -372,6 +405,13 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     const place = sectionPlaceHint(p, places);
     if (place) {
       out.push(`${formatStructureProblem(p, schema)}. ${place}.`);
+      continue;
+    }
+    // Mejoras C, Part 2: an element the rule names, put where the schema
+    // does not allow it -- the same "goes inside" sentence as the prompt.
+    const rulePlace = p.kind === 'notAllowed' ? rulePlaces.find((x) => x.element === p.element) : null;
+    if (rulePlace) {
+      out.push(`${formatStructureProblem(p, schema)}. ${placeSentence(rulePlace)}`);
       continue;
     }
     const element = ['unknownElement', 'notAllowed', 'unknownAttribute'].includes(p.kind) ? p.element : null;

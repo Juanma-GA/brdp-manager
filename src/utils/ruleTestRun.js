@@ -15,15 +15,16 @@
 // correction round for the examples that fail them, and the engine run.
 import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleTestResponse, RULE_TEST_USER_MESSAGE } from '../prompts/ruleTestExamplesPrompt.js';
 import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } from '../prompts/ruleProposalCheckPrompt.js';
-import { extractRuleNames } from '../validation/schemaValidation.js';
+import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { describeRule, parseXmlDocument, ruleConditions, rulePathParts } from './ruleTestEngine.js';
 import { stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
+import { elementPlaces } from './schemaPlacement.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 import { cleanInternalNames } from './answerCleanup.js';
-import { checkRulePaths } from '../validation/rulePathCheck.js';
+import { checkRulePaths, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
 // "review" result (the panel shows them all, from the rule itself).
@@ -185,6 +186,9 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       withRoutes: !String(standard).startsWith('DITA'),
       relation: relation || null,
     });
+    // Mejoras C, Part 2: where each element the rule names goes, when it
+    // does not fit where the LLM writes and no route above says it already.
+    placement.places = placementPlaces(structure, placement, ruleXml);
     if (placement.sectionMissing && role === 'rule') {
       untested.push({ schema, element: placement.sectionMissing.element, names: placement.sectionMissing.names });
     }
@@ -234,6 +238,60 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     tableModel,
     setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml), tableModel: Boolean(tableModel) },
   };
+}
+
+// The elements a placement already gives a way to (the routes down from the
+// insertion point, the routes in the identification and status section,
+// the nestings): elementPlaces says nothing more about them.
+function placementRouteNames(placement) {
+  return [
+    ...(placement.routes?.cards || []).map((c) => c.name),
+    ...(placement.routes?.steps || []).flatMap((st) => st.children),
+    ...(placement.metadata?.routes || []).map((r) => r.target),
+    ...(placement.nestings || []).map((n) => n.descendant),
+  ];
+}
+
+// Mejoras C, Part 2: where each element the rule names goes, for one
+// placement (also used by the prompt snapshot, so it is the app's code).
+// An element the rule's own path already writes under its parent
+// (tgroup/tbody, dmStatus/applicRef) needs no sentence either.
+export function placementPlaces(structure, placement, ruleXml) {
+  const elements = structure?.elements || {};
+  const underParent = [];
+  // A step written under the step before it -- "/" with that parent allowed
+  // by the schema, or "//" (the path gives the ancestor and the nesting is
+  // said elsewhere) -- also inside the steps' predicates ([entry[…]]).
+  const visit = (alternative, start) => {
+    const { steps } = pathSteps(alternative);
+    steps.forEach((step, i) => {
+      const prev = i === 0 && step.sep === null ? (start ? { kind: 'element', name: start } : null) : steps[i - 1];
+      if (step.kind !== 'element') return;
+      if (prev?.kind === 'element' && (step.sep === '//' || step.desc || (elements[prev.name]?.children || []).includes(step.name))) underParent.push(step.name);
+      for (const pred of step.predicates) {
+        for (const operand of pathOperands(pred)) if (!operand.startsWith('/')) pathAlternatives(operand).forEach((alt) => visit(alt, step.name));
+      }
+    });
+  };
+  for (const expression of [...extractRuleXPaths(ruleXml || ''), ...ruleMatchExpressions(ruleXml || '')]) {
+    for (const alternative of pathOperands(expression).flatMap(pathAlternatives)) visit(alternative, null);
+  }
+  // A Schematron test reads from its rule's context node (row → entry[…]).
+  const decode = (t) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  for (const m of String(ruleXml || '').matchAll(/<(?:[\w.-]+:)?rule\b[^>]*?\scontext\s*=\s*"([^"]*)"[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?rule\s*>/g)) {
+    const lasts = pathOperands(decode(m[1])).flatMap(pathAlternatives).map((alt) => {
+      const steps = pathSteps(alt).steps;
+      const last = steps[steps.length - 1];
+      return last?.kind === 'element' ? last.name : null;
+    });
+    for (const t of m[2].matchAll(/\stest\s*=\s*"([^"]*)"/g)) {
+      for (const operand of pathOperands(decode(t[1]))) {
+        if (operand.startsWith('/')) continue;
+        for (const start of lasts.filter(Boolean)) pathAlternatives(operand).forEach((alt) => visit(alt, start));
+      }
+    }
+  }
+  return elementPlaces(structure, placement, extractRuleNames(ruleXml).elements, [...placementRouteNames(placement), ...underParent]);
 }
 
 // For each attribute-only alternative of the rule (//@materialUsage), the
@@ -438,6 +496,11 @@ export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null) {
   return lines.join(' ') || null;
 }
 
+function correctionPlaces(entry, names) {
+  if (!entry?.structure || !entry.placement) return [];
+  return elementPlaces(entry.structure, entry.placement, names);
+}
+
 // The examples the correction round must fix: [{ index, label, problems }].
 export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, setup = null, parseXml = parseXmlDocument }) {
   const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
@@ -460,6 +523,9 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             expected: examples[index].expected,
             tableModel: Boolean(setup?.tableModel),
             sectionTree: setup?.placements?.[materialized[index].schema]?.placement?.metadata?.tree || null,
+            // every element of the rule, also those its own path places (the
+            // prompt leaves those out): the example still put one elsewhere
+            places: correctionPlaces(setup?.placements?.[materialized[index].schema], ruleNames.elements),
           });
       if (problems.length > 0 && !missing && keep && examples[index].expected === 'reject') problems.push(keep);
       return { index, label: examples[index].label, problems };
@@ -546,6 +612,9 @@ export async function generateRuleTestExamples({
     const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute });
     if (!isCurrent()) return null;
     if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup, untested: prepared.untested };
+    // Mejoras C, Part 2: the rule, so materializeExample can move an element
+    // of it to its only parent without changing what the rule decides.
+    prepared.setup.rule = { ruleXml, format, names: extractRuleNames(ruleXml).elements };
     // The schemas whose examples the application builds whole (rootOnly):
     // their examples come with no "content".
     const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema) };

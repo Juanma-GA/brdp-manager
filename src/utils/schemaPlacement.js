@@ -384,3 +384,169 @@ export function relocateMisplacedElements(text, structure, parentName) {
   }
   return { text: current, moved };
 }
+
+// ─── Mejoras C, Part 2: where an element of the rule goes ───────────────────
+
+const PLACE_MAX_PARENTS = 5;
+
+function shortestWay(elements, root, target) {
+  if (!elements[root] || !elements[target]) return null;
+  const previous = new Map([[root, null]]);
+  let frontier = [root];
+  while (frontier.length) {
+    const next = [];
+    for (const name of [...frontier].sort()) {
+      for (const child of [...(elements[name]?.children || [])].sort()) {
+        if (previous.has(child)) continue;
+        previous.set(child, name);
+        if (child === target) {
+          const way = [child];
+          for (let n = name; n; n = previous.get(n)) way.unshift(n);
+          return way;
+        }
+        next.push(child);
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+// [{ element, parents, way, after, before }] -- for each element the rule
+// names (`names`) that does not fit directly where the LLM writes (the
+// insertion point's children; for a whole document, the root's), is not
+// already in the skeleton or the minimal identification and status section,
+// and is not `skip`ped (a route or nesting the prompt already gives): the
+// elements it can be a child of in this schema. With ONE parent: `way`, the
+// shortest chain from the root down to it ("dmodule/idstatus/status"), and,
+// when that parent is in the minimal section, its neighbours there by the
+// XSD's order ("after <orig>, before <applic>"). Several parents (at most
+// PLACE_MAX_PARENTS, else nothing -- a list that long tells the LLM
+// nothing): `parents` only. Real case BRDP-EXT-02613 (3.0.1,
+// /dmodule[not(//actref)]): the LLM put <actref> in <descript>; it only goes
+// in <status> (or <pmstatus>, another schema).
+export function elementPlaces(structure, placement, names, skip = []) {
+  const elements = structure?.elements || {};
+  const models = structure?.models || {};
+  if (!placement?.root || !elements[placement.root]) return [];
+  const sectionNodes = placement.metadata?.tree ? treeNodes(placement.metadata.tree) : [];
+  const present = new Set([...(placement.path || []), ...sectionNodes.map((n) => n.name), placement.root]);
+  const fitsAt = placement.insertion && placement.contentInsertion !== false ? placement.insertion : placement.insertion ? null : placement.root;
+  const fits = new Set(fitsAt ? elements[fitsAt]?.children || [] : []);
+  const skipped = new Set(skip);
+  const out = [];
+  for (const name of [...new Set(names)]) {
+    if (!elements[name] || present.has(name) || fits.has(name) || skipped.has(name)) continue;
+    const parents = Object.keys(elements).filter((p) => (elements[p].children || []).includes(name)).sort();
+    if (parents.length === 0 || parents.length > PLACE_MAX_PARENTS) continue;
+    const place = { element: name, parents, way: null, after: null, before: null };
+    if (parents.length === 1) {
+      const way = shortestWay(elements, placement.root, parents[0]);
+      place.way = way ? way.join('/') : null;
+      const node = sectionNodes.find((n) => n.name === parents[0]);
+      if (node) {
+        const order = models[parents[0]]?.order || [];
+        const at = order.indexOf(name);
+        const siblings = (node.children || []).map((c) => c.name).filter((n) => order.indexOf(n) >= 0);
+        if (at >= 0) {
+          place.after = [...siblings].reverse().find((n) => order.indexOf(n) < at) || null;
+          place.before = siblings.find((n) => order.indexOf(n) > at) || null;
+        }
+      }
+    }
+    out.push(place);
+  }
+  return out;
+}
+
+// "<actref> goes inside <status> (dmodule/idstatus/status), after <orig> and
+// before <applic>." -- the same sentence for the prompt and the correction.
+export function placeSentence(place) {
+  if (place.parents.length > 1) {
+    const list = place.parents.map((p) => `<${p}>`);
+    return `<${place.element}> goes inside ${list.slice(0, -1).join(', ')} or ${list[list.length - 1]}.`;
+  }
+  const where = place.way ? ` (${place.way})` : '';
+  const between =
+    place.after && place.before
+      ? `, after <${place.after}> and before <${place.before}>`
+      : place.after
+        ? `, after <${place.after}>`
+        : place.before
+          ? `, before <${place.before}>`
+          : '';
+  return `<${place.element}> goes inside <${place.parents[0]}>${where}${between}.`;
+}
+
+// Moves, in `text`, an element the rule names (`names`) that sits where the
+// schema does not allow it, into its ONLY possible parent in this schema
+// when exactly one such parent is already in the text -- at its place by the
+// XSD's order. `keepsResult(before, after)` decides whether the move would
+// change what the rule selects or decides (then nothing moves: the example
+// goes to the correction round with the place). Nothing either with several
+// possible parents, or several (or no) instances of the parent.
+// → { text, moved: [{ element, parent, path }] }
+export function relocateToOnlyParent(text, structure, parentName, names, keepsResult = () => true) {
+  const original = String(text ?? '');
+  const elements = structure?.elements || {};
+  const models = structure?.models || {};
+  const wanted = new Set(names || []);
+  if (!wanted.size || !Object.keys(elements).length) return { text: original, moved: [] };
+  let current = original;
+  const moved = [];
+  const skip = new Set();
+  for (let pass = 0; pass < 20; pass += 1) {
+    const top = parseSpans(current);
+    if (!top) return { text: original, moved: [] };
+    let found = null;
+    const visit = (node, name) => {
+      for (const child of node.children) {
+        if (found) return;
+        if (
+          name &&
+          wanted.has(child.name) &&
+          elements[child.name] &&
+          elements[name] &&
+          !elements[name].children.includes(child.name) &&
+          !skip.has(`${name}>${child.name}@${child.start}`)
+        ) {
+          found = { node: child, parentName: name };
+          return;
+        }
+        visit(child, child.name);
+      }
+    };
+    visit(top, parentName);
+    if (!found) break;
+    const { node, parentName: wrong } = found;
+    const key = `${wrong}>${node.name}@${node.start}`;
+    const parents = Object.keys(elements).filter((p) => (elements[p].children || []).includes(node.name));
+    const targets = parents.length === 1 ? treeNodes(top).filter((n) => n.name === parents[0] && !n.selfClosing && n !== top) : [];
+    if (targets.length !== 1) {
+      skip.add(key);
+      continue;
+    }
+    const into = targets[0];
+    const raw = current.slice(node.start, node.end);
+    const siblings = into.children;
+    const at = orderIndex(models, into.name, node.name, siblings.map((c) => c.name));
+    const insertAt = at < siblings.length ? siblings[at].start : at > 0 ? siblings[at - 1].end : into.openEnd;
+    const next =
+      insertAt <= node.start
+        ? current.slice(0, insertAt) + raw + current.slice(insertAt, node.start) + current.slice(node.end)
+        : current.slice(0, node.start) + current.slice(node.end, insertAt) + raw + current.slice(insertAt);
+    if (!keepsResult(current, next)) {
+      skip.add(key);
+      continue;
+    }
+    current = next;
+    const chain = [];
+    const find = (n, trail) => {
+      if (n === into) return chain.push(...trail, n.name), true;
+      return n.children.some((c) => find(c, n.name ? [...trail, n.name] : trail));
+    };
+    find(top, parentName ? [parentName] : []);
+    moved.push({ element: node.name, parent: wrong, path: [...chain, node.name], onlyParent: true });
+  }
+  return { text: current, moved };
+}

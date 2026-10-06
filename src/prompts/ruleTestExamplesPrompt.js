@@ -13,6 +13,7 @@
 // and gives the verdict.
 import { readLlmJson } from './llmJson.js';
 import { buildSchemaFactsBlock } from './shared.js';
+import { placeSentence } from '../utils/schemaPlacement.js';
 import { metadataXml } from '../utils/ruleTestSkeleton.js';
 
 export const RULE_TEST_USER_MESSAGE = 'Write the test examples for this rule.';
@@ -190,6 +191,15 @@ function routeLines(p) {
   What those elements contain (use only these names, never invented attributes):${cards.join('')}`;
 }
 
+// Mejoras C, Part 2: where each element the rule names goes when it does
+// not fit where this example is written (elementPlaces, schemaPlacement.js)
+// -- its parent, the way down from the root and, in the identification and
+// status section, between which siblings. Nothing when every element fits.
+function placeLines(p) {
+  return (p.places || []).map((place) => `
+  ${placeSentence(place)}`).join('');
+}
+
 function placementLine(p, dita) {
   const allowed = p.allowedChildren.length > 0 ? p.allowedChildren.join(', ') : 'text only';
   const kind = dita ? 'topic type' : 'schema';
@@ -214,12 +224,12 @@ function placementLine(p, dita) {
   this minimal, valid one:
 ${minimalSection(p)}` : ''
     }
-  Allowed directly inside <${p.root}>: ${allowed}.${nestingLines(p)}`;
+  Allowed directly inside <${p.root}>: ${allowed}.${nestingLines(p)}${placeLines(p)}`;
   }
   if (p.metadata?.insertion && p.contentInsertion === false) {
     return `- ${kind} "${p.schema}": the application builds the rest of the document
   (${p.path.join('/')}); write no "content".
-${metadataLine(p)}`;
+${metadataLine(p)}${placeLines(p)}`;
   }
   // T4b: the skeleton's own <title> (a DITA topic's, mandatory).
   const titleLine =
@@ -236,7 +246,7 @@ ${metadataLine(p)}`;
   Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''
-  }`;
+  }${placeLines(p)}`;
 }
 
 // T4b: a rule whose context depends on the title of an element (for example
