@@ -72,6 +72,7 @@ import {
   parseXmlDocument,
   reason,
   stripLiterals,
+  withoutPredicates,
   xpathErrorMessage,
 } from './ruleTestCommon.js';
 
@@ -448,6 +449,95 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
     notExecutableParts: notRun,
     outOfScopeSchemas: [],
   };
+}
+
+// ─── Why an example was accepted (Mejoras B, Parts 1 and 3) ────────────────
+// The rule's contexts without their predicates: [{ ruleId, path, stripped,
+// flag: null }] -- one per sch:rule with a context.
+export function schematronRuleParts(ruleXml, options = {}) {
+  const parseXml = options.parseXml || parseXmlDocument;
+  let ruleDoc;
+  try {
+    ruleDoc = parseRuleDoc(ruleXml, parseXml);
+  } catch {
+    return [];
+  }
+  const { patterns } = parseSchematron(ruleDoc.documentElement);
+  const out = [];
+  for (const pattern of patterns) {
+    for (const rule of pattern.rules) {
+      if (rule.abstract || !rule.context) continue;
+      const path = collapse(rule.context);
+      out.push({ ruleId: pattern.ruleId, path, stripped: withoutPredicates(path), flag: null, schematron: true });
+    }
+  }
+  return out;
+}
+
+// For an example the rule accepted: per rule context, whether it matched
+// nothing because there is no node of that kind ('missing') or because no
+// node of that kind meets the context's predicates ('predicate'). A context
+// that matched something gives no detail (the assert held: its own text is
+// the explanation). A stripped context that cannot be evaluated safely (it
+// uses a variable, or the evaluation fails) is 'unsafe': the correction
+// round then works as before (it names the whole context).
+export function schematronAcceptanceDetails(ruleXml, fragmentXml, options = {}) {
+  const parseXml = options.parseXml || parseXmlDocument;
+  let doc;
+  let ruleDoc;
+  try {
+    doc = parseXml(String(fragmentXml || ''));
+    ruleDoc = parseRuleDoc(ruleXml, parseXml);
+    if (!doc?.documentElement) return [];
+  } catch {
+    return [];
+  }
+  const { patterns, globalLets, namespaces } = parseSchematron(ruleDoc.documentElement);
+  activeParseXml = parseXml;
+  const evaluate = makeEvaluator(doc, namespaces);
+  const out = [];
+  for (const pattern of patterns) {
+    const lets = [...globalLets, ...pattern.lets];
+    for (const rule of pattern.rules) {
+      if (rule.abstract || !rule.context) continue;
+      const path = collapse(rule.context);
+      const stripped = withoutPredicates(path);
+      const base = { ruleId: pattern.ruleId, flag: null, path, stripped, schematron: true };
+      let selected;
+      try {
+        selected = evaluate(documentExpr(lets, `//(${rule.context})`), doc, 'nodes');
+      } catch {
+        continue;
+      }
+      if (selected.length > 0) continue;
+      if (stripped === path) {
+        out.push({ ...base, case: 'missing', target: contextTarget(stripped) });
+        continue;
+      }
+      if (/\$/.test(stripLiterals(stripped))) {
+        out.push({ ...base, case: 'unsafe' });
+        continue;
+      }
+      let nodes;
+      try {
+        nodes = evaluate(documentExpr(lets, `//(${stripped})`), doc, 'nodes');
+      } catch {
+        out.push({ ...base, case: 'unsafe' });
+        continue;
+      }
+      if (nodes.length === 0) out.push({ ...base, case: 'missing', target: contextTarget(stripped) });
+      else out.push({ ...base, case: 'predicate', amount: nodes.length, target: contextTarget(stripped), predicate: path });
+    }
+  }
+  return out;
+}
+
+// "<name>" for a context's last step, "@name" for an attribute, or null.
+function contextTarget(context) {
+  const last = String(context).split(/\/+/).pop().trim();
+  const attr = /^@([\w.:-]+)$/.exec(last);
+  if (attr) return `@${attr[1]}`;
+  return /^[A-Za-z_][\w.:-]*$/.test(last) ? `<${last.replace(/^.*:/, '')}>` : null;
 }
 
 // ─── XPath 3.x syntax in an XPath 2.0 project ───────────────────────────────

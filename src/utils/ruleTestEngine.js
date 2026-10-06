@@ -130,9 +130,11 @@ import {
   nodePath,
   parseXmlDocument,
   reason,
+  stripLiterals,
+  withoutPredicates,
   xpathErrorMessage,
 } from './ruleTestCommon.js';
-import { analyzeSchematron, describeSchematron, runSchematronOnFragment, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
+import { analyzeSchematron, describeSchematron, runSchematronOnFragment, schematronAcceptanceDetails, schematronRuleParts, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
 import { checkRuleFormat, extractXPathNames } from '../validation/schemaValidation.js';
 
 export { nodePath, parseXmlDocument };
@@ -925,6 +927,225 @@ export function ruleConditions(ruleXml, format, options = {}) {
     }
   }
   return out;
+}
+
+// ─── Why an example was accepted (Mejoras B, Parts 1 and 3) ────────────────
+// The parts of a rule and their paths without predicates, for the
+// correction round (which must never push an example toward the rule):
+//   rulePathParts(ruleXml, format, options) →
+//     [{ ruleId, path, stripped, flag, schema, condition }]
+// Schematron: one entry per context, flag null.
+export function rulePathParts(ruleXml, format, options = {}) {
+  if (SCHEMATRON_FORMATS.includes(format)) return schematronRuleParts(ruleXml, options);
+  const spec = FORMATS[format];
+  if (!spec) return [];
+  const parseXml = options.parseXml || parseXmlDocument;
+  let ruleDoc;
+  try {
+    ruleDoc = parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
+    if (part.kind !== 'rule' || part.emptyContext) continue;
+    try {
+      const { expression, flag } = partBasics(part, spec);
+      const path = expression.replace(/\s+/g, ' ').trim();
+      out.push({
+        ruleId: part.ruleId,
+        path,
+        stripped: withoutPredicates(path),
+        flag,
+        schema: part.schema,
+        condition: isConditionPath(expression, parseXml),
+      });
+    } catch (err) {
+      if (!(err instanceof NotExecutable)) throw err;
+    }
+  }
+  return out;
+}
+
+// A single predicate on an attribute: [@a], [not(@a)], [@a = 'v'],
+// [@a != 'v'] (also eq / ne, either side) → { kind: 'has' | 'lacks' |
+// 'equals' | 'notEquals', attr, value? } or null.
+export function attributePredicate(predicate) {
+  const p = String(predicate || '').replace(/\s+/g, ' ').trim();
+  const name = String.raw`(?:@|attribute::)((?:[A-Za-z_][\w.-]*:)?[A-Za-z_][\w.-]*)`;
+  let m = new RegExp(`^${name}$`).exec(p);
+  if (m) return { kind: 'has', attr: m[1] };
+  m = new RegExp(`^not\\(\\s*${name}\\s*\\)$`).exec(p);
+  if (m) return { kind: 'lacks', attr: m[1] };
+  m = new RegExp(`^${name}\\s*(=|!=|eq|ne)\\s*(['"])([^'"]*)\\3$`).exec(p);
+  if (m) return { kind: m[2] === '=' || m[2] === 'eq' ? 'equals' : 'notEquals', attr: m[1], value: m[4] };
+  m = new RegExp(`^(['"])([^'"]*)\\1\\s*(=|!=|eq|ne)\\s*${name}$`).exec(p);
+  if (m) return { kind: m[3] === '=' || m[3] === 'eq' ? 'equals' : 'notEquals', attr: m[4], value: m[2] };
+  return null;
+}
+
+// The names of the steps of a predicate-free path: "//entry/*" → ['entry', '*'].
+function strippedStepNames(stripped) {
+  return String(stripped)
+    .split('/')
+    .map((s) => s.trim().replace(/^(?:child|descendant|descendant-or-self|self)::/, ''))
+    .filter(Boolean);
+}
+
+// What the example has instead, for a node path that selected nothing
+// although nodes of its kind are there (case b): one line of the cause.
+function predicateCause(alternative, stripped, nodes, evaluate) {
+  const step = lastTopLevelStep(alternative) || alternative;
+  const predicates = stepPredicateTexts(step);
+  const names = strippedStepNames(stripped);
+  const last = names[names.length - 1] || '';
+  const isAttr = /^@|^attribute::/.test(last);
+  let target;
+  let childOf = null;
+  if (last === '*' && names.length > 1 && /^[A-Za-z_][\w.:-]*$/.test(names[names.length - 2])) {
+    target = `<${names[names.length - 2]}>`;
+    childOf = target;
+  } else if (isAttr) target = `@${last.replace(/^@|^attribute::/, '')}`;
+  else if (/^[A-Za-z_][\w.:-]*$/.test(last)) target = `<${last}>`;
+  else target = null;
+  const amount = nodes.length;
+  if (predicates.length === 0) {
+    // the predicates are on earlier steps: name the whole path
+    return { code: 'cause_predicate_path', params: { amount, target: target || stripped, path: alternative } };
+  }
+  if (predicates.length === 1 && target) {
+    const attr = attributePredicate(predicates[0]);
+    if (attr) {
+      const code = { has: 'cause_attr_has', lacks: 'cause_attr_lacks', equals: 'cause_attr_equals', notEquals: 'cause_attr_not_equals' }[attr.kind];
+      return { code, params: { count: amount, amount, target, childOf, attr: `@${attr.attr}`, value: attr.value ?? '' } };
+    }
+  }
+  const params = { amount, target: target || stripped, predicate: predicates.map((p) => `[${p.replace(/\s+/g, ' ')}]`).join(''), childOf };
+  const threshold = pathThreshold(alternative);
+  if (threshold?.kind === 'nesting' && evaluate) {
+    let deepest = 0;
+    for (const node of nodes) {
+      try {
+        deepest = Math.max(deepest, evaluate(`count(ancestor-or-self::${threshold.name})`, node, null, 'number'));
+      } catch {
+        deepest = 0;
+        break;
+      }
+    }
+    if (deepest > 0) return { code: 'cause_predicate_nesting', params: { ...params, deepest, mode: threshold.mode, level: threshold.level } };
+  }
+  return { code: 'cause_predicate', params };
+}
+
+// For an example the rule ACCEPTED: per rule part in scope, why. Never
+// changes a verdict; the panel says it (Part 3), and case 'predicate' keeps
+// a reject example out of the correction round (Part 1):
+//   [{ ruleId, flag, path, stripped, case, cause: { code, params } | null }]
+// case: 'missing'   -- no node of the path's kind (without predicates)
+//       'predicate' -- nodes of that kind, none meets the predicates (b)
+//       'unsafe'    -- the path without predicates could not be evaluated
+//       'mandatory_present' | 'mandatory_absent_parent' | 'mandatory_somewhere'
+//       'values_allowed' | 'values_not_prohibited' | 'allowed' | 'condition'
+export function acceptanceDetails(ruleXml, format, fragmentXml, fragmentSchema = null, options = {}) {
+  if (SCHEMATRON_FORMATS.includes(format)) {
+    return schematronAcceptanceDetails(ruleXml, fragmentXml, options).map((d) => ({ ...d, cause: schematronCause(d) }));
+  }
+  const spec = FORMATS[format];
+  if (!spec) return [];
+  const parseXml = options.parseXml || parseXmlDocument;
+  let doc;
+  let ruleDoc;
+  try {
+    doc = parseXml(String(fragmentXml || ''));
+    ruleDoc = parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+    if (!doc?.documentElement) return [];
+  } catch {
+    return [];
+  }
+  const xsi = doc.documentElement.getAttributeNS
+    ? doc.documentElement.getAttributeNS(KNOWN_NAMESPACES.xsi, 'noNamespaceSchemaLocation')
+    : null;
+  const schema = fragmentSchema || (xsi ? schemaNameFromContext(xsi, options.schemaLocation || null) : null);
+  const evaluate = makeEvaluator(doc);
+  const evalNumber = (expression, node) => Number(fontoxpath.evaluateXPathToNumber(expression, node, null, null, { language: XPATH_LANGUAGE }));
+  const out = [];
+  for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
+    if (part.kind !== 'rule' || part.emptyContext) continue;
+    if (part.schema && part.schema !== schema) continue;
+    try {
+      const { expression, flag } = partBasics(part, spec);
+      const path = expression.replace(/\s+/g, ' ').trim();
+      const stripped = withoutPredicates(path);
+      const base = { ruleId: part.ruleId, flag, path, stripped };
+      const evaluated = evaluate(expression, doc, null, 'path');
+      if (evaluated.condition !== undefined) {
+        out.push({ ...base, case: 'condition', holds: evaluated.condition, cause: null });
+        continue;
+      }
+      const nodes = evaluated.nodes;
+      const valueEls = childElements(part.element, spec.value);
+      const matchers = valueEls.map((v) => buildValueMatcher(v, spec, evaluate));
+      const values = (list) => [...new Set(list.map((n) => String(n.nodeType === 2 ? n.value : n.textContent || '').trim()))];
+      if (flag === '1') {
+        const split = _splitTopLevel(expression);
+        if (split && _isContextPattern(split.parent)) {
+          const parents = evaluate(split.parent, doc, null, 'nodes');
+          const parentName = pathTarget(withoutPredicates(split.parent)) || withoutPredicates(split.parent);
+          const child = pathTarget(`x/${withoutPredicates(split.step)}`) || withoutPredicates(split.step);
+          if (parents.length === 0) out.push({ ...base, case: 'mandatory_absent_parent', cause: { code: 'cause_missing', params: { target: parentName } } });
+          else out.push({ ...base, case: 'mandatory_present', cause: { code: matchers.length ? 'cause_mandatory_present_values' : 'cause_mandatory_present', params: { parent: parentName, child } } });
+        } else {
+          out.push({ ...base, case: 'mandatory_somewhere', cause: { code: 'cause_mandatory_somewhere', params: { target: pathTarget(stripped) || stripped } } });
+        }
+        continue;
+      }
+      if (nodes.length > 0) {
+        if (matchers.length && flag !== '0') out.push({ ...base, case: 'values_allowed', cause: { code: 'cause_values_allowed', params: { count: values(nodes).length, values: values(nodes).map((v) => `«${v}»`).join(', ') } } });
+        else if (matchers.length && flag === '0') out.push({ ...base, case: 'values_not_prohibited', cause: { code: 'cause_values_not_prohibited', params: { count: values(nodes).length, values: values(nodes).map((v) => `«${v}»`).join(', ') } } });
+        else out.push({ ...base, case: 'allowed', cause: null });
+        continue;
+      }
+      // Nothing selected: case a (no node of that kind) or b (nodes of
+      // that kind, none meets the predicates), alternative by alternative.
+      if (/\$/.test(stripLiterals(stripped))) {
+        out.push({ ...base, case: 'unsafe', cause: null });
+        continue;
+      }
+      let found = null;
+      let unsafe = false;
+      for (const alternative of topLevelAlternatives(expression)) {
+        const alt = alternative.replace(/\s+/g, ' ').trim();
+        const altStripped = withoutPredicates(alt);
+        if (altStripped === alt) continue;
+        try {
+          const r = evaluate(altStripped, doc, null, 'path');
+          if (r.nodes?.length) {
+            found = { alt, altStripped, nodes: r.nodes };
+            break;
+          }
+        } catch {
+          unsafe = true;
+        }
+      }
+      if (found) {
+        const evalForCause = (e, node, _v, kind) => (kind === 'number' ? evalNumber(e, node) : evaluate(e, node, null, kind));
+        out.push({ ...base, case: 'predicate', amount: found.nodes.length, cause: predicateCause(found.alt, found.altStripped, found.nodes, evalForCause) });
+      } else if (unsafe) {
+        out.push({ ...base, case: 'unsafe', cause: null });
+      } else {
+        out.push({ ...base, case: 'missing', cause: { code: 'cause_missing', params: { target: pathTarget(stripped) || stripped } } });
+      }
+    } catch (err) {
+      if (!(err instanceof NotExecutable)) throw err;
+    }
+  }
+  return out;
+}
+
+function schematronCause(d) {
+  if (d.case === 'missing') return { code: 'cause_missing', params: { target: d.target || d.stripped } };
+  if (d.case === 'predicate') return { code: 'cause_sch_context', params: { amount: d.amount, target: d.target || d.stripped, context: d.path } };
+  return null;
 }
 
 // "Comparar dos BRDP lado a lado": the structure of a rule, for the

@@ -703,6 +703,11 @@ export default function RuleTestPanel({
             </p>
           )}
           <CorrectionNote correction={state.correction} />
+          {state.predicateSkipped > 0 && (
+            <p className={styles.ruleTestNote} data-testid="rule-test-predicate-skipped">
+              {t('records.ruleTest.predicateSkipped', { count: state.predicateSkipped })}
+            </p>
+          )}
           <UntestedNote untested={state.untested} />
           <p className={styles.hint}>{t('records.ruleTest.skeletonLegend')}</p>
           {state.examples.map((ex, i) => (

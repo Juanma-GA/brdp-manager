@@ -17,7 +17,7 @@ import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleT
 import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } from '../prompts/ruleProposalCheckPrompt.js';
 import { extractRuleNames } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
-import { describeRule, parseXmlDocument, ruleConditions } from './ruleTestEngine.js';
+import { describeRule, parseXmlDocument, ruleConditions, rulePathParts } from './ruleTestEngine.js';
 import { stripLiterals } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
@@ -247,18 +247,42 @@ async function attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, el
 // (no node on its paths, no node any Schematron context matches) can never
 // be rejected -- the test then ends "inconclusive" although the example
 // is valid. It goes to the correction round too, with what it must contain.
+// Mejoras B, Part 1: the correction round fixes markup, it never pushes an
+// example toward the rule:
+//   - an example the rule already rejects is never sent (a mandatory part,
+//     flag 1, rejects the parent that lacks the node, so nothing is
+//     "selected": BRDP-S1-00219 was sent back and the LLM added the
+//     <partSegment> -- since 007a9b1, when this check was written);
+//   - with nodes of the path's kind none of which meets its predicates
+//     (case b, run.predicateMiss), the example shows the decision and the
+//     rule does not cover it: not sent (the verdict says why);
+//   - with no node of that kind (case a) it is sent, naming the path
+//     WITHOUT its predicates (never a value or a threshold), and only for
+//     the parts that forbid or restrict (flag 0, flag 2, no objappl,
+//     Schematron contexts) -- a mandatory part is never asked for.
+// A context whose predicates cannot be removed safely (it uses a variable,
+// or the stripped path does not evaluate) is sent back as before, naming
+// the whole expression.
 export function missesRuleProblem(example, run, ruleXml) {
   if (example.expected !== 'reject' || !run.result || run.result.status === 'not_executable') return null;
+  if (run.result.status === 'rejected') return null;
   if (run.result.selectedNodePaths.length > 0) return null;
   // Plantillas, Part 4: a rule whose path is a true/false condition selects
   // no node; a reject example it accepted did not trigger the condition.
   const conditions = run.result.conditions || [];
-  if (conditions.length > 0) {
-    if (run.result.status === 'rejected') return null;
-    return conditions.map(conditionToMeet).join(' ');
+  if (conditions.length > 0) return conditions.map(conditionToMeet).join(' ');
+  if (run.predicateMiss) return null;
+  const details = run.acceptance;
+  if (!details || details.some((d) => d.case === 'unsafe')) {
+    const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
+    return `This example must contain a node matched by: ${matched}. Nothing in it matches, so the rule never runs.`;
   }
-  const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
-  return `This example must contain a node matched by: ${matched}. Nothing in it matches, so the rule never runs.`;
+  const missingParts = details.filter((d) => d.case === 'missing' && d.flag !== '1');
+  const missing = [...new Set(missingParts.map((d) => d.stripped))];
+  if (missing.length === 0) return null;
+  const matched = missing.map((e) => `\`${e}\``).join(' or ');
+  const stripped = missingParts.some((d) => d.stripped !== d.path) ? " (the rule's path without its predicates)" : '';
+  return `This example must contain a node matched by: ${matched}${stripped}. Nothing in it matches, so the rule never runs.`;
 }
 
 // C3, Part 1c: a rule that restricts VALUES only shows it accepts a valid
@@ -336,7 +360,14 @@ function conditionToMeet(c) {
     : `This example must make the rule's condition TRUE: \`${c.path.replace(/\s+/g, ' ').trim()}\` (the rule rejects a document where it is true); here it is false.`;
 }
 
-export function keepMatchedNodeProblem(ruleXml, conditions = []) {
+// Mejoras B, Part 1, point 4: what an invalid example meant to be
+// rejected must keep while its markup is fixed -- never "add the node the
+// rule looks for". parts: rulePathParts (ruleTestEngine.js); without it,
+// the old line (callers that do not know the format).
+//   flag 1 parts: do not change which elements are present or absent;
+//   flag 0 / 2 / Schematron: keep the nodes of the path without its
+//     predicates, and do not change what the example shows.
+export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null) {
   // A rule made only of conditions: keep what triggers them.
   if (conditions.length > 0 && conditions.length === ruleMatchExpressions(ruleXml).length) {
     const kept = conditions
@@ -344,15 +375,33 @@ export function keepMatchedNodeProblem(ruleXml, conditions = []) {
       .join(' and ');
     return `Keep ${kept}: fix the markup around it, do not remove it.`;
   }
-  const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
-  return matched ? `Keep a node matched by ${matched}: fix the markup around it, do not remove it.` : null;
+  if (!parts) {
+    const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
+    return matched ? `Keep a node matched by ${matched}: fix the markup around it, do not remove it.` : null;
+  }
+  const nodeParts = parts.filter((p) => !p.condition);
+  const lines = [];
+  if (nodeParts.some((p) => p.flag === '1')) {
+    lines.push('Do not change which elements are present or absent in this example: fix only the markup named above.');
+  }
+  const kept = [...new Set(nodeParts.filter((p) => p.flag !== '1').map((p) => p.stripped))];
+  if (kept.length) {
+    lines.push(
+      `Keep the nodes matched by ${kept.map((e) => `\`${e}\``).join(' or ')}: fix only the markup named above, and do not change what the example shows (its nesting, how many elements there are, the values, or which element each attribute is on).`
+    );
+  }
+  return lines.join(' ') || null;
 }
 
 // The examples the correction round must fix: [{ index, label, problems }].
 export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, setup = null, parseXml = parseXmlDocument }) {
   const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
   const ruleNames = extractRuleNames(ruleXml);
-  const keep = keepMatchedNodeProblem(ruleXml, format ? ruleConditions(ruleXml, format, { parseXml }) : []);
+  const keep = keepMatchedNodeProblem(
+    ruleXml,
+    format ? ruleConditions(ruleXml, format, { parseXml }) : [],
+    format ? rulePathParts(ruleXml, format, { parseXml }) : null
+  );
   return runs
     .map((r, index) => {
       const missing = r.validation.runnable ? missesRuleProblem(examples[index], r, ruleXml) : null;
@@ -483,6 +532,10 @@ export async function generateRuleTestExamples({
     // (T4b) reject examples the rule never runs on. What still fails is
     // shown as it is, with its warnings -- never dropped.
     const failures = exampleFailures(examples, materialized, runs, { ruleXml, standard, format, setup: prepared.setup, parseXml });
+    // Mejoras B, Part 1, point 6: the reject examples kept out of the
+    // correction round because the rule's predicates leave their nodes out
+    // (case b) -- the panel says how many.
+    const predicateSkipped = runs.filter((r, i) => examples[i].expected === 'reject' && r.predicateMiss).length;
     let correction = null;
     if (failures.length > 0) {
       correction = { attempted: failures.length, fixed: 0, failed: null };
@@ -523,6 +576,7 @@ export async function generateRuleTestExamples({
       examples: materialized,
       runs,
       correction,
+      predicateSkipped,
       setup: prepared.setup,
       untested: prepared.untested,
       systemPrompt,

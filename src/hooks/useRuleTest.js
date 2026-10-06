@@ -175,8 +175,8 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       return;
     }
     setupRef.current = result.setup;
-    const { proposalCheck, examples, runs, correction, untested } = result;
-    setState({ status: 'ready', proposalCheck, examples, runs, correction, untested });
+    const { proposalCheck, examples, runs, correction, predicateSkipped, untested } = result;
+    setState({ status: 'ready', proposalCheck, examples, runs, correction, predicateSkipped, untested });
     if (!onDemand) {
       // A passed test keeps its examples (Guardar la prueba aprobada).
       const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalCheck)), examples, runs, brdp?.proposal);

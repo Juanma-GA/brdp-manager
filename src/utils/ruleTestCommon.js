@@ -91,3 +91,30 @@ export function nodePath(node) {
 export function stripLiterals(expression) {
   return String(expression || '').replace(/'[^']*'|"[^"]*"/g, "''");
 }
+
+// Mejoras B, Part 1: the expression without its predicates ([…], nested
+// ones included), string literals OUTSIDE the predicates kept -- the path
+// the rule walks before filtering, to tell "no node of that kind here"
+// from "nodes of that kind, none of which meets the predicate". Steps such
+// as * and the axes are kept: //entry/*[@a] → //entry/*.
+export function withoutPredicates(expression) {
+  let out = '';
+  let depth = 0;
+  let quote = '';
+  for (const ch of String(expression || '')) {
+    if (quote) {
+      if (depth === 0) out += ch;
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      if (depth === 0) out += ch;
+      continue;
+    }
+    if (ch === '[') depth += 1;
+    else if (ch === ']') depth = Math.max(0, depth - 1);
+    else if (depth === 0) out += ch;
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}

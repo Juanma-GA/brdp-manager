@@ -613,19 +613,27 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   });
   check('T4b EXT-00001: prompt says the rule depends on a title', asked[0].systemPrompt.includes('THE RULE DEPENDS ON A TITLE'));
   check('T4b EXT-00001: prompt never quotes a real title as the example', asked[0].systemPrompt.includes('<section><title>Parts list</title><table>…</table></section>'));
-  check('T4b EXT-00001: one correction round asked', asked.length === 2 && asked[1].messages.at(-1).content.includes('This example must contain a node matched by: `*[title = ('), asked[1]?.messages.at(-1).content);
+  // Mejoras B, Part 1: the reject example has a table with the title on
+  // the table: rows are there, none is under a titled element -- case b
+  // (the context's predicates leave them out). It shows the decision and is
+  // never pushed toward the rule: not sent back, and the verdict says the
+  // rule accepted it (before, T4b sent it back with the whole context and
+  // the LLM moved the title into a <section>).
+  check('MB1 EXT-00001: one correction round asked (accept example only)', asked.length === 2 && !asked[1].messages.at(-1).content.includes('Example 2 ('), asked[1]?.messages.at(-1).content);
   // C3, Part 1c: EXT-00001 checks cell values, so the accept example (title
-  // on the table, so the rule selects nothing in it either) goes back too.
-  check('T4b EXT-00001: correction names the reject example (misses)', asked[1].messages.at(-1).content.includes('Example 2 ("quantity missing")'));
+  // on the table, so the rule selects nothing in it either) goes back.
   check('C3 1c EXT-00001: accept example without a selected node sent back too', asked[1].messages.at(-1).content.includes('Example 1 ("quantity given"):\n- The rule checks values, so at least one example meant to be accepted must contain a node matched by: `*[title = ('), asked[1].messages.at(-1).content);
-  check('T4b EXT-00001: fixed', result.status === 'ready' && result.correction.attempted === 2 && result.correction.fixed === 2, JSON.stringify(result.correction));
-  check('T4b EXT-00001: reject example now in a titled section', result.examples[1].content.startsWith('<section><title>LISTA DE MATERIAL OBLIGATORIO</title><table>'));
-  check('T4b EXT-00001: reject example rejected', result.runs[1].result.status === 'rejected' && result.runs[1].result.selectedNodePaths.length > 0, JSON.stringify(result.runs[1].result));
+  check('MB1 EXT-00001: accept example fixed', result.status === 'ready' && result.correction.attempted === 1 && result.correction.fixed === 1, JSON.stringify(result.correction));
+  check('MB1 EXT-00001: reject example kept as written', result.examples[1].content.startsWith('<table><title>LISTA DE MATERIAL OBLIGATORIO</title>'));
+  check('MB1 EXT-00001: reject example accepted, case b', result.runs[1].result.status === 'accepted' && result.runs[1].predicateMiss === true, JSON.stringify(result.runs[1].result));
+  check('MB1 EXT-00001: cause names the rows and the context', result.runs[1].acceptance[0]?.cause?.code === 'cause_sch_context' && result.runs[1].acceptance[0].cause.params.amount === 1 && result.runs[1].acceptance[0].cause.params.target === '<row>', JSON.stringify(result.runs[1].acceptance));
   check('T4b EXT-00001: topic title in the assembled document', result.examples[1].xml.startsWith(`<topic>\n  <title>${SKELETON_TITLE_TEXT}</title>`), result.examples[1].xml);
   const verdict = ruleTestVerdict(result.examples, result.runs, analyzeRule(ext1.Rule, 'SCH-DITA', { parseXml }));
-  check('T4b EXT-00001: verdict correct', verdict.kind === 'correct', JSON.stringify(verdict));
+  check('MB1 EXT-00001: verdict incorrect (permissive)', verdict.kind === 'incorrect' && verdict.permissive === true, JSON.stringify(verdict));
 
-  // Still nothing selected after the round → inconclusive, as before.
+  // The LLM keeps the title on the table in the correction: the accept
+  // example is not fixed; the verdict is still "incorrect", never
+  // "inconclusive" (case b is checked before "nothing selected").
   const stubborn = await generateRuleTestExamples({
     ruleXml: ext1.Rule, format: 'SCH-DITA', standard: DITA3, schemaLocation: 'flat',
     brdp: { identifier: 'BRDP-EXT-00001', title: '', definition: '', proposal: '' },
@@ -635,7 +643,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     fetchStructure: async (_std, schema) => ({ available: true, ...structureOf(DITA, schema) }),
   });
   const stubbornVerdict = ruleTestVerdict(stubborn.examples, stubborn.runs, analyzeRule(ext1.Rule, 'SCH-DITA', { parseXml }));
-  check('T4b EXT-00001: still nothing → 0 of 1 fixed, inconclusive', stubborn.correction.fixed === 0 && stubbornVerdict.kind === 'inconclusive', JSON.stringify({ c: stubborn.correction, v: stubbornVerdict }));
+  check('MB1 EXT-00001: still on the table → 0 of 1 fixed, incorrect', stubborn.correction.fixed === 0 && stubbornVerdict.kind === 'incorrect', JSON.stringify({ c: stubborn.correction, v: stubbornVerdict }));
 
   // Respuestas cortadas por el límite de tokens: a cut answer is said as
   // such, never "not valid JSON" -- in the generation and in the correction
@@ -1647,7 +1655,9 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   // told to keep what the rule checks. Real case: the reject example had a
   // <changeInline> around an invalid element and the correction replaced it
   // with plain text (the test ended inconclusive).
-  const keepLine = 'Keep a node matched by `//changeInline[* and not(text()[normalize-space()])]`: fix the markup around it, do not remove it.';
+  // Mejoras B, Part 1: the line names the path WITHOUT its predicates and
+  // asks not to change what the example shows.
+  const keepLine = 'Keep the nodes matched by `//changeInline`: fix only the markup named above, and do not change what the example shows (its nesting, how many elements there are, the values, or which element each attribute is on).';
   const brokenReject = '<changeInline changeMark="1"><pokemonRef>Warning lights</pokemonRef></changeInline> come on.';
   const wordsAccept = 'Set the valve <changeInline changeMark="1">to the open position</changeInline>.';
   const broken40 = run41(R40, [
@@ -1665,7 +1675,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const fAccept = exampleFailures(
     [{ label: 'words', expected: 'accept' }, { label: 'element', expected: 'reject' }],
     brokenAccept.materialized, brokenAccept.runs, { ruleXml: R40, standard: S41, format: 'BREX-4.1', parseXml });
-  check('keep matched node: never on an accept example', fAccept.length === 1 && fAccept[0].index === 0 && !fAccept[0].problems.some((p) => p.startsWith('Keep a node')), JSON.stringify(fAccept));
+  check('keep matched node: never on an accept example', fAccept.length === 1 && fAccept[0].index === 0 && !fAccept[0].problems.some((p) => p.startsWith('Keep')), JSON.stringify(fAccept));
   const missing40 = run41(R40, [
     { label: 'words', expected: 'accept', schema: 'descript', content: wordsAccept },
     { label: 'element', expected: 'reject', schema: 'descript', content: 'Warning lights come on.' },
@@ -1687,7 +1697,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
       asked40.push({ messages, systemPrompt });
       if (asked40.length === 1) return answer40(brokenReject);
       // Like the real LLM: without the keep line it drops the changeInline.
-      return answer40(messages.at(-1).content.includes('Keep a node matched by')
+      return answer40(messages.at(-1).content.includes('Keep the nodes matched by')
         ? '<changeInline changeMark="1"><emphasis>Warning lights</emphasis></changeInline> come on.'
         : 'Warning lights come on.');
     },
@@ -2855,6 +2865,151 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('section: pm → pmAddress/pmIdent', pmProblems[0].includes('identAndStatusSection/pmAddress/pmIdent/language'), pmProblems[0]);
   const content = exampleProblems({ wellFormed: true, structure: [{ kind: 'notAllowed', element: 'language', parent: 'para' }] }, { standard: 'S1000D 4.2', schema: 'descript', sectionTree: st.skeleton.metadata.tree });
   check('section: a problem outside the section gets no hint', !content[0].includes('minimal section'));
+}
+
+// ─── Mejoras B, Part 1: the correction round never pushes an example toward the rule ──
+{
+  const DITA = 'DITA 1.3 Xpath2.0';
+  const vocabDita = vocabOf('schema-vocabulary-dita.json');
+  const IPD = 'http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd';
+  // The real Lufthansa BRDP-S1-00219 (flag 1, limited to ipd).
+  const S219 = `<contextRules rulesContext="${IPD}"><structureObjectRuleGroup><structureObjectRule id="BRDP-S1-00219"><objectPath allowedObjectFlag="1">//itemSeqNumber/partSegment</objectPath><objectUse>BRDP-S1-00219. partSegment shall be used.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+  const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+  const segment = '<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>';
+  const partRef = (extra = '') => `<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"${extra}/>`;
+  const ex219 = [
+    { label: 'with part data', expected: 'accept', schema: 'ipd', content: csn(segment) },
+    { label: 'part reference only', expected: 'reject', schema: 'ipd', content: csn(partRef()) },
+  ];
+  const setup219 = setupFor('S1000D 4.2', S219, ['ipd']);
+  const r219 = testRun(S219, ex219, setup219);
+  check('MB1 S1-00219: reject example rejected with nothing selected', r219.runs[1].result.status === 'rejected' && r219.runs[1].result.selectedNodePaths.length === 0, JSON.stringify(r219.runs[1].result));
+  check('MB1 S1-00219: never sent to correction (point 1)', missesRuleProblem(ex219[1], r219.runs[1], S219) === null);
+  const f219 = exampleFailures(ex219, r219.materialized, r219.runs, { ruleXml: S219, standard: 'S1000D 4.2', format: 'BREX-4.2', setup: setup219, parseXml });
+  check('MB1 S1-00219: no failures', f219.length === 0, JSON.stringify(f219));
+  check('MB1 S1-00219: verdict correct', r219.verdict.kind === 'correct', JSON.stringify(r219.verdict));
+  // Before (since 007a9b1): the reject example was sent back with the whole
+  // path and the LLM added <partSegment>.
+  const asked219 = [];
+  const answer219 = (rejectContent) => JSON.stringify({ examples: [
+    { label: 'with part data', expected: 'accept', schema: 'ipd', content: csn(segment) },
+    { label: 'part reference only', expected: 'reject', schema: 'ipd', content: rejectContent },
+  ] });
+  const cards42 = async (_std, names) => ({ cards: {}, document_schemas: ['descript', 'proced', 'ipd'], element_schemas: Object.fromEntries(names.map((n) => [n, ['ipd'].filter((t) => structureOf('S1000D 4.2', t).elements[n])])) });
+  const gen219 = await generateRuleTestExamples({
+    ruleXml: S219, format: 'BREX-4.2', standard: 'S1000D 4.2', schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-S1-00219', title: 'Part data', definition: '', proposal: 'The element <partSegment> shall be used to store the part data in the IPD data module each time the part is listed.' },
+    vocabulary, parseXml,
+    ask: async (messages, systemPrompt) => {
+      asked219.push({ messages, systemPrompt });
+      // Like the real LLM: told the whole path, it adds the node.
+      return answer219(asked219.length > 1 && messages.at(-1).content.includes('//itemSeqNumber/partSegment') ? csn(partRef() + segment) : csn(partRef()));
+    },
+    fetchSchemaCards: cards42,
+    fetchStructure: async (_std, schema) => ({ available: true, ...structureOf('S1000D 4.2', schema) }),
+  });
+  check('MB1 S1-00219 (generation): no correction round', asked219.length === 1 && gen219.correction === null, JSON.stringify(gen219.correction));
+  check('MB1 S1-00219 (generation): verdict correct', ruleTestVerdict(gen219.examples, gen219.runs, analyzeRule(S219, 'BREX-4.2', { parseXml })).kind === 'correct');
+
+  // An invalid reject example (an invented attribute in <partRef>): sent
+  // back for its markup, never told to keep or add <partSegment>.
+  const bad219 = [ex219[0], { ...ex219[1], content: csn(partRef(' pokemonCode="x"')) }];
+  const rb = testRun(S219, bad219, setup219);
+  const fb = exampleFailures(bad219, rb.materialized, rb.runs, { ruleXml: S219, standard: 'S1000D 4.2', format: 'BREX-4.2', setup: setup219, parseXml });
+  check('MB1 S1-00219 invalid: sent back for its markup', fb.length === 1 && fb[0].index === 1 && fb[0].problems.some((p) => p.includes('pokemonCode')), JSON.stringify(fb));
+  check('MB1 S1-00219 invalid: no line names <partSegment> to keep or add', !fb[0].problems.some((p) => p.includes('partSegment')), JSON.stringify(fb[0].problems));
+  check('MB1 S1-00219 invalid: told not to change which elements are present', fb[0].problems.at(-1) === 'Do not change which elements are present or absent in this example: fix only the markup named above.', fb[0].problems.at(-1));
+
+  // S1-00186 (>5, real false pass): 5 and 6 levels → case b, no correction,
+  // verdict incorrect (before: the correction gave the predicate path and
+  // the LLM added a 7th level → "correct").
+  const S186 = '<structureObjectRule id="BRDP-S1-00186"><objectPath allowedObjectFlag="0">//proceduralStep[count(ancestor::proceduralStep)&gt;5]</objectPath><objectUse>BRDP-S1-00186. A maximum of five levels of procedural steps.</objectUse></structureObjectRule>';
+  const nested = (n) => { let x = '<para>Do it.</para>'; for (let i = 0; i < n; i += 1) x = `<proceduralStep>${x}</proceduralStep>`; return x; };
+  const ex186 = [
+    { label: 'five levels', expected: 'accept', schema: 'proced', content: nested(5) },
+    { label: 'six levels', expected: 'reject', schema: 'proced', content: nested(6) },
+  ];
+  const setup186 = setupFor('S1000D 4.2', S186, ['proced']);
+  const r186 = testRun(S186, ex186, setup186);
+  check('MB1 S1-00186: six levels accepted, case b', r186.runs[1].result.status === 'accepted' && r186.runs[1].predicateMiss === true, JSON.stringify(r186.runs[1].acceptance));
+  check('MB1 S1-00186: not sent to correction', exampleFailures(ex186, r186.materialized, r186.runs, { ruleXml: S186, standard: 'S1000D 4.2', format: 'BREX-4.2', setup: setup186, parseXml }).length === 0);
+  check('MB1 S1-00186: verdict incorrect (permissive), not inconclusive', r186.verdict.kind === 'incorrect' && r186.verdict.permissive, JSON.stringify(r186.verdict));
+  const c186 = r186.runs[1].acceptance[0].cause;
+  check('MB1 S1-00186: cause with the deepest level and the rejection level', c186.code === 'cause_predicate_nesting' && c186.params.amount === 6 && c186.params.deepest === 6 && c186.params.level === 7, JSON.stringify(c186));
+  // case a: no <proceduralStep> at all → sent back with the path WITHOUT predicates
+  const none186 = [ex186[0], { label: 'none', expected: 'reject', schema: 'proced', content: '<proceduralStep><para>x</para></proceduralStep>' }];
+  const r186a = testRun(S186, [ex186[0], { label: 'none', expected: 'reject', schema: 'descript', content: '<para>No steps here.</para>' }], setupFor('S1000D 4.2', S186, ['proced', 'descript']));
+  const m186 = missesRuleProblem({ expected: 'reject' }, r186a.runs[1], S186);
+  check('MB1 case a: path without predicates, never the threshold', m186 === "This example must contain a node matched by: `//proceduralStep` (the rule's path without its predicates). Nothing in it matches, so the rule never runs.", m186);
+  void none186;
+
+  // S1-00123 (applicability at entry level): the attribute on <entry>, the
+  // rule looks at entry's children → case b, no correction, incorrect.
+  const S123 = '<structureObjectRule id="BRDP-S1-00123"><objectPath allowedObjectFlag="0">//entry/*[@applicRefId]</objectPath><objectUse>BRDP-S1-00123. No applicability at entry level.</objectUse></structureObjectRule>';
+  const tbl = (entry) => `<table><tgroup cols="1"><tbody><row applicRefId="a1">${entry}</row></tbody></tgroup></table>`;
+  const ex123 = [
+    { label: 'row level', expected: 'accept', schema: 'descript', content: tbl('<entry><para>1</para></entry>') },
+    { label: 'entry level', expected: 'reject', schema: 'descript', content: tbl('<entry applicRefId="a3"><para>1</para></entry>') },
+  ];
+  const setup123 = setupFor('S1000D 4.2', S123, ['descript']);
+  const r123 = testRun(S123, ex123, setup123);
+  check('MB1 S1-00123: entry-level example accepted, case b', r123.runs[1].predicateMiss === true, JSON.stringify(r123.runs[1]));
+  check('MB1 S1-00123: not sent to correction', exampleFailures(ex123, r123.materialized, r123.runs, { ruleXml: S123, standard: 'S1000D 4.2', format: 'BREX-4.2', setup: setup123, parseXml }).length === 0);
+  check('MB1 S1-00123: verdict incorrect', r123.verdict.kind === 'incorrect' && r123.verdict.permissive, JSON.stringify(r123.verdict));
+  const c123 = r123.runs[1].acceptance[0].cause;
+  check('MB1 S1-00123: cause "1 child of <entry>, none has @applicRefId"', c123.code === 'cause_attr_has' && c123.params.amount === 1 && c123.params.childOf === '<entry>' && c123.params.attr === '@applicRefId', JSON.stringify(c123));
+
+  // Path ending in an attribute: no predicates → never case b.
+  const ATTR = '<structureObjectRule><objectPath allowedObjectFlag="0">//entry/@applicRefId</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const rAttr = testRun(ATTR, [{ label: 'r', expected: 'reject', schema: 'descript', content: tbl('<entry><para>1</para></entry>') }], setupFor('S1000D 4.2', ATTR, ['descript']));
+  check('MB1 attribute path: case a, no parenthesis', rAttr.runs[0].predicateMiss === false && missesRuleProblem({ expected: 'reject' }, rAttr.runs[0], ATTR) === 'This example must contain a node matched by: `//entry/@applicRefId`. Nothing in it matches, so the rule never runs.');
+  // * kept when the predicates are removed
+  check('MB1 stripped keeps *', r123.runs[1].acceptance[0].stripped === '//entry/*');
+  // Predicate on an intermediate step: every predicate removed.
+  const MID = '<structureObjectRule><objectPath allowedObjectFlag="0">//randomList[@listItemPrefix]/listItem</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const rMid = testRun(MID, [{ label: 'r', expected: 'reject', schema: 'descript', content: 'See <randomList><listItem><para>a</para></listItem></randomList>' }], setupFor('S1000D 4.2', MID, ['descript']));
+  check('MB1 intermediate predicate: case b with the whole path', rMid.runs[0].result && rMid.runs[0].predicateMiss && rMid.runs[0].acceptance[0].stripped === '//randomList/listItem' && rMid.runs[0].acceptance[0].cause.code === 'cause_predicate_path', JSON.stringify({ v: rMid.runs[0].validation, a: rMid.runs[0].acceptance }));
+  // Alternatives: one alternative with nodes is enough for case b.
+  const ALT = '<structureObjectRule><objectPath allowedObjectFlag="0">//randomList[@listItemPrefix] | //proceduralStep[count(ancestor::proceduralStep)&gt;5]</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const rAlt = testRun(ALT, [{ label: 'r', expected: 'reject', schema: 'proced', content: nested(2) }], setupFor('S1000D 4.2', ALT, ['proced']));
+  check('MB1 alternatives: case b from the second alternative', rAlt.runs[0].predicateMiss === true, JSON.stringify(rAlt.runs[0].acceptance));
+
+  // Several parts (flag 1 and flag 0): one rejecting is enough for point 1.
+  const MIX = `<structureObjectRule id="M1"><objectPath allowedObjectFlag="1">//itemSeqNumber/partSegment</objectPath><objectUse>x</objectUse></structureObjectRule><structureObjectRule id="M2"><objectPath allowedObjectFlag="0">//randomList</objectPath><objectUse>y</objectUse></structureObjectRule>`;
+  const rMix = testRun(MIX, [ex219[1]], setupFor('S1000D 4.2', MIX, ['ipd']));
+  check('MB1 mixed parts: rejected by one → never sent', rMix.runs[0].result.status === 'rejected' && missesRuleProblem(ex219[1], rMix.runs[0], MIX) === null);
+  // flag 1 somewhere: rejected → never sent
+  const SOME = '<structureObjectRule><objectPath allowedObjectFlag="1">//emphasis</objectPath><objectUse>x</objectUse></structureObjectRule>';
+  const rSome = testRun(SOME, [{ label: 'r', expected: 'reject', schema: 'descript', content: 'No emphasis.' }], setupFor('S1000D 4.2', SOME, ['descript']));
+  check('MB1 flag 1 somewhere: rejected → never sent', rSome.runs[0].result?.status === 'rejected' && missesRuleProblem({ expected: 'reject' }, rSome.runs[0], SOME) === null, JSON.stringify(rSome.runs[0]));
+  // flag 1 with values: rejected → never sent
+  const VAL1 = '<structureObjectRule><objectPath allowedObjectFlag="1">//emphasis/@emphasisType</objectPath><objectUse>x</objectUse><objectValue valueForm="single" valueAllowed="em01"/></structureObjectRule>';
+  const rVal1 = testRun(VAL1, [{ label: 'r', expected: 'reject', schema: 'descript', content: 'An <emphasis>important</emphasis> word.' }], setupFor('S1000D 4.2', VAL1, ['descript']));
+  check('MB1 flag 1 with values: rejected → never sent', rVal1.runs[0].result?.status === 'rejected' && rVal1.runs[0].result.selectedNodePaths.length === 0 && missesRuleProblem({ expected: 'reject' }, rVal1.runs[0], VAL1) === null, JSON.stringify(rVal1.runs[0]));
+  // An accept example the rule rejects: as before (no acceptance details).
+  const rAcc = testRun(S186, [{ label: 'a', expected: 'accept', schema: 'proced', content: nested(7) }], setup186);
+  check('MB1 accept example rejected: as before', rAcc.runs[0].matches === false && rAcc.runs[0].acceptance === null);
+
+  // keep line by flag
+  const parts = (x) => [{ path: x, stripped: x, flag: '0' }];
+  check('MB1 keep: flag 0 → the path without predicates', keepMatchedNodeProblem(S186, [], [{ path: '//proceduralStep[count(ancestor::proceduralStep)>5]', stripped: '//proceduralStep', flag: '0' }]).startsWith('Keep the nodes matched by `//proceduralStep`: fix only the markup named above'));
+  check('MB1 keep: flag 1 → never "keep a node"', keepMatchedNodeProblem(S219, [], [{ path: '//itemSeqNumber/partSegment', stripped: '//itemSeqNumber/partSegment', flag: '1' }]) === 'Do not change which elements are present or absent in this example: fix only the markup named above.');
+  void parts;
+
+  // Hand-edited examples: Parts 1-3 apply (never corrected).
+  const edited = editExample(r186.materialized[1], nested(6), null, setup186, parseXml);
+  const rEdited = runExample(S186, 'BREX-4.2', edited, { vocabulary, parseXml });
+  check('MB1 edited example: case b computed too', rEdited.predicateMiss === true);
+
+  // Schematron: a context whose predicates are removed; a variable outside
+  // the predicates → unsafe → as before (the whole context).
+  const SCH = '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron" id="P1"><sch:rule context="note[@type = \'danger\']"><sch:assert test="false()">x</sch:assert></sch:rule></sch:pattern>';
+  const rSch = testRun(SCH, [{ label: 'r', expected: 'reject', schema: 'topic', content: '<note type="tip"><p>x</p></note>' }], setupFor(DITA, SCH, ['topic']), { format: 'SCH-DITA', vocab: vocabDita });
+  check('MB1 Schematron: case b on the context', rSch.runs[0].predicateMiss === true && rSch.runs[0].acceptance[0].cause.code === 'cause_sch_context', JSON.stringify(rSch.runs[0].acceptance));
+  const SCHV = '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron" id="P1"><sch:let name="n" value="//note"/><sch:rule context="$n[@type = \'danger\']"><sch:assert test="false()">x</sch:assert></sch:rule></sch:pattern>';
+  const rSchV = testRun(SCHV, [{ label: 'r', expected: 'reject', schema: 'topic', content: '<p>x</p>' }], setupFor(DITA, SCHV, ['topic']), { format: 'SCH-DITA', vocab: vocabDita });
+  const mSchV = missesRuleProblem({ expected: 'reject' }, rSchV.runs[0], SCHV);
+  check('MB1 Schematron unsafe: as before, the whole context', rSchV.runs[0].acceptance?.[0]?.case === 'unsafe' && mSchV === "This example must contain a node matched by: `$n[@type = 'danger']`. Nothing in it matches, so the rule never runs.", JSON.stringify({ a: rSchV.runs[0].acceptance, mSchV }));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

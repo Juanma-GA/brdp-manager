@@ -17,7 +17,7 @@
 //   / not executable / nothing runnable).
 // - xmlDisplayLines: the example re-indented, split into segments so the
 //   panel can highlight the nodes the rule selected and dim the skeleton.
-import { nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
+import { acceptanceDetails, nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
 import {
   addMissingCalsColspecs,
   checkAgainstVocabulary,
@@ -401,7 +401,24 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
   });
   const expectedStatus = example.expected === 'reject' ? 'rejected' : 'accepted';
   const matches = result.status === 'not_executable' ? null : result.status === expectedStatus;
-  return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result) };
+  // Mejoras B, Parts 1 and 3: for an example meant to be rejected that the
+  // rule accepted, why -- per rule part, with the path without predicates.
+  // predicateMiss (case b): the rule selected nothing, but nodes of the
+  // kind its path names are there and none meets its predicates -- the
+  // example shows the decision and the rule does not cover it: never sent
+  // to the correction round, and the verdict is "incorrect", not
+  // "inconclusive".
+  const acceptance =
+    example.expected === 'reject' && result.status === 'accepted'
+      ? acceptanceDetails(ruleXml, format, example.xml, example.schema || null, { parseXml, schemaLocation: example.schemaLocation || schemaLocation })
+      : null;
+  const predicateMiss = Boolean(
+    acceptance &&
+      result.selectedNodePaths.length === 0 &&
+      !(result.conditions?.length > 0) &&
+      acceptance.some((d) => d.case === 'predicate')
+  );
+  return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result), acceptance, predicateMiss };
 }
 
 // Rule test on DM metadata: a rejection whose every offending node is in
@@ -466,7 +483,13 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
   }
   // A condition (Plantillas, Part 4) is always evaluated on the document,
   // so a rule made of conditions has always looked at it.
-  if (ran.every((r) => r.result.selectedNodePaths.length === 0 && !(r.result.conditions?.length > 0))) return { kind: 'inconclusive', why: 'nothing_selected' };
+  // Mejoras B, Part 3: an example whose nodes the rule's predicates leave
+  // out (case b) shows the rule is permissive -- checked before "nothing
+  // selected".
+  if (
+    !runs.some((r) => r.predicateMiss) &&
+    ran.every((r) => r.result.selectedNodePaths.length === 0 && !(r.result.conditions?.length > 0))
+  ) return { kind: 'inconclusive', why: 'nothing_selected' };
   const ranExpectations = new Set(runs.map((r, i) => (r.result ? examples[i].expected : null)).filter(Boolean));
   const mismatches = runs.map((r, i) => (r.matches === false ? examples[i].expected : null)).filter(Boolean);
   if (mismatches.length > 0) {
