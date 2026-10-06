@@ -90,6 +90,22 @@ npm run build
 
 The static frontend in `dist/` is served by nginx (`nginx.conf`, `Dockerfile`); the API is the FastAPI backend.
 
+## Comprobaciones
+
+Un solo comando comprueba todo lo que no necesita navegador. Es igual en PowerShell y en Linux (son scripts de Node, sin sintaxis de shell); se ejecuta desde la raíz del repo:
+
+```bash
+npm run check:all
+```
+
+- `npm run check` -- lint, build, tests JS (`scripts/test-*.mjs`), snapshot de prompts y lint de las plantillas, parando en el primer fallo.
+- `npm run check:all` -- lo mismo más los tests del backend (pytest). Necesita Postgres arrancado (Linux: `service postgresql start`; Windows con Docker: `docker start brdp-postgres`) y la base migrada (`alembic upgrade head`).
+- Por partes: `npm run lint`, `npm run build`, `npm run test:js`, `npm run check:prompts`, `npm run lint:templates`, `npm run test:backend`. Con `--` se pasan opciones: `npm run test:js -- rule-test` (solo esos ficheros), `npm run test:backend -- -k similar -x` (opciones de pytest).
+
+Cada comando termina con un resumen (qué pasó, qué falló, cuánto tardó) y, si todo pasa, con la línea `TODO OK`. Código de salida: 0 todo bien, 1 algo falla, 2 falta algo del entorno (el Python del backend o la base de datos), que no es un fallo de la app.
+
+El Python del backend se busca en `backend/.venv` (`Scripts\python.exe` en Windows, `bin/python` en Linux); otro se indica con la variable `BACKEND_PYTHON` (PowerShell: `$env:BACKEND_PYTHON = "C:\ruta\python.exe"`; Linux: `export BACKEND_PYTHON=/ruta/python`). La base de datos de los tests es la de `DATABASE_URL` (`backend/.env`).
+
 ## Troubleshooting: Corporate Network / SSL-Inspecting Proxy
 
 If you're on a corporate network with SSL inspection (e.g. Zscaler), you may hit certificate errors in two different places. Both share the same root cause (npm and Python each maintain their own trust store and neither trusts your organization's proxy root CA by default), but each needs its own fix.

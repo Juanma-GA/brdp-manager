@@ -274,13 +274,13 @@ Sin purga automática de la Papelera. Los proyectos temporales de `run-prompt-ev
 
 | Guardrail | Estado | Qué hay | Qué falta |
 |---|---|---|---|
-| G1 Pre-commit hooks | **AUSENTE** | No hay `.pre-commit-config.yaml`, husky ni hooks (`.git/hooks` solo tiene `*.sample`) | Hook con detección de secretos, eslint y ruff, que pueda rechazar el commit |
+| G1 Pre-commit hooks | **AUSENTE** (por decisión, Protecciones 1) | No hay `.pre-commit-config.yaml`, husky ni hooks (`.git/hooks` solo tiene `*.sample`). Lo que haría el hook se hace a mano con `npm run check:all` | Hook con detección de secretos, eslint y ruff, que pueda rechazar el commit |
 | G2 Secret scanning como gate | PARCIAL | GitHub secret scanning y push protection activados (API del repo) | detect-secrets o Gitleaks en commit y en CI |
-| G3 Dependencias | PARCIAL | `package-lock.json` versionado; `playwright-core` fijado; `npm audit` 0 | `npm ci` en el `Dockerfile:7` (hoy `npm install`); lockfile de Python (`pyproject.toml:6-24` solo tiene `>=`); SBOM; allowlist y periodo de espera; declarar **`@xmldom/xmldom` y `jszip`**, que usan los scripts y llegan por `mammoth`; Dependabot está desactivado |
+| G3 Dependencias | PARCIAL (casi completo tras Protecciones 1) | `package-lock.json` y `npm ci` (también en el `Dockerfile`); `@xmldom/xmldom` y `jszip` declarados; lockfiles de Python con hashes (`backend/requirements.lock.txt`, `requirements-dev.lock.txt`), válidos en Windows y Linux | SBOM; allowlist y periodo de espera; Dependabot (depende de GitHub, fuera de este encargo); `npm audit`/`pip-audit` no son paso obligatorio de ningún comando |
 | G5 Protección de rama | **AUSENTE** | `main` no está protegida (API: "Branch not protected"). En la práctica, el agente trabaja en `v2-multiproyecto` | PR y revisión obligatorias para `main` |
 | G6 Humano en el bucle | PARCIAL | En la app: Accept, revisión antes de importar, confirmaciones, Verify | En desarrollo no hay revisión obligatoria antes de fusionar (G5) |
 | G7 Auditoría de acciones de IA | PARCIAL | `brdp_history` (quién, qué, cuándo) en BRDP y reglas, con origen `llm`/`external_llm`/`extracted`/`copied`; `suggestion_feedback` | Registro de cada llamada al LLM (usuario, proyecto, tipo, tokens), de acciones administrativas y borrados (1.6), logging estructurado y SIEM |
-| G10 Gates de seguridad en CI | **AUSENTE** | No hay CI (no existe `.github/`) | CI con lint, pytest, SCA (npm audit, pip-audit), SAST (semgrep o bandit) y DAST |
+| G10 Gates de seguridad en CI | **AUSENTE** (por decisión, Protecciones 1) | No hay CI (no existe `.github/`). Lint, build, tests JS, snapshot, lint de plantillas y pytest se lanzan a mano con `npm run check:all` | CI con lint, pytest, SCA (npm audit, pip-audit), SAST (semgrep o bandit) y DAST |
 | G11 Grounding y temperatura baja | PRESENTE | Fichas de esquema, precedentes y vocabulario en los prompts; temperaturas de 0 a 0,7 (`shared.js:25-56`); comprobaciones deterministas después | — |
 | G12 Rate limits y cuotas | **AUSENTE** | — | Cuotas por usuario y proyecto en el LLM y los embeddings, con vigilancia (2.1 #7) |
 
@@ -370,7 +370,7 @@ En orden: primero los bloqueantes de T2.
 | 4 | Registro de auditoría de llamadas al LLM, acciones administrativas y borrados (tras AACF 2, de los borrados solo faltan los permanentes y los cambios de rol) | G7, HR9, Global 4 | medio | **sí** |
 | 5 | CI (lint, pytest, SCA, SAST, secret scan) y pre-commit | G1, G2, G10 | medio | **sí** |
 | 6 | Proteger `main` | G5 | pequeño | **sí** |
-| 7 | Lockfile de Python, `npm ci` en el Dockerfile, declarar `@xmldom/xmldom` y `jszip`, activar Dependabot | G3 | pequeño | sí (G3 es de T2) |
+| 7 | ~~Lockfile de Python, `npm ci` en el Dockerfile, declarar `@xmldom/xmldom` y `jszip`~~ **hecho** (`972d507`); Dependabot sigue desactivado (depende de GitHub) | G3 | pequeño | sí (G3 es de T2) |
 | 8 | ~~Guardados de Records (campos, Verify, Revoke, borrar) con error visible y deshacer~~ **hecho** (`dd9bbac`) | HR7, HR20 | pequeño | no |
 | 9 | ~~Diálogo de borrar proyecto: no mostrar "0" si falla el recuento~~ **hecho** (`3fa0c5a`) | HR7, HR9 | pequeño | no |
 | 10 | `must_change_password` en el servidor | seguridad | pequeño | no |
@@ -415,3 +415,13 @@ AACF 3 (`c26f17a`, `913e0aa`, `5187a67`, `afe2de6`): cifras de Registros alinead
 - **Colores**: 160 de los 482 colores escritos a mano en los CSS Modules siguen como hex (tonos de estado, fondos de aviso, grises de separadores que no son tokens de marca); se pueden pasar a variables si se amplía la paleta.
 - **Tailwind** sigue instalado sin uso (Decisión 22).
 - Todo lo de "Qué sigue abierto tras AACF 2" que no se menciona aquí sigue igual.
+
+## Qué sigue abierto tras Protecciones 1
+
+Protecciones 1 (`4e9eeea`, `972d507` y el commit de esta documentación): un comando de comprobación y dependencias declaradas y fijadas. Sin cambios en el código de la app, los prompts ni las migraciones.
+
+- **Un comando de comprobación**: `npm run check:all` (lint, build, `scripts/test-*.mjs`, snapshot de prompts, lint de plantillas y pytest), igual en PowerShell y Linux, con resumen final y `TODO OK`. Es el cierre de cada encargo (CLAUDE.md). No sustituye a CI: hay que lanzarlo.
+- **G3, nuevo estado (casi completo)**: frontend con `npm ci` (también en el `Dockerfile`), `@xmldom/xmldom` 0.8.15 y `jszip` 3.10.1 declarados como devDependencies exactas (solo los usan los scripts); backend con `requirements.lock.txt` (producción) y `requirements-dev.lock.txt` (desarrollo y tests), generados con `uv pip compile --universal --generate-hashes` desde `pyproject.toml`, que conserva sus rangos. Lo fijado son las versiones que ya estaban instaladas; solo `colorama` 0.4.6 (Windows) entra con su última versión, porque en Linux no estaba instalada. Falta: SBOM, allowlist y periodo de espera, y Dependabot (depende de GitHub).
+- **Auditoría de dependencias** (ejecutada una vez, no forma parte de ningún comando): `npm audit`, 1 alta (`source-map-js` 1.2.1, solo en el build, vía postcss/tailwind; tiene arreglo con `npm audit fix` sin `--force`) y 3 moderadas (`sprintf-js` ← `argparse` ← `mammoth`, solo en la línea de comandos de mammoth, que la app no usa; el único "arreglo" es bajar mammoth a 0.3.29). `pip-audit` sobre los dos lockfiles: 2 en `pyjwt` 2.14.0 (PYSEC-2026-4141 / GHSA-42vr-xj54-vc7v y CVE-2026-102275 / GHSA-x33g-cr3x-6449, arregladas en 2.15.0), ninguna explotable en el uso actual (RS256 con clave PEM: la firma se comprueba antes de leer el contenido; no se usan JWK ni `PyJWKClient`). Ninguna se ha arreglado ni silenciado: propuesta en el informe del encargo.
+- **G1 (pre-commit) y G10 (CI): ausentes por decisión de Juanma** -- por ahora no hay CI, workflows, Dependabot ni hooks de pre-commit. `npm run check:all` cubre a mano lo que harían; se puede volver a decidir sin cambiar nada de lo hecho (el mismo comando serviría como paso de CI).
+- **Sigue abierto**: **G5** (proteger `main`: PR y revisión obligatorias), **G7** (registro de cada llamada al LLM, de acciones administrativas, borrados permanentes y cambios de rol) y **G12** (rate limiting compartido y cuotas por usuario en el LLM, embeddings y login). Todo lo de "Qué sigue abierto tras AACF 3" que no se menciona aquí sigue igual.
