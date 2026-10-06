@@ -18,19 +18,52 @@ Business Rules Decision Points (BRDP) management for S1000D and DITA technical d
 
 ## Installation
 
+The dependencies are pinned in lockfiles: `package-lock.json` for the frontend and `backend/requirements*.lock.txt` for the backend. Install from them, so everyone gets exactly the same versions.
+
+Linux / macOS:
+
 ```bash
 git clone <repo-url>
 cd brdp-manager
-npm install
+npm ci
 
 cd backend
-python -m venv .venv
-source .venv/bin/activate        # .venv\Scripts\activate on Windows
-pip install -e ".[dev]"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --require-hashes -r requirements-dev.lock.txt
 cp .env.example .env             # then fill in the database URL, keys and LLM provider
 alembic upgrade head
 python scripts/create_admin_user.py
 ```
+
+Windows (PowerShell):
+
+```powershell
+git clone <repo-url>
+cd brdp-manager
+npm ci
+
+cd backend
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install --require-hashes -r requirements-dev.lock.txt
+Copy-Item .env.example .env      # then fill in the database URL, keys and LLM provider
+alembic upgrade head
+python scripts/create_admin_user.py
+```
+
+`requirements-dev.lock.txt` is for development and tests (pytest, `pip-system-certs`); a server installs `requirements.lock.txt` instead (no dev tools). Both are valid on Windows and Linux: platform-only packages carry a marker (`colorama` only on Windows, `uvloop` never on Windows) and every package has its hashes for all platforms. The app is not installed as a package: the backend runs from `backend/` (`uvicorn app.main:app`, `alembic`, `pytest` all start there).
+
+### Updating the backend lockfiles
+
+`backend/pyproject.toml` keeps the version ranges; the lockfiles are generated from it with [uv](https://docs.astral.sh/uv/) (`pip install uv`), from `backend/`:
+
+```bash
+uv pip compile pyproject.toml --universal --python-version 3.11 --generate-hashes -o requirements.lock.txt
+uv pip compile pyproject.toml --extra dev --universal --python-version 3.11 --generate-hashes -o requirements-dev.lock.txt
+```
+
+These commands keep the versions already in the lockfiles (uv reuses them); they only add or remove what changed in `pyproject.toml`. To move one package to a newer version add `--upgrade-package <name>` to both; `--upgrade` moves everything. Commit `pyproject.toml` and both lockfiles together.
 
 ## Development
 
@@ -61,9 +94,9 @@ The static frontend in `dist/` is served by nginx (`nginx.conf`, `Dockerfile`); 
 
 If you're on a corporate network with SSL inspection (e.g. Zscaler), you may hit certificate errors in two different places. Both share the same root cause (npm and Python each maintain their own trust store and neither trusts your organization's proxy root CA by default), but each needs its own fix.
 
-### 1. `npm install` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`
+### 1. `npm ci` / `npm install` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`
 
-Affects: any `npm install` — the initial one, or adding any new dependency later. This is an npm tooling issue, not something wrong with this app's code.
+Affects: any `npm ci` or `npm install` — the initial one, or adding any new dependency later. This is an npm tooling issue, not something wrong with this app's code.
 
 **Cause:** your corporate SSL-inspecting proxy (confirmed with Zscaler in our case) re-signs HTTPS traffic with its own root certificate, which npm doesn't recognize.
 
@@ -76,7 +109,7 @@ Ask your IT department for your organization's root CA `.pem` file, or export it
 **Quick fix (only if you don't have the certificate on hand, temporary):**
 ```bash
 npm config set strict-ssl false
-npm install
+npm ci
 npm config set strict-ssl true
 ```
 ⚠️ This disables npm's SSL verification while active. Re-enable `strict-ssl` immediately after the install completes — don't leave it disabled.
@@ -89,10 +122,10 @@ Affects: `POST /api/llm-proxy` (Ask, Suggest Definition, and any other AI featur
 
 **Recommended fix for local development:**
 ```bash
-pip install -e ".[dev]"
+pip install --require-hashes -r requirements-dev.lock.txt
 uvicorn app.main:app --reload
 ```
-That's it — no certificate path to find, no environment variable to set. `pip-system-certs` is in the `[dev]` extras specifically for this: it patches Python's `ssl` module (via a `.pth` file that runs automatically every time the interpreter starts, in this venv, no import needed anywhere in the app's own code) to validate against the OS's certificate store instead of only `certifi`'s bundled list. Your corporate root CA is normally already in the OS store (that's what makes your browser and other apps work on this network), so this "just works" without you having to locate the `.pem` file yourself.
+That's it — no certificate path to find, no environment variable to set. `pip-system-certs` is in the `[dev]` extras (and so in `requirements-dev.lock.txt`) specifically for this: it patches Python's `ssl` module (via a `.pth` file that runs automatically every time the interpreter starts, in this venv, no import needed anywhere in the app's own code) to validate against the OS's certificate store instead of only `certifi`'s bundled list. Your corporate root CA is normally already in the OS store (that's what makes your browser and other apps work on this network), so this "just works" without you having to locate the `.pem` file yourself.
 
 ⚠️ **Dev-only, not a production fix.** `pip-system-certs` is deliberately in `[dev]`, never in the production dependency list. A real deployment installs the corporate root CA into the server OS's trust store directly (the normal, correct way to do this for a server) — nothing in this app's own code or dependencies should be relying on this shortcut in production.
 

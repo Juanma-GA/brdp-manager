@@ -31,6 +31,8 @@ cd /home/user/brdp-manager && npx vite --port 5173 --strictPort                 
 
 El `.venv` de `backend/` ya existe con todas las dependencias instaladas. `uvicorn` normalmente se lanza SIN `--reload` en este entorno — si editas código Python del backend con el servidor ya arrancado, hay que reiniciarlo a mano (matar el proceso real, `ps aux | grep "[u]vicorn app.main:app"` para el PID exacto — `pkill -f uvicorn` se automata a sí mismo porque su propio argv contiene el patrón) para que recoja los cambios; Vite sí hace HMR normal sobre `src/`.
 
+**Dependencias fijadas** (Protecciones 1): frontend con `npm ci` (instala exactamente `package-lock.json`; el `Dockerfile` también); backend con `pip install --require-hashes -r backend/requirements-dev.lock.txt` (desarrollo y tests) o `requirements.lock.txt` (servidor), sin instalar la app como paquete (todo corre desde `backend/`). Los lockfiles salen de `backend/pyproject.toml` (que conserva sus rangos) con uv, válidos en Windows y Linux (`--universal`, con hashes); para regenerarlos, desde `backend/`: `uv pip compile pyproject.toml [--extra dev] --universal --python-version 3.11 --generate-hashes -o requirements[-dev].lock.txt` -- uv conserva las versiones ya fijadas; `--upgrade-package <nombre>` sube una. Nunca `npm audit fix --force`.
+
 Hay un proyecto de desarrollo sembrado ("Demo Project (S1000D 4.2)") y un admin de pruebas (`admin@example.com` / `AdminTest123!`, ver `backend/scripts/seed_dev_data.py`) — usarlos para verificación con navegador real en vez de crear datos nuevos cada vez, salvo que el propio caso de prueba lo requiera (y luego limpiar lo creado).
 
 ### Cómo verificar cambios: `npm run check:all`
