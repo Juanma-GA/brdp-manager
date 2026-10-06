@@ -104,9 +104,15 @@ npm run check:all
 - `npm run check:all` -- lo mismo más los tests del backend (pytest), que necesitan su **propia base de datos** (abajo).
 - Por partes: `npm run lint`, `npm run build`, `npm run test:js`, `npm run check:prompts`, `npm run lint:templates`, `npm run test:backend`. Con `--` se pasan opciones: `npm run test:js -- rule-test` (solo esos ficheros), `npm run test:backend -- -k similar -x` (opciones de pytest).
 
-Cada comando termina con un resumen (qué pasó, qué falló, cuánto tardó) y, si todo pasa, con la línea `TODO OK`. Código de salida: 0 todo bien, 1 algo falla, 2 falta algo del entorno (el Python del backend o la base de datos de tests), que no es un fallo de la app.
+Cada comando termina con un resumen (qué pasó, qué falló, cuánto tardó) y, si todo pasa, con la línea `TODO OK`. Código de salida: 0 todo bien, 1 algo falla, 2 falta algo del entorno (el Python del backend, la base de datos de tests o las claves JWT de `backend/keys/`, que no están en git: en una copia nueva se crean con `python scripts/generate_rsa_keypair.py` desde `backend/`), que no es un fallo de la app.
 
-El Python del backend se busca en `backend/.venv` (`Scripts\python.exe` en Windows, `bin/python` en Linux); otro se indica con la variable `BACKEND_PYTHON` (PowerShell: `$env:BACKEND_PYTHON = "C:\ruta\python.exe"`; Linux: `export BACKEND_PYTHON=/ruta/python`).
+`check` y `check:all` paran en el primer paso que falla; con `--keep-going` ejecutan todos y el resumen lista todos los fallos: `npm run check:all -- --keep-going`.
+
+El Python del backend se busca en `backend/.venv` (`Scripts\python.exe` en Windows, `bin/python` en Linux); otro se indica con la variable `BACKEND_PYTHON` (PowerShell: `$env:BACKEND_PYTHON = "C:\ruta\python.exe"`; Linux: `export BACKEND_PYTHON=/ruta/python`). El resumen dice cuál se usó, con su ruta completa: `(backend virtualenv)` o `(system Python on the PATH, not backend/.venv)`.
+
+Tiempos máximos: 180 s por fichero de `test:js` (`--timeout` o `JS_TEST_TIMEOUT_SECONDS`) y 3600 s para `test:backend` (`BACKEND_TEST_TIMEOUT_SECONDS`). Los pasos de lint y build no tienen.
+
+En Windows los ficheros de prueba que se comparan byte a byte se descargan con LF (`.gitattributes`), y los scripts los leen igual aunque vengan con CRLF. Las capturas de los scripts de navegador van a `SHOTS_DIR` o, si no está, a la carpeta temporal del sistema.
 
 ### La base de datos de los tests
 
@@ -126,6 +132,18 @@ Windows con Postgres en Docker (`brdp-postgres`), desde la raíz del repo, en Po
 docker start brdp-postgres
 npm run test:db:create      # solo la primera vez (o tras una migración nueva)
 npm run check:all
+```
+
+### Si tu copia de Windows es anterior a `.gitattributes`
+
+Los ficheros que ya tenías descargados conservan sus finales de línea hasta que git los vuelve a escribir. Los scripts ya los leen bien igual, así que no es obligatorio; para dejarlos como los descargaría una copia nueva, con tus cambios locales ya guardados en un commit o un `git stash`:
+
+```powershell
+git pull
+git rm --cached -r -q .
+git reset --hard
+npm ci
+npm run check:all -- --keep-going
 ```
 
 Los scripts de navegador (`scripts/verify-*.mjs`) y el juego de pruebas de prompts (`scripts/run-prompt-eval.mjs`) **no** usan la base de tests: hablan con el backend que esté arrancado, y ese backend usa su `DATABASE_URL`. Si se lanzan contra la base de trabajo, crean (y en general borran al terminar) sus propios proyectos ahí.
