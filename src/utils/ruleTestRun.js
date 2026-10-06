@@ -23,6 +23,30 @@ import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, rel
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 import { cleanInternalNames } from './answerCleanup.js';
+import { checkRulePaths } from '../validation/rulePathCheck.js';
+
+// Mejoras C, Part 1: at most this many path problems are recorded with a
+// "review" result (the panel shows them all, from the rule itself).
+const MAX_RECORDED_PATH_PROBLEMS = 10;
+
+// The paths of the rule against the standard's element graph, before any
+// LLM call: when every node path of the rule can never select anything
+// (<trade> inside <perscat>, /techstd as a root), the test answers "review"
+// with the reason -- no example could show anything. Without a graph (no
+// fetcher, the standard has none, or it failed to load) nothing is checked.
+async function impossiblePathReview({ ruleXml, format, standard, schemaLocation, fetchSchemaGraph, parseXml }) {
+  if (!fetchSchemaGraph) return null;
+  let graph;
+  try {
+    graph = await fetchSchemaGraph(standard);
+  } catch {
+    return null;
+  }
+  const check = checkRulePaths(ruleXml, format, graph, { schemaLocation, parseXml });
+  if (!check.allImpossible) return null;
+  const problems = check.problems.filter((p) => !p.inPredicate).slice(0, MAX_RECORDED_PATH_PROBLEMS);
+  return { code: 'test_impossible_path', params: { format, problems } };
+}
 
 // Same cap as the schema facts of Ask / Suggest Rule.
 const MAX_SCHEMA_FACTS = 6;
@@ -481,6 +505,9 @@ export async function checkRuleImplementsProposal({ brdp, standard, format, rule
 //     correction, setup, systemPrompt, responses }
 //   | { status: 'not_executable', reason, setup } -- the rule looks at
 //     nothing the examples can contain (no LLM call)
+//   | { status: 'path_review', reason } -- Mejoras C: every path of the rule
+//     cannot exist in the standard (no LLM call); reason
+//     { code: 'test_impossible_path', params: { format, problems } }
 //   | { status: 'error', error, badResponse?, truncated?, systemPrompt?, responses? }
 //   truncated: the LLM's answer was cut by its length limit (ask threw
 //   llmAPI.js's LLM_TRUNCATED error) -- said as such, never "not valid JSON".
@@ -498,6 +525,8 @@ export async function generateRuleTestExamples({
   fetchSchemaCards,
   fetchStructure,
   fetchSchemaAttribute,
+  // Mejoras C, Part 1 (optional): GET /api/schema-cards/graph.
+  fetchSchemaGraph = null,
   parseXml = parseXmlDocument,
   isCurrent = () => true,
   onPrompt,
@@ -511,6 +540,9 @@ export async function generateRuleTestExamples({
   let systemPrompt = null;
   const responses = [];
   try {
+    const pathReview = await impossiblePathReview({ ruleXml, format, standard, schemaLocation, fetchSchemaGraph, parseXml });
+    if (!isCurrent()) return null;
+    if (pathReview) return { status: 'path_review', reason: pathReview, systemPrompt: null, responses };
     const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute });
     if (!isCurrent()) return null;
     if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup, untested: prepared.untested };

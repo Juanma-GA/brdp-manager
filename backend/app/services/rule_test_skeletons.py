@@ -753,3 +753,64 @@ def get_element_relation(standard: str, parent: str, child: str) -> dict:
             result["schemas"].append({"schema": schema, "direct": direct, "path": path})
     result["schemas"].sort(key=lambda s: s["schema"])
     return result
+
+
+# ─── Whole-standard graph (Mejoras C, Part 1: paths that cannot exist) ───────
+# The client checks every step of a rule's path against the standard's
+# schemas -- a/b (b a child of a), a//b (b reachable from a), a/@x (x on a),
+# /x (x a document root) -- in ANY schema of the rule's scope (its context
+# schemas, or the whole standard). One compact answer per standard:
+#   schemas   the document schemas;
+#   roots     {schema: [root element names]};
+#   elements  {name: [[schemas], [children], [attribute names]]} -- one
+#             entry per card variant, its schemas kept to the document ones.
+# DITA: one merged schema ("dita": the cards' single variant), never the
+# per-topic-type graphs -- those leave out nested topics (topic/topic is
+# valid DITA), and a check on them would flag real paths. Its roots are
+# every topic and map type the cards define.
+DITA_GRAPH_SCHEMA = "dita"
+
+
+@lru_cache(maxsize=8)
+def get_standard_graph(standard: str) -> dict:
+    data = _cards_for(standard)
+    if data is None:
+        return {"standard": standard, "available": False, "schemas": [], "roots": {}, "elements": {}, "unchecked_children": []}
+    cards = data.get("cards", {})
+    if is_dita_standard(standard):
+        elements = {
+            name: [[[DITA_GRAPH_SCHEMA], list(variants[0].get("children", [])), [a["name"] for a in variants[0].get("attributes", [])]]]
+            for name, variants in cards.items()
+            if variants
+        }
+        roots = sorted(name for name in DITA_NESTED_TYPES if name in cards)
+        # Which topic types nest inside another is set per shell (the
+        # info-types redefine), and the merged cards keep only one shell's
+        # answer (topic allows <task> there, never <topic>): a pair whose
+        # child is a topic or map type is never judged.
+        return {
+            "standard": standard,
+            "available": True,
+            "schemas": [DITA_GRAPH_SCHEMA],
+            "roots": {DITA_GRAPH_SCHEMA: roots},
+            "elements": elements,
+            "unchecked_children": roots,
+        }
+    elements: dict[str, list] = {}
+    schemas: set[str] = set()
+    for name, variants in cards.items():
+        entries = []
+        for variant in variants:
+            own = [s for s in variant.get("schemas", []) if s not in _NON_DOCUMENT_SCHEMAS]
+            if not own:
+                continue
+            schemas.update(own)
+            entries.append([own, list(variant.get("children", [])), [a["name"] for a in variant.get("attributes", [])]])
+        if entries:
+            elements[name] = entries
+    roots = {}
+    for schema in sorted(schemas):
+        graph = schema_graph(standard, schema)
+        if graph:
+            roots[schema] = [_root_of(graph)]
+    return {"standard": standard, "available": True, "schemas": sorted(roots), "roots": roots, "elements": elements, "unchecked_children": []}

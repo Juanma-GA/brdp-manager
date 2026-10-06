@@ -40,9 +40,13 @@
 //   recorded verdicts (verdictToTestRecord below): test_incorrect
 //     {permissive, strict}, test_nothing_selected, test_missing_expectation,
 //     test_no_runnable, test_proposal_mismatch {mismatch},
-//     test_proposal_unchecked {error} (Barrido final 1/2).
+//     test_proposal_unchecked {error} (Barrido final 1/2),
+//     test_impossible_path {format, problems} (Mejoras C, Part 1: every
+//     path of the rule cannot exist in the standard; validation/
+//     rulePathCheck.js's problems, formatted with formatPathProblem).
 
 import { formatSchemaIssue } from '../validation/schemaValidation.js';
+import { formatPathProblem } from '../validation/rulePathCheck.js';
 
 export const ENGINE_REASON_CODES = [
   'external_document', 'non_context_rule', 'mandatory_whole_document', 'xpath_error', 'unsupported_value_form',
@@ -51,7 +55,7 @@ export const ENGINE_REASON_CODES = [
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
 ];
-export const VERDICT_REASON_CODES = ['test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch'];
+export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -69,6 +73,9 @@ export function formatRuleTestReason(reason, t) {
   }
   if (reason.code === 'test_threshold_mismatch') {
     return t('records.ruleTest.reasons.test_threshold_mismatch', { detail: formatThresholdMismatch(params, t) || '' });
+  }
+  if (reason.code === 'test_impossible_path') {
+    return (params.problems || []).map((p) => formatPathProblem(p, t, { format: params.format })).join(' ');
   }
   if (reason.code === 'rule_format') {
     const { problem, ...problemParams } = params;
@@ -97,6 +104,7 @@ export function verdictToTestRecord(verdict) {
     case 'correct':
       return { result: 'passed', reason: null };
     case 'review':
+      if (verdict.path) return { result: 'review', reason: verdict.path };
       if (verdict.threshold) return { result: 'review', reason: { code: 'test_threshold_mismatch', params: { numbers: verdict.threshold.numbers, thresholds: verdict.threshold.thresholds } } };
       return verdict.unchecked
         ? { result: 'review', reason: { code: 'test_proposal_unchecked', params: { error: verdict.error || '' } } }

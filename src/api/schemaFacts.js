@@ -49,3 +49,20 @@ export async function fetchSchemaRelation(standard, parent, child) {
     `/api/schema-cards/relation?standard=${encodeURIComponent(standard)}&parent=${encodeURIComponent(parent)}&child=${encodeURIComponent(child)}`
   );
 }
+
+// Mejoras C, Part 1: the standard's whole element graph (every document
+// schema's children and attributes, and its roots) -- GET
+// /api/schema-cards/graph. Loaded once per standard and kept for the page's
+// life (reference data, ~120-350 kB): the path check of every rule shown
+// uses it. A failed load is not kept, so the next caller tries again.
+const GRAPHS = new Map();
+export function fetchSchemaGraph(standard) {
+  if (!GRAPHS.has(standard)) {
+    const promise = authFetchJson(`/api/schema-cards/graph?standard=${encodeURIComponent(standard)}`).catch((err) => {
+      GRAPHS.delete(standard);
+      throw err;
+    });
+    GRAPHS.set(standard, promise);
+  }
+  return GRAPHS.get(standard);
+}

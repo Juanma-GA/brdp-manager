@@ -31,6 +31,10 @@
 //     a path that is a condition on the whole document);
 //   - ancestor_depth ("count(ancestor::*) as depth"): counts every
 //     ancestor, not how deep the element is nested;
+//   - impossible_path ("path that cannot exist", Mejoras C): a step of the
+//     path the standard's schemas never allow (<trade> inside <perscat>,
+//     /techstd as a root) -- only with options.graph (the standard's
+//     element graph); validation/rulePathCheck.js;
 //   - duplicate_values ("duplicate allowed value", new this round): the same
 //     value twice in one rule's list of allowed values -- BREX objectValue /
 //     objval of one structureObjectRule / objrule, or a sequence of string
@@ -49,6 +53,7 @@ import { analyzeRule, describeRule, parseXmlDocument, pathGroups, ruleConditions
 import { formatRuleStatement, formatRuleTestReason } from './ruleTestReasons.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
 import { checkRuleFormat, extractRuleXPaths, formatSchemaIssue, ruleFormatIssues } from '../validation/schemaValidation.js';
+import { checkRulePaths, formatPathProblem } from '../validation/rulePathCheck.js';
 
 // "Must not" wording, English and Spanish (the templates mix both).
 const MUST_NOT_RE = /\b(must not|shall not|must be no|shall be no|should not|may not|cannot|can not|not allowed|forbidden|prohibited|no debe|no deben|no debe haber|no se (?:debe|deben|permite|permiten|puede|pueden|utiliza|utilizan|usa|usan)|prohibid[oa]s?)\b/i;
@@ -65,6 +70,7 @@ const LINT_KINDS = {
   flag1_value_predicate: 'flag 1 with a value predicate',
   ancestor_depth: 'count(ancestor::*) as depth',
   duplicate_values: 'duplicate allowed value',
+  impossible_path: 'path that cannot exist',
 };
 
 // The findings the lint scripts are the only place to show before this
@@ -306,7 +312,13 @@ function occurrences(ruleXml, format, parseXml) {
 export function lintRuleFindings(ruleXml, format, options = {}) {
   const parseXml = options.parseXml || parseXmlDocument;
   const grouped = new Map();
-  for (const o of occurrences(String(ruleXml || ''), format, parseXml)) {
+  const found = occurrences(String(ruleXml || ''), format, parseXml);
+  if (options.graph) {
+    for (const problem of checkRulePaths(String(ruleXml || ''), format, options.graph, { parseXml, schemaLocation: options.schemaLocation || null }).problems) {
+      found.push({ code: 'impossible_path', known: false, params: { problem, format } });
+    }
+  }
+  for (const o of found) {
     const key = `${o.code}\u0000${o.known}`;
     if (!grouped.has(key)) grouped.set(key, { code: o.code, known: o.known, items: [], occurrences: 0 });
     const g = grouped.get(key);
@@ -337,6 +349,8 @@ function formatItem(code, params, t) {
       return k('flag1ValuePredicate', params);
     case 'ancestor_depth':
       return k('ancestorDepth', params);
+    case 'impossible_path':
+      return formatPathProblem(params.problem, t, { format: params.format });
     case 'duplicate_values':
       return k('duplicateValues', {
         where: params.where,

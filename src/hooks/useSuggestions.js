@@ -602,6 +602,18 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
       return next;
     });
 
+  // Mejoras C, Part 1: a mechanical path fix ("Change /techstd to
+  // //techstd") on the suggested rule, clicked by the person. A test made on
+  // the previous text no longer applies (its hash differs).
+  const setSuggestionRuleText = (brdpId, text) =>
+    setSuggestionsByBrdpId((prev) => {
+      const entry = prev.get(brdpId);
+      if (!entry || !entry.text) return prev;
+      const next = new Map(prev);
+      next.set(brdpId, { ...entry, text });
+      return next;
+    });
+
   const acceptPastedRule = async () => {
     if (!selected) return;
     const entry = suggestionsByBrdpId.get(selected.id);
@@ -635,6 +647,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     acceptSuggestion,
     acceptPastedRule,
     setPastedRule,
+    setSuggestionRuleText,
     recordSuggestionTest,
     discardSuggestion,
     removeSuggestionEntry,

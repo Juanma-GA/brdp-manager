@@ -10,6 +10,7 @@ import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 import RuleLintWarnings from './RuleLintWarnings';
 import RuleThresholdWarning from './RuleThresholdWarning';
+import RulePathWarnings from './RulePathWarnings.jsx';
 
 // Test rule (T2 of 4): which rule formats can be tested (S1000D BREX since
 // T1, DITA Schematron since T4). Used by both places that show the button.
@@ -38,6 +39,7 @@ export function verdictView(t, verdict, standard) {
     case 'correct':
       return { tone: 'ok', text: t('records.ruleTest.verdicts.correct') };
     case 'review':
+      if (verdict.path) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewPath', { detail: formatRuleTestReason(verdict.path, t) }) };
       if (verdict.threshold) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewThreshold', { detail: formatThresholdMismatch(verdict.threshold, t) }) };
       return verdict.unchecked
         ? { tone: 'warn', text: t('records.ruleTest.verdicts.reviewUnchecked', { error: verdict.error }) }
@@ -647,6 +649,11 @@ export default function RuleTestPanel({
 
       <RuleDescription description={description} />
       {!notARule && <RuleLintWarnings ruleXml={ruleXml} format={format} place="panel" />}
+      {/* Mejoras C, Part 1: once the test says "review" for it, the verdict
+          carries the same text. */}
+      {!notARule && state.status !== 'path_review' && (
+        <RulePathWarnings ruleXml={ruleXml} format={format} standard={standard} schemaLocation={schemaLocation} testId="rule-test-path-warning" />
+      )}
       {/* Mejoras B, Part 2: shown here unless the verdict already says it. */}
       {!notARule && !verdict?.threshold && <RuleThresholdWarning ruleXml={ruleXml} format={format} proposal={brdp?.proposal} />}
 
@@ -658,6 +665,13 @@ export default function RuleTestPanel({
         </div>
       )}
       {state.status === 'loading' && <p className={styles.muted}>{t('records.ruleTest.generating')}</p>}
+      {state.status === 'path_review' && (
+        <>
+          <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneWarn}`} data-testid="rule-test-verdict" data-kind="review" data-reason="test_impossible_path">
+            {view.text}
+          </p>
+        </>
+      )}
       {state.status === 'error' && (
         <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneBad}`} role="alert">
           ⚠ {state.truncated

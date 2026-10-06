@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
-import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
+import { fetchSchemaAttribute, fetchSchemaCards, fetchSchemaGraph } from '../api/schemaFacts.js';
 import i18n from '../i18n';
 import { RULE_PROPOSAL_CHECK_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
 import { buildCopyableTestPrompt } from '../prompts/ruleTestExamplesPrompt.js';
@@ -152,6 +152,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       fetchSchemaCards,
       fetchStructure,
       fetchSchemaAttribute,
+      fetchSchemaGraph,
       isCurrent: () => generationRef.current === generation,
       onPrompt: (systemPrompt) => setCopyablePrompt(buildCopyableTestPrompt(systemPrompt)),
       previousReview: previousReview?.mismatches ? previousReview : null,
@@ -171,6 +172,16 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       setLateAnalysis({ status: 'not_executable', reason: result.reason, unreachable: true });
       setState({ status: 'idle' });
       if (!onDemand) report({ result: 'not_executable', reason: result.reason });
+      return;
+    }
+    if (result.status === 'path_review') {
+      // Mejoras C, Part 1: the path cannot exist -- "review", no LLM call.
+      setState({ status: 'path_review', reason: result.reason });
+      if (!onDemand) {
+        const record = verdictToTestRecord({ kind: 'review', path: result.reason });
+        recordedRef.current = record;
+        report(record);
+      }
       return;
     }
     if (result.status !== 'ready') {
@@ -254,7 +265,12 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     setEditNotice({ kind: 'recorded', count: record.editedExamples.length });
   };
 
-  const verdict = state.status === 'ready' ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck, threshold) : null;
+  const verdict =
+    state.status === 'ready'
+      ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck, threshold)
+      : state.status === 'path_review'
+        ? { kind: 'review', path: state.reason }
+        : null;
   const shownAnalysis = lateAnalysis || analysis;
 
   // T3b "Review with the assistant" (incorrect verdict only): the Proposal,

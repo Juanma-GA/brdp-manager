@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { numberDuplicateRuleIds, splitMultiPathRules } from '../utils/ruleSplit.js';
+import RulePathWarnings from '../components/assistant/RulePathWarnings.jsx';
 import { useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
@@ -1978,6 +1979,16 @@ export default function RecordsPage() {
                       {t('records.assistant.numberIdsButton')}
                     </button>
                   )}
+                  {ruleDraftFormat?.ok && (
+                    <RulePathWarnings
+                      ruleXml={ruleDraftText}
+                      format={ruleFormat}
+                      standard={project.standard}
+                      schemaLocation={schemaLocationOf(project.project_config, project.standard)}
+                      onApplyFix={setRuleDraftText}
+                      testId="rule-editor-path-warning"
+                    />
+                  )}
                   {ruleEditorNote && (
                     <p className={styles.hint} data-testid="rule-editor-note">
                       {ruleEditorNote}
@@ -2579,6 +2590,7 @@ export default function RecordsPage() {
                     onDiscard={suggestions.discardSuggestion}
                     onToggleReference={(id) => suggestions.toggleReferenceExpanded(selected.id, id)}
                     onPastedRuleChange={(value) => suggestions.setPastedRule(selected.id, value)}
+                    onRuleTextChange={(value) => suggestions.setSuggestionRuleText(selected.id, value)}
                     onAcceptPasted={suggestions.acceptPastedRule}
                     onEnsurePastedCoverage={(rule) => suggestions.ensurePastedCoverage(selected.id, rule)}
                     onTestResult={(ruleXml, record) => suggestions.recordSuggestionTest(selected.id, ruleXml, record)}

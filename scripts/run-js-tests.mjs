@@ -31,7 +31,7 @@ import { duration, rule, runProcess, seconds, tail } from './lib/checkReport.mjs
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(SCRIPTS);
-const NEEDS_PYTHON = ['lib/readXlsx.mjs', 'lib/extractRules.mjs'].map((p) => path.join(SCRIPTS, p));
+const NEEDS_PYTHON = ['lib/readXlsx.mjs', 'lib/extractRules.mjs', 'lib/schemaGraph.mjs'].map((p) => path.join(SCRIPTS, p));
 
 function parseArgs(argv) {
   let timeout = Number(process.env.JS_TEST_TIMEOUT_SECONDS) || 180;

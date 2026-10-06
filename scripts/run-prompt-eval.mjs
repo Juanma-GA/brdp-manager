@@ -72,7 +72,7 @@ import {
   RULE_TEST_REVIEW_USER_MESSAGE,
 } from "../src/prompts/ruleTestReviewPrompt.js";
 import i18n from "../src/i18n/index.js";
-import { acceptCauseText, ruleDescriptionText } from "../src/utils/ruleTestReasons.js";
+import { acceptCauseText, formatRuleTestReason, ruleDescriptionText } from "../src/utils/ruleTestReasons.js";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import { analyzeRule, describeRule } from "../src/utils/ruleTestEngine.js";
 import { exampleProblems, ruleTestVerdict } from "../src/utils/ruleTest.js";
@@ -377,6 +377,18 @@ async function runCheck(check, answer, ctx = {}) {
       const expectations = new Set(r.examples.map((ex) => ex.expected));
       const ok = expectations.has("accept") && expectations.has("reject");
       return { status: ok ? "pass" : "fail", detail: `expectations: ${[...expectations].join(", ") || "none"}` };
+    }
+    case "rule_test_path_review": {
+      // Mejoras C, Part 1: a rule whose path cannot exist gets "review"
+      // before any LLM call -- the reason (English text) must match
+      // `pattern` when given, and nothing may have gone to the LLM.
+      const r = ctx.ruleTest;
+      if (!r) return { status: "fail", detail: "no test" };
+      if (r.status !== "path_review") return { status: "fail", detail: `status ${r.status}, expected path_review` };
+      const text = formatRuleTestReason(r.reason, i18n.getFixedT("en"));
+      const calls = (r.responses || []).length;
+      const matches = !check.pattern || new RegExp(check.pattern, check.flags || "").test(text);
+      return { status: matches && calls === 0 ? "pass" : "fail", detail: `${calls} LLM call(s); reason: ${text}` };
     }
     case "rule_test_verdict_correct": {
       const r = ctx.ruleTest;
@@ -883,13 +895,20 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
       apiFetch(`/api/schema-cards/structure?standard=${encodeURIComponent(standard)}&schema=${encodeURIComponent(schema)}`),
     fetchSchemaAttribute: (standard, name) =>
       apiFetch(`/api/schema-cards/attribute?standard=${encodeURIComponent(standard)}&name=${encodeURIComponent(name)}`),
+    // Mejoras C, Part 1: the path check before any LLM call, as in the app.
+    fetchSchemaGraph: (standard) => apiFetch(`/api/schema-cards/graph?standard=${encodeURIComponent(standard)}`),
     parseXml: xmldomParse,
     // Barrido final 1/2: the Proposal check, the same separate call as the
     // app (in parallel with the examples, RULE_PROPOSAL_CHECK_TEMPERATURE).
     ruleDescription: description,
     askProposalCheck: (messages, systemPrompt) => sendMessagesToLlm(aiProvider, systemPrompt, messages, RULE_PROPOSAL_CHECK_TEMPERATURE),
   });
-  const verdict = result.status === "ready" ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalCheck, threshold) : null;
+  const verdict =
+    result.status === "ready"
+      ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalCheck, threshold)
+      : result.status === "path_review"
+        ? { kind: "review", path: result.reason }
+        : null;
   return {
     systemPrompt: result.systemPrompt,
     userMessage: "Write the test examples for this rule.",
@@ -902,6 +921,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
       proposalCheck: result.proposalCheck ? { status: result.proposalCheck.status, reason: result.proposalCheck.reason ?? null, missing: result.proposalCheck.missing ?? null, error: result.proposalCheck.error ?? null, answer: result.proposalCheck.answer ?? null } : null,
       correction: result.correction ?? null,
       verdict,
+      reason: result.reason ?? null,
       examples: (result.examples || []).map((ex, i) => ({
         label: ex.label,
         expected: ex.expected,

@@ -153,3 +153,18 @@ class SchemaRelationOut(BaseModel):
     parent_exists: bool
     child_exists: bool
     schemas: list[SchemaRelationSchemaOut] = []
+
+
+class SchemaGraphOut(BaseModel):
+    """Mejoras C, Part 1: the whole standard's element graph, compact --
+    rule_test_skeletons.get_standard_graph."""
+
+    standard: str
+    available: bool
+    schemas: list[str] = []
+    roots: dict[str, list[str]] = {}
+    # {name: [[schemas], [children], [attribute names]], ...}
+    elements: dict[str, list[list[list[str]]]] = {}
+    # Child names whose pairs are never judged (DITA: the topic and map
+    # types -- which one nests in which is set per shell).
+    unchecked_children: list[str] = []

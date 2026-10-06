@@ -18,7 +18,9 @@ from app.services.rule_test_skeletons import (
     SKELETON_EXCLUDED,
     derive_metadata_skeleton,
     derive_skeleton,
+    _root_of,
     get_element_schemas,
+    get_standard_graph,
     schema_content_models,
     schema_graph,
 )
@@ -427,3 +429,52 @@ async def test_structure_endpoint_serves_the_content_models(client):
         "/api/schema-cards/structure", params={"standard": "S1000D 5.0", "schema": "descript"}, headers=_headers(user)
     )
     assert res.json()["models"] == {}
+
+
+# ─── Mejoras C, Part 1: the whole standard's graph (paths that cannot exist) ──
+
+
+def test_standard_graph_fits_the_cards_and_schema_graphs():
+    graph = get_standard_graph("S1000D 3.0.1")
+    assert graph["available"] is True
+    assert graph["schemas"] == get_document_schemas("S1000D 3.0.1")
+    for schema in graph["schemas"]:
+        per_schema = schema_graph("S1000D 3.0.1", schema)
+        assert graph["roots"][schema] == [_root_of(per_schema)]
+        # every element of the schema graph is in the standard graph with the same children
+        for name, entry in per_schema.items():
+            variant = next(v for v in graph["elements"][name] if schema in v[0])
+            assert variant[1] == entry["children"]
+            assert variant[2] == entry["attributes"]
+    # the two real cases: <trade> only inside <reqpers>; <techstd> only inside <status>
+    parents = lambda child: sorted({n for n, vs in graph["elements"].items() for v in vs if child in v[1]})
+    assert parents("trade") == ["reqpers"]
+    assert parents("techstd") == ["status"]
+    assert graph["elements"]["perscat"][0][1] == []
+    assert graph["unchecked_children"] == []
+    # helper schemas are not document schemas
+    assert not {"dc", "rdf", "xlink", "xcf"} & set(graph["schemas"])
+
+
+def test_standard_graph_dita_and_unavailable():
+    dita = get_standard_graph("DITA 1.3 Xpath2.0")
+    assert dita["schemas"] == ["dita"]
+    assert {"topic", "task", "map", "concept"} <= set(dita["roots"]["dita"])
+    assert "topic" in dita["unchecked_children"]
+    assert get_standard_graph("DITA 1.3 Xpath3.0")["elements"] == dita["elements"]
+    none = get_standard_graph("S1000D 5.0")
+    assert none["available"] is False and none["elements"] == {}
+
+
+async def test_graph_endpoint(client):
+    user = await _make_user()
+    res = await client.get("/api/schema-cards/graph", params={"standard": "S1000D 3.0.1"}, headers=_headers(user))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["available"] is True
+    assert body["roots"]["proced"] == ["dmodule"]
+    assert any("proced" in v[0] and "trade" in v[1] for v in body["elements"]["reqpers"])
+    res = await client.get("/api/schema-cards/graph", params={"standard": "S1000D 5.0"}, headers=_headers(user))
+    assert res.status_code == 200 and res.json()["available"] is False
+    res = await client.get("/api/schema-cards/graph", params={"standard": "S1000D 3.0.1"})
+    assert res.status_code == 401

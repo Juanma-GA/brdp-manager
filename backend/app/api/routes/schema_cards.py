@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_current_user
 from app.models import User
-from app.schemas.schema_cards import SchemaAttributeOut, SchemaCardsOut, SchemaRelationOut, SchemaStructureOut
-from app.services.rule_test_skeletons import get_element_relation, get_element_schemas, get_schema_structure
+from app.schemas.schema_cards import SchemaAttributeOut, SchemaCardsOut, SchemaGraphOut, SchemaRelationOut, SchemaStructureOut
+from app.services.rule_test_skeletons import get_element_relation, get_element_schemas, get_schema_structure, get_standard_graph
 from app.services.schema_cards import get_attribute_owners, get_document_schemas, get_schema_cards
 
 router = APIRouter(prefix="/api/schema-cards", tags=["schema-cards"])
@@ -94,3 +94,15 @@ async def read_schema_structure(
         elements=data["elements"],
         models=data["models"],
     )
+
+
+@router.get("/graph", response_model=SchemaGraphOut)
+async def read_schema_graph(
+    standard: str = Query(...),
+    _current_user: User = Depends(get_current_user),
+) -> SchemaGraphOut:
+    """Mejoras C, Part 1: every document schema's element graph (children
+    and attribute names per card variant) and roots, so the client can tell
+    a rule whose path cannot exist (<trade> inside <perscat>, /techstd as a
+    root). Reference data, same posture as GET /api/schema-cards."""
+    return SchemaGraphOut(**get_standard_graph(standard))

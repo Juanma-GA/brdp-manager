@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
+import RulePathWarnings from './RulePathWarnings.jsx';
 import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
 import { finalRuleXml, ruleIdsNote, ruleSplitNote, validateRuleXml } from '../../hooks/useSuggestions';
 import { NAME_HINT_TEST_IDS, extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
@@ -150,6 +151,7 @@ export default function RuleSuggestionPanel({
   onDiscard,
   onToggleReference,
   onPastedRuleChange,
+  onRuleTextChange,
   onAcceptPasted,
   onEnsurePastedCoverage,
   onTestResult,
@@ -228,6 +230,14 @@ export default function RuleSuggestionPanel({
           <RuleSplitNote split={entry.split} />
           <RuleIdsNote renamed={entry.idsRenamed} />
           <RuleValidationWarnings validation={generatedValidation} standard={standard} proposal={brdp?.proposal ?? null} />
+          <RulePathWarnings
+            ruleXml={entry.text}
+            format={entry.format}
+            standard={standard}
+            schemaLocation={entry.schemaLocation}
+            onApplyFix={onRuleTextChange}
+            testId="suggested-rule-path-warning"
+          />
           <SchemaCoverageWarnings ruleXml={entry.text} entry={entry} />
         </>
       )}
@@ -323,6 +333,17 @@ export default function RuleSuggestionPanel({
           <RuleSplitNote split={pastedSplit} />
           <RuleIdsNote renamed={pastedIds} />
           {pastedValidation && <RuleValidationWarnings validation={pastedValidation} standard={standard} proposal={brdp?.proposal ?? null} />}
+          {pasted && pastedValidation?.wellFormed && (
+            <RulePathWarnings
+              ruleXml={pastedFinal}
+              fixXml={entry.pastedRule || ''}
+              format={entry.format}
+              standard={standard}
+              schemaLocation={entry.schemaLocation}
+              onApplyFix={onPastedRuleChange}
+              testId="pasted-rule-path-warning"
+            />
+          )}
           {pasted && <SchemaCoverageWarnings ruleXml={pastedFinal} entry={entry} />}
           {pasted && (
             <div className={styles.suggestionActions}>
