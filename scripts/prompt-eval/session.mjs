@@ -17,6 +17,8 @@
 //   await client.login();
 //   await client.apiFetch(path, options)  -- JSON in, JSON out (204 → null)
 //   await client.rawFetch(path, init)     -- any body (FormData), the Response
+//   await client.llmProxy(payload)        -- POST /api/llm-proxy, waiting out
+//                                            the per-minute limit (below)
 //   await cleanupLeftoverProjects(client, { log })
 //
 // Temp projects are named "Prompt Eval — <standard> — <timestamp>"
@@ -30,6 +32,22 @@ export class SessionLostError extends Error {
     this.name = "SessionLostError";
   }
 }
+
+// Protecciones 2a: the per-user limit on AI requests. Over the per-minute
+// limit the request waits what the server says (retry_after_seconds) and is
+// sent again, like the app (src/api/llmRateLimit.js) -- a pass never fails a
+// case because of it. Over the per-day limit nothing would work for hours:
+// the pass stops with this error, which says the limit and when to retry.
+export class LlmLimitError extends SessionLostError {
+  constructor(message) {
+    super(message);
+    this.name = "LlmLimitError";
+  }
+}
+
+// An unattended pass waits longer than the app before giving up: each wait
+// is under 60 s, so this is ~20 minutes for ONE request at most.
+export const EVAL_RATE_LIMIT_MAX_WAITS = 20;
 
 export class LoginError extends Error {
   constructor(message) {
@@ -49,9 +67,12 @@ async function readDetail(res) {
   return detail;
 }
 
-export function createEvalClient({ api, email, password, fetchImpl = fetch }) {
+const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export function createEvalClient({ api, email, password, fetchImpl = fetch, sleepImpl = realSleep, log = console.log }) {
   let accessToken = null;
   let relogins = 0;
+  let rateLimitWaits = 0;
   // Set once the session is lost: the pass checks it after every run, since
   // a caller may catch the error (the rule test turns a failed call into its
   // own error state) and the pass must stop all the same.
@@ -124,12 +145,41 @@ export function createEvalClient({ api, email, password, fetchImpl = fetch }) {
     return send(path, init);
   }
 
+  // One chat request through the proxy, as the app sends it.
+  async function llmProxy(payload) {
+    const init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ payload }) };
+    for (let waits = 0; ; waits += 1) {
+      const res = await send("/api/llm-proxy", init);
+      if (res.ok) return res.json();
+      const detail = await readDetail(res);
+      if (res.status === 429 && detail?.code === "llm_rate_limited") {
+        const seconds = Math.max(1, Number(detail.retry_after_seconds) || Number(res.headers.get("retry-after")) || 1);
+        if (detail.window !== "minute" || waits >= EVAL_RATE_LIMIT_MAX_WAITS) {
+          lost = new LlmLimitError(
+            `The AI request limit of ${detail.limit} per ${detail.window} was reached; the server allows the next one in ${seconds} s. ` +
+              "Raise LLM_CALLS_PER_MINUTE / LLM_CALLS_PER_DAY in backend/.env (0 = no limit) and restart the backend, or run the pass later."
+          );
+          throw lost;
+        }
+        rateLimitWaits += 1;
+        log(`  waiting ${seconds} s: AI request limit of ${detail.limit} per minute reached`);
+        await sleepImpl(seconds * 1000);
+        continue;
+      }
+      throw new Error(`POST /api/llm-proxy -> ${res.status}: ${JSON.stringify(detail)}`);
+    }
+  }
+
   return {
     login,
     apiFetch,
     rawFetch,
+    llmProxy,
     get relogins() {
       return relogins;
+    },
+    get rateLimitWaits() {
+      return rateLimitWaits;
     },
     get accessToken() {
       return accessToken;

@@ -78,6 +78,15 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   const [lateAnalysis, setLateAnalysis] = useState(null);
   // Only the latest generation may land (Regenerate while one is running).
   const generationRef = useRef(0);
+  // Closing the panel (or a newer generation) cancels a wait for the AI's
+  // per-minute limit (Protecciones 2a): nothing is sent after it.
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
   const setupRef = useRef(null);
   // Latest callback, so a generation that lands later reports to it.
   const onResultRef = useRef(onResult);
@@ -128,6 +137,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   const generate = useCallback(async (previousReview = null) => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
+    const shouldCancel = () => unmountedRef.current || generationRef.current !== generation;
     setState({ status: 'loading' });
     setReview(null);
     setReplaceQuestion(null);
@@ -147,6 +157,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
           await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
             temperature: RULE_TEST_TEMPERATURE,
             maxTokens: RULE_TEST_MAX_TOKENS,
+            shouldCancel,
           })
         ).content,
       fetchSchemaCards,
@@ -164,6 +175,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
         (
           await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
             temperature: RULE_PROPOSAL_CHECK_TEMPERATURE,
+            shouldCancel,
           })
         ).content,
     });
@@ -293,6 +305,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     try {
       const res = await sendMessage([{ role: 'user', content: RULE_TEST_REVIEW_USER_MESSAGE }], null, aiProvider.model, aiProvider.provider, systemPrompt, {
         temperature: RULE_TEST_REVIEW_TEMPERATURE,
+        shouldCancel: () => unmountedRef.current || generationRef.current !== generation,
       });
       if (generationRef.current !== generation) return; // examples replaced meanwhile
       const parsed = parseRuleTestReviewResponse(res.content);

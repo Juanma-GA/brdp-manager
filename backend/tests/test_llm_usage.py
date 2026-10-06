@@ -150,7 +150,7 @@ async def test_record_failure_never_breaks_the_call(client, user, monkeypatch, c
         response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
     assert response.status_code == 200
     assert response.content == SSE_BODY
-    assert any("Could not record an LLM call" in r.getMessage() for r in caplog.records)
+    assert any("record an LLM call" in r.getMessage() for r in caplog.records)
 
 
 async def test_embedding_call_leaves_a_row_with_text_count(user):
@@ -223,3 +223,131 @@ async def test_admin_usage_is_for_admins_only(client, user):
     assert (await client.get("/api/admin/llm-usage", headers=_headers(user))).status_code == 403
     assert (await client.get("/api/admin/llm-usage")).status_code == 401
     assert (await client.get("/api/admin/llm-usage?days=0", headers=_headers(user))).status_code in (403, 422)
+
+
+# --- Part 2: the per-user limit on chat calls -------------------------------
+
+
+@pytest.fixture
+def limits(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+
+    def set_limits(per_minute: int, per_day: int):
+        monkeypatch.setattr(settings, "llm_calls_per_minute", per_minute)
+        monkeypatch.setattr(settings, "llm_calls_per_day", per_day)
+
+    return set_limits
+
+
+def _counting_provider():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, content=SSE_BODY, headers={"content-type": "application/json"})
+
+    _mock(handler)
+    return calls
+
+
+async def _add_past_calls(user_id, *seconds_ago, result="ok"):
+    async with async_session_factory() as session:
+        now = datetime.now(timezone.utc)
+        for s in seconds_ago:
+            session.add(LlmCall(user_id=user_id, kind="chat", result=result, created_at=now - timedelta(seconds=s)))
+        await session.commit()
+
+
+async def test_minute_limit_refuses_without_calling_the_provider(client, user, limits):
+    limits(2, 0)
+    provider = _counting_provider()
+    for _ in range(2):
+        assert (await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))).status_code == 200
+    refused = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    assert refused.status_code == 429
+    detail = refused.json()["detail"]
+    assert detail["code"] == "llm_rate_limited"
+    assert (detail["limit"], detail["window"]) == (2, "minute")
+    assert 1 <= detail["retry_after_seconds"] <= 60
+    assert refused.headers["retry-after"] == str(detail["retry_after_seconds"])
+    assert len(provider) == 2
+    assert [r.result for r in await _rows(user.id)] == ["ok", "ok", "rate_limited"]
+
+
+async def test_refused_calls_do_not_count(client, user, limits):
+    limits(2, 0)
+    _counting_provider()
+    await _add_past_calls(user.id, 5, 4, 3, result="rate_limited")
+    for _ in range(2):
+        assert (await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))).status_code == 200
+
+
+async def test_retry_after_is_when_the_oldest_counted_call_leaves_the_window(client, user, limits):
+    limits(2, 0)
+    _counting_provider()
+    await _add_past_calls(user.id, 50, 10)
+    refused = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    assert refused.status_code == 429
+    # The call 50 s ago leaves the 60 s window in ~10 s.
+    assert 8 <= refused.json()["detail"]["retry_after_seconds"] <= 11
+
+
+async def test_day_limit_is_a_moving_24_hour_window(client, user, limits):
+    limits(100, 3)
+    _counting_provider()
+    # Two calls 23 h ago (inside the window), one 25 h ago (outside).
+    await _add_past_calls(user.id, 23 * 3600, 23 * 3600 - 60, 25 * 3600)
+    assert (await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))).status_code == 200
+    refused = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    assert refused.status_code == 429
+    detail = refused.json()["detail"]
+    assert (detail["limit"], detail["window"]) == (3, "day")
+    # The oldest of the two leaves the window in ~1 h.
+    assert 3500 <= detail["retry_after_seconds"] <= 3610
+
+
+async def test_zero_means_no_limit(client, user, limits):
+    limits(0, 0)
+    _counting_provider()
+    await _add_past_calls(user.id, *range(1, 30))
+    for _ in range(3):
+        assert (await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))).status_code == 200
+
+
+async def test_embeddings_never_count_for_the_chat_limit(client, user, limits):
+    limits(1, 0)
+    _counting_provider()
+    await llm_usage.record_call(user_id=user.id, kind="embedding", result="ok", text_count=1)
+    assert (await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))).status_code == 200
+
+
+async def test_limit_is_per_user_and_shared_by_the_users_tabs(client, user, limits):
+    import asyncio
+
+    limits(3, 0)
+    provider = _counting_provider()
+    other = await _new_user()
+    try:
+        # Ten calls at the same moment (two tabs, several batches): three
+        # go through, never more, and another user is not affected.
+        responses = await asyncio.gather(
+            *[client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user)) for _ in range(10)]
+        )
+        assert sorted(r.status_code for r in responses) == [200] * 3 + [429] * 7
+        assert len(provider) == 3
+        assert (await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(other))).status_code == 200
+    finally:
+        await _cleanup([other.id])
+
+
+async def test_a_limit_that_cannot_be_read_never_stops_the_call(client, user, limits, monkeypatch):
+    limits(1, 1)
+
+    async def broken(session, user_id):
+        raise RuntimeError("database unreachable")
+
+    monkeypatch.setattr(llm_usage, "_over_limit", broken)
+    _counting_provider()
+    assert (await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))).status_code == 200

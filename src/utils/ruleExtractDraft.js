@@ -11,6 +11,7 @@
 // answer leaves out is "failed" too, without retrying the whole batch.
 import { aiFieldsOf, buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../prompts/extractFromRulesPrompt.js';
 import { buildExtractFromTextPrompt, EXTRACT_TEXT_USER_MESSAGE } from '../prompts/extractFromTextPrompt.js';
+import { LLM_CANCELLED } from '../api/llmRateLimit.js';
 
 const DRAFT_BATCH_SIZE = 10;
 const DRAFT_CONCURRENCY = 3;
@@ -56,14 +57,14 @@ function batchPrompt(batch, { standard, ruleFormat }) {
   return { system: buildExtractFromRulesPrompt({ standard, ruleFormat, candidates: batch }), user: EXTRACT_USER_MESSAGE };
 }
 
-async function draftBatch(batch, { standard, ruleFormat, ask }) {
+async function draftBatch(batch, { standard, ruleFormat, ask, shouldCancel }) {
   const { system, user } = batchPrompt(batch, { standard, ruleFormat });
   const keys = batch.map((c) => c.key);
   const fieldsByKey = new Map(batch.map((c) => [c.key, aiFieldsOf(c)]));
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const text = await ask({ system, user });
+      const text = await ask({ system, user, shouldCancel });
       const { items } = parseExtractFromRulesResponse(text, keys, fieldsByKey);
       return batch.map((c) => {
         const item = items.get(c.key);
@@ -72,6 +73,9 @@ async function draftBatch(batch, { standard, ruleFormat, ask }) {
         return { key: c.key, ...written, draft_status: 'drafted' };
       });
     } catch (err) {
+      // Cancelled while waiting for the per-minute limit of AI requests
+      // (Protecciones 2a): the rows stay pending, nothing is retried.
+      if (err?.code === LLM_CANCELLED) throw err;
       lastError = err;
     }
   }
@@ -90,7 +94,13 @@ export async function draftCandidates(candidates, { standard, ruleFormat, ask, o
       if (shouldStop?.()) return;
       const batch = batches[next];
       next += 1;
-      const results = await draftBatch(batch, { standard, ruleFormat, ask });
+      let results;
+      try {
+        results = await draftBatch(batch, { standard, ruleFormat, ask, shouldCancel: shouldStop });
+      } catch (err) {
+        if (err?.code === LLM_CANCELLED) return;
+        throw err;
+      }
       all.push(...results);
       if (onBatch) await onBatch(results);
     }

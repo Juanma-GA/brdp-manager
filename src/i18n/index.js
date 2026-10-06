@@ -53,6 +53,7 @@ const resources = {
           llm_temperature_invalid: 'The AI request has an invalid temperature.',
           llm_max_tokens_invalid: 'The AI request has an invalid answer length (max_tokens).',
           llm_max_tokens_too_high: 'The AI request asks for an answer of {{requested}} tokens; the server allows at most {{max}}.',
+          llm_rate_limited: 'You have reached the limit of {{limit}} AI requests per {{window}}. Try again in {{retry_in}}.',
           standard_not_supported: 'The standard "{{standard}}" is not supported. Supported: {{supported}}.',
           project_config_not_object: 'The project configuration is not valid.',
           project_config_value_not_text: 'The project configuration field "{{key}}" must be text.',
@@ -110,6 +111,9 @@ const resources = {
           current_password_incorrect: 'The current password is incorrect.',
         },
         jobKinds: { import: 'Excel import', embeddings: 'embeddings', extraction: 'AI Extract' },
+        // Protecciones 2a: the per-user limit on AI requests.
+        rateWindows: { minute: 'minute', day: 'day' },
+        retryIn: { seconds: '{{count}} s', minutes: '{{count}} min', hours: '{{hours}} h', hoursMinutes: '{{hours}} h {{minutes}} min' },
       },
       appName: 'BRDP Manager',
       validation: {
@@ -1725,6 +1729,7 @@ const resources = {
           llm_temperature_invalid: 'La petición a la IA tiene una temperatura no válida.',
           llm_max_tokens_invalid: 'La petición a la IA tiene una longitud de respuesta (max_tokens) no válida.',
           llm_max_tokens_too_high: 'La petición a la IA pide una respuesta de {{requested}} tokens; el servidor admite como máximo {{max}}.',
+          llm_rate_limited: 'Has alcanzado el límite de {{limit}} peticiones a la IA por {{window}}. Vuelve a intentarlo en {{retry_in}}.',
           standard_not_supported: 'El estándar "{{standard}}" no está admitido. Admitidos: {{supported}}.',
           project_config_not_object: 'La configuración del proyecto no es válida.',
           project_config_value_not_text: 'El campo "{{key}}" de la configuración del proyecto debe ser texto.',
@@ -1781,6 +1786,8 @@ const resources = {
           current_password_incorrect: 'La contraseña actual no es correcta.',
         },
         jobKinds: { import: 'importación de Excel', embeddings: 'embeddings', extraction: 'AI Extract' },
+        rateWindows: { minute: 'minuto', day: 'día' },
+        retryIn: { seconds: '{{count}} s', minutes: '{{count}} min', hours: '{{hours}} h', hoursMinutes: '{{hours}} h {{minutes}} min' },
       },
       appName: 'BRDP Manager',
       validation: {

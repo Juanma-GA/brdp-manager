@@ -4,7 +4,7 @@
 // schema facts fetched for the currently displayed exchange.
 import { useEffect, useRef, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
-import { sendMessage } from '../api/llmAPI';
+import { LLM_CANCELLED, sendMessage } from '../api/llmAPI';
 import { ruleStateOf } from '../utils/ruleState';
 import { fetchSchemaAttribute, fetchSchemaCards, fetchSchemaFacts, fetchSchemaRelation } from '../api/schemaFacts.js';
 import { buildAskSystemPrompt } from '../prompts/askPrompt.js';
@@ -68,6 +68,9 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   // answer, so a repeated question still gets a fresh answer (all lists folded).
   const [schemaAnswerView, setSchemaAnswerView] = useState(null);
   const schemaAnswerSeqRef = useRef(0);
+  // Bumped by Clear and by another BRDP: ends a wait for the AI's
+  // per-minute limit (Protecciones 2a) without sending anything more.
+  const askSeqRef = useRef(0);
   // "+ Ask comparing with another BRDP": collapsed by default. compareBrdp holds
   // the chosen entry ({ source: 'records'|'catalog'|'other_project',
   // identifier, title, definition, and for 'records'/'other_project' also
@@ -90,6 +93,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   // visible, and the next question would have chained onto it as if it
   // were still about the newly selected BRDP.
   useEffect(() => {
+    askSeqRef.current += 1;
     setQuestion('');
     setAnswer('');
     setAskError(null);
@@ -118,6 +122,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   const askGeneric = async () => {
     if (!question.trim() || !aiProvider || !selected) return;
     const askedQuestion = question;
+    const askSeq = askSeqRef.current;
     setBusy(true);
     setAskPending(true);
     // Shown immediately (docs request: "mostrar la pregunta enviada ya en
@@ -174,6 +179,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
 
       const res = await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
         temperature: ASK_TEMPERATURE,
+        shouldCancel: () => askSeqRef.current !== askSeq,
       });
       // Barrido final 1/2: the internal name of the cards block ("SCHEMA
       // FACTS") never reaches the user (answerCleanup.js).
@@ -188,6 +194,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
       // stays in the textarea below so the user never loses what they typed.
       setQuestion('');
     } catch (err) {
+      if (err.code === LLM_CANCELLED) return; // cleared, or another BRDP
       setAskError(err.message);
     } finally {
       setBusy(false);
@@ -196,6 +203,7 @@ export function useAskAssistant({ projectId, standard, ruleFormat, selected, rul
   };
 
   const clearAsk = () => {
+    askSeqRef.current += 1;
     setAnswer('');
     setAskError(null);
     setLastAsked(null);

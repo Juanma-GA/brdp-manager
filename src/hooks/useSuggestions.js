@@ -221,6 +221,10 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
     const token = (suggestGenerationRef.current.get(brdpId) || 0) + 1;
     suggestGenerationRef.current.set(brdpId, token);
     const isCurrent = () => suggestGenerationRef.current.get(brdpId) === token;
+    // A newer request for this BRDP, its entry removed (BRDP deleted,
+    // project changed) or Discard end a wait for the AI's per-minute limit
+    // (Protecciones 2a) without sending anything more.
+    const shouldCancel = () => !isCurrent() || !suggestionsRef.current.has(brdpId);
     const commit = (entry) => {
       if (!isCurrent()) return; // a newer request for this same BRDP has since started
       setSuggestionsByBrdpId((prev) => {
@@ -261,7 +265,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
           aiProvider.model,
           aiProvider.provider,
           systemPrompt,
-          { temperature: SUGGEST_TEMPERATURE }
+          { temperature: SUGGEST_TEMPERATURE, shouldCancel }
         );
         commit({
           brdpId,
@@ -302,7 +306,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
           aiProvider.model,
           aiProvider.provider,
           systemPrompt,
-          { temperature: SUGGEST_TEMPERATURE }
+          { temperature: SUGGEST_TEMPERATURE, shouldCancel }
         );
         commit({
           brdpId,
@@ -374,7 +378,7 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
           aiProvider.model,
           aiProvider.provider,
           systemPrompt,
-          { temperature: SUGGEST_TEMPERATURE }
+          { temperature: SUGGEST_TEMPERATURE, shouldCancel }
         );
       } catch (err) {
         commit({ ...ruleBase, error: err.message });

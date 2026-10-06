@@ -2,6 +2,9 @@ import { authFetch } from '../services/apiClient.js';
 import { ApiError, apiErrorFromResponse, networkError } from '../services/apiErrors.js';
 import i18n from '../i18n/index.js';
 import { LLM_TRUNCATED, isTruncatedAnswer, truncatedAnswerError } from './llmTruncation.js';
+import { LLM_CANCELLED, sendWithRateLimitRetry } from './llmRateLimit.js';
+
+export { LLM_CANCELLED };
 
 // The output limit of an answer, unless the use sets its own (the rule
 // test's examples need more: src/prompts/shared.js RULE_TEST_MAX_TOKENS).
@@ -50,7 +53,10 @@ function buildRequestBody(provider, messages, systemPrompt, temperature, maxToke
  * @param {string} [systemPrompt=""] - System prompt (optional, defaults to empty string)
  * @param {Object} [options={}] - Optional parameters
  * @param {number} [options.temperature=1] - Temperature parameter for sampling
- * @param {string} [options.customEndpoint=""] - Custom endpoint override
+ * @param {number} [options.maxTokens] - Output limit of the answer
+ * @param {Function} [options.shouldCancel] - () => true once the operation
+ *   was cancelled: ends a wait for the per-minute limit with LLM_CANCELLED
+ *   and sends nothing more (Protecciones 2a, llmRateLimit.js)
  * @returns {Promise<Object>} Response from LLM
  * @throws {Error} If the request fails
  */
@@ -62,7 +68,7 @@ export async function sendMessage(
   systemPrompt = "",
   options = {}
 ) {
-  const { temperature = 1, maxTokens = DEFAULT_MAX_TOKENS } = options;
+  const { temperature = 1, maxTokens = DEFAULT_MAX_TOKENS, shouldCancel } = options;
 
   if (!modelName || !provider) {
     throw new Error(i18n.t('errors.llmMissingModel'));
@@ -75,6 +81,14 @@ export async function sendMessage(
   // construction (buildRequestBody) is untouched.
   const payload = buildRequestBody(provider, messages, systemPrompt, temperature, maxTokens);
 
+  // Over the per-minute limit of AI requests the request waits and is sent
+  // again by itself; over the per-day limit its error is thrown, with the
+  // limit and when to try again (Protecciones 2a). The only place in the
+  // app that sends to the LLM, so every use gets the same behaviour.
+  return sendWithRateLimitRetry(() => sendOnce(provider, payload), { shouldCancel });
+}
+
+async function sendOnce(provider, payload) {
   try {
     let response;
     try {

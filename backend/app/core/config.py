@@ -102,6 +102,19 @@ class Settings(BaseSettings):
     # refused, never lowered silently.
     llm_max_tokens: int = 16000
 
+    # --- LLM call limits per user (Protecciones 2a, AACF G12) ---
+    # Chat calls through /api/llm-proxy (embeddings are not limited), per
+    # user, counted from llm_calls over a moving window (the last 60 s, the
+    # last 24 h), so they hold across processes and browser tabs. 0 = no
+    # limit. Over a limit the call is refused with a 429 (llm_rate_limited)
+    # and the provider is not called.
+    # Defaults sized from the app's own peak rate: AI Extract writes texts
+    # in 3 parallel batches, the fastest real use (~3 s per answer) being
+    # ~60 calls/minute; a full prompt-eval run with --runs 3 is ~900 calls
+    # in a day. 120/minute and 3000/day leave twice that, and more.
+    llm_calls_per_minute: int = 120
+    llm_calls_per_day: int = 3000
+
     # --- Interface preferences (AACF 3, Part 1) ---
     # users.ui_preferences.records_detail_width: the Records detail panel's
     # width in px. The minimum is the divider's own (src/pages/RecordsPage.jsx

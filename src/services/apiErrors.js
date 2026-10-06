@@ -45,6 +45,8 @@ export const KNOWN_CODES = new Set([
   'llm_temperature_invalid',
   'llm_max_tokens_invalid',
   'llm_max_tokens_too_high',
+  // Protecciones 2a: the per-user limit on AI requests (minute / day).
+  'llm_rate_limited',
   'standard_not_supported',
   'project_config_not_object',
   'project_config_value_not_text',
@@ -167,6 +169,10 @@ export function describeErrorDetail(status, detail, t = defaultT) {
       // Job kinds are tokens (import / embeddings / extraction): named in
       // the interface language, never shown raw (HR21).
       if (Array.isArray(params.jobs)) params.jobs = params.jobs.map((kind) => t(`errors.jobKinds.${kind}`, { defaultValue: kind }));
+      if (code === 'llm_rate_limited') {
+        params.window = t(`errors.rateWindows.${params.window}`, { defaultValue: params.window });
+        params.retry_in = retryInText(params.retry_after_seconds, t);
+      }
       const text = t(`errors.codes.${code}`, formatParams(params));
       return ref ? t('errors.withRef', { text: text.replace(/\.$/, ''), ref }) : text;
     }
@@ -183,6 +189,17 @@ export function describeErrorDetail(status, detail, t = defaultT) {
     return detail;
   }
   return statusText(status, t);
+}
+
+/** "45 s", "3 min", "2 h 5 min": how long until a refused AI request can be sent again. */
+export function retryInText(seconds, t = defaultT) {
+  const s = Math.max(1, Math.ceil(Number(seconds) || 0));
+  if (s < 60) return t('errors.retryIn.seconds', { count: s });
+  const minutes = Math.ceil(s / 60);
+  if (minutes < 60) return t('errors.retryIn.minutes', { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? t('errors.retryIn.hoursMinutes', { hours, minutes: rest }) : t('errors.retryIn.hours', { hours });
 }
 
 // Lists read as comma-separated text in a sentence.

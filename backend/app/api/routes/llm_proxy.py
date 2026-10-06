@@ -127,9 +127,23 @@ async def llm_proxy(
         )
         raise HTTPException(status_code=422, detail=problem)
 
-    call_id = await llm_usage.record_call(
-        user_id=current_user.id, kind=llm_usage.KIND_CHAT, result=llm_usage.RESULT_FAILED, request_chars=request_chars
-    )
+    # Protecciones 2a, Part 2: the per-user limits (Settings llm_calls_per_
+    # minute / per_day). Over one, a 429 the frontend waits on (minute) or
+    # explains (day); the provider is never called.
+    call_id, limited = await llm_usage.start_chat_call(current_user.id, request_chars)
+    if limited:
+        raise HTTPException(
+            status_code=429,
+            detail=error_detail(
+                "llm_rate_limited",
+                limit=limited.limit,
+                window=limited.window,
+                retry_after_seconds=limited.retry_after_seconds,
+                message=f"Limit of {limited.limit} AI requests per {limited.window} reached; "
+                f"try again in {limited.retry_after_seconds} s.",
+            ),
+            headers={"Retry-After": str(limited.retry_after_seconds)},
+        )
     try:
         endpoint, api_key = _resolve_provider()
     except HTTPException:

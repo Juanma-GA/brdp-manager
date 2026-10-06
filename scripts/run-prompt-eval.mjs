@@ -683,7 +683,7 @@ async function sendToLlm(aiProvider, systemPrompt, userMessage, temperature) {
           temperature,
           messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
         };
-  const res = await apiFetch("/api/llm-proxy", { method: "POST", body: JSON.stringify({ payload }) });
+  const res = await client.llmProxy(payload);
   if (isTruncatedAnswer(aiProvider.provider, res)) throw truncatedAnswerError();
   if (aiProvider.provider === "Anthropic") return res.content[0].text;
   return res.choices[0].message.content;
@@ -876,7 +876,7 @@ async function sendMessagesToLlm(aiProvider, systemPrompt, messages, temperature
     aiProvider.provider === "Anthropic"
       ? { max_tokens: maxTokens, temperature, system: systemPrompt, messages }
       : { max_tokens: maxTokens, temperature, messages: [{ role: "system", content: systemPrompt }, ...messages] };
-  const res = await apiFetch("/api/llm-proxy", { method: "POST", body: JSON.stringify({ payload }) });
+  const res = await client.llmProxy(payload);
   if (isTruncatedAnswer(aiProvider.provider, res)) throw truncatedAnswerError();
   if (aiProvider.provider === "Anthropic") return res.content[0].text;
   return res.choices[0].message.content;

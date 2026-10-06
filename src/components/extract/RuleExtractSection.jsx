@@ -30,7 +30,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authFetch, authFetchJson } from '../../services/apiClient';
 import { describeErrorDetail } from '../../services/apiErrors';
-import { sendMessage } from '../../api/llmAPI.js';
+import { LLM_CANCELLED, sendMessage } from '../../api/llmAPI.js';
 import { EXTRACT_MAX_TOKENS, FIND_DECISIONS_TEMPERATURE, SUGGEST_TEMPERATURE } from '../../prompts/shared.js';
 import { findDecisions, FIND_TRUNCATED } from '../../utils/textExtract.js';
 import TextExtractInput from './TextExtractInput';
@@ -457,10 +457,11 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   );
 
   const ask = useCallback(
-    async ({ system, user }) => {
+    async ({ system, user, shouldCancel }) => {
       const res = await sendMessage([{ role: 'user', content: user }], null, aiProvider.model, aiProvider.provider, system, {
         temperature: SUGGEST_TEMPERATURE,
         maxTokens: EXTRACT_MAX_TOKENS,
+        shouldCancel,
       });
       return res.content;
     },
@@ -468,10 +469,11 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   );
 
   const askFind = useCallback(
-    async ({ system, user }) => {
+    async ({ system, user, shouldCancel }) => {
       const res = await sendMessage([{ role: 'user', content: user }], null, aiProvider.model, aiProvider.provider, system, {
         temperature: FIND_DECISIONS_TEMPERATURE,
         maxTokens: EXTRACT_MAX_TOKENS,
+        shouldCancel,
       });
       return res.content;
     },
@@ -488,7 +490,13 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
       setFinding(true);
       setFindError(null);
       try {
-        const decisions = await findDecisions({ text, standard, ask: askFind });
+        // A new extraction replacing this one ends a wait for the AI's
+        // per-minute limit (Protecciones 2a) without sending anything more.
+        const decisions = await findDecisions({
+          text,
+          standard,
+          ask: (prompt) => askFind({ ...prompt, shouldCancel: () => jobIdRef.current !== jobId }),
+        });
         const res = await authFetch(`${base}/jobs/${jobId}/decisions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -498,6 +506,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
         const j = await res.json();
         if (jobIdRef.current === j.id) setJob(j);
       } catch (err) {
+        if (err.code === LLM_CANCELLED) return; // replaced by another extraction
         setFindError(err.code === FIND_TRUNCATED ? t('config.ruleExtract.text.findTruncated') : t('config.ruleExtract.text.findFailed', { error: err.message }));
       } finally {
         findingRef.current = false;
