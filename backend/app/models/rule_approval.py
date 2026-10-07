@@ -57,3 +57,7 @@ class RuleApproval(Base):
     # and "Probar con los ejemplos guardados" can re-run it after the rule
     # changes. NULL: no passed test has been recorded with its examples.
     last_passed_test: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Corrección propuesta: the SHA-256 hex of the rule_xml whose proposed
+    # correction was discarded. The proposal does not come back for that
+    # text; it is re-evaluated as soon as the rule changes. NULL = none.
+    correction_dismissed_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -31,6 +31,40 @@ class RuleApprovalPropose(BaseModel):
     # "rule_copied" event naming its project and identifier (read from the
     # database, never from the client); the user must be able to see it.
     copied_from_brdp_id: uuid.UUID | None = None
+    # Corrección propuesta: the rule saved is a correction the person
+    # accepted. History gets a "rule_corrected" event with what was fixed
+    # (codes, never sentences) besides the change of the rule text.
+    correction: "RuleCorrectionRecord | None" = None
+
+
+# A proposed correction as History records it: each fix with the defect it
+# fixes ({code, params, fix}) and what is still wrong after it -- codes
+# from src/validation/ruleCorrection.js, translated by the interface.
+_MAX_CORRECTION_ITEMS = 50
+_MAX_CORRECTION_JSON = 20000
+
+
+class RuleCorrectionItem(BaseModel):
+    code: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=64)
+    params: dict[str, Any] = Field(default_factory=dict)
+    fix: dict[str, Any] | None = None
+
+
+class RuleCorrectionRecord(BaseModel):
+    fixes: list[RuleCorrectionItem] = Field(min_length=1, max_length=_MAX_CORRECTION_ITEMS)
+    remaining: list[RuleCorrectionItem] = Field(default_factory=list, max_length=_MAX_CORRECTION_ITEMS)
+
+    @model_validator(mode="after")
+    def _size(self) -> "RuleCorrectionRecord":
+        if len(json.dumps(self.model_dump())) > _MAX_CORRECTION_JSON:
+            raise ValueError("correction is too large")
+        return self
+
+
+class RuleCorrectionDismiss(BaseModel):
+    # SHA-256 hex of the rule_xml the discarded correction was proposed
+    # for; must be the saved rule's (409 otherwise).
+    rule_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 # Test de reglas T3: the recorded result of the last "Test rule" run.
@@ -171,6 +205,8 @@ class RuleApprovalOut(BaseModel):
     last_test_edited_examples: list[dict[str, Any]] | None = None
     # The last passed test with its examples (see the model).
     last_passed_test: dict[str, Any] | None = None
+    # Corrección propuesta: the rule text whose correction was discarded.
+    correction_dismissed_hash: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -202,7 +238,8 @@ class BulkRuleApprovalOut(BaseModel):
 
 class BulkRuleApprovalWithRuleOut(BulkRuleApprovalOut):
     """Same shape as the bulk lookup above, plus the actual rule text --
-    used only by Project Configuration's Export to Excel (Rule column).
+    used by Project Configuration's Export to Excel (Rule column), Generate,
+    and the check of the project's rules for defects in Records.
     Kept as a separate response model (not an extra field bolted onto
     BulkRuleApprovalOut) so RecordsPage's bulk fetch, which only ever
     reads `.status` and runs on every Records page load, never grows its
@@ -210,3 +247,10 @@ class BulkRuleApprovalWithRuleOut(BulkRuleApprovalOut):
     """
 
     rule_xml: str
+    # Corrección propuesta: Records checks every saved rule for defects and
+    # needs to know which rule texts had their correction discarded.
+    correction_dismissed_hash: str | None = None
+    identifier: str | None = None
+
+
+RuleApprovalPropose.model_rebuild()

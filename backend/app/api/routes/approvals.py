@@ -19,6 +19,7 @@ from app.schemas.rule_approval import (
     BulkRuleApprovalWithRuleOut,
     RuleApprovalOut,
     RuleApprovalPropose,
+    RuleCorrectionDismiss,
     RuleTestRegister,
     rule_xml_hash,
 )
@@ -75,7 +76,7 @@ async def list_project_approvals_for_export(
     format: str,
     _viewer: User = Depends(require_project_role("viewer")),
     db: AsyncSession = Depends(get_db),
-) -> list[RuleApproval]:
+) -> list[BulkRuleApprovalWithRuleOut]:
     """Same query as list_project_approvals above, but also returns
     rule_xml -- Project Configuration's Export to Excel needs the actual
     rule text for its Rule column (docs request), which the lean bulk
@@ -84,8 +85,14 @@ async def list_project_approvals_for_export(
     looks up each BRDP's row here by brdp_id, same "absent row -> todo,
     empty rule" convention as everywhere else.
     """
-    result = await db.execute(_project_approvals_stmt(project_id, format))
-    return list(result.scalars().all())
+    result = await db.execute(_project_approvals_stmt(project_id, format).add_columns(BRDP.identifier))
+    # The BRDP's identifier too: the check of the project's rules for defects
+    # (Records) names the other BRDP when two rules share an id, whatever
+    # filter the Records list has.
+    return [
+        BulkRuleApprovalWithRuleOut.model_validate(approval).model_copy(update={"identifier": identifier})
+        for approval, identifier in result.all()
+    ]
 
 
 def _rule_state(approval: RuleApproval | None) -> str:
@@ -254,6 +261,18 @@ async def propose_approval(
         record_change(
             db, brdp_id, editor, "rule_copied", "", json.dumps(copied_from, sort_keys=True, ensure_ascii=False), always=True
         )
+    if body.correction is not None:
+        # Corrección propuesta: what the accepted correction fixed (and what
+        # it left), as codes -- the "rule" entry above has the old and new text.
+        record_change(
+            db,
+            brdp_id,
+            editor,
+            "rule_corrected",
+            "",
+            json.dumps(body.correction.model_dump(), sort_keys=True, ensure_ascii=False),
+            always=True,
+        )
     await db.commit()
     await db.refresh(approval)
     return approval
@@ -398,6 +417,40 @@ async def register_rule_test(
         _rule_test_history_value(body.result, reason, edited, examples_from=examples_from),
         always=True,
     )
+    await db.commit()
+    await db.refresh(approval)
+    return approval
+
+
+@router.post("/correction-dismissal", response_model=RuleApprovalOut)
+async def dismiss_rule_correction(
+    project_id: uuid.UUID,
+    brdp_id: uuid.UUID,
+    format: str,
+    body: RuleCorrectionDismiss,
+    editor: User = Depends(require_project_role("editor")),
+    db: AsyncSession = Depends(get_db),
+) -> RuleApproval:
+    """Corrección propuesta, "Descartar": the correction proposed for the
+    saved rule text does not come back for that text (it is remembered by
+    the text's SHA-256). The rule itself never changes here. 409 when the
+    hash is not the saved rule's -- the correction was of another text.
+    """
+    await _get_owned_brdp(project_id, brdp_id, db)
+    approval = await db.get(RuleApproval, (brdp_id, format))
+    if approval is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_detail("rule_not_found", message="No rule found for this BRDP/format"),
+        )
+    if body.rule_hash != rule_xml_hash(approval.rule_xml):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=error_detail(
+                "rule_correction_outdated", message="The rule changed since the correction was proposed; open it again"
+            ),
+        )
+    approval.correction_dismissed_hash = body.rule_hash
     await db.commit()
     await db.refresh(approval)
     return approval
