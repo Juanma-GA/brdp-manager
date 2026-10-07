@@ -133,6 +133,9 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
         "BRDP-LINT-TWOPATHS": "more than one objectPath in a rule",
         "BRDP-LINT-THRICE": "flag 1 with a value predicate",
         "BRDP-LINT-DUPLICATE": "duplicate allowed value",
+        # Mejoras F, Part 2.2b: flag 1 with values -- validators disagree on
+        # it (amber warning, counted like any finding), with the flag 0 fix.
+        "BRDP-LINT-OK-VALUES": "flag 1 with values",
     }
     for identifier, kind in expected.items():
         assert any(f"| {kind} |" in line for line in _rows(out, identifier)), (identifier, out)
@@ -163,7 +166,6 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
         "BRDP-LINT-OK-DEPTH",
         "BRDP-LINT-OK-FLAG1",
         "BRDP-LINT-OK-FLAG1-CONDITION",
-        "BRDP-LINT-OK-VALUES",
         "BRDP-LINT-OK-BOOLEAN",
     ):
         assert _rows(out, identifier) == [], (identifier, out)
@@ -173,8 +175,9 @@ async def test_each_pattern_is_listed_and_correct_rules_are_not(seeded_project):
     assert any("can only have one <objectPath>; this one has 2" in line for line in _rows(out, "BRDP-LINT-TWOPATHS")), out
     # The two-path rule also counts "not executable" (its test refuses it),
     # like the rule that is not of the format.
-    assert "Checked 18 stored rule(s) in 1 project(s); 12 finding(s), each problem counted once per rule." in out
-    assert "- Working projects: 18 rule(s) in 1 project(s); 12 finding(s) (14 place(s))." in out
+    assert any('allowedObjectFlag="0"' in line for line in _rows(out, "BRDP-LINT-OK-VALUES")), out
+    assert "Checked 18 stored rule(s) in 1 project(s); 13 finding(s), each problem counted once per rule." in out
+    assert "- Working projects: 18 rule(s) in 1 project(s); 13 finding(s) (15 place(s))." in out
     assert "- Reference projects (Official Default…): 0 rule(s) in 0 project(s); 0 finding(s)." in out
 
 
