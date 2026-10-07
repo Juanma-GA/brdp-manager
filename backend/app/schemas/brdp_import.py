@@ -60,6 +60,16 @@ class ImportRowResult(BaseModel):
     # the "conflict" outcome (file says "no rule" but one exists) -- that
     # case already has its own, unrelated warning via existing_rule_status.
     rule_override: bool = False
+    # True when this BRDP already has a rule for the format and the file's
+    # Rule is the same rule (structurally equal, both without legacy
+    # wrappers -- import_jobs._rule_xml_structurally_equal): the import keeps
+    # the stored rule_approvals row exactly as it is (text, source,
+    # approved_at, test). Only a different Rule Status changes, then just
+    # its status and approved_at. Never set together with rule_override.
+    rule_kept: bool = False
+    # True when the row brings a Rule and the BRDP (new or existing) has no
+    # rule yet for the format: a rule is added, none is replaced.
+    rule_new: bool = False
     # The identifier is an official one of the project's specification that
     # the catalog of the project's standard does not have, but another S1000D
     # edition's does (the closest; on a tie the most recent): that edition

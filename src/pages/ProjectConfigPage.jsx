@@ -307,6 +307,11 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // above -- rows Apply will skip touching entirely because all four core
   // fields already match what's stored (no field write, no history entry).
   const unchangedRows = analysis?.results.filter((r) => r.unchanged) ?? [];
+  // What the import does to the rules: replaced by a different one, kept
+  // exactly as stored (text, source and test -- the file's rule is the same
+  // rule), or added to a BRDP that had none.
+  const keptRuleRows = analysis?.results.filter((r) => r.rule_kept) ?? [];
+  const newRuleRows = analysis?.results.filter((r) => r.rule_new && r.outcome === 'ok') ?? [];
   // An official identifier the catalog of the project's standard does not
   // have but another S1000D edition's does: imported with that edition's
   // Title/Definition, never rejected (same as AI Extract's "From catalog
@@ -516,6 +521,24 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                       </>
                     )}
                   </p>
+                  {ruleOverrideRows.length + keptRuleRows.length + newRuleRows.length > 0 && (
+                    <p className={styles.hint} data-testid="import-rule-summary">
+                      {t('config.dataManagement.rulesSummaryLabel')}{' '}
+                      <span data-testid="import-rule-summary-changed">
+                        {t('config.dataManagement.rulesSummaryChanged', { count: ruleOverrideRows.length })}
+                      </span>
+                      {' · '}
+                      <span data-testid="import-rule-summary-kept">
+                        {t('config.dataManagement.rulesSummaryKept', { count: keptRuleRows.length })}
+                      </span>
+                      {newRuleRows.length > 0 && (
+                        <>
+                          {' · '}
+                          {t('config.dataManagement.rulesSummaryNew', { count: newRuleRows.length })}
+                        </>
+                      )}
+                    </p>
+                  )}
 
                   {rejectedRows.length > 0 && (
                     <>

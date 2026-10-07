@@ -160,6 +160,18 @@ def _rule_xml_structurally_equal(a: str, b: str) -> bool:
     return _elements_structurally_equal(root_a, root_b)
 
 
+def same_rule(stored_xml: str, file_xml: str, rule_format: str | None) -> bool:
+    """The file's Rule is the rule already stored: structurally equal once
+    both are without legacy wrappers (a <rules> or a bare
+    <structureObjectRuleGroup> around the same rules). Indentation and line
+    breaks between elements never count; attribute values and text always
+    do (see _rule_xml_structurally_equal)."""
+    return _rule_xml_structurally_equal(
+        unwrap_rule_xml(stored_xml, rule_format)[0],
+        unwrap_rule_xml(file_xml, rule_format)[0],
+    )
+
+
 async def _get_owned_project(project_id: uuid.UUID, db: AsyncSession) -> Project:
     project = await db.get(Project, project_id)
     if project is None:
@@ -326,15 +338,13 @@ def _classify_row(
     # Both sides without legacy wrappers (rule_wrappers.py): the rule is
     # stored clean, so a file that only differs from it by a <rules> or
     # <structureObjectRuleGroup> around the same rules is not a new rule.
-    rule_override = (
+    rule_kept = (
         action == "update"
         and existing_approval is not None
         and bool(rule_xml)
-        and not _rule_xml_structurally_equal(
-            unwrap_rule_xml(existing_approval.rule_xml, rule_format)[0],
-            unwrap_rule_xml(rule_xml, rule_format)[0],
-        )
+        and same_rule(existing_approval.rule_xml, rule_xml, rule_format)
     )
+    rule_override = action == "update" and existing_approval is not None and bool(rule_xml) and not rule_kept
 
     return ImportRowResult(
         row_number=row.row_number,
@@ -343,6 +353,8 @@ def _classify_row(
         action=action,
         catalog_override=catalog_override,
         rule_override=rule_override,
+        rule_kept=rule_kept,
+        rule_new=bool(rule_xml) and existing_approval is None,
         unchanged=unchanged,
         **edition_fields,
     )
@@ -681,6 +693,20 @@ async def run_import_job(
                 new_status = "approved" if row.rule_status == "Verified" else "pending_review"
                 existing_approval = existing_approvals.get(brdp.id)
                 old_state = _rule_state(existing_approval)
+                if result.rule_kept:
+                    # The same rule as the one stored (_classify_row): the
+                    # row is left as it is -- its text byte for byte, its
+                    # source, approved_at and its test (last_test_*,
+                    # last_passed_test), so a tested rule stays tested
+                    # after a re-import. Only a different Rule Status
+                    # changes, and then just status and approved_at.
+                    if existing_approval.status != new_status:
+                        existing_approval.status = new_status
+                        existing_approval.approved_at = datetime.now(timezone.utc) if new_status == "approved" else None
+                        record_change(work_session, brdp.id, editor, "rule_status", old_state, _rule_state(existing_approval))
+                    processed += 1
+                    await _set_progress(progress_session, job_id, processed)
+                    continue
                 old_rule_xml = existing_approval.rule_xml if existing_approval is not None else ""
                 if existing_approval is None:
                     existing_approval = RuleApproval(brdp_id=brdp.id, format=rule_format)
@@ -689,7 +715,10 @@ async def run_import_job(
                 # <structureObjectRuleGroup> around the rules): the format
                 # check and the rule test only accept the rules themselves,
                 # and Generate never used the wrapper anyway. A rule with no
-                # wrapper is stored exactly as in the file.
+                # wrapper is stored exactly as in the file. A different rule
+                # keeps its recorded test: last_test_rule_hash no longer
+                # matches, so the test shows as outdated, as after editing
+                # the rule by hand.
                 existing_approval.rule_xml = unwrap_rule_xml(row.rule, rule_format)[0]
                 existing_approval.source = "manual"
                 existing_approval.status = new_status
