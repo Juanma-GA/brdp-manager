@@ -185,6 +185,22 @@ function suggestRuleReply(systemPrompt) {
   if (/LONGRULE/.test(proposal)) {
     return '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath><objectUse>MOCK-LONG-RULE</objectUse></structureObjectRule>';
   }
+  // Mejoras F, Part 2.2a (BRDP-EXT-02636): "every <row> of a <tbody>
+  // carries @rowsep 0". With the prompt's rule 9 ("never objappl="1" with
+  // values") the rule forbids the opposite with objappl="0"; without it,
+  // objappl="1" with an objval -- the real mistake.
+  if (/@rowsep/.test(proposal) && /FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
+    if (/never objappl="1" with values/.test(systemPrompt)) {
+      return `<objrule id="${id}"><objpath objappl="0">/dmodule/content//tbody/row[not(@rowsep='0')]</objpath><objuse>MOCK-RULE: every row of a tbody carries rowsep 0.</objuse></objrule>`;
+    }
+    return `<objrule id="${id}"><objpath objappl="1">/dmodule/content//tbody/row/@rowsep</objpath><objuse>MOCK-RULE: every row of a tbody carries rowsep 0.</objuse><objval valtype="single" val1="0"/></objrule>`;
+  }
+  // Mejoras F, Part 1.1 (c) (BRDP-EXT-02651): the corrected rule really
+  // offered for the inverted one -- objappl="1" on //reqconds[…], which
+  // also rejects a descript data module with nothing written in it.
+  if (/<reqconds>/.test(proposal) && /PREVIOUS RULE FAILED ITS TEST/.test(systemPrompt) && /FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
+    return `<objrule id="${id}"><objpath objappl="1">//reqconds[ /dmodule/content/proced or /dmodule/content/schedule ]</objpath><objuse>MOCK-RULE: procedures and scheduled maintenance declare their required conditions.</objuse></objrule>`;
+  }
   // Mejoras C: the real rule BRDP-EXT-00087, whose path cannot exist
   // (/techstd is never a document root) -- for the amber warning and its
   // "Change /techstd to //techstd" button.
@@ -436,10 +452,26 @@ function ruleTestReply(systemPrompt, messages) {
       const inline = minimal.replace("</applic>", '</applic><inlineapplics><applic id="app-0001"><displaytext><p>All</p></displaytext></applic></inlineapplics>');
       return answer([withMeta({ label: "Inline applicabilities in the status section", expected: "accept", schema: ruleSchema || "descript", content: "Remove the access panel." }, inline)]);
     }
+    // Mejoras F, Part 2.1 (BRDP-EXT-02640 b): <issno> is required in
+    // <dmaddres>, so only an accept example: the minimal section as it is.
+    if (/\/\/dmaddres\[not\(issno\)\]/.test(rule) && minimal) {
+      return answer([withMeta({ label: "Data module with its issue number", expected: "accept", schema: ruleSchema || "descript", content: "Remove the access panel." })]);
+    }
     if (/\/\/avee\/\*/.test(rule)) {
       const avee = "<avee><modelic>AA</modelic><sdc>A</sdc><chapnum>00</chapnum><section>0</section><subsect>0</subsect><subject>00</subject><discode>00</discode><discodev>A</discodev><incode>040</incode><incodev>A</incodev><itemloc>D</itemloc></avee>";
       return answer([withMeta({ label: "Reference with a complete code", expected: "accept", schema: ruleSchema || "descript", content: `See <refdm>${avee}</refdm> for the removal.` })]);
     }
+  }
+  // Mejoras F, Part 1.3 (BRDP-EXT-02651): a condition on proced/schedule
+  // and <reqconds>. Written in proced (the schema the condition needs): the
+  // accept example has the preliminary requirements, the reject one not.
+  if (/reqconds/.test(rule) && /proced/.test(rule)) {
+    const prelreqs = "<prelreqs><reqconds><noconds/></reqconds><reqpers><person man=\"A\"/></reqpers><supequip><nosupeq/></supequip><supplies><nosupply/></supplies><spares><nospares/></spares><safety><nosafety/></safety></prelreqs>";
+    const main = "<mainfunc><step1><para>Remove the access panel.</para></step1></mainfunc>";
+    return answer([
+      { label: "Procedure with its required conditions", expected: "accept", schema: "proced", content: prelreqs + main },
+      { label: "Procedure without required conditions", expected: "reject", schema: "proced", content: main },
+    ]);
   }
   // Remates B, Part 1: a rule whose path is a condition
   // (//emphasis and //randomList, flag 0). Written from the decision ("no
@@ -866,6 +898,10 @@ function ruleTestReviewReply(systemPrompt) {
   // rule rejects every note that has it) is the rule's fault.
   if (/not\(@type\)/.test(systemPrompt)) {
     return JSON.stringify({ cause: "rule", explanation: "MOCK-REVIEW: the assert is inverted: it requires notes WITHOUT @type, but the Proposal requires @type on every note." });
+  }
+  // Mejoras F (BRDP-EXT-02651): the rule asks for //reqconds the wrong way round.
+  if (/reqconds/.test(systemPrompt)) {
+    return JSON.stringify({ cause: "rule", explanation: "MOCK-REVIEW: the rule rejects the procedures that HAVE <reqconds>; the Proposal requires it." });
   }
   if (/cannot reject any content/.test(systemPrompt)) {
     return JSON.stringify({ cause: "rule", explanation: "MOCK-REVIEW: the rule allows <emphasis> (allowedObjectFlag 2 without values), but the Proposal forbids it; it should use allowedObjectFlag 0." });

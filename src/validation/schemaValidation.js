@@ -21,6 +21,7 @@
 //   5b. Rule format: what is saved as a rule contains a rule of the format
 //   6. Messages: every finding as { source, code, params }, one i18n key
 //      table and one formatter -- the texts each panel showed before.
+import { xpathBalanceProblem } from './xpathBalance.js';
 import fontoxpath from 'fontoxpath';
 import { wrapRuleXmlFragment } from '../utils/ruleXmlFragment.js';
 import { duplicateRuleIds, multiplePathOrUse } from '../utils/ruleSplit.js';
@@ -2111,7 +2112,10 @@ export function structureIssues(problems, { schema } = {}) {
 
 // invalidRuleXPaths' expressions as issues.
 export function xpathIssues(expressions) {
-  return (expressions || []).map((expression) => ({ source: 'rule', code: 'invalid_xpath', params: { expression } }));
+  return (expressions || []).map((expression) => {
+    const balance = xpathBalanceProblem(expression);
+    return { source: 'rule', code: 'invalid_xpath', params: balance ? { expression, balance } : { expression } };
+  });
 }
 
 // The issue in the interface language (`t` from i18next). An unknown code
@@ -2122,6 +2126,10 @@ export function formatSchemaIssue(issue, t) {
   const params = { ...issue.params };
   if (Array.isArray(params.suggestions)) params.suggestions = joinList(params.suggestions, t('records.assistant.listOr'));
   if (Array.isArray(params.standards)) params.standards = formatStandardList(params.standards, t('records.assistant.listAnd'));
+  // Mejoras F, Part 2.3: the unbalanced ( [ or quote first.
+  if (issue.code === 'invalid_xpath' && params.balance) {
+    return `${t(`records.xpathBalance.${params.balance}`)} ${t(key, params)}`;
+  }
   if (issue.code === 'rowFullyCovered') {
     // " (column c2, by the morerows of row 1)" -- same text as
     // formatStructureProblem in English.

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import VerdictCauseHint from './VerdictCauseHint';
+import MinimalDocumentsLine from './MinimalDocumentsLine.jsx';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
@@ -43,6 +44,7 @@ export function verdictView(t, verdict, standard) {
       return { tone: 'ok', text: t('records.ruleTest.verdicts.schemaCovered', { detail: coverageDetail(verdict.items, t) }) };
     case 'review':
       if (verdict.path) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewPath', { detail: formatRuleTestReason(verdict.path, t) }) };
+      if (verdict.rootAll) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewRootAll') };
       if (verdict.threshold) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewThreshold', { detail: formatThresholdMismatch(verdict.threshold, t) }) };
       return verdict.unchecked
         ? { tone: 'warn', text: t('records.ruleTest.verdicts.reviewUnchecked', { error: verdict.error }) }
@@ -87,6 +89,15 @@ export function verdictView(t, verdict, standard) {
       };
     }
   }
+}
+
+// Mejoras F, Part 1.4.
+const shortPath = (p) => p.replace(/\[1\]/g, '');
+function rejectionText(rejection, t) {
+  const nodes = rejection.nodes.map(shortPath).join(', ');
+  const more = rejection.more ? t('records.ruleTest.rejectedMore', { count: rejection.more }) : '';
+  const where = rejection.allAppBuilt ? t('records.ruleTest.rejectedAppBuilt', { count: rejection.total }) : '';
+  return t('records.ruleTest.rejectedBecause', { nodes: `${nodes}${more}`, where });
 }
 
 export const TONE_CLASS = { ok: 'ruleTestToneOk', bad: 'ruleTestToneBad', warn: 'ruleTestToneWarn' };
@@ -389,9 +400,14 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
               {t('records.ruleTest.rootOnlyExample', { root: example.xml ? rootName(example.xml) : example.schema })}
             </p>
           )}
+          {example.minimalDocument && (
+            <p className={styles.ruleTestNote} data-testid="rule-test-minimal-document">
+              {t('records.ruleTest.minimalDocumentExample', { schema: example.schema, root: example.xml ? rootName(example.xml) : '' })}
+            </p>
+          )}
           <HighlightedXml lines={lines} xml={example.xml || example.content} />
           <div className={styles.ruleTestExampleActions}>
-            {!example.rootOnly && !readOnly && (
+            {!example.rootOnly && !example.minimalDocument && !readOnly && (
               <button
                 type="button"
                 className={styles.linkButton}
@@ -424,8 +440,15 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           rejected -- the exact data, so the person decides whether the
           example or the rule is wrong. */}
       {showResult && run?.matches === false && acceptCauseText(run, t) && (
-        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-accept-cause">
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad} ${styles.ruleTestPre}`} data-testid="rule-test-accept-cause">
           {t('records.ruleTest.acceptedBecause', { cause: acceptCauseText(run, t) })}
+        </p>
+      )}
+      {/* Mejoras F, Part 1.4: why the rule rejected an example meant to be
+          accepted -- the nodes, and whether they are all the application's. */}
+      {showResult && run?.matches === false && run?.rejection && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad} ${styles.ruleTestPre}`} data-testid="rule-test-reject-cause" data-app-built={run.rejection.allAppBuilt ? 'true' : 'false'}>
+          {rejectionText(run.rejection, t)}
         </p>
       )}
       {/* Plantillas, Part 4: a rule whose path is a true/false condition
@@ -683,6 +706,7 @@ export default function RuleTestPanel({
       {state.status !== 'ready' && <ReplacePassedQuestion question={replaceQuestion} answer={replaceAnswer} onAnswer={answerReplaceQuestion} />}
 
       <RuleDescription description={description} />
+      <MinimalDocumentsLine ruleXml={ruleXml} format={format} standard={standard} schemaLocation={schemaLocation} testId="rule-test-minimal-documents" />
       {!notARule && <RuleLintWarnings ruleXml={ruleXml} format={format} place="panel" />}
       {/* Mejoras C, Part 1: once the test says "review" for it, the verdict
           carries the same text. */}

@@ -450,6 +450,9 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
         // T3b: written to correct a rule whose test the review blamed on
         // the rule -- shown as a note; testable straight away like any other.
         correctedFromTest: Boolean(options.failedTest),
+        // Mejoras F, Part 1.1 (c): the rule that failed its test, to tell
+        // the minimal documents the new rule rejects and it accepted.
+        previousRuleXml: options.failedTest?.ruleXml || null,
         copyablePrompt: buildCopyablePrompt(systemPrompt),
         pastedRule: '',
         expandedReferenceIds: new Set(),

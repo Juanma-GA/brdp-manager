@@ -234,7 +234,7 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
     { reason: 'The rule reads another file (document()), which is not available in a test.' });
   expect('doc()', run(sor('0', 'doc($uri)//x'), 'BREX-4.2', '<x/>'), 'not_executable', { reason: /reads another file/ });
   expect('"doc(" inside a string literal is not a call', run(sor('0', "//p[. = 'see doc(1)']"), 'BREX-4.2', '<x><p>see doc(1)</p></x>'), 'rejected');
-  const bad = expect('invalid XPath', run(sor('0', '//para['), 'BREX-4.2', '<x/>'), 'not_executable', { reason: /^XPath error: .*XPST0003/ });
+  const bad = expect('invalid XPath', run(sor('0', '//para['), 'BREX-4.2', '<x/>'), 'not_executable', { reason: /^A bracket is not closed\. XPath error: .*XPST0003/ });
   check('XPath error message is one line', !bad.notExecutableReason.params.message.includes('\n'), bad.notExecutableReason.params.message);
   expect('unknown prefix is an XPath error', run(sor('0', '//foo:bar'), 'BREX-4.2', '<x/>'), 'not_executable', { reason: /^XPath error: .*XPST0081/ });
   expect('nonContextRule only', run('<nonContextRule><simplePara>Decide X.</simplePara></nonContextRule>', 'BREX-4.2', '<x/>'), 'not_executable',

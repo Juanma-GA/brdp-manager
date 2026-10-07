@@ -17,6 +17,13 @@ export default function VerdictCauseHint({ verdict, runs }) {
       </p>
     );
   }
+  if (cause.appBuilt) {
+    return (
+      <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-cause" data-cause="rule" data-app-built="true">
+        {t('records.ruleTest.cause.ruleStrictAppBuilt')}
+      </p>
+    );
+  }
   const both = cause.permissive && cause.strict;
   const what = both ? 'ruleBoth' : cause.permissive ? 'rulePermissive' : 'ruleStrict';
   return (

@@ -479,6 +479,16 @@ async function runCheck(check, answer, ctx = {}) {
       const expect = check.expect || [];
       return { status: expect.includes(verdict.kind) ? "pass" : "fail", detail: `engine verdict ${verdict.kind}, expected ${expect.join(" or ")}: ${JSON.stringify(verdict)}` };
     }
+    case "rule_test_examples_by_app": {
+      // Mejoras F, Part 1.2: a rule on the document root alone -- the
+      // examples are the minimal documents the application builds, and no
+      // examples call goes to the LLM.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: `status ${r?.status || "none"}` };
+      const calls = (r.responses || []).length;
+      const built = r.examples.length > 0 && r.examples.every((ex) => ex.minimalDocument === true);
+      return { status: built && calls === 0 ? "pass" : "fail", detail: `${calls} examples call(s); examples: ${r.examples.map((ex) => `${ex.schema}:${ex.expected}${ex.minimalDocument ? " (app)" : ""}`).join(", ")}` };
+    }
     case "rule_test_some_example_runs": {
       // Mejoras D, Part 1.1: at least one example runs (valid in its schema)
       // and the verdict is neither no_runnable nor not_executable -- the

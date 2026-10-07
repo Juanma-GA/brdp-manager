@@ -53,6 +53,15 @@
 // ruleProposalCheck/brex-4-2-at-most-three-vs-exactly-one ("<proceduralStep>
 // with exactly 1 <proceduralStep> child must not appear"). Nothing else.
 //
+// Mejoras F, Parts 1.5 and 2.2a: the BREX format rules of Suggest Rule gain
+// rule 8 (the indentation between elements is text too; a rule on text
+// looks at text() and never counts whitespace-only nodes -- BRDP-EXT-02719)
+// and rule 9 ("every <X> must carry @a = v" is forbidden as the opposite
+// with flag/objappl 0 on X[not(@a='v')], never flag 1 with values --
+// BRDP-EXT-02636); 3.0.1's rule 5 no longer sends a mandatory node to
+// objappl="1". The Schematron rules gain rule 13 (the same text line).
+// Changed on purpose: the 9 suggestRule cases. Nothing else.
+
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a
 // few rounds back) means expected-prompts.json is stale by design, not

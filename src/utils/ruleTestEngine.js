@@ -574,6 +574,8 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
     notExecutableParts: notRun,
     outOfScopeSchemas: [...new Set(outOfScope)],
     conditions,
+    // Mejoras F, Part 1.1: no part applies to this document's schema.
+    notApplicable,
   };
 }
 
@@ -673,6 +675,10 @@ function ruleFormatReason(ruleXml, format, parseXml) {
 //   describe_document_must_contain {root, target, path}  flag 0, /R[not(//x)] on a
 //                                                      document root (Mejoras C)
 //   describe_document_must_not_contain {root, target, path}  /R[//x], flag 0
+//   describe_any_document_must_contain / _must_not_contain {target, path}
+//                                                      /*[not(//x)] / /*[//x] (Mejoras F)
+//   describe_root_must_be / _must_not_be {roots, path} /*[not(self::a or self::b)]
+//                                                      (Mejoras F, Part 1.2)
 //   describe_forbidden_existence {target, path, joiner, conditions}  flag 0, a
 //                                                      predicate of existence tests
 //                                                      joined by and/or (Mejoras C)
@@ -807,6 +813,10 @@ function describePart(part, spec, parseXml) {
     const qualifier = target ? checkedStepQualifier(path) : null;
     return qualifier ? { ...statement, params: { ...statement.params, qualifier } } : statement;
   };
+  if ((flag === '0' || flag === '1') && !withValues) {
+    const root = rootSelfStatement(path, flag);
+    if (root) return root;
+  }
   if (flag === '0') {
     if (withValues) return qualified({ code: 'describe_forbidden_values', params: { target, values, path } });
     return (
@@ -1020,16 +1030,21 @@ function attributePredicateStatement(path) {
   const bare = step.replace(/\[[\s\S]*$/, '').trim().replace(/^child::/, '');
   let target = null;
   let childOf = null;
+  let anyLevel = false;
   if (bare === '*') {
-    const steps = topLevelSteps(withoutPredicates(path)) || [];
+    const stripped = withoutPredicates(path);
+    const steps = topLevelSteps(stripped) || [];
     const parent = steps.length > 1 ? steps[steps.length - 2].replace(/^(?:child|descendant|descendant-or-self)::/, '') : null;
     if (!parent || !/^[A-Za-z_][\w.:-]*$/.test(parent)) return null;
     childOf = `<${parent}>`;
+    // Mejoras F, Part 2.4: //reqcblst//*[@checksum] -- any element inside
+    // <reqcblst> at any level, not only its children.
+    anyLevel = /\/\/\s*(?:\*|descendant(?:-or-self)?::\*)\s*$/.test(stripped) || /descendant(?:-or-self)?::\*\s*$/.test(stripped);
   } else {
     target = pathTarget(path);
     if (!target || target.startsWith('@')) return null;
   }
-  return { code: 'describe_forbidden_attr', params: { target, childOf, path, attr: `@${attr.attr}`, kind: attr.kind, value: attr.value ?? '' } };
+  return { code: 'describe_forbidden_attr', params: { target, childOf, anyLevel, path, attr: `@${attr.attr}`, kind: attr.kind, value: attr.value ?? '' } };
 }
 
 // Mejoras C, Part 3: predicates that only ask whether a node is there.
@@ -1068,6 +1083,68 @@ function splitTopLevelLogic(predicate) {
 }
 
 const NAME_RE = String.raw`[A-Za-z_][\w.-]*`;
+
+// Mejoras F, Part 1.2: a path made of the document's root step only --
+// "/*" or "/name" with at least one predicate, every predicate testing only
+// self:: (combined with not / and / or and parentheses):
+// /*[not(self::dmodule)], /*[self::pm or self::ddn] → { root, predicates }
+// | null. A bare /pm (no predicate) stays with the "is the document a <pm>"
+// handling (isRootOnly).
+export function rootSelfPath(path) {
+  const text = String(path || '').trim();
+  if (!text.startsWith('/') || text.startsWith('//')) return null;
+  const steps = topLevelSteps(text);
+  if (!steps || steps.length !== 1) return null;
+  const step = steps[0];
+  const bare = step.replace(/\[[\s\S]*$/, '').trim();
+  if (bare !== '*' && !new RegExp(`^${NAME_RE}$`).test(bare)) return null;
+  const predicates = stepPredicateTexts(step);
+  if (predicates.length === 0) return null;
+  for (const pred of predicates) {
+    if (!new RegExp(`self::(?:${NAME_RE}|\\*)`).test(pred)) return null;
+    const rest = pred
+      .replace(new RegExp(`self::(?:${NAME_RE}|\\*)`, 'g'), ' ')
+      .replace(/\bnot\s*\(/g, ' ( ')
+      .replace(/\b(?:and|or)\b/g, ' ')
+      .replace(/[()\s]/g, '');
+    if (rest) return null;
+  }
+  return { root: bare, predicates };
+}
+
+// The root elements a single /*[not(self::a or self::b)] (or its positive
+// form /*[self::a or self::b]) names → { negated, names } | null.
+function rootSelfList(path) {
+  const root = rootSelfPath(path);
+  if (!root || root.root !== '*' || root.predicates.length !== 1) return null;
+  let text = root.predicates[0].trim();
+  let negated = false;
+  const not = /^not\s*\(([\s\S]*)\)$/.exec(text);
+  if (not) {
+    negated = true;
+    text = not[1].trim();
+  }
+  while (/^\(([\s\S]*)\)$/.test(text)) text = text.slice(1, -1).trim();
+  const names = [];
+  for (const term of text.split(/\s+or\s+/)) {
+    const m = new RegExp(`^\\(?\\s*self::(${NAME_RE})\\s*\\)?$`).exec(term.trim());
+    if (!m) return null;
+    names.push(m[1]);
+  }
+  return names.length ? { negated, names } : null;
+}
+
+// "The document's root element must be <dmodule>" (flag 0 with not(), or
+// flag 1 without it) / "must not be <pm>".
+function rootSelfStatement(path, flag) {
+  const list = rootSelfList(path);
+  if (!list) return null;
+  const mustBe = flag === '0' ? list.negated : !list.negated;
+  return {
+    code: mustBe ? 'describe_root_must_be' : 'describe_root_must_not_be',
+    params: { roots: list.names.map((n) => `<${n}>`), path },
+  };
+}
 
 // One existence term: x / child::x (child), .//x / descendant::x (inside),
 // //x (anywhere in the document), @a / attribute::a, each optionally in
@@ -1108,11 +1185,26 @@ function singleStepWithPredicate(path) {
 // not(), "No document may contain <actref>".
 function documentMustContainStatement(path) {
   const single = singleStepWithPredicate(path);
-  if (!single || !WHOLE_DOCUMENT_ROOTS.has(single.name)) return null;
-  const term = existenceTerm(single.predicate);
+  // Mejoras F, Part 1.2: /*[not(//x)] -- the same, on any type of document.
+  const anyRoot = !single && /^\/\*\[/.test(String(path || '').trim()) ? anyRootSingle(path) : null;
+  const step = single || anyRoot;
+  if (!step || (!anyRoot && !WHOLE_DOCUMENT_ROOTS.has(step.name))) return null;
+  if (!String(path || '').trim().startsWith('/') || String(path || '').trim().startsWith('//')) return null;
+  const term = existenceTerm(step.predicate);
   if (!term || (term.kind !== 'document' && term.kind !== 'inside')) return null;
-  const params = { root: `<${single.name}>`, target: `<${term.name}>`, path };
+  if (anyRoot) {
+    return { code: term.negated ? 'describe_any_document_must_contain' : 'describe_any_document_must_not_contain', params: { target: `<${term.name}>`, path } };
+  }
+  const params = { root: `<${step.name}>`, target: `<${term.name}>`, path };
   return { code: term.negated ? 'describe_document_must_contain' : 'describe_document_must_not_contain', params };
+}
+
+function anyRootSingle(path) {
+  const steps = topLevelSteps(String(path || '').trim());
+  if (!steps || steps.length !== 1) return null;
+  const preds = stepPredicateTexts(steps[0]);
+  if (preds.length !== 1 || steps[0].replace(/\[[\s\S]*$/, '').trim() !== '*') return null;
+  return { name: '*', predicate: preds[0] };
 }
 
 // //techstd[not(authex) or not(notes)] with flag 0 → "<techstd> without
@@ -1153,6 +1245,7 @@ function thresholdStatement(target, path, threshold) {
 
 const CAN_REJECT = new Set([
   'describe_forbidden_in_nesting', 'describe_forbidden_attr', 'describe_document_must_contain', 'describe_document_must_not_contain', 'describe_forbidden_existence',
+  'describe_root_must_be', 'describe_root_must_not_be', 'describe_any_document_must_contain', 'describe_any_document_must_not_contain',
   'describe_forbidden_nesting', 'describe_forbidden_ancestors', 'describe_forbidden_children', 'describe_forbidden_length',
   'describe_condition_forbidden', 'describe_condition_required',
   'describe_forbidden', 'describe_forbidden_values', 'describe_mandatory', 'describe_mandatory_values',

@@ -168,3 +168,9 @@ class SchemaGraphOut(BaseModel):
     # Child names whose pairs are never judged (DITA: the topic and map
     # types -- which one nests in which is set per shell).
     unchecked_children: list[str] = []
+    # Mejoras F, Part 2.1: {name: [[schemas], [required children], [required
+    # attribute names]]} -- only where something is required.
+    required: dict[str, list[list[list[str]]]] = {}
+    # Mejoras F, Part 1.1: {schema: {path, titled, metadata}} -- the document
+    # the application builds for each schema with nothing written.
+    skeletons: dict[str, dict] = {}

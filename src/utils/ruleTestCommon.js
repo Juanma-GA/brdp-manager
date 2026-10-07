@@ -1,6 +1,7 @@
 // Shared by the two rule test engines (Test rule): utils/ruleTestEngine.js
 // (BREX, T1) and utils/ruleTestSchematron.js (Schematron, T4). Pure module
 // (no React, no API), importable from plain Node.
+import { xpathBalanceProblem } from '../validation/xpathBalance.js';
 import fontoxpath from 'fontoxpath';
 
 export const XPATH_LANGUAGE = fontoxpath.evaluateXPath.XPATH_3_1_LANGUAGE;
@@ -63,7 +64,9 @@ export class RuleRuntimeError extends NotExecutable {
 export function evaluationError(err, expression) {
   const message = xpathErrorMessage(err);
   if (STATIC_ERROR_RE.test(String(err?.message || ''))) {
-    const e = new NotExecutable(reason('xpath_error', { message }));
+    // Mejoras F, Part 2.3: an unbalanced ( [ or quote, in plain words.
+    const balance = xpathBalanceProblem(expression);
+    const e = new NotExecutable(reason('xpath_error', balance ? { message, balance } : { message }));
     e.static = true;
     return e;
   }

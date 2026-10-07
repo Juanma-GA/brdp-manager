@@ -1656,3 +1656,10 @@
   justify-content: flex-end;
   font-size: 12px;
 }
+
+/* Mejoras F, Part 1.5: spaces inside an XPath shown as they are
+   (contains(., '  ') keeps both spaces). */
+.ruleTestDescription li,
+.ruleTestPre {
+  white-space: pre-wrap;
+}

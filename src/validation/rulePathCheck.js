@@ -68,7 +68,18 @@ export function graphIndex(graph) {
       for (const a of attrs) attributesAnywhere.add(a);
       for (const schema of schemas) {
         if (!bySchema.has(schema)) bySchema.set(schema, new Map());
-        bySchema.get(schema).set(name, { children: new Set(children), attrs: new Set(attrs) });
+        bySchema.get(schema).set(name, { children: new Set(children), attrs: new Set(attrs), requiredChildren: new Set(), requiredAttrs: new Set() });
+      }
+    }
+  }
+  // Mejoras F, Part 2.1: what the schema makes mandatory (graph.required).
+  for (const [name, entries] of Object.entries(graph.required || {})) {
+    for (const [schemas, children, attrs] of entries) {
+      for (const schema of schemas) {
+        const node = bySchema.get(schema)?.get(name);
+        if (!node) continue;
+        for (const c of children) node.requiredChildren.add(c);
+        for (const a of attrs) node.requiredAttrs.add(a);
       }
     }
   }
@@ -884,4 +895,69 @@ export function formatPathFix(fix, t) {
 // callers that want to know whether a graph is worth loading.
 export function isPathName(name) {
   return NAME_RE.test(name);
+}
+
+// ─── Mejoras F, Part 1.3: absolute paths the condition requires ──────────
+// BRDP-EXT-02651: /*[ ( /dmodule/content/proced or /dmodule/content/schedule )
+// and not(//reqconds) ] was tested on descript, where the condition can
+// never be true. For every rule part (BREX), on the last step of each
+// alternative, an "and" operand that is NOT negated and is an absolute path
+// (/a/b or //a) or an "or" of absolute paths is a requirement: the test
+// schema must have every element of at least one of them.
+// → [[names of one absolute path, …], …] (one entry per requirement).
+// A negated operand (not(/dmodule/content/proced)) never requires anything.
+export function absoluteConditionRequirements(ruleXml, format, options = {}) {
+  const out = [];
+  for (const part of rulePathParts(ruleXml, format, options)) {
+    if (part.condition) continue;
+    for (const alternative of pathAlternatives(part.path)) {
+      const { steps } = pathSteps(alternative);
+      const last = steps[steps.length - 1];
+      if (!last) continue;
+      for (const operand of last.predicates.flatMap((p) => andOperands(p) || [])) {
+        const text = unwrapParens(operand.trim());
+        if (/^not\s*\(/.test(text)) continue;
+        const sets = [];
+        for (const raw of orOperands(text)) {
+          const one = unwrapParens(raw.trim());
+          if (!one.startsWith('/') || /^\/\s*$/.test(one)) {
+            sets.length = 0;
+            break;
+          }
+          const names = pathSteps(one).steps.filter((st) => st.kind === 'element' && st.name).map((st) => st.name);
+          if (names.length === 0) {
+            sets.length = 0;
+            break;
+          }
+          sets.push([...new Set(names)]);
+        }
+        if (sets.length && !out.some((r) => JSON.stringify(r) === JSON.stringify(sets))) out.push(sets);
+      }
+    }
+  }
+  return out;
+}
+
+// The elements an "and" operand of the checked step asks about anywhere in
+// the document -- //x or not(//x) (BRDP-EXT-02651: not(//reqconds)): the
+// examples must be able to contain them, so the insertion point must reach
+// them (<reqconds> is in proced/prelreqs, never inside a <para>).
+export function documentExistenceNames(ruleXml, format, options = {}) {
+  const out = new Set();
+  for (const part of rulePathParts(ruleXml, format, options)) {
+    if (part.condition) continue;
+    for (const alternative of pathAlternatives(part.path)) {
+      const { steps } = pathSteps(alternative);
+      const last = steps[steps.length - 1];
+      if (!last) continue;
+      for (const operand of last.predicates.flatMap((p) => andOperands(p) || [])) {
+        let text = unwrapParens(operand.trim());
+        const not = /^not\s*\(([\s\S]*)\)$/.exec(text);
+        if (not) text = unwrapParens(not[1].trim());
+        const m = /^\/\/([A-Za-z_][\w.-]*)$/.exec(text);
+        if (m) out.add(m[1]);
+      }
+    }
+  }
+  return [...out];
 }

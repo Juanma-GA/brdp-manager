@@ -22,7 +22,12 @@
 //       parent::);
 //   (b) X/*[not(self::a or self::b or …)] -- alone or as one "and"
 //       operand -- when, in every schema of the scope where X can appear,
-//       every child the schema allows in X is in the list.
+//       every child the schema allows in X is in the list;
+//   (c) Mejoras F, Part 2.1: X[not(Y)] / X[not(@a)] -- alone or as one
+//       "and" operand -- when <Y> is a required child of <X> (graph.required:
+//       a plain entry of the content model, never an alternative of a
+//       choice) or @a a required attribute, in every schema of the scope
+//       where X can appear. BRDP-EXT-02640 //dmaddres[not(issno)].
 // Only BREX parts that forbid (allowedObjectFlag="0" / objappl="0"); a
 // mandatory part (flag 1), a restriction of values (flag 2, no objappl) and
 // a condition are never "covered" (as before). The scope is the part's
@@ -39,6 +44,9 @@ const NAME = '[A-Za-z_][\\w.-]*';
 const RELATION_RE = new RegExp(`^not\\s*\\(\\s*(ancestor|parent)::(${NAME})\\s*\\)$`);
 const SELF_RE = new RegExp(`^self::(${NAME})$`);
 const NOT_RE = /^not\s*\(([\s\S]*)\)$/;
+// Mejoras F, Part 2.1: X[not(Y)] / X[not(@a)] (child:: and attribute:: too).
+const NOT_CHILD_RE = new RegExp(`^not\\s*\\(\\s*(?:child::)?(${NAME})\\s*\\)$`);
+const NOT_ATTR_RE = new RegExp(`^not\\s*\\(\\s*(?:@|attribute::)(${NAME})\\s*\\)$`);
 
 // Every element reachable from the schema's roots, without expanding
 // `blocked` (it can itself be reached).
@@ -98,6 +106,27 @@ function coveredAlternative(index, scope, alternative) {
       });
       if (covered) return { kind: axis === 'ancestor' ? 'onlyInside' : 'onlyDirectlyInside', element, other };
     }
+    // Mejoras F, Part 2.1: X[not(Y)] when <Y> is a required child of <X>
+    // (a plain entry of its content model, never an alternative of a
+    // choice), X[not(@a)] when @a is a required attribute -- in every
+    // schema of the scope where <X> can appear.
+    for (const operand of operands) {
+      const child = NOT_CHILD_RE.exec(operand);
+      const attr = child ? null : NOT_ATTR_RE.exec(operand);
+      if (!child && !attr) continue;
+      const element = last.name;
+      const where = schemasWith(index, scope, element);
+      if (where.length === 0) continue;
+      const covered = where.every((s) => {
+        const n = graphNode(index, s, element);
+        return child ? Boolean(n?.requiredChildren?.has(child[1])) : Boolean(n?.requiredAttrs?.has(attr[1]));
+      });
+      if (covered) {
+        return child
+          ? { kind: 'requiredChild', element, other: child[1] }
+          : { kind: 'requiredAttribute', element, other: attr[1] };
+      }
+    }
     return null;
   }
   // (b) X/*[not(self::a or …)]
@@ -151,6 +180,9 @@ export function formatCoverageItem(item, t) {
 export function coverageItemEnglish(item) {
   if (item.kind === 'onlyInside') return `<${item.element}> can only go inside <${item.other}>`;
   if (item.kind === 'onlyDirectlyInside') return `<${item.element}> can only go directly inside <${item.other}>`;
+  if (item.kind === 'requiredChild') return `<${item.other}> is required in <${item.element}>`;
+  if (item.kind === 'requiredAttribute') return `@${item.other} is required in <${item.element}>`;
+  if (item.kind === 'rootsAllowed') return `every document type of the standard has <${item.element}> as its root, which the rule allows`;
   if (item.kind === 'childrenListed') return `the schema only allows the listed children in <${item.element}> (${item.children.map((c) => `<${c}>`).join(', ')})`;
   return `<${item.element}> is not allowed inside <${item.parent}> by the schema`;
 }

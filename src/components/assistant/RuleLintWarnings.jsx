@@ -14,7 +14,12 @@ export default function RuleLintWarnings({ ruleXml, format, place }) {
   const { t } = useTranslation();
   const warnings = useMemo(() => lintWarnings(ruleXml, format, place, t), [ruleXml, format, place, t]);
   return warnings.map((w) => (
-    <p key={w.code} className={styles.vocabWarning} data-testid="rule-lint-warning" data-code={w.code}>
+    <p
+      key={w.code}
+      className={w.amber ? `${styles.ruleTestNote} ${styles.ruleTestToneWarn}` : styles.vocabWarning}
+      data-testid="rule-lint-warning"
+      data-code={w.code}
+    >
       ⚠ {w.title}: {w.detail}
     </p>
   ));

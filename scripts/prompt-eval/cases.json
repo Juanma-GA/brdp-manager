@@ -3979,6 +3979,130 @@
           "note": "every Definition the AI wrote in Spanish"
         }
       ]
+    },
+    {
+      "id": "rule-test-3-0-1-root-must-be-dmodule",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras F, Part 1.2 (real case BRDP-EXT-02770): a rule on the document root alone. The application runs it on its own minimal documents (a data module is accepted, a publication module rejected) with no examples call to the LLM; before, the LLM wrote <dmodule> examples that never broke it.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-MF-1",
+        "title": "Elemento raíz de los módulos de datos",
+        "definition": "Decidir qué elemento raíz llevan los módulos de datos del proyecto.",
+        "proposal": "El elemento raíz debe ser <dmodule>.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"XML-R-2770\"><objpath objappl=\"0\">/*[not(self::dmodule)]</objpath><objuse>El elemento raíz debe ser dmodule</objuse></objrule>",
+      "checks": [
+        {
+          "type": "rule_test_examples_by_app",
+          "note": "minimal documents built by the app, no LLM examples call"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "root element must be <dmodule>",
+          "note": "the description says it plainly"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-condition-proced-reqconds",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras F, Part 1.3 (real case BRDP-EXT-02651): the condition needs /dmodule/content/proced or /schedule, so the examples are written in proced, where <reqconds> can be written; before, they were written in descript and the rule never applied.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-MF-2",
+        "title": "Condiciones requeridas en procedimientos",
+        "definition": "Decidir si los procedimientos y el mantenimiento programado declaran sus condiciones requeridas.",
+        "proposal": "Los DM de procedimiento y de mantenimiento programado deben llevar <reqconds>.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"XML-R-2651\"><objpath objappl=\"0\">/*[ ( /dmodule/content/proced or /dmodule/content/schedule ) and not(//reqconds) ]</objpath><objuse>Los DM de procedimiento y de mantenimiento programado deben llevar reqconds</objuse></objrule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "\"proced\"",
+          "note": "the examples are asked for in proced"
+        },
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-required-issno",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras F, Part 2.1 (real case BRDP-EXT-02640, form b): <issno> is required in <dmaddres>, so no valid document breaks //dmaddres[not(issno)] -- \"Already covered by the schema\", found before the LLM.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-MF-4",
+        "title": "Número de edición del módulo de datos",
+        "definition": "Decidir si todo módulo de datos lleva su número de edición.",
+        "proposal": "Todo DM lleva <issno>.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"XML-R-2640\"><objpath objappl=\"0\">//dmaddres[not(issno)]</objpath><objuse>Todo DM lleva issno</objuse></objrule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "NO example meant to be rejected"
+        },
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_schema_covered",
+          "via": "path"
+        }
+      ]
+    },
+    {
+      "id": "rule-3-0-1-rowsep-every-row",
+      "type": "suggest-rule",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras F, Part 2.2a (real case BRDP-EXT-02636): \"every <row> carries @rowsep 0\" must be objappl=\"0\" on row[not(@rowsep='0')], never objappl=\"1\" with an objval (validators disagree on it).",
+      "brdp": {
+        "identifier": "BRDP-EVAL-MF-5",
+        "title": "Separador de filas en las tablas",
+        "definition": "Decidir si las filas del cuerpo de las tablas llevan separador.",
+        "proposal": "Cada <row> de un <tbody> lleva @rowsep con el valor 0.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false
+        },
+        {
+          "type": "not_contains",
+          "pattern": "objappl=[\"']1",
+          "note": "never objappl=\"1\" with values"
+        }
+      ]
     }
   ]
 }

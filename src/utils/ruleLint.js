@@ -29,6 +29,13 @@
 //     by the node's own value and no objectValue/objval -- only ONE node
 //     with a good value has to exist, a bad one is never rejected (never for
 //     a path that is a condition on the whole document);
+//   - flag1_with_values ("flag 1 with values", Mejoras F, Part 2.2b, amber):
+//     allowedObjectFlag="1" / objappl="1" WITH objectValue / objval --
+//     validators do not agree: some require the value on every node of the
+//     parent step, others only that the document have one such node (and
+//     then reject a document without the parent at all). Forbidding the
+//     opposite (flag 0 on parent[not(@a='v')]) means the same everywhere.
+//     Real rules: BRDP-EXT-00001, 00086, 02772, BRDP-S1-00024;
 //   - ancestor_depth ("count(ancestor::*) as depth"): counts every
 //     ancestor, not how deep the element is nested;
 //   - impossible_path ("path that cannot exist", Mejoras C): a step of the
@@ -68,6 +75,7 @@ const LINT_KINDS = {
   cannot_reject: 'cannot reject',
   must_not_allowed: '"must not" but allowed',
   flag1_value_predicate: 'flag 1 with a value predicate',
+  flag1_with_values: 'flag 1 with values',
   ancestor_depth: 'count(ancestor::*) as depth',
   duplicate_values: 'duplicate allowed value',
   impossible_path: 'path that cannot exist',
@@ -78,9 +86,13 @@ const LINT_KINDS = {
 // and "cannot reject" (describeRule), the suggestion panel the rule format.
 // `panel`: what RuleTestPanel adds; `suggestion`: what the suggested /
 // pasted rule adds (it shows no description, so "cannot reject" too).
+// Warnings shown amber, not red: the rule is not wrong, but validators
+// may read it differently (Mejoras F, Part 2.2b).
+const AMBER_CODES = new Set(['flag1_with_values']);
+
 const LINT_CODES_FOR = {
-  panel: ['must_not_allowed', 'flag1_value_predicate', 'ancestor_depth', 'duplicate_values'],
-  suggestion: ['cannot_reject', 'must_not_allowed', 'flag1_value_predicate', 'ancestor_depth', 'duplicate_values'],
+  panel: ['must_not_allowed', 'flag1_value_predicate', 'flag1_with_values', 'ancestor_depth', 'duplicate_values'],
+  suggestion: ['cannot_reject', 'must_not_allowed', 'flag1_value_predicate', 'flag1_with_values', 'ancestor_depth', 'duplicate_values'],
 };
 
 const localName = (el) => el.localName || el.nodeName.replace(/^.*:/, '');
@@ -301,12 +313,32 @@ function occurrences(ruleXml, format, parseXml) {
       if (rule.flag === '1' && rule.values.length === 0 && lastStepPredicates(rule.path).some(filtersByOwnValue)) {
         add('flag1_value_predicate', { id: rule.id, attr: rule.flagAttr, path: clip(rule.path), valueElement: rule.valueElement });
       }
+      if (rule.flag === '1' && rule.values.length > 0) add('flag1_with_values', flag1WithValuesParams(rule));
     }
   }
   const xpaths = extractRuleXPaths(ruleXml);
   for (const xp of xpaths.filter((x) => ANCESTOR_WILDCARD_RE.test(x))) add('ancestor_depth', { path: clip(xp) });
   for (const item of duplicateValueItems(rules, xpaths)) add('duplicate_values', item);
   return out;
+}
+
+// Mejoras F, Part 2.2b: the parent step and the target of a flag-1 path
+// with values (/dmodule/content//tbody/row/@rowsep → row, @rowsep) and the
+// opposite to forbid -- only for single values.
+function flag1WithValuesParams(rule) {
+  const stripped = String(rule.path || '').replace(/\[[^\]]*\]/g, '');
+  const steps = stripped.split(/\/+/).map((st) => st.trim()).filter(Boolean);
+  const last = steps[steps.length - 1] || '';
+  const before = steps[steps.length - 2] || '';
+  const target = last.startsWith('@') ? last : `<${last}>`;
+  const parent = before && /^[A-Za-z_][\w.-]*$/.test(before) ? before : null;
+  const singles = rule.values.every((v) => v.form === 'single') ? rule.values.map((v) => v.value) : null;
+  const test = last.replace(/^@/, '@');
+  const fix =
+    parent && singles?.length
+      ? `${parent}[not(${singles.map((v) => `${test}='${v}'`).join(' or ')})]`
+      : null;
+  return { id: rule.id, attr: rule.flagAttr, path: clip(rule.path), parent: parent ? `<${parent}>` : null, target, fix };
 }
 
 export function lintRuleFindings(ruleXml, format, options = {}) {
@@ -347,6 +379,10 @@ function formatItem(code, params, t) {
       return k('mustNotAllowed', { ids: params.ruleIds.join(', '), says: params.says, statement: statement() });
     case 'flag1_value_predicate':
       return k('flag1ValuePredicate', params);
+    case 'flag1_with_values':
+      return params.parent
+        ? `${k('flag1WithValues', params)}${params.fix ? k('flag1WithValuesFix', params) : ''}`
+        : k('flag1WithValuesNoParent', params);
     case 'ancestor_depth':
       return k('ancestorDepth', params);
     case 'impossible_path':
@@ -381,5 +417,5 @@ export function lintWarnings(ruleXml, format, place, t, options = {}) {
   }
   return findings
     .filter((f) => !f.known && LINT_CODES_FOR[place].includes(f.code))
-    .map((f) => ({ code: f.code, title: t(`records.ruleLint.titles.${f.code}`), detail: formatLintFinding(f, t).detail }));
+    .map((f) => ({ code: f.code, title: t(`records.ruleLint.titles.${f.code}`), detail: formatLintFinding(f, t).detail, amber: AMBER_CODES.has(f.code) }));
 }

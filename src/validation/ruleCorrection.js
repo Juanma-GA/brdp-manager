@@ -36,6 +36,7 @@
 // not decided (needsOtherVocabularies), the caller loads them and asks
 // again. Pure module: the same code runs in the browser (the BRDP's ficha,
 // the project list) and in the Node tests.
+import { xpathBalanceProblem } from './xpathBalance.js';
 import { numberDuplicateRuleIds, splitMultiPathRules, ruleElementIds } from '../utils/ruleSplit.js';
 import { parseXmlDocument } from '../utils/ruleTestCommon.js';
 import { wrapRuleXmlFragment } from '../utils/ruleXmlFragment.js';
@@ -237,7 +238,8 @@ export function ruleDefects(ruleXml, format, ctx = {}) {
   }
 
   for (const expression of invalidRuleXPaths(xml)) {
-    defects.push({ key: `xpath|${expression}`, code: 'xpath_invalid', params: { expression }, fix: null });
+    const balance = xpathBalanceProblem(expression);
+    defects.push({ key: `xpath|${expression}`, code: 'xpath_invalid', params: balance ? { expression, balance } : { expression }, fix: null });
   }
 
   if (ctx.vocabulary) {
@@ -462,7 +464,7 @@ export function formatRuleDefect(defect, t, { format = null, short = false } = {
     case 'duplicate_ids':
       return t('records.ruleCorrection.defects.duplicateIds', { ids: Array.isArray(p.ids) ? p.ids.join(', ') : p.ids });
     case 'xpath_invalid':
-      return t('records.ruleCorrection.defects.xpathInvalid', { expression: p.expression });
+      return `${p.balance ? `${t(`records.xpathBalance.${p.balance}`)} ` : ''}${t('records.ruleCorrection.defects.xpathInvalid', { expression: p.expression })}`;
     case 'name_case':
       return t('records.ruleCorrection.defects.nameCase', { name: shown(p.type, p.name), to: shown(p.type, p.to), standard: p.standard });
     case 'name_similar':

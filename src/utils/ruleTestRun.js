@@ -17,14 +17,15 @@ import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleT
 import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } from '../prompts/ruleProposalCheckPrompt.js';
 import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
-import { describeRule, parseXmlDocument, ruleConditions, rulePathParts } from './ruleTestEngine.js';
+import { describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootSelfPath } from './ruleTestEngine.js';
+import { minimalDocumentRuns } from './ruleMinimalDocuments.js';
 import { stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 import { elementPlaces } from './schemaPlacement.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 import { cleanInternalNames } from './answerCleanup.js';
-import { checkRulePaths, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
+import { absoluteConditionRequirements, checkRulePaths, documentExistenceNames, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
 import { coverageItemEnglish, schemaCoverage } from '../validation/schemaCoverage.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
@@ -51,6 +52,81 @@ function impossiblePathReview({ ruleXml, format, schemaLocation, graph, parseXml
   if (!check.allImpossible) return null;
   const problems = check.problems.filter((p) => !p.inPredicate).slice(0, MAX_RECORDED_PATH_PROBLEMS);
   return { code: 'test_impossible_path', params: { format, problems } };
+}
+
+// ─── Mejoras F, Part 1.2: a rule on the document's root ───────────────────
+// /*[not(self::dmodule)] (BRDP-EXT-02770): the test schema was descript and
+// both examples had a <dmodule> root -- the rule can only be shown with
+// documents of different types, which nothing the LLM writes changes. Such
+// a rule (every part a BREX path that is ONLY the root step, /* or /name,
+// with predicates testing only self::, flag 0 or 1, no values) is tested
+// without examples from the LLM: the rule is run on the minimal document of
+// every schema (ruleMinimalDocuments.js); one example is the minimal
+// document of a schema it accepts, the other of one it rejects (the first
+// of each group by preference), both "built by the application". No schema
+// rejected → "Already covered by the schema"; every one rejected → review.
+const BREX_FORMATS = new Set(['BREX-4.2', 'BREX-4.1', 'BREX-3.0.1']);
+const ROOT_TEST_ACCEPT_PREFERENCE = ['descript', 'proced', 'process', 'fault', 'ipd', 'schedul', 'crew', 'comrep', 'sb'];
+const ROOT_TEST_REJECT_PREFERENCE = ['pm', 'ddn', 'dml', 'comment'];
+
+export function isRootSelfRule(ruleXml, format, options = {}) {
+  if (!BREX_FORMATS.has(format)) return false;
+  if (/<(?:objectValue|objval)\b/.test(String(ruleXml || ''))) return false;
+  const parts = rulePathParts(ruleXml, format, options);
+  return parts.length > 0 && parts.every((p) => !p.condition && (p.flag === '0' || p.flag === '1') && rootSelfPath(p.path));
+}
+
+function firstByPreference(schemas, preference) {
+  const rank = (s) => {
+    const i = preference.indexOf(s);
+    return i === -1 ? preference.length : i;
+  };
+  return [...schemas].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))[0] || null;
+}
+
+function minimalExample(run, expected, schemaLocation) {
+  return {
+    label: run.schema,
+    expected,
+    schema: run.schema,
+    content: '',
+    xml: run.xml,
+    skeletonNodePaths: run.skeletonNodePaths,
+    schemaLocation: schemaLocation || null,
+    structure: null,
+    insertion: null,
+    contentInsertion: false,
+    // Built by the application, never edited: the minimal document of its
+    // schema, with nothing written for the test.
+    minimalDocument: true,
+  };
+}
+
+function rootElementOf(xml) {
+  const m = /<([A-Za-z_][\w.-]*)[\s>]/.exec(String(xml || ''));
+  return m ? m[1] : null;
+}
+
+// → null (not a root rule, or no minimal documents) | the 'ready' result.
+export function rootRuleTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml }) {
+  if (!graph || !isRootSelfRule(ruleXml, format, { parseXml, schemaLocation })) return null;
+  const minimal = minimalDocumentRuns(ruleXml, format, graph, { standard, schemaLocation, parseXml });
+  if (!minimal.available || minimal.counted === 0) return null;
+  const bySchema = new Map(minimal.results.map((r) => [r.schema, r]));
+  const examples = [];
+  let coverage = null;
+  const accepted = firstByPreference(minimal.accepted, ROOT_TEST_ACCEPT_PREFERENCE);
+  const rejected = firstByPreference(minimal.rejected, ROOT_TEST_REJECT_PREFERENCE);
+  if (accepted) examples.push(minimalExample(bySchema.get(accepted), 'accept', schemaLocation));
+  if (rejected) examples.push(minimalExample(bySchema.get(rejected), 'reject', schemaLocation));
+  if (!rejected) {
+    const roots = [...new Set(minimal.accepted.map((s) => rootElementOf(bySchema.get(s).xml)).filter(Boolean))];
+    coverage = { items: [{ ruleId: null, kind: 'rootsAllowed', element: roots.join('>, <'), roots }] };
+  } else if (!accepted) {
+    coverage = { rootAllRejected: true, schemas: minimal.rejected };
+  }
+  const runs = examples.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml, schemaLocation }));
+  return { status: 'ready', coverage, examples, runs, minimal, rootRule: true };
 }
 
 // Same cap as the schema facts of Ask / Suggest Rule.
@@ -111,9 +187,15 @@ async function splitByRelation({ ruleXml, targets, cards, elementSchemas, testSc
 // rule forbids (schemaCoverage.js) -- only examples meant to be accepted are
 // written, so the relation split (one example inside, one outside) is not
 // needed: the "outside" example cannot exist.
-export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly = false }) {
+export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly = false, format = null, parseXml = parseXmlDocument }) {
   const contextSchemas = contextSchemasOfRule(ruleXml, schemaLocation).schemas;
-  const targets = ruleTargets(ruleXml);
+  // Mejoras F, Part 1.3: absolute paths the checked step's condition needs
+  // (BREX only; Schematron DITA unchanged).
+  const conditionRequirements = format && format.startsWith('BREX') ? absoluteConditionRequirements(ruleXml, format, { parseXml, schemaLocation }) : [];
+  const targets = {
+    ...ruleTargets(ruleXml),
+    containNames: format && format.startsWith('BREX') ? documentExistenceNames(ruleXml, format, { parseXml, schemaLocation }) : [],
+  };
   const useNames = ruleUseNames(ruleXml);
   const factNames = extractRuleNames(ruleXml).elements.slice(0, MAX_SCHEMA_FACTS);
   const lookup = [
@@ -123,6 +205,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       ...targets.absolutePrefixes.map((p) => p[0]),
       // every element step, so the schema groups know where each part lives
       ...targets.alternatives.flatMap((a) => (a.opaque ? [] : a.steps)),
+      ...conditionRequirements.flat(2),
     ]),
   ];
   // Schema facts improve the examples but are never required; the schema
@@ -141,7 +224,20 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   }
   const schemaFacts = factNames.filter((n) => cards[n]).map((name) => ({ name, entry: cards[name] }));
   const attributeSchemas = await attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, elementSchemas);
-  const { testSchema, otherSchema, groups, candidates } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets });
+  const { testSchema, otherSchema, groups, candidates, noConditionSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets, conditionRequirements });
+  if (noConditionSchema) {
+    return {
+      contextSchemas,
+      schemaFacts,
+      promptPlacements: [],
+      untested: [],
+      unreachable: {
+        code: 'condition_no_schema',
+        params: { paths: noConditionSchema.map((names) => `/${names.join('/')}`).join(' | '), standard },
+      },
+      setup: { standard, schemaLocation, placements: {}, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
+    };
+  }
   // Mejoras A, Part 2: //commonInfo[not(ancestor::procedure)] (BRDP-S1-00177)
   // was tested on proced only, where every <commonInfo> is inside
   // <procedure> -- the example the rule selects could not be written there.
@@ -702,11 +798,28 @@ export async function generateRuleTestExamples({
     if (!isCurrent()) return null;
     const pathReview = impossiblePathReview({ ruleXml, format, schemaLocation, graph, parseXml });
     if (pathReview) return { status: 'path_review', reason: pathReview, systemPrompt: null, responses };
+    // Mejoras F, Part 1.2: a rule on the document's root -- no LLM examples.
+    const rootTest = rootRuleTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml });
+    if (rootTest) {
+      const checkable = !rootTest.coverage && askProposalCheck && ruleDescription != null;
+      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck }) : null;
+      if (!isCurrent()) return null;
+      return {
+        ...rootTest,
+        proposalCheck,
+        correction: null,
+        predicateSkipped: 0,
+        setup: { standard, schemaLocation, placements: {}, keepBrexReference: false },
+        untested: [],
+        systemPrompt: null,
+        responses,
+      };
+    }
     // Mejoras E, Part 1.2: the rule forbids what no valid document of the
     // schema can contain -- only examples meant to be accepted are asked
     // for (Part 1.4), to show the rule does not reject what is valid.
     const coverage = graph ? schemaCoverage(ruleXml, format, graph, { schemaLocation, parseXml }) : null;
-    const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly: Boolean(coverage) });
+    const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly: Boolean(coverage), format, parseXml });
     if (!isCurrent()) return null;
     if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup, untested: prepared.untested };
     // Mejoras C, Part 2: the rule, so materializeExample can move an element

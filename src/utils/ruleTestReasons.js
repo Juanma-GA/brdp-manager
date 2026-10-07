@@ -33,6 +33,8 @@
 //     example_impossible {element, other, axis, inside, standard} (Mejoras
 //     A, Part 2) -- the rule's checked element must (not) be inside another
 //     one, and no schema of the standard allows one of the two examples;
+//     condition_no_schema {paths, standard} (Mejoras F, Part 1.3) -- no
+//       schema has the absolute paths the rule's condition needs
 //     example_no_room {outer, checked, standard} (Mejoras D, Part 1) -- no
 //     insertion point of any candidate schema holds the outermost element
 //     of the rule's path (<figure>) with the checked one (<def>) inside;
@@ -58,9 +60,9 @@ export const ENGINE_REASON_CODES = [
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
-  'example_no_room',
+  'example_no_room', 'condition_no_schema',
 ];
-export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_engine_error'];
+export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_engine_error', 'test_root_rejects_all'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -90,6 +92,11 @@ export function formatRuleTestReason(reason, t) {
   }
   if (reason.code === 'test_impossible_path') {
     return (params.problems || []).map((p) => formatPathProblem(p, t, { format: params.format })).join(' ');
+  }
+  // Mejoras F, Part 2.3: the unbalanced ( [ or quote first, then the
+  // engine's own message.
+  if (reason.code === 'xpath_error' && params.balance) {
+    return `${t(`records.xpathBalance.${params.balance}`)} ${t('records.ruleTest.reasons.xpath_error', { message: params.message || '' })}`;
   }
   if (reason.code === 'rule_format') {
     const { problem, ...problemParams } = params;
@@ -137,6 +144,7 @@ export function verdictToTestRecord(verdict) {
       return { result: 'passed', reason: null };
     case 'review':
       if (verdict.path) return { result: 'review', reason: verdict.path };
+      if (verdict.rootAll) return { result: 'review', reason: { code: 'test_root_rejects_all', params: { schemas: verdict.schemas || [] } } };
       if (verdict.threshold) return { result: 'review', reason: { code: 'test_threshold_mismatch', params: { numbers: verdict.threshold.numbers, thresholds: verdict.threshold.thresholds } } };
       return verdict.unchecked
         ? { result: 'review', reason: { code: 'test_proposal_unchecked', params: { error: verdict.error || '' } } }
@@ -195,6 +203,8 @@ export function formatRuleStatement(statement, schemas, t) {
   if (params.values) values.values = formatValues(params.values, t);
   // Plantillas, Part 4: the names a condition looks at.
   if (Array.isArray(params.names)) values.names = params.names.join(', ');
+  // Mejoras F, Part 1.2: "<dmodule>", "<pm> or <ddn>".
+  if (Array.isArray(params.roots)) values.roots = params.roots.join(t('records.ruleTest.describe.rootsOr'));
   // Mejoras A, Part 4: a threshold ("more than 5", "at level 7 or deeper").
   if (params.op) {
     values.amountText = t(`records.ruleTest.describe.amount.${params.op}`, { n: params.amount });
@@ -207,7 +217,7 @@ export function formatRuleStatement(statement, schemas, t) {
     values.levels = t(`records.ruleTest.describe.inLevel.${params.mode}`, { level: params.level });
   }
   if (statement.code === 'describe_forbidden_attr') {
-    values.subject = params.childOf ? t('records.ruleTest.describe.anyChildOf', { parent: params.childOf }) : params.target;
+    values.subject = params.childOf ? t(`records.ruleTest.describe.${params.anyLevel ? 'anyInsideOf' : 'anyChildOf'}`, { parent: params.childOf }) : params.target;
     values.condition = t(`records.ruleTest.describe.attrCondition.${params.kind}`, { attr: params.attr, value: params.value });
   }
   // Mejoras C, Part 3: "<techstd> without <authex> or without <notes>".

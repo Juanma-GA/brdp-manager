@@ -8,6 +8,7 @@ import { finalRuleXml, ruleIdsNote, ruleSplitNote, validateRuleXml } from '../..
 import { NAME_HINT_TEST_IDS, extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
 import SchemaIssueLines from './SchemaIssueLines';
 import RuleLintWarnings from './RuleLintWarnings';
+import MinimalDocumentsLine from './MinimalDocumentsLine.jsx';
 import RuleThresholdWarning from './RuleThresholdWarning';
 import { useNameFixHints } from '../../hooks/useNameFixHints.js';
 import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
@@ -248,6 +249,16 @@ export default function RuleSuggestionPanel({
             testId="suggested-rule-path-warning"
           />
           <SchemaCoverageWarnings ruleXml={entry.text} entry={entry} />
+          {generatedValidation.acceptable && (
+            <MinimalDocumentsLine
+              ruleXml={entry.text}
+              format={entry.format}
+              standard={standard}
+              schemaLocation={entry.schemaLocation}
+              previousRuleXml={entry.previousRuleXml}
+              testId="suggested-rule-minimal-documents"
+            />
+          )}
         </>
       )}
 
@@ -354,6 +365,9 @@ export default function RuleSuggestionPanel({
             />
           )}
           {pasted && <SchemaCoverageWarnings ruleXml={pastedFinal} entry={entry} />}
+          {pasted && pastedValidation?.acceptable && (
+            <MinimalDocumentsLine ruleXml={pastedFinal} format={entry.format} standard={standard} schemaLocation={entry.schemaLocation} testId="pasted-rule-minimal-documents" />
+          )}
           {pasted && (
             <div className={styles.suggestionActions}>
               <button

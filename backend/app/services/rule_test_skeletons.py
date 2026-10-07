@@ -795,6 +795,8 @@ def get_standard_graph(standard: str) -> dict:
             "roots": {DITA_GRAPH_SCHEMA: roots},
             "elements": elements,
             "unchecked_children": roots,
+            "required": {},
+            "skeletons": _skeletons_by_schema(standard, [t for t in DITA_DOCUMENT_TYPES if schema_graph(standard, t)]),
         }
     elements: dict[str, list] = {}
     schemas: set[str] = set()
@@ -813,4 +815,64 @@ def get_standard_graph(standard: str) -> dict:
         graph = schema_graph(standard, schema)
         if graph:
             roots[schema] = [_root_of(graph)]
-    return {"standard": standard, "available": True, "schemas": sorted(roots), "roots": roots, "elements": elements, "unchecked_children": []}
+    return {
+        "standard": standard,
+        "available": True,
+        "schemas": sorted(roots),
+        "roots": roots,
+        "elements": elements,
+        "unchecked_children": [],
+        "required": _required_by_schema(standard, cards, sorted(roots)),
+        "skeletons": _skeletons_by_schema(standard, sorted(roots)),
+    }
+
+
+# Mejoras F, Part 2.1: what the schema already makes mandatory --
+# {name: [[schemas], [required children], [required attribute names]]},
+# one entry per group of schemas with the same answer, only where something
+# is required. A required child is a plain entry of the content model's
+# "required" list (minOccurs >= 1 outside any choice); an alternative of a
+# required choice never counts (the other alternative is valid without
+# it). A required attribute is use="required" on the card.
+def _required_by_schema(standard: str, cards: dict, schemas: list[str]) -> dict[str, list]:
+    filename = STANDARD_TO_CONTENT_MODELS_FILE.get(standard)
+    models = _content_models_file(filename) if filename else {}
+    wanted = set(schemas)
+    per_schema: dict[str, dict[str, tuple]] = {}
+    for name in set(models) | set(cards):
+        for schema in wanted:
+            children: list[str] = []
+            variant = next((v for v in models.get(name, []) if schema in v.get("schemas", [])), None)
+            if variant is not None and variant.get("resolved") is not False:
+                for slot in variant.get("required", []):
+                    if isinstance(slot, str) and slot not in children:
+                        children.append(slot)
+            card = _card_variant(cards, name, schema)
+            attributes = sorted(a["name"] for a in (card or {}).get("attributes", []) if a.get("required"))
+            if children or attributes:
+                per_schema.setdefault(name, {})[schema] = (tuple(children), tuple(attributes))
+    out: dict[str, list] = {}
+    for name, by_schema in per_schema.items():
+        groups: dict[tuple, list[str]] = {}
+        for schema, key in by_schema.items():
+            groups.setdefault(key, []).append(schema)
+        out[name] = [[sorted(s), list(key[0]), list(key[1])] for key, s in sorted(groups.items(), key=lambda kv: sorted(kv[1]))]
+    return out
+
+
+# Mejoras F, Part 1.1: the document the application builds for each schema
+# with nothing written for the test -- the skeleton's path, the titled
+# elements and the minimal identification and status section (null when
+# the application does not build one).
+def _skeletons_by_schema(standard: str, schemas: list[str]) -> dict[str, dict]:
+    out = {}
+    for schema in schemas:
+        skeleton = derive_skeleton(standard, schema)
+        if not skeleton:
+            continue
+        out[schema] = {
+            "path": list(skeleton["path"]),
+            "titled": list(skeleton.get("titled", [])),
+            "metadata": derive_metadata_skeleton(standard, schema),
+        }
+    return out

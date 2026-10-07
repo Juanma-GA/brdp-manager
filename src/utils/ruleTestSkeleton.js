@@ -416,25 +416,39 @@ function byPreference(schemas, documentSchemas = []) {
 // does not narrow anything: the placement then says it is unreachable, as
 // before. An alternative with element steps (//supportEquipDescr/@x) does
 // not change.
-export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, attributeSchemas = null, targets }) {
+// `conditionRequirements` (Mejoras F, Part 1.3): [[names of one absolute
+// path, …], …] -- an "and" operand of the checked step's condition, not
+// negated, that is an absolute path or an "or" of them
+// (rulePathCheck.js's absoluteConditionRequirements). The chosen schema
+// must have every element of at least one of each; none does →
+// { noConditionSchema: requirement }. No new groups are made for it.
+export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, attributeSchemas = null, targets, conditionRequirements = [] }) {
   const known = (name) => Boolean(cards[name]) || Boolean(elementSchemas?.[name]?.length);
+  const meetsConditions = (schema) =>
+    conditionRequirements.every((sets) =>
+      sets.some((names) => schemasHavingAll(names, cards, [schema], elementSchemas).length > 0)
+    );
   const required = [...new Set([...(targets?.checked || []), ...(targets?.absolutePrefixes || []).map((p) => p[0])])]
     .filter(known);
   const order = (list) => byPreference(list, documentSchemas);
   const carriersOf = attributeOnlySchemas(attributeSchemas, documentSchemas);
   const attributeOnly = (targets?.alternatives || []).map(carriersOf).filter(Boolean);
   const fitting = order(
-    schemasHavingAll(required, cards, documentSchemas, elementSchemas).filter((schema) =>
-      attributeOnly.every((schemas) => schemas.includes(schema))
+    schemasHavingAll(required, cards, documentSchemas, elementSchemas).filter(
+      (schema) => attributeOnly.every((schemas) => schemas.includes(schema)) && meetsConditions(schema)
     )
   );
+  if (contextSchemas.length === 0 && conditionRequirements.length > 0 && fitting.length === 0) {
+    const unmet = conditionRequirements.find((sets) => !documentSchemas.some((s) => sets.some((names) => schemasHavingAll(names, cards, [s], elementSchemas).length > 0)));
+    return { testSchema: null, otherSchema: null, groups: null, candidates: [], noConditionSchema: unmet || conditionRequirements[0] };
+  }
   if (contextSchemas.length > 0) {
     const taken = new Set(contextSchemas);
     const others = fitting.filter((s) => !taken.has(s));
     const fallback = order(documentSchemas.filter((s) => !taken.has(s)));
     return { testSchema: contextSchemas[0], otherSchema: others[0] || fallback[0] || null, groups: null };
   }
-  const fallback = order(documentSchemas);
+  const fallback = order(conditionRequirements.length ? fitting : documentSchemas);
   const groups = schemaGroups(targets, fitting[0] || null, { known, order, cards, documentSchemas, elementSchemas, carriersOf });
   if (groups) return { testSchema: groups[0].schema, otherSchema: null, groups };
   // Mejoras A, Part 1: a single schema must also have every element step of
@@ -1218,8 +1232,12 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // insertion point must allow that too.
   const relationOk = (i) =>
     !relation || relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], relation, relation.inside);
+  // Mejoras F, Part 1.3: //x / not(//x) in the checked step's condition
+  // -- the examples must be able to contain <x>.
+  const containNames = (targets?.containNames || []).filter((name) => elements[name] && !chain.includes(name));
   const fitsChecked = (i) =>
     contentChecked.every((name) => reachable(elements, chain[i], name))
+    && containNames.every((name) => reachable(elements, chain[i], name))
     && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
     && relationOk(i);
   // Mejoras D, Part 1: the insertion point must also hold the OUTERMOST
@@ -1600,7 +1618,9 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
       skeletonNodePaths.push(`${prefix}/title[1]`, `${prefix}/title[1]${SKELETON_TEXT_SUFFIX}`);
     }
   }
-  return { xml: lines.join('\n'), skeletonNodePaths: [...skeletonNodePaths, ...sectionPaths] };
+  // Mejoras F, Part 1.4: the insertion point holds what was written for the
+  // test, so it is never counted as the application's.
+  return { xml: lines.join('\n'), skeletonNodePaths: [...skeletonNodePaths, ...sectionPaths], insertionPath: prefix };
 }
 
 // ─── Model table with a merged row (Barrido final 1/2) ─────────────────────

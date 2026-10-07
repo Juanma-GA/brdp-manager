@@ -478,3 +478,35 @@ async def test_graph_endpoint(client):
     assert res.status_code == 200 and res.json()["available"] is False
     res = await client.get("/api/schema-cards/graph", params={"standard": "S1000D 3.0.1"})
     assert res.status_code == 401
+
+
+# ─── Mejoras F: required children/attributes and per-schema skeletons in the graph ──
+
+
+def test_standard_graph_carries_required_children_and_skeletons():
+    graph = get_standard_graph("S1000D 3.0.1")
+    # <issno> is required in <dmaddres> in every schema that has it
+    dmaddres = graph["required"]["dmaddres"]
+    assert dmaddres and all("issno" in entry[1] for entry in dmaddres)
+    assert any("descript" in entry[0] for entry in dmaddres)
+    # <row> needs <entry>; <jacked> is required in <avehcfg>
+    assert all("entry" in entry[1] for entry in graph["required"]["row"])
+    assert all("jacked" in entry[1] for entry in graph["required"]["avehcfg"])
+    # every required child is an allowed child of that element in those schemas
+    for name, entries in graph["required"].items():
+        for schemas, children, attrs in entries:
+            for variant in graph["elements"][name]:
+                if set(schemas) & set(variant[0]):
+                    assert set(children) <= set(variant[1]), (name, children)
+                    assert set(attrs) <= set(variant[2]), (name, attrs)
+    # one skeleton per document schema; same path as the rule-test skeleton
+    assert set(graph["skeletons"]) == set(graph["schemas"])
+    assert graph["skeletons"]["proced"]["path"] == ["dmodule", "content", "proced", "mainfunc", "step1", "para"]
+    assert graph["skeletons"]["proced"]["metadata"]["element"] == "idstatus"
+    assert graph["skeletons"]["ddn"] == {"path": ["ddn"], "titled": [], "metadata": None}
+
+
+def test_standard_graph_dita_has_skeletons_but_no_required():
+    dita = get_standard_graph("DITA 1.3 Xpath2.0")
+    assert dita["required"] == {}
+    assert {"topic", "concept", "task", "reference", "troubleshooting", "map"} <= set(dita["skeletons"])

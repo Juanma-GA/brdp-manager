@@ -148,7 +148,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     adjusted.brexReferenceNormalized = normalized.changed && !normalized.shared;
     if (normalized.shared) adjusted.brexModelIdentFollowed = true;
   }
-  const { xml, skeletonNodePaths } = assembleExample({
+  const { xml, skeletonNodePaths, insertionPath } = assembleExample({
     standard: setup.standard,
     schema,
     schemaLocation: setup.schemaLocation,
@@ -163,6 +163,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     schema,
     xml,
     skeletonNodePaths,
+    insertionPath: entry.placement.contentInsertion === false ? null : insertionPath || null,
     structure: entry.structure,
     schemaLocation: setup.schemaLocation || null,
     insertion: entry.placement.insertion,
@@ -474,7 +475,36 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
       (conditionMiss ||
         (result.selectedNodePaths.length === 0 && !(result.conditions?.length > 0) && acceptance.some((d) => d.case === 'predicate')))
   );
-  return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result), acceptance, predicateMiss };
+  const rejection = example.expected === 'accept' && result.status === 'rejected' ? rejectionDetails(example, result) : null;
+  return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result), acceptance, predicateMiss, rejection };
+}
+
+// ─── Mejoras F, Part 1.4: why the rule rejected an example meant to be
+// accepted ──────────────────────────────────────────────────────────────────
+// BRDP-EXT-02719 (//*[text()[contains(., '  ')]]) rejected every example:
+// the nodes it selected were the indentation of the document the
+// application builds, not what was written for the test. The nodes the rule
+// rejected (a text node counts as its element), at most REJECTION_SHOWN
+// shown, and whether ALL of them are in the part the application built
+// (its skeleton and minimal section -- the insertion point holds what was
+// written, so it never counts; a minimal document built whole for a rule on
+// the root is all the application's).
+export const REJECTION_SHOWN = 5;
+const TEXT_STEP_RE = /\/(?:text|comment|processing-instruction)\(\)\[\d+\]$/;
+
+export function rejectionDetails(example, result) {
+  const raw = (result.violations || []).flatMap((v) => v.nodePaths || []);
+  const paths = [...new Set((raw.length ? raw : result.selectedNodePaths || []).map((p) => p.replace(TEXT_STEP_RE, '')).filter(Boolean))];
+  if (paths.length === 0) return null;
+  const skeleton = new Set((example.skeletonNodePaths || []).filter((p) => !p.endsWith('/text()')));
+  if (example.insertionPath) skeleton.delete(example.insertionPath);
+  const appBuilt = (p) => example.minimalDocument === true || skeleton.has(p.replace(/\/@[^/]+$/, ''));
+  return {
+    nodes: paths.slice(0, REJECTION_SHOWN),
+    more: Math.max(0, paths.length - REJECTION_SHOWN),
+    total: paths.length,
+    allAppBuilt: paths.every(appBuilt),
+  };
 }
 
 // Mejoras E, Part 1.3: the nodes of the example that the schema does not
@@ -604,10 +634,13 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
     const others = runs.map((r, i) => (r.matches === false && r.result?.status !== 'error' ? examples[i].expected : null)).filter(Boolean);
     return { kind: 'incorrect', permissive: others.includes('reject'), strict: others.includes('accept'), engineErrors };
   }
+  // Mejoras F, Part 1.2: a rule on the root that rejects the root of every
+  // document type of the standard.
+  if (coverage?.rootAllRejected) return { kind: 'review', rootAll: true, schemas: coverage.schemas || [] };
   const rejectIndices = examples.map((ex, i) => (ex.expected === 'reject' ? i : -1)).filter((i) => i >= 0);
   const coveredRuns = runs.filter((r) => r.schemaCovered);
   const coveredByExamples = coveredRuns.length > 0 && rejectIndices.length > 0 && rejectIndices.every((i) => runs[i]?.schemaCovered);
-  if (coverage || coveredByExamples) {
+  if ((coverage && !coverage.rootAllRejected) || coveredByExamples) {
     const accepts = runs.filter((r, i) => r.result && examples[i].expected === 'accept');
     if (accepts.length > 0) {
       if (accepts.some((r) => r.matches === false)) return { kind: 'incorrect', permissive: false, strict: true };
@@ -675,7 +708,12 @@ export function verdictCause(verdict, runs = []) {
   if (verdict.engineErrors?.length) return null;
   // An example the schema already rules out (Part 1.3) is not a bad example.
   if (runs.some((r) => !r?.validation?.runnable && !r?.schemaCovered)) return { cause: 'examples' };
-  return { cause: 'rule', permissive: verdict.permissive === true, strict: verdict.strict === true };
+  // Mejoras F, Part 1.4: every accept example the rule rejected was
+  // rejected only for the document the application built -- the example
+  // is not what to review.
+  const rejectedAccepts = runs.filter((r) => r?.rejection);
+  const appBuilt = verdict.strict === true && verdict.permissive !== true && rejectedAccepts.length > 0 && rejectedAccepts.every((r) => r.rejection.allAppBuilt);
+  return { cause: 'rule', permissive: verdict.permissive === true, strict: verdict.strict === true, ...(appBuilt ? { appBuilt: true } : {}) };
 }
 
 // ─── Display ────────────────────────────────────────────────────────────────
