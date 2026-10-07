@@ -245,7 +245,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     if (state.status !== 'ready') return;
     const example = editExample(state.examples[index], content, metadata, setupRef.current);
     const examples = state.examples.map((ex, i) => (i === index ? example : ex));
-    const runs = state.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary, schemaLocation }) : r));
+    const runs = state.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary, schemaLocation, graph: setupRef.current?.graph || null }) : r));
     setState({ ...state, examples, runs });
     if (!examples.some((ex) => ex.editedByUser)) {
       setEditNotice(null);

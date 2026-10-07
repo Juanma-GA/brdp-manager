@@ -153,7 +153,9 @@ export function documentPresenceTest({ ruleXml, format, standard, schemaLocation
   const accepted = firstByPreference(acceptable, ROOT_TEST_ACCEPT_PREFERENCE);
   const rejected = firstByPreference(rejectable, ROOT_TEST_REJECT_PREFERENCE);
   // The note under each example says what decides it (not "only the root").
-  const withTarget = (ex) => ({ ...ex, presenceTarget: `<${presence.target}>` });
+  // presenceNames (Remates de Mejoras G, Part 1.3): the whole path, so the
+  // note names "<qa> inside <status>", not only <qa>.
+  const withTarget = (ex) => ({ ...ex, presenceTarget: `<${presence.target}>`, presenceNames: presence.names });
   if (accepted) examples.push(withTarget(minimalExample(bySchema.get(accepted), 'accept', schemaLocation)));
   if (rejected) examples.push(withTarget(minimalExample(bySchema.get(rejected), 'reject', schemaLocation)));
   let coverage = null;
@@ -772,7 +774,7 @@ function withLabelNote(corrected, original) {
 // Materialize, validate and run every example.
 function runRuleTestExamples(examples, { ruleXml, format, setup, vocabulary, parseXml = parseXmlDocument }) {
   const materialized = examples.map((ex) => materializeExample(ex, setup, parseXml));
-  const runs = materialized.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml }));
+  const runs = materialized.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml, graph: setup.graph || null }));
   return { materialized, runs };
 }
 
@@ -891,6 +893,10 @@ export async function generateRuleTestExamples({
     // Mejoras C, Part 2: the rule, so materializeExample can move an element
     // of it to its only parent without changing what the rule decides.
     prepared.setup.rule = { ruleXml, format, names: extractRuleNames(ruleXml).elements };
+    // Remates de Mejoras G, Part 1.1: the standard's graph, so an example
+    // the schema rules out is recognized only by a relation the rule names
+    // (runExample's schemaCovered; "Run again" reads it from here too).
+    prepared.setup.graph = graph || null;
     // The schemas whose examples the application builds whole (rootOnly):
     // their examples come with no "content".
     const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema) };

@@ -185,6 +185,16 @@ function suggestRuleReply(systemPrompt) {
   if (/LONGRULE/.test(proposal)) {
     return '<structureObjectRule id="MOCK-LONG-RULE"><objectPath allowedObjectFlag="1">/dmodule/content/description/verylongunbrokenxpathsegmentnamewithnowhitespaceatallxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[@attr=\'value\']</objectPath><objectUse>MOCK-LONG-RULE</objectUse></structureObjectRule>';
   }
+  // Remates de Mejoras G, Part 1.2: "every <orig> carries @origname with one
+  // of these values". With the new rule 9 (several values → the list in
+  // {ID}-1 and the attribute required in {ID}-2) two rules; without it, the
+  // list as a condition -- what rule 9 said before.
+  if (/@origname/.test(proposal) && /FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
+    if (/\{ID\}-2 with objappl="0" on X\[not\(@a\)\]/.test(systemPrompt)) {
+      return `<objrule id="${id}-1"><objpath>//orig/@origname</objpath><objuse>MOCK-RULE: @origname only takes the listed values.</objuse><objval valtype="single" val1="ACME SL"/><objval valtype="single" val1="BETA SA"/><objval valtype="single" val1="GAMMA SL"/></objrule>\n<objrule id="${id}-2"><objpath objappl="0">//orig[not(@origname)]</objpath><objuse>MOCK-RULE: every orig carries @origname.</objuse></objrule>`;
+    }
+    return `<objrule id="${id}"><objpath objappl="0">//orig[not(@origname='ACME SL' or @origname='BETA SA' or @origname='GAMMA SL')]</objpath><objuse>MOCK-RULE: origname values.</objuse></objrule>`;
+  }
   // Mejoras F, Part 2.2a (BRDP-EXT-02636): "every <row> of a <tbody>
   // carries @rowsep 0". With the prompt's rule 9 ("never objappl="1" with
   // values") the rule forbids the opposite with objappl="0"; without it,

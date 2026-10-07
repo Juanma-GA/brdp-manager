@@ -70,6 +70,13 @@
 // / <displaytext> inside <applic>", Part 1.4) and
 // brex-3-0-1-several-p-requested (the corrected 02792: ask for examples
 // with two or more <p>, Part 1.6). Every other case is unchanged.
+//
+// Remates de Mejoras G, Part 1.2: BREX rule 9 (mandatory value) splits one
+// value (X[not(@a='v')], one rule) from several (two rules: {ID}-1 with the
+// list, {ID}-2 forbidding X[not(@a)] unless SCHEMA FACTS make @a required);
+// never the list as a condition. Changed on purpose: the 7 BREX suggestRule
+// cases. Every other case (Schematron, Ask, Suggest Definition/Proposal,
+// rule test) is unchanged.
 
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a

@@ -6,7 +6,7 @@ import MinimalDocumentsLine from './MinimalDocumentsLine.jsx';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
-import { acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleTestReason, formatThresholdMismatch } from '../../utils/ruleTestReasons.js';
+import { acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleTestReason, formatThresholdMismatch, presencePathText } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 import RuleLintWarnings from './RuleLintWarnings';
@@ -414,7 +414,7 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
               {t(example.presenceTarget ? 'records.ruleTest.minimalDocumentPresence' : 'records.ruleTest.minimalDocumentExample', {
                 schema: example.schema,
                 root: example.xml ? rootName(example.xml) : '',
-                target: example.presenceTarget,
+                target: example.presenceNames ? presencePathText(example.presenceNames, t) : example.presenceTarget,
               })}
             </p>
           )}
@@ -542,7 +542,7 @@ function RuleDescription({ description, presence = null, reach = [] }) {
     presence && presence.always.length > 0 && presence.cannot.length > 0
       ? t('records.ruleTest.describe.presenceNever', {
           schemas: new Intl.ListFormat(i18n.language, { type: 'conjunction' }).format(presence.cannot),
-          target: `<${presence.target}>`,
+          target: presencePathText(presence.names, t),
         })
       : null;
   return (
@@ -743,7 +743,7 @@ export default function RuleTestPanel({
 
       <RuleDescription description={description} presence={state.presence || null} reach={reach} />
       <MinimalDocumentsLine ruleXml={ruleXml} format={format} standard={standard} schemaLocation={schemaLocation} testId="rule-test-minimal-documents" />
-      {!notARule && <RuleLintWarnings ruleXml={ruleXml} format={format} place="panel" />}
+      {!notARule && <RuleLintWarnings ruleXml={ruleXml} format={format} place="panel" standard={standard} />}
       {/* Mejoras C, Part 1: once the test says "review" for it, the verdict
           carries the same text. */}
       {!notARule && state.status !== 'path_review' && (

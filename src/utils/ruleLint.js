@@ -60,7 +60,7 @@ import { analyzeRule, describeRule, parseXmlDocument, pathGroups, ruleConditions
 import { formatRuleStatement, formatRuleTestReason } from './ruleTestReasons.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
 import { checkRuleFormat, extractRuleXPaths, formatSchemaIssue, ruleFormatIssues } from '../validation/schemaValidation.js';
-import { checkRulePaths, formatPathProblem } from '../validation/rulePathCheck.js';
+import { checkRulePaths, formatPathProblem, graphIndex } from '../validation/rulePathCheck.js';
 
 // "Must not" wording, English and Spanish (the templates mix both).
 const MUST_NOT_RE = /\b(must not|shall not|must be no|shall be no|should not|may not|cannot|can not|not allowed|forbidden|prohibited|no debe|no deben|no debe haber|no se (?:debe|deben|permite|permiten|puede|pueden|utiliza|utilizan|usa|usan)|prohibid[oa]s?)\b/i;
@@ -259,7 +259,7 @@ const pathNotNodes = (reason) =>
 const statementOf = (s) => ({ statement: s.statement, schemas: s.schemas });
 
 // Every occurrence, before grouping: [{ code, known, params }].
-function occurrences(ruleXml, format, parseXml) {
+function occurrences(ruleXml, format, parseXml, graph = null) {
   const out = [];
   const add = (code, params, known = false) => out.push({ code, known, params });
   // Mejoras A, Part 3: a rule element with two objectPath (or objectUse)
@@ -313,7 +313,7 @@ function occurrences(ruleXml, format, parseXml) {
       if (rule.flag === '1' && rule.values.length === 0 && lastStepPredicates(rule.path).some(filtersByOwnValue)) {
         add('flag1_value_predicate', { id: rule.id, attr: rule.flagAttr, path: clip(rule.path), valueElement: rule.valueElement });
       }
-      if (rule.flag === '1' && rule.values.length > 0) add('flag1_with_values', flag1WithValuesParams(rule));
+      if (rule.flag === '1' && rule.values.length > 0) add('flag1_with_values', flag1WithValuesParams(rule, graph));
     }
   }
   const xpaths = extractRuleXPaths(ruleXml);
@@ -325,7 +325,21 @@ function occurrences(ruleXml, format, parseXml) {
 // Mejoras F, Part 2.2b: the parent step and the target of a flag-1 path
 // with values (/dmodule/content//tbody/row/@rowsep → row, @rowsep) and the
 // opposite to forbid -- only for single values.
-function flag1WithValuesParams(rule) {
+// Remates de Mejoras G, Part 1.2b: one value → forbid the opposite
+// (row[not(@rowsep='0')]); several values → two rules, the list on
+// parent/@a (allowedObjectFlag="2"; no objappl in 3.0.1) and
+// parent[not(@a)] forbidden -- only the list when the standard's graph
+// says @a is required in <parent> in every schema where <parent> is.
+function requiredInEverySchema(graph, parent, target) {
+  const index = graphIndex(graph);
+  if (!index) return false;
+  const name = target.replace(/^@/, '');
+  const where = [...index.bySchema.values()].map((byName) => byName.get(parent)).filter(Boolean);
+  if (where.length === 0) return false;
+  return where.every((n) => (target.startsWith('@') ? n.requiredAttrs.has(name) : n.requiredChildren.has(name)));
+}
+
+function flag1WithValuesParams(rule, graph = null) {
   const stripped = String(rule.path || '').replace(/\[[^\]]*\]/g, '');
   const steps = stripped.split(/\/+/).map((st) => st.trim()).filter(Boolean);
   const last = steps[steps.length - 1] || '';
@@ -333,18 +347,24 @@ function flag1WithValuesParams(rule) {
   const target = last.startsWith('@') ? last : `<${last}>`;
   const parent = before && /^[A-Za-z_][\w.-]*$/.test(before) ? before : null;
   const singles = rule.values.every((v) => v.form === 'single') ? rule.values.map((v) => v.value) : null;
-  const test = last.replace(/^@/, '@');
-  const fix =
-    parent && singles?.length
-      ? `${parent}[not(${singles.map((v) => `${test}='${v}'`).join(' or ')})]`
-      : null;
-  return { id: rule.id, attr: rule.flagAttr, path: clip(rule.path), parent: parent ? `<${parent}>` : null, target, fix };
+  const params = { id: rule.id, attr: rule.flagAttr, path: clip(rule.path), parent: parent ? `<${parent}>` : null, target, fix: null };
+  if (!parent || !singles?.length) return params;
+  if (singles.length === 1) return { ...params, fix: `${parent}[not(${last}='${singles[0]}')]` };
+  return {
+    ...params,
+    fixList: `${parent}/${last}`,
+    listFlag: rule.flagAttr === 'objappl' ? null : `${rule.flagAttr}="2"`,
+    fixRequired: requiredInEverySchema(graph, parent, last) ? null : `${parent}[not(${last})]`,
+  };
 }
 
 export function lintRuleFindings(ruleXml, format, options = {}) {
   const parseXml = options.parseXml || parseXmlDocument;
   const grouped = new Map();
-  const found = occurrences(String(ruleXml || ''), format, parseXml);
+  // options.schemaGraph (Remates de Mejoras G, Part 1.2b): the standard's
+  // graph only to know what the schema makes required, without the
+  // impossible-path findings options.graph adds.
+  const found = occurrences(String(ruleXml || ''), format, parseXml, options.schemaGraph || options.graph || null);
   if (options.graph) {
     for (const problem of checkRulePaths(String(ruleXml || ''), format, options.graph, { parseXml, schemaLocation: options.schemaLocation || null }).problems) {
       found.push({ code: 'impossible_path', known: false, params: { problem, format } });
@@ -380,9 +400,13 @@ function formatItem(code, params, t) {
     case 'flag1_value_predicate':
       return k('flag1ValuePredicate', params);
     case 'flag1_with_values':
-      return params.parent
-        ? `${k('flag1WithValues', params)}${params.fix ? k('flag1WithValuesFix', params) : ''}`
-        : k('flag1WithValuesNoParent', params);
+      if (!params.parent) return k('flag1WithValuesNoParent', params);
+      if (params.fix) return `${k('flag1WithValues', params)}${k('flag1WithValuesFix', params)}`;
+      if (params.fixList) {
+        const how = params.listFlag ? k('flag1WithValuesListFlag', params) : k('flag1WithValuesListNoFlag', params);
+        return `${k('flag1WithValues', params)}${k(params.fixRequired ? 'flag1WithValuesFixTwo' : 'flag1WithValuesFixListOnly', { ...params, how })}`;
+      }
+      return k('flag1WithValues', params);
     case 'ancestor_depth':
       return k('ancestorDepth', params);
     case 'impossible_path':

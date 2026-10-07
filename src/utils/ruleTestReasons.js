@@ -237,6 +237,20 @@ export function formatRuleStatement(statement, schemas, t) {
   return schemas && schemas.length ? t('records.ruleTest.describe.onlyInSchemas', { text, schemas: schemas.join(', ') }) : text;
 }
 
+// Remates de Mejoras G, Part 1.3: the element of "every document must
+// contain <x>" with its whole path -- /*[not(//status/qa)] → "<qa> inside
+// <status>" (in pm, <qa> exists inside <pmstatus>: naming only <qa> said
+// something false). One step: the element alone, as before.
+export function presencePathText(names, t) {
+  const list = (names || []).filter(Boolean);
+  if (list.length === 0) return '';
+  let text = `<${list[list.length - 1]}>`;
+  for (let i = list.length - 2; i >= 0; i -= 1) {
+    text = t('records.ruleTest.describe.presenceInside', { target: text, container: `<${list[i]}>` });
+  }
+  return text;
+}
+
 // → { lines: [text], cannotReject } | null when the rule cannot be described.
 export function formatRuleDescription(description, t) {
   if (!description?.available) return null;

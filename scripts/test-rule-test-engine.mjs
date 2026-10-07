@@ -354,6 +354,10 @@ const TEMPLATE_CASES = {
     'BRDP-EXT-00001': {
       bad: '<dmodule><idstatus><status><orig origname="ACME ENGINEERING">9AAAA</orig></status></idstatus></dmodule>',
       good: '<dmodule><idstatus><status><orig origname="INDRA SISTEMAS SA">9BBBB</orig></status></idstatus></dmodule>',
+      // Remates de Mejoras G, Part 1.2c: two rules -- the list, and the
+      // attribute required (an <orig> without @origname is rejected).
+      alsoBad: ['<dmodule><idstatus><status><orig>9CCCC</orig></status></idstatus></dmodule>'],
+      alsoGood: ['<dmodule><idstatus><status><orig origname="SAPA OPERACIONES SL">9DDDD</orig></status></idstatus></dmodule>'],
     },
     'BRDP-EXT-02767': { bad: '<step1><title>Remove</title><para>x</para></step1>', good: '<step1><para>x</para><step2><para>y</para></step2></step1>' },
     'BRDP-S1-00019': {

@@ -48,8 +48,32 @@ const TEXT_NODES_LINE = 'The indentation and line breaks between elements are te
 // objappl="1" on //tbody/row/@rowsep with a value -- validators do not
 // agree on that form (some reject a document with no <row> at all). The
 // opposite, forbidden, means the same in every validator.
-const brexValueOnEvery = (pathElement, flagAttr, example) => `9. When the Proposal says every <X> must carry @a with a given value: forbid the opposite with ${flagAttr}="0" on X[not(@a='v')] (several values: X[not(@a='v1' or @a='v2')]) — never ${flagAttr}="1" with values. Example (invented names, not from this BRDP) for "every <acmeElement> shall carry @acmeAttr with the value 1":
-   ${example}`;
+// Remates de Mejoras G, Part 1.2: with several values, the list as a
+// condition (X[not(@a='v1' or @a='v2')]) hid the values in a predicate --
+// the list goes in its own rule (rule 5) and a second rule makes the
+// attribute required, unless the schema already does.
+const brexValueOnEvery = ({ pathElement, flagAttr, oneValue, listRule, requiredRule }) => `9. When the Proposal says every <X> must carry @a with a given value: forbid the opposite with ${flagAttr}="0" on X[not(@a='v')] — one rule. With SEVERAL allowed values, two rules: {ID}-1 with the list (rule 5: ${pathElement} selects X/@a, one value per allowed value) and {ID}-2 with ${flagAttr}="0" on X[not(@a)], so the attribute must be there; when SCHEMA FACTS say @a is required in <X>, write only {ID}-1. Never the list as a condition (X[not(@a='v1' or @a='v2')]) and never ${flagAttr}="1" with values. Examples (invented names, not from this BRDP):
+   "every <acmeElement> shall carry @acmeAttr with the value 1":
+   ${oneValue}
+   "every <acmeElement> shall carry @acmeAttr with the value 1 or 2":
+   {ID}-1: ${listRule}
+   {ID}-2: ${requiredRule}`;
+
+const BREX_4X_VALUE_ON_EVERY = brexValueOnEvery({
+  pathElement: 'objectPath',
+  flagAttr: 'allowedObjectFlag',
+  oneValue: `<objectPath allowedObjectFlag="0">//acmeElement[not(@acmeAttr='1')]</objectPath>`,
+  listRule: `<objectPath allowedObjectFlag="2">//acmeElement/@acmeAttr</objectPath> with <objectValue valueForm="single" valueAllowed="1">1</objectValue> and <objectValue valueForm="single" valueAllowed="2">2</objectValue>`,
+  requiredRule: `<objectPath allowedObjectFlag="0">//acmeElement[not(@acmeAttr)]</objectPath>`,
+});
+
+const BREX_301_VALUE_ON_EVERY = brexValueOnEvery({
+  pathElement: 'objpath',
+  flagAttr: 'objappl',
+  oneValue: `<objpath objappl="0">//acmeElement[not(@acmeAttr='1')]</objpath>`,
+  listRule: `<objpath>//acmeElement/@acmeAttr</objpath> with <objval valtype="single" val1="1"/> and <objval valtype="single" val1="2"/>`,
+  requiredRule: `<objpath objappl="0">//acmeElement[not(@acmeAttr)]</objpath>`,
+});
 
 // Rule 10 of the BREX blocks and 14 of Schematron (Mejoras G, Part 1.5):
 // BRDP-EXT-02792's corrected rule compared normalize-space() of
@@ -66,7 +90,7 @@ ${BREX_4X_VALUE_LIST}
 ${BREX_4X_PATH_NAMES}
 ${brexOwnAncestor('objectPath')}
 8. ${TEXT_NODES_LINE}
-${brexValueOnEvery('objectPath', 'allowedObjectFlag', `<objectPath allowedObjectFlag="0">//acmeElement[not(@acmeAttr='1')]</objectPath>`)}
+${BREX_4X_VALUE_ON_EVERY}
 10. ${SEVERAL_NODES_LINE}`;
 
 const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: <structureObjectRule> elements (normally one).
@@ -78,7 +102,7 @@ ${BREX_4X_VALUE_LIST}
 ${BREX_4X_PATH_NAMES}
 ${brexOwnAncestor('objectPath')}
 8. ${TEXT_NODES_LINE}
-${brexValueOnEvery('objectPath', 'allowedObjectFlag', `<objectPath allowedObjectFlag="0">//acmeElement[not(@acmeAttr='1')]</objectPath>`)}
+${BREX_4X_VALUE_ON_EVERY}
 10. ${SEVERAL_NODES_LINE}`;
 
 // 3.0.1 gets the same reinforcement, adapted: objappl only has 0/1 (no
@@ -100,7 +124,7 @@ const BREX_301 = `FORMAT — S1000D Issue 3.0.1 BREX: <objrule> elements (normal
    Wrong:   <objpath objappl="0">//&lt;acmeElement&gt;</objpath>
 ${brexOwnAncestor('objpath')}
 8. ${TEXT_NODES_LINE}
-${brexValueOnEvery('objpath', 'objappl', `<objpath objappl="0">//acmeElement[not(@acmeAttr='1')]</objpath>`)}
+${BREX_301_VALUE_ON_EVERY}
 10. ${SEVERAL_NODES_LINE}`;
 
 function schDita(standard) {

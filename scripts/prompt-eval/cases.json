@@ -4105,6 +4105,61 @@
       ]
     },
     {
+      "id": "rule-3-0-1-mandatory-value-list",
+      "type": "suggest-rule",
+      "standard": "S1000D 3.0.1",
+      "description": "Remates de Mejoras G, Part 1.2 (template 3.0.1, BRDP-EXT-00001): \"every <orig> carries @origname with one of these values\" -- two rules with distinct ids: {ID}-1 the list (objval, no objappl) and {ID}-2 objappl=\"0\" on orig[not(@origname)]; never the list as a condition, never objappl=\"1\" with values.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RG-1",
+        "title": "Códigos de originador permitidos",
+        "definition": "Decidir qué originadores se admiten en los módulos de datos.",
+        "proposal": "Todo <orig> debe llevar el atributo @origname, con uno de estos valores: \"ACME SL\", \"BETA SA\", \"GAMMA SL\".",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "xml_well_formed"
+        },
+        {
+          "type": "xpath_valid"
+        },
+        {
+          "type": "names_in_vocabulary"
+        },
+        {
+          "type": "not_checkable",
+          "expect": false
+        },
+        {
+          "type": "rule_ids_distinct",
+          "min": 2,
+          "note": "two rules: the list and the attribute required"
+        },
+        {
+          "type": "contains",
+          "pattern": "<objval\\b",
+          "note": "the list as objval, one per value"
+        },
+        {
+          "type": "contains",
+          "pattern": "orig\\[\\s*not\\(\\s*@origname\\s*\\)\\s*\\]",
+          "target": "xpath",
+          "note": "{ID}-2 forbids an <orig> without @origname"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "@origname\\s*=\\s*['\"][^'\"]*['\"]\\s+or\\b",
+          "target": "xpath",
+          "note": "never the list as a condition"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "objappl=[\"']1",
+          "note": "never objappl=\"1\" with values"
+        }
+      ]
+    },
+    {
       "id": "rule-test-3-0-1-applic-at-most-one-evaluate",
       "type": "rule-test",
       "standard": "S1000D 3.0.1",

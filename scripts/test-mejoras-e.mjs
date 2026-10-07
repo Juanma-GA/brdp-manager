@@ -140,7 +140,10 @@ async function generate(ruleXml, answers, { withGraph = true } = {}) {
   check('case 2: verdict schema_covered', verdict.kind === 'schema_covered', JSON.stringify(verdict));
 }
 
-// ─── Part 1.3: no graph, a reject example with <emphasis> in <avee> ────────
+// ─── Part 1.3 (Remates de Mejoras G 1.1): a reject example with <emphasis>
+// in <avee>. Without the graph it is never "ruled out by the schema" (normal
+// correction round); with the graph, only an alternative of the rule that the
+// schema covers by that relation counts.
 {
   const emphasisAvee = AVEE.replace('</avee>', '<emphasis>x</emphasis></avee>');
   const answer = {
@@ -151,16 +154,29 @@ async function generate(ruleXml, answers, { withGraph = true } = {}) {
   };
   const { result, calls } = await generate(CASE2, [answer, answer], { withGraph: false });
   check('1.3: no coverage without graph', !result.coverage);
-  check('1.3: the <emphasis> example is not corrected (one LLM call)', calls === 1, String(calls));
-  const run = result.runs[1];
+  check('1.3: without graph the <emphasis> example goes to the correction round', calls === 2, String(calls));
+  check('1.3: without graph never schemaCovered', !result.runs[1]?.schemaCovered, JSON.stringify(result.runs[1]?.schemaCovered));
+
+  // Two alternatives, only one covered (children listed of <avee>): with
+  // the graph, the <emphasis> example is ruled out by the schema.
+  const casePath = CASE2.match(/<objpath[^>]*>([\s\S]*)<\/objpath>/)[1];
+  const unionRule = objrule(`${casePath} | //para[@id = 'bad']`);
+  const onlyCovered = {
+    examples: [
+      { ...answer.examples[0], content: `<para>${answer.examples[0].content}</para>` },
+      { ...answer.examples[1], content: `<para>${answer.examples[1].content}</para>` },
+    ],
+  };
+  const c = await generate(unionRule, [onlyCovered, onlyCovered]);
+  check('1.3: union rule is not covered as a whole', !c.result.coverage);
+  check('1.3: the <emphasis> example is not corrected (one LLM call)', c.calls === 1, String(c.calls));
+  const run = c.result.runs[1];
   check('1.3: reject example marked schemaCovered', run?.schemaCovered?.items?.[0]?.element === 'emphasis' && run.schemaCovered.items[0].parent === 'avee', JSON.stringify(run?.schemaCovered));
-  const verdict = ruleTestVerdict(result.examples, result.runs, null, null, null, null);
+  const verdict = ruleTestVerdict(c.result.examples, c.result.runs, null, null, null, null);
   check('1.3: verdict schema_covered via examples', verdict.kind === 'schema_covered' && verdict.via === 'examples', JSON.stringify(verdict));
   check('1.3: item text ES', formatCoverageItem(verdict.items[0], es) === 'el esquema no admite <emphasis> dentro de <avee>');
 
   // Only one of two reject examples covered: the other gives the verdict.
-  const casePath = CASE2.match(/<objpath[^>]*>([\s\S]*)<\/objpath>/)[1];
-  const unionRule = objrule(`${casePath} | //para[@id = 'bad']`);
   const mixed = {
     // With the //para alternative the insertion point is <para0>.
     examples: [
@@ -169,7 +185,7 @@ async function generate(ruleXml, answers, { withGraph = true } = {}) {
       { ...answer.examples[1], content: `<para>${answer.examples[1].content}</para>` },
     ],
   };
-  const m = await generate(unionRule, [mixed, mixed], { withGraph: false });
+  const m = await generate(unionRule, [mixed, mixed]);
   const statuses = m.result.runs.map((r) => r.result?.status || (r.schemaCovered ? 'covered' : 'invalid'));
   check('1.3 mixed: covered example not counted, other rejected', JSON.stringify(statuses) === '["accepted","rejected","covered"]', JSON.stringify(statuses));
   check('1.3 mixed: verdict from the other examples (correct)', ruleTestVerdict(m.result.examples, m.result.runs).kind === 'correct', JSON.stringify(ruleTestVerdict(m.result.examples, m.result.runs)));

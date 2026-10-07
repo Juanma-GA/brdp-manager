@@ -77,7 +77,7 @@ export function RuleValidationWarnings({ validation, standard, proposal = null }
         testIds={{ ...RULE_FORMAT_TEST_IDS, ...NAME_HINT_TEST_IDS }}
       />
       {/* Barrido final 2/2, Part 2: the lint's warnings, never blocking. */}
-      {validation.acceptable && <RuleLintWarnings ruleXml={validation.xml} format={validation.format} place="suggestion" />}
+      {validation.acceptable && <RuleLintWarnings ruleXml={validation.xml} format={validation.format} place="suggestion" standard={standard} />}
       {/* Mejoras B, Part 2: the rule's threshold against the Proposal's numbers (amber). */}
       {validation.acceptable && proposal != null && <RuleThresholdWarning ruleXml={validation.xml} format={validation.format} proposal={proposal} />}
     </>

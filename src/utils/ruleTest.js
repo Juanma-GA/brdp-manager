@@ -31,6 +31,7 @@ import {
 } from '../validation/schemaValidation.js';
 import { SKELETON_TEXT_SUFFIX, assembleExample, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { placeSentence, relocateMisplacedElements, relocateToOnlyParent } from './schemaPlacement.js';
+import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
 // names (xsi:…, xlink:…) and namespace declarations are not schema
@@ -444,7 +445,7 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
 // schemaLocation: the project's setting (ruleSchemaContext.js), so a context
 // block written with a custom pattern is recognized; the example's own one
 // (materializeExample) wins.
-export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument, schemaLocation = null } = {}) {
+export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument, schemaLocation = null, graph = null } = {}) {
   const unknownSchema = example.unmaterialized ? example.schema || '(none)' : null;
   const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, {
     unknownSchema,
@@ -455,10 +456,12 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     // problem is an element the schema does not allow where it is -- and
     // that element is exactly what the rule rejects -- shows the schema
     // already forbids it. Never corrected (the correction would remove
-    // what makes it break the rule) and never counted.
+    // what makes it break the rule) and never counted. Remates de Mejoras
+    // G, Part 1.1: only with the standard's graph and an alternative of
+    // the rule that the schema covers by that very relation.
     const schemaCovered =
       example.expected === 'reject'
-        ? schemaCoveredExample(ruleXml, format, example, validation, { parseXml, schemaLocation })
+        ? schemaCoveredExample(ruleXml, format, example, validation, { parseXml, schemaLocation, graph })
         : null;
     return schemaCovered ? { validation, result: null, matches: null, schemaCovered } : { validation, result: null, matches: null };
   }
@@ -537,7 +540,7 @@ function notAllowedNodes(doc, structure) {
     for (let n = el.firstChild; n; n = n.nextSibling) {
       if (n.nodeType !== 1) continue;
       if (elements[n.nodeName] && elements[el.nodeName] && !elements[el.nodeName].children.includes(n.nodeName)) {
-        out.push({ path: nodePath(n), element: n.nodeName, parent: el.nodeName });
+        out.push({ path: nodePath(n), element: n.nodeName, parent: el.nodeName, node: n });
       }
       walk(n);
     }
@@ -546,10 +549,35 @@ function notAllowedNodes(doc, structure) {
   return out;
 }
 
+// Remates de Mejoras G, Part 1.1: does a node the schema does not allow
+// where it is break exactly the relation a covered alternative names?
+//   onlyInside          the alternative's element, with no ancestor <other>
+//   onlyDirectlyInside  the alternative's element, its parent not <other>
+//   childrenListed      a child of the alternative's element that is not
+//                       one of the children the schema allows there
+function breaksCoveredRelation(o, item) {
+  if (item.kind === 'onlyInside') {
+    if (o.element !== item.element) return false;
+    for (let p = o.node?.parentNode; p && p.nodeType === 1; p = p.parentNode) if (p.nodeName === item.other) return false;
+    return true;
+  }
+  if (item.kind === 'onlyDirectlyInside') return o.element === item.element && o.parent !== item.other;
+  if (item.kind === 'childrenListed') return o.parent === item.element && !(item.children || []).includes(o.element);
+  return false;
+}
+
 // { items: [{ kind: 'structure', element, parent, schema }], nodePaths } when
-// the example's only problems are elements not allowed where they are and
-// the rule rejects exactly those nodes; null otherwise.
-function schemaCoveredExample(ruleXml, format, example, validation, { parseXml, schemaLocation }) {
+// the example's only problems are elements not allowed where they are, the
+// rule rejects exactly those nodes and (Remates de Mejoras G, Part 1.1)
+// each of them breaks a relation an alternative of the rule names and the
+// schema covers (by the standard's graph: "only inside", "only directly
+// inside", "children listed"). BRDP-EXT-02642 //*[@mark and …] rejects a
+// <para mark="1"> written inside another <para>: the schema does not allow
+// that <para> there, but nothing in the rule is about where a <para> goes
+// -- the example is just written wrong and goes to the correction round.
+// Without a graph, never. null otherwise.
+function schemaCoveredExample(ruleXml, format, example, validation, { parseXml, schemaLocation, graph }) {
+  if (!graph) return null;
   if (!validation.wellFormed || validation.unknownSchema || validation.missingMetadata || !example.structure) return null;
   if (validation.names?.available && (validation.names.notFound.length > 0 || validation.names.wrongType.length > 0)) return null;
   if (!validation.structure.length || !validation.structure.every((p) => p.kind === 'notAllowed')) return null;
@@ -561,6 +589,8 @@ function schemaCoveredExample(ruleXml, format, example, validation, { parseXml, 
   }
   const offending = notAllowedNodes(doc, example.structure);
   if (offending.length === 0) return null;
+  const covered = coveredRelationAlternatives(ruleXml, format, graph, { parseXml, schemaLocation: example.schemaLocation || schemaLocation });
+  if (covered.length === 0 || !offending.every((o) => covered.some((item) => breaksCoveredRelation(o, item)))) return null;
   // A descendant step of the rule (A//X) that the schema allows by another
   // way (<randomList> inside <randomList> through listItem/para): the
   // example is merely written wrong, the schema does not rule it out.

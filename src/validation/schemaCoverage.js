@@ -211,6 +211,33 @@ export function schemaCoverage(ruleXml, format, graph, options = {}) {
   return items.length ? { items } : null;
 }
 
+// Remates de Mejoras G, Part 1.1: the alternatives of the rule that the
+// schema covers by a RELATION -- "only inside" (a), "only directly inside"
+// (a) and "children listed" (b) --, each on its own, even when the rest of
+// the rule is not covered. runExample's schemaCoveredExample reads them:
+// an example meant to be rejected is "already ruled out by the schema"
+// only when what the schema does not allow in it is exactly one of these
+// relations. Only BREX parts that forbid (flag 0), as above. Without a
+// graph, none.
+// → [{ ruleId, kind, element, other?, children? }]
+const RELATION_KINDS = new Set(['onlyInside', 'onlyDirectlyInside', 'childrenListed']);
+
+export function coveredRelationAlternatives(ruleXml, format, graph, options = {}) {
+  if (!BREX_FORMATS.has(format)) return [];
+  const index = graphIndex(graph);
+  if (!index) return [];
+  const out = [];
+  for (const part of rulePathParts(ruleXml, format, options)) {
+    if (part.condition || part.flag !== '0') continue;
+    const scope = part.schema && index.bySchema.has(part.schema) ? [part.schema] : index.schemas;
+    for (const alternative of pathAlternatives(part.path)) {
+      const item = coveredAlternative(index, scope, alternative);
+      if (item && RELATION_KINDS.has(item.kind)) out.push({ ruleId: part.ruleId, ...item });
+    }
+  }
+  return out;
+}
+
 // One item in the language of `t` (records.ruleTest.covered.*).
 export function formatCoverageItem(item, t) {
   if (item.kind === 'structure') {
