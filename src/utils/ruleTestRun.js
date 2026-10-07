@@ -26,7 +26,9 @@ import { elementPlaces } from './schemaPlacement.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 import { cleanInternalNames } from './answerCleanup.js';
 import { absoluteConditionRequirements, checkRulePaths, documentExistenceNames, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
-import { coverageItemEnglish, schemaCoverage } from '../validation/schemaCoverage.js';
+import { coverageItemEnglish, documentPresence, schemaCoverage } from '../validation/schemaCoverage.js';
+import { repeatingComparisons, singleChildPairs, viewFromStructure } from '../validation/ruleRepetition.js';
+import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
 // "review" result (the panel shows them all, from the rule itself).
@@ -127,6 +129,42 @@ export function rootRuleTest({ ruleXml, format, standard, schemaLocation, graph,
   }
   const runs = examples.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml, schemaLocation }));
   return { status: 'ready', coverage, examples, runs, minimal, rootRule: true };
+}
+
+// Mejoras G, Part 2.3: "every document must contain <x>" -- /*[not(P)] or
+// /R[not(P)], flag 0 (schemaCoverage.js documentPresence). When no schema
+// of the scope depends on the document (P is either always there or can
+// never be there), no examples from the LLM: one is the minimal document of
+// a schema where it is always there (accepted), the other, if any, of one
+// where it cannot exist (rejected) -- like the rules on the root. None of
+// the second kind → "Already covered by the schema"; only the second kind →
+// review. BRDP-EXT-02715 /*[not(//dmaddres)].
+export function documentPresenceTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml }) {
+  if (!graph) return null;
+  const presence = documentPresence(ruleXml, format, graph, { parseXml, schemaLocation });
+  if (!presence || presence.depends.length > 0) return null;
+  const minimal = minimalDocumentRuns(ruleXml, format, graph, { standard, schemaLocation, parseXml });
+  if (!minimal.available) return null;
+  const bySchema = new Map(minimal.results.map((r) => [r.schema, r]));
+  const acceptable = presence.always.filter((s) => bySchema.get(s)?.status === 'accepted');
+  const rejectable = presence.cannot.filter((s) => bySchema.get(s)?.status === 'rejected');
+  if (acceptable.length === 0 && rejectable.length === 0) return null;
+  const examples = [];
+  const accepted = firstByPreference(acceptable, ROOT_TEST_ACCEPT_PREFERENCE);
+  const rejected = firstByPreference(rejectable, ROOT_TEST_REJECT_PREFERENCE);
+  // The note under each example says what decides it (not "only the root").
+  const withTarget = (ex) => ({ ...ex, presenceTarget: `<${presence.target}>` });
+  if (accepted) examples.push(withTarget(minimalExample(bySchema.get(accepted), 'accept', schemaLocation)));
+  if (rejected) examples.push(withTarget(minimalExample(bySchema.get(rejected), 'reject', schemaLocation)));
+  let coverage = null;
+  if (presence.cannot.length === 0) {
+    const roots = [...new Set(presence.always.map((s) => rootElementOf(bySchema.get(s)?.xml)).filter(Boolean))];
+    coverage = { items: [{ ruleId: null, kind: 'documentAlways', element: presence.target, other: roots.join('>, <') || presence.root }] };
+  } else if (presence.always.length === 0) {
+    coverage = { rootAllRejected: true, schemas: presence.cannot };
+  }
+  const runs = examples.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml, schemaLocation }));
+  return { status: 'ready', coverage, examples, runs, minimal, rootRule: true, presence };
 }
 
 // Same cap as the schema facts of Ask / Suggest Rule.
@@ -376,6 +414,14 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     firstRule && ruleLooksAtTables(ruleXml, [...extractRuleNames(ruleXml).elements, ...targets.checked])
       ? calsTableModel(placements[firstRule.schema]?.structure)
       : null;
+  // Mejoras G, Parts 1.4 and 1.6, read from the test schemas' structures:
+  // the parent/child pairs the rule names that the schema allows only once
+  // ("at most one <evaluate> inside <applic>"), and the paths the rule
+  // compares with that can give several nodes (examples with several).
+  const views = rulePlacements.map((p) => viewFromStructure(placements[p.schema]?.structure)).filter(Boolean);
+  const ruleFormat = format || STANDARD_TO_RULE_FORMAT[standard] || null;
+  const limits = ruleFormat ? singleChildPairs(ruleXml, ruleFormat, views, { parseXml, schemaLocation }) : [];
+  const several = ruleFormat && !acceptOnly ? repeatingComparisons(ruleXml, ruleFormat, views, { parseXml, schemaLocation }) : [];
   return {
     contextSchemas,
     schemaFacts,
@@ -383,7 +429,9 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     unreachable,
     untested,
     tableModel,
-    setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml), tableModel: Boolean(tableModel) },
+    limits,
+    several,
+    setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml), tableModel: Boolean(tableModel), several },
   };
 }
 
@@ -815,6 +863,24 @@ export async function generateRuleTestExamples({
         responses,
       };
     }
+    // Mejoras G, Part 2.3: "every document must contain <x>", decided by the
+    // schema for every type -- no LLM examples either.
+    const presenceTest = documentPresenceTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml });
+    if (presenceTest) {
+      const checkable = !presenceTest.coverage && askProposalCheck && ruleDescription != null;
+      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck }) : null;
+      if (!isCurrent()) return null;
+      return {
+        ...presenceTest,
+        proposalCheck,
+        correction: null,
+        predicateSkipped: 0,
+        setup: { standard, schemaLocation, placements: {}, keepBrexReference: false },
+        untested: [],
+        systemPrompt: null,
+        responses,
+      };
+    }
     // Mejoras E, Part 1.2: the rule forbids what no valid document of the
     // schema can contain -- only examples meant to be accepted are asked
     // for (Part 1.4), to show the rule does not reject what is valid.
@@ -847,6 +913,8 @@ export async function generateRuleTestExamples({
       conditions: ruleConditions(ruleXml, format, { parseXml }),
       tableModel: prepared.tableModel,
       acceptOnly: coverage ? { reasons: coverage.items.map(coverageItemEnglish) } : null,
+      limits: prepared.limits || [],
+      several: prepared.several || [],
     });
     onPrompt?.(systemPrompt);
     const run = (examples) => runRuleTestExamples(examples, { ruleXml, format, setup: prepared.setup, vocabulary, parseXml });
@@ -931,6 +999,7 @@ export async function generateRuleTestExamples({
       runs,
       correction,
       predicateSkipped,
+      several: prepared.several || [],
       setup: prepared.setup,
       untested: prepared.untested,
       systemPrompt,

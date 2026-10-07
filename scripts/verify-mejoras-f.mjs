@@ -160,14 +160,15 @@ async function main() {
     const red = page.getByTestId("suggested-rule-minimal-documents-newly-rejected");
     await red.waitFor({ timeout: 15000 });
     const redText = await red.textContent();
-    assert(/rejects documents? of type .*\bdescript\b.* with nothing written for the test; the previous rule accepted (it|them)/.test(redText), `corrected rule: red warning (${redText})`);
+    // Mejoras G, Part 2.4 b: up to 5 names, then "and N more" (descript is among them).
+    assert(/rejects documents of type (\w+, ){4}\w+ and \d+ more with nothing written for the test; the previous rule accepted them/.test(redText), `corrected rule: red warning (${redText})`);
     const color = await red.evaluate((el) => getComputedStyle(el).color);
     assert(color === "rgb(185, 28, 28)", `corrected rule: warning in red (${color})`);
     assert(await page.getByRole("button", { name: "Accept", exact: true }).isEnabled(), "corrected rule: Accept not blocked");
     await page.getByTestId("rule-corrected-note").locator("..").screenshot({ path: shot("mejoras-f-corrected-rule-warning.png") });
     await language("es");
     const redEs = await red.textContent();
-    assert(/Esta regla rechaza (un documento|documentos) de tipo .*\bdescript\b.* sin nada escrito para la prueba; la regla anterior los? aceptaba/.test(redEs), `corrected rule: red warning in Spanish (${redEs})`);
+    assert(/Esta regla rechaza documentos de tipo (\w+, ){4}\w+ y \d+ más sin nada escrito para la prueba; la regla anterior los aceptaba/.test(redEs), `corrected rule: red warning in Spanish (${redEs})`);
     await language("en");
     await page.getByRole("button", { name: "Discard", exact: true }).first().click();
 

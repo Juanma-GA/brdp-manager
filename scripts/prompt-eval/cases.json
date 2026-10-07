@@ -4103,6 +4103,71 @@
           "note": "never objappl=\"1\" with values"
         }
       ]
+    },
+    {
+      "id": "rule-test-3-0-1-applic-at-most-one-evaluate",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras G, Part 1.2 (real case BRDP-EXT-02786): the LLM wrote two <evaluate> as direct children of <applic>, which the 3.0.1 XSD allows only once. The example check now says so ('<applic> allows at most 1 <evaluate>; the example has 2') and the correction round brings the card with the maxima; the corrected example nests them and runs.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-MG-1",
+        "title": "Aplicabilidad con varios párrafos de texto",
+        "definition": "Decidir cómo se evalúa una aplicabilidad con varios párrafos de texto.",
+        "proposal": "Cada párrafo del texto de aplicabilidad debe tener su propia evaluación.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"XML-R-2786\"><objpath objappl=\"0\">//idstatus//applic[not(DRAGON) and count(displaytext/p) &gt; 1][count(evaluate/evaluate[@operator='and']) != count(displaytext/p)]</objpath><objuse>Cada párrafo del texto de aplicabilidad debe tener su propia evaluación</objuse></objrule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "at most one <evaluate> inside <applic>",
+          "note": "Part 1.4: the prompt says it before the LLM writes"
+        },
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_correction_not_contains",
+          "pattern": "is not allowed inside",
+          "note": "if a correction round happens, it names the maximum, not a wrong parent"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-every-document-dmaddres",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras G, Part 2.3 (real case BRDP-EXT-02715): /*[not(//dmaddres)] -- in every schema <dmaddres> is either always there (data modules) or can never be (comment, ddn, dml, pm), so the application builds the examples itself from the minimal documents, with no LLM examples call: a data module accepted, a publication module rejected.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-MG-5",
+        "title": "Dirección del módulo de datos",
+        "definition": "Decidir si todo documento lleva la dirección del módulo de datos.",
+        "proposal": "Todo documento debe llevar <dmaddres>.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"XML-R-2715\"><objpath objappl=\"0\">/*[not(//dmaddres)]</objpath><objuse>Todo documento debe llevar dmaddres</objuse></objrule>",
+      "checks": [
+        {
+          "type": "rule_test_examples_by_app",
+          "note": "minimal documents built by the app, no LLM examples call"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "<dmaddres>",
+          "note": "the description names the element"
+        }
+      ]
     }
   ]
 }

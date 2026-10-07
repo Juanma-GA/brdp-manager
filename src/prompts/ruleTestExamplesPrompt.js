@@ -302,6 +302,19 @@ not a set of nodes. Write the examples so that:
 ${lines.join('\n')}`;
 }
 
+// Mejoras G, Part 1.6: the rule compares with a path that can give several
+// nodes -- the examples must show that case, or the test never sees it
+// (BRDP-EXT-02792: normalize-space() over ancestor::applic/displaytext/p).
+function severalInstructions(several) {
+  const lines = several.map((s) => `- ${s.path} can give several <${s.element}>.`);
+  return `
+
+SEVERAL NODES: the rule compares with paths that can give more than one node:
+${lines.join('\n')}
+At least one example meant to be accepted and one meant to be rejected carry
+two or more of that element there, with different values.`;
+}
+
 // Barrido final 1/2: a rule that looks at tables -- one valid CALS table
 // with a merged row, built by the application from the schema
 // (calsTableModel), and the three things a merged row needs. Mistral wrote
@@ -363,6 +376,12 @@ export function buildRuleTestExamplesPrompt({
   // already rules out what the rule forbids -- only examples meant to be
   // accepted are asked for, and the LLM is told why.
   acceptOnly = null,
+  // Mejoras G, Part 1.4: [{ parent, child }] the rule names that the schema
+  // allows only once -- a line in the parent's card (or its own block when
+  // the parent has no card). Part 1.6: [{ path, element }] the rule
+  // compares with that can give several -- examples with two or more.
+  limits = [],
+  several = [],
 }) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
@@ -436,8 +455,14 @@ ${acceptOnly ? '' : `- The reject example goes against the decision in one clear
   if (ruleDependsOnTitle(matchExpressions)) prompt += titleDependentInstructions();
   if (conditions.length > 0) prompt += conditionInstructions(conditions);
   if (tableModel) prompt += tableModelInstructions(tableModel);
+  if (several.length > 0) prompt += severalInstructions(several);
 
-  prompt += buildSchemaFactsBlock(standard, schemaFacts);
+  prompt += buildSchemaFactsBlock(standard, schemaFacts, { limits });
+  const carded = new Set((schemaFacts || []).map((f) => f.name));
+  const looseLimits = limits.filter((l) => !carded.has(l.parent));
+  if (looseLimits.length > 0) {
+    prompt += `\n\nAT MOST ONE (the schema allows no more):${looseLimits.map((l) => `\n- at most one <${l.child}> inside <${l.parent}>`).join('')}`;
+  }
 
   if (previousReview) {
     const lines = previousReview.mismatches.map(

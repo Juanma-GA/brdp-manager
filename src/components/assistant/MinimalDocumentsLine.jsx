@@ -4,6 +4,8 @@ import styles from '../../pages/RecordsPage.module.css';
 import { useSchemaGraphState } from '../../hooks/useSchemaGraph.js';
 import { minimalDocumentRuns, newlyRejectedMinimalDocuments } from '../../utils/ruleMinimalDocuments.js';
 
+const NEWLY_SHOWN = 5;
+
 // Mejoras F, Part 1.1: the rule run on the document the application builds
 // for each schema of the standard with nothing written for the test
 // (utils/ruleMinimalDocuments.js), by code. Information, never a verdict:
@@ -46,7 +48,11 @@ export default function MinimalDocumentsLine({ ruleXml, format, standard, schema
     <>
       {newly.length > 0 && (
         <p className={styles.vocabWarning} data-testid={`${testId}-newly-rejected`}>
-          ⚠ {t('records.ruleTest.minimalNewlyRejected', { count: newly.length, schemas: newly.join(', ') })}
+          ⚠ {t('records.ruleTest.minimalNewlyRejected', {
+            count: newly.length,
+            // Mejoras G, Part 2.4 b: up to 5 types named, then "and N more".
+            schemas: newly.slice(0, NEWLY_SHOWN).join(', ') + (newly.length > NEWLY_SHOWN ? t('records.ruleTest.rejectedMore', { count: newly.length - NEWLY_SHOWN }) : ''),
+          })}
         </p>
       )}
       {runs.rejected.length > 0 && (

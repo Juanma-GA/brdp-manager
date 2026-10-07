@@ -423,6 +423,7 @@ async def test_structure_endpoint_serves_the_content_models(client):
         "required": ["restrictionInstructions"],
         "text": False,
         "attributes": [],
+        "max": {"restrictionInstructions": 1, "restrictionInfo": 1},
     }
     assert models["dmStatus"]["required"][3] == ["applic", "applicRef"]
     res = await client.get(
@@ -510,3 +511,44 @@ def test_standard_graph_dita_has_skeletons_but_no_required():
     dita = get_standard_graph("DITA 1.3 Xpath2.0")
     assert dita["required"] == {}
     assert {"topic", "concept", "task", "reference", "troubleshooting", "map"} <= set(dita["skeletons"])
+
+
+# Mejoras G, Part 1.1: how many times each child can appear, from the XSDs
+# (content-models-*.json "max"), served with the structure and the graph.
+def test_known_child_maxima():
+    import json
+
+    raw = json.loads(
+        (Path(__file__).resolve().parents[1] / "schema_cards" / "content-models-3-0-1.json").read_text(encoding="utf-8")
+    )["models"]
+
+    def file_max(element, child, schema="descript"):
+        variant = next(v for v in raw[element] if schema in v["schemas"])
+        return variant["max"][child]
+
+    assert file_max("applic", "evaluate") == 1
+    assert file_max("applic", "displaytext") == 1
+    assert file_max("dmaddres", "issno") == 1
+    assert file_max("displaytext", "p") == "unbounded"
+    assert file_max("evaluate", "evaluate") == "unbounded"
+    # every child in "max" is a child in "order", and every bound is >= 1
+    for element, variants in raw.items():
+        for v in variants:
+            assert set(v["max"]) <= set(v["order"]), element
+            assert all(m == "unbounded" or m >= 1 for m in v["max"].values()), element
+
+    # the structure serves only the finite maxima
+    models = schema_content_models("S1000D 3.0.1", "descript")
+    assert models["applic"]["max"]["evaluate"] == 1
+    assert "p" not in models["displaytext"]["max"]
+
+    # the graph: per element, the schemas and their finite maxima
+    graph = get_standard_graph("S1000D 3.0.1")
+    applic = graph["maxima"]["applic"]
+    descript = next(entry for entry in applic if "descript" in entry[0])
+    assert descript[1]["evaluate"] == 1 and descript[1]["displaytext"] == 1
+    assert all("p" not in entry[1] for entry in graph["maxima"].get("displaytext", []))
+    # DITA: one merged schema; <cmd> appears once in <step>, <info> can repeat
+    dita = get_standard_graph("DITA 1.3 Xpath2.0")["maxima"]
+    assert dita["step"][0][1]["cmd"] == 1 and "info" not in dita["step"][0][1]
+    assert get_standard_graph("S1000D 5.0").get("maxima", {}) == {}

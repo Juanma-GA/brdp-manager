@@ -51,6 +51,12 @@ const TEXT_NODES_LINE = 'The indentation and line breaks between elements are te
 const brexValueOnEvery = (pathElement, flagAttr, example) => `9. When the Proposal says every <X> must carry @a with a given value: forbid the opposite with ${flagAttr}="0" on X[not(@a='v')] (several values: X[not(@a='v1' or @a='v2')]) — never ${flagAttr}="1" with values. Example (invented names, not from this BRDP) for "every <acmeElement> shall carry @acmeAttr with the value 1":
    ${example}`;
 
+// Rule 10 of the BREX blocks and 14 of Schematron (Mejoras G, Part 1.5):
+// BRDP-EXT-02792's corrected rule compared normalize-space() of
+// ancestor::applic/displaytext/p, and <displaytext> holds any number of <p>
+// -- with two, XPath 2.0 stops with an error and XPath 1.0 reads the first.
+const SEVERAL_NODES_LINE = 'A text function (normalize-space, string, concat, contains…) takes ONE node: never give it a path that can return several (a child that can repeat, or //x that can appear more than once). For "any of them" use some $x in … satisfies …; for the first, add [1].';
+
 const BREX_42 = `FORMAT — S1000D Issue 4.2 BREX: <structureObjectRule> elements (normally one).
 1. Normally output one <structureObjectRule id="{ID}" brSeverityLevel="brsl01">. When the Proposal makes several independent requirements, write one <structureObjectRule> per requirement, with ids {ID}-1, {ID}-2…, each with its own <objectPath> and its <objectUse>; never two <objectPath> in one rule. Never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
 2. Child order: <brDecisionRef brDecisionIdentNumber="{ID}"/> → <objectPath> → <objectUse> → <objectValue> (zero or more). brDecisionRef carries the ID as an ATTRIBUTE, never as text.
@@ -60,7 +66,8 @@ ${BREX_4X_VALUE_LIST}
 ${BREX_4X_PATH_NAMES}
 ${brexOwnAncestor('objectPath')}
 8. ${TEXT_NODES_LINE}
-${brexValueOnEvery('objectPath', 'allowedObjectFlag', `<objectPath allowedObjectFlag="0">//acmeElement[not(@acmeAttr='1')]</objectPath>`)}`;
+${brexValueOnEvery('objectPath', 'allowedObjectFlag', `<objectPath allowedObjectFlag="0">//acmeElement[not(@acmeAttr='1')]</objectPath>`)}
+10. ${SEVERAL_NODES_LINE}`;
 
 const BREX_41 = `FORMAT — S1000D Issue 4.1 BREX: <structureObjectRule> elements (normally one).
 1. Normally output one <structureObjectRule id="{ID}">. When the Proposal makes several independent requirements, write one <structureObjectRule> per requirement, with ids {ID}-1, {ID}-2…, each with its own <objectPath> and its <objectUse>; never two <objectPath> in one rule. Never a context block (<contextRules>: when the rule is limited to some schemas, the application adds it), a <nonContextRule>, or a dmodule wrapper. {ID} is the BRDP's ID.
@@ -71,7 +78,8 @@ ${BREX_4X_VALUE_LIST}
 ${BREX_4X_PATH_NAMES}
 ${brexOwnAncestor('objectPath')}
 8. ${TEXT_NODES_LINE}
-${brexValueOnEvery('objectPath', 'allowedObjectFlag', `<objectPath allowedObjectFlag="0">//acmeElement[not(@acmeAttr='1')]</objectPath>`)}`;
+${brexValueOnEvery('objectPath', 'allowedObjectFlag', `<objectPath allowedObjectFlag="0">//acmeElement[not(@acmeAttr='1')]</objectPath>`)}
+10. ${SEVERAL_NODES_LINE}`;
 
 // 3.0.1 gets the same reinforcement, adapted: objappl only has 0/1 (no
 // "optional") and is optional itself in the 3.0.1 BREX schema -- the real
@@ -92,7 +100,8 @@ const BREX_301 = `FORMAT — S1000D Issue 3.0.1 BREX: <objrule> elements (normal
    Wrong:   <objpath objappl="0">//&lt;acmeElement&gt;</objpath>
 ${brexOwnAncestor('objpath')}
 8. ${TEXT_NODES_LINE}
-${brexValueOnEvery('objpath', 'objappl', `<objpath objappl="0">//acmeElement[not(@acmeAttr='1')]</objpath>`)}`;
+${brexValueOnEvery('objpath', 'objappl', `<objpath objappl="0">//acmeElement[not(@acmeAttr='1')]</objpath>`)}
+10. ${SEVERAL_NODES_LINE}`;
 
 function schDita(standard) {
   const queryBinding = queryBindingForStandard(standard);
@@ -116,7 +125,8 @@ function schDita(standard) {
 10. Inside sch:assert/sch:report message text, write element names as &lt;elementName&gt;. Inside test, context and sch:let/@value, a literal < or & must be escaped as &lt; / &amp; (count(...) &lt; 2, never a raw <).
 11. Never write a vacuous test (e.g. two nearly identical expressions compared with each other) — if the only way to "check" the decision is vacuous, the decision is not checkable.
 12. Row-by-row check across columns of a DITA/CALS table -> resolve each column by its header TEXT with <sch:let name="colX" value="tgroup/thead/row[1]/entry[normalize-space(.) = 'Header Text']/@colname"/> placed before the checks, and express "for every row" with "every $row in tgroup/tbody/row satisfies (...)" — never by column position.
-13. ${TEXT_NODES_LINE}`;
+13. ${TEXT_NODES_LINE}
+14. ${SEVERAL_NODES_LINE}`;
 }
 
 // `format` is the rule_approvals format id (STANDARD_TO_RULE_FORMAT);

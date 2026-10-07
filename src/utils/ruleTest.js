@@ -17,7 +17,7 @@
 //   / not executable / nothing runnable).
 // - xmlDisplayLines: the example re-indented, split into segments so the
 //   panel can highlight the nodes the rule selected and dim the skeleton.
-import { acceptanceDetails, nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
+import { acceptanceDetails, documentPresenceTarget, nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
 import {
   addMissingCalsColspecs,
   checkAgainstVocabulary,
@@ -247,7 +247,10 @@ function elementCards(doc, names, problems, structure) {
   };
   for (const p of problems) {
     if (p.kind === 'notAllowed') want(p.parent);
-    else if (p.kind === 'unknownAttribute') want(p.element);
+    else if (p.kind === 'tooMany') {
+      want(p.parent);
+      want(p.element);
+    } else if (p.kind === 'unknownAttribute') want(p.element);
     else if (p.kind === 'unknownElement') {
       for (const el of elementsNamed(doc, (e) => e.nodeName === p.element)) want(el.parentNode?.nodeName);
     }
@@ -268,6 +271,7 @@ function elementCards(doc, names, problems, structure) {
     element,
     children: [...structure.elements[element].children],
     attributes: [...structure.elements[element].attributes],
+    max: { ...(structure.models?.[element]?.max || {}) },
   }));
 }
 
@@ -281,7 +285,18 @@ function cardNameList(names, prefix = '') {
 
 function formatElementCard(card, schema) {
   const where = schema ? ` in the ${schema} schema` : '';
-  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}; attributes: ${cardNameList(card.attributes, '@')}`;
+  // Mejoras G, Part 1.2: the children it allows only a limited number of
+  // times ("at most 1: <displaytext>, <evaluate>").
+  const limited = new Map();
+  for (const child of card.children) {
+    const max = card.max?.[child];
+    if (Number.isInteger(max)) limited.set(max, [...(limited.get(max) || []), child]);
+  }
+  const limits = [...limited.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([max, names]) => `; at most ${max} of each: ${cardNameList(names.map((n) => `<${n}>`))}`)
+    .join('');
+  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}${limits}; attributes: ${cardNameList(card.attributes, '@')}`;
 }
 
 // C3b: an example often fails on the markup of an element the rule does
@@ -476,6 +491,12 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
         (result.selectedNodePaths.length === 0 && !(result.conditions?.length > 0) && acceptance.some((d) => d.case === 'predicate')))
   );
   const rejection = example.expected === 'accept' && result.status === 'rejected' ? rejectionDetails(example, result) : null;
+  // Mejoras G, Part 2.4 d: "every document must contain <x>" -- what the
+  // document lacks, never "it rejects /dmodule".
+  if (rejection) {
+    const missing = documentPresenceTarget(ruleXml, format, { parseXml, schemaLocation: example.schemaLocation || schemaLocation });
+    if (missing) rejection.missing = missing;
+  }
   return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result), acceptance, predicateMiss, rejection };
 }
 

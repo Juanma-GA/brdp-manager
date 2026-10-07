@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { authFetchJson } from '../services/apiClient';
 import { ruleXmlHash } from '../utils/ruleHash.js';
 import { clashDefects, projectRuleIdClashes, proposeRuleCorrection } from '../validation/ruleCorrection.js';
+import { ruleElementIds } from '../utils/ruleSplit.js';
 import { loadOtherStandardVocabularies, STANDARD_TO_VOCABULARY_FILE } from '../validation/schemaValidation.js';
 import { useSchemaGraphState } from './useSchemaGraph.js';
 
@@ -164,6 +165,20 @@ export function useRuleCorrections({ projectId, format, correction, refreshToken
     return { proposed, unfixable };
   }, [state.byBrdpId]);
 
+  // Mejoras G, Part 2.2 b: id → the BRDPs whose saved rule uses it, for the
+  // warning under a suggested, corrected or pasted rule.
+  const idOwners = useMemo(() => {
+    const owners = new Map();
+    for (const r of currentRows || []) {
+      if (!r.rule_xml) continue;
+      for (const id of ruleElementIds(r.rule_xml, format)) {
+        if (!owners.has(id)) owners.set(id, []);
+        if (!owners.get(id).some((o) => o.brdpId === r.brdp_id)) owners.get(id).push({ brdpId: r.brdp_id, identifier: r.identifier || r.brdp_id });
+      }
+    }
+    return owners;
+  }, [currentRows, format]);
+
   const current = state.source === currentRows && state.ctx === ctx;
   const status = !format
     ? 'idle'
@@ -179,6 +194,7 @@ export function useRuleCorrections({ projectId, format, correction, refreshToken
     progress: current ? state.progress : { done: 0, total: 0 },
     byBrdpId: state.byBrdpId,
     counts,
+    idOwners,
     error: rules.error,
     retry: () => setReloadToken((n) => n + 1),
   };

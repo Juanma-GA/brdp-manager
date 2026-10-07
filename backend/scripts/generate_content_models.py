@@ -15,7 +15,14 @@ containers down to an element:
             repeated (capped at 3);
   text      whether the element can hold text (mixed content, simple
             content, or a simple / no type) -- where a minimal instance gets
-            a "…" placeholder.
+            a "…" placeholder;
+  max       (Mejoras G, Part 1.1) how many times each child can appear: a
+            number or "unbounded". An upper bound, never less than a valid
+            document admits: in a choice the largest of its branches, in a
+            sequence the sum when the same child appears more than once,
+            everything multiplied by the maxOccurs of the particles around
+            it. "Either <assert> or <evaluate>, not both" is not modelled
+            (each gets its own bound).
 
 Same two resolution worlds as the cards (S1000D: each file on its own, plus
 its xlink/rdf imports; DITA: one merged world with its redefines), reusing
@@ -61,19 +68,21 @@ def _occurs(node, attr: str, default: int = 1) -> int | None:
 
 
 def _particle(node, scope, stack: frozenset, visited: frozenset, depth: int):
-    """A particle as a small tree: ("el", name, min) | ("seq"|"all", [..], min)
-    | ("choice", [..], min) | None (an xs:any, an attribute, …)."""
+    """A particle as a small tree: ("el", name, min, max) | ("seq", [..], min,
+    max) | ("choice", [..], min, max) | None (an xs:any, an attribute, …);
+    max None = unbounded."""
     if depth > _MAX_DEPTH:
         raise Unresolved("content model too deep")
     tag = _local(node.tag)
     minimum = _occurs(node, "minOccurs") or 0
+    maximum = _occurs(node, "maxOccurs")
     if tag == "element":
         ref = node.get("ref")
         name = ref.split(":", 1)[-1] if ref else node.get("name")
-        return ("el", name, minimum) if name else None
+        return ("el", name, minimum, maximum) if name else None
     if tag in ("sequence", "all", "choice"):
         parts = [p for p in (_particle(c, scope, stack, visited, depth + 1) for c in node if _is_xsd(c)) if p]
-        return ("choice" if tag == "choice" else "seq", parts, minimum)
+        return ("choice" if tag == "choice" else "seq", parts, minimum, maximum)
     if tag == "group":
         ref = node.get("ref")
         if not ref:
@@ -83,14 +92,14 @@ def _particle(node, scope, stack: frozenset, visited: frozenset, depth: int):
         if target is None:
             raise Unresolved(f"group ref not found: {name}")
         if id(target) in visited:
-            return None
+            raise Unresolved(f"circular group ref: {name}")
         next_stack = stack | {("group", name)} if is_redef else stack
         parts = [
             p
             for p in (_particle(c, scope, next_stack, visited | {id(target)}, depth + 1) for c in target if _is_xsd(c))
             if p
         ]
-        return ("seq", parts, minimum)
+        return ("seq", parts, minimum, maximum)
     return None
 
 
@@ -141,7 +150,7 @@ def _order(particles: list, out: list) -> None:
 
 def _slots(p) -> list:
     """The required slots of one particle (see module docstring)."""
-    kind, body, minimum = p
+    kind, body, minimum, _maximum = p
     if minimum == 0:
         return []
     repeat = min(minimum, _MAX_REPEAT)
@@ -165,9 +174,42 @@ def _slots(p) -> list:
     return min(alternatives, key=len) * repeat
 
 
+def _add(a, b):
+    return None if a is None or b is None else a + b
+
+
+def _times(count, factor):
+    return None if count is None or factor is None else count * factor
+
+
+def _max_counts(p) -> dict:
+    """{child: upper bound of its occurrences (None = unbounded)} of one
+    particle (see module docstring)."""
+    kind, body, _minimum, maximum = p
+    if maximum == 0:
+        return {}
+    if kind == "el":
+        own = {body: 1}
+    elif kind == "seq":
+        own = {}
+        for child in body:
+            for name, count in _max_counts(child).items():
+                own[name] = _add(own[name], count) if name in own else count
+    else:  # choice: one branch per occurrence -- the largest
+        own = {}
+        for child in body:
+            for name, count in _max_counts(child).items():
+                if name not in own:
+                    own[name] = count
+                elif own[name] is not None and (count is None or count > own[name]):
+                    own[name] = count
+    return {name: _times(count, maximum) for name, count in own.items()}
+
+
 def compute_model(element_node, scope) -> dict:
     order: list = []
     required: list = []
+    maxima: dict = {}
     text = False
     resolved = True
     inline = element_node.find(QN("complexType"))
@@ -187,9 +229,15 @@ def compute_model(element_node, scope) -> dict:
             particles, text = [], True  # xs:string & co., or no type at all
         _order(particles, order)
         required = [s for p in particles for s in _slots(p)]
+        maxima = _max_counts(("seq", particles, 1, 1))
     except Unresolved:
         resolved = False
-    model = {"order": order, "required": required, "text": text}
+    model = {
+        "order": order,
+        "required": required,
+        "text": text,
+        "max": {name: ("unbounded" if maxima.get(name) is None else maxima[name]) for name in order if name in maxima},
+    }
     if not resolved:
         model["resolved"] = False
     return model
@@ -233,7 +281,7 @@ def main() -> None:
     payload = {
         "_readme": (
             "Auto-generated by backend/scripts/generate_content_models.py -- do not hand-edit. "
-            "Child order, required children and text per element, grouped by schemas like the schema cards."
+            "Child order, required children, text and child maxima per element, grouped by schemas like the schema cards."
         ),
         "standard": standard,
         "mode": mode,

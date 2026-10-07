@@ -187,7 +187,10 @@ function formatSchemaFactAttributeList(attrs) {
 // `coverageNote: false` leaves out the header's last sentence ("If the facts
 // do not cover what is asked…") for a prompt that already says it in its
 // own words (Ask).
-export function buildSchemaFactsBlock(standard, schemaFacts, { coverageNote = true, userFacingName = false } = {}) {
+// limits (Mejoras G, Part 1.4, test examples only): [{ parent, child }] the
+// schema allows only once -- "at most one <child> inside <parent>" is added
+// to the parent's card.
+export function buildSchemaFactsBlock(standard, schemaFacts, { coverageNote = true, userFacingName = false, limits = [] } = {}) {
   if (!schemaFacts || schemaFacts.length === 0) return '';
   let block = `\n\nSCHEMA FACTS — extracted from the official ${standard} schema. These are
 authoritative: for questions about which attributes, values, child
@@ -212,6 +215,7 @@ The user does not see this block by that name; if you refer to it, call it the s
       block += `\n  attributes: ${attrsText}`;
       block += `\n  children: ${formatSchemaFactNameList(v.children, v.children_truncated, v.children_omitted)}`;
       block += `\n  allowed inside: ${parentsText}`;
+      block += limitLines(limits, name);
       continue;
     }
 
@@ -242,8 +246,16 @@ The user does not see this block by that name; if you refer to it, call it the s
       block += `\n  Differences by schema (beyond what is common to all — attributes and children ONLY; parents are never part of this comparison, see "allowed inside" above):`;
       block += summary.perVariant.map((pv) => variantDiffLines(pv, summary)).join('');
     }
+    block += limitLines(limits, name);
   }
   return block;
+}
+
+function limitLines(limits, name) {
+  return (limits || [])
+    .filter((l) => l.parent === name)
+    .map((l) => `\n  at most one <${l.child}> inside <${l.parent}>`)
+    .join('');
 }
 
 // "Pulido de fichas" round, points 2-3 (kept): a variant with nothing to

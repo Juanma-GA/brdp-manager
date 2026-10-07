@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -84,6 +86,9 @@ class ContentModelOut(BaseModel):
     text: bool = False
     # [[name, value or None], ...] -- its required attributes.
     attributes: list[list[str | None]] = []
+    # Mejoras G, Part 1.1: {child: most occurrences} -- a child left out is
+    # unbounded.
+    max: dict[str, int] = {}
 
 
 class MetadataNodeOut(BaseModel):
@@ -171,6 +176,9 @@ class SchemaGraphOut(BaseModel):
     # Mejoras F, Part 2.1: {name: [[schemas], [required children], [required
     # attribute names]]} -- only where something is required.
     required: dict[str, list[list[list[str]]]] = {}
+    # Mejoras G, Part 1.1: {name: [[schemas], {child: most occurrences}]} --
+    # only finite maxima; a child left out is unbounded.
+    maxima: dict[str, list[list[Any]]] = {}
     # Mejoras F, Part 1.1: {schema: {path, titled, metadata}} -- the document
     # the application builds for each schema with nothing written.
     skeletons: dict[str, dict] = {}

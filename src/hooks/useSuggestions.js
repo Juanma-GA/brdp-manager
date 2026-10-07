@@ -9,7 +9,7 @@ import { buildSuggestDefinitionPrompt } from '../prompts/suggestDefinitionPrompt
 import { buildSuggestProposalPrompt } from '../prompts/suggestProposalPrompt.js';
 import { buildSuggestTitlePrompt, readSuggestedTitle, sameTitle, SUGGEST_TITLE_USER_MESSAGE } from '../prompts/suggestTitlePrompt.js';
 import { SUGGEST_TEMPERATURE } from '../prompts/shared.js';
-import { numberDuplicateRuleIds, splitMultiPathRules } from '../utils/ruleSplit.js';
+import { alignRuleIds, numberDuplicateRuleIds, splitMultiPathRules } from '../utils/ruleSplit.js';
 import { buildCopyablePrompt, buildSuggestRulePrompt, parseSuggestRuleResponse, SUGGEST_RULE_USER_MESSAGE } from '../prompts/suggestRulePrompt.js';
 import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
@@ -472,6 +472,9 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
         return;
       }
       const parsed = parseSuggestRuleResponse(res.content);
+      // Mejoras G, Part 2.2 a: a corrected rule keeps the ids of the rule
+      // it corrects.
+      if (parsed.xml && options.failedTest?.ruleXml) parsed.xml = alignRuleIds(parsed.xml, similar.format, options.failedTest.ruleXml, { schemas }).xml;
       if (parsed.notCheckable !== undefined) {
         commit({ ...ruleBase, notCheckable: parsed.notCheckable || '—' });
       } else {

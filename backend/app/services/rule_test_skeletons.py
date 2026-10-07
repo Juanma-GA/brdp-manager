@@ -667,6 +667,9 @@ def schema_content_models(standard: str, schema: str) -> dict[str, dict]:
             "required": required,
             "text": bool(variant["text"]),
             "attributes": attributes,
+            # Mejoras G, Part 1.1: the most each child can appear (a number);
+            # a child left out is unbounded.
+            "max": {n: m for n, m in variant.get("max", {}).items() if n in known and m != "unbounded"},
         }
     return out
 
@@ -796,6 +799,7 @@ def get_standard_graph(standard: str) -> dict:
             "elements": elements,
             "unchecked_children": roots,
             "required": {},
+            "maxima": _maxima_by_schema(standard, [DITA_GRAPH_SCHEMA]),
             "skeletons": _skeletons_by_schema(standard, [t for t in DITA_DOCUMENT_TYPES if schema_graph(standard, t)]),
         }
     elements: dict[str, list] = {}
@@ -823,6 +827,7 @@ def get_standard_graph(standard: str) -> dict:
         "elements": elements,
         "unchecked_children": [],
         "required": _required_by_schema(standard, cards, sorted(roots)),
+        "maxima": _maxima_by_schema(standard, sorted(roots)),
         "skeletons": _skeletons_by_schema(standard, sorted(roots)),
     }
 
@@ -857,6 +862,33 @@ def _required_by_schema(standard: str, cards: dict, schemas: list[str]) -> dict[
         for schema, key in by_schema.items():
             groups.setdefault(key, []).append(schema)
         out[name] = [[sorted(s), list(key[0]), list(key[1])] for key, s in sorted(groups.items(), key=lambda kv: sorted(kv[1]))]
+    return out
+
+
+# Mejoras G, Part 1.1: how many times each child can appear --
+# {name: [[schemas], {child: max}]}, one entry per group of schemas with the
+# same answer, only the children with a finite maximum (a child left out is
+# unbounded; an element without an entry has no finite maximum anywhere).
+# DITA: the merged model, under the graph's single schema "dita".
+def _maxima_by_schema(standard: str, schemas: list[str]) -> dict[str, list]:
+    filename = STANDARD_TO_CONTENT_MODELS_FILE.get(standard)
+    models = _content_models_file(filename) if filename else {}
+    dita = is_dita_standard(standard)
+    out: dict[str, list] = {}
+    for name, variants in models.items():
+        groups: dict[str, tuple[list[str], dict]] = {}
+        for schema in schemas:
+            key = "DITA 1.3" if dita else schema
+            variant = next((v for v in variants if key in v.get("schemas", [])), None)
+            if variant is None or variant.get("resolved") is False:
+                continue
+            finite = {c: m for c, m in variant.get("max", {}).items() if m != "unbounded"}
+            if not finite:
+                continue
+            signature = json.dumps(finite, sort_keys=True)
+            groups.setdefault(signature, ([], finite))[0].append(schema)
+        if groups:
+            out[name] = [[sorted(s), m] for s, m in sorted(groups.values(), key=lambda g: sorted(g[0]))]
     return out
 
 

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import { useSchemaGraph } from '../../hooks/useSchemaGraph.js';
 import { applyRulePathFix, checkAncestorAbsolutePaths, checkRulePaths, formatAncestorProblem, formatPathFix, formatPathProblem } from '../../validation/rulePathCheck.js';
+import { formatTextFunctionWarning, textFunctionWarnings } from '../../validation/ruleRepetition.js';
 
 // Mejoras C, Part 1: amber, never blocking -- a path of the rule that the
 // standard's schemas never allow ("The path cannot exist: <trade> does not
@@ -17,6 +18,8 @@ import { applyRulePathFix, checkAncestorAbsolutePaths, checkRulePaths, formatAnc
 //   ruleXml   what is checked (a pasted rule as it will be saved)
 //   fixXml    the text the fix is applied to (default: ruleXml) -- the
 //             pasted text, for a pasted rule wrapped in context blocks
+// Mejoras G, Part 1.5: also a text function (normalize-space, string…) over
+// a path that can give several nodes -- amber, no button, never blocking.
 export default function RulePathWarnings({ ruleXml, fixXml = null, format, standard, schemaLocation = null, onApplyFix = null, testId = 'rule-path-warning' }) {
   const { t } = useTranslation();
   const graph = useSchemaGraph(standard);
@@ -37,9 +40,17 @@ export default function RulePathWarnings({ ruleXml, fixXml = null, format, stand
       return [];
     }
   }, [ruleXml, format, schemaLocation]);
+  const repetition = useMemo(() => {
+    if (!graph || !ruleXml || !format) return [];
+    try {
+      return textFunctionWarnings(ruleXml, format, graph, { schemaLocation });
+    } catch {
+      return [];
+    }
+  }, [graph, ruleXml, format, schemaLocation]);
   const problems = [...(check?.problems || []), ...ancestorProblems];
   const shownNote = note && note.xml === (fixXml ?? ruleXml) ? note.text : null;
-  if (problems.length === 0 && !shownNote) return null;
+  if (problems.length === 0 && repetition.length === 0 && !shownNote) return null;
   const apply = (fix) => {
     const source = fixXml ?? ruleXml;
     const { xml, changed } = applyRulePathFix(source, fix);
@@ -60,6 +71,11 @@ export default function RulePathWarnings({ ruleXml, fixXml = null, format, stand
               </button>
             </>
           )}
+        </div>
+      ))}
+      {repetition.map((w) => (
+        <div key={`${w.fn}|${w.argument}`} className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid={testId} data-kind="textFunction">
+          ⚠ {formatTextFunctionWarning(w, t)}
         </div>
       ))}
       {shownNote && (

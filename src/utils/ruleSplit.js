@@ -316,3 +316,56 @@ export function ruleElementIds(ruleXml, format) {
   }
   return [];
 }
+
+// Mejoras G, Part 2.2 a: "Suggest a corrected rule" -- the new rule keeps
+// the ids of the rule it corrects, whatever the LLM wrote (BRDP-EXT-02651:
+// the correction came back with the id of BRDP-S1-00024's rule). Same
+// number of rule elements: the previous ids in order; another number: the
+// previous rule's first id on all of them, then numbered like repeated ids
+// ({id}-1, {id}-2…). A rule element without an id gets one. Schematron
+// DITA: the ids of its <pattern> elements. Text-based. `schemas`: the
+// schemas the new rule will be wrapped for -- the previous rule's copies
+// per context block ({id}-{schema}) count once, without the suffix (the
+// wrapper adds it again).
+//   alignRuleIds(ruleXml, format, previousXml, { schemas }) → { xml, changed: [{ from, to }] }
+const SCH_PATTERN_RE = /<((?:[A-Za-z_][\w.-]*:)?pattern)\b([^>]*?)(\/?)>/g;
+export function alignRuleIds(ruleXml, format, previousXml, { schemas = [] } = {}) {
+  const source = String(ruleXml ?? '');
+  const shape = SHAPES[format];
+  const rawIds = shape
+    ? ruleElementIds(previousXml, format)
+    : format === 'SCH-DITA'
+      ? [...String(previousXml ?? '').matchAll(SCH_PATTERN_RE)].map((m) => ID_ATTR_RE.exec(m[2])?.[3]).filter(Boolean)
+      : [];
+  const previousIds = [];
+  for (const raw of rawIds) {
+    const suffix = schemas.length > 1 ? schemas.find((sc) => raw.endsWith(`-${sc}`)) : null;
+    const id = suffix ? raw.slice(0, -(suffix.length + 1)) : raw;
+    if (!previousIds.includes(id)) previousIds.push(id);
+  }
+  if (previousIds.length === 0) return { xml: source, changed: [] };
+  const openings = shape
+    ? (ruleElements(source, shape.rule) || []).sort((a, b) => a.start - b.start).map((r) => ({ start: r.start, end: r.openEnd, tag: r.openTag }))
+    : [...source.matchAll(SCH_PATTERN_RE)].map((m) => ({ start: m.index, end: m.index + m[0].length, tag: m[0] }));
+  if (openings.length === 0) return { xml: source, changed: [] };
+  const sameCount = openings.length === previousIds.length;
+  const changed = [];
+  let xml = '';
+  let at = 0;
+  openings.forEach((o, i) => {
+    const id = sameCount ? previousIds[i] : previousIds[0];
+    const current = ID_ATTR_RE.exec(o.tag)?.[3] ?? null;
+    let tag = o.tag;
+    if (current === null) tag = tag.replace(/^(<[^\s/>]+)/, `$1 id="${id}"`);
+    else if (current !== id) tag = tag.replace(ID_ATTR_RE, (_x, pre, q) => `${pre}${q}${id}${q}`);
+    if (current !== id) changed.push({ from: current, to: id });
+    xml += source.slice(at, o.start) + tag;
+    at = o.end;
+  });
+  xml += source.slice(at);
+  if (!sameCount && shape) {
+    const numbered = numberDuplicateRuleIds(xml, format);
+    return { xml: numbered.xml, changed: [...changed, ...numbered.renamed.map((r) => ({ from: r.id, to: r.to.join(', ') }))] };
+  }
+  return { xml, changed };
+}

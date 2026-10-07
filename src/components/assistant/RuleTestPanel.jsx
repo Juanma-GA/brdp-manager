@@ -12,6 +12,10 @@ import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation
 import RuleLintWarnings from './RuleLintWarnings';
 import RuleThresholdWarning from './RuleThresholdWarning';
 import RulePathWarnings from './RulePathWarnings.jsx';
+import RuleReachWarning from './RuleReachWarning.jsx';
+import { useRuleReach } from '../../hooks/useRuleReach.js';
+import { listElementNames, REACH_LISTED } from '../../validation/ruleRepetition.js';
+import { severalUncovered } from '../../validation/ruleRepetition.js';
 
 // Test rule (T2 of 4): which rule formats can be tested (S1000D BREX since
 // T1, DITA Schematron since T4). Used by both places that show the button.
@@ -94,6 +98,11 @@ export function verdictView(t, verdict, standard) {
 // Mejoras F, Part 1.4.
 const shortPath = (p) => p.replace(/\[1\]/g, '');
 function rejectionText(rejection, t) {
+  if (rejection.missing) {
+    return rejection.missing.container
+      ? t('records.ruleTest.rejectedMissingInside', { target: rejection.missing.target, container: rejection.missing.container })
+      : t('records.ruleTest.rejectedMissing', { target: rejection.missing.target });
+  }
   const nodes = rejection.nodes.map(shortPath).join(', ');
   const more = rejection.more ? t('records.ruleTest.rejectedMore', { count: rejection.more }) : '';
   const where = rejection.allAppBuilt ? t('records.ruleTest.rejectedAppBuilt', { count: rejection.total }) : '';
@@ -402,7 +411,11 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           )}
           {example.minimalDocument && (
             <p className={styles.ruleTestNote} data-testid="rule-test-minimal-document">
-              {t('records.ruleTest.minimalDocumentExample', { schema: example.schema, root: example.xml ? rootName(example.xml) : '' })}
+              {t(example.presenceTarget ? 'records.ruleTest.minimalDocumentPresence' : 'records.ruleTest.minimalDocumentExample', {
+                schema: example.schema,
+                root: example.xml ? rootName(example.xml) : '',
+                target: example.presenceTarget,
+              })}
             </p>
           )}
           <HighlightedXml lines={lines} xml={example.xml || example.content} />
@@ -512,10 +525,26 @@ function CorrectionNote({ correction }) {
 
 // T3b: what the rule checks, from describeRule (never from the LLM), in the
 // interface language; a rule that can never reject anything is flagged.
-function RuleDescription({ description }) {
-  const { t } = useTranslation();
+// Mejoras G, Part 2.3: `presence` (documentPresence) adds the schemas
+// where the element can never exist -- the rule always rejects them.
+// Mejoras G, Part 2.1: `reach` (starReach) -- the elements a "*[@a]" step
+// reaches, up to REACH_LISTED by name, more as a number.
+function RuleDescription({ description, presence = null, reach = [] }) {
+  const { t, i18n } = useTranslation();
   const formatted = formatRuleDescription(description, t);
   if (!formatted) return null;
+  const reachLines = reach.map((r) =>
+    r.elements.length > REACH_LISTED
+      ? t('records.ruleTest.reach.count', { path: r.path, count: r.elements.length })
+      : t('records.ruleTest.reach.list', { path: r.path, names: listElementNames(r.elements, i18n.language) })
+  );
+  const neverThere =
+    presence && presence.always.length > 0 && presence.cannot.length > 0
+      ? t('records.ruleTest.describe.presenceNever', {
+          schemas: new Intl.ListFormat(i18n.language, { type: 'conjunction' }).format(presence.cannot),
+          target: `<${presence.target}>`,
+        })
+      : null;
   return (
     <div className={styles.ruleTestDescription} data-testid="rule-test-description">
       <strong>{t('records.ruleTest.describe.title')}</strong>
@@ -523,6 +552,12 @@ function RuleDescription({ description }) {
         {formatted.lines.map((line, i) => (
           <li key={i}>{line}</li>
         ))}
+        {reachLines.map((line, i) => (
+          <li key={`reach-${i}`} data-testid="rule-test-reach">
+            {line}
+          </li>
+        ))}
+        {neverThere && <li data-testid="rule-test-presence-never">{neverThere}</li>}
       </ul>
       {formatted.cannotReject && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-cannot-reject">
@@ -621,6 +656,7 @@ export default function RuleTestPanel({
   correctedRuleBlockedReason = null,
 }) {
   const { t } = useTranslation();
+  const reach = useRuleReach(ruleXml, format, standard, schemaLocation);
   const {
     state,
     analysis,
@@ -705,7 +741,7 @@ export default function RuleTestPanel({
 
       {state.status !== 'ready' && <ReplacePassedQuestion question={replaceQuestion} answer={replaceAnswer} onAnswer={answerReplaceQuestion} />}
 
-      <RuleDescription description={description} />
+      <RuleDescription description={description} presence={state.presence || null} reach={reach} />
       <MinimalDocumentsLine ruleXml={ruleXml} format={format} standard={standard} schemaLocation={schemaLocation} testId="rule-test-minimal-documents" />
       {!notARule && <RuleLintWarnings ruleXml={ruleXml} format={format} place="panel" />}
       {/* Mejoras C, Part 1: once the test says "review" for it, the verdict
@@ -715,6 +751,7 @@ export default function RuleTestPanel({
       )}
       {/* Mejoras B, Part 2: shown here unless the verdict already says it. */}
       {!notARule && !verdict?.threshold && <RuleThresholdWarning ruleXml={ruleXml} format={format} proposal={brdp?.proposal} />}
+      {!notARule && <RuleReachWarning ruleXml={ruleXml} format={format} standard={standard} schemaLocation={schemaLocation} proposal={brdp?.proposal} testId="rule-test-reach-warning" />}
 
       {state.status === 'idle' && !notARule && !unreachable && (
         <div className={styles.suggestionActions}>
@@ -806,6 +843,11 @@ export default function RuleTestPanel({
             </p>
           )}
           <UntestedNote untested={state.untested} />
+          {severalUncovered(state.several, state.examples, state.runs).map((element) => (
+            <p key={element} className={`${styles.ruleTestNote} ${styles.ruleTestToneNeutral}`} data-testid="rule-test-several-uncovered">
+              {t('records.ruleTest.repetition.severalUncovered', { element: `<${element}>` })}
+            </p>
+          ))}
           <p className={styles.hint}>{t('records.ruleTest.skeletonLegend')}</p>
           {state.examples.map((ex, i) => (
             <ExampleCard

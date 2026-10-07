@@ -1303,6 +1303,17 @@ export function checkExampleStructure(doc, structure) {
         if (!elements[name].attributes.includes(local)) add({ kind: 'unknownAttribute', attribute: a.name, element: name });
       }
     }
+    // Mejoras G, Part 1.2: more children of a kind than the element allows
+    // (structure.models[name].max, a child left out is unbounded).
+    const maxima = known ? structure.models?.[name]?.max : null;
+    if (maxima) {
+      const counts = new Map();
+      for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) counts.set(n.nodeName, (counts.get(n.nodeName) || 0) + 1);
+      for (const [child, count] of counts) {
+        const max = maxima[child];
+        if (Number.isInteger(max) && count > max) add({ kind: 'tooMany', element: child, parent: name, max, count });
+      }
+    }
     for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) walk(n, name);
   };
   walk(root, null);
@@ -1786,6 +1797,8 @@ export function formatStructureProblem(problem, schema) {
       return `<${problem.element}> does not exist in the ${schema} schema`;
     case 'notAllowed':
       return `<${problem.element}> is not allowed inside <${problem.parent}>`;
+    case 'tooMany':
+      return `<${problem.parent}> allows at most ${problem.max} <${problem.element}>; the example has ${problem.count}`;
     case 'unknownAttribute':
       return `@${problem.attribute} does not exist on <${problem.element}>`;
     case 'wrongRoot':
@@ -2045,6 +2058,7 @@ export const SCHEMA_ISSUE_KEYS = {
     wrong_types: 'records.ruleTest.wrongTypeNames',
     unknownElement: 'records.ruleTest.structure.unknownElement',
     notAllowed: 'records.ruleTest.structure.notAllowed',
+    tooMany: 'records.ruleTest.structure.tooMany',
     unknownAttribute: 'records.ruleTest.structure.unknownAttribute',
     wrongRoot: 'records.ruleTest.structure.wrongRoot',
     spannedEntry: 'records.ruleTest.structure.spannedEntry',

@@ -28,6 +28,11 @@
 //       a plain entry of the content model, never an alternative of a
 //       choice) or @a a required attribute, in every schema of the scope
 //       where X can appear. BRDP-EXT-02640 //dmaddres[not(issno)].
+//   (d) Mejoras G, Part 1.3: X[count(Y) > n] (also >=, =, n < count(Y);
+//       alone or as one "and" operand) -- when the most <Y> children <X>
+//       allows (graph.maxima) is below what the condition needs, in every
+//       schema of the scope where X can appear. //applic[count(evaluate) > 1]:
+//       <applic> allows at most 1 <evaluate>.
 // Only BREX parts that forbid (allowedObjectFlag="0" / objappl="0"); a
 // mandatory part (flag 1), a restriction of values (flag 2, no objappl) and
 // a condition are never "covered" (as before). The scope is the part's
@@ -47,6 +52,26 @@ const NOT_RE = /^not\s*\(([\s\S]*)\)$/;
 // Mejoras F, Part 2.1: X[not(Y)] / X[not(@a)] (child:: and attribute:: too).
 const NOT_CHILD_RE = new RegExp(`^not\\s*\\(\\s*(?:child::)?(${NAME})\\s*\\)$`);
 const NOT_ATTR_RE = new RegExp(`^not\\s*\\(\\s*(?:@|attribute::)(${NAME})\\s*\\)$`);
+// Mejoras G, Part 1.3: count(Y) compared with a number, either way round.
+const COUNT_LEFT_RE = new RegExp(`^count\\s*\\(\\s*(?:child::)?(${NAME})\\s*\\)\\s*(>=|>|=|ge|gt|eq)\\s*(\\d+)$`);
+const COUNT_RIGHT_RE = new RegExp(`^(\\d+)\\s*(<=|<|=|le|lt|eq)\\s*count\\s*\\(\\s*(?:child::)?(${NAME})\\s*\\)$`);
+
+// The fewest <Y> an "and" operand needs, or null.
+function countNeeded(operand) {
+  const left = COUNT_LEFT_RE.exec(operand);
+  if (left) {
+    const n = Number(left[3]);
+    const op = left[2];
+    return { name: left[1], least: op === '>' || op === 'gt' ? n + 1 : n };
+  }
+  const right = COUNT_RIGHT_RE.exec(operand);
+  if (right) {
+    const n = Number(right[1]);
+    const op = right[2];
+    return { name: right[3], least: op === '<' || op === 'lt' ? n + 1 : n };
+  }
+  return null;
+}
 
 // Every element reachable from the schema's roots, without expanding
 // `blocked` (it can itself be reached).
@@ -127,6 +152,25 @@ function coveredAlternative(index, scope, alternative) {
           : { kind: 'requiredAttribute', element, other: attr[1] };
       }
     }
+    // (d) Mejoras G, Part 1.3: X[count(Y) > n] beyond what <X> allows.
+    for (const operand of operands) {
+      const need = countNeeded(operand.replace(/\s+/g, ' ').trim());
+      if (!need || need.least < 1) continue;
+      const element = last.name;
+      const where = schemasWith(index, scope, element);
+      if (where.length === 0) continue;
+      if (!where.some((s) => graphNode(index, s, element)?.children.has(need.name))) continue;
+      let most = 0;
+      const covered = where.every((s) => {
+        const n = graphNode(index, s, element);
+        if (!n?.children.has(need.name)) return true;
+        const max = n.max?.get(need.name);
+        if (!Number.isInteger(max)) return false;
+        most = Math.max(most, max);
+        return max < need.least;
+      });
+      if (covered) return { kind: 'maxChildren', element, other: need.name, max: most };
+    }
     return null;
   }
   // (b) X/*[not(self::a or …)]
@@ -172,7 +216,7 @@ export function formatCoverageItem(item, t) {
   if (item.kind === 'structure') {
     return t('records.ruleTest.covered.structure', { element: item.element, parent: item.parent, schema: item.schema || '' });
   }
-  return t(`records.ruleTest.covered.${item.kind}`, { element: item.element, other: item.other || '' });
+  return t(`records.ruleTest.covered.${item.kind}`, { element: item.element, other: item.other || '', max: item.max ?? '' });
 }
 
 // The same, in English, for the prompt (the LLM is told why no example
@@ -182,7 +226,84 @@ export function coverageItemEnglish(item) {
   if (item.kind === 'onlyDirectlyInside') return `<${item.element}> can only go directly inside <${item.other}>`;
   if (item.kind === 'requiredChild') return `<${item.other}> is required in <${item.element}>`;
   if (item.kind === 'requiredAttribute') return `@${item.other} is required in <${item.element}>`;
+  if (item.kind === 'maxChildren') return `<${item.element}> allows at most ${item.max} <${item.other}>`;
+  if (item.kind === 'documentAlways') return `<${item.element}> is required in every document with the root <${item.other}>`;
   if (item.kind === 'rootsAllowed') return `every document type of the standard has <${item.element}> as its root, which the rule allows`;
   if (item.kind === 'childrenListed') return `the schema only allows the listed children in <${item.element}> (${item.children.map((c) => `<${c}>`).join(', ')})`;
   return `<${item.element}> is not allowed inside <${item.parent}> by the schema`;
+}
+
+// ─── Mejoras G, Part 2.3: "every document must contain <x>" ────────────────
+// /*[not(P)] and /R[not(P)] with flag 0, P a path of child steps with or
+// without a leading // (//dmaddres, //status/qa, idstatus/dmaddres). For
+// every schema of the scope whose root is R (any root for /*):
+//   always  P is in every document: each step a plain required child of the
+//           one before (with //, its first element reached from the root
+//           through a chain of required children);
+//   cannot  P can never occur: the first element is not in the documents
+//           of that schema, or a step is never a child of the one before;
+//   depends anything else (it depends on the document).
+// BRDP-EXT-02715 /*[not(//dmaddres)]: <dmaddres> is required in every
+// data module and cannot exist in comment, ddn, dml or pm.
+// → null (another form) | { root, names, target, container, always, cannot, depends }
+const PRESENCE_RE = new RegExp(`^/(\\*|${NAME})\\[\\s*not\\s*\\(\\s*(//)?(${NAME}(?:/${NAME})*)\\s*\\)\\s*\\]$`);
+
+function requiredReach(index, schema) {
+  const roots = (index.roots.get(schema) || []).filter((r) => graphNode(index, schema, r));
+  const seen = new Set(roots);
+  const frontier = [...roots];
+  while (frontier.length) {
+    const name = frontier.pop();
+    for (const child of graphNode(index, schema, name)?.requiredChildren || []) {
+      if (!seen.has(child) && graphNode(index, schema, child)) {
+        seen.add(child);
+        frontier.push(child);
+      }
+    }
+  }
+  return seen;
+}
+
+function presenceIn(index, schema, names, descendant) {
+  const root = (index.roots.get(schema) || [])[0];
+  if (!root) return 'depends';
+  let state;
+  const [first, ...rest] = names;
+  if (descendant) {
+    if (!reachableFromRoots(index, schema).has(first)) return 'cannot';
+    state = requiredReach(index, schema).has(first) ? 'always' : 'depends';
+  } else {
+    const n = graphNode(index, schema, root);
+    if (!n?.children.has(first)) return 'cannot';
+    state = n.requiredChildren?.has(first) ? 'always' : 'depends';
+  }
+  let prev = first;
+  for (const name of rest) {
+    const n = graphNode(index, schema, prev);
+    if (!n?.children.has(name)) return 'cannot';
+    if (!n.requiredChildren?.has(name)) state = 'depends';
+    prev = name;
+  }
+  return state;
+}
+
+export function documentPresence(ruleXml, format, graph, options = {}) {
+  if (!BREX_FORMATS.has(format)) return null;
+  const index = graphIndex(graph);
+  if (!index) return null;
+  const parts = rulePathParts(ruleXml, format, options);
+  if (parts.length !== 1) return null;
+  const [part] = parts;
+  if (part.condition || part.flag !== '0') return null;
+  const m = PRESENCE_RE.exec(String(part.path || '').replace(/\s+/g, ' ').trim());
+  if (!m) return null;
+  const [, root, descendant, steps] = m;
+  const names = steps.split('/');
+  const scope = (part.schema && index.bySchema.has(part.schema) ? [part.schema] : index.schemas).filter(
+    (s) => root === '*' || (index.roots.get(s) || []).includes(root)
+  );
+  if (scope.length === 0) return null;
+  const out = { root, names, target: names[names.length - 1], container: names.length > 1 ? names[names.length - 2] : null, always: [], cannot: [], depends: [] };
+  for (const schema of scope) out[presenceIn(index, schema, names, Boolean(descendant))].push(schema);
+  return out;
 }

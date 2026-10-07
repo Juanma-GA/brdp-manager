@@ -1165,6 +1165,13 @@ function existenceTerm(term) {
   if (m) return { negated, kind: 'inside', name: m[1] };
   m = new RegExp(`^//(${NAME_RE})$`).exec(t);
   if (m) return { negated, kind: 'document', name: m[1] };
+  // Mejoras G, Part 2.4 c: //status/actref (.//a/b/x) -- the last element,
+  // inside the one before it.
+  m = new RegExp(`^(\\.)?//((?:${NAME_RE}/)+${NAME_RE})$`).exec(t);
+  if (m) {
+    const names = m[2].split('/');
+    return { negated, kind: m[1] ? 'inside' : 'document', name: names[names.length - 1], container: names[names.length - 2], names };
+  }
   return null;
 }
 
@@ -1192,11 +1199,26 @@ function documentMustContainStatement(path) {
   if (!String(path || '').trim().startsWith('/') || String(path || '').trim().startsWith('//')) return null;
   const term = existenceTerm(step.predicate);
   if (!term || (term.kind !== 'document' && term.kind !== 'inside')) return null;
+  const inside = term.container ? '_inside' : '';
+  const container = term.container ? { container: `<${term.container}>` } : {};
   if (anyRoot) {
-    return { code: term.negated ? 'describe_any_document_must_contain' : 'describe_any_document_must_not_contain', params: { target: `<${term.name}>`, path } };
+    return { code: `${term.negated ? 'describe_any_document_must_contain' : 'describe_any_document_must_not_contain'}${inside}`, params: { target: `<${term.name}>`, path, ...container } };
   }
-  const params = { root: `<${step.name}>`, target: `<${term.name}>`, path };
-  return { code: term.negated ? 'describe_document_must_contain' : 'describe_document_must_not_contain', params };
+  const params = { root: `<${step.name}>`, target: `<${term.name}>`, path, ...container };
+  return { code: `${term.negated ? 'describe_document_must_contain' : 'describe_document_must_not_contain'}${inside}`, params };
+}
+
+// Mejoras G, Part 2.4 d: a rule "every document must contain <x> (inside
+// <c>)" -- flag 0 on /R[not(//…x)] -- → { target, container } of its first
+// such part, or null. "Why the rule rejected it" then says what the
+// document lacks instead of naming its root.
+export function documentPresenceTarget(ruleXml, format, options = {}) {
+  for (const part of rulePathParts(ruleXml, format, options)) {
+    if (part.flag !== '0' || part.condition) continue;
+    const statement = documentMustContainStatement(part.path);
+    if (statement && /_must_contain/.test(statement.code)) return { target: statement.params.target, container: statement.params.container || null };
+  }
+  return null;
 }
 
 function anyRootSingle(path) {
@@ -1246,6 +1268,7 @@ function thresholdStatement(target, path, threshold) {
 const CAN_REJECT = new Set([
   'describe_forbidden_in_nesting', 'describe_forbidden_attr', 'describe_document_must_contain', 'describe_document_must_not_contain', 'describe_forbidden_existence',
   'describe_root_must_be', 'describe_root_must_not_be', 'describe_any_document_must_contain', 'describe_any_document_must_not_contain',
+  'describe_document_must_contain_inside', 'describe_document_must_not_contain_inside', 'describe_any_document_must_contain_inside', 'describe_any_document_must_not_contain_inside',
   'describe_forbidden_nesting', 'describe_forbidden_ancestors', 'describe_forbidden_children', 'describe_forbidden_length',
   'describe_condition_forbidden', 'describe_condition_required',
   'describe_forbidden', 'describe_forbidden_values', 'describe_mandatory', 'describe_mandatory_values',

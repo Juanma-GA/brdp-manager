@@ -68,7 +68,7 @@ export function graphIndex(graph) {
       for (const a of attrs) attributesAnywhere.add(a);
       for (const schema of schemas) {
         if (!bySchema.has(schema)) bySchema.set(schema, new Map());
-        bySchema.get(schema).set(name, { children: new Set(children), attrs: new Set(attrs), requiredChildren: new Set(), requiredAttrs: new Set() });
+        bySchema.get(schema).set(name, { children: new Set(children), attrs: new Set(attrs), requiredChildren: new Set(), requiredAttrs: new Set(), max: new Map() });
       }
     }
   }
@@ -80,6 +80,17 @@ export function graphIndex(graph) {
         if (!node) continue;
         for (const c of children) node.requiredChildren.add(c);
         for (const a of attrs) node.requiredAttrs.add(a);
+      }
+    }
+  }
+  // Mejoras G, Part 1.1: how many times a child can appear (graph.maxima;
+  // a child left out is unbounded).
+  for (const [name, entries] of Object.entries(graph.maxima || {})) {
+    for (const [schemas, maxima] of entries) {
+      for (const schema of schemas) {
+        const node = bySchema.get(schema)?.get(name);
+        if (!node) continue;
+        for (const [c, m] of Object.entries(maxima)) node.max.set(c, m);
       }
     }
   }
@@ -961,3 +972,7 @@ export function documentExistenceNames(ruleXml, format, options = {}) {
   }
   return [...out];
 }
+
+// Mejoras G: the readers above, for ruleRepetition.js (how many nodes a
+// path can give).
+export { matchingClose, splitWhere, quantifiedParts, conditionalParts, parentsMap, reachableSet };

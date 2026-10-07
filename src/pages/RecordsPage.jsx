@@ -76,7 +76,7 @@ import { useSchemaNavigation } from '../hooks/useSchemaNavigation';
 import { fetchSchemaAttribute, fetchSchemaCards } from '../api/schemaFacts.js';
 import { parseMoreMarker, schemaLinkTarget } from '../utils/schemaNavigation.js';
 import { AnswerMoreNames, SchemaNameLink } from '../components/assistant/SchemaAnswerLinks';
-import { NAME_HINT_TEST_IDS, checkRuleFormat, checkRuleNames, nameIssues, ruleFormatIssues } from '../validation/schemaValidation.js';
+import { NAME_HINT_TEST_IDS, checkRuleFormat, checkRuleNames, invalidRuleXPaths, nameIssues, ruleFormatIssues, xpathIssues } from '../validation/schemaValidation.js';
 import styles from './RecordsPage.module.css';
 
 // The data-testids the verification scripts read on the Ask answer's
@@ -1213,6 +1213,9 @@ export default function RecordsPage() {
   // its own error on Save). An empty draft only disables Save, silently.
   const ruleDraftFormat =
     ruleEditing && ruleDraftText.trim() && checkWellFormed(ruleDraftText).valid ? checkRuleFormat(ruleDraftText, ruleFormat) : null;
+  // Mejoras G, Part 2.4 a: an XPath that does not parse -- with the missing
+  // or extra parenthesis, bracket or quote (Mejoras F) -- while typing.
+  const ruleDraftXPathIssues = ruleEditing && ruleDraftText.trim() && checkWellFormed(ruleDraftText).valid ? xpathIssues(invalidRuleXPaths(ruleDraftText)) : [];
   const ruleDraftBlocked = ruleEditing && (!ruleDraftText.trim() || (ruleDraftFormat && !ruleDraftFormat.ok));
   const ruleDraftSplit = ruleDraftFormat?.problem?.code === 'rule_format_multiple' ? splitMultiPathRules(ruleDraftText, ruleFormat) : { total: 0 };
   // The names of the draft's XPath against the vocabulary, with the near
@@ -2144,6 +2147,7 @@ export default function RecordsPage() {
                     issues={ruleFormatIssues(ruleDraftFormat)}
                     testIds={Object.fromEntries(ruleFormatIssues(ruleDraftFormat).map((i) => [i.code, 'rule-editor-format-error']))}
                   />
+                  <SchemaIssueLines issues={ruleDraftXPathIssues} testIds={{ invalid_xpath: 'rule-editor-xpath-error' }} />
                   {/* Mejoras B, Part 4.2-4.3: the fix next to the warning, never
                       applied on its own -- the person clicks it. */}
                   {ruleDraftFormat?.problem?.code === 'rule_format_multiple' && ruleDraftSplit.total > 0 && (
@@ -2819,6 +2823,7 @@ export default function RecordsPage() {
                     onTestResult={(ruleXml, record) => suggestions.recordSuggestionTest(selected.id, ruleXml, record)}
                     onSuggestCorrectedRule={(failed) => suggestions.suggestCorrectedRule(failed)}
                     correctedRuleBlockedReason={suggestDisabledByEmbeddings ? t('records.ruleTest.review.blockedByEmbeddings') : null}
+                    ruleIdOwners={ruleCorrections.idOwners}
                   />
                 )}
 

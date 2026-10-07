@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import ReferenceRow from './ReferenceRow';
 import RulePathWarnings from './RulePathWarnings.jsx';
+import RuleReachWarning from './RuleReachWarning.jsx';
+import RuleIdClashWarning from './RuleIdClashWarning.jsx';
 import RuleTestPanel, { canTestRule, TestRuleButton } from './RuleTestPanel';
 import { finalRuleXml, ruleIdsNote, ruleSplitNote, validateRuleXml } from '../../hooks/useSuggestions';
 import { NAME_HINT_TEST_IDS, extractRuleNames, nameIssues, ruleFormatIssues, xpathIssues } from '../../validation/schemaValidation.js';
@@ -159,6 +161,7 @@ export default function RuleSuggestionPanel({
   onTestResult,
   onSuggestCorrectedRule,
   correctedRuleBlockedReason,
+  ruleIdOwners = null,
 }) {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(null); // null | 'copied' | 'failed'
@@ -248,6 +251,8 @@ export default function RuleSuggestionPanel({
             onApplyFix={onRuleTextChange}
             testId="suggested-rule-path-warning"
           />
+          <RuleReachWarning ruleXml={entry.text} format={entry.format} standard={standard} schemaLocation={entry.schemaLocation} proposal={brdp?.proposal ?? null} testId="suggested-rule-reach-warning" />
+          <RuleIdClashWarning ruleXml={entry.text} format={entry.format} owners={ruleIdOwners} brdpId={brdp?.id} testId="suggested-rule-id-clash" />
           <SchemaCoverageWarnings ruleXml={entry.text} entry={entry} />
           {generatedValidation.acceptable && (
             <MinimalDocumentsLine
@@ -363,6 +368,12 @@ export default function RuleSuggestionPanel({
               onApplyFix={onPastedRuleChange}
               testId="pasted-rule-path-warning"
             />
+          )}
+          {pasted && pastedValidation?.wellFormed && (
+            <RuleIdClashWarning ruleXml={pastedFinal} format={entry.format} owners={ruleIdOwners} brdpId={brdp?.id} testId="pasted-rule-id-clash" />
+          )}
+          {pasted && pastedValidation?.wellFormed && (
+            <RuleReachWarning ruleXml={pastedFinal} format={entry.format} standard={standard} schemaLocation={entry.schemaLocation} proposal={brdp?.proposal ?? null} testId="pasted-rule-reach-warning" />
           )}
           {pasted && <SchemaCoverageWarnings ruleXml={pastedFinal} entry={entry} />}
           {pasted && pastedValidation?.acceptable && (

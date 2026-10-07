@@ -199,7 +199,11 @@ function suggestRuleReply(systemPrompt) {
   // offered for the inverted one -- objappl="1" on //reqconds[…], which
   // also rejects a descript data module with nothing written in it.
   if (/<reqconds>/.test(proposal) && /PREVIOUS RULE FAILED ITS TEST/.test(systemPrompt) && /FORMAT — S1000D Issue 3\.0\.1/.test(systemPrompt)) {
-    return `<objrule id="${id}"><objpath objappl="1">//reqconds[ /dmodule/content/proced or /dmodule/content/schedule ]</objpath><objuse>MOCK-RULE: procedures and scheduled maintenance declare their required conditions.</objuse></objrule>`;
+    // Mejoras G, Part 2.2 (BRDP-EXT-02651 again): the real corrected rule came
+    // back with XML-R-2652, the id of BRDP-S1-00024's rule (CLASH2652 in the
+    // Proposal) -- the application keeps the previous rule's id instead.
+    const rid = /CLASH2652/.test(proposal) ? "XML-R-2652" : id;
+    return `<objrule id="${rid}"><objpath objappl="1">//reqconds[ /dmodule/content/proced or /dmodule/content/schedule ]</objpath><objuse>MOCK-RULE: procedures and scheduled maintenance declare their required conditions.</objuse></objrule>`;
   }
   // Mejoras C: the real rule BRDP-EXT-00087, whose path cannot exist
   // (/techstd is never a document root) -- for the amber warning and its
@@ -560,6 +564,27 @@ function ruleTestReply(systemPrompt, messages) {
     return answer([
       { label: "Data module with its ACT reference", expected: "accept", schema, content: doc(true) },
       { label: "Data module without an ACT reference", expected: "reject", schema, content: doc(false) },
+    ]);
+  }
+  // Mejoras G, Part 1.2 (BRDP-EXT-02786): the real run wrote two loose
+  // <evaluate> as children of <applic>, which allows only one. The
+  // correction round fixes it -- nesting them in one <evaluate> -- only when
+  // it brings the maximum ("allows at most 1 <evaluate>").
+  if (/count\(evaluate\/evaluate/.test(rule)) {
+    const wholeOf = (systemPrompt.match(/your "metadata" is the WHOLE <([\w-]+)>/) || [])[1] || "idstatus";
+    const lines = systemPrompt.split("\n");
+    const start = lines.findIndex((l) => l.startsWith(`    <${wholeOf}>`));
+    const section = [];
+    for (let i = start; start !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) section.push(lines[i].slice(4));
+    const base = section.join("\n");
+    const told = correcting && /allows at most 1 <evaluate>/.test(lastUser);
+    const and = (v) => `<evaluate operator="and"><assert actidref="model" actreftype="prodattr" actvalues="${v}"/><assert actidref="serialno" actreftype="prodattr" actvalues="1-99"/></evaluate>`;
+    const evaluations = (n) => (told ? `<evaluate operator="or">${Array.from({ length: n }, (_, i) => and(String.fromCharCode(65 + i))).join("")}</evaluate>` : Array.from({ length: n }, (_, i) => and(String.fromCharCode(65 + i))).join(""));
+    const applic = (n) => `<applic><displaytext><p>Model A, serial 1-99</p><p>Model B, serial 1-99</p></displaytext>${evaluations(n)}</applic>`;
+    const metadata = (n) => base.replace(/<applic>[\s\S]*?<\/applic>/, applic(n));
+    return answer([
+      { label: "Two display paragraphs, two evaluations", expected: "accept", schema: ruleSchema || "descript", metadata: metadata(2), content: "Remove the access panel." },
+      { label: "Two display paragraphs, one evaluation", expected: "reject", schema: ruleSchema || "descript", metadata: metadata(1), content: "Remove the access panel." },
     ]);
   }
   const metadata = metadataReply(systemPrompt, rule, answer);

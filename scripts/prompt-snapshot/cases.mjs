@@ -28,6 +28,7 @@ import path from 'node:path';
 import { placementPlaces } from '../../src/utils/ruleTestRun.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { extractRuleNames } from '../../src/validation/schemaValidation.js';
+import { repeatingComparisons, singleChildPairs, viewFromStructure } from '../../src/validation/ruleRepetition.js';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
 import { describeRule, ruleConditions } from '../../src/utils/ruleTestEngine.js';
@@ -813,6 +814,46 @@ ruleTestExamplesCases.push({
     },
   ],
 });
+
+// Mejoras G: the real 3.0.1 rules of BRDP-EXT-02786 (two <evaluate> are not
+// allowed in <applic>: the prompt says so, Part 1.4) and the corrected
+// BRDP-EXT-02792 (normalize-space over a path with several <p>: the prompt
+// asks for examples with two or more, Part 1.6). Limits and requests come
+// from the same code as prepareRuleTestSetup.
+const ruleApplicEvaluate301 =
+  "<objrule id=\"XML-R-2786\"><objpath objappl=\"0\">//idstatus//applic[not(DRAGON) and count(displaytext/p) &gt; 1][count(evaluate/evaluate[@operator='and']) != count(displaytext/p)]</objpath><objuse>Every applicability with several display paragraphs must evaluate each of them.</objuse></objrule>";
+const ruleEvaluateParagraph301 =
+  "<objrule id=\"XML-R-2792\"><objpath objappl=\"0\">//evaluate[normalize-space(concat(@actidref, ' ', @actreftype)) = normalize-space(ancestor::applic/displaytext/p)]</objpath><objuse>An evaluate must not repeat its display text.</objuse></objrule>";
+const descript301View = [viewFromStructure(realStructures['S1000D 3.0.1|descript'])];
+const snapshotParseXml = (text) => new DOMParser().parseFromString(text, 'text/xml');
+ruleTestExamplesCases.push(
+  {
+    name: 'brex-3-0-1-at-most-one-evaluate',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-02786', title: 'Applicability with several display paragraphs', definition: 'Decide how an applicability with several display paragraphs is evaluated.', proposal: 'Every paragraph of the display text must have its own evaluation.' },
+        standard: 'S1000D 3.0.1',
+        format: 'BREX-3.0.1',
+        ruleXml: ruleApplicEvaluate301,
+        placements: placementsFor('S1000D 3.0.1', ruleApplicEvaluate301, [['descript', 'rule']]),
+        limits: singleChildPairs(ruleApplicEvaluate301, 'BREX-3.0.1', descript301View, { parseXml: snapshotParseXml }),
+      },
+    ],
+  },
+  {
+    name: 'brex-3-0-1-several-p-requested',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-02792', title: 'Display text of an evaluation', definition: 'Decide whether an evaluation may repeat its display text.', proposal: 'An evaluation shall not repeat the display text of its applicability.' },
+        standard: 'S1000D 3.0.1',
+        format: 'BREX-3.0.1',
+        ruleXml: ruleEvaluateParagraph301,
+        placements: placementsFor('S1000D 3.0.1', ruleEvaluateParagraph301, [['descript', 'rule']]),
+        several: repeatingComparisons(ruleEvaluateParagraph301, 'BREX-3.0.1', descript301View, { parseXml: snapshotParseXml }),
+      },
+    ],
+  }
+);
 
 // Test de reglas T4: DITA Schematron -- examples on topic-type skeletons
 // (topic/body for a note rule, the whole document for a root context).

@@ -480,9 +480,14 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
 
   const stepRun = testRun(STEP, [
     { label: 'one cmd', expected: 'accept', schema: 'task', content: '<step><cmd>Remove the four bolts.</cmd></step>' },
-    { label: 'two cmds', expected: 'reject', schema: 'task', content: '<step><cmd>Remove the bolts.</cmd><cmd>Lift the cover.</cmd></step>' },
+    // Mejoras G, Part 1.2: <step> allows at most one <cmd>, so the reject
+    // example is a step without one (missing required children are not
+    // checked).
+    { label: 'no cmd', expected: 'reject', schema: 'task', content: '<step><info>Lift the cover.</info></step>' },
   ], setupFor(DITA, STEP, ['task']), { format: 'SCH-DITA', vocab: vocabDita });
   check('T4 run: step rule on the task skeleton', stepRun.verdict.kind === 'correct' && stepRun.materialized[0].xml.startsWith('<task>'), JSON.stringify(stepRun.verdict));
+  const twoCmds = checkExampleStructure(parseXml('<task id="t"><title>x</title><taskbody><steps><step><cmd>a</cmd><cmd>b</cmd></step></steps></taskbody></task>'), structureOf(DITA, 'task'));
+  check('MG 1.2: DITA <step> with two <cmd>', twoCmds.some((p) => p.kind === 'tooMany' && p.parent === 'step' && p.element === 'cmd' && p.max === 1 && p.count === 2), JSON.stringify(twoCmds));
 
   const lang = testRun(ROOT_LANG, [
     { label: 'with lang', expected: 'accept', schema: 'topic', content: '<topic id="t" xml:lang="en-GB"><title>Bilge pump</title><body><p>Check the seals.</p></body></topic>' },

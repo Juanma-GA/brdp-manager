@@ -61,6 +61,15 @@
 // BRDP-EXT-02636); 3.0.1's rule 5 no longer sends a mandatory node to
 // objappl="1". The Schematron rules gain rule 13 (the same text line).
 // Changed on purpose: the 9 suggestRule cases. Nothing else.
+//
+// Mejoras G: Suggest Rule's format rules gain one line (BREX rule 10,
+// Schematron rule 14): a text function takes ONE node, never a path that
+// can return several (BRDP-EXT-02792/-02642). Changed on purpose: the 9
+// suggestRule cases. Two NEW ruleTestExamples cases:
+// brex-3-0-1-at-most-one-evaluate (BRDP-EXT-02786: "at most one <evaluate>
+// / <displaytext> inside <applic>", Part 1.4) and
+// brex-3-0-1-several-p-requested (the corrected 02792: ask for examples
+// with two or more <p>, Part 1.6). Every other case is unchanged.
 
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a
