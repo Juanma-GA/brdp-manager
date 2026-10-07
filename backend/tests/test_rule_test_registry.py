@@ -132,6 +132,28 @@ async def test_register_not_executable_keeps_the_reason_code(client, editor_view
     assert res.json()["last_test_reason"] == DOC_REASON
 
 
+async def test_register_schema_covered_is_its_own_result(client, editor_viewer_and_project):
+    """Mejoras E: "Already covered by the schema" is recorded as its own
+    result (never passed, never not executable), with its History entry."""
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    reason = {
+        "code": "test_schema_covered",
+        "params": {"via": "path", "items": [{"ruleId": "R", "kind": "onlyInside", "element": "inlineapplics", "other": "idstatus"}]},
+    }
+    res = await client.post(url + "/test", json={"result": "schema_covered", "reason": reason, "rule_hash": _hash(RULE)}, headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["last_test_result"] == "schema_covered"
+    assert body["last_test_reason"] == reason
+    assert body["test_category"] == "schema_covered"
+    history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
+    assert any(h["field_name"] == "rule_test" and "schema_covered" in (h["new_value"] or "") for h in history)
+    # A schema_covered result without its reason is rejected, like any non-pass.
+    bad = await client.post(url + "/test", json={"result": "schema_covered", "reason": None, "rule_hash": _hash(RULE)}, headers=headers)
+    assert bad.status_code == 422
+
+
 async def test_multi_part_reason_is_stored_as_given(client, editor_viewer_and_project):
     project, headers, _ = editor_viewer_and_project
     _, url = await _brdp_with_rule(client, project, headers)

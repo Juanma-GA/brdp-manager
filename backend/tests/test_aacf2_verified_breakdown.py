@@ -23,6 +23,7 @@ def _rule(n):
 CASES = [
     ("passed", "approved", "passed", "same", "passed"),
     ("passed-edited", "approved", "passed", "same", "passed"),
+    ("schema-covered", "approved", "schema_covered", "same", "schema_covered"),
     ("review", "approved", "review", "same", "review"),
     ("failed", "approved", "failed", "same", "failed"),
     ("inconclusive", "approved", "inconclusive", "same", "inconclusive"),
@@ -87,7 +88,7 @@ def test_the_category_function():
     assert rule_test_category("passed", "", h) == "not_tested"
     assert rule_test_category("other", h, h) == "not_tested"
     assert rule_test_category("failed", rule_xml_hash("<s/>"), h) == "outdated"
-    for result in ("passed", "review", "failed", "inconclusive", "not_executable"):
+    for result in ("passed", "schema_covered", "review", "failed", "inconclusive", "not_executable"):
         assert rule_test_category(result, h, h) == result
 
 
@@ -97,7 +98,7 @@ async def test_counts_add_up_and_match_each_indicator(client, project_with_rules
     stats = (await client.get(f"/api/projects/{project.id}/brdps/stats", headers=headers)).json()
     verified = stats["rule_status_counts"]["verified"]
     breakdown = stats["verified_test_counts"]
-    assert verified == 11
+    assert verified == 12
     assert sum(breakdown.values()) == verified
     assert set(breakdown) == set(TEST_CATEGORIES)
     expected = {c: 0 for c in TEST_CATEGORIES}

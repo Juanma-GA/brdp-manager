@@ -89,7 +89,7 @@ export function RuleStatusSummary({ counts, variant = 'full' }) {
 // each rule's indicator. "Tested ✓" always shows; the others only when not
 // zero. Each category is a button that filters the table to the verified
 // rules of that category; the active one is marked and can be removed.
-const VERIFIED_TEST_CATEGORIES = ['passed', 'not_tested', 'review', 'failed', 'inconclusive', 'not_executable', 'outdated'];
+const VERIFIED_TEST_CATEGORIES = ['passed', 'schema_covered', 'not_tested', 'review', 'failed', 'inconclusive', 'not_executable', 'outdated'];
 
 export function VerifiedTestBreakdown({ counts, verified, active, onSelect }) {
   const { t } = useTranslation();

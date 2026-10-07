@@ -86,6 +86,30 @@ function DefectList({ defects, format, testId }) {
   );
 }
 
+// Mejoras E, Part 2.4: the mechanical fixes that exist but are not proposed,
+// and the defect each would bring.
+// The fix sits mid-sentence ("Possible fix: change …").
+function lowerFirst(text) {
+  return text ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+}
+
+function BlockedFixes({ blocked, format }) {
+  const { t } = useTranslation();
+  if (!blocked?.length) return null;
+  return (
+    <ul className={styles.ruleCorrectionList} data-testid="rule-correction-blocked">
+      {blocked.map((b) => (
+        <li key={b.defect.key}>
+          {t('records.ruleCorrection.blockedFix', {
+            fix: lowerFirst(formatRuleFix(b.defect.fix, t).replace(/\.$/, '')),
+            defects: b.newDefects.map((d) => formatRuleDefect(d, t, { format, short: true })).join(' '),
+          })}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function RuleCorrectionBlock({ entry, ruleXml, format, canEdit, busy, error, onAccept, onDismiss, onSuggestRule, suggestRuleBlockedReason }) {
   const { t } = useTranslation();
   const [showDismissed, setShowDismissed] = useState(false);
@@ -121,6 +145,7 @@ export default function RuleCorrectionBlock({ entry, ruleXml, format, canEdit, b
             <DefectList defects={remaining} format={format} testId="rule-correction-remaining" />
           </>
         )}
+        <BlockedFixes blocked={entry.result?.blocked} format={format} />
         <RuleDiff before={ruleXml} after={proposal.xml} />
         {error && (
           <p className={styles.ruleErrorText} role="alert" data-testid="rule-correction-error">
@@ -151,6 +176,7 @@ export default function RuleCorrectionBlock({ entry, ruleXml, format, canEdit, b
     <div className={styles.ruleCorrectionBox} data-testid="rule-defect">
       <strong>{t('records.ruleCorrection.defectTitle')}</strong>
       <DefectList defects={defects} format={format} testId="rule-defect-list" />
+      <BlockedFixes blocked={entry.result?.blocked} format={format} />
       <p className={styles.hint}>{t('records.ruleCorrection.noFixHint')}</p>
       {canEdit && onSuggestRule && (
         <button

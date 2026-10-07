@@ -50,6 +50,7 @@
 
 import { formatSchemaIssue } from '../validation/schemaValidation.js';
 import { formatPathProblem } from '../validation/rulePathCheck.js';
+import { formatCoverageItem } from '../validation/schemaCoverage.js';
 
 export const ENGINE_REASON_CODES = [
   'external_document', 'non_context_rule', 'mandatory_whole_document', 'xpath_error', 'unsupported_value_form',
@@ -59,7 +60,7 @@ export const ENGINE_REASON_CODES = [
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
   'example_no_room',
 ];
-export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch'];
+export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_engine_error'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -78,6 +79,15 @@ export function formatRuleTestReason(reason, t) {
   if (reason.code === 'test_threshold_mismatch') {
     return t('records.ruleTest.reasons.test_threshold_mismatch', { detail: formatThresholdMismatch(params, t) || '' });
   }
+  // Mejoras E, Part 1: what the schema already guarantees.
+  if (reason.code === 'test_schema_covered') {
+    return t('records.ruleTest.reasons.test_schema_covered', { detail: coverageDetail(params.items, t) });
+  }
+  // Mejoras E, Part 2.3: the engine's error on an example, in plain words
+  // and with its own message.
+  if (reason.code === 'test_engine_error') {
+    return t('records.ruleTest.reasons.test_engine_error', { detail: engineErrorText(params, t), message: params.message || '' });
+  }
   if (reason.code === 'test_impossible_path') {
     return (params.problems || []).map((p) => formatPathProblem(p, t, { format: params.format })).join(' ');
   }
@@ -95,8 +105,26 @@ export function formatRuleTestReason(reason, t) {
   return t(`records.ruleTest.reasons.${reason.code}`, { ...values, defaultValue: reason.code });
 }
 
+// "<inlineapplics> can only go inside <idstatus>; …" in the language of `t`.
+export function coverageDetail(items, t) {
+  return (items || []).map((item) => formatCoverageItem(item, t)).join('; ');
+}
+
+// One engine error ({ code, message, plain }) in plain words: a function
+// given several nodes where it takes one, or the engine's own message.
+export function engineErrorText(error, t) {
+  const plain = error?.plain || {};
+  if (plain.code === 'engine_several_items') {
+    const names = (plain.params?.names || []).map((n) => `<${n}>`).join(', ');
+    return names
+      ? t('records.ruleTest.engineError.severalItems', { fn: plain.params.fn, names })
+      : t('records.ruleTest.engineError.severalNodes', { fn: plain.params?.fn || '' });
+  }
+  return error?.message || '';
+}
+
 // The result to record for a panel verdict (ruleTest.js's ruleTestVerdict):
-//   { result: 'passed' | 'review' | 'failed' | 'inconclusive' | 'not_executable', reason }
+//   { result: 'passed' | 'schema_covered' | 'review' | 'failed' | 'inconclusive' | 'not_executable', reason }
 // "review": the examples passed but the rule does not seem to implement the
 // Proposal (test_proposal_mismatch {mismatch} -- the check's sentence, as
 // the LLM wrote it), or the Proposal could not be checked
@@ -114,7 +142,13 @@ export function verdictToTestRecord(verdict) {
         ? { result: 'review', reason: { code: 'test_proposal_unchecked', params: { error: verdict.error || '' } } }
         : { result: 'review', reason: { code: 'test_proposal_mismatch', params: { mismatch: verdict.mismatch } } };
     case 'incorrect':
+      if (verdict.engineErrors?.length) {
+        const e = verdict.engineErrors[0];
+        return { result: 'failed', reason: { code: 'test_engine_error', params: { code: e.code, message: e.message, plain: e.plain } } };
+      }
       return { result: 'failed', reason: { code: 'test_incorrect', params: { permissive: Boolean(verdict.permissive), strict: Boolean(verdict.strict) } } };
+    case 'schema_covered':
+      return { result: 'schema_covered', reason: { code: 'test_schema_covered', params: { items: verdict.items, via: verdict.via } } };
     case 'inconclusive':
       return {
         result: 'inconclusive',

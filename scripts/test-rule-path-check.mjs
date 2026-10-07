@@ -120,7 +120,8 @@ check('attribute that exists', run301('//perscat/@category').problems.length ===
 const pred = run301('//techstd[not(trade)]');
 check('predicate: problem', pred.problems.length === 1 && pred.problems[0].inPredicate && pred.problems[0].element === 'trade', JSON.stringify(pred.problems));
 check('predicate: not all impossible', !pred.allImpossible);
-check('predicate EN', formatPathProblem(pred.problems[0], en).startsWith('The condition [not(trade)] cannot be met as written: <trade> does not go inside <techstd>'), formatPathProblem(pred.problems[0], en));
+// Mejoras E, Part 2.1: a child missing in a condition reads "<x> has no <y>".
+check('predicate EN', formatPathProblem(pred.problems[0], en).startsWith('The condition [not(trade)] cannot be met as written: <techstd> has no <trade>.'), formatPathProblem(pred.problems[0], en));
 check('predicate b/c', run301('//status[techstd/trade]').problems.some((p) => p.inPredicate && p.element === 'trade' && p.parent === 'techstd'));
 check('predicate .//x', run301('//techstd[.//trade]').problems.some((p) => p.kind === 'descendant' && p.inPredicate));
 check('predicate with comparison', run301("//reqpers[perscat = 'x']").problems.length === 0);

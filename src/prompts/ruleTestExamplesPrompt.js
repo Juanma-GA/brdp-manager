@@ -359,6 +359,10 @@ export function buildRuleTestExamplesPrompt({
   matchExpressions = [],
   conditions = [],
   tableModel = null,
+  // Mejoras E, Part 1.4: { reasons: [English sentences] } when the schema
+  // already rules out what the rule forbids -- only examples meant to be
+  // accepted are asked for, and the LLM is told why.
+  acceptOnly = null,
 }) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
@@ -391,7 +395,7 @@ attributes and schemas are involved:
 ${ruleXml}
 
 WHAT TO WRITE:
-- "examples": at least two examples, written from the Proposal's DECISION,
+${acceptOnly ? acceptOnlyInstructions(standard, acceptOnly) : `- "examples": at least two examples, written from the Proposal's DECISION,
   never from the rule: one that follows the decision ("expected": "accept")
   and one that goes against it ("expected": "reject"). If the rule does not
   implement the decision, the examples still follow the decision — finding
@@ -400,7 +404,7 @@ WHAT TO WRITE:
   an example without the attribute or element follows the decision unless
   the Proposal says it is required. The reject example goes against exactly
   what the Proposal decides (for example a value the Proposal does not
-  allow), never against something the Proposal does not mention.
+  allow), never against something the Proposal does not mention.`}
 ${schemaInstructions(contextSchemas, placements, dita)}
 
 ${buildingInstructions(standard, placements, dita)}
@@ -424,9 +428,9 @@ ${
   other content (${NO_TEXT_ELEMENTS}): give it its child
   elements and attributes instead.`
   }
-- The reject example goes against the decision in one clear way; the
+${acceptOnly ? '' : `- The reject example goes against the decision in one clear way; the
   accept example is otherwise similar, so the difference is easy to see.
-- No customer data, no real manufacturer names, part numbers or CAGE codes.
+`}- No customer data, no real manufacturer names, part numbers or CAGE codes.
 - "label": a few words saying what the example shows.`;
 
   if (ruleDependsOnTitle(matchExpressions)) prompt += titleDependentInstructions();
@@ -458,6 +462,16 @@ Write new examples that do not repeat this mistake.`;
 OUTPUT: strict JSON, no comments:
 {"examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", ${fields.join(', ')}}]}`;
   return prompt;
+}
+
+// Mejoras E, Part 1.4: what to write when no valid document can go against
+// the rule.
+function acceptOnlyInstructions(standard, acceptOnly) {
+  return `- "examples": one or two examples that follow the decision ("expected":
+  "accept"), and NO example meant to be rejected: no valid ${standard}
+  document can go against this rule, because ${acceptOnly.reasons.join('; ')}.
+  The examples show that the rule accepts valid documents: each one contains
+  the elements the rule is about, written the way the schema allows.`;
 }
 
 // T2b, the one automatic correction round: the exact problems of each

@@ -78,7 +78,10 @@ class RuleCorrectionDismiss(BaseModel):
 #                     example passed validation
 #   not_executable -- the engine cannot run the rule (document(), a
 #                     nonContextRule, an XPath error...)
-RuleTestResult = Literal["passed", "review", "failed", "inconclusive", "not_executable"]
+#   schema_covered -- Mejoras E: the rule forbids what no valid document of
+#                     the schema can contain; an example meant to be
+#                     accepted ran and passed. Not a defect, not a failure.
+RuleTestResult = Literal["passed", "schema_covered", "review", "failed", "inconclusive", "not_executable"]
 
 # A reason's serialized size cap: a code plus a few short params (an XPath
 # error message, a rule id per part). Generous, only there so the column

@@ -33,7 +33,7 @@ class RuleApproval(Base):
     # hex digest of the rule_xml that was tested -- when it no longer
     # matches the current rule_xml the test is outdated (the rule changed
     # since), which RuleApprovalOut reports as last_test_up_to_date=False.
-    # "passed" | "review" | "failed" | "inconclusive" | "not_executable"
+    # "passed" | "schema_covered" | "review" | "failed" | "inconclusive" | "not_executable"
     last_test_result: Mapped[str | None] = mapped_column(String, nullable=True)
     # {"code": ..., "params": {...}} -- a code, never a sentence, so the
     # UI shows it in the viewer's own language (see RuleTestReason).

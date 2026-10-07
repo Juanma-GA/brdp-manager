@@ -205,11 +205,11 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       return;
     }
     setupRef.current = result.setup;
-    const { proposalCheck, examples, runs, correction, predicateSkipped, untested } = result;
-    setState({ status: 'ready', proposalCheck, examples, runs, correction, predicateSkipped, untested });
+    const { proposalCheck, examples, runs, correction, predicateSkipped, untested, coverage } = result;
+    setState({ status: 'ready', proposalCheck, examples, runs, correction, predicateSkipped, untested, coverage });
     if (!onDemand) {
       // A passed test keeps its examples (Guardar la prueba aprobada).
-      const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalCheck, threshold)), examples, runs, brdp?.proposal);
+      const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalCheck, threshold, coverage)), examples, runs, brdp?.proposal);
       recordedRef.current = record;
       report(record);
     }
@@ -258,7 +258,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
             recorded: recordedRef.current,
             alreadyRecorded: editsRecordedRef.current,
             examples,
-            verdict: ruleTestVerdict(examples, runs, analysis, state.proposalCheck, threshold),
+            verdict: ruleTestVerdict(examples, runs, analysis, state.proposalCheck, threshold, state.coverage),
           }),
           examples,
           runs,
@@ -285,7 +285,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
 
   const verdict =
     state.status === 'ready'
-      ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck, threshold)
+      ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck, threshold, state.coverage)
       : state.status === 'path_review'
         ? { kind: 'review', path: state.reason }
         : null;

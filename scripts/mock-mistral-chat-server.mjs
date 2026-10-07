@@ -415,6 +415,32 @@ function ruleTestReply(systemPrompt, messages) {
     return '{"examples": [ {"label": "cut", "expected": "accept", "content": "<para>';
   }
   const answer = (examples) => JSON.stringify({ examples });
+  // Mejoras E, Part 1.4: a rule the schema already covers -- the prompt
+  // asks for accept examples only ("NO example meant to be rejected").
+  // BRDP-EXT-02805 (//inlineapplics outside <idstatus>): an
+  // <inlineapplics> in its place, in <status>. BRDP-EXT-02802 (<avee> with
+  // children other than the listed ones): a complete <avee> in a <refdm>.
+  if (/NO example meant to be rejected/.test(systemPrompt)) {
+    const wholeOf = (systemPrompt.match(/your "metadata" is the WHOLE <([\w-]+)>/) || [])[1];
+    const minimal = (() => {
+      if (!wholeOf) return null;
+      const lines = systemPrompt.split("\n");
+      const start = lines.findIndex((l) => l.startsWith(`    <${wholeOf}>`));
+      if (start === -1) return null;
+      const out = [];
+      for (let i = start; i < lines.length && lines[i].startsWith("    "); i += 1) out.push(lines[i].slice(4));
+      return out.join("\n");
+    })();
+    const withMeta = (ex, metadata = minimal) => (metadata ? { ...ex, metadata } : ex);
+    if (/inlineapplics/.test(rule) && minimal) {
+      const inline = minimal.replace("</applic>", '</applic><inlineapplics><applic id="app-0001"><displaytext><p>All</p></displaytext></applic></inlineapplics>');
+      return answer([withMeta({ label: "Inline applicabilities in the status section", expected: "accept", schema: ruleSchema || "descript", content: "Remove the access panel." }, inline)]);
+    }
+    if (/\/\/avee\/\*/.test(rule)) {
+      const avee = "<avee><modelic>AA</modelic><sdc>A</sdc><chapnum>00</chapnum><section>0</section><subsect>0</subsect><subject>00</subject><discode>00</discode><discodev>A</discodev><incode>040</incode><incodev>A</incodev><itemloc>D</itemloc></avee>";
+      return answer([withMeta({ label: "Reference with a complete code", expected: "accept", schema: ruleSchema || "descript", content: `See <refdm>${avee}</refdm> for the removal.` })]);
+    }
+  }
   // Remates B, Part 1: a rule whose path is a condition
   // (//emphasis and //randomList, flag 0). Written from the decision ("no
   // emphasis"), the reject example has an <emphasis> and no random list:

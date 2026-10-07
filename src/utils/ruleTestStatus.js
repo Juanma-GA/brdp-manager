@@ -7,7 +7,7 @@
 import { analyzeRule, RULE_TEST_FORMATS } from './ruleTestEngine.js';
 
 // The indicator state of a saved rule:
-//   { kind: 'not_tested' | 'outdated' | 'passed' | 'review' | 'failed' | 'inconclusive' | 'not_executable',
+//   { kind: 'not_tested' | 'outdated' | 'passed' | 'schema_covered' | 'review' | 'failed' | 'inconclusive' | 'not_executable',
 //     reason, at }
 // The kind is the server's test_category (AACF 2, Part 2): one function,
 // backend services/rule_test_category.py, decides it for this indicator and
@@ -78,6 +78,9 @@ export function parseRuleTestHistoryValue(value) {
 export function verifyWarning(approval, format, options = {}) {
   if (!RULE_TEST_FORMATS.includes(format) || !approval) return null;
   const status = ruleTestStatus(approval);
+  // Mejoras E: "already covered by the schema" is neither a defect nor a
+  // failed test -- nothing to warn about before Verify.
+  if (status.kind === 'schema_covered') return null;
   if (status.kind === 'passed') {
     return status.editedCount > 0 ? { kind: 'passed_edited', reason: null, editedCount: status.editedCount, canTestNow: true } : null;
   }

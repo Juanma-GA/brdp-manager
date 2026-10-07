@@ -15,6 +15,7 @@ import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { registerRuleTest } from '../api/ruleTests';
 import { ruleXmlHash } from '../utils/ruleHash.js';
+import { runExample } from '../utils/ruleTest.js';
 import {
   checkAgainstVocabulary,
   checkRuleFormat,
@@ -92,6 +93,20 @@ export function validateRuleXml(xml, vocabulary, format) {
     xml: xml || '',
     format,
   };
+}
+
+// Mejoras E, Part 2.3: a rule written to correct a failed test is run on
+// that test's examples before it is offered. An engine error on any of
+// them is said, and the rule is not presented as "corrected".
+// → [{ label, ...runtime error }] (empty when none, or with no examples).
+function engineErrorsOnTestExamples(ruleXml, format, failedTest, schemaLocation) {
+  const out = [];
+  for (const example of failedTest?.examples || []) {
+    if (!example?.xml) continue;
+    const run = runExample(ruleXml, format, example, { schemaLocation });
+    if (run.result?.status === 'error') out.push({ label: example.label || '', ...run.result.runtimeErrors[0] });
+  }
+  return out;
 }
 
 export function useSuggestions({ projectId, standard, schemaLocation, selected, aiProvider, vocabulary, ruleApproval, handleUpdate, recomputeVocabResult, bumpApprovalsRefreshToken, onRuleTestRecordError, t }) {
@@ -468,7 +483,8 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
         const coverageByName = schemas.length
           ? await fetchMissingCoverage(extractRuleNames(parsed.xml).elements, ruleBase.coverageByName)
           : ruleBase.coverageByName;
-        commit({ ...ruleBase, coverageByName, text, split, idsRenamed });
+        const correctedEngineErrors = engineErrorsOnTestExamples(text, ruleBase.format, options.failedTest, schemaLocation);
+        commit({ ...ruleBase, coverageByName, text, split, idsRenamed, correctedEngineErrors });
       }
     } catch (err) {
       // Docs request's explicit edge case: an error entry still gets a
@@ -561,14 +577,14 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
   // suggestion under test, when the review ran on one (logged as
   // discarded, it was never accepted). Nothing is recorded: only a new
   // test of the new rule is.
-  const suggestCorrectedRule = async ({ ruleXml, schemas, mismatches, diagnosis }, prepare = null) => {
+  const suggestCorrectedRule = async ({ ruleXml, schemas, mismatches, diagnosis, examples }, prepare = null) => {
     if (!selected || !aiProvider) return;
     const existing = suggestionsByBrdpId.get(selected.id);
     if (existing?.text) await logSuggestionFeedback(existing, 'discarded');
     await requestSuggestion('rule', prepare, {
       schemas: schemas || [],
       fromSelector: true,
-      failedTest: { ruleXml, mismatches, diagnosis },
+      failedTest: { ruleXml, mismatches, diagnosis, examples: examples || [] },
     });
   };
 

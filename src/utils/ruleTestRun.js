@@ -25,6 +25,7 @@ import { elementPlaces } from './schemaPlacement.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 import { cleanInternalNames } from './answerCleanup.js';
 import { checkRulePaths, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
+import { coverageItemEnglish, schemaCoverage } from '../validation/schemaCoverage.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
 // "review" result (the panel shows them all, from the rule itself).
@@ -35,14 +36,17 @@ const MAX_RECORDED_PATH_PROBLEMS = 10;
 // (<trade> inside <perscat>, /techstd as a root), the test answers "review"
 // with the reason -- no example could show anything. Without a graph (no
 // fetcher, the standard has none, or it failed to load) nothing is checked.
-async function impossiblePathReview({ ruleXml, format, standard, schemaLocation, fetchSchemaGraph, parseXml }) {
+async function loadGraph(fetchSchemaGraph, standard) {
   if (!fetchSchemaGraph) return null;
-  let graph;
   try {
-    graph = await fetchSchemaGraph(standard);
+    return await fetchSchemaGraph(standard);
   } catch {
     return null;
   }
+}
+
+function impossiblePathReview({ ruleXml, format, schemaLocation, graph, parseXml }) {
+  if (!graph) return null;
   const check = checkRulePaths(ruleXml, format, graph, { schemaLocation, parseXml });
   if (!check.allImpossible) return null;
   const problems = check.problems.filter((p) => !p.inPredicate).slice(0, MAX_RECORDED_PATH_PROBLEMS);
@@ -103,7 +107,11 @@ async function splitByRelation({ ruleXml, targets, cards, elementSchemas, testSc
 }
 
 // The schemas the examples use and where each takes the LLM's content.
-export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute }) {
+// acceptOnly (Mejoras E, Part 1.4): the schema already rules out what the
+// rule forbids (schemaCoverage.js) -- only examples meant to be accepted are
+// written, so the relation split (one example inside, one outside) is not
+// needed: the "outside" example cannot exist.
+export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly = false }) {
   const contextSchemas = contextSchemasOfRule(ruleXml, schemaLocation).schemas;
   const targets = ruleTargets(ruleXml);
   const useNames = ruleUseNames(ruleXml);
@@ -141,7 +149,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   // one in proced; when no schema allows one of them, the test says so
   // before any LLM call.
   const split =
-    contextSchemas.length === 0 && !groups && testSchema
+    contextSchemas.length === 0 && !groups && testSchema && !acceptOnly
       ? await splitByRelation({ ruleXml, targets, cards, elementSchemas, testSchema, candidates, standard, fetchStructure })
       : null;
   if (split?.impossible) {
@@ -389,7 +397,7 @@ async function attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, el
 // or the stripped path does not evaluate) is sent back as before, naming
 // the whole expression.
 export function missesRuleProblem(example, run, ruleXml) {
-  if (example.expected !== 'reject' || !run.result || run.result.status === 'not_executable') return null;
+  if (example.expected !== 'reject' || !run.result || run.result.status === 'not_executable' || run.result.status === 'error') return null;
   if (run.result.status === 'rejected') return null;
   if (run.predicateMiss) return null;
   // Remates B, Part 1: a rejecting condition (Plantillas, Part 4: flag 0
@@ -483,6 +491,7 @@ function acceptWithoutNodeIndices(examples, runs, restrictsValues) {
       examples[index].expected === 'accept' &&
       r.result &&
       r.result.status !== 'not_executable' &&
+      r.result.status !== 'error' &&
       !(r.result.outOfScopeSchemas?.length > 0)
     );
   if (candidates.length === 0 || candidates.some(({ r }) => r.result.selectedNodePaths.length > 0)) return [];
@@ -555,6 +564,9 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
   );
   return runs
     .map((r, index) => {
+      // Mejoras E, Part 1.3: an example the schema already rules out is
+      // never sent back -- correcting it would remove what breaks the rule.
+      if (r.schemaCovered) return { index, label: examples[index].label, problems: [] };
       const missing = r.validation.runnable ? missesRuleProblem(examples[index], r, ruleXml) : null;
       const problems = r.validation.runnable
         ? [missing, withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null].filter(Boolean)
@@ -574,6 +586,43 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
       return { index, label: examples[index].label, problems };
     })
     .filter((f) => f.problems.length > 0);
+}
+
+// Mejoras E, Part 1.5: a corrected example keeps a true label. The element
+// names its label mentions (<x>, or the bare name) that the correction
+// removed from the example, or moved to another parent, are noted:
+// { removed: [names], moved: [names] } -- the panel says "corrected:
+// <emphasis> was removed". Real case: "disallowed child element (emphasis)"
+// kept its label after the correction took the <emphasis> out.
+function elementParents(xml) {
+  const parents = new Map();
+  const stack = [];
+  const text = String(xml || '').replace(/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>/g, '');
+  for (const m of text.matchAll(/<(\/?)([A-Za-z_][\w.:-]*)[^>]*?(\/?)>/g)) {
+    const [, close, name, self] = m;
+    if (close) {
+      stack.pop();
+      continue;
+    }
+    if (!parents.has(name)) parents.set(name, new Set());
+    parents.get(name).add(stack[stack.length - 1] || '');
+    if (!self) stack.push(name);
+  }
+  return parents;
+}
+
+export function labelNote(label, correctedXml, originalXml) {
+  const before = elementParents(originalXml);
+  const after = elementParents(correctedXml);
+  const named = [...new Set(String(label || '').match(/[A-Za-z_][\w.-]*/g) || [])].filter((n) => before.has(n));
+  const removed = named.filter((n) => !after.has(n));
+  const moved = named.filter((n) => after.has(n) && [...before.get(n)].some((p) => !after.get(n).has(p)));
+  return removed.length || moved.length ? { removed, moved } : null;
+}
+
+function withLabelNote(corrected, original) {
+  const note = labelNote(corrected.label, corrected.xml, original.xml);
+  return note ? { ...corrected, labelNote: note } : corrected;
 }
 
 // Materialize, validate and run every example.
@@ -649,10 +698,15 @@ export async function generateRuleTestExamples({
   let systemPrompt = null;
   const responses = [];
   try {
-    const pathReview = await impossiblePathReview({ ruleXml, format, standard, schemaLocation, fetchSchemaGraph, parseXml });
+    const graph = await loadGraph(fetchSchemaGraph, standard);
     if (!isCurrent()) return null;
+    const pathReview = impossiblePathReview({ ruleXml, format, schemaLocation, graph, parseXml });
     if (pathReview) return { status: 'path_review', reason: pathReview, systemPrompt: null, responses };
-    const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute });
+    // Mejoras E, Part 1.2: the rule forbids what no valid document of the
+    // schema can contain -- only examples meant to be accepted are asked
+    // for (Part 1.4), to show the rule does not reject what is valid.
+    const coverage = graph ? schemaCoverage(ruleXml, format, graph, { schemaLocation, parseXml }) : null;
+    const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly: Boolean(coverage) });
     if (!isCurrent()) return null;
     if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup, untested: prepared.untested };
     // Mejoras C, Part 2: the rule, so materializeExample can move an element
@@ -661,8 +715,10 @@ export async function generateRuleTestExamples({
     // The schemas whose examples the application builds whole (rootOnly):
     // their examples come with no "content".
     const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema) };
+    // With the schema already covering the rule there is no "correct" to
+    // turn into "review": the Proposal check is not asked.
     const checkPromise =
-      askProposalCheck && ruleDescription != null
+      askProposalCheck && ruleDescription != null && !coverage
         ? checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck })
         : Promise.resolve(null);
     systemPrompt = buildRuleTestExamplesPrompt({
@@ -677,6 +733,7 @@ export async function generateRuleTestExamples({
       matchExpressions: ruleMatchExpressions(ruleXml),
       conditions: ruleConditions(ruleXml, format, { parseXml }),
       tableModel: prepared.tableModel,
+      acceptOnly: coverage ? { reasons: coverage.items.map(coverageItemEnglish) } : null,
     });
     onPrompt?.(systemPrompt);
     const run = (examples) => runRuleTestExamples(examples, { ruleXml, format, setup: prepared.setup, vocabulary, parseXml });
@@ -690,6 +747,14 @@ export async function generateRuleTestExamples({
       return { status: 'error', error: parsed.error, badResponse: true, systemPrompt, responses };
     }
     let { examples } = parsed;
+    if (coverage) {
+      // Only examples meant to be accepted: one meant to be rejected cannot
+      // be a valid document here, whatever the answer says.
+      examples = examples.filter((ex) => ex.expected === 'accept');
+      if (examples.length === 0) {
+        return { status: 'error', error: 'The answer has no example meant to be accepted.', badResponse: true, systemPrompt, responses };
+      }
+    }
     let { materialized, runs } = run(examples);
 
     // One automatic correction round (T2b, Part 3): the exact problems of
@@ -722,10 +787,18 @@ export async function generateRuleTestExamples({
             reparsed.examples.length === examples.length
               ? examples.map((ex, i) => (failing.has(i) ? reparsed.examples[i] : ex))
               : reparsed.examples;
-          const rerun = run(next);
-          const still = new Set(exampleFailures(next, rerun.materialized, rerun.runs, { ruleXml, standard, format, setup: prepared.setup, parseXml }).map((f) => f.index));
+          // The answer to the correction keeps only what this test asks for
+          // (accept examples only when the schema covers the rule).
+          const kept = coverage ? next.filter((ex) => ex.expected === 'accept') : next;
+          const rerun = run(kept);
+          const still = new Set(exampleFailures(kept, rerun.materialized, rerun.runs, { ruleXml, standard, format, setup: prepared.setup, parseXml }).map((f) => f.index));
           correction.fixed = failures.filter((f) => rerun.runs[f.index] && !still.has(f.index)).length;
-          examples = next;
+          // Mejoras E, Part 1.5: a corrected example whose label names an
+          // element the correction removed or moved says so.
+          rerun.materialized = rerun.materialized.map((ex, i) =>
+            failures.some((f) => f.index === i) && materialized[i] ? withLabelNote(ex, materialized[i]) : ex
+          );
+          examples = kept;
           ({ materialized, runs } = rerun);
         }
       } catch (err) {
@@ -739,6 +812,7 @@ export async function generateRuleTestExamples({
     if (!isCurrent()) return null;
     return {
       status: 'ready',
+      coverage,
       proposalCheck,
       examples: materialized,
       runs,

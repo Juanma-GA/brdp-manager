@@ -399,9 +399,12 @@ expect(
   check('fn: prefix is not an extension', run(one('fn:exists(.)'), topic('<p>x</p>')).status === 'accepted');
   check('xs: constructor is not an extension', run(one("xs:integer('3') = 3"), topic('<p>x</p>')).status === 'accepted');
   check('@xml:lang works without a declaration', run(one('@xml:lang'), topic('<p xml:lang="en">x</p>')).status === 'accepted');
-  // A dynamic error on the real fragment: reported, not thrown.
+  // A dynamic error on the real fragment: reported, not thrown. Mejoras E,
+  // Part 2.3: it is the rule failing on THIS document -- status "error"
+  // with the engine's code and message, never "not executable".
   const dyn = one("xs:integer(.) gt 0");
-  check('dynamic error on the fragment → xpath_error', run(dyn, topic('<p>abc</p>')).notExecutableReason?.code === 'xpath_error');
+  const dynRun = run(dyn, topic('<p>abc</p>'));
+  check('dynamic error on the fragment → status error', dynRun.status === 'error' && dynRun.runtimeErrors?.[0]?.code === 'FORG0001', JSON.stringify(dynRun));
   check('  but analyzeRule does not refuse it (only static errors count)', analyze(dyn).status === 'executable');
   // An abstract rule on its own never fires.
   const abstractRule = sch('<§pattern><§rule abstract="true" id="base"><§assert test="false()">never</§assert></§rule><§rule context="p"><§assert id="P" test="true()">x</§assert></§rule></§pattern>');

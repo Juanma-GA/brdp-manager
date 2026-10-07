@@ -42,6 +42,81 @@ export class NotExecutable extends Error {
   }
 }
 
+// Mejoras E, Part 2.3: an error the engine gives WHILE running the rule on
+// an example (fontoxpath's dynamic errors: XPTY…, FORG…, XPDY…; never a
+// static XPST/XQST error, which does not depend on the example and stays
+// "not executable"). Caught as NotExecutable everywhere that only needs to
+// know the rule did not run (analyzeRule, the descriptions); the two
+// engines' run on a fragment tell it apart: the rule is wrong on this
+// example -- the test fails, with the reason in plain words.
+// An invalid regular expression or flags in the rule (FORX0001/0002) is a
+// defect of the rule, not of the example.
+const STATIC_ERROR_RE = /\b(?:(?:XPST|XQST)\d{4}|FORX000[12])\b/;
+export class RuleRuntimeError extends NotExecutable {
+  constructor(message, expression) {
+    super(reason('xpath_error', { message }));
+    this.runtime = engineErrorDetail(message, expression);
+  }
+}
+
+// The evaluator's error for `err` while evaluating `expression`.
+export function evaluationError(err, expression) {
+  const message = xpathErrorMessage(err);
+  if (STATIC_ERROR_RE.test(String(err?.message || ''))) {
+    const e = new NotExecutable(reason('xpath_error', { message }));
+    e.static = true;
+    return e;
+  }
+  return new RuleRuntimeError(message, expression);
+}
+
+// { code, message, plain: { code, params } } -- plain is what the panel
+// says in words: a function given several nodes where it takes one
+// (XPTY0004, real case: normalize-space(ancestor::applic/displaytext/p)
+// with two <p>) names the function and the elements its argument selects;
+// anything else is said with the engine's own message.
+export function engineErrorDetail(message, expression = '') {
+  const code = (/\b([A-Z]{4}\d{4})\b/.exec(message) || [])[1] || null;
+  const many = /Multiplicity of function argument[^.]*? for ([\w:.-]+) is incorrect\. Expected "\??", but got "[+*]"/.exec(message);
+  if (many) {
+    const fn = many[1].replace(/^fn:/, '');
+    return { code, message, plain: { code: 'engine_several_items', params: { fn, names: argumentNames(expression, fn) } } };
+  }
+  return { code, message, plain: { code: 'engine_other', params: {} } };
+}
+
+// The last element step of every path argument of fn(...) in the
+// expression, outside string literals: "normalize-space(ancestor::applic/
+// displaytext/p)" → ['p']. A call whose argument is another call or a
+// variable gives nothing.
+function argumentNames(expression, fn) {
+  const text = String(expression || '').replace(/'[^']*'|"[^"]*"/g, (m) => ' '.repeat(m.length));
+  const names = [];
+  const re = new RegExp(`(?<![\\w.:-])(?:fn:)?${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`, 'g');
+  for (const m of text.matchAll(re)) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    const start = i;
+    for (; i < text.length && depth > 0; i += 1) {
+      if (text[i] === '(' || text[i] === '[') depth += 1;
+      else if (text[i] === ')' || text[i] === ']') depth -= 1;
+    }
+    const arg = text.slice(start, i - 1).trim();
+    if (!arg || /^[$\w.:-]+\s*\(/.test(arg) || arg.startsWith('$')) continue;
+    // the last step, without its predicates
+    let flat = '';
+    let d = 0;
+    for (const ch of arg) {
+      if (ch === '[' || ch === '(') d += 1;
+      if (d === 0) flat += ch;
+      if (ch === ']' || ch === ')') d -= 1;
+    }
+    const last = flat.split('/').pop().trim().replace(/^(?:child|descendant|descendant-or-self|ancestor|ancestor-or-self|parent|self|following-sibling|preceding-sibling)::/, '');
+    if (/^[A-Za-z_][\w.-]*$/.test(last) && !names.includes(last)) names.push(last);
+  }
+  return names;
+}
+
 export function parseXmlDocument(text) {
   if (typeof DOMParser === 'undefined') throw new Error('No XML parser available.');
   const doc = new DOMParser().parseFromString(text, 'application/xml');

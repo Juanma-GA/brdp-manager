@@ -5,7 +5,7 @@ import VerdictCauseHint from './VerdictCauseHint';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
-import { acceptCauseText, formatRuleDescription, formatRuleTestReason, formatThresholdMismatch } from '../../utils/ruleTestReasons.js';
+import { acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleTestReason, formatThresholdMismatch } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 import RuleLintWarnings from './RuleLintWarnings';
@@ -38,6 +38,9 @@ export function verdictView(t, verdict, standard) {
   switch (verdict.kind) {
     case 'correct':
       return { tone: 'ok', text: t('records.ruleTest.verdicts.correct') };
+    // Mejoras E, Part 1: not a defect, not a failure.
+    case 'schema_covered':
+      return { tone: 'ok', text: t('records.ruleTest.verdicts.schemaCovered', { detail: coverageDetail(verdict.items, t) }) };
     case 'review':
       if (verdict.path) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewPath', { detail: formatRuleTestReason(verdict.path, t) }) };
       if (verdict.threshold) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewThreshold', { detail: formatThresholdMismatch(verdict.threshold, t) }) };
@@ -45,6 +48,11 @@ export function verdictView(t, verdict, standard) {
         ? { tone: 'warn', text: t('records.ruleTest.verdicts.reviewUnchecked', { error: verdict.error }) }
         : { tone: 'warn', text: t('records.ruleTest.verdicts.review', { mismatch: verdict.mismatch }) };
     case 'incorrect':
+      // Mejoras E, Part 2.3: the rule gave an error on a valid example.
+      if (verdict.engineErrors?.length) {
+        const e = verdict.engineErrors[0];
+        return { tone: 'bad', text: t('records.ruleTest.verdicts.engineError', { label: e.label, detail: engineErrorText(e, t) }) };
+      }
       return {
         tone: 'bad',
         text: [
@@ -239,6 +247,17 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
     <div className={styles.ruleTestExample} data-testid={`${testIdPrefix}-${index}`}>
       <div className={styles.ruleTestExampleHead}>
         <strong>{example.label}</strong>
+        {/* Mejoras E, Part 1.5: never a label that claims what the corrected example no longer has. */}
+        {example.labelNote?.removed?.length > 0 && (
+          <span className={`${styles.ruleTestEditedMark} ${styles.ruleTestToneWarn}`} data-testid="rule-test-label-note">
+            {t('records.ruleTest.labelRemoved', { names: example.labelNote.removed.map((n) => `<${n}>`).join(', ') })}
+          </span>
+        )}
+        {example.labelNote?.moved?.length > 0 && (
+          <span className={`${styles.ruleTestEditedMark} ${styles.ruleTestToneWarn}`} data-testid="rule-test-label-note">
+            {t('records.ruleTest.labelMoved', { names: example.labelNote.moved.map((n) => `<${n}>`).join(', ') })}
+          </span>
+        )}
         {example.editedByUser && (
           <span className={`${styles.ruleTestEditedMark} ${styles.ruleTestToneWarn}`} data-testid="rule-test-edited-mark">
             {t('records.ruleTest.editedMark')}
@@ -291,7 +310,23 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           {t('records.ruleTest.brexModelIdentFollowed')}
         </p>
       )}
-      {!run.validation.runnable && <ValidationProblems validation={run.validation} standard={standard} schema={example.schema} />}
+      {/* Mejoras E, Part 1.3: the schema already rules this example out. */}
+      {run.schemaCovered ? (
+        <p className={styles.ruleTestNote} data-testid="rule-test-schema-covered-example">
+          {t('records.ruleTest.schemaCoveredExample', { detail: coverageDetail(run.schemaCovered.items, t) })}
+        </p>
+      ) : (
+        !run.validation.runnable && <ValidationProblems validation={run.validation} standard={standard} schema={example.schema} />
+      )}
+      {/* Mejoras E, Part 2.3: the engine's error on this example, in plain words and as it was given. */}
+      {showResult &&
+        result?.status === 'error' &&
+        (result.runtimeErrors || []).map((e, i) => (
+          <div key={`e:${i}`} className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-engine-error">
+            <p>{t('records.ruleTest.engineError.onExample', { detail: engineErrorText(e, t) })}</p>
+            <p className={styles.muted}>{t('records.ruleTest.engineError.message', { message: e.message })}</p>
+          </div>
+        ))}
       {showResult && result?.outOfScopeSchemas?.length > 0 && result.status === 'accepted' && example.schema && (
         <p className={styles.ruleTestNote}>{t('records.ruleTest.notApplicable', { schema: example.schema })}</p>
       )}
@@ -688,6 +723,17 @@ export default function RuleTestPanel({
             </p>
           )}
           {!ruleNotExecutable && <VerdictCauseHint verdict={verdict} runs={state.runs} />}
+          {verdict?.engineErrors?.length > 0 && (
+            <p className={`${styles.ruleTestNote} ${styles.muted}`} data-testid="rule-test-engine-message">
+              {t('records.ruleTest.engineError.message', { message: verdict.engineErrors[0].message })}
+            </p>
+          )}
+          {/* Mejoras E, Part 1.4: why there is no example meant to be rejected. */}
+          {state.coverage && (
+            <p className={styles.ruleTestNote} data-testid="rule-test-no-reject-example">
+              {t('records.ruleTest.noRejectExample', { detail: coverageDetail(state.coverage.items, t) })}
+            </p>
+          )}
           <ReplacePassedQuestion question={replaceQuestion} answer={replaceAnswer} onAnswer={answerReplaceQuestion} />
           {editNotice?.kind === 'not_saved' && (
             <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-edited-notice" data-kind="not_saved">
@@ -712,6 +758,7 @@ export default function RuleTestPanel({
                     schemas: contextSchemasOfRule(ruleXml, schemaLocation).schemas,
                     mismatches: review.mismatches,
                     diagnosis: review.explanation,
+                    examples: state.examples,
                   }))
               }
               correctedBlockedReason={correctedRuleBlockedReason}

@@ -212,7 +212,10 @@ export function extractContextCandidates(text) {
 
   const camelCase = extractCamelCaseCandidates(source);
 
-  const rawPhraseCandidates = extractPhraseCandidates(source);
+  // Names that are marked but not looked up here (prefixed names, the
+  // `<element/@attribute>` notation) still end a trigger's phrase.
+  const phraseSource = maskPrefixedNames(text || '', MARKED_NAME).replace(ELEMENT_ATTRIBUTE_PAIR_RE, MARKED_NAME);
+  const rawPhraseCandidates = extractPhraseCandidates(phraseSource);
   const phraseCandidates = [];
   const seenPhrase = new Set();
   for (const c of rawPhraseCandidates) {
@@ -269,14 +272,22 @@ export function attributesToCheckOnElements(pairs, vocabulary) {
 // warn as before.
 const PREFIXED_NAME_RE = /(?:@|<\/?)?[\p{L}_][\p{L}\p{N}_.-]*:[\p{L}_][\p{L}\p{N}_.-]*/gu;
 
-function maskPrefixedNames(text) {
+// `replacement` (Mejoras E, 2.4b): the phrase extractor gets a
+// one-character MARKED_NAME instead of blanks, so a trigger word followed by
+// a prefixed name ("el atributo @xsi:noNamespaceSchemaLocation para el
+// elemento <dmodule>") is consumed by it -- with blanks, the next word
+// ("para") became the trigger's candidate and "Did you mean <para>?" showed.
+// A private-use character: never typed in a BRDP text.
+const MARKED_NAME = '\uE000';
+
+function maskPrefixedNames(text, replacement = null) {
   return text.replace(PREFIXED_NAME_RE, (m, offset) => {
     // "word:" inside a URL ("http://…") never matches: the colon is followed
     // by "/", not a letter. A prefixed name glued to a preceding letter or
     // digit is part of something else; leave it alone.
     const before = offset > 0 ? text[offset - 1] : undefined;
     if (m[0] !== '@' && m[0] !== '<' && isLetterOrDigit(before)) return m;
-    return ' '.repeat(m.length);
+    return replacement ?? ' '.repeat(m.length);
   });
 }
 
@@ -484,7 +495,7 @@ const CLOSE_TOKEN_RE = /([\p{L}](?:[\p{L}\p{N}_-]*[\p{L}\p{N}])?)>/gu;
 // old ASCII-only [A-Za-z][\w-]* pattern broke "cómo" into "c" + "mo",
 // which the list-continuation feature below could then chain onto a
 // trigger's candidate list as a spurious single-letter "name").
-const WORD_RE = /[\p{L}][\p{L}\p{N}_.-]*|,/gu;
+const WORD_RE = /[\p{L}][\p{L}\p{N}_.-]*|,|\uE000/gu;
 const CAMEL_CASE_TOKEN_RE = /[\p{L}][\p{L}\p{N}_.-]*/gu;
 // Follow-up round, point 2: requires at least two lowercase letters before
 // the first uppercase one, AND a minimum total length of 5 -- "lA" (1
@@ -533,6 +544,10 @@ function tokenize(text) {
       out.push({ type: 'comma' });
       continue;
     }
+    if (m[0] === MARKED_NAME) {
+      out.push({ type: 'marked' });
+      continue;
+    }
     const before = text[m.index - 1];
     const after = text[m.index + m[0].length];
     const marked = before === '<' || before === '@' || (before === '/' && text[m.index - 2] === '<') || after === '>';
@@ -572,6 +587,10 @@ function extractPhraseCandidates(text) {
     const type = lower.startsWith('atributo') || lower.startsWith('attribute') ? 'attribute' : 'element';
 
     let j = skipSkipWords(tokens, i + 1);
+    if (tokens[j]?.type === 'marked') {
+      i = j; // the trigger was about that marked name: nothing to suggest
+      continue;
+    }
     if (j >= tokens.length || tokens[j].type !== 'word') continue;
     if (TRIGGER_WORDS.has(tokens[j].value.toLowerCase())) continue; // re-anchor: let the outer loop reach this trigger itself
 

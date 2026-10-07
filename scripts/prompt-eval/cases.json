@@ -1872,6 +1872,72 @@
       ]
     },
     {
+      "id": "rule-test-3-0-1-schema-covered-inlineapplics",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras E, Part 1 (real case BRDP-EXT-02805): <inlineapplics> only goes inside <status>, and <status> only inside <idstatus>, so no valid document can break the rule. Before: \"Not executable … no schema allows it\". Now: \"Already covered by the schema\", found before the LLM, and only an accept example is asked for and run.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ME-1",
+        "title": "Inline applicabilities outside the identification section",
+        "definition": "Decide where inline applicabilities may be declared.",
+        "proposal": "Inline applicabilities shall only be declared in the identification and status section.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"XML-R-2817\"><objpath objappl=\"0\">//inlineapplics[not(ancestor::idstatus)]</objpath><objuse>Prohibir inlineapplics fuera de idstatus</objuse></objrule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "NO example meant to be rejected",
+          "note": "only accept examples are asked for"
+        },
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_schema_covered",
+          "via": "path",
+          "note": "Mejoras E: new result \"Already covered by the schema\", with an accept example run"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-schema-covered-avee-children",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Mejoras E, Part 1 (real case BRDP-EXT-02802): the listed children of <avee> are exactly the ones the schema allows. Before: \"Test failed\" after the correction removed the <emphasis> of the reject example. Now: \"Already covered by the schema\", without a correction round.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ME-2",
+        "title": "Children of the data module code",
+        "definition": "Decide which children the data module code may have.",
+        "proposal": "The data module code shall only contain its code elements.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"XML-R-2814\"><objpath objappl=\"0\">//avee/*[not(self::modelic or self::sdc or self::chapnum or self::section or self::subsect or self::subject or self::discode or self::discodev or self::incode or self::incodev or self::itemloc)]</objpath><objuse>Prohibir avee con hijos no permitidos</objuse></objrule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "NO example meant to be rejected",
+          "note": "only accept examples are asked for"
+        },
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_schema_covered",
+          "via": "path",
+          "note": "Mejoras E: new result \"Already covered by the schema\", with an accept example run"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-limited-to-proced",
       "type": "rule-test",
       "standard": "S1000D 4.2",

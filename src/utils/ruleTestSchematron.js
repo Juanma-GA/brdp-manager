@@ -73,7 +73,8 @@ import {
   reason,
   stripLiterals,
   withoutPredicates,
-  xpathErrorMessage,
+  evaluationError,
+  RuleRuntimeError,
 } from './ruleTestCommon.js';
 
 export const SCHEMATRON_FORMATS = ['SCH-DITA'];
@@ -335,9 +336,9 @@ function makeEvaluator(doc, ruleNamespaces) {
       return items;
     } catch (err) {
       if (err instanceof NotExecutable) throw err;
-      const e = new NotExecutable(REASON.xpath(xpathErrorMessage(err)));
-      e.static = /\b(?:XPST|XQST)\d{4}\b/.test(String(err?.message || ''));
-      throw e;
+      // Mejoras E, Part 2.3: static errors stay "not executable" (e.static);
+      // a dynamic one is the rule failing on this document.
+      throw evaluationError(err, expression);
     }
   };
 }
@@ -426,6 +427,7 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
   const warnings = [];
   const selected = [];
   const notRun = [];
+  const runtimeErrors = [];
   let ran = 0;
   for (const pattern of patterns) {
     try {
@@ -436,9 +438,25 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
       violations.push(...result.violations);
       warnings.push(...result.warnings);
     } catch (err) {
+      if (err instanceof RuleRuntimeError) {
+        runtimeErrors.push({ ruleId: pattern.ruleId, ...err.runtime });
+        continue;
+      }
       if (!(err instanceof NotExecutable)) throw err;
       notRun.push({ ruleId: pattern.ruleId, reason: err.reason });
     }
+  }
+  if (runtimeErrors.length > 0) {
+    return {
+      status: 'error',
+      violations,
+      warnings,
+      selectedNodePaths: [...new Set(selected)],
+      notExecutableReason: null,
+      notExecutableParts: notRun,
+      outOfScopeSchemas: [],
+      runtimeErrors,
+    };
   }
   return {
     status: ran === 0 ? 'not_executable' : violations.length ? 'rejected' : 'accepted',

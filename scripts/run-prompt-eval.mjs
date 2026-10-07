@@ -416,7 +416,7 @@ async function runCheck(check, answer, ctx = {}) {
     case "rule_test_verdict_correct": {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
       return { status: verdict.kind === "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_verdict_review": {
@@ -427,7 +427,7 @@ async function runCheck(check, answer, ctx = {}) {
       // not the answer this case expects.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
       return { status: verdict.kind === "review" && !verdict.unchecked ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_proposal_check_level": {
@@ -447,7 +447,7 @@ async function runCheck(check, answer, ctx = {}) {
       // expose it.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
       return { status: verdict.kind === "incorrect" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_verdict_not_correct": {
@@ -455,15 +455,27 @@ async function runCheck(check, answer, ctx = {}) {
       // "incorrect" or "review" both pass; only "correct" fails.
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
       return { status: verdict.kind !== "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+    }
+    case "rule_test_schema_covered": {
+      // Mejoras E, Part 1: "already covered by the schema" -- the verdict is
+      // schema_covered (via "path": found before the LLM, or "examples":
+      // the reject examples were ruled out by the schema, when `via` is
+      // given) and at least one example meant to be accepted ran.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: `status ${r?.status || "none"}${r?.error ? `: ${r.error}` : ""}` };
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
+      const acceptsRun = r.runs.filter((run, i) => run.result && r.examples[i].expected === "accept").length;
+      const ok = verdict.kind === "schema_covered" && acceptsRun > 0 && (!check.via || verdict.via === check.via);
+      return { status: ok ? "pass" : "fail", detail: `engine verdict ${verdict.kind}${verdict.via ? ` (via ${verdict.via})` : ""}; ${acceptsRun} accept example(s) ran` };
     }
     case "rule_test_verdict_in": {
       // Mejoras B, Part 6: the verdict is one of `expect` (e.g. incorrect or
       // review for a rule off by one level).
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
       const expect = check.expect || [];
       return { status: expect.includes(verdict.kind) ? "pass" : "fail", detail: `engine verdict ${verdict.kind}, expected ${expect.join(" or ")}: ${JSON.stringify(verdict)}` };
     }
@@ -474,7 +486,7 @@ async function runCheck(check, answer, ctx = {}) {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: `status ${r?.status || "none"}${r?.reason ? `: ${JSON.stringify(r.reason)}` : ""}` };
       const ran = r.runs.filter((run) => run.validation.runnable).length;
-      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold);
+      const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
       const ok = ran > 0 && !["no_runnable", "not_executable"].includes(verdict.kind);
       return { status: ok ? "pass" : "fail", detail: `${ran}/${r.runs.length} example(s) ran; engine verdict ${verdict.kind}` };
     }
@@ -990,7 +1002,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
   });
   const verdict =
     result.status === "ready"
-      ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalCheck, threshold)
+      ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalCheck, threshold, result.coverage)
       : result.status === "path_review"
         ? { kind: "review", path: result.reason }
         : null;

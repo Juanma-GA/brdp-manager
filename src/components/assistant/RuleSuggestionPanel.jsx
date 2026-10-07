@@ -11,6 +11,7 @@ import RuleLintWarnings from './RuleLintWarnings';
 import RuleThresholdWarning from './RuleThresholdWarning';
 import { useNameFixHints } from '../../hooks/useNameFixHints.js';
 import { checkRuleSchemaCoverage, supportsSchemaContext } from '../../utils/ruleSchemaContext.js';
+import { engineErrorText } from '../../utils/ruleTestReasons.js';
 
 // Part 5 (Suggest Rule part 2): with schemas chosen, an element of the
 // rule's XPath that doesn't exist in one of them -- red, never blocking.
@@ -218,11 +219,19 @@ export default function RuleSuggestionPanel({
           {t('records.assistant.ruleNotCheckable', { reason: entry.notCheckable })}
         </p>
       )}
-      {entry.correctedFromTest && (
+      {entry.correctedFromTest && !entry.correctedEngineErrors?.length && (
         <p className={styles.hint} data-testid="rule-corrected-note">
           {t('records.ruleTest.review.correctedNote')}
         </p>
       )}
+      {/* Mejoras E, Part 2.3: the new rule gives an error on the failed
+          test's examples -- offered, but never as "corrected". */}
+      {entry.correctedFromTest &&
+        (entry.correctedEngineErrors || []).map((e, i) => (
+          <p key={i} className={styles.vocabWarning} data-testid="rule-corrected-engine-error">
+            ⚠ {t('records.ruleTest.review.correctedEngineError', { label: e.label, detail: engineErrorText(e, t) })}
+          </p>
+        ))}
       {(entry.text || entry.notCheckable !== undefined) && <AppliesTo entry={entry} />}
       {entry.text && (
         <>

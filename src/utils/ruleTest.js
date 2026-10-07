@@ -29,7 +29,7 @@ import {
   formatStructureProblem,
   removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
-import { SKELETON_TEXT_SUFFIX, assembleExample, normalizeBrexReferenceCode } from './ruleTestSkeleton.js';
+import { SKELETON_TEXT_SUFFIX, assembleExample, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { placeSentence, relocateMisplacedElements, relocateToOnlyParent } from './schemaPlacement.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
@@ -434,13 +434,26 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     unknownSchema,
     missingMetadata: example.missingMetadata || null,
   });
-  if (!validation.runnable) return { validation, result: null, matches: null };
+  if (!validation.runnable) {
+    // Mejoras E, Part 1.3: an example meant to be rejected whose only
+    // problem is an element the schema does not allow where it is -- and
+    // that element is exactly what the rule rejects -- shows the schema
+    // already forbids it. Never corrected (the correction would remove
+    // what makes it break the rule) and never counted.
+    const schemaCovered =
+      example.expected === 'reject'
+        ? schemaCoveredExample(ruleXml, format, example, validation, { parseXml, schemaLocation })
+        : null;
+    return schemaCovered ? { validation, result: null, matches: null, schemaCovered } : { validation, result: null, matches: null };
+  }
   const result = runRuleOnFragment(ruleXml, format, example.xml, example.schema || null, {
     parseXml,
     schemaLocation: example.schemaLocation || schemaLocation,
   });
   const expectedStatus = example.expected === 'reject' ? 'rejected' : 'accepted';
-  const matches = result.status === 'not_executable' ? null : result.status === expectedStatus;
+  // Mejoras E, Part 2.3: an engine error on a valid example is the rule
+  // failing on it (never "as expected").
+  const matches = result.status === 'not_executable' ? null : result.status === 'error' ? false : result.status === expectedStatus;
   // Mejoras B, Parts 1 and 3: for an example meant to be rejected that the
   // rule accepted, why -- per rule part, with the path without predicates.
   // predicateMiss (case b): the rule selected nothing, but nodes of the
@@ -462,6 +475,61 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
         (result.selectedNodePaths.length === 0 && !(result.conditions?.length > 0) && acceptance.some((d) => d.case === 'predicate')))
   );
   return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result), acceptance, predicateMiss };
+}
+
+// Mejoras E, Part 1.3: the nodes of the example that the schema does not
+// allow where they are (their parent does not list them as children).
+function notAllowedNodes(doc, structure) {
+  const elements = structure?.elements || {};
+  const out = [];
+  const walk = (el) => {
+    for (let n = el.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType !== 1) continue;
+      if (elements[n.nodeName] && elements[el.nodeName] && !elements[el.nodeName].children.includes(n.nodeName)) {
+        out.push({ path: nodePath(n), element: n.nodeName, parent: el.nodeName });
+      }
+      walk(n);
+    }
+  };
+  walk(doc.documentElement);
+  return out;
+}
+
+// { items: [{ kind: 'structure', element, parent, schema }], nodePaths } when
+// the example's only problems are elements not allowed where they are and
+// the rule rejects exactly those nodes; null otherwise.
+function schemaCoveredExample(ruleXml, format, example, validation, { parseXml, schemaLocation }) {
+  if (!validation.wellFormed || validation.unknownSchema || validation.missingMetadata || !example.structure) return null;
+  if (validation.names?.available && (validation.names.notFound.length > 0 || validation.names.wrongType.length > 0)) return null;
+  if (!validation.structure.length || !validation.structure.every((p) => p.kind === 'notAllowed')) return null;
+  let doc;
+  try {
+    doc = parseXml(String(example.xml || ''));
+  } catch {
+    return null;
+  }
+  const offending = notAllowedNodes(doc, example.structure);
+  if (offending.length === 0) return null;
+  // A descendant step of the rule (A//X) that the schema allows by another
+  // way (<randomList> inside <randomList> through listItem/para): the
+  // example is merely written wrong, the schema does not rule it out.
+  const pairs = ruleTargets(ruleXml).alternatives.flatMap((a) => a.descendantPairs || []);
+  if (offending.some((o) => pairs.some(([a, x]) => x === o.element && nestingPath(example.structure.elements || {}, a, o.element)))) return null;
+  const result = runRuleOnFragment(ruleXml, format, example.xml, example.schema || null, {
+    parseXml,
+    schemaLocation: example.schemaLocation || schemaLocation,
+  });
+  if (result.status !== 'rejected') return null;
+  const rejected = new Set(result.violations.flatMap((v) => v.nodePaths || []));
+  const notAllowed = new Set(offending.map((o) => o.path));
+  if (rejected.size === 0 || [...rejected].some((p) => !notAllowed.has(p)) || [...notAllowed].some((p) => !rejected.has(p))) return null;
+  const items = [];
+  for (const o of offending) {
+    if (!items.some((i) => i.element === o.element && i.parent === o.parent)) {
+      items.push({ kind: 'structure', element: o.element, parent: o.parent, schema: example.schema || null });
+    }
+  }
+  return { items, nodePaths: [...rejected] };
 }
 
 // Rule test on DM metadata: a rejection whose every offending node is in
@@ -513,14 +581,47 @@ function rejectedByBrexReference(result) {
 // the Proposal's numbers match no border of the rule's threshold -- a
 // verdict that would be "correct" becomes { kind: 'review', threshold }
 // (before the Proposal check: it is a deterministic fact).
-export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck = null, threshold = null) {
+// Mejoras E: `coverage` (schemaCoverage.js: the rule forbids what no valid
+// document of the schema can contain, found before any LLM call -- the
+// examples are then only meant to be accepted) and the examples the schema
+// already rules out (runExample's schemaCovered, Part 1.3) give
+//   { kind: 'schema_covered', items, via: 'path' | 'examples' }
+// when at least one example meant to be accepted ran and the rule accepted
+// it; a rule that rejects it is "incorrect", as always. An example the
+// schema rules out never counts otherwise (the verdict comes from the
+// others). An engine error on an example (Part 2.3) is
+//   { kind: 'incorrect', engineErrors: [{ index, label, code, message, plain }] }
+// -- the rule fails on a valid example; never "not executable".
+export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck = null, threshold = null, coverage = null) {
   if (analysis?.status === 'not_executable') return { kind: 'not_executable', reason: analysis.reason };
   const ran = runs.filter((r) => r.result);
   const notExecutable = ran.find((r) => r.result.status === 'not_executable');
   if (notExecutable) return { kind: 'not_executable', reason: notExecutable.result.notExecutableReason };
+  const engineErrors = runs
+    .map((r, index) => (r.result?.status === 'error' ? { index, label: examples[index]?.label || '', ...r.result.runtimeErrors[0] } : null))
+    .filter(Boolean);
+  if (engineErrors.length > 0) {
+    const others = runs.map((r, i) => (r.matches === false && r.result?.status !== 'error' ? examples[i].expected : null)).filter(Boolean);
+    return { kind: 'incorrect', permissive: others.includes('reject'), strict: others.includes('accept'), engineErrors };
+  }
+  const rejectIndices = examples.map((ex, i) => (ex.expected === 'reject' ? i : -1)).filter((i) => i >= 0);
+  const coveredRuns = runs.filter((r) => r.schemaCovered);
+  const coveredByExamples = coveredRuns.length > 0 && rejectIndices.length > 0 && rejectIndices.every((i) => runs[i]?.schemaCovered);
+  if (coverage || coveredByExamples) {
+    const accepts = runs.filter((r, i) => r.result && examples[i].expected === 'accept');
+    if (accepts.length > 0) {
+      if (accepts.some((r) => r.matches === false)) return { kind: 'incorrect', permissive: false, strict: true };
+      const items = [];
+      for (const item of coverage ? coverage.items : coveredRuns.flatMap((r) => r.schemaCovered.items)) {
+        if (!items.some((i) => i.kind === item.kind && i.element === item.element && i.other === item.other && i.parent === item.parent)) items.push(item);
+      }
+      return { kind: 'schema_covered', items, via: coverage ? 'path' : 'examples' };
+    }
+  }
   if (ran.length === 0) {
     const bySchema = [];
     runs.forEach((r, i) => {
+      if (r.schemaCovered) return;
       const schema = examples[i]?.schema || null;
       const entry = bySchema.find((b) => b.schema === schema);
       if (entry) entry.count += 1;
@@ -570,7 +671,10 @@ export function verdictCause(verdict, runs = []) {
   if (!verdict) return null;
   if (verdict.kind === 'no_runnable' || verdict.kind === 'inconclusive') return { cause: 'examples' };
   if (verdict.kind !== 'incorrect') return null;
-  if (runs.some((r) => !r?.validation?.runnable)) return { cause: 'examples' };
+  // Mejoras E, Part 2.3: the verdict itself says the error and its reason.
+  if (verdict.engineErrors?.length) return null;
+  // An example the schema already rules out (Part 1.3) is not a bad example.
+  if (runs.some((r) => !r?.validation?.runnable && !r?.schemaCovered)) return { cause: 'examples' };
   return { cause: 'rule', permissive: verdict.permissive === true, strict: verdict.strict === true };
 }
 

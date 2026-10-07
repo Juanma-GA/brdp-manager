@@ -174,7 +174,7 @@ const pathKey = (p) => [p.kind, p.element, p.parent, p.attribute, p.inPredicate 
 // The problem as plain data (what History and the UI need to say it again).
 function pathParams(p) {
   const out = {};
-  for (const k of ['kind', 'element', 'parent', 'attribute', 'parents', 'owners', 'ways', 'inPredicate', 'predicate', 'alternative', 'alternatives', 'flag', 'ruleId', 'ancestor', 'looked', 'checked', 'operand']) {
+  for (const k of ['kind', 'element', 'parent', 'attribute', 'parents', 'owners', 'ways', 'inPredicate', 'predicate', 'alternative', 'alternatives', 'flag', 'ruleId', 'ancestor', 'looked', 'checked', 'operand', 'readFrom']) {
     if (p[k] !== undefined && p[k] !== null) out[k] = p[k];
   }
   return out;
@@ -328,7 +328,7 @@ function acceptable(before, afterDefects, applied) {
   return !afterDefects.some((d) => applied.some((a) => a.key === d.key) || !keys.has(d.key));
 }
 
-export function proposeRuleCorrection(ruleXml, format, ctx = {}) {
+function computeProposal(ruleXml, format, ctx = {}) {
   const original = ruleDefects(ruleXml, format, ctx);
   const result = { defects: original.defects, proposal: null, needsOtherVocabularies: original.needsOtherVocabularies };
   const fixable = original.defects.filter((d) => d.fix);
@@ -385,6 +385,28 @@ export function proposeRuleCorrection(ruleXml, format, ctx = {}) {
   return result;
 }
 
+// Mejoras E, Part 2.4: a mechanical fix that exists but is not proposed
+// because, applied, it brings another defect -- said in the block ("Possible
+// fix: change @cheksum to @checksum. Not proposed because, with that change,
+// <cbdata> has no @checksum."). result.blocked: [{ defect, newDefects }],
+// for each fixable defect left out of the proposal whose fix, applied on
+// its own to the saved rule, leaves a defect the rule did not have.
+export function proposeRuleCorrection(ruleXml, format, ctx = {}) {
+  const result = computeProposal(ruleXml, format, ctx);
+  result.blocked = [];
+  const source = String(ruleXml ?? '');
+  if (source.length > ONE_BY_ONE_MAX_CHARS) return result;
+  const inProposal = new Set((result.proposal?.fixes || []).map((d) => d.key));
+  const before = new Set(result.defects.map((d) => d.key));
+  for (const defect of result.defects.filter((d) => d.fix && !inProposal.has(d.key))) {
+    const after = applyDefectFix(source, format, defect.fix);
+    if (!after.changed) continue;
+    const newDefects = ruleDefects(after.xml, format, ctx).defects.filter((d) => !before.has(d.key));
+    if (newDefects.length) result.blocked.push({ defect, newDefects });
+  }
+  return result;
+}
+
 // The fixes of a proposal as History records them: { code, params, fix }.
 export function correctionRecord(proposal) {
   return {
@@ -425,7 +447,9 @@ export function clashDefects(clashes) {
 
 const shown = (type, name) => (type === 'attribute' ? `@${name}` : `<${name}>`);
 
-export function formatRuleDefect(defect, t, { format = null } = {}) {
+// short (Mejoras E, Part 2.4): a path defect without its "The condition
+// […] cannot be met as written:" lead -- "<cbdata> has no @checksum.".
+export function formatRuleDefect(defect, t, { format = null, short = false } = {}) {
   const p = defect.params || {};
   const or = t('records.rulePath.or');
   switch (defect.code) {
@@ -463,7 +487,7 @@ export function formatRuleDefect(defect, t, { format = null } = {}) {
         standard: p.standard,
       });
     case 'path':
-      return formatPathProblem(p.problem, t, { format });
+      return formatPathProblem(p.problem, t, { format, detailOnly: short });
     case 'any_ancestor':
       return formatAncestorProblem(p.problem, t);
     case 'project_duplicate_id':

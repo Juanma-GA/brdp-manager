@@ -793,6 +793,27 @@ ruleTestExamplesCases.push({
   ],
 });
 
+// Mejoras E, Part 1.4: the schema already rules out what the rule forbids
+// (BRDP-EXT-02802, the listed children of <avee>) -- only examples meant
+// to be accepted are asked for, and the prompt says why.
+const ruleAveeChildren301 =
+  '<objrule id="XML-R-2814"><objpath objappl="0">//avee/*[not(self::modelic or self::sdc or self::chapnum or self::section or self::subsect or self::subject or self::discode or self::discodev or self::incode or self::incodev or self::itemloc)]</objpath><objuse>Prohibir avee con hijos no permitidos</objuse></objrule>';
+ruleTestExamplesCases.push({
+  name: 'brex-3-0-1-schema-covered-accept-only',
+  args: [
+    {
+      brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-02802', title: 'Children of the data module code', definition: 'Decide which children the data module code may have.', proposal: 'The data module code shall only contain its code elements.' },
+      standard: 'S1000D 3.0.1',
+      format: 'BREX-3.0.1',
+      ruleXml: ruleAveeChildren301,
+      placements: placementsFor('S1000D 3.0.1', ruleAveeChildren301, [['descript', 'rule']]),
+      acceptOnly: {
+        reasons: ['the schema only allows the listed children in <avee> (<chapnum>, <discode>, <discodev>, <incode>, <incodev>, <itemloc>, <modelic>, <sdc>, <section>, <subject>, <subsect>)'],
+      },
+    },
+  ],
+});
+
 // Test de reglas T4: DITA Schematron -- examples on topic-type skeletons
 // (topic/body for a note rule, the whole document for a root context).
 const ruleDitaNote =

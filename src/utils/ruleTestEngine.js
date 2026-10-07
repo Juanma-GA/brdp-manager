@@ -132,7 +132,8 @@ import {
   reason,
   stripLiterals,
   withoutPredicates,
-  xpathErrorMessage,
+  evaluationError,
+  RuleRuntimeError,
 } from './ruleTestCommon.js';
 import { analyzeSchematron, describeSchematron, runSchematronOnFragment, schematronAcceptanceDetails, schematronRuleParts, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
 import { checkRuleFormat, extractXPathNames } from '../validation/schemaValidation.js';
@@ -437,7 +438,10 @@ function makeEvaluator(doc) {
       return kind === 'path' ? { nodes: items } : items;
     } catch (err) {
       if (err instanceof NotExecutable) throw err;
-      throw new NotExecutable(REASON.xpath(xpathErrorMessage(err)));
+      // Mejoras E, Part 2.3: a dynamic error is the rule failing on THIS
+      // document (RuleRuntimeError, still a NotExecutable for every caller
+      // that only needs to know the rule did not run).
+      throw evaluationError(err, expression);
     }
   };
 }
@@ -515,6 +519,7 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
   const notRun = [];
   const outOfScope = [];
   const conditions = [];
+  const runtimeErrors = [];
   let ran = 0;
   for (const part of parts) {
     try {
@@ -528,9 +533,30 @@ export function runRuleOnFragment(ruleXml, format, fragmentXml, fragmentSchema =
       if (result.condition) conditions.push(result.condition);
       if (result.violation) violations.push(result.violation);
     } catch (err) {
+      if (err instanceof RuleRuntimeError) {
+        runtimeErrors.push({ ruleId: part.ruleId, ...err.runtime });
+        continue;
+      }
       if (!(err instanceof NotExecutable)) throw err;
       notRun.push({ ruleId: part.ruleId, reason: err.reason });
     }
+  }
+
+  // Mejoras E, Part 2.3: the rule gave an error on this document -- status
+  // 'error' (the test fails with the reason in plain words), never "not
+  // executable" and never a dropped example.
+  if (runtimeErrors.length > 0) {
+    return {
+      status: 'error',
+      violations,
+      warnings: [],
+      selectedNodePaths: [...new Set(selected)],
+      notExecutableReason: null,
+      notExecutableParts: notRun,
+      outOfScopeSchemas: [...new Set(outOfScope)],
+      conditions,
+      runtimeErrors,
+    };
   }
 
   // Every part is scoped to other schemas: the rule does not apply to this

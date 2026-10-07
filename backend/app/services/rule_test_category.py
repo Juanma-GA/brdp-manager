@@ -12,13 +12,15 @@ Every rule is in exactly ONE category:
   - outdated: tested, but the rule changed since (the tested hash is not
     the saved rule's) -- wins over whatever the old result was;
   - otherwise the recorded result: passed (also "passed with examples
-    edited by hand"), review, failed, inconclusive, not_executable.
+    edited by hand"), schema_covered (Mejoras E: the rule forbids what no
+    valid document of the schema can contain, and an example meant to be
+    accepted passed), review, failed, inconclusive, not_executable.
 """
 import hashlib
 
-RECORDED_RESULTS = ("passed", "review", "failed", "inconclusive", "not_executable")
+RECORDED_RESULTS = ("passed", "schema_covered", "review", "failed", "inconclusive", "not_executable")
 # The order the header lists them in (passed first, always shown).
-TEST_CATEGORIES = ("passed", "not_tested", "review", "failed", "inconclusive", "not_executable", "outdated")
+TEST_CATEGORIES = ("passed", "schema_covered", "not_tested", "review", "failed", "inconclusive", "not_executable", "outdated")
 
 
 def rule_xml_hash(rule_xml: str) -> str:

@@ -219,6 +219,12 @@
 // down to <supportEquipDescr>/<supplyDescr>/<spareDescr> through
 // <preliminaryRqmts>. The 45 earlier cases are unchanged (no attribute-only
 // rule among them).
+//
+// Mejoras E, Part 1.4: new case
+// ruleTestExamples/brex-3-0-1-schema-covered-accept-only (BRDP-EXT-02802,
+// the listed children of <avee>): the schema already rules out what the
+// rule forbids, so the prompt asks for examples meant to be accepted only
+// and says why. Every earlier case is unchanged.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

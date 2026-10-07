@@ -41,6 +41,11 @@ const NAME_RE = new RegExp(`^${NAME}$`);
 const CHILD_STEP_RE = new RegExp(`^(?:child::)?(${NAME})$`);
 const DESC_STEP_RE = new RegExp(`^descendant(?:-or-self)?::(${NAME})$`);
 const ATTR_STEP_RE = new RegExp(`^(?:@|attribute::)(${NAME})$`);
+// Mejoras E, Part 2.1: a named step reached by another axis
+// (ancestor::applic, parent::x, preceding-sibling::y…). The pair with the
+// step before is never judged (the axis is not "child"), but the steps
+// after it, and its predicates, are read from that element.
+const AXIS_STEP_RE = new RegExp(`^(ancestor|ancestor-or-self|parent|preceding-sibling|following-sibling|preceding|following|self)::(${NAME})$`);
 const WRAPPER_RE = /^(?:not|boolean|exists|empty|count)\s*\(/;
 const MAX_LISTED = 5;
 const MAX_WAYS = 3;
@@ -87,6 +92,9 @@ function scopeOf(index, schema) {
 }
 
 const node = (index, schema, name) => index.bySchema.get(schema)?.get(name);
+// The graph entry of <name> in one schema: { children: Set, attrs: Set } or
+// undefined (Mejoras E: schemaCoverage.js reads the graph through it).
+export const graphNode = node;
 const existsIn = (index, scope, name) => scope.some((s) => Boolean(node(index, s, name)));
 const childOk = (index, scope, a, b) => scope.some((s) => node(index, s, a)?.children.has(b) && Boolean(node(index, s, b)));
 const attrOk = (index, scope, a, x) => scope.some((s) => node(index, s, a)?.attrs.has(x));
@@ -118,6 +126,36 @@ function parentsMap(index, schema) {
   }
   index.parentsBySchema.set(schema, out);
   return out;
+}
+
+// The top-level operands of a predicate joined by "and" (outer parentheses
+// removed): null when it also has a top-level "or" -- then no operand on
+// its own narrows the selection (Mejoras E: schemaCoverage.js).
+export function andOperands(predicate) {
+  const text = String(predicate || '').trim();
+  if (orOperands(text).length > 1) return null;
+  return splitWhere(text, (t, i) => {
+    const m = /^\s+and\s+/.exec(t.slice(i));
+    return m && i > 0 ? m[0].length : 0;
+  })
+    .map((part) => unwrapParens(part.trim()))
+    .filter(Boolean);
+}
+
+// The operands of a top-level "or" (outer parentheses removed).
+export function orOperands(text) {
+  return splitWhere(String(text || '').trim(), (t, i) => {
+    const m = /^\s+or\s+/.exec(t.slice(i));
+    return m && i > 0 ? m[0].length : 0;
+  })
+    .map((part) => unwrapParens(part.trim()))
+    .filter(Boolean);
+}
+
+function unwrapParens(text) {
+  let e = text;
+  while (e.startsWith('(') && matchingClose(e, 0) === e.length - 1) e = e.slice(1, -1).trim();
+  return e;
 }
 
 // The elements <name> can be a direct child of, in the scope.
@@ -235,7 +273,13 @@ const unionBar = (text, i) => (text[i] === '|' ? 1 : /^\sunion\s/.test(text.slic
 
 // The location paths an expression is made of: a plain path, or the
 // operands of a condition (and/or, comparisons, not()/count()/…).
-export function pathOperands(expression) {
+// deep (Mejoras E, Part 2.1, only for the check of the conditions): also
+// the arguments of a function call (concat(a, ' ', b), normalize-space(x),
+// string(x)…) and the parts of some/every … satisfies, for … return and
+// if … then … else -- a path inside them is read from the same context node
+// as the predicate (never from a $variable).
+const QUANTIFIED_RE = /^(some|every|for|let)\s+\$/;
+export function pathOperands(expression, { deep = false } = {}) {
   const out = [];
   const visit = (raw) => {
     let e = raw.trim();
@@ -257,12 +301,63 @@ export function pathOperands(expression) {
     const sides = splitWhere(e, comparison);
     if (sides.length > 1) return sides.forEach(visit);
     if (/^['"\d]/.test(e) || e === '.' || /^\$/.test(e)) return;
-    // another function call: nothing is concluded from its arguments
-    if (/^[A-Za-z_][\w.:-]*\s*\(/.test(e) && !/^(?:node|text|comment)\(\)/.test(e)) return;
+    if (deep && QUANTIFIED_RE.test(e)) return quantifiedParts(e).forEach(visit);
+    if (deep && /^if\s*\(/.test(e)) return conditionalParts(e).forEach(visit);
+    // another function call: nothing is concluded from its arguments (deep:
+    // each argument is visited)
+    if (/^[A-Za-z_][\w.:-]*\s*\(/.test(e) && !/^(?:node|text|comment)\(\)/.test(e)) {
+      if (!deep) return;
+      const open = e.indexOf('(');
+      if (matchingClose(e, open) !== e.length - 1) return;
+      return splitWhere(e.slice(open + 1, -1), (t, i) => (t[i] === ',' ? 1 : 0)).forEach(visit);
+    }
     out.push(e);
   };
   visit(String(expression || ''));
   return out;
+}
+
+// some $a in X, $b in Y satisfies Z → [X, Y, Z]; for $a in X return Z;
+// let $a := X return Z. Only what is at the top level of the expression.
+function quantifiedParts(expression) {
+  const words = [];
+  scan(expression, (i, ch, depth) => {
+    if (depth !== 0) return true;
+    const m = /^\s(satisfies|return|in|:=)\s/.exec(expression.slice(i));
+    if (m) words.push({ at: i, len: m[0].length, word: m[1] });
+    return true;
+  });
+  const out = [];
+  let start = 0;
+  for (const w of words) {
+    if (w.word !== 'in' && w.word !== ':=') {
+      out.push(expression.slice(start, w.at));
+      start = w.at + w.len;
+      continue;
+    }
+    start = w.at + w.len; // the binding name before "in" / ":=" is skipped
+  }
+  out.push(expression.slice(start));
+  // each binding part "X, $b" → X (the next binding's name is dropped)
+  return out
+    .flatMap((part) => splitWhere(part, (t, i) => (t[i] === ',' ? 1 : 0)))
+    .map((p) => p.trim())
+    .filter((p) => p && !/^\$/.test(p) && !QUANTIFIED_RE.test(p));
+}
+
+// if (A) then B else C → [A, B, C].
+function conditionalParts(expression) {
+  const open = expression.indexOf('(');
+  const close = matchingClose(expression, open);
+  if (close === -1) return [];
+  const rest = expression.slice(close + 1);
+  const m = /^\s*then\s([\s\S]*)$/.exec(rest);
+  if (!m) return [expression.slice(open + 1, close)];
+  const parts = splitWhere(m[1], (t, i) => {
+    const w = /^\selse\s/.exec(t.slice(i));
+    return w && i > 0 ? w[0].length : 0;
+  });
+  return [expression.slice(open + 1, close), ...parts];
 }
 
 // A path's alternatives: top-level "|", and a parenthesised union followed
@@ -370,6 +465,7 @@ function readStep(sep, raw) {
   if ((m = CHILD_STEP_RE.exec(main))) return { sep, main, predicates, kind: 'element', name: m[1], desc: false };
   if ((m = DESC_STEP_RE.exec(main))) return { sep, main, predicates, kind: 'element', name: m[1], desc: true };
   if ((m = ATTR_STEP_RE.exec(main))) return { sep, main, predicates, kind: 'attribute', name: m[1] };
+  if ((m = AXIS_STEP_RE.exec(main))) return { sep, main, predicates, kind: 'axis', axis: m[1], name: m[2] };
   return { sep, main, predicates, kind: 'other' };
 }
 
@@ -387,6 +483,14 @@ function checkAlternative(index, scope, alternative, { start = null, inPredicate
     if (step.kind === 'self') return; // "." keeps the current element (the predicate's start)
     if (step.kind === 'other') {
       prev = null;
+      return;
+    }
+    if (step.kind === 'axis') {
+      // Mejoras E, Part 2.1: ancestor::applic/displaytext/p[…] -- the pair
+      // with the step before is not judged; what follows is read from it.
+      const inScope = existsIn(index, scope, step.name);
+      prev = inScope ? step.name : null;
+      if (inScope) problems.push(...predicateProblems(index, scope, step));
       return;
     }
     if (step.kind === 'attribute') {
@@ -419,17 +523,24 @@ function checkAlternative(index, scope, alternative, { start = null, inPredicate
     }
     prev = inScope ? name : null;
     // simple child paths in the step's predicates
-    if (inScope) {
-      for (const pred of step.predicates) {
-        for (const operand of pathOperands(pred)) {
-          if (operand.startsWith('/')) continue; // anchored elsewhere: the name check covers it
-          for (const alt of pathAlternatives(operand)) {
-            problems.push(...checkAlternative(index, scope, alt, { start: name, inPredicate: true, predicate: pred.replace(/\s+/g, ' ').trim() }));
-          }
-        }
+    if (inScope) problems.push(...predicateProblems(index, scope, step));
+  });
+  return problems;
+}
+
+// The relative paths of a step's predicates, read from the step's element
+// -- also inside a predicate of a predicate, an argument of a function and
+// the parts of some/every/for/if (Mejoras E, Part 2.1).
+function predicateProblems(index, scope, step) {
+  const problems = [];
+  for (const pred of step.predicates) {
+    for (const operand of pathOperands(pred, { deep: true })) {
+      if (operand.startsWith('/')) continue; // anchored elsewhere: the name check covers it
+      for (const alt of pathAlternatives(operand)) {
+        problems.push(...checkAlternative(index, scope, alt, { start: step.name, inPredicate: true, predicate: pred.replace(/\s+/g, ' ').trim() }));
       }
     }
-  });
+  }
   return problems;
 }
 
@@ -517,6 +628,14 @@ export function checkRulePaths(ruleXml, format, graph, options = {}) {
     let impossible = 0;
     for (const alternative of alternatives) {
       const found = checkAlternative(index, scope, alternative);
+      // Mejoras E, Part 2.1: a child missing in a condition that IS a child
+      // of the element the rule checks (the last step of its path): the
+      // path inside p[…] is read from <p>, not from that element.
+      const mainSteps = pathSteps(alternative).steps.filter((st) => st.kind === 'element' || st.kind === 'axis');
+      const checked = mainSteps.length ? mainSteps[mainSteps.length - 1].name : null;
+      for (const p of found) {
+        if (p.inPredicate && p.kind === 'child' && checked && checked !== p.parent && childOk(index, scope, checked, p.element)) p.readFrom = checked;
+      }
       if (found.some((p) => !p.inPredicate)) impossible += 1;
       for (const p of found) {
         const problem = {
@@ -711,7 +830,7 @@ const list = (names, t, mark) => {
 };
 
 // One problem in the language of `t`.
-export function formatPathProblem(p, t, { format = null } = {}) {
+export function formatPathProblem(p, t, { format = null, detailOnly = false } = {}) {
   const el = (n) => `<${n}>`;
   let detail;
   if (p.kind === 'root') {
@@ -724,6 +843,11 @@ export function formatPathProblem(p, t, { format = null } = {}) {
       attribute: p.attribute,
       owners: list(p.owners || [], t, el),
     });
+  } else if (p.inPredicate && p.kind === 'child') {
+    // Mejoras E, Part 2.1: "<p> has no <assert>." -- and, when the missing
+    // child belongs to the checked element, where the path is read from.
+    detail = t('records.rulePath.childInPredicate', { element: p.element, parent: p.parent });
+    if (p.readFrom) detail += ` ${t('records.rulePath.readFrom', { element: p.element, checked: p.readFrom, parent: p.parent })}`;
   } else {
     detail = t(
       p.parents?.length
@@ -732,6 +856,7 @@ export function formatPathProblem(p, t, { format = null } = {}) {
       { element: p.element, parent: p.parent, parents: list(p.parents || [], t, el) }
     );
   }
+  if (detailOnly) return detail;
   let text = p.inPredicate
     ? t('records.rulePath.inPredicate', { predicate: p.predicate, detail })
     : p.kind === 'root'
