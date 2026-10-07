@@ -50,6 +50,30 @@ function isSuggestDefinition(text) {
   return text === "Write the Definition for this BRDP.";
 }
 
+// Suggest Title: its fixed user message. The reply comes from the current
+// Title in the system prompt ("Current Title: …"), like a model following
+// the prompt: a reference prefix in brackets is kept; an "avee" Title
+// becomes the decision on the order of its children; a "hotspot"/"apsname"
+// Title the decision on @applicationStructureName; "ALREADYOK" in the Title
+// returns it unchanged; "MULTILINE" answers two lines; "POKEMON" names an
+// element that does not exist. Anything else: "Decide whether <Title>".
+function isSuggestTitle(text) {
+  return text === "Write the Title for this BRDP.";
+}
+
+function suggestTitleReply(systemPrompt) {
+  const current = (/\nCurrent Title: ([^\n]*)/.exec(systemPrompt || "") || [])[1] || "";
+  if (/ALREADYOK/.test(current)) return current;
+  const prefixMatch = /^(\([^)]*\))\s*/.exec(current);
+  const prefix = prefixMatch ? `${prefixMatch[1]} ` : "";
+  const rest = current.slice(prefixMatch ? prefixMatch[0].length : 0);
+  if (/MULTILINE/.test(current)) return `${prefix}Decidir el orden de <avee>\nEste título describe la decisión.`;
+  if (/POKEMON/.test(current)) return `${prefix}Decidir si se usa el elemento <pokemon>`;
+  if (/avee/i.test(rest)) return `${prefix}Definir el orden de los elementos hijos de <avee>`;
+  if (/hotspot|apsname/i.test(rest)) return `${prefix}Decide on the attribute @applicationStructureName for the element <hotspot>`;
+  return `${prefix}Decide whether ${rest}`;
+}
+
 // Suggest Rule round (docs request): Suggest Rule's fixed user message.
 // The reply is chosen deterministically from the BRDP's Proposal, read
 // from the tail of the system prompt ("BRDP:\n...\nProposal: <text>"), so
@@ -1086,6 +1110,8 @@ const server = http.createServer((req, res) => {
       reply = "ncage es un atributo del elemento `<identAndStatusSection>`, que agrupa los datos de identificación y estado del módulo de datos.";
     } else if (/IDSTATUS_TEST/.test(userText)) {
       reply = "En S1000D 3.0.1 los datos de identificación y estado van en `<idstatus>`, dentro de `<dmodule>`.";
+    } else if (isSuggestTitle(userText)) {
+      reply = suggestTitleReply(messages.find((m) => m.role === "system")?.content);
     } else if (isSuggestDefinition(userText)) {
       reply =
         "MOCK-LONG-DEFINITION: This decision point governs the applicability and scope of the allowedObjectFlag attribute across every structureObjectRule and nonContextRule in the data module, including split-rule variants, and must be evaluated consistently for every objectPath regardless of dmCode context or system differences. " +

@@ -7,6 +7,7 @@ import { authFetchJson } from '../services/apiClient';
 import { sendMessage } from '../api/llmAPI';
 import { buildSuggestDefinitionPrompt } from '../prompts/suggestDefinitionPrompt.js';
 import { buildSuggestProposalPrompt } from '../prompts/suggestProposalPrompt.js';
+import { buildSuggestTitlePrompt, readSuggestedTitle, sameTitle, SUGGEST_TITLE_USER_MESSAGE } from '../prompts/suggestTitlePrompt.js';
 import { SUGGEST_TEMPERATURE } from '../prompts/shared.js';
 import { numberDuplicateRuleIds, splitMultiPathRules } from '../utils/ruleSplit.js';
 import { buildCopyablePrompt, buildSuggestRulePrompt, parseSuggestRuleResponse, SUGGEST_RULE_USER_MESSAGE } from '../prompts/suggestRulePrompt.js';
@@ -14,7 +15,16 @@ import { fetchSchemaCards, fetchSchemaFacts } from '../api/schemaFacts.js';
 import { checkWellFormed } from '../api/generateBREX.js';
 import { registerRuleTest } from '../api/ruleTests';
 import { ruleXmlHash } from '../utils/ruleHash.js';
-import { checkRuleFormat, checkRuleNames, extractRuleNames, invalidRuleXPaths, selectSchemaFactNames } from '../validation/schemaValidation.js';
+import {
+  checkAgainstVocabulary,
+  checkRuleFormat,
+  checkRuleNames,
+  extractContextCandidates,
+  extractRuleNames,
+  invalidRuleXPaths,
+  nameIssues,
+  selectSchemaFactNames,
+} from '../validation/schemaValidation.js';
 import {
   coverageOf,
   decideRuleSchemaContext,
@@ -249,6 +259,60 @@ export function useSuggestions({ projectId, standard, schemaLocation, selected, 
       // of this same standard that hasn't been through ITS OWN project's
       // embedding job yet is invisible to this search -- always surfaced.
       const excludedPendingOtherProjects = similar.excluded_pending_other_projects || 0;
+
+      // kind='title' (Suggest Title): rewrites the Title the BRDP already
+      // has as the name of its decision point. The Definition corpus
+      // (/similar?kind=title) gives other titles, as style only; the
+      // schema facts are those of the names in the BRDP and its rule. The
+      // answer is checked before it is shown: one line of reasonable
+      // length (otherwise an error entry with Discard), the same name
+      // check as a suggested rule (red warnings, Accept still enabled),
+      // and a Title equal to the current one is "already follows the
+      // criterion", never an empty change.
+      if (kind === 'title') {
+        const referenceSimilar = similar.candidates;
+        const referenceStyle = similar.style_references || [];
+        const vocab = await recomputeVocabResult(selected);
+        const ruleXml = ruleApproval?.rule_xml || '';
+        const schemaFacts = await fetchSchemaFacts(standard, vocabulary, [selected.title, selected.definition, selected.proposal, ruleXml], 6);
+        const systemPrompt = buildSuggestTitlePrompt(selected, standard, {
+          similar: referenceSimilar,
+          styleReferences: referenceStyle,
+          schemaFacts,
+          ruleXml,
+          vocabCheck: vocab,
+        });
+        const res = await sendMessage(
+          [{ role: 'user', content: SUGGEST_TITLE_USER_MESSAGE }],
+          null,
+          aiProvider.model,
+          aiProvider.provider,
+          systemPrompt,
+          { temperature: SUGGEST_TEMPERATURE, shouldCancel }
+        );
+        const read = readSuggestedTitle(cleanInternalNames(res.content));
+        const base = {
+          brdpId,
+          kind,
+          loading: false,
+          sourceBrdpIds: referenceSimilar.map((c) => c.id),
+          similar: referenceSimilar,
+          styleReferences: referenceStyle,
+          excludedPendingOtherProjects,
+          expandedReferenceIds: new Set(),
+        };
+        if (read.problem) {
+          commit({ ...base, error: t(`records.assistant.titleSuggestionProblem.${read.problem}`) });
+          return;
+        }
+        if (sameTitle(read.title, selected.title)) {
+          commit({ ...base, alreadyFollows: true });
+          return;
+        }
+        const names = checkAgainstVocabulary(extractContextCandidates(read.title), vocabulary);
+        commit({ ...base, text: read.title, nameIssues: nameIssues(names, 'title', { standard }) });
+        return;
+      }
 
       // kind='definition' (docs request, Suggest Definition corpus round):
       // its own dedicated prompt + corpus shape (Similar/Style references,

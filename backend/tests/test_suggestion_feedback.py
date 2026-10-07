@@ -156,3 +156,21 @@ async def test_invalid_kind_or_outcome_is_rejected(client):
         assert response.status_code == 422
     finally:
         await _cleanup(project, [viewer])
+
+
+async def test_feedback_accepts_kind_title(client):
+    """Suggest Title logs its accepted/discarded suggestions like the others
+    (no migration: suggestion_feedback.kind is a plain string column)."""
+    project, brdp = await _make_project_with_brdp()
+    editor = await _make_user()
+    await _assign_role(editor.id, project.id, "editor")
+    try:
+        response = await client.post(
+            "/api/suggestion-feedback",
+            json={"brdp_id": str(brdp.id), "kind": "title", "suggested_text": "Decidir si se usa <randomList>", "source_brdp_ids": [], "outcome": "accepted"},
+            headers=_headers(editor),
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["kind"] == "title"
+    finally:
+        await _cleanup(project, [editor])

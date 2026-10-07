@@ -238,6 +238,39 @@ export const suggestDefinitionCases = [
   { name: 'only-similar-empty-fields', args: [{ ...brdpBase, definition: '', proposal: '' }, 'DITA 1.3 Xpath3.0', similarDefinitionSample, [], vocabNone] },
 ];
 
+// Suggest Title: a 3.0.1 Title that states the outcome, with its rule and
+// the decision points' titles as style; and a 4.2 English one with a
+// reference prefix and the <table> card.
+export const suggestTitleCases = [
+  {
+    name: 'spanish-outcome-title-with-rule-3-0-1',
+    args: [
+      {
+        ...brdpBase,
+        identifier: 'BRDP-EXT-02610',
+        title: 'Prohibir avee con orden de hijos incorrecto',
+        definition: 'Orden de los hijos de avee.',
+        proposal: 'Los hijos de <avee> siguen el orden del esquema.',
+      },
+      'S1000D 3.0.1',
+      {
+        similar: similarDefinitionSample,
+        styleReferences: styleReferencesSample,
+        ruleXml: '<objrule id="BRDP-EXT-02610"><objpath objappl="0">//avee[*[1][not(self::modelic)]]</objpath><objuse>Orden de hijos de avee.</objuse></objrule>',
+        vocabCheck: vocabClean,
+      },
+    ],
+  },
+  {
+    name: 'english-prefix-with-table-card-4-2',
+    args: [
+      { ...brdpBase, title: '(SOPTE BREX 3.9.5.2.1.9-2.2) Prohibit tables without frame' },
+      'S1000D 4.2',
+      { schemaFacts: [{ name: 'table', entry: tableEntry }], vocabCheck: vocabNotFound },
+    ],
+  },
+];
+
 export const suggestProposalCases = [
   { name: 'all-three-groups', args: [brdpBase, 'S1000D 4.2', sameBrdpSample, similarProposalSample, thisProjectSample, vocabClean] },
   { name: 'refused-with-comments-wrongtype', args: [brdpRefused, 'S1000D 4.2', [], [], [], vocabWrongType] },

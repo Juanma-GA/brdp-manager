@@ -276,6 +276,80 @@
       ]
     },
     {
+      "id": "suggest-title-avee-child-order-3-0-1",
+      "description": "A 3.0.1 Spanish Title that states the outcome ('Prohibir …') must become the name of its decision point: one line, with <avee>, never starting with 'Prohibir'.",
+      "standard": "S1000D 3.0.1",
+      "type": "suggest-title",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ST-01",
+        "title": "Prohibir avee con orden de hijos incorrecto",
+        "definition": "Orden en el que deben aparecer los elementos hijos de avee dentro del código del módulo de datos.",
+        "proposal": "Los hijos de <avee> siguen el orden del esquema.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule id=\"BRDP-EVAL-ST-01\"><objpath objappl=\"0\">//avee[*[1][not(self::modelic)]]</objpath><objuse>Los hijos de avee siguen el orden del esquema.</objuse></objrule>",
+      "checks": [
+        {
+          "type": "not_contains",
+          "pattern": "\\n",
+          "note": "one line"
+        },
+        {
+          "type": "contains",
+          "pattern": "<avee>"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "^\\s*Prohibir",
+          "flags": "i",
+          "note": "names the decision, not the outcome"
+        },
+        {
+          "type": "language",
+          "expect": "es"
+        }
+      ]
+    },
+    {
+      "id": "suggest-title-hotspot-apsname-4-2-en",
+      "description": "A 4.2 English Title with a reference prefix that states the outcome must keep the prefix and name the decision on @apsname of <hotspot>.",
+      "standard": "S1000D 4.2",
+      "type": "suggest-title",
+      "brdp": {
+        "identifier": "BRDP-EVAL-ST-02",
+        "title": "(SOPTE BREX 3.9.5.2.1.9-2.2) Prohibit hotspot without apsname or with an empty apsname",
+        "definition": "Whether every hotspot of an illustration must carry a non-empty application-specific name.",
+        "proposal": "Every <hotspot> shall have a non-empty @applicationStructureName.",
+        "validation": "Validated"
+      },
+      "checks": [
+        {
+          "type": "not_contains",
+          "pattern": "\\n",
+          "note": "one line"
+        },
+        {
+          "type": "contains",
+          "pattern": "^\\(SOPTE BREX 3\\.9\\.5\\.2\\.1\\.9-2\\.2\\)",
+          "note": "the reference prefix is kept at the start"
+        },
+        {
+          "type": "contains",
+          "pattern": "<hotspot>"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "^\\(SOPTE BREX [^)]*\\)\\s*Prohibit",
+          "flags": "i",
+          "note": "names the decision, not the outcome"
+        },
+        {
+          "type": "language",
+          "expect": "en"
+        }
+      ]
+    },
+    {
       "id": "suggest-proposal-cage-code",
       "description": "A CAGE-code decision must come back as a fill-in template with a placeholder, never an invented real-looking code.",
       "standard": "S1000D 4.2",

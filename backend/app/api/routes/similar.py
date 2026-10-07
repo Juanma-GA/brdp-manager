@@ -78,7 +78,7 @@ PROPOSAL_THIS_PROJECT_LIMIT = 3
 async def get_similar(
     project_id: uuid.UUID,
     brdp_id: uuid.UUID,
-    kind: str = Query(..., pattern="^(definition|proposal|rule)$"),
+    kind: str = Query(..., pattern="^(title|definition|proposal|rule)$"),
     viewer: User = Depends(require_project_role("viewer")),
     db: AsyncSession = Depends(get_db),
     transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
@@ -106,7 +106,8 @@ async def get_similar(
     # -- a project can legitimately have non-EXT identifiers that aren't
     # catalog entries, and vice versa). Cheap enough to do before the real
     # embedding call below, so a direct API call never pays for one either.
-    if kind == "definition":
+    # Suggest Title: same gate (the catalog gives the official Title too).
+    if kind in ("definition", "title"):
         is_catalog_brdp = (
             await db.execute(
                 select(func.count())
@@ -115,13 +116,22 @@ async def get_similar(
             )
         ).scalar_one() > 0
         if is_catalog_brdp:
+            what = "title" if kind == "title" else "definition"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f"BRDP {brdp.identifier!r} already has an official definition from the "
-                    f"{project.standard!r} catalog -- Suggest Definition is not available for it."
+                    f"BRDP {brdp.identifier!r} already has an official {what} from the "
+                    f"{project.standard!r} catalog -- Suggest {what.capitalize()} is not available for it."
                 ),
             )
+
+    # Suggest Title rewrites the Title the BRDP already has as the name of
+    # its decision point; with no Title there is nothing to rewrite.
+    if kind == "title" and not brdp.title.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"BRDP {brdp.identifier!r} has no Title yet -- write one before Suggest Title.",
+        )
 
     # docs request (Suggest Proposal round), point 2: a Proposal is the
     # project's concrete ANSWER to the decision point the Definition
@@ -156,7 +166,9 @@ async def get_similar(
         logger.error("ref=%s query embedding for Suggest failed: %s", ref, err)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error_detail("embedding_unavailable", ref))
 
-    if kind == "definition":
+    # Suggest Title uses the Definition corpus: the closest decision points
+    # (and a few different ones) carry their titles, used only as style.
+    if kind in ("definition", "title"):
         return await _get_definition_similar(db, project, project_id, brdp_id, query_embedding)
 
     if kind == "proposal":

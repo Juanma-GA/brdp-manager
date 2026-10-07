@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 class SuggestionFeedbackCreate(BaseModel):
     brdp_id: uuid.UUID
-    kind: Literal["definition", "proposal", "rule"]
+    kind: Literal["title", "definition", "proposal", "rule"]
     suggested_text: str
     # The (up to 10) BRDP ids /similar returned as few-shot precedent for
     # this particular suggestion -- kept even for a discarded outcome, so

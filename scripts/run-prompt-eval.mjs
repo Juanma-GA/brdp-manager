@@ -61,6 +61,7 @@ import { execFileSync } from "node:child_process";
 import { buildAskSystemPrompt } from "../src/prompts/askPrompt.js";
 import { buildSuggestDefinitionPrompt } from "../src/prompts/suggestDefinitionPrompt.js";
 import { buildSuggestProposalPrompt } from "../src/prompts/suggestProposalPrompt.js";
+import { buildSuggestTitlePrompt, readSuggestedTitle, SUGGEST_TITLE_USER_MESSAGE } from "../src/prompts/suggestTitlePrompt.js";
 import {
   NOT_CHECKABLE_PREFIX,
   SUGGEST_RULE_USER_MESSAGE,
@@ -830,6 +831,34 @@ async function runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCa
   return { systemPrompt, userMessage, answer };
 }
 
+// Suggest Title: same flow as the app (useSuggestions, kind "title") --
+// the Definition corpus via /similar?kind=title, the schema facts of the
+// names in the BRDP and its rule (the case's optional `rule`, seeded as
+// the BRDP's Draft rule), the real prompt and the fixed user message. The
+// answer is read the way the app reads it (readSuggestedTitle): the checks
+// see the Title the app would offer.
+async function runSuggestTitleCase(project, aiProvider, createdBrdp, testCase) {
+  const similar = await similarFor(project, createdBrdp.id, "title");
+  const vocabCheck = computeVocabResult(createdBrdp, testCase.standard);
+  const ruleXml = testCase.rule || "";
+  const vocabulary = loadSchemaVocabulary(testCase.standard);
+  const names = selectSchemaFactNames([createdBrdp.title, createdBrdp.definition, createdBrdp.proposal, ruleXml], vocabulary, 6).map((c) => c.name);
+  const schemaFacts = await fetchSchemaFacts(testCase.standard, names);
+  const systemPrompt = buildSuggestTitlePrompt(createdBrdp, testCase.standard, {
+    similar: similar.candidates,
+    styleReferences: similar.style_references || [],
+    schemaFacts,
+    ruleXml,
+    vocabCheck,
+  });
+  const rawAnswer = await sendToLlm(aiProvider, systemPrompt, SUGGEST_TITLE_USER_MESSAGE, SUGGEST_TEMPERATURE);
+  const read = readSuggestedTitle(cleanInternalNames(rawAnswer));
+  // A problem (several lines, too long) leaves the raw text so the checks
+  // fail on it; the app would not offer it.
+  const answer = read.problem ? rawAnswer : read.title;
+  return { systemPrompt, userMessage: SUGGEST_TITLE_USER_MESSAGE, answer, rawAnswer };
+}
+
 async function runSuggestProposalCase(project, aiProvider, createdBrdp, testCase) {
   const similar = await similarFor(project, createdBrdp.id, "proposal");
   const vocabCheck = computeVocabResult(createdBrdp, testCase.standard);
@@ -1144,6 +1173,7 @@ async function runCaseOnce(project, aiProvider, createdBrdp, testCase) {
   if (testCase.type === "rule-review") return runRuleReviewCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-rule") return runSuggestRuleCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "ask") return runAskCase(project, aiProvider, createdBrdp, testCase);
+  if (testCase.type === "suggest-title") return runSuggestTitleCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-definition") return runSuggestDefinitionCase(project, aiProvider, createdBrdp, testCase);
   if (testCase.type === "suggest-proposal") return runSuggestProposalCase(project, aiProvider, createdBrdp, testCase);
   throw new Error(`Unknown case type: ${testCase.type}`);
@@ -1218,6 +1248,15 @@ async function main() {
       // An extract-from-rules / extract-from-text case has no BRDP of its
       // own: its candidates come from the file or the text.
       if (testCase.brdp) brdpByCase.set(testCase.id, await createBrdp(project.id, testCase.brdp));
+      // Suggest Title: the case's rule is the BRDP's own (Draft), as the
+      // app would read it from rule_approvals.
+      if (testCase.type === "suggest-title" && testCase.rule) {
+        const format = STANDARD_TO_RULE_FORMAT[testCase.standard];
+        await apiFetch(`/api/projects/${project.id}/brdps/${brdpByCase.get(testCase.id).id}/approvals/${format}`, {
+          method: "PUT",
+          body: JSON.stringify({ rule_xml: testCase.rule, source: "manual", status: "pending_review" }),
+        });
+      }
     }
 
     for (const [standard, project] of projectByStandard) {
@@ -1303,7 +1342,7 @@ function buildReportHeader(meta, runs) {
     model: meta.aiProvider.model,
     commit: meta.gitInfo.commit,
     uncommittedChanges: meta.gitInfo.dirty,
-    temperatures: { ask: ASK_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE, "rule-proposal-check": RULE_PROPOSAL_CHECK_TEMPERATURE, "extract-from-rules": SUGGEST_TEMPERATURE, "extract-from-text": FIND_DECISIONS_TEMPERATURE },
+    temperatures: { ask: ASK_TEMPERATURE, "suggest-title": SUGGEST_TEMPERATURE, "suggest-definition": SUGGEST_TEMPERATURE, "suggest-proposal": SUGGEST_TEMPERATURE, "suggest-rule": SUGGEST_TEMPERATURE, "rule-test": RULE_TEST_TEMPERATURE, "rule-review": RULE_TEST_REVIEW_TEMPERATURE, "rule-proposal-check": RULE_PROPOSAL_CHECK_TEMPERATURE, "extract-from-rules": SUGGEST_TEMPERATURE, "extract-from-text": FIND_DECISIONS_TEMPERATURE },
     runs,
     generatedAt: meta.generatedAt,
     // C3: only some cases were run (--only / --cases).
@@ -1324,7 +1363,7 @@ function writeReport(results, runs, meta) {
   lines.push(`- Provider: ${header.provider} / ${header.model}`);
   lines.push(`- Commit: ${header.commit}${header.uncommittedChanges ? " (+ uncommitted changes)" : ""}`);
   lines.push(
-    `- Temperatures: ask=${header.temperatures.ask}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}, rule-proposal-check=${header.temperatures["rule-proposal-check"]}, extract-from-rules=${header.temperatures["extract-from-rules"]}, extract-from-text=${header.temperatures["extract-from-text"]} (texts ${SUGGEST_TEMPERATURE})`
+    `- Temperatures: ask=${header.temperatures.ask}, suggest-title=${header.temperatures["suggest-title"]}, suggest-definition=${header.temperatures["suggest-definition"]}, suggest-proposal=${header.temperatures["suggest-proposal"]}, suggest-rule=${header.temperatures["suggest-rule"]}, rule-test=${header.temperatures["rule-test"]}, rule-review=${header.temperatures["rule-review"]}, rule-proposal-check=${header.temperatures["rule-proposal-check"]}, extract-from-rules=${header.temperatures["extract-from-rules"]}, extract-from-text=${header.temperatures["extract-from-text"]} (texts ${SUGGEST_TEMPERATURE})`
   );
   lines.push(`- Runs per case: ${header.runs}`);
   lines.push(`- Similar decisions: ${header.similar}`);

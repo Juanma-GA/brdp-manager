@@ -91,7 +91,7 @@ const FIELD_LABEL_KEYS = {
   proposal: 'records.fieldProposal',
   comments: 'records.fieldRefusalReason',
 };
-const SUGGEST_KINDS = ['definition', 'proposal', 'rule'];
+const SUGGEST_KINDS = ['title', 'definition', 'proposal', 'rule'];
 
 // Live estimate from the job's OWN observed rate so far (elapsed time /
 // items processed), not a pre-configured ms-per-item setting -- the
@@ -2492,7 +2492,20 @@ export default function RecordsPage() {
                     // by this; Suggest Proposal/Rule are unaffected.
                     // (null = the catalog could not be loaded: the check is
                     // unavailable and said so below, never "not a catalog BRDP".)
-                    const catalogDisabled = kind === 'definition' && Boolean(suggestions.catalogIdentifierSet?.has(selected.identifier));
+                    // Suggest Title has the same gate: the catalog gives the
+                    // official Title too.
+                    const catalogDisabled =
+                      (kind === 'definition' || kind === 'title') && Boolean(suggestions.catalogIdentifierSet?.has(selected.identifier));
+                    // Suggest Title rewrites the Title already written (none
+                    // -> nothing to rewrite), and only an editor can change it.
+                    const titleBlockedReason =
+                      kind !== 'title'
+                        ? null
+                        : !canEdit
+                          ? t('records.assistant.suggestTitleViewer')
+                          : !selected.title?.trim()
+                            ? t('records.assistant.suggestTitleNeedsTitle')
+                            : null;
                     // docs request (Suggest Proposal corpus round): Proposal
                     // is built ON TOP OF the Definition (the prompt cites it
                     // as fixed context) -- an empty Definition means there is
@@ -2527,14 +2540,18 @@ export default function RecordsPage() {
                           suggestDisabledByEmbeddings ||
                           catalogDisabled ||
                           definitionEmptyForProposal ||
-                          !!ruleBlockedReason
+                          !!ruleBlockedReason ||
+                          !!titleBlockedReason
                         }
+                        data-testid={`suggest-${kind}`}
                         title={
                           pendingBlocked
                             ? t('records.assistant.pendingSuggestionBlocksNew')
                             : catalogDisabled
-                              ? t('records.assistant.suggestDefinitionCatalogDisabled')
-                              : definitionEmptyForProposal
+                              ? t(kind === 'title' ? 'records.assistant.suggestTitleCatalogDisabled' : 'records.assistant.suggestDefinitionCatalogDisabled')
+                              : titleBlockedReason
+                                ? titleBlockedReason
+                                : definitionEmptyForProposal
                                 ? t('records.assistant.suggestProposalNeedsDefinition')
                                 : ruleBlockedReason || undefined
                         }
@@ -2622,11 +2639,21 @@ export default function RecordsPage() {
                   </div>
                 )}
 
+                {selectedSuggestion?.alreadyFollows && (
+                  <div className={styles.suggestionBox} data-testid="title-already-follows">
+                    <span className={styles.muted}>{t('records.assistant.titleAlreadyFollows')}</span>
+                    <div className={styles.suggestionActions}>
+                      <button onClick={suggestions.discardSuggestion}>{t('records.assistant.discard')}</button>
+                    </div>
+                  </div>
+                )}
+
                 {selectedSuggestion?.text && selectedSuggestion.kind !== 'rule' && (
-                  <div className={styles.suggestionBox}>
+                  <div className={styles.suggestionBox} data-testid={`suggestion-${selectedSuggestion.kind}`}>
                     <div className={styles.suggestionText}>
                       {selectedSuggestion.text}
                     </div>
+                    {selectedSuggestion.nameIssues?.length > 0 && <SchemaIssueLines issues={selectedSuggestion.nameIssues} />}
                     <div className={styles.suggestionActions}>
                       <button
                         onClick={suggestions.acceptSuggestion}
@@ -2644,10 +2671,12 @@ export default function RecordsPage() {
                         `styleReferences` arrays buildSuggestDefinitionPrompt
                         used -- NEVER text the LLM produced, and the
                         accepted text above never includes it. */}
-                    {selectedSuggestion.kind === 'definition' && (
+                    {(selectedSuggestion.kind === 'definition' || selectedSuggestion.kind === 'title') && (
                       <div className={styles.suggestionReferences}>
                         {selectedSuggestion.similar.length === 0 && selectedSuggestion.styleReferences.length === 0 ? (
-                          <p className={styles.hint}>{t('records.assistant.definitionNoReferences')}</p>
+                          <p className={styles.hint}>
+                            {t(selectedSuggestion.kind === 'title' ? 'records.assistant.titleNoReferences' : 'records.assistant.definitionNoReferences')}
+                          </p>
                         ) : (
                           <>
                             {selectedSuggestion.similar.length > 0 && (

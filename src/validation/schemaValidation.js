@@ -1971,7 +1971,8 @@ export function ruleFormatIssues(result) {
 // formatter (formatSchemaIssue). The keys are exactly the ones each panel
 // used before this consolidation, so the texts on screen do not change.
 // Sources: 'brdp' (the BRDP's own text), 'rule' (a suggested or pasted
-// rule), 'answer' (an Ask answer), 'example' (a Test rule example).
+// rule), 'title' (a suggested Title), 'answer' (an Ask answer),
+// 'example' (a Test rule example).
 export const SCHEMA_ISSUE_KEYS = {
   brdp: {
     names_not_found: 'records.assistant.vocabUnknownNames',
@@ -1997,6 +1998,12 @@ export const SCHEMA_ISSUE_KEYS = {
     rule_format_foreign: 'records.assistant.ruleFormat.foreign',
     rule_format_multiple: 'records.assistant.ruleFormat.multiple',
     rule_format_duplicate_ids: 'records.assistant.ruleFormat.duplicateIds',
+  },
+  // A suggested Title (Suggest Title).
+  title: {
+    names_not_found: 'records.assistant.titleNamesNotFound',
+    wrong_type_as_element: 'records.assistant.vocabWrongTypeAsElement',
+    wrong_type_as_attribute: 'records.assistant.vocabWrongTypeAsAttribute',
   },
   answer: {
     names_not_found: 'records.assistant.answerUnknownNames',

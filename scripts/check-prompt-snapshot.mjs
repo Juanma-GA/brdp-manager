@@ -368,6 +368,9 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // (<standard>)' source label is covered). The 44 existing prompts are
 // unchanged.
 //
+// Suggest Title: a new group, suggestTitle (2 cases); the 62 existing
+// prompts are unchanged.
+//
 // AI Extract (2/2), free text: two new groups -- findDecisions (step 1: the
 // two sample texts of the eval set and the text with instructions to the
 // AI) and extractFromText (step 2: a new EXT whose Title came from step 1,
@@ -407,14 +410,16 @@ import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.j
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';
 import { buildExtractFromTextPrompt, buildFindDecisionsPrompt } from '../src/prompts/extractFromTextPrompt.js';
-import { askCases, extractFromRulesCases, extractFromTextCases, findDecisionsCases, ruleProposalCheckCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases } from './prompt-snapshot/cases.mjs';
+import { buildSuggestTitlePrompt } from '../src/prompts/suggestTitlePrompt.js';
+import { askCases, extractFromRulesCases, extractFromTextCases, findDecisionsCases, ruleProposalCheckCases, ruleTestExamplesCases, ruleTestReviewCases, suggestDefinitionCases, suggestProposalCases, suggestRuleCases, suggestTitleCases } from './prompt-snapshot/cases.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXPECTED_PATH = path.join(__dirname, 'prompt-snapshot', 'expected-prompts.json');
 
 function buildActual() {
-  const actual = { ask: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {}, ruleProposalCheck: {}, extractFromRules: {}, findDecisions: {}, extractFromText: {} };
+  const actual = { ask: {}, suggestTitle: {}, suggestDefinition: {}, suggestProposal: {}, suggestRule: {}, ruleTestExamples: {}, ruleTestReview: {}, ruleProposalCheck: {}, extractFromRules: {}, findDecisions: {}, extractFromText: {} };
   for (const c of askCases) actual.ask[c.name] = buildAskSystemPrompt(...c.args);
+  for (const c of suggestTitleCases) actual.suggestTitle[c.name] = buildSuggestTitlePrompt(...c.args);
   for (const c of suggestDefinitionCases) actual.suggestDefinition[c.name] = buildSuggestDefinitionPrompt(...c.args);
   for (const c of suggestProposalCases) actual.suggestProposal[c.name] = buildSuggestProposalPrompt(...c.args);
   for (const c of suggestRuleCases) actual.suggestRule[c.name] = buildSuggestRulePrompt(...c.args);

@@ -1564,3 +1564,59 @@ async def test_proposal_excluded_pending_other_projects_scoped_to_non_empty_prop
     finally:
         await _cleanup(project, [editor])
         await _cleanup(other_project)
+
+
+# ─── Suggest Title (kind=title) ─────────────────────────────────────────────
+
+
+async def test_title_uses_the_definition_corpus(client):
+    """Suggest Title reads the same corpus as Suggest Definition: the
+    closest decision points carry their titles (used only as style)."""
+    shared_standard = f"TEST-STANDARD-{uuid.uuid4()}"
+    project_a = await _make_project(standard=shared_standard)
+    project_b = await _make_project(standard=shared_standard)
+    editor = await _make_editor(project_a.id)
+    source = await _make_source_brdp(project_a.id)
+    async with async_session_factory() as session:
+        db_source = await session.get(BRDP, source.id)
+        db_source.title = "Prohibir avee con orden de hijos incorrecto"
+        await session.commit()
+    await _make_validated_candidate(project_b.id, _SAME_DIRECTION, "BRDP-OTHERPROJ-T1")
+    catalog_entry = await _make_catalog_entry(shared_standard, _SAME_DIRECTION, "BRDP-CAT-T1")
+    try:
+        url = f"/api/projects/{project_a.id}/brdps/{source.id}/similar"
+        title = (await client.get(url + "?kind=title", headers=_headers(editor))).json()
+        definition = (await client.get(url + "?kind=definition", headers=_headers(editor))).json()
+        assert {c["identifier"] for c in title["candidates"]} == {"BRDP-OTHERPROJ-T1", "BRDP-CAT-T1"}
+        assert title == definition
+        assert next(c for c in title["candidates"] if c["identifier"] == "BRDP-CAT-T1")["title"] == catalog_entry.title
+    finally:
+        await _cleanup(project_a, [editor])
+        await _cleanup(project_b, [])
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_title_rejected_on_a_catalog_brdp(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    catalog_entry = await _make_catalog_entry(project.standard, None, "BRDP-S1-00071")
+    source = await _make_source_brdp_with_identifier(project.id, "BRDP-S1-00071")
+    try:
+        response = await client.get(f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=title", headers=_headers(editor))
+        assert response.status_code == 400
+        assert "Suggest Title" in response.text
+    finally:
+        await _cleanup(project, [editor])
+        await _cleanup_catalog([catalog_entry])
+
+
+async def test_title_rejected_without_a_title(client):
+    project = await _make_project()
+    editor = await _make_editor(project.id)
+    source = await _make_source_brdp(project.id)  # no title
+    try:
+        response = await client.get(f"/api/projects/{project.id}/brdps/{source.id}/similar?kind=title", headers=_headers(editor))
+        assert response.status_code == 400
+        assert "no Title" in response.text
+    finally:
+        await _cleanup(project, [editor])
