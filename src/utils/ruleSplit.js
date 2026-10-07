@@ -296,3 +296,23 @@ export function numberApprovedRulesDuplicateIds(rules, format) {
   const clashes = [...owners].filter(([, set]) => set.size > 1).map(([id, set]) => ({ id, identifiers: [...set] }));
   return { rules: out, duplicateIds: { numbered, clashes } };
 }
+
+// The ids of the rule elements of a fragment, in document order (BREX:
+// structureObjectRule / objrule; Schematron: pattern, rule, assert, report)
+// -- for "an id used by the rules of two BRDPs" (Corrección propuesta).
+const SCH_ID_RE = /<(?:[A-Za-z_][\w.-]*:)?(?:pattern|rule|assert|report)\b[^>]*?\sid\s*=\s*(["'])([^"']*)\1/g;
+export function ruleElementIds(ruleXml, format) {
+  const source = String(ruleXml ?? '');
+  const shape = SHAPES[format];
+  if (shape) {
+    return (ruleElements(source, shape.rule) || [])
+      .sort((a, b) => a.start - b.start)
+      .map((rule) => ID_ATTR_RE.exec(rule.openTag)?.[3])
+      .filter(Boolean);
+  }
+  if (format === 'SCH-DITA') {
+    const text = source.replace(/<!--[\s\S]*?-->/g, (c) => ' '.repeat(c.length));
+    return [...text.matchAll(SCH_ID_RE)].map((m) => m[2]);
+  }
+  return [];
+}

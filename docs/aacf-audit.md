@@ -460,3 +460,10 @@ Protecciones 2b (`fa1c37e`, el commit del endpoint y los tests, y el de esta doc
 - HR13: Tailwind (fuera del encargo); `@types/*` sin uso.
 - Avisos de lint que no cubría el encargo: 23 `set-state-in-effect`, 7 `only-export-components`, 5 `preserve-manual-memoization` (35 en total; antes 49).
 - `scripts/verify-*.mjs` sin revisar (fuera del encargo).
+
+## Corrección propuesta de reglas con defecto
+
+"La IA propone, el código comprueba, las personas deciden" (HR7, HR9) aplicado a las reglas ya guardadas: cuando el código encuentra un defecto, prepara una corrección que nadie aplica hasta que un editor pulsa Aceptar; la app nunca llama a la IA por su cuenta. Migración nueva `0029_rule_correction_dismissed.py`; ningún prompt cambia.
+
+- **Aceptar** es un guardado normal de la regla (Draft, la prueba queda desactualizada por el hash) con un evento `rule_corrected` en History (qué arregló, qué queda, quién). **Descartar** se recuerda por la huella de la regla (`rule_approvals.correction_dismissed_hash`): si la regla cambia, vuelve a proponerse. Un lector ve los bloques y las listas, sin botones.
+- **Sigue abierto**: AI Extract no muestra estas correcciones en su tabla de revisión (2.4, no hecho); una regla cuyo texto pesa varios MB (BRDP-S1-00007 del BREX "CA") congela la página ~1 s mientras se comprueba.

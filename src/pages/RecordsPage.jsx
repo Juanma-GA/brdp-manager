@@ -64,6 +64,10 @@ import { formatRuleTestReason } from '../utils/ruleTestReasons.js';
 import RuleStatusCell from '../components/RuleStatusCell';
 import SchemaIssueLines from '../components/assistant/SchemaIssueLines';
 import { useNameFixHints } from '../hooks/useNameFixHints.js';
+import { cachedRuleCorrection, useCorrectionContext, useRuleCorrections } from '../hooks/useRuleCorrections.js';
+import RuleCorrectionBlock from '../components/assistant/RuleCorrectionBlock.jsx';
+import { correctionRecord, formatRuleDefect, formatRuleFix } from '../validation/ruleCorrection.js';
+import { ruleXmlHash } from '../utils/ruleHash.js';
 import SchemaNavCard from '../components/assistant/SchemaNavCard';
 import BrdpCompareDialog from '../components/compare/BrdpCompareDialog';
 import CatalogEditionTag from '../components/CatalogEditionTag';
@@ -227,6 +231,21 @@ function formatCatalogEditionValue(t, value) {
   }
 }
 
+// Corrección propuesta: the "rule_corrected" event's value is JSON
+// ({ fixes: [{ code, params, fix }], remaining }) -- each defect fixed and
+// how, then what was left, in the viewer's language.
+function formatRuleCorrectedValue(t, value) {
+  if (!value) return '—';
+  try {
+    const parsed = JSON.parse(value);
+    const fixed = (parsed.fixes || []).map((d) => `${formatRuleDefect(d, t)} → ${formatRuleFix(d.fix, t)}`).join(' ');
+    const left = (parsed.remaining || []).map((d) => formatRuleDefect(d, t)).join(' ');
+    return left ? `${fixed} ${t('records.ruleCorrection.remainingHeading')} ${left}` : fixed;
+  } catch {
+    return value;
+  }
+}
+
 function extractedQuoteLength(value) {
   try {
     return (JSON.parse(value || '{}').quote || '').length;
@@ -240,6 +259,7 @@ function extractedQuoteLength(value) {
 function historyValueTitle(t, fieldName, value) {
   if (!value) return undefined;
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
+  if (fieldName === 'rule_corrected') return formatRuleCorrectedValue(t, value);
   if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   if (fieldName === 'catalog_edition') return formatCatalogEditionValue(t, value);
   // AACF 3, Part 3: a status value reads in the interface language in its
@@ -273,6 +293,7 @@ function isLongHistoryEntry(entry) {
   if (entry.field_name === 'rule_test') return (parseRuleTestHistoryValue(entry.new_value)?.editedExamples.length || 0) > 0;
   // An extraction from free text carries its quote: long when the quote is.
   if (entry.field_name === 'extracted_from') return extractedQuoteLength(entry.new_value) > HISTORY_MAX_CHARS - 60;
+  if (entry.field_name === 'rule_corrected') return formatRuleCorrectedValue(i18n.t.bind(i18n), entry.new_value).length > HISTORY_MAX_CHARS;
   if (HISTORY_TRANSLATED_FIELDS[entry.field_name] || entry.field_name === 'rule_copied' || entry.field_name === 'catalog_edition') return false;
   return [entry.old_value, entry.new_value].some((v) => historyText(entry.field_name, v).length > HISTORY_MAX_CHARS);
 }
@@ -286,6 +307,7 @@ function historyText(fieldName, value) {
 // keeps its line breaks and indentation).
 function fullHistoryValue(t, fieldName, value) {
   if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
+  if (fieldName === 'rule_corrected') return formatRuleCorrectedValue(t, value);
   if (fieldName === 'rule_test' || fieldName === 'rule_copied' || fieldName === 'extracted_from' || fieldName === 'catalog_edition' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
   return value || '—';
 }
@@ -299,6 +321,10 @@ function historyReviewTag(entry) {
 
 function formatHistoryValue(t, fieldName, value) {
   if (fieldName === 'rule_test') return formatRuleTestHistoryValue(t, value);
+  if (fieldName === 'rule_corrected') {
+    const text = formatRuleCorrectedValue(t, value);
+    return text.length > HISTORY_MAX_CHARS ? `${text.slice(0, HISTORY_MAX_CHARS)}…` : text;
+  }
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
   if (fieldName === 'catalog_edition') return formatCatalogEditionValue(t, value);
   if (fieldName === 'extracted_from') {
@@ -310,6 +336,57 @@ function formatHistoryValue(t, fieldName, value) {
   if (!value) return '—';
   const text = historyText(fieldName, value);
   return text.length > HISTORY_MAX_CHARS ? `${text.slice(0, HISTORY_MAX_CHARS)}…` : text;
+}
+
+// Corrección propuesta, Part 2: how many saved rules have a proposed
+// correction and how many a defect without a fix -- each a filter of the
+// list (one BRDP at a time is accepted or discarded in its ficha; there is
+// no "accept all"). While the rules are being checked, the progress.
+function CorrectionCounts({ corrections, active, onSelect }) {
+  const { t } = useTranslation();
+  if (corrections.status === 'error') {
+    return (
+      <ErrorNotice
+        testId="records-notice-corrections"
+        message={t('records.ruleCorrection.list.failed', { reason: errorMessage(corrections.error, t) })}
+        onRetry={corrections.retry}
+      />
+    );
+  }
+  if (corrections.status !== 'done') {
+    if (corrections.status !== 'checking' || corrections.progress.total === 0) return null;
+    return (
+      <div className={styles.correctionCounts} data-testid="correction-progress">
+        <span className={styles.hint}>{t('records.ruleCorrection.list.checking', corrections.progress)}</span>
+      </div>
+    );
+  }
+  const { proposed, unfixable } = corrections.counts;
+  const item = (kind, count, label) => (
+    <button
+      type="button"
+      className={styles.linkButton}
+      data-testid={`correction-count-${kind}`}
+      data-count={count}
+      aria-pressed={active === kind}
+      disabled={count === 0 && active !== kind}
+      onClick={() => onSelect(active === kind ? '' : kind)}
+      title={t('records.ruleCorrection.list.title')}
+    >
+      {active === kind ? <strong>{label}</strong> : label}
+    </button>
+  );
+  return (
+    <div className={styles.correctionCounts} data-testid="correction-counts">
+      {item('proposed', proposed, t('records.ruleCorrection.list.proposed', { count: proposed }))}
+      {item('unfixable', unfixable, t('records.ruleCorrection.list.unfixable', { count: unfixable }))}
+      {active && (
+        <button type="button" className={styles.linkButton} onClick={() => onSelect('')} data-testid="correction-filter-clear">
+          {t('records.ruleCorrection.list.clearFilter')}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export default function RecordsPage() {
@@ -633,6 +710,20 @@ export default function RecordsPage() {
   }, [approvalsRefreshToken]);
 
   const selected = brdps.find((b) => b.id === selectedId) || null;
+  const { vocabulary, vocabResult, recomputeVocabResult, vocabularyLoadError, retryVocabularyLoad } = useVocabularyCheck(
+    project.standard,
+    selected
+  );
+  // Corrección propuesta: every saved rule checked by code, in slices (see
+  // src/hooks/useRuleCorrections.js), and the list filtered by the result.
+  const correctionContext = useCorrectionContext({
+    standard: project.standard,
+    vocabulary,
+    vocabularyLoadError,
+    schemaLocation: schemaLocationOf(project.project_config, project.standard),
+  });
+  const ruleCorrections = useRuleCorrections({ projectId, format: ruleFormat, correction: correctionContext, refreshToken: approvalsRefreshToken });
+  const [correctionFilter, setCorrectionFilter] = useState('');
   // Suggest Rule adjustments round, Part 6: when the ONLY pending embedding
   // (project and catalog) is the selected BRDP itself -- e.g. its Proposal
   // was just edited -- Suggest isn't blocked: it embeds that one BRDP
@@ -677,6 +768,7 @@ export default function RecordsPage() {
   const compareByFlowOrder = (order, a, b) => order.indexOf(a) - order.indexOf(b);
 
   const filteredBrdps = brdps.filter((b) => {
+    if (correctionFilter && ruleCorrections.byBrdpId.get(b.id)?.status !== correctionFilter) return false;
     const q = tableSearchQuery.trim().toLowerCase();
     if (!q) return true;
     return b.identifier.toLowerCase().includes(q) || (b.title || '').toLowerCase().includes(q);
@@ -757,6 +849,7 @@ export default function RecordsPage() {
   // whose error must stay visible).
   useEffect(() => {
     setRuleTestRecordError(null);
+    setCorrectionError(null);
     setVerifyDialog(null);
   }, [selected?.id]);
 
@@ -788,10 +881,9 @@ export default function RecordsPage() {
   // now -- see src/hooks/{useVocabularyCheck,useAskAssistant,
   // useSuggestions}.js. Same behavior as before the refactor, split by
   // concern instead of one giant effect.
-  const { vocabulary, vocabResult, recomputeVocabResult, vocabularyLoadError, retryVocabularyLoad } = useVocabularyCheck(
-    project.standard,
-    selected
-  );
+  // (useVocabularyCheck is called right after `selected` is known, above:
+  // the check of the project's rules needs the vocabulary before the list
+  // is filtered.)
   // "Sugerencias para erratas": near names / other standards after the
   // red "not found" line of the selected BRDP.
   const vocabNameHints = useNameFixHints(vocabResult && vocabResult.brdpId === selected?.id ? vocabResult : null, project.standard, vocabulary);
@@ -1202,6 +1294,93 @@ export default function RecordsPage() {
 
   const revokeRule = () => changeRuleState('revoke', 'pending_review');
 
+  // Corrección propuesta, Part 1: what code finds wrong with the selected
+  // BRDP's SAVED rule (the same cached check the project list uses), with
+  // the project-level defect of an id shared with another BRDP.
+  const [correctionBusy, setCorrectionBusy] = useState(false);
+  const [correctionError, setCorrectionError] = useState(null);
+  const selectedRuleXml = ruleApproval?.rule_xml || '';
+  // The block's key: the rule's hash, never its text (a long text as a key
+  // made React duplicate the block on re-renders).
+  const selectedRuleHash = useMemo(() => (selectedRuleXml ? ruleXmlHash(selectedRuleXml) : ''), [selectedRuleXml]);
+  const selectedCorrection = useMemo(() => {
+    if (!selectedId || !ruleFormat || !selectedRuleXml.trim() || !correctionContext.ready) return null;
+    const result = cachedRuleCorrection(selectedRuleXml, ruleFormat, correctionContext.ctx);
+    const listed = ruleCorrections.byBrdpId.get(selectedId);
+    const clashes = listed && listed.ruleXml === selectedRuleXml ? listed.clashes : [];
+    const dismissedHash = ruleApproval?.correction_dismissed_hash;
+    const dismissed = Boolean(dismissedHash) && dismissedHash === selectedRuleHash;
+    return { result, clashes, dismissed };
+  }, [selectedId, ruleFormat, selectedRuleXml, ruleApproval?.correction_dismissed_hash, selectedRuleHash, correctionContext.ready, correctionContext.ctx, ruleCorrections.byBrdpId]);
+  const needsOtherVocabularies = Boolean(selectedCorrection?.result?.needsOtherVocabularies);
+  useEffect(() => {
+    if (needsOtherVocabularies) correctionContext.requestOtherVocabularies();
+    // requestOtherVocabularies only sets a flag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsOtherVocabularies]);
+
+  // Aceptar: saved like any rule edit (Draft; a Verified rule asks first),
+  // with what the correction fixed for History. The test of the old text
+  // becomes outdated by itself (its hash no longer matches).
+  const acceptRuleCorrection = async () => {
+    const proposal = selectedCorrection?.result?.proposal;
+    if (!proposal || !canEdit || !ruleFormat) return;
+    if (ruleStateOf(ruleApproval) === 'verified' && !window.confirm(t('records.ruleCorrection.acceptConfirmVerified'))) return;
+    const brdpId = selected.id;
+    setCorrectionBusy(true);
+    setCorrectionError(null);
+    try {
+      const saved = await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/approvals/${ruleFormat}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule_xml: proposal.xml, source: 'manual', status: 'pending_review', correction: correctionRecord(proposal) }),
+      });
+      if (selectedIdRef.current === brdpId) setRuleApproval(saved);
+      setRuleApprovalsById((m) => (m ? { ...m, [brdpId]: { status: saved.status } } : m));
+      setApprovalsRefreshToken((n) => n + 1);
+      setHistoryRefreshToken((n) => n + 1);
+    } catch (err) {
+      if (selectedIdRef.current === brdpId) setCorrectionError(t('records.ruleCorrection.acceptFailed', { reason: errorMessage(err, t) }));
+    } finally {
+      setCorrectionBusy(false);
+    }
+  };
+
+  // Descartar, optimistic (HR20): the block turns into the discreet line at
+  // once; if the server refuses, it comes back with the reason.
+  const dismissRuleCorrection = async () => {
+    if (!canEdit || !ruleFormat || !ruleApproval) return;
+    const brdpId = selected.id;
+    const previous = ruleApproval;
+    const hash = ruleXmlHash(previous.rule_xml);
+    setCorrectionError(null);
+    setRuleApproval((a) => (a ? { ...a, correction_dismissed_hash: hash } : a));
+    try {
+      await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/approvals/${ruleFormat}/correction-dismissal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule_hash: hash }),
+      });
+      setApprovalsRefreshToken((n) => n + 1);
+    } catch (err) {
+      if (selectedIdRef.current === brdpId) {
+        setRuleApproval(previous);
+        setCorrectionError(t('records.ruleCorrection.dismissFailed', { reason: errorMessage(err, t) }));
+      }
+    }
+  };
+
+  // "Defecto detectado": the person asks for a new rule with the very
+  // Suggest Rule button (its own availability and reasons); never on the
+  // application's initiative.
+  const goToSuggestRule = () => {
+    const button = document.querySelector('[data-testid="suggest-rule"]');
+    if (!button) return;
+    button.scrollIntoView({ block: 'center' });
+    if (button.disabled) button.focus();
+    else button.click();
+  };
+
   const openCreatePanel = () => {
     if (!confirmLeaveSelected()) return;
     setSelectedId(null);
@@ -1401,6 +1580,9 @@ export default function RecordsPage() {
               active={testCategoryFilter}
               onSelect={setTestCategoryFilter}
             />
+            {ruleFormat && (
+              <CorrectionCounts corrections={ruleCorrections} active={correctionFilter} onSelect={setCorrectionFilter} />
+            )}
           </div>
         )}
       </div>
@@ -2058,6 +2240,18 @@ export default function RecordsPage() {
                       onDismiss={() => clearNotice(`rule:${selected.id}`)}
                     />
                   )}
+                  <RuleCorrectionBlock
+                    key={`${selected.id}:${selectedRuleHash}`}
+                    entry={selectedCorrection}
+                    ruleXml={selectedRuleXml}
+                    format={ruleFormat}
+                    canEdit={canEdit}
+                    busy={correctionBusy}
+                    error={correctionError}
+                    onAccept={acceptRuleCorrection}
+                    onDismiss={dismissRuleCorrection}
+                    onSuggestRule={goToSuggestRule}
+                  />
                   <div className={styles.suggestionActions}>
                     {ruleStateOf(ruleApproval) === 'draft' && canTestRule(ruleFormat) && (
                       <TestRuleButton

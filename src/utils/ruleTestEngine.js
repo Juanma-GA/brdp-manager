@@ -730,10 +730,20 @@ function describeValues(part, spec, valueElements = null) {
 // Whether a part's path is a condition (true/false) or a node path, by
 // evaluating it once on an empty document of its own root -- the same probe
 // analyzeRule uses. Throws NotExecutable (an XPath error, a number…).
+// Whether a path is a condition depends on the expression only: memoised
+// (a rule with thousands of paths is checked again for every correction
+// step -- Corrección propuesta), bounded so it never grows without end.
+const CONDITION_CACHE = new Map();
+const CONDITION_CACHE_MAX = 20000;
+
 function isConditionPath(expression, parseXml) {
+  if (CONDITION_CACHE.has(expression)) return CONDITION_CACHE.get(expression);
   const root = absoluteRootNames(expression)[0] || 'dmodule';
   const doc = parseXml(`<${root}/>`);
-  return makeEvaluator(doc)(expression, doc, null, 'path').condition !== undefined;
+  const condition = makeEvaluator(doc)(expression, doc, null, 'path').condition !== undefined;
+  if (CONDITION_CACHE.size >= CONDITION_CACHE_MAX) CONDITION_CACHE.clear();
+  CONDITION_CACHE.set(expression, condition);
+  return condition;
 }
 
 // The names a condition mentions (elements as <x>, attributes as @x).

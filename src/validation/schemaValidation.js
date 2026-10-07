@@ -1800,15 +1800,25 @@ export function formatStructureProblem(problem, schema) {
 
 const SYNTAX_ERROR = 'XPST0003';
 
+// Memoised by expression (bounded): the same expressions are checked again
+// for every step of a proposed correction (Corrección propuesta).
+const SYNTAX_CACHE = new Map();
+const SYNTAX_CACHE_MAX = 20000;
+
 export function isXPathSyntaxValid(expression) {
+  if (SYNTAX_CACHE.has(expression)) return SYNTAX_CACHE.get(expression);
+  let valid;
   try {
     fontoxpath.evaluateXPath(expression, null, null, null, fontoxpath.evaluateXPath.ANY_TYPE, {
       language: fontoxpath.evaluateXPath.XPATH_3_1_LANGUAGE,
     });
-    return true;
+    valid = true;
   } catch (err) {
-    return !String(err?.message || '').includes(SYNTAX_ERROR);
+    valid = !String(err?.message || '').includes(SYNTAX_ERROR);
   }
+  if (SYNTAX_CACHE.size >= SYNTAX_CACHE_MAX) SYNTAX_CACHE.clear();
+  SYNTAX_CACHE.set(expression, valid);
+  return valid;
 }
 
 // The rule's XPath expressions that are not syntactically valid (after

@@ -33,6 +33,7 @@
 // own -- a button the person clicks):
 //   { kind: 'descendant_root', from: '/techstd', to: '//techstd' }
 //   { kind: 'remove_steps', from: 'reqpers/perscat/trade', to: 'reqpers/trade', removed: ['perscat'] }
+//   { kind: 'insert_steps', from: 'legend/def', to: 'legend/deflist/def', added: ['deflist'] }
 import { rulePathParts } from '../utils/ruleTestEngine.js';
 
 const NAME = '[A-Za-z_][\\w.-]*';
@@ -410,7 +411,7 @@ function checkAlternative(index, scope, alternative, { start = null, inPredicate
       const ok = desc ? reachableOk(index, scope, prev, name) : childOk(index, scope, prev, name);
       if (!ok) {
         const problem = { kind: desc ? 'descendant' : 'child', element: name, parent: prev, parents: parentsOf(index, scope, name), inPredicate, predicate };
-        if (!desc) problem.fix = removeStepsFix(steps, i, problem.parents);
+        if (!desc) problem.fix = removeStepsFix(steps, i, problem.parents) || insertStepsFix(index, scope, steps, i);
         problems.push(problem);
         mainFailed = true;
         return;
@@ -453,6 +454,49 @@ function removeStepsFix(steps, i, parents) {
     }
   }
   return null;
+}
+
+// "Add <deflist> to the path" (Corrección propuesta): a/b where <b> is not
+// a child of <a>, but the scope allows exactly ONE way down from <a> to
+// <b> through other elements (BRDP-EXT-02816: legend/def -> <def> only goes
+// inside <deflist>, and <legend> holds <deflist>: legend/deflist/def). The
+// step before is a plain element step without predicates (so the text
+// "legend/def" is in the path as it is). Several ways, or none, give no fix.
+const MAX_INSERTED = 4;
+
+function waysDown(index, scope, from, to) {
+  const found = new Set();
+  for (const s of scope) {
+    if (!node(index, s, from) || !reachableSet(index, s, from).has(to)) continue;
+    const walk = (current, trail) => {
+      if (found.size > 1) return;
+      for (const c of node(index, s, current)?.children || []) {
+        if (found.size > 1) return;
+        if (c === to) {
+          if (trail.length > 0) found.add(trail.join('/'));
+          continue;
+        }
+        if (trail.length >= MAX_INSERTED || c === from || trail.includes(c)) continue;
+        if (!reachableSet(index, s, c).has(to)) continue;
+        walk(c, [...trail, c]);
+      }
+    };
+    walk(from, []);
+    if (found.size > 1) break;
+  }
+  return [...found];
+}
+
+function insertStepsFix(index, scope, steps, i) {
+  const step = steps[i];
+  const before = steps[i - 1];
+  if (!before || before.kind !== 'element' || before.desc || before.predicates.length > 0) return null;
+  if (step.sep !== '/' || step.desc) return null;
+  if (!/^[A-Za-z_][\w.-]*$/.test(before.main) || !/^[A-Za-z_][\w.-]*$/.test(step.main)) return null;
+  const ways = waysDown(index, scope, before.name, step.name);
+  if (ways.length !== 1) return null;
+  const added = ways[0].split('/');
+  return { kind: 'insert_steps', from: `${before.name}/${step.name}`, to: [before.name, ...added, step.name].join('/'), added };
 }
 
 // checkRulePaths(ruleXml, format, graph, { schemaLocation, parseXml }) →
@@ -593,7 +637,7 @@ export function applyRulePathFix(ruleXml, fix) {
     // /techstd not preceded by a name, "/", ":" or "*"; not followed by a name char
     pattern = new RegExp(`(?<![\\w./:*\\]\\-])${escapeRe(fix.from)}(?![\\w.:-])`, 'g');
     replacement = fix.to;
-  } else if (fix.kind === 'remove_steps') {
+  } else if (fix.kind === 'remove_steps' || fix.kind === 'insert_steps') {
     const names = fix.from.split('/');
     pattern = new RegExp(`(?<![\\w.:-])${names.map(escapeRe).join('\\s*/\\s*')}(?![\\w.:-])`, 'g');
     replacement = fix.to;
@@ -707,6 +751,7 @@ export function formatPathFix(fix, t) {
   if (!fix) return '';
   if (fix.kind === 'ancestor_axis') return t('records.rulePath.fixAncestorAxis', { from: fix.from, to: fix.to });
   if (fix.kind === 'descendant_root') return t('records.rulePath.fixDescendantRoot', { from: fix.from, to: fix.to });
+  if (fix.kind === 'insert_steps') return t('records.rulePath.fixInsertSteps', { count: fix.added.length, added: fix.added.map((n) => `<${n}>`).join(', ') });
   return t('records.rulePath.fixRemoveSteps', { count: fix.removed.length, removed: fix.removed.map((n) => `<${n}>`).join(', ') });
 }
 
