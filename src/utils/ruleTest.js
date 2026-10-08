@@ -320,6 +320,9 @@ const PLAIN_TEXT_HINT = 'If this element is not needed to test the rule, remove 
 export function editExample(current, content, metadata, setup, parseXml = parseXmlDocument) {
   const generated = current.generated || { content: current.content, metadata: current.metadata ?? null };
   const edited = { ...current, content, generated };
+  // Mejoras H: a hand edit is the user's example, no longer the one the
+  // correction could not write.
+  if (content !== current.content || (metadata !== undefined && metadata !== (current.metadata ?? null))) delete edited.schemaLimit;
   if (metadata !== undefined) edited.metadata = metadata;
   edited.editedByUser = edited.content !== generated.content || (edited.metadata ?? null) !== generated.metadata;
   return materializeExample(edited, setup, parseXml);
@@ -718,10 +721,18 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
   // Mejoras B, Part 3: an example whose nodes the rule's predicates leave
   // out (case b) shows the rule is permissive -- checked before "nothing
   // selected".
+  // Mejoras H, Part 1.3: no example meant to be rejected ran because the
+  // schema limits what it needs (the correction that removed the element
+  // was discarded): the inconclusive verdict says so -- never "incorrect"
+  // and never "covered by the schema".
+  const limitedReject = !runs.some((r, i) => r.result && examples[i].expected === 'reject')
+    ? examples.find((ex) => ex?.expected === 'reject' && ex.schemaLimit)?.schemaLimit || null
+    : null;
+  const inconclusive = (why) => (limitedReject ? { kind: 'inconclusive', why, schemaLimit: limitedReject } : { kind: 'inconclusive', why });
   if (
     !runs.some((r) => r.predicateMiss) &&
     ran.every((r) => r.result.selectedNodePaths.length === 0 && !(r.result.conditions?.length > 0))
-  ) return { kind: 'inconclusive', why: 'nothing_selected' };
+  ) return inconclusive('nothing_selected');
   const ranExpectations = new Set(runs.map((r, i) => (r.result ? examples[i].expected : null)).filter(Boolean));
   const mismatches = runs.map((r, i) => (r.matches === false ? examples[i].expected : null)).filter(Boolean);
   if (mismatches.length > 0) {
@@ -732,7 +743,7 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
       strict: mismatches.includes('accept'),
     };
   }
-  if (!ranExpectations.has('accept') || !ranExpectations.has('reject')) return { kind: 'inconclusive', why: 'missing_expectation' };
+  if (!ranExpectations.has('accept') || !ranExpectations.has('reject')) return inconclusive('missing_expectation');
   if (threshold) return { kind: 'review', threshold };
   if (typeof proposalCheck === 'string' && proposalCheck.trim()) return { kind: 'review', mismatch: proposalCheck.trim() };
   if (proposalCheck?.status === 'mismatch') return { kind: 'review', mismatch: proposalCheck.missing || '' };
@@ -753,6 +764,9 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
 //                             executable (its own reason)
 export function verdictCause(verdict, runs = []) {
   if (!verdict) return null;
+  // Mejoras H, Part 1.3: the schema limits the example, regenerating it
+  // will not help -- the verdict says why.
+  if (verdict.kind === 'inconclusive' && verdict.schemaLimit) return null;
   if (verdict.kind === 'no_runnable' || verdict.kind === 'inconclusive') return { cause: 'examples' };
   if (verdict.kind !== 'incorrect') return null;
   // Mejoras E, Part 2.3: the verdict itself says the error and its reason.

@@ -2117,7 +2117,8 @@
         },
         {
           "type": "rule_test_examples_valid",
-          "note": "every example passes the XML, vocabulary and structure checks (DITA topic-type skeleton) after the one correction round"
+          "note": "every example passes the XML, vocabulary and structure checks (DITA topic-type skeleton) after the one correction round; Mejoras H: an example whose correction removed what the schema limits (<step> allows at most 1 <cmd>) is kept invalid and reported, not counted",
+          "allowSchemaLimited": true
         },
         {
           "type": "rule_test_accept_and_reject",
@@ -2125,7 +2126,8 @@
         },
         {
           "type": "rule_test_verdict_correct",
-          "note": "the engine agrees with every example on a rule known to be correct"
+          "note": "the engine agrees with every example on a rule known to be correct; Mejoras H: \"inconclusive\" because the schema prevents writing the reject example also passes, \"incorrect\" never",
+          "orSchemaLimited": true
         },
         {
           "type": "contains",

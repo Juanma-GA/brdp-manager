@@ -640,9 +640,13 @@ function ruleTestReply(systemPrompt, messages) {
       ]);
     }
     if (/context="step"/.test(rule)) {
+      // Mejoras H: told "<step> allows at most 1 <cmd>", the correction
+      // merges the two commands into one -- what Mistral did (08/10). The
+      // app discards that correction: it removed what the schema limits.
+      const merged = correcting && /allows at most 1 <cmd>/.test(lastUser);
       return answer([
         { label: "Step with one command", expected: "accept", schema: ditaType, content: "<step><cmd>Remove the four bolts from the pump cover.</cmd></step>" },
-        { label: "Step with two commands", expected: "reject", schema: ditaType, content: "<step><cmd>Remove the bolts.</cmd><cmd>Lift the pump cover.</cmd></step>" },
+        { label: "Step with two commands", expected: "reject", schema: ditaType, content: merged ? "<step><cmd>Remove the bolts and lift the pump cover.</cmd></step>" : "<step><cmd>Remove the bolts.</cmd><cmd>Lift the pump cover.</cmd></step>" },
       ]);
     }
     if (/is the WHOLE document/.test(systemPrompt)) {

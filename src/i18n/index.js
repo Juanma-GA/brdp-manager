@@ -922,6 +922,7 @@ const resources = {
             strict: "The rule rejected an example meant to comply with it. Either the rule is too strict or the example doesn't really follow the decision. Check both.",
             nothingSelected: "Inconclusive: the rule's path selected nothing in any example, so the examples don't contain what the rule checks. Regenerate the examples.",
             missingExpectation: 'Inconclusive: an example meant to be accepted and one meant to be rejected are both needed, and one of them could not be run.',
+            schemaLimit: 'The schema prevents writing the example that breaks the decision (<{{parent}}> allows at most {{max}} <{{element}}>); the schema may already enforce it.',
             notExecutable: "The rule can't be run on these examples: {{reason}}",
             noRunnable: 'None of the examples could be run.',
             noRunnableSchema_one: 'The example of the {{schema}} schema is not valid there: {{problem}}{{more}}.',
@@ -971,6 +972,7 @@ const resources = {
           },
           noRejectExample: 'There is no example meant to be rejected: no valid document of the schema can break this rule ({{detail}}).',
           schemaCoveredExample: 'The schema already rules this out: what the rule rejects is exactly {{detail}}. This example is not corrected and does not count.',
+          schemaLimitExample: '<{{parent}}> allows at most {{max}} <{{element}}>: this example cannot be written within the schema (the correction removed <{{element}}>).',
           labelRemoved: 'corrected: {{names}} removed',
           labelMoved: 'corrected: {{names}} moved',
           // Mejoras E, Part 2.3: an engine error on an example.
@@ -2758,6 +2760,7 @@ const resources = {
             strict: 'La regla rechazó un ejemplo pensado para cumplirla. O la regla es demasiado estricta o el ejemplo no sigue de verdad la decisión. Revisa ambos.',
             nothingSelected: 'No concluyente: la ruta de la regla no seleccionó nada en ningún ejemplo, así que los ejemplos no contienen lo que la regla comprueba. Regenera los ejemplos.',
             missingExpectation: 'No concluyente: hace falta un ejemplo que se acepte y otro que se rechace, y uno de ellos no se pudo ejecutar.',
+            schemaLimit: 'El esquema impide escribir el ejemplo que incumple la decisión (<{{parent}}> admite como mucho {{max}} <{{element}}>); puede que el esquema ya lo imponga.',
             notExecutable: 'La regla no se puede ejecutar sobre estos ejemplos: {{reason}}',
             noRunnable: 'No se pudo ejecutar ningún ejemplo.',
             noRunnableSchema_one: 'El ejemplo del esquema {{schema}} no es válido en él: {{problem}}{{more}}.',
@@ -2804,6 +2807,7 @@ const resources = {
           },
           noRejectExample: 'No hay ejemplo a rechazar: ningún documento válido del esquema puede incumplir esta regla ({{detail}}).',
           schemaCoveredExample: 'El esquema ya lo excluye: lo que la regla rechaza es justo esto: {{detail}}. Este ejemplo no se corrige ni cuenta.',
+          schemaLimitExample: '<{{parent}}> admite como mucho {{max}} <{{element}}>: este ejemplo no se puede escribir dentro del esquema (la corrección quitaba <{{element}}>).',
           labelRemoved: 'corregido: se quitó {{names}}',
           labelMoved: 'corregido: se movió {{names}}',
           engineError: {

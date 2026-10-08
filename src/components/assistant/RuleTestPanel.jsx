@@ -71,7 +71,13 @@ export function verdictView(t, verdict, standard) {
     case 'inconclusive':
       return {
         tone: 'warn',
-        text: t(verdict.why === 'nothing_selected' ? 'records.ruleTest.verdicts.nothingSelected' : 'records.ruleTest.verdicts.missingExpectation'),
+        text: [
+          t(verdict.why === 'nothing_selected' ? 'records.ruleTest.verdicts.nothingSelected' : 'records.ruleTest.verdicts.missingExpectation'),
+          // Mejoras H, Part 1.3
+          verdict.schemaLimit && t('records.ruleTest.verdicts.schemaLimit', verdict.schemaLimit),
+        ]
+          .filter(Boolean)
+          .join(' '),
       };
     case 'not_executable':
       return { tone: 'warn', text: t('records.ruleTest.verdicts.notExecutable', { reason: formatRuleTestReason(verdict.reason, t) }) };
@@ -328,6 +334,12 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
       {example.brexModelIdentFollowed && (
         <p className={styles.ruleTestNote} data-testid="rule-test-brex-model-ident">
           {t('records.ruleTest.brexModelIdentFollowed')}
+        </p>
+      )}
+      {/* Mejoras H, Part 1.2: the correction removed what the schema limits; it was discarded. */}
+      {example.schemaLimit && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-schema-limit">
+          {t('records.ruleTest.schemaLimitExample', example.schemaLimit)}
         </p>
       )}
       {/* Mejoras E, Part 1.3: the schema already rules this example out. */}

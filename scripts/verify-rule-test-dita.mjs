@@ -239,7 +239,13 @@ async function main() {
     const panel4 = await testDraft();
     const x3 = await panel4.getByTestId("rule-test-analysis-warning").textContent();
     assert(x3.includes("This project uses XPath 2.0, but the rule uses XPath 3.x syntax (inline function, dynamic function call)") && x3.includes("The test runs it anyway."), `XPath 3.x warning (${x3})`);
-    assert((await panel4.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), "XPath 3.x rule still runs in the XPath 2.0 project");
+    // Mejoras H: the example with two <cmd> cannot be written within the
+    // schema (<step> allows at most 1 <cmd>); the simulator's correction
+    // merges them, the app discards it -- inconclusive with the reason,
+    // never "incorrect". The rule still ran on the accept example.
+    const v4 = await panel4.getByTestId("rule-test-verdict").textContent();
+    assert(v4.startsWith("Inconclusive") && v4.includes("The schema prevents writing the example that breaks the decision (<step> allows at most 1 <cmd>)"), `XPath 3.x rule still runs in the XPath 2.0 project (${v4})`);
+    assert((await examplesOf(panel4).nth(0).getByTestId("rule-test-result").textContent()).startsWith("Result: accepted"), "XPath 3.x rule: the accept example ran");
     await panel4.getByRole("button", { name: "Close" }).click();
 
     // 5. The wrong rule: inverted assert → incorrect → review (cause rule)
@@ -279,8 +285,15 @@ async function main() {
     assert((await panel6.getByTestId("rule-test-analysis-warning").count()) === 0, "XPath 3.0 project: no XPath 3.x warning");
     assert((await panel6.getByTestId("rule-test-description").textContent()).includes("For each step: variables cuenta, n."), "description lists the sch:let variables");
     assert((await examplesOf(panel6).nth(0).textContent()).includes("Topic type: task"), "step rule: task topic type");
-    assert((await examplesOf(panel6).nth(1).textContent()).includes("Rule's message: Each step has exactly one command; found 2."), "message with the evaluated sch:value-of");
-    assert((await panel6.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), "sch:let + inline function: verdict correct");
+    // Mejoras H, Parts 1.2-1.3: the correction that merged the two <cmd> is
+    // discarded; the example says why and the verdict is inconclusive with
+    // the schema's limit (before: "Correct" with "found 2", impossible since
+    // Mejoras G marked two <cmd> in a <step> as invalid).
+    assert((await examplesOf(panel6).nth(1).getByTestId("rule-test-schema-limit").textContent()) === "<step> allows at most 1 <cmd>: this example cannot be written within the schema (the correction removed <cmd>).", "Mejoras H 1.2: the example's reason");
+    assert((await examplesOf(panel6).nth(1).getByTestId("rule-test-result").count()) === 0, "Mejoras H 1.1: the example is not run");
+    const v6 = await panel6.getByTestId("rule-test-verdict").textContent();
+    assert(v6.startsWith("Inconclusive") && v6.includes("the schema may already enforce it."), `Mejoras H 1.3: inconclusive with the schema's limit (${v6})`);
+    assert((await panel6.getByTestId("rule-test-cause").count()) === 0, "Mejoras H 1.3: no 'regenerate the examples' hint");
     await panel6.screenshot({ path: shot("rule-test-dita-let.png") });
     await panel6.getByRole("button", { name: "Close" }).click();
 

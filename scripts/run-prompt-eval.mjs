@@ -384,15 +384,21 @@ async function runCheck(check, answer, ctx = {}) {
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       // Barrido final 1/2: each invalid example with its exact reason (the
       // same English lines the correction round sends), not only its label.
+      // Mejoras H: `allowSchemaLimited` -- an example the schema does not
+      // let be written (its correction removed what the schema limits, and
+      // was discarded) is reported, not counted as a failure.
+      const limited = r.examples.filter((ex) => ex.schemaLimit).map((ex) => `"${ex.label}" (<${ex.schemaLimit.parent}> allows at most ${ex.schemaLimit.max} <${ex.schemaLimit.element}>)`);
       const bad = r.runs
         .map((run, i) => {
           if (run.validation.runnable) return null;
+          if (check.allowSchemaLimited && r.examples[i].schemaLimit) return null;
           const reasons = exampleProblems(run.validation, { standard: ctx.standard, schema: r.examples[i].schema });
           return `"${r.examples[i].label}" (${reasons.join("; ") || "not runnable"})`;
         })
         .filter(Boolean);
       const corrected = r.correction ? ` (correction round: ${r.correction.truncated ? "answer cut off by max_tokens" : `${r.correction.fixed}/${r.correction.attempted} fixed`})` : "";
-      return { status: bad.length ? "fail" : "pass", detail: bad.length ? `still invalid after the correction round: ${bad.join(", ")}${corrected}` : `all ${r.examples.length} examples valid${corrected}` };
+      const limitedNote = limited.length ? `; schema-limited, correction discarded: ${limited.join(", ")}` : "";
+      return { status: bad.length ? "fail" : "pass", detail: (bad.length ? `still invalid after the correction round: ${bad.join(", ")}${corrected}` : `all ${r.examples.length - (check.allowSchemaLimited ? limited.length : 0)} examples valid${corrected}`) + limitedNote };
     }
     case "rule_test_accept_and_reject": {
       const r = ctx.ruleTest;
@@ -417,7 +423,11 @@ async function runCheck(check, answer, ctx = {}) {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
-      return { status: verdict.kind === "correct" ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
+      // Mejoras H: `orSchemaLimited` -- "inconclusive" because the schema
+      // limits the example that breaks the decision passes too; "incorrect"
+      // never does.
+      const ok = verdict.kind === "correct" || (check.orSchemaLimited && verdict.kind === "inconclusive" && Boolean(verdict.schemaLimit));
+      return { status: ok ? "pass" : "fail", detail: `engine verdict: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_verdict_review": {
       // "Revisar": a rule that does not implement the Proposal but whose

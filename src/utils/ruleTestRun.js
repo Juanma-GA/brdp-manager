@@ -771,6 +771,68 @@ function withLabelNote(corrected, original) {
   return note ? { ...corrected, labelNote: note } : corrected;
 }
 
+// Mejoras H, Part 1.1: the correction round may never remove what the
+// schema limits. Real cases: "<step> allows at most 1 <cmd>; the example has
+// 2" on an example meant to be rejected (the rule: one <cmd> per <step>) --
+// the correction merged the two <cmd> into one, the rule accepted it and the
+// verdict blamed the rule; and two <evaluate> in <applic> merged into one.
+// For every tooMany problem { element: C, parent: P, max } of an example the
+// <C> written by the LLM (its content and, if any, its identification
+// section -- never the application's skeleton) are counted before and after
+// the correction: fewer after → that example's correction is discarded and
+// the example stays as in the first answer (invalid, never run), carrying
+// `schemaLimit` { element, parent, max } for the panel and the verdict.
+// Moving or nesting the surplus (as many <C> or more) is a real fix.
+function tooManyLimits(run) {
+  const seen = new Set();
+  return (run?.validation?.structure || [])
+    .filter((p) => p.kind === 'tooMany')
+    .filter((p) => {
+      const key = `${p.parent}/${p.element}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((p) => ({ element: p.element, parent: p.parent, max: p.max }));
+}
+
+const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export function countWrittenElements(example, name) {
+  const text = `${example?.content || ''}\n${example?.metadata || ''}`.replace(/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>/g, '');
+  return (text.match(new RegExp(`<${escapeRegExp(name)}(?=[\\s/>])`, 'g')) || []).length;
+}
+
+// → the limit whose element the correction removed, or null.
+export function lostSchemaLimit(original, corrected, limits) {
+  return limits.find((l) => countWrittenElements(original, l.element) > (corrected ? countWrittenElements(corrected, l.element) : 0)) || null;
+}
+
+// The corrected examples with every correction that removed a limited
+// element replaced by the first answer's example. `next` is aligned with
+// `examples` when `aligned`; otherwise the corrected example is found by
+// its label (one not found counts as removing everything).
+export function keepSchemaLimitedExamples(examples, runs, failures, next, aligned) {
+  const out = [...next];
+  const used = new Set();
+  for (const f of failures) {
+    const limits = tooManyLimits(runs[f.index]);
+    if (limits.length === 0) continue;
+    const original = examples[f.index];
+    let pos = aligned ? f.index : out.findIndex((ex, j) => !used.has(j) && ex.label === original.label);
+    if (pos >= 0) used.add(pos);
+    const lost = lostSchemaLimit(original, pos >= 0 ? out[pos] : null, limits);
+    if (!lost) continue;
+    const kept = { ...original, schemaLimit: lost };
+    if (pos >= 0) out[pos] = kept;
+    else {
+      out.push(kept);
+      used.add(out.length - 1);
+    }
+  }
+  return out;
+}
+
 // Materialize, validate and run every example.
 function runRuleTestExamples(examples, { ruleXml, format, setup, vocabulary, parseXml = parseXmlDocument }) {
   const materialized = examples.map((ex) => materializeExample(ex, setup, parseXml));
@@ -970,10 +1032,14 @@ export async function generateRuleTestExamples({
           correction.failed = reparsed.error;
         } else {
           const failing = new Set(failures.map((f) => f.index));
-          const next =
-            reparsed.examples.length === examples.length
-              ? examples.map((ex, i) => (failing.has(i) ? reparsed.examples[i] : ex))
-              : reparsed.examples;
+          const aligned = reparsed.examples.length === examples.length;
+          const next = keepSchemaLimitedExamples(
+            examples,
+            runs,
+            failures,
+            aligned ? examples.map((ex, i) => (failing.has(i) ? reparsed.examples[i] : ex)) : reparsed.examples,
+            aligned
+          );
           // The answer to the correction keeps only what this test asks for
           // (accept examples only when the schema covers the rule).
           const kept = coverage ? next.filter((ex) => ex.expected === 'accept') : next;
