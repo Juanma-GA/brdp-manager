@@ -363,7 +363,7 @@ async def register_rule_test(
             ),
         )
     reason = body.reason.model_dump() if body.reason is not None else None
-    edited = [e.model_dump() for e in body.edited_examples] if body.edited_examples else None
+    edited = [_without_empty_dossier(e.model_dump()) for e in body.edited_examples] if body.edited_examples else None
     old_value = _rule_test_history_value(
         approval.last_test_result, approval.last_test_reason, approval.last_test_edited_examples
     )
@@ -403,7 +403,7 @@ async def register_rule_test(
                 "proposal": body.passed_test.proposal,
                 "examples_from": examples_from.isoformat() if examples_from is not None else None,
                 "edited_count": len(edited) if edited else body.passed_test.edited_count,
-                "examples": [e.model_dump(by_alias=True) for e in body.passed_test.examples],
+                "examples": [_without_empty_dossier(e.model_dump(by_alias=True)) for e in body.passed_test.examples],
             }
             if body.passed_test is not None
             else None
@@ -420,6 +420,15 @@ async def register_rule_test(
     await db.commit()
     await db.refresh(approval)
     return approval
+
+
+def _without_empty_dossier(example: dict) -> dict:
+    """A single-document example is stored as before the dossier (no "files",
+    no "main_path"); a dossier example keeps them."""
+    if not example.get("files"):
+        example.pop("files", None)
+        example.pop("main_path", None)
+    return example
 
 
 @router.post("/correction-dismissal", response_model=RuleApprovalOut)

@@ -14,6 +14,10 @@
 //      the XPath 2.0 template rules (@@…@@) not executable, a rule without
 //      other-file reads not a dossier rule.
 //   4. analyzeRule (dossier: true) and describeRule (the dossier line, EN/ES).
+//   5. Part 2: generation (the prompt, the files materialized and checked by
+//      their own type, the correction round naming the file, a reference to
+//      a missing file only a warning), "Run again" on one file, and the
+//      saved passed test with its files, re-run without the LLM.
 // The same verdicts in Chromium are checked by scripts/verify-rule-test-dossier.mjs.
 import { DOMParser } from '@xmldom/xmldom';
 import { readPublicTemplate } from './lib/readXlsx.mjs';
@@ -22,6 +26,12 @@ import { DOSSIER_BASE_URI, dossierUri } from '../src/utils/ruleTestSchematron.js
 import i18n from '../src/i18n/index.js';
 import { formatRuleDescription } from '../src/utils/ruleTestReasons.js';
 import { DOSSIER_CASES, DOSSIER_MAP } from './lib/dossierFixtures.mjs';
+import fs from 'node:fs';
+import { generateRuleTestExamples } from '../src/utils/ruleTestRun.js';
+import { editExample, ruleTestVerdict, exampleProblems } from '../src/utils/ruleTest.js';
+import { passedTestPayload, runSavedTest, savedPassedTest } from '../src/utils/ruleTestSaved.js';
+import { buildRuleTestCorrectionMessage, parseRuleTestResponse } from '../src/prompts/ruleTestExamplesPrompt.js';
+import { dossierProblemText } from '../src/utils/ruleTestDossier.js';
 
 const FORMAT = 'SCH-DITA';
 let passed = 0;
@@ -166,6 +176,149 @@ for (const row of readPublicTemplate('brdp-template-dita-xpath2.xlsx').filter((r
   const es = formatRuleDescription(d, i18n.getFixedT('es'))?.lines[0] || '';
   check('describe EN', en === 'Reads other files of the dossier: the examples include the ditamap and the topics it points to.', en);
   check('describe ES', es === 'Lee otros ficheros del dosier: los ejemplos incluyen el ditamap y las fichas a las que apunta.', es);
+}
+
+// ─── 5. Part 2: generation, panel data, saved test ─────────────────────────
+const STRUCTURES = JSON.parse(fs.readFileSync(new URL('./rule-test-fixtures/structures.json', import.meta.url)));
+const vocab0 = JSON.parse(fs.readFileSync(new URL('../public/schema-vocabulary-dita.json', import.meta.url)));
+const VOCAB = { elements: new Set(vocab0.elements), attributes: new Set(vocab0.attributes) };
+const fetchStructure = async (_std, schema) => {
+  const s = STRUCTURES[`DITA 1.3 Xpath2.0|${schema}`];
+  return s ? { available: true, ...s } : { available: false };
+};
+const fetchSchemaCards = async (_std, names) => ({
+  cards: {},
+  document_schemas: ['topic', 'task', 'map'],
+  element_schemas: Object.fromEntries(names.map((n) => [n, n === 'map' || n === 'topicref' ? ['map'] : ['topic', 'task']])),
+});
+const brdpOf = (id) => {
+  const r = rows.find((x) => x.ID === id);
+  return { identifier: r.ID, title: r.Title, definition: r.Definition, proposal: r.Proposal };
+};
+const PREC_TASK = '<task id="prec"><title>PRECAUCIONES DE SEGURIDAD</title><taskbody><steps><step><cmd>No fumar.</cmd></step></steps></taskbody></task>';
+const procTask = (info) => `<task id="proc"><title>PROCEDIMIENTO</title><taskbody><steps><step><cmd>Abrir.</cmd><info>${info}</info></step></steps></taskbody></task>`;
+const MAP2 = (hrefs) => `<map><title>Dosier</title>${hrefs.map((h) => `<topicref href="${h}"/>`).join('')}</map>`;
+async function generate(id, answers) {
+  const asked = [];
+  let prompt = null;
+  const result = await generateRuleTestExamples({
+    ruleXml: rule(id),
+    format: FORMAT,
+    standard: 'DITA 1.3 Xpath3.0',
+    schemaLocation: 'flat',
+    brdp: brdpOf(id),
+    vocabulary: VOCAB,
+    parseXml,
+    ask: async (messages) => {
+      asked.push(messages);
+      return JSON.stringify(answers[Math.min(asked.length - 1, answers.length - 1)]);
+    },
+    onPrompt: (p) => {
+      prompt = p;
+    },
+    fetchSchemaCards,
+    fetchStructure,
+    fetchSchemaAttribute: async () => ({ owners: [] }),
+  });
+  return { result, asked, prompt };
+}
+{
+  const good = { examples: [
+    { label: 'with the safety topic', expected: 'accept', schema: 'map', content: MAP2(['topics/prec.dita', 'topics/proc.dita']), files: [{ path: 'topics/prec.dita', content: PREC_TASK }, { path: './topics/proc.dita', content: procTask('<p>x</p>') }] },
+    { label: 'without it', expected: 'reject', schema: 'map', content: MAP2(['topics/proc.dita', 'topics/missing.dita']), files: [{ path: 'topics/proc.dita', content: procTask('<p>x</p>') }] },
+  ] };
+  const { result, asked, prompt } = await generate('BRDP-EXT-00007', [good]);
+  check('EXT-00007: one LLM call, ready', result.status === 'ready' && asked.length === 1, JSON.stringify(result.error || ''));
+  check('prompt: the dossier block', /each example is a DOSSIER/.test(prompt) && /"files": at most 4 more files/.test(prompt) && /at most\s+30 lines each/.test(prompt) && /not only in the ditamap/.test(prompt), prompt);
+  check('prompt: output with files', prompt.includes('"files": [{"path": "topics/….dita"'), prompt.slice(-400));
+  check('prompt: no "lists above" (there are none)', !/the rule's own names and the lists above/.test(prompt));
+  const [a] = result.examples;
+  check('materialized: main path and files', a.mainPath === 'dossier.ditamap' && a.files.length === 2 && a.files[1].path === 'topics/proc.dita', JSON.stringify(a.files.map((f) => f.path)));
+  check('materialized: each file has its type and structure', a.files.every((f) => f.schema === 'task' && f.structure), JSON.stringify(a.files.map((f) => f.schema)));
+  check('runs: accept accepted, reject rejected', result.runs[0].result?.status === 'accepted' && result.runs[1].result?.status === 'rejected', JSON.stringify(result.runs.map((r) => r.result?.status)));
+  check('verdict correct', ruleTestVerdict(result.examples, result.runs, null).kind === 'correct');
+  check('reference to a file not in the dossier: a warning, the example still runs', result.runs[1].validation.runnable && JSON.stringify(result.runs[1].validation.referenceWarnings) === '[{"file":"dossier.ditamap","attr":"href","value":"topics/missing.dita"}]', JSON.stringify(result.runs[1].validation));
+  check('no warning for the complete dossier', result.runs[0].validation.referenceWarnings.length === 0);
+
+  // "Run again" on one file: the safety topic loses its title → rejected.
+  const files = a.files.map((f) => ({ path: f.path, content: f.content }));
+  files[0] = { ...files[0], content: PREC_TASK.replace('PRECAUCIONES DE SEGURIDAD', 'OTRA COSA') };
+  const edited = editExample(a, a.content, undefined, result.setup, parseXml, files);
+  check('edit one file: marked edited', edited.editedByUser === true && edited.files[0].content.includes('OTRA COSA'));
+  const { runExample } = await import('../src/utils/ruleTest.js');
+  const rerun = runExample(rule('BRDP-EXT-00007'), FORMAT, edited, { vocabulary: VOCAB, parseXml });
+  check('edit one file: run again → rejected', rerun.result?.status === 'rejected', JSON.stringify(rerun.result?.status));
+  const back = editExample(edited, a.content, undefined, result.setup, parseXml, a.files.map((f) => ({ path: f.path, content: f.content })));
+  check('back to the generated files: no mark', back.editedByUser === false);
+
+  // Saved passed test with its files, re-run without the LLM.
+  const payload = passedTestPayload(result.examples, result.runs, brdpOf('BRDP-EXT-00007').proposal);
+  check('saved payload: files and main path', payload.examples[0].main_path === 'dossier.ditamap' && payload.examples[0].files.length === 2 && payload.examples[0].files[0].xml.includes('PRECAUCIONES'), JSON.stringify(payload.examples[0]).slice(0, 300));
+  const saved = savedPassedTest({ last_passed_test: { ...payload, at: '2026-10-09T10:00:00Z', rule_xml: rule('BRDP-EXT-00007'), rule_hash: 'x' }, rule_xml: rule('BRDP-EXT-00007') });
+  check('saved test read back with its files', saved.examples[0].files?.length === 2 && saved.examples[0].mainPath === 'dossier.ditamap');
+  const rerunSaved = runSavedTest(saved, rule('BRDP-EXT-00007'), FORMAT, { parseXml });
+  check('saved dossier re-run: correct, nothing changed', rerunSaved.verdict.kind === 'correct' && rerunSaved.changed.length === 0, JSON.stringify(rerunSaved.verdict));
+  check('saved dossier re-run: records the files again', rerunSaved.record.passedTest?.examples[0].files?.length === 2);
+}
+{
+  // Correction round: an invalid file (a <cmd> straight inside <taskbody>)
+  // and an unknown root; the problems name the file.
+  const bad = { examples: [
+    { label: 'conref to the common notes', expected: 'accept', schema: 'map', content: MAP2(['topics/prec.dita', 'topics/proc.dita']), files: [
+      { path: 'topics/prec.dita', content: '<task id="prec"><title>PRECAUCIONES DE SEGURIDAD</title><taskbody><cmd>No fumar.</cmd></taskbody></task>' },
+      { path: 'topics/proc.dita', content: procTask('<note conref="../common/notes.dita#notes/w1"/>') },
+      { path: 'common/notes.dita', content: '<notes id="notes"><note id="w1" type="warning">No fumar.</note></notes>' },
+    ] },
+    { label: 'warning not in the safety topic', expected: 'reject', schema: 'map', content: MAP2(['topics/prec.dita', 'topics/proc.dita']), files: [{ path: 'topics/prec.dita', content: PREC_TASK }, { path: 'topics/proc.dita', content: procTask('<note type="warning">Usar guantes.</note>') }] },
+  ] };
+  const fixed = { examples: [
+    { ...bad.examples[0], files: [
+      { path: 'topics/prec.dita', content: PREC_TASK },
+      { path: 'topics/proc.dita', content: procTask('<note conref="../common/notes.dita#notes/w1"/>') },
+      { path: 'common/notes.dita', content: '<topic id="notes"><title>Notas</title><body><note id="w1" type="warning">No fumar.</note></body></topic>' },
+    ] },
+    bad.examples[1],
+  ] };
+  const { result, asked } = await generate('BRDP-EXT-00008', [bad, fixed]);
+  check('EXT-00008: a correction round', asked.length === 2 && result.correction?.attempted === 1 && result.correction?.fixed === 1, JSON.stringify(result.correction));
+  const lines = result.correction.problems[0].problems;
+  check('correction names the file of a structure problem', lines.some((l) => l.startsWith('file "topics/prec.dita": ') && /<cmd> is not allowed inside <taskbody>/.test(l)), JSON.stringify(lines));
+  check('correction names the file with an unknown root', lines.some((l) => /file "common\/notes\.dita": <notes> is not the root/.test(l)), JSON.stringify(lines));
+  const msg = asked[1][2].content;
+  check('correction message: change "content" and "files"', msg.includes('change only the\n"content" and "files" of the examples listed'), msg);
+  check('after correction: verdict correct (conref to another file read)', ruleTestVerdict(result.examples, result.runs, null).kind === 'correct', JSON.stringify(result.runs.map((r) => [r.result?.status, r.validation.runnable])));
+}
+{
+  // Parse and limits.
+  const p = parseRuleTestResponse(JSON.stringify({ examples: [{ label: 'x', expected: 'accept', content: '<map/>', files: 'nope' }] }), { dossier: true });
+  check('parse: files that are not a list → error', !p.ok && /"files" that is not a list/.test(p.error));
+  const q = parseRuleTestResponse(JSON.stringify({ examples: [{ label: 'x', expected: 'accept', content: '<map/>', files: [{ path: 'a.dita' }] }] }), { dossier: true });
+  check('parse: a file without content → error', !q.ok && /file 1/.test(q.error));
+  const plain = parseRuleTestResponse(JSON.stringify({ examples: [{ label: 'x', expected: 'accept', content: '<p/>', files: [{ path: 'a', content: 'b' }] }] }));
+  check('parse without dossier: files ignored', plain.ok && plain.examples[0].files === undefined);
+  check('correction message without dossier: unchanged', buildRuleTestCorrectionMessage([{ index: 0, label: 'x', problems: ['p'] }]).includes('"content" (and "metadata", if it has one)'));
+  check('dossier problem texts', dossierProblemText({ code: 'dossier_too_many_files', params: { count: 5, max: 4 } }) === 'the dossier has 5 files besides the ditamap; write at most 4'
+    && /is not a relative path/.test(dossierProblemText({ code: 'dossier_bad_path', params: { path: '/etc/x' } })));
+  const five = Array.from({ length: 5 }, (_, i) => ({ path: `t${i}.dita`, content: '<topic id="t"><title>T</title></topic>' }));
+  const gen = await generate('BRDP-EXT-00007', [{ examples: [{ label: 'five', expected: 'accept', schema: 'map', content: MAP2(['t0.dita']), files: five }, { label: 'none', expected: 'reject', schema: 'map', content: MAP2([]), files: [] }] }]);
+  const r0 = gen.result.runs[0];
+  check('5 files: not run, the dossier problem', !r0.validation.runnable && r0.validation.dossierProblems.some((x) => x.code === 'dossier_too_many_files'), JSON.stringify(r0.validation.dossierProblems));
+  check('5 files: in the correction lines', exampleProblems(r0.validation, { standard: 'DITA 1.3 Xpath3.0', schema: 'map' }).some((l) => /5 files besides the ditamap/.test(l)));
+  for (const [path, code] of [['/abs.dita', 'dossier_bad_path'], ['http://x/a.dita', 'dossier_bad_path'], ['../out.dita', 'dossier_bad_path'], ['dossier.ditamap', 'dossier_duplicate_path']]) {
+    const g = await generate('BRDP-EXT-00007', [{ examples: [{ label: 'p', expected: 'accept', schema: 'map', content: MAP2([]), files: [{ path, content: PREC_TASK }] }, { label: 'n', expected: 'reject', schema: 'map', content: MAP2([]), files: [] }] }]);
+    check(`path "${path}" → ${code}`, g.result.runs[0].validation.dossierProblems.some((x) => x.code === code), JSON.stringify(g.result.runs[0].validation.dossierProblems));
+  }
+}
+{
+  // A DITA rule without other-file reads: the prompt has no dossier block.
+  const plainRule = '<sch:pattern id="p"><sch:rule context="note"><sch:assert id="N" test="@type">x</sch:assert></sch:rule></sch:pattern>';
+  let prompt = null;
+  await generateRuleTestExamples({
+    ruleXml: plainRule, format: FORMAT, standard: 'DITA 1.3 Xpath3.0', schemaLocation: 'flat', brdp: { identifier: 'X', title: '', definition: '', proposal: '' },
+    vocabulary: VOCAB, parseXml, ask: async () => '{"examples":[{"label":"a","expected":"accept","schema":"topic","content":"<note type=\\"note\\">x</note>"}]}',
+    onPrompt: (p) => { prompt = p; }, fetchSchemaCards, fetchStructure, fetchSchemaAttribute: async () => ({ owners: [] }),
+  });
+  check('rule without other-file reads: no dossier block', prompt && !/DOSSIER/.test(prompt) && !/"files"/.test(prompt), prompt?.slice(0, 200));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -537,3 +537,60 @@ async def test_keep_previous_over_a_passed_test_of_an_earlier_rule(client, edito
     body = res.json()
     assert body["last_test_result"] == "passed" and body["last_test_at"] == passed["last_test_at"]
     assert body["last_test_up_to_date"] is False
+
+
+# ─── Dosier (Test de reglas sobre un dosier, Part 2) ────────────────────────
+
+def _dossier_payload():
+    payload = _passed_payload()
+    payload["examples"][0] = {
+        **payload["examples"][0],
+        "schema": "map",
+        "xml": '<map><topicref href="topics/safety.dita"/></map>',
+        "skeleton_node_paths": [],
+        "main_path": "dossier.ditamap",
+        "files": [{"path": "topics/safety.dita", "xml": '<task id="s"><title>PRECAUCIONES DE SEGURIDAD</title></task>'}],
+    }
+    return payload
+
+
+async def test_a_dossier_passed_test_keeps_its_files_and_an_old_one_reads_as_before(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    body = (
+        await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": _dossier_payload()}, headers=headers)
+    ).json()
+    first, second = body["last_passed_test"]["examples"]
+    assert first["main_path"] == "dossier.ditamap"
+    assert first["files"] == [{"path": "topics/safety.dita", "xml": '<task id="s"><title>PRECAUCIONES DE SEGURIDAD</title></task>'}]
+    # A single-document example is stored exactly as before the dossier.
+    assert "files" not in second and "main_path" not in second
+    plain = (
+        await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": _passed_payload()}, headers=headers)
+    ).json()["last_passed_test"]
+    assert all("files" not in e for e in plain["examples"])
+
+
+async def test_dossier_limits_give_422_with_the_reason(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+
+    async def post(payload):
+        return await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": payload}, headers=headers)
+
+    five = _dossier_payload()
+    five["examples"][0]["files"] = [{"path": f"t{i}.dita", "xml": "<topic/>"} for i in range(5)]
+    assert (await post(five)).status_code == 422
+    big_file = _dossier_payload()
+    big_file["examples"][0]["files"] = [{"path": "t.dita", "xml": "<topic>" + "x" * 50001 + "</topic>"}]
+    assert (await post(big_file)).status_code == 422
+    # Each file within its cap, the dossier over its total.
+    over = _dossier_payload()
+    over["examples"][0]["files"] = [{"path": f"t{i}.dita", "xml": "<topic>" + "x" * 49000 + "</topic>"} for i in range(4)]
+    over["examples"][0]["xml"] = "<map>" + "y" * 49000 + "</map>"
+    res = await post(over)
+    assert res.status_code == 422
+    assert "at most 200000" in json.dumps(res.json())
+    no_path = _dossier_payload()
+    no_path["examples"][0]["files"] = [{"path": "", "xml": "<topic/>"}]
+    assert (await post(no_path)).status_code == 422

@@ -77,6 +77,10 @@
 // never the list as a condition. Changed on purpose: the 7 BREX suggestRule
 // cases. Every other case (Schematron, Ask, Suggest Definition/Proposal,
 // rule test) is unchanged.
+//
+// Dosier, Part 2: two new cases (ruleTestExamples/dita-xpath{3,2}-dossier-
+// safety-topic): a DITA rule that reads the files of its ditamap gets the
+// dossier block ("files" in the output). Every existing case is unchanged.
 
 // A DELIBERATE change to a prompt's wording/structure (not this repo's
 // day-to-day case, but it does happen -- see e.g. the "SCOPE:" rewrite a

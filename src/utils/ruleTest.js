@@ -32,6 +32,14 @@ import {
 import { SKELETON_TEXT_SUFFIX, assembleExample, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { placeSentence, relocateMisplacedElements, relocateToOnlyParent } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
+import {
+  DOSSIER_MAIN_PATH,
+  dossierForEngine,
+  dossierProblemText,
+  dossierProblems,
+  dossierReferenceWarnings,
+  materializeDossierFiles,
+} from './ruleTestDossier.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
 // names (xsi:…, xlink:…) and namespace declarations are not schema
@@ -159,8 +167,14 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   });
   const missingMetadata =
     section?.insertion && entry.placement.path.length > 0 && !String(example.metadata || '').trim() ? section.element : null;
+  // Dosier, Part 2: the other files of the example's dossier, each with the
+  // same fixes and the structure of its own type.
+  const dossier = setup.dossier
+    ? { mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: materializeDossierFiles(example.files || [], setup.dossier.structures, parseXml) }
+    : null;
   return {
     ...adjusted,
+    ...(dossier ? { mainPath: dossier.mainPath, files: dossier.files } : {}),
     schema,
     xml,
     skeletonNodePaths,
@@ -317,14 +331,27 @@ const PLAIN_TEXT_HINT = 'If this element is not needed to test the rule, remove 
 // says the verdict includes hand-edited examples and is not recorded (T3:
 // only the examples as the LLM wrote them are). Running it again unchanged,
 // or back to the generated text, leaves no mark.
-export function editExample(current, content, metadata, setup, parseXml = parseXmlDocument) {
-  const generated = current.generated || { content: current.content, metadata: current.metadata ?? null };
+// Dosier, Part 2: `files` ([{ path, content }]) replaces the dossier's other
+// files (one edited file, the rest as they were).
+const filesText = (files) => JSON.stringify((files || []).map((f) => [f.path, f.content]));
+export function editExample(current, content, metadata, setup, parseXml = parseXmlDocument, files = undefined) {
+  const generated = current.generated || {
+    content: current.content,
+    metadata: current.metadata ?? null,
+    ...(Array.isArray(current.files) ? { files: current.files.map((f) => ({ path: f.path, content: f.content })) } : {}),
+  };
   const edited = { ...current, content, generated };
+  if (files !== undefined) edited.files = files.map((f) => ({ path: f.path, content: f.content }));
+  else if (Array.isArray(current.files)) edited.files = current.files.map((f) => ({ path: f.path, content: f.content }));
+  const filesChanged = files !== undefined && filesText(files) !== filesText(current.files);
   // Mejoras H: a hand edit is the user's example, no longer the one the
   // correction could not write.
-  if (content !== current.content || (metadata !== undefined && metadata !== (current.metadata ?? null))) delete edited.schemaLimit;
+  if (content !== current.content || filesChanged || (metadata !== undefined && metadata !== (current.metadata ?? null))) delete edited.schemaLimit;
   if (metadata !== undefined) edited.metadata = metadata;
-  edited.editedByUser = edited.content !== generated.content || (edited.metadata ?? null) !== generated.metadata;
+  edited.editedByUser =
+    edited.content !== generated.content ||
+    (edited.metadata ?? null) !== generated.metadata ||
+    (generated.files !== undefined && filesText(edited.files) !== filesText(generated.files));
   return materializeExample(edited, setup, parseXml);
 }
 
@@ -342,7 +369,15 @@ export function editedExamplesRecord({ recorded, alreadyRecorded, examples, verd
   if (recorded && recorded.result === 'passed') return null;
   const edited = (examples || []).filter((ex) => ex.editedByUser && ex.xml);
   if (edited.length === 0) return null;
-  return { result: 'passed', reason: null, editedExamples: edited.map((ex) => ({ label: ex.label || '', xml: ex.xml })) };
+  return {
+    result: 'passed',
+    reason: null,
+    editedExamples: edited.map((ex) => ({
+      label: ex.label || '',
+      xml: ex.xml,
+      ...(Array.isArray(ex.files) ? { files: ex.files.map((f) => ({ path: f.path, xml: f.xml ?? f.content })) } : {}),
+    })),
+  };
 }
 
 // Pending of the test rule (Part 1): `nestings` (the placement's
@@ -439,6 +474,13 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
   }
   for (const card of validation.cards || []) out.push(formatElementCard(card, schema));
   if (tableModel && (validation.structure || []).some((p) => TABLE_PROBLEM_KINDS.has(p.kind))) out.push(TABLE_MODEL_HINT);
+  // Dosier, Part 2: the dossier's own problems, and each file's, naming the
+  // file.
+  for (const p of validation.dossierProblems || []) out.push(dossierProblemText(p));
+  for (const f of validation.files || []) {
+    if (f.validation.runnable) continue;
+    for (const line of exampleProblems(f.validation, { standard, schema: f.schema, ruleNames, tableModel })) out.push(`file "${f.path}": ${line}`);
+  }
   return out;
 }
 
@@ -454,6 +496,21 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     unknownSchema,
     missingMetadata: example.missingMetadata || null,
   });
+  // Dosier, Part 2: every file of the example's dossier is validated with
+  // the structure of its own type; a problem in any of them (or in the
+  // dossier itself) keeps the example from running. A reference to a file
+  // not in the dossier is only a warning.
+  const dossier = dossierForEngine(example);
+  if (dossier) {
+    validation.files = example.files.map((f) => ({
+      path: f.path,
+      schema: f.schema || null,
+      validation: validateExample(f.xml ?? f.content, vocabulary, parseXml, f.structure || null),
+    }));
+    validation.dossierProblems = dossierProblems(example.files, dossier.mainPath);
+    validation.referenceWarnings = dossierReferenceWarnings(example.xml, example.files, parseXml, dossier.mainPath);
+    validation.runnable = validation.runnable && validation.dossierProblems.length === 0 && validation.files.every((f) => f.validation.runnable);
+  }
   if (!validation.runnable) {
     // Mejoras E, Part 1.3: an example meant to be rejected whose only
     // problem is an element the schema does not allow where it is -- and
@@ -471,6 +528,7 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
   const result = runRuleOnFragment(ruleXml, format, example.xml, example.schema || null, {
     parseXml,
     schemaLocation: example.schemaLocation || schemaLocation,
+    ...(dossier ? { dossier } : {}),
   });
   const expectedStatus = example.expected === 'reject' ? 'rejected' : 'accepted';
   // Mejoras E, Part 2.3: an engine error on a valid example is the rule
@@ -485,7 +543,11 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
   // "inconclusive".
   const acceptance =
     example.expected === 'reject' && result.status === 'accepted'
-      ? acceptanceDetails(ruleXml, format, example.xml, example.schema || null, { parseXml, schemaLocation: example.schemaLocation || schemaLocation })
+      ? acceptanceDetails(ruleXml, format, example.xml, example.schema || null, {
+          parseXml,
+          schemaLocation: example.schemaLocation || schemaLocation,
+          ...(dossier ? { dossier } : {}),
+        })
       : null;
   // Remates B, Part 1: a rejecting condition the example names (some of
   // the elements or attributes it looks at are there) but does not meet is
@@ -599,9 +661,11 @@ function schemaCoveredExample(ruleXml, format, example, validation, { parseXml, 
   // example is merely written wrong, the schema does not rule it out.
   const pairs = ruleTargets(ruleXml).alternatives.flatMap((a) => a.descendantPairs || []);
   if (offending.some((o) => pairs.some(([a, x]) => x === o.element && nestingPath(example.structure.elements || {}, a, o.element)))) return null;
+  const exampleDossier = dossierForEngine(example);
   const result = runRuleOnFragment(ruleXml, format, example.xml, example.schema || null, {
     parseXml,
     schemaLocation: example.schemaLocation || schemaLocation,
+    ...(exampleDossier ? { dossier: exampleDossier } : {}),
   });
   if (result.status !== 'rejected') return null;
   const rejected = new Set(result.violations.flatMap((v) => v.nodePaths || []));

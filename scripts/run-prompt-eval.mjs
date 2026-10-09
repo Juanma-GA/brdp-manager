@@ -400,6 +400,15 @@ async function runCheck(check, answer, ctx = {}) {
       const limitedNote = limited.length ? `; schema-limited, correction discarded: ${limited.join(", ")}` : "";
       return { status: bad.length ? "fail" : "pass", detail: (bad.length ? `still invalid after the correction round: ${bad.join(", ")}${corrected}` : `all ${r.examples.length - (check.allowSchemaLimited ? limited.length : 0)} examples valid${corrected}`) + limitedNote };
     }
+    case "rule_test_dossier_files": {
+      // Dosier, Part 2: every example is a dossier with 1..4 files besides
+      // the ditamap.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const counts = r.examples.map((ex) => (Array.isArray(ex.files) ? ex.files.length : -1));
+      const ok = counts.every((n) => n >= 1 && n <= 4);
+      return { status: ok ? "pass" : "fail", detail: `files per example: ${counts.map((n) => (n < 0 ? "not a dossier" : n)).join(", ")}` };
+    }
     case "rule_test_accept_and_reject": {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
@@ -549,7 +558,10 @@ async function runCheck(check, answer, ctx = {}) {
       // LLM wrote (rule test on DM metadata); "all" -- the section and the
       // content (a value that may be in the DM's own code or in a
       // reference); the content otherwise.
+      // Dosier, Part 2: "target": "files" -- every other file of the
+      // example's dossier (the ditamap is "content").
       const text = (ex) => (check.target === "metadata" ? ex.metadata || ""
+        : check.target === "files" ? (ex.files || []).map((f) => f.content).join("\n")
         : check.target === "all" ? `${ex.metadata || ""}\n${ex.content || ""}` : ex.content);
       const bad = rejects.filter((ex) => !re.test(text(ex)));
       if (rejects.length === 0) return { status: "fail", detail: `no ${expected} example` };

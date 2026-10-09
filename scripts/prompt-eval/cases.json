@@ -4225,6 +4225,82 @@
           "note": "the description names the element"
         }
       ]
+    },
+    {
+      "id": "rule-test-template-dita3-dossier-safety-topic",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Dosier: template row BRDP-EXT-00007 (XPath 3.0): the dossier must have the 'PRECAUCIONES DE SEGURIDAD' topic; the rule opens each topicref with doc()/doc-available().",
+      "templateRow": {
+        "file": "brdp-template-dita-xpath3.xlsx",
+        "id": "BRDP-EXT-00007"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier: the ditamap and 1 to 4 more files"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "the ditamap and every file pass the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine, reading the files of each dossier, agrees with every example on the curated rule"
+        },
+        {
+          "type": "rule_test_accept_examples_contain",
+          "target": "files",
+          "pattern": "PRECAUCIONES DE SEGURIDAD",
+          "note": "every accept example has the safety topic among its files"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-template-dita3-dossier-warnings",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Dosier: template row BRDP-EXT-00008 (XPath 3.0): every warning of the procedure is a step of 'PRECAUCIONES DE SEGURIDAD', also a warning reached by conref to another file.",
+      "templateRow": {
+        "file": "brdp-template-dita-xpath3.xlsx",
+        "id": "BRDP-EXT-00008"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier: the ditamap and 1 to 4 more files"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "the ditamap and every file pass the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine, reading the files of each dossier, agrees with every example on the curated rule"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "files",
+          "pattern": "type=[\"']warning[\"']|conref=",
+          "note": "every reject example has a warning (or a conref to one) in its files"
+        }
+      ]
     }
   ]
 }

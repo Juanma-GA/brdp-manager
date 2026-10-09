@@ -108,9 +108,37 @@ _MAX_EDITED_EXAMPLES = 20
 _MAX_EDITED_XML = 50000
 
 
+# Dosier (Test de reglas sobre un dosier, Part 2): an example of a rule that
+# reads other files is a dossier -- the ditamap (`xml`) and up to
+# _MAX_DOSSIER_FILES more files, each a relative path and its whole XML. Each
+# file has the same cap as a document; the whole dossier has its own.
+_MAX_DOSSIER_FILES = 4
+_MAX_DOSSIER_PATH = 300
+_MAX_DOSSIER_TOTAL_XML = 200000
+
+
+class RuleTestDossierFile(BaseModel):
+    path: str = Field(min_length=1, max_length=_MAX_DOSSIER_PATH)
+    xml: str = Field(min_length=1, max_length=_MAX_EDITED_XML)
+
+
+def _check_dossier_size(xml: str, files: list[RuleTestDossierFile]) -> None:
+    total = len(xml) + sum(len(f.xml) for f in files)
+    if total > _MAX_DOSSIER_TOTAL_XML:
+        raise ValueError(
+            f"the dossier of this example has {total} characters of XML; at most {_MAX_DOSSIER_TOTAL_XML}"
+        )
+
+
 class RuleTestEditedExample(BaseModel):
     label: str = Field(max_length=500)
     xml: str = Field(min_length=1, max_length=_MAX_EDITED_XML)
+    files: list[RuleTestDossierFile] = Field(default_factory=list, max_length=_MAX_DOSSIER_FILES)
+
+    @model_validator(mode="after")
+    def _dossier_size(self) -> "RuleTestEditedExample":
+        _check_dossier_size(self.xml, self.files)
+        return self
 
 
 # The examples of a passed test, kept with it ("Ver prueba aprobada",
@@ -132,8 +160,17 @@ class RuleTestPassedExample(BaseModel):
     skeleton_node_paths: list[str] = Field(default_factory=list, max_length=_MAX_PASSED_PATHS)
     result: Literal["accepted", "rejected"]
     matches: bool
+    # Dosier: the ditamap's path in the dossier and the other files (none
+    # for a single-document example, and in every test saved before).
+    main_path: str | None = Field(default=None, max_length=_MAX_DOSSIER_PATH)
+    files: list[RuleTestDossierFile] = Field(default_factory=list, max_length=_MAX_DOSSIER_FILES)
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def _dossier_size(self) -> "RuleTestPassedExample":
+        _check_dossier_size(self.xml, self.files)
+        return self
 
 
 class RuleTestPassedTest(BaseModel):

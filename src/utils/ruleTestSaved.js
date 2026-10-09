@@ -11,6 +11,7 @@ import { runExample, ruleTestVerdict } from './ruleTest.js';
 import { analyzeRule } from './ruleTestEngine.js';
 import { thresholdMismatch } from './ruleThreshold.js';
 import { verdictToTestRecord } from './ruleTestReasons.js';
+import { DOSSIER_MAIN_PATH } from './ruleTestDossier.js';
 
 // The examples of a passed test, as they ran: only the examples the engine
 // ran (an example that failed validation is no evidence of anything).
@@ -28,6 +29,8 @@ export function passedTestPayload(examples, runs, proposal, examplesFrom = null)
       skeleton_node_paths: ex.skeletonNodePaths || [],
       result: status,
       matches: runs[i].matches === true,
+      // Dosier, Part 2: the dossier's other files, as they ran.
+      ...(Array.isArray(ex.files) ? { main_path: ex.mainPath || null, files: ex.files.map((f) => ({ path: f.path, xml: f.xml ?? f.content })) } : {}),
     });
   });
   if (kept.length === 0) return null;
@@ -69,6 +72,10 @@ export function savedPassedTest(approval, currentProposal = null) {
       xml: ex.xml,
       skeletonNodePaths: ex.skeleton_node_paths || [],
       saved: { result: ex.result, matches: ex.matches === true },
+      // Dosier, Part 2 (an older saved test has no files: a single document).
+      ...(Array.isArray(ex.files) && ex.files.length > 0
+        ? { mainPath: ex.main_path || DOSSIER_MAIN_PATH, content: ex.xml, files: ex.files.map((f) => ({ path: f.path, xml: f.xml, content: f.xml })) }
+        : {}),
     })),
     ruleChanged: approval.rule_xml != null && saved.rule_hash !== ruleXmlHash(approval.rule_xml),
     proposalChanged: currentProposal != null && !sameText(saved.proposal, currentProposal),

@@ -349,6 +349,30 @@ around it, never the document root.
 ${placements.map((p) => placementLine(p, dita)).join('\n')}`;
 }
 
+// Dosier, Part 2: a rule that reads other files of a DITA dossier. Each
+// example is a dossier: the ditamap ("content") and up to `maxFiles` more
+// files ("files"). Only these rules get this block; every other prompt is
+// unchanged.
+function dossierInstructions(standard, dossier) {
+  return `HOW EACH EXAMPLE IS BUILT: the rule reads other files of a DITA dossier
+(doc(), doc-available(), document()), so each example is a DOSSIER: a folder
+with the ditamap the rule runs on and the files the ditamap points to.
+- "content": the whole ditamap (${dossier.mainPath}, at the top of the folder):
+  a complete ${standard} <map> whose <topicref href="…"> point to the files by
+  their path relative to the folder (for example "topics/safety.dita").
+- "files": at most ${dossier.maxFiles} more files, each {"path": "…", "content": "…"}:
+  the path relative to the folder and the complete DITA document (a
+  ${dossier.types.filter((t) => t !== 'map').join(', ')} root element), at most
+  ${dossier.maxLines} lines each.
+- A conref to another file is its path relative to the file that contains
+  it, then #topic-id/element-id (for example "../common/notes.dita#notes/w1").
+- The reject example goes against the decision in the FILES (a topic that is
+  missing, a note that is not where the decision requires it, a conref to a
+  file or id that is not there...), not only in the ditamap.
+- Titles and texts the rule looks for are written exactly as the rule writes
+  them.`;
+}
+
 // `input`: { brdp, standard, format, ruleXml, contextSchemas, placements,
 // schemaFacts, previousReview, matchExpressions } -- matchExpressions (T4b)
 // are the rule's match expressions (ruleMatchExpressions), used to tell a
@@ -382,6 +406,9 @@ export function buildRuleTestExamplesPrompt({
   // compares with that can give several -- examples with two or more.
   limits = [],
   several = [],
+  // Dosier, Part 2: { mainPath, maxFiles, maxLines, types } for a rule that
+  // reads other files of the dossier; null otherwise.
+  dossier = null,
 }) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
@@ -397,7 +424,7 @@ export function buildRuleTestExamplesPrompt({
     ? `use only element and attribute names that appear in
   the rule, in the lists above or in the SCHEMA FACTS below`
     : `use only real ${standard} element and attribute names —
-  the rule's own names and the lists above; never invent a name`;
+  the rule's own names${dossier ? '' : ' and the lists above'}; never invent a name`;
 
   let prompt = `You write test examples for one ${standard} business rule, in BRDP Manager's
 "Test rule". The application runs the rule itself on each example and
@@ -426,11 +453,14 @@ ${acceptOnly ? acceptOnlyInstructions(standard, acceptOnly) : `- "examples": at 
   allow), never against something the Proposal does not mention.`}
 ${schemaInstructions(contextSchemas, placements, dita)}
 
-${buildingInstructions(standard, placements, dita)}
+${dossier ? dossierInstructions(standard, dossier) : buildingInstructions(standard, placements, dita)}
 
 EACH EXAMPLE:
 ${
-    metadataOnly
+    dossier
+      ? `- A small dossier of a ship or aircraft maintenance manual: maintenance
+  steps, safety precautions, removal of components and the like.`
+      : metadataOnly
       ? `- Only the identification and status section, starting from the minimal one
   above: change what the decision is about and keep the rest as it is.`
       : `- A short piece of ${dita ? 'a ship or aircraft maintenance manual' : 'an aircraft maintenance manual'}: maintenance steps,
@@ -482,6 +512,13 @@ Write new examples that do not repeat this mistake.`;
     withMetadata ? `"metadata": "<${placements.find((p) => p.metadata?.insertion).metadata.element}>…"` : null,
     withContent ? '"content": "…"' : null,
   ].filter(Boolean);
+  if (dossier) {
+    prompt += `
+
+OUTPUT: strict JSON, no comments:
+{"examples": [{"label": "…", "expected": "accept", "schema": "map", "content": "<map>…</map>", "files": [{"path": "topics/….dita", "content": "<task id=\\"…\\">…</task>"}]}]}`;
+    return prompt;
+  }
   prompt += `
 
 OUTPUT: strict JSON, no comments:
@@ -502,13 +539,15 @@ function acceptOnlyInstructions(standard, acceptOnly) {
 // T2b, the one automatic correction round: the exact problems of each
 // failing example, sent as the next user message after the LLM's first
 // answer. `failures`: [{ index (0-based), label, problems: [English] }].
-export function buildRuleTestCorrectionMessage(failures) {
+export function buildRuleTestCorrectionMessage(failures, { dossier = false } = {}) {
   const blocks = failures.map(
     (f) => `Example ${f.index + 1} ("${f.label}"):\n${f.problems.map((p) => `- ${p}`).join('\n')}`
   );
+  // Dosier, Part 2: the files are part of what may change.
+  const what = dossier ? '"content" and "files"' : '"content" (and "metadata", if it has one)';
   return `Some examples are not valid. Fix exactly these problems and
 return the complete JSON again: the same examples in the same order with the same "expected" and "schema" — change only the
-"content" (and "metadata", if it has one) of the examples listed.
+${what} of the examples listed.
 
 ${blocks.join('\n\n')}`;
 }
@@ -527,7 +566,10 @@ export function buildCopyableTestPrompt(systemPrompt) {
 // options.contentOptionalSchemas: the schemas whose examples the
 // application builds whole (placeExample's rootOnly) -- their examples come
 // with no "content".
-export function parseRuleTestResponse(raw, { contentOptionalSchemas = [] } = {}) {
+// options.dossier (Dosier, Part 2): each example also has "files", a list of
+// { path, content } (kept as written; the dossier's own checks say what is
+// wrong with them).
+export function parseRuleTestResponse(raw, { contentOptionalSchemas = [], dossier = false } = {}) {
   // No closing brace (a truncated answer) still reaches JSON.parse, which
   // says what is wrong.
   const read = readLlmJson(raw);
@@ -555,12 +597,24 @@ export function parseRuleTestResponse(raw, { contentOptionalSchemas = [] } = {})
     if (ex.schema !== undefined && ex.schema !== null && typeof ex.schema !== 'string') {
       return { ok: false, error: `${where} has a "schema" that is not text or null.` };
     }
+    let files = null;
+    if (dossier) {
+      if (ex.files !== undefined && ex.files !== null && !Array.isArray(ex.files)) return { ok: false, error: `${where} has "files" that is not a list.` };
+      files = [];
+      for (const [j, f] of (ex.files || []).entries()) {
+        if (!f || typeof f !== 'object' || typeof f.path !== 'string' || typeof (f.content ?? f.xml) !== 'string') {
+          return { ok: false, error: `${where}, file ${j + 1}, is not {"path": "…", "content": "…"}.` };
+        }
+        files.push({ path: f.path.trim(), content: String(f.content ?? f.xml).trim() });
+      }
+    }
     examples.push({
       label: typeof ex.label === 'string' && ex.label.trim() ? ex.label.trim() : where,
       expected: ex.expected,
       schema: ex.schema && ex.schema !== 'null' ? ex.schema : null,
       content: content.trim(),
       ...(metadata ? { metadata } : {}),
+      ...(files ? { files } : {}),
     });
   }
   return { ok: true, examples };

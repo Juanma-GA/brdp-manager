@@ -17,7 +17,8 @@ import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleT
 import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } from '../prompts/ruleProposalCheckPrompt.js';
 import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
-import { describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootSelfPath } from './ruleTestEngine.js';
+import { analyzeRule, describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootSelfPath } from './ruleTestEngine.js';
+import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures } from './ruleTestDossier.js';
 import { minimalDocumentRuns } from './ruleMinimalDocuments.js';
 import { stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
@@ -959,9 +960,17 @@ export async function generateRuleTestExamples({
     // the schema rules out is recognized only by a relation the rule names
     // (runExample's schemaCovered; "Run again" reads it from here too).
     prepared.setup.graph = graph || null;
+    // Dosier, Part 2: a DITA rule that reads other files -- each example is
+    // a dossier (the ditamap and its files), every file checked against the
+    // structure of its own type.
+    const dossierRule = format === 'SCH-DITA' && analyzeRule(ruleXml, format, { parseXml, standard }).dossier === true;
+    if (dossierRule) {
+      prepared.setup.dossier = { mainPath: DOSSIER_MAIN_PATH, structures: await loadDossierStructures(standard, fetchStructure) };
+      if (!isCurrent()) return null;
+    }
     // The schemas whose examples the application builds whole (rootOnly):
     // their examples come with no "content".
-    const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema) };
+    const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema), dossier: dossierRule };
     // With the schema already covering the rule there is no "correct" to
     // turn into "review": the Proposal check is not asked.
     const checkPromise =
@@ -983,6 +992,7 @@ export async function generateRuleTestExamples({
       acceptOnly: coverage ? { reasons: coverage.items.map(coverageItemEnglish) } : null,
       limits: prepared.limits || [],
       several: prepared.several || [],
+      dossier: dossierRule ? { mainPath: DOSSIER_MAIN_PATH, maxFiles: DOSSIER_MAX_FILES, maxLines: DOSSIER_MAX_FILE_LINES, types: DOSSIER_FILE_TYPES } : null,
     });
     onPrompt?.(systemPrompt);
     const run = (examples) => runRuleTestExamples(examples, { ruleXml, format, setup: prepared.setup, vocabulary, parseXml });
@@ -1022,7 +1032,7 @@ export async function generateRuleTestExamples({
       correction = { attempted: failures.length, fixed: 0, failed: null, problems: failures.map((f) => ({ label: f.label, problems: f.problems })) };
       try {
         const again = await ask(
-          [...first, { role: 'assistant', content: answer }, { role: 'user', content: buildRuleTestCorrectionMessage(failures) }],
+          [...first, { role: 'assistant', content: answer }, { role: 'user', content: buildRuleTestCorrectionMessage(failures, { dossier: dossierRule }) }],
           systemPrompt
         );
         responses.push(again);

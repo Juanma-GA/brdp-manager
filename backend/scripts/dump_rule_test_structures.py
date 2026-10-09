@@ -20,7 +20,7 @@ _REQUESTS = [
     ("S1000D 4.1", ["descript", "proced", "update", "ipd", "schedul"]),
     ("S1000D 3.0.1", ["descript", "proced", "pm", "ddn", "schedul"]),
     # T4: DITA topic types (the XPath 3.0 standard has the same graphs).
-    ("DITA 1.3 Xpath2.0", ["topic", "task", "map"]),
+    ("DITA 1.3 Xpath2.0", ["topic", "task", "map", "concept", "reference", "troubleshooting"]),
 ]
 
 _OUT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "rule-test-fixtures" / "structures.json"

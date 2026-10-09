@@ -906,6 +906,43 @@ ruleTestExamplesCases.push(
   }
 );
 
+// Dosier, Part 2: a DITA rule that reads the files its ditamap points to
+// (the shape of BRDP-EXT-00007 of the XPath 3.0 template) -- the examples
+// are dossiers. Only these cases have the dossier block.
+const ruleDitaDossier =
+  '<sch:pattern id="p-BRDP-D1-00300">\n  <sch:rule context="map">\n    <sch:let name="docs" value="for $tr in //topicref[@href] return (let $u := resolve-uri(substring-before(concat($tr/@href, \'#\'), \'#\'), base-uri($tr)) return if (doc-available($u)) then doc($u) else ())"/>\n    <sch:assert role="error" id="BRDP-D1-00300" test="exists($docs[normalize-space(*/title) = \'SAFETY PRECAUTIONS\'])">The dossier has no topic titled "SAFETY PRECAUTIONS".</sch:assert>\n  </sch:rule>\n</sch:pattern>';
+const dossierOption = { mainPath: 'dossier.ditamap', maxFiles: 4, maxLines: 30, types: ['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'] };
+ruleTestExamplesCases.push(
+  {
+    name: 'dita-xpath3-dossier-safety-topic',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-D1-00300', title: 'Safety precautions topic', definition: 'Decide whether every dossier has a safety precautions topic.', proposal: 'Every dossier shall have a topic titled "SAFETY PRECAUTIONS".' },
+        standard: 'DITA 1.3 Xpath3.0',
+        format: 'SCH-DITA',
+        ruleXml: ruleDitaDossier,
+        placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaDossier, [['map', 'rule']]),
+        matchExpressions: ruleMatchExpressions(ruleDitaDossier),
+        dossier: dossierOption,
+      },
+    ],
+  },
+  {
+    name: 'dita-xpath2-dossier-safety-topic',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-D1-00300', title: 'Safety precautions topic', definition: 'Decide whether every dossier has a safety precautions topic.', proposal: 'Every dossier shall have a topic titled "SAFETY PRECAUTIONS".' },
+        standard: 'DITA 1.3 Xpath2.0',
+        format: 'SCH-DITA',
+        ruleXml: ruleDitaDossier,
+        placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaDossier, [['map', 'rule']]),
+        matchExpressions: ruleMatchExpressions(ruleDitaDossier),
+        dossier: dossierOption,
+      },
+    ],
+  }
+);
+
 // Barrido final 1/2: a rule that looks at tables gets the model table built
 // from the first test schema's real structure, exactly as
 // prepareRuleTestSetup computes it (dita-xpath3-title-dependent-context and

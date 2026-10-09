@@ -433,6 +433,43 @@ function metadataReply(systemPrompt, rule, answer) {
   return null;
 }
 
+function dossierExamples(rule, correcting, lastUser) {
+  const map = (hrefs) => `<map><title>Dosier de mantenimiento</title>${hrefs.map((h) => `<topicref href="${h}"/>`).join("")}</map>`;
+  const prec = '<task id="precauciones"><title>PRECAUCIONES DE SEGURIDAD</title><taskbody><steps><step><cmd>No fumar en la zona de trabajo.</cmd></step><step><cmd>Usar gafas de protección.</cmd></step></steps></taskbody></task>';
+  const proc = (info) => `<task id="procedimiento"><title>PROCEDIMIENTO</title><taskbody><steps><step><cmd>Desmontar la tapa de la bomba.</cmd><info>${info}</info></step></steps></taskbody></task>`;
+  const PREC = { path: "fichas/precauciones.dita", content: prec };
+  if (/escalonPlan/.test(rule)) {
+    const plan = (v) => `<topic id="planificacion"><title>HOJA DE DATOS DE PLANIFICACIÓN CONSOLIDADA</title><body><section><title>DATOS PARA LA PLANIFICACIÓN</title><table><tgroup cols="2"><colspec colname="c1"/><colspec colname="c2"/><thead><row><entry colname="c1">EQUIPO</entry><entry colname="c2">ESCALÓN DE MANTENIMIENTO</entry></row></thead><tbody><row><entry colname="c1">Bomba</entry><entry colname="c2">${v}</entry></row></tbody></tgroup></table></section></body></topic>`;
+    const resumen = (v) => `<topic id="resumen"><title>HOJA RESUMEN DE PROCEDIMIENTO</title><body><table><tgroup cols="1"><colspec colname="c1"/><tbody><row><entry colname="c1"><p><b>ESCALÓN DE MANTENIMIENTO</b></p><p>${v}</p></entry></row></tbody></tgroup></table></body></topic>`;
+    const files = (a, b) => [{ path: "fichas/planificacion.dita", content: plan(a) }, { path: "fichas/resumen.dita", content: resumen(b) }];
+    return [
+      { label: "Same level in both sheets", expected: "accept", schema: "map", content: map(["fichas/planificacion.dita", "fichas/resumen.dita"]), files: files("2º escalón", "2º escalón") },
+      { label: "Different level in the sheets", expected: "reject", schema: "map", content: map(["fichas/planificacion.dita", "fichas/resumen.dita"]), files: files("2º escalón", "3er escalón") },
+    ];
+  }
+  if (/huerfanas/.test(rule)) {
+    const fixed = correcting && /file "comunes\/notas\.dita"/.test(lastUser);
+    const notes = fixed
+      ? '<topic id="notas"><title>NOTAS COMUNES</title><body><note id="w1" type="warning">Usar gafas de protección.</note></body></topic>'
+      : '<notes id="notas"><note id="w1" type="warning">Usar gafas de protección.</note></notes>';
+    return [
+      { label: "Warning by conref, listed in the safety topic", expected: "accept", schema: "map", content: map(["fichas/precauciones.dita", "fichas/procedimiento.dita"]), files: [PREC, { path: "fichas/procedimiento.dita", content: proc('<note conref="../comunes/notas.dita#notas/w1"/>') }, { path: "comunes/notas.dita", content: notes }] },
+      { label: "Warning missing from the safety topic", expected: "reject", schema: "map", content: map(["fichas/precauciones.dita", "fichas/procedimiento.dita"]), files: [PREC, { path: "fichas/procedimiento.dita", content: proc('<note type="warning">Calzar la bomba antes de soltarla.</note>') }] },
+    ];
+  }
+  if (/conrefRoto/.test(rule)) {
+    const NOTES = { path: "comunes/notas.dita", content: '<topic id="notas"><title>NOTAS COMUNES</title><body><note id="w1" type="warning">Usar gafas de protección.</note></body></topic>' };
+    return [
+      { label: "Conref that resolves", expected: "accept", schema: "map", content: map(["fichas/procedimiento.dita"]), files: [{ path: "fichas/procedimiento.dita", content: proc('<note conref="../comunes/notas.dita#notas/w1"/>') }, NOTES] },
+      { label: "Conref to a missing file", expected: "reject", schema: "map", content: map(["fichas/procedimiento.dita"]), files: [{ path: "fichas/procedimiento.dita", content: proc('<note conref="../comunes/no-esta.dita#notas/w1"/>') }] },
+    ];
+  }
+  return [
+    { label: "Dossier with the safety topic", expected: "accept", schema: "map", content: map(["fichas/precauciones.dita", "fichas/procedimiento.dita"]), files: [PREC, { path: "fichas/procedimiento.dita", content: proc("<p>Tapa desmontada.</p>") }] },
+    { label: "Dossier without the safety topic", expected: "reject", schema: "map", content: map(["fichas/procedimiento.dita"]), files: [{ path: "fichas/procedimiento.dita", content: proc("<p>Tapa desmontada.</p>") }] },
+  ];
+}
+
 function ruleTestReply(systemPrompt, messages) {
   const rule = (systemPrompt.match(/\nThe rule under test \([^)]*\)[^\n]*\n[^\n]*\n([\s\S]*?)\n\nWHAT TO WRITE/) || [])[1] || "";
   const proposal = (systemPrompt.match(/\nProposal: (.*)\n/) || [])[1] || "";
@@ -597,6 +634,13 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Two display paragraphs, one evaluation", expected: "reject", schema: ruleSchema || "descript", metadata: metadata(1), content: "Remove the access panel." },
     ]);
   }
+  // Dosier, Part 2: a rule that reads the files of its ditamap -- each
+  // example is a dossier (the ditamap as "content" and its "files"). The
+  // rule decides which dossier (the template rows BRDP-EXT-00004/7/8/9 of
+  // the XPath 3.0 template). For 00008 the first answer gives the common
+  // notes file an unknown root (<notes>); the correction round, which names
+  // that file, gives it a real <topic>.
+  if (/each example is a DOSSIER/.test(systemPrompt)) return answer(dossierExamples(rule, correcting, lastUser));
   const metadata = metadataReply(systemPrompt, rule, answer);
   if (metadata) return metadata;
   // T4, DITA Schematron: the topic type the prompt offers; the examples

@@ -190,7 +190,150 @@ function validationProblemTexts(t, validation, standard, schema) {
   for (const issue of [...nameIssues(validation.names, 'example', { standard }), ...structureIssues(validation.structure, { schema })]) {
     problems.push(formatSchemaIssue(issue, t));
   }
+  // Dosier, Part 2: the dossier's own problems, then each file's, naming it.
+  for (const p of validation.dossierProblems || []) problems.push(t(`records.ruleTest.dossier.problems.${p.code}`, p.params));
+  for (const f of validation.files || []) {
+    if (f.validation.runnable) continue;
+    for (const text of validationProblemTexts(t, f.validation, standard, f.schema)) problems.push(t('records.ruleTest.dossier.inFile', { path: f.path, problem: text }));
+  }
   return problems;
+}
+
+// Dosier, Part 2: one file of an example's dossier -- its path as the
+// header (the ditamap first), collapsible, with the same highlighting, the
+// application's fixes, "Copy XML" and, unless read-only, "Edit" / "Run
+// again" for that file alone.
+function DossierFileBlock({ path, xml, content, selected, skeleton, isMain, fixes, readOnly, onRunAgain, testId }) {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(content);
+  const [copied, setCopied] = useState(false);
+  const lines = xml ? xmlDisplayLines(xml, selected || [], undefined, skeleton || []) : null;
+  const copyXml = async () => {
+    try {
+      await navigator.clipboard.writeText(lines ? displayText(lines) : xml || content);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <details open className={styles.ruleTestDossierFile} data-testid={testId} data-path={path}>
+      <summary>
+        <code>{path}</code>
+        {isMain && <span className={styles.muted}> — {t('records.ruleTest.dossier.mainFile')}</span>}
+      </summary>
+      {fixes}
+      {editing ? (
+        <>
+          <textarea
+            className={styles.ruleTestEditor}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            spellCheck={false}
+            rows={Math.min(14, Math.max(4, draft.split('\n').length + 1))}
+            data-testid={`${testId}-editor`}
+          />
+          <div className={styles.suggestionActions}>
+            <button
+              onClick={() => {
+                onRunAgain(draft);
+                setEditing(false);
+              }}
+            >
+              {t('records.ruleTest.runAgain')}
+            </button>
+            <button
+              onClick={() => {
+                setDraft(content);
+                setEditing(false);
+              }}
+            >
+              {t('records.ruleTest.cancelEdit')}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <HighlightedXml lines={lines} xml={xml || content} />
+          <div className={styles.ruleTestExampleActions}>
+            {!readOnly && (
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => {
+                  setDraft(content);
+                  setEditing(true);
+                }}
+              >
+                {t('records.ruleTest.edit')}
+              </button>
+            )}
+            <button type="button" className={styles.linkButton} onClick={copyXml}>
+              {copied ? t('records.ruleTest.xmlCopied') : t('records.ruleTest.copyXml')}
+            </button>
+          </div>
+        </>
+      )}
+    </details>
+  );
+}
+
+// The fixes the application made to one document of the example.
+function DocumentFixNotes({ doc }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {doc.relocated?.length > 0 && (
+        <p className={styles.ruleTestNote} data-testid="rule-test-relocated">
+          {t('records.ruleTest.relocated', {
+            moves: doc.relocated.map((m) => `<${m.element}> → ${m.path.slice(0, -1).join('/')}`).join('; '),
+          })}
+        </p>
+      )}
+      {doc.colspecsAdded > 0 && <ColspecsAddedNote count={doc.colspecsAdded} />}
+      {doc.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={doc.spannedEntriesRemoved} />}
+      {doc.colsRaised?.length > 0 && <TableFixNote testId="rule-test-cols-raised" text={t('records.ruleTest.colsRaised', { count: doc.colsRaised.length, values: doc.colsRaised.map((c) => `${c.from} → ${c.to}`).join(', ') })} />}
+      {doc.morerowsLowered?.length > 0 && <TableFixNote testId="rule-test-morerows-lowered" text={t('records.ruleTest.morerowsLowered', { count: doc.morerowsLowered.length, rows: [...new Set(doc.morerowsLowered)].join(', ') })} />}
+      {doc.emptyRowsRemoved?.length > 0 && <TableFixNote testId="rule-test-empty-rows-removed" text={t('records.ruleTest.emptyRowsRemoved', { count: doc.emptyRowsRemoved.length, rows: doc.emptyRowsRemoved.join(', ') })} />}
+    </>
+  );
+}
+
+// Dosier, Part 2: every file of the example, the ditamap first.
+function DossierFiles({ example, selected, readOnly, onRunAgain, testIdPrefix }) {
+  const files = example.files || [];
+  const runWith = (index, text) => {
+    if (index < 0) onRunAgain(text, undefined, files.map((f) => ({ path: f.path, content: f.content })));
+    else onRunAgain(example.content, undefined, files.map((f, i) => ({ path: f.path, content: i === index ? text : f.content })));
+  };
+  return (
+    <div className={styles.ruleTestDossier} data-testid={`${testIdPrefix}-dossier`}>
+      <DossierFileBlock
+        path={example.mainPath}
+        xml={example.xml}
+        content={example.content}
+        selected={selected}
+        skeleton={example.skeletonNodePaths}
+        isMain
+        readOnly={readOnly}
+        onRunAgain={(text) => runWith(-1, text)}
+        testId={`${testIdPrefix}-file-main`}
+      />
+      {files.map((f, i) => (
+        <DossierFileBlock
+          key={`${f.path}:${i}`}
+          path={f.path}
+          xml={f.xml}
+          content={f.content}
+          readOnly={readOnly}
+          fixes={<DocumentFixNotes doc={f} />}
+          onRunAgain={(text) => runWith(i, text)}
+          testId={`${testIdPrefix}-file-${i}`}
+        />
+      ))}
+    </div>
+  );
 }
 
 function ValidationProblems({ validation, standard, schema }) {
@@ -363,7 +506,21 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
         <p className={styles.ruleTestNote}>{t('records.ruleTest.notApplicable', { schema: example.schema })}</p>
       )}
 
-      {editing ? (
+      {/* Dosier, Part 2: a reference to a file the dossier does not have -- a warning, never an error. */}
+      {(run.validation.referenceWarnings || []).map((w, i) => (
+        <p key={`rw:${i}`} className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-dossier-reference">
+          {t('records.ruleTest.dossier.missingReference', w)}
+        </p>
+      ))}
+      {Array.isArray(example.files) ? (
+        <DossierFiles
+          example={example}
+          selected={showResult && result ? result.selectedNodePaths : []}
+          readOnly={readOnly}
+          onRunAgain={onRunAgain}
+          testIdPrefix={`${testIdPrefix}-${index}`}
+        />
+      ) : editing ? (
         <>
           {example.metadataElement && (
             <>
@@ -872,7 +1029,7 @@ export default function RuleTestPanel({
               standard={standard}
               dita={format === 'SCH-DITA'}
               showResult={showResults}
-              onRunAgain={(content, metadata) => runAgain(i, content, metadata)}
+              onRunAgain={(content, metadata, files) => runAgain(i, content, metadata, files)}
             />
           ))}
         </>

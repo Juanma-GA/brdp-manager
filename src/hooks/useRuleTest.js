@@ -241,9 +241,11 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // passed into "Correct" ARE recorded -- as passed, with the edited
   // examples (editedExamplesRecord). Never for a rule that is not
   // executable at all (its illustrative examples record nothing).
-  const runAgain = async (index, content, metadata) => {
+  // Dosier, Part 2: `files` ([{ path, content }]), when one file of a
+  // dossier example was edited.
+  const runAgain = async (index, content, metadata, files) => {
     if (state.status !== 'ready') return;
-    const example = editExample(state.examples[index], content, metadata, setupRef.current);
+    const example = editExample(state.examples[index], content, metadata, setupRef.current, undefined, files);
     const examples = state.examples.map((ex, i) => (i === index ? example : ex));
     const runs = state.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary, schemaLocation, graph: setupRef.current?.graph || null }) : r));
     setState({ ...state, examples, runs });

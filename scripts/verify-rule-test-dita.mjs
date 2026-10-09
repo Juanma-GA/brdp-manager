@@ -3,8 +3,9 @@
 // skeletons, the Schematron engine's verdicts and messages, role="warning",
 // sch:let with an inline function and sch:value-of (XPath 3.0), the XPath
 // 3.x warning in an XPath 2.0 project, a rule reading the ditamap with
-// doc() (not executable from the start, recorded without calling the LLM,
-// explained by Verify), and the wrong rule loop: inverted assert →
+// collection() (not executable from the start, recorded without calling
+// the LLM, explained by Verify; Dosier: a rule with doc()/doc-available()
+// is a dossier rule now -- scripts/verify-rule-test-dossier.mjs), and the wrong rule loop: inverted assert →
 // incorrect → review (cause rule) → Suggest a corrected rule (with the
 // PREVIOUS RULE FAILED ITS TEST block) → correct test → Accept records it.
 // T4b: the topic's own <title> in the skeleton (dimmed), the real template
@@ -73,7 +74,7 @@ const LANG_RULE = (id) => `<pattern id="p-${id}">
 </pattern>`;
 const MAP_DOC_RULE = (id) => `<sch:pattern id="p-${id}">
   <sch:rule context="map">
-    <sch:let name="docs" value="for $tr in //topicref[@href] return if (doc-available(resolve-uri($tr/@href, base-uri($tr)))) then doc(resolve-uri($tr/@href, base-uri($tr))) else ()"/>
+    <sch:let name="docs" value="collection('topics?select=*.dita')"/>
     <sch:assert id="${id}" role="error" test="empty($docs//note[not(@type)])">Some topics of the map have notes without a type.</sch:assert>
   </sch:rule>
 </sch:pattern>`;
@@ -297,14 +298,16 @@ async function main() {
     await panel6.screenshot({ path: shot("rule-test-dita-let.png") });
     await panel6.getByRole("button", { name: "Close" }).click();
 
-    // 7. doc() on the ditamap: not executable from the start, explained by
-    //    Verify, recorded without calling the LLM when the panel opens.
+    // 7. collection() on the ditamap: not executable from the start,
+    //    explained by Verify, recorded without calling the LLM when the panel
+    //    opens (doc()/doc-available() are dossier rules since "Test de
+    //    reglas sobre un dosier").
     await select("BRDP-DT-DOC");
     await fetch(`${MOCK}/reset`, { method: "POST" });
     await page.getByRole("button", { name: "Verify", exact: true }).click();
     await dialog().waitFor({ timeout: 3000 });
     assert((await dialog().getAttribute("data-kind")) === "not_executable", "doc(): Verify explains it is not executable");
-    assert((await dialog().textContent()).includes("The rule reads another file (doc-available()), which is not available in a test."), `doc() dialog reason (${await dialog().textContent()})`);
+    assert((await dialog().textContent()).includes("The rule reads another file (collection()), which is not available in a test."), `doc() dialog reason (${await dialog().textContent()})`);
     await dialog().getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("button", { name: "Test rule" }).first().click();
     const panel7 = panels().first();

@@ -1226,6 +1226,24 @@
   gap: 12px;
 }
 
+/* Dosier, Part 2: the files of a dossier example, the ditamap first. */
+.ruleTestDossier {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ruleTestDossierFile {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.ruleTestDossierFile > summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+
 .ruleTestEditor {
   width: 100%;
   box-sizing: border-box;
