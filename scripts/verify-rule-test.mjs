@@ -269,7 +269,7 @@ async function main() {
     await example(1).getByRole("button", { name: "Run again" }).click();
     await page.waitForTimeout(300);
     assert((await example(1).getByTestId("rule-test-result").textContent()).includes("Result: accepted ✗"), "edited to em02 + Run again → accepted");
-    assert((await verdict().textContent()).startsWith("The rule accepted an example meant to violate it."), "verdict: the rule accepted an example meant to violate it");
+    assert((await verdict().textContent()).startsWith("Test failed."), "verdict: the rule accepted an example meant to violate it");
     assert((await example(1).locator("pre").textContent()).includes("<proceduralStep>"), "the edited content is rebuilt on the skeleton");
     assert(JSON.stringify(await lastRequest()) === before, "Run again made no LLM call");
     const saved = await api(`/api/projects/${p42.id}/brdps/${type.id}/approvals/BREX-4.2`).then((r) => r.json());
@@ -322,12 +322,12 @@ async function main() {
     assert((await showExamples.textContent()) === "Show illustrative examples", "document(): the on-demand button is shown");
     await page.waitForTimeout(1500);
     assert((await lastRequest()) === null, "document(): no LLM call before the button is clicked");
-    assert((await example(0).count()) === 0 && (await panel().getByText("Writing example fragments…").count()) === 0, "document(): no examples and nothing being written");
+    assert((await example(0).count()) === 0 && (await panel().getByTestId("rule-test-progress").count()) === 0, "document(): no examples and nothing being written");
     assert((await panel().getByRole("button", { name: "Regenerate examples" }).count()) === 0, "document(): no Regenerate before the first generation");
     await panel().screenshot({ path: shot("rule-test-document-on-demand.png") });
     await fetch(`${MOCK}/slow-next`, { method: "POST" });
     await showExamples.click();
-    await panel().getByText("Writing example fragments…").waitFor({ timeout: 5000 });
+    await panel().getByTestId("rule-test-progress").waitFor({ timeout: 5000 });
     assert((await showExamples.count()) === 0, "document(): the button goes away once clicked");
     await example(0).waitFor({ timeout: 15000 });
     assert((await lastRequest()).messages.some((m) => m.content === "Write the test examples for this rule."), "document(): the click made the LLM call");

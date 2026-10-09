@@ -66,7 +66,17 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // asks. status: 'idle' (waiting for that click) | 'loading' | 'error' |
   // 'ready'.
   const onDemand = analysis.status === 'not_executable';
-  const [state, setState] = useState(() => ({ status: onDemand ? 'idle' : 'loading' }));
+  // While loading: step ('preparing' | 'waiting' | 'correcting' |
+  // 'proposal'), count (examples being corrected) and startedAt (ms) --
+  // the panel shows the step and the time elapsed (progreso, Part 1.2).
+  const [state, setState] = useState(() => (onDemand ? { status: 'idle' } : { status: 'loading', step: 'preparing', startedAt: Date.now() }));
+  // "Cancel" during a generation: the state before it comes back, with
+  // "Cancelled" next to it; nothing is recorded and nothing more is sent.
+  const [cancelled, setCancelled] = useState(false);
+  const stateRef = useRef(state);
+  // eslint-disable-next-line react-hooks/refs
+  stateRef.current = state;
+  const beforeGenerationRef = useRef(null);
   const [copyablePrompt, setCopyablePrompt] = useState(null);
   // T3b "Review with the assistant": { status: 'loading' | 'ready' |
   // 'error', cause, explanation, mismatches, error } | null. Indicative
@@ -142,7 +152,10 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     const shouldCancel = () => unmountedRef.current || generationRef.current !== generation;
-    setState({ status: 'loading' });
+    const previous = stateRef.current;
+    beforeGenerationRef.current = previous.status === 'loading' ? beforeGenerationRef.current : previous;
+    setCancelled(false);
+    setState({ status: 'loading', step: 'preparing', startedAt: Date.now() });
     setReview(null);
     setReplaceQuestion(null);
     setReplaceAnswer(null);
@@ -170,6 +183,10 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       fetchSchemaGraph,
       isCurrent: () => generationRef.current === generation,
       onPrompt: (systemPrompt) => setCopyablePrompt(buildCopyableTestPrompt(systemPrompt)),
+      onStep: ({ step, count }) => {
+        if (generationRef.current !== generation) return;
+        setState((st) => (st.status === 'loading' ? { ...st, step, count } : st));
+      },
       previousReview: previousReview?.mismatches ? previousReview : null,
       // Barrido final 1/2: "does the rule implement the Proposal?" -- its
       // own short call, in parallel with the examples (one more call per
@@ -323,6 +340,18 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     }
   };
 
+  // "Cancel" (progreso, Part 1.2): the running generation is abandoned --
+  // its answers are ignored when they land, a wait for the per-minute limit
+  // ends (shouldCancel), no correction round or further call is made, and
+  // nothing is recorded. The panel goes back to what it showed before.
+  const cancel = () => {
+    if (stateRef.current.status !== 'loading') return;
+    generationRef.current += 1;
+    const before = beforeGenerationRef.current;
+    setState(before && before.status !== 'loading' ? before : { status: 'cancelled' });
+    setCancelled(true);
+  };
+
   // "Regenerate examples" after a review that blamed the examples.
   const regenerateWithReview = () =>
     review?.status === 'ready' ? generate({ explanation: review.explanation, mismatches: review.mismatches }) : generate();
@@ -336,6 +365,8 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     copyablePrompt,
     generate,
     regenerate: generate,
+    cancel,
+    cancelled,
     runAgain,
     review,
     reviewFailure,

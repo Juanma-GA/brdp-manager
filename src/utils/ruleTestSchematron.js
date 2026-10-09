@@ -528,7 +528,12 @@ function runPattern(pattern, globalLets, doc, evaluate) {
         const message = messageOf(check.element, (body) => evaluate(nodeExpr(lets, rule.lets, body), node, 'string'));
         const bucket = WARNING_ROLES.has(check.role) ? warnings : violations;
         const key = `${pattern.rules.indexOf(rule)}:${index}\u0000${message}`;
-        if (!bucket.has(key)) bucket.set(key, { ruleId: check.id || pattern.ruleId, message, role: check.role, nodePaths: [] });
+        // Test de reglas, causas en Schematron (Part 1.3): which assert or
+        // report failed, by its id and expression -- an assert whose test
+        // is false ("not met"), a report whose test is true ("met").
+        if (!bucket.has(key)) {
+          bucket.set(key, { ruleId: check.id || pattern.ruleId, message, role: check.role, nodePaths: [], check: { kind: check.kind, id: check.id || pattern.ruleId || null, test: collapseXPath(check.test) } });
+        }
         const entry = bucket.get(key);
         const path = nodePath(node);
         if (!entry.nodePaths.includes(path)) entry.nodePaths.push(path);

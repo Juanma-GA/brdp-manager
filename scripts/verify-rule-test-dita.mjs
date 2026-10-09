@@ -253,7 +253,7 @@ async function main() {
     //    → Suggest a corrected rule → correct test → Accept records it.
     await select("BRDP-DT-WRONG");
     const panel5 = await testDraft();
-    assert((await panel5.getByTestId("rule-test-verdict").textContent()).startsWith("The rule accepted an example meant to violate it"), "inverted assert: verdict incorrect");
+    assert((await panel5.getByTestId("rule-test-verdict").textContent()).startsWith("Test failed."), "inverted assert: verdict incorrect");
     await waitIndicator("failed");
     await panel5.getByTestId("rule-test-review").click();
     await panel5.getByTestId("rule-test-review-result").waitFor({ timeout: 15000 });
@@ -340,7 +340,7 @@ async function main() {
     const rej8 = examplesOf(panel8).nth(1);
     assert((await rej8.getByTestId("rule-test-result").textContent()).startsWith("Result: accepted"), "EXT-00001: the row on the untitled-section table is accepted (the rule never reaches it)");
     assert((await rej8.getByTestId("rule-test-accept-cause").textContent()).startsWith("Why the rule accepted it:"), `EXT-00001: exact cause under the example (${await rej8.getByTestId("rule-test-accept-cause").textContent()})`);
-    assert((await panel8.getByTestId("rule-test-verdict").textContent()).startsWith("The rule accepted an example meant to violate it."), `EXT-00001: failed verdict (${await panel8.getByTestId("rule-test-verdict").textContent()})`);
+    assert((await panel8.getByTestId("rule-test-verdict").textContent()).startsWith("Test failed."), `EXT-00001: failed verdict (${await panel8.getByTestId("rule-test-verdict").textContent()})`);
     await waitIndicator("failed");
     await panel8.screenshot({ path: shot("rule-test-dita-titled-section.png") });
     await panel8.getByRole("button", { name: "Close" }).click();

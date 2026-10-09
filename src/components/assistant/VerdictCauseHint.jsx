@@ -11,8 +11,16 @@ export default function VerdictCauseHint({ verdict, runs }) {
   const cause = verdictCause(verdict, runs);
   if (!cause) return null;
   if (cause.cause === 'examples') {
+    // A failed verdict with an example that did not run: which way the rule
+    // failed, then the examples as the likely cause (the verdict itself
+    // only says "Test failed").
+    const fact =
+      verdict.kind === 'incorrect'
+        ? t(`records.ruleTest.cause.${verdict.permissive && verdict.strict ? 'ruleBoth' : verdict.permissive ? 'rulePermissive' : 'ruleStrict'}`)
+        : '';
     return (
       <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-cause" data-cause="examples">
+        {fact ? `${fact} ` : ''}
         {t('records.ruleTest.cause.examples')}
       </p>
     );

@@ -31,7 +31,7 @@ import { generateRuleTestExamples } from '../src/utils/ruleTestRun.js';
 import { editExample, ruleTestVerdict, exampleProblems } from '../src/utils/ruleTest.js';
 import { passedTestPayload, runSavedTest, savedPassedTest } from '../src/utils/ruleTestSaved.js';
 import { buildRuleTestCorrectionMessage, parseRuleTestResponse } from '../src/prompts/ruleTestExamplesPrompt.js';
-import { dossierProblemText } from '../src/utils/ruleTestDossier.js';
+import { DOSSIER_LOOK_MAX_CHARS, dossierLookExpressions, dossierProblemText } from '../src/utils/ruleTestDossier.js';
 
 const FORMAT = 'SCH-DITA';
 let passed = 0;
@@ -319,6 +319,40 @@ async function generate(id, answers) {
     onPrompt: (p) => { prompt = p; }, fetchSchemaCards, fetchStructure, fetchSchemaAttribute: async () => ({ owners: [] }),
   });
   check('rule without other-file reads: no dossier block', prompt && !/DOSSIER/.test(prompt) && !/"files"/.test(prompt), prompt?.slice(0, 200));
+}
+
+// ─── 6. "WHERE THE RULE LOOKS" (progreso y causas, Part 1.5) ───────────────
+{
+  const names = (id) => dossierLookExpressions(rule(id), parseXml).expressions.map((e) => e.name);
+  const n4 = names('BRDP-EXT-00004');
+  check('EXT-00004: tablasPlan, celdasProc, escalonPlan, escalonProc', ['tablasPlan', 'celdasProc', 'escalonPlan', 'escalonProc'].every((n) => n4.includes(n)), JSON.stringify(n4));
+  check('EXT-00004: values only combined (valoresPlan, the asserts) are not quoted', !n4.includes('valoresPlan') && !n4.includes('BRDP-EXT-00004a'), JSON.stringify(n4));
+  check('EXT-00004: $clave (the ditamap only, not derived) is not quoted', !n4.includes('clave'), JSON.stringify(n4));
+  const n8 = names('BRDP-EXT-00008');
+  check('EXT-00008: pasosPrec and notas', n8.includes('pasosPrec') && n8.includes('notas'), JSON.stringify(n8));
+  const all8 = dossierLookExpressions(rule('BRDP-EXT-00008'), parseXml).expressions;
+  check('EXT-00008: in document order', all8.map((e) => e.name).join(',') === 'docFicha,nodoConref,esAdvertencia,conrefRoto,docs,docPrec,pasosPrec,notas', all8.map((e) => e.name).join(','));
+  check('quoted verbatim, whitespace outside literals collapsed', all8.find((e) => e.name === 'pasosPrec').text === '$docPrec//cmd ! normalize-space(.)');
+  check('a literal keeps its spaces', /'PRECAUCIONES DE SEGURIDAD'/.test(all8.find((e) => e.name === 'notas').text));
+  // More than 10, and one too long: the first 10 in order, the cut said.
+  const many = Array.from({ length: 13 }, (_, i) => `<sch:let name="v${i}" value="doc('a${i}.dita')//title"/>`).join('');
+  const long = `<sch:let name="big" value="doc('b.dita')//${'p/'.repeat(500)}title"/>`;
+  const look = dossierLookExpressions(`<sch:pattern id="p"><sch:rule context="map">${long}${many}<sch:assert id="A" test="true()">x</sch:assert></sch:rule></sch:pattern>`, parseXml);
+  check('more than 10: the first 10 in document order', look.expressions.length === 10 && look.expressions[0].name === 'big' && look.expressions[9].name === 'v8' && look.omitted === 4, JSON.stringify(look.expressions.map((e) => e.name)) + look.omitted);
+  check('the longest is cut with its count', look.expressions[0].cut > 0 && look.expressions[0].text.length === DOSSIER_LOOK_MAX_CHARS);
+  const { buildRuleTestExamplesPrompt } = await import('../src/prompts/ruleTestExamplesPrompt.js');
+  const p = buildRuleTestExamplesPrompt({ brdp: brdpOf('BRDP-EXT-00004'), standard: 'DITA 1.3 Xpath3.0', format: FORMAT, ruleXml: rule('BRDP-EXT-00004'), contextSchemas: [], placements: [{ schema: 'map', role: 'rule' }], schemaFacts: [], dossier: { mainPath: 'dossier.ditamap', maxFiles: 4, maxLines: 30, types: ['topic', 'map'], look } });
+  check('prompt: the omitted count is said', /\(4 more expressions of the rule navigate the files; only the first 10, in the rule's order, are shown\.\)/.test(p));
+  check('prompt: the cut mark', /… \[cut: \d+ more characters\]/.test(p));
+  const p4 = buildRuleTestExamplesPrompt({ brdp: brdpOf('BRDP-EXT-00004'), standard: 'DITA 1.3 Xpath3.0', format: FORMAT, ruleXml: rule('BRDP-EXT-00004'), contextSchemas: [], placements: [{ schema: 'map', role: 'rule' }], schemaFacts: [], dossier: { mainPath: 'dossier.ditamap', maxFiles: 4, maxLines: 30, types: ['topic', 'map'], look: dossierLookExpressions(rule('BRDP-EXT-00004'), parseXml) } });
+  check('prompt: WHERE THE RULE LOOKS with $tablasPlan', /WHERE THE RULE LOOKS[\s\S]*must place every value exactly where these expressions look for it \(same\nelements and nesting\); the Proposal may not say it\.\n- \$docFicha := function/.test(p4) && p4.includes('- $tablasPlan := $docs//*[normalize-space(title) = '), p4.split('WHERE THE RULE LOOKS')[1]?.slice(0, 400));
+  check('a non-dossier rule has no expressions', dossierLookExpressions('<sch:pattern id="p"><sch:rule context="note"><sch:assert id="N" test="@type">x</sch:assert></sch:rule></sch:pattern>', parseXml).expressions.length === 0);
+}
+{
+  // Generation passes the block through (EXT-00008).
+  const answer = { examples: [{ label: 'a', expected: 'accept', schema: 'map', content: MAP2(['topics/prec.dita']), files: [{ path: 'topics/prec.dita', content: PREC_TASK }] }, { label: 'b', expected: 'reject', schema: 'map', content: MAP2(['topics/prec.dita']), files: [{ path: 'topics/prec.dita', content: PREC_TASK }] }] };
+  const { prompt } = await generate('BRDP-EXT-00008', [answer]);
+  check('generation: the prompt quotes $pasosPrec and $notas', prompt.includes('- $pasosPrec := $docPrec//cmd ! normalize-space(.)') && prompt.includes('- $notas := $docs//note['), prompt.split('WHERE THE RULE LOOKS')[1]?.slice(0, 300));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

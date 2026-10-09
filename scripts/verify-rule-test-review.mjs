@@ -167,7 +167,7 @@ async function main() {
     const examplesPrompt = systemOf(await lastRequest());
     assert(examplesPrompt.includes("the examples test THIS") && examplesPrompt.includes("written from the Proposal's DECISION"), "examples prompt: written from the decision");
     assert(!examplesPrompt.includes('"explanation"'), "examples prompt: no LLM explanation asked");
-    assert((await panel.getByTestId("rule-test-verdict").textContent()).startsWith("The rule accepted an example meant to violate it."), `flag 2: verdict incorrect (${await panel.getByTestId("rule-test-verdict").textContent()})`);
+    assert((await panel.getByTestId("rule-test-verdict").textContent()).startsWith("Test failed."), `flag 2: verdict incorrect (${await panel.getByTestId("rule-test-verdict").textContent()})`);
     await waitIndicator("failed");
     const historyBefore = (await historyOf("BRDP-RV-WRONG")).filter((h) => h.field_name === "rule_test").length;
     await panel.getByTestId("rule-test-review").click();
@@ -215,7 +215,7 @@ async function main() {
     await testDraft();
     const panel2 = panels().first();
     assert((await panel2.getByTestId("rule-test-description").textContent()).includes("@emphasisType, when it appears, can only take: em01, em02; if it does not appear, it is not rejected"), "emphasisType: description says a missing attribute is not rejected");
-    assert((await panel2.getByTestId("rule-test-verdict").textContent()).startsWith("The rule accepted an example meant to violate it."), "missing-attribute example: verdict incorrect");
+    assert((await panel2.getByTestId("rule-test-verdict").textContent()).startsWith("Test failed."), "missing-attribute example: verdict incorrect");
     await waitIndicator("failed");
     await panel2.getByTestId("rule-test-review").click();
     await panel2.getByTestId("rule-test-review-result").waitFor({ timeout: 15000 });

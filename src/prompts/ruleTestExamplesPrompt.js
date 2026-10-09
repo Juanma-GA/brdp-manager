@@ -370,7 +370,26 @@ with the ditamap the rule runs on and the files the ditamap points to.
   missing, a note that is not where the decision requires it, a conref to a
   file or id that is not there...), not only in the ditamap.
 - Titles and texts the rule looks for are written exactly as the rule writes
-  them.`;
+  them.${whereTheRuleLooks(dossier.look)}`;
+}
+
+// Test de reglas, progreso y causas, Part 1.5: the rule's own expressions
+// that navigate the dossier's files (utils/ruleTestDossier.js
+// dossierLookExpressions), quoted so every value goes exactly where the rule
+// looks for it. Nothing when the rule has none.
+function whereTheRuleLooks(look) {
+  const expressions = look?.expressions || [];
+  if (expressions.length === 0) return '';
+  const label = (e) => (e.kind === 'let' ? `$${e.name} :=` : e.kind === 'context' ? 'rule context:' : `test${e.name ? ` of ${e.name}` : ''}:`);
+  const lines = expressions.map((e) => `- ${label(e)} ${e.text}${e.cut ? ` … [cut: ${e.cut} more characters]` : ''}`);
+  const more = look.omitted > 0 ? `\n(${look.omitted} more expressions of the rule navigate the files; only the first ${expressions.length}, in the rule's order, are shown.)` : '';
+  return `
+
+WHERE THE RULE LOOKS: these expressions of the rule navigate the dossier's
+files (quoted from the rule; whitespace outside quotes collapsed). Each example
+must place every value exactly where these expressions look for it (same
+elements and nesting); the Proposal may not say it.
+${lines.join('\n')}${more}`;
 }
 
 // `input`: { brdp, standard, format, ruleXml, contextSchemas, placements,

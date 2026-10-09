@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import VerdictCauseHint from './VerdictCauseHint';
@@ -59,15 +59,10 @@ export function verdictView(t, verdict, standard) {
         const e = verdict.engineErrors[0];
         return { tone: 'bad', text: t('records.ruleTest.verdicts.engineError', { label: e.label, detail: engineErrorText(e, t) }) };
       }
-      return {
-        tone: 'bad',
-        text: [
-          verdict.permissive && t('records.ruleTest.verdicts.permissive'),
-          verdict.strict && t('records.ruleTest.verdicts.strict'),
-        ]
-          .filter(Boolean)
-          .join(' '),
-      };
+      // Test de reglas, progreso y causas, Part 1.4: the verdict says the
+      // result; which way the rule failed and what to check is said once,
+      // right below (VerdictCauseHint).
+      return { tone: 'bad', text: t('records.ruleTest.verdicts.failed') };
     case 'inconclusive':
       return {
         tone: 'warn',
@@ -101,6 +96,20 @@ export function verdictView(t, verdict, standard) {
   }
 }
 
+// The asserts/reports a Schematron rule failed on an example, once each.
+function schematronFailedChecks(result) {
+  const seen = new Set();
+  const out = [];
+  for (const v of result?.violations || []) {
+    if (!v.check) continue;
+    const key = `${v.check.kind}\u0000${v.check.id}\u0000${v.check.test}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v.check);
+  }
+  return out;
+}
+
 // Mejoras F, Part 1.4.
 const shortPath = (p) => p.replace(/\[1\]/g, '');
 function rejectionText(rejection, t) {
@@ -113,6 +122,36 @@ function rejectionText(rejection, t) {
   const more = rejection.more ? t('records.ruleTest.rejectedMore', { count: rejection.more }) : '';
   const where = rejection.allAppBuilt ? t('records.ruleTest.rejectedAppBuilt', { count: rejection.total }) : '';
   return t('records.ruleTest.rejectedBecause', { nodes: `${nodes}${more}`, where });
+}
+
+// Test de reglas, progreso, Part 1.2: what the test is doing now and for how
+// long (mm:ss, every second), with Cancel.
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function TestProgress({ state, onCancel }) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const step = state.step || 'preparing';
+  return (
+    <div className={styles.ruleTestProgress} data-testid="rule-test-progress" data-step={step}>
+      <span className={styles.muted} data-testid="rule-test-progress-step">
+        {step === 'correcting' ? t('records.ruleTest.progress.correcting', { count: state.count || 0 }) : t(`records.ruleTest.progress.${step}`)}
+      </span>{' '}
+      <span className={styles.ruleTestElapsed} data-testid="rule-test-progress-elapsed">
+        {formatElapsed(now - (state.startedAt || now))}
+      </span>
+      <button type="button" className={styles.linkButton} onClick={onCancel} data-testid="rule-test-cancel">
+        {t('records.ruleTest.progress.cancel')}
+      </button>
+    </div>
+  );
 }
 
 export const TONE_CLASS = { ok: 'ruleTestToneOk', bad: 'ruleTestToneBad', warn: 'ruleTestToneWarn' };
@@ -626,9 +665,22 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           {t('records.ruleTest.acceptedBecause', { cause: acceptCauseText(run, t) })}
         </p>
       )}
+      {/* Test de reglas, causas en Schematron (Part 1.3): under any example
+          a Schematron rule rejected, each assert that is not met and each
+          report that is, by id and expression. */}
+      {showResult && result?.status === 'rejected' && schematronFailedChecks(result).length > 0 && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad} ${styles.ruleTestPre}`} data-testid="rule-test-sch-cause">
+          {t('records.ruleTest.schematronCause', {
+            checks: schematronFailedChecks(result)
+              .map((c) => t(c.kind === 'report' ? 'records.ruleTest.schematronReportMet' : 'records.ruleTest.schematronAssertNotMet', { id: c.id || '—', test: c.test }))
+              .join('; '),
+          })}
+        </p>
+      )}
       {/* Mejoras F, Part 1.4: why the rule rejected an example meant to be
-          accepted -- the nodes, and whether they are all the application's. */}
-      {showResult && run?.matches === false && run?.rejection && (
+          accepted -- the nodes, and whether they are all the application's.
+          A Schematron rule says which check failed instead (above). */}
+      {showResult && run?.matches === false && run?.rejection && schematronFailedChecks(result).length === 0 && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad} ${styles.ruleTestPre}`} data-testid="rule-test-reject-cause" data-app-built={run.rejection.allAppBuilt ? 'true' : 'false'}>
           {rejectionText(run.rejection, t)}
         </p>
@@ -835,6 +887,8 @@ export default function RuleTestPanel({
     copyablePrompt,
     generate,
     regenerate,
+    cancel,
+    cancelled,
     runAgain,
     review,
     reviewFailure,
@@ -929,7 +983,12 @@ export default function RuleTestPanel({
           </button>
         </div>
       )}
-      {state.status === 'loading' && <p className={styles.muted}>{t('records.ruleTest.generating')}</p>}
+      {state.status === 'loading' && <TestProgress state={state} onCancel={cancel} />}
+      {cancelled && state.status !== 'loading' && (
+        <p className={`${styles.ruleTestNote} ${styles.muted}`} data-testid="rule-test-cancelled">
+          {t('records.ruleTest.progress.cancelled')}
+        </p>
+      )}
       {state.status === 'path_review' && (
         <>
           <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneWarn}`} data-testid="rule-test-verdict" data-kind="review" data-reason="test_impossible_path">

@@ -152,7 +152,7 @@ async function main() {
     assert((await page.getByTestId(`saved-rule-test-example-${acceptIndex}`).getByTestId("rule-test-result-changed").count()) === 1, "the accept example is marked as changing result");
     assert(/^Result changed: accepted in the approved test, rejected now\.$/.test(((await page.getByTestId(`saved-rule-test-example-${acceptIndex}`).getByTestId("rule-test-result-changed").textContent()) || "").trim()), "changed marker text");
     assert(((await page.getByTestId("saved-rule-test-changed-summary").textContent()) || "").includes("change result"), "summary of the examples that change");
-    assert(((await savedPanel().getByTestId("rule-test-cause").textContent()) || "").includes("the problem is in the rule"), "cause: the rule (saved examples are valid)");
+    assert(((await savedPanel().getByTestId("rule-test-cause").textContent()) || "").includes("right, the rule"), "cause: the rule (saved examples are valid)");
     await question().waitFor({ timeout: 5000 });
     assert(/^The previous test passed on .+\. Record this result and replace it\?/.test((await question().textContent()) || ""), "question before replacing the passed test");
     const beforeKeep = await approval(s187);
@@ -210,14 +210,14 @@ async function main() {
     assert((await verdict().getAttribute("data-kind")) === "incorrect", "swapped examples: incorrect");
     const cause = page.getByTestId("rule-test-panel").getByTestId("rule-test-cause");
     assert((await cause.getAttribute("data-cause")) === "rule", "cause: the rule");
-    assert(/^The rule (accepted an example it should have rejected|rejected an example it should have accepted)[^.]*\. Check (that example: if it is|those examples: if they are) right, the problem is in the rule\.$/.test((await cause.textContent()) || ""), `cause text: ${await cause.textContent()}`);
+    assert(/^The rule (accepted an example it should have rejected|rejected an example it should have accepted)[^.]*\. If the examples? (is|are) badly written, repeat the test or edit (it|them); if (it is|they are) right, the rule (does not cover the decision|rejects what the decision allows|does not match the decision)\.$/.test((await cause.textContent()) || ""), `cause text: ${await cause.textContent()}`);
     assert((await page.getByTestId("rule-test-review").count()) === 1, "Review with the assistant at hand");
     await page.getByTestId("rule-test-panel").screenshot({ path: path.join(SHOTS, "rule-test-cause-rule.png") });
     assert((await approval(failedOnly)).last_test_result === "failed" && !(await approval(failedOnly)).last_passed_test, "failed only: no approved test kept");
     assert((await openSaved().count()) === 0, "failed only: no 'See approved test' button");
     await language().selectOption("es");
     await settle(400);
-    assert(/^La regla (aceptó un ejemplo que debía rechazar|rechazó un ejemplo que debía aceptar)[^.]*\. Revisa (ese ejemplo: si es correcto|esos ejemplos: si son correctos), el problema está en la regla\.$/.test((await cause.textContent()) || ""), `causa en español: ${await cause.textContent()}`);
+    assert(/^La regla (aceptó un ejemplo que debía rechazar|rechazó un ejemplo que debía aceptar)[^.]*\. Si (el ejemplo está mal escrito|los ejemplos están mal escritos), repite la prueba o (edítalo|edítalos); si (está bien|están bien), la regla (no cubre la decisión|rechaza lo que la decisión permite|no se ajusta a la decisión)\.$/.test((await cause.textContent()) || ""), `causa en español: ${await cause.textContent()}`);
     await language().selectOption("en");
     await settle(400);
 

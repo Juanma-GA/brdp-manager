@@ -28,6 +28,8 @@ import path from 'node:path';
 import { placementPlaces } from '../../src/utils/ruleTestRun.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { extractRuleNames } from '../../src/validation/schemaValidation.js';
+import { dossierLookExpressions } from '../../src/utils/ruleTestDossier.js';
+import { DOMParser as XmldomParser } from '@xmldom/xmldom';
 import { repeatingComparisons, singleChildPairs, viewFromStructure } from '../../src/validation/ruleRepetition.js';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
@@ -911,7 +913,15 @@ ruleTestExamplesCases.push(
 // are dossiers. Only these cases have the dossier block.
 const ruleDitaDossier =
   '<sch:pattern id="p-BRDP-D1-00300">\n  <sch:rule context="map">\n    <sch:let name="docs" value="for $tr in //topicref[@href] return (let $u := resolve-uri(substring-before(concat($tr/@href, \'#\'), \'#\'), base-uri($tr)) return if (doc-available($u)) then doc($u) else ())"/>\n    <sch:assert role="error" id="BRDP-D1-00300" test="exists($docs[normalize-space(*/title) = \'SAFETY PRECAUTIONS\'])">The dossier has no topic titled "SAFETY PRECAUTIONS".</sch:assert>\n  </sch:rule>\n</sch:pattern>';
-const dossierOption = { mainPath: 'dossier.ditamap', maxFiles: 4, maxLines: 30, types: ['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'] };
+// Part 1.5 of "progreso y causas": the rule's expressions on the dossier's
+// files, computed by the same function as the app.
+const dossierOption = {
+  mainPath: 'dossier.ditamap',
+  maxFiles: 4,
+  maxLines: 30,
+  types: ['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'],
+  look: dossierLookExpressions(ruleDitaDossier, (x) => new XmldomParser().parseFromString(x, 'application/xml')),
+};
 ruleTestExamplesCases.push(
   {
     name: 'dita-xpath3-dossier-safety-topic',

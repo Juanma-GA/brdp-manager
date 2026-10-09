@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     # src/prompts/shared.js RULE_TEST_MAX_TOKENS); a request over it is
     # refused, never lowered silently.
     llm_max_tokens: int = 16000
+    # Longest wait for the provider on a chat call, in seconds: until the
+    # first byte of the answer and between two bytes of it. Over it the
+    # call ends with a 504 (llm_timeout) and its llm_calls row is "failed".
+    # 0 = no limit. Embeddings are not affected.
+    llm_request_timeout_seconds: int = 300
 
     # --- LLM call limits per user (Protecciones 2a, AACF G12) ---
     # Chat calls through /api/llm-proxy (embeddings are not limited), per

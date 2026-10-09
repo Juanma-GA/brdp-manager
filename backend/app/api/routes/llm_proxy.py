@@ -1,9 +1,10 @@
+import asyncio
 import logging
 import time
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import get_current_user, get_httpx_transport
@@ -96,16 +97,46 @@ def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
+class _ProviderTimeout(Exception):
+    """The provider did not send anything within the time limit."""
+
+
+def _timeout_seconds() -> float | None:
+    seconds = get_settings().llm_request_timeout_seconds
+    return seconds if seconds > 0 else None
+
+
+async def _within(awaitable, timeout: float | None):
+    """Awaits within the time limit (Settings.llm_request_timeout_seconds,
+    None = no limit); over it, _ProviderTimeout."""
+    if timeout is None:
+        return await awaitable
+    try:
+        return await asyncio.wait_for(awaitable, timeout)
+    except asyncio.TimeoutError as exc:
+        raise _ProviderTimeout from exc
+
+
+def _timeout_exception(seconds: float) -> HTTPException:
+    return HTTPException(status_code=504, detail=error_detail("llm_timeout", seconds=int(seconds)))
+
+
 @router.post("")
 async def llm_proxy(
     body: LLMProxyRequest,
     current_user: User = Depends(get_current_user),
     transport: httpx.AsyncBaseTransport | None = Depends(get_httpx_transport),
-) -> StreamingResponse:
+) -> Response:
     """Byte-for-byte pass-through of the upstream response (same behavior
     as v1's server.js pump loop) -- preserves streaming SSE chunks exactly
     as the provider sent them; llmAPI.js's parsing logic doesn't change,
-    only the URL it calls (docs/v2 §5.1).
+    only the URL it calls (docs/v2 §5.1). A JSON answer is read whole
+    before it is sent on; an SSE stream is passed on as it arrives.
+
+    Time limit (Settings.llm_request_timeout_seconds, 0 = none): until the
+    provider starts answering and between two chunks of the answer. Over
+    it, a 504 llm_timeout {seconds} (for an SSE stream already started,
+    the stream ends) and a "failed" row with its duration.
 
     Every call leaves one llm_calls row (Protecciones 2a, services/
     llm_usage.py), also a refused or failed one: a payload refused here
@@ -152,10 +183,20 @@ async def llm_proxy(
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     upstream_payload = {"model": _model(), **body.payload}
 
+    # The time limit is applied here, by the proxy, and not by httpx: the
+    # same wait for every transport (tests use a MockTransport, which
+    # ignores httpx's own timeouts), until the response starts and then
+    # between two chunks of it.
+    timeout = _timeout_seconds()
     http_client = httpx.AsyncClient(timeout=None, transport=transport)
     try:
         request = http_client.build_request("POST", endpoint, headers=headers, json=upstream_payload)
-        upstream = await http_client.send(request, stream=True)
+        upstream = await _within(http_client.send(request, stream=True), timeout)
+    except _ProviderTimeout:
+        logger.warning("LLM provider (%s) did not answer within %s s", endpoint, timeout)
+        await http_client.aclose()
+        await llm_usage.finish_call(call_id, result=llm_usage.RESULT_FAILED, duration_ms=_elapsed_ms(started))
+        raise _timeout_exception(timeout)
     except Exception:
         # The client only ever gets a generic 500 back (docs/v2 S8 -- never
         # leak upstream connection internals to it), but that must never
@@ -198,12 +239,57 @@ async def llm_proxy(
             status_code=status_code, detail=error_detail("llm_upstream_error", ref, upstream_status=upstream.status_code)
         )
 
+    content_type = upstream.headers.get("content-type", "application/json")
+    chunks = upstream.aiter_bytes()
+
+    if not content_type.startswith("text/event-stream"):
+        # A single JSON answer -- the only kind the app asks for (`stream`
+        # is not an allowed parameter). It is read whole before answering,
+        # so a provider that stops in the middle of it ends in the same 504
+        # as one that never starts (an error the page can show), never in
+        # a half answer.
+        body_parts: list[bytes] = []
+        try:
+            while True:
+                try:
+                    body_parts.append(await _within(chunks.__anext__(), timeout))
+                except StopAsyncIteration:
+                    break
+        except _ProviderTimeout:
+            logger.warning("LLM provider (%s) stopped sending its answer for %s s", endpoint, timeout)
+            await llm_usage.finish_call(
+                call_id, result=llm_usage.RESULT_FAILED, upstream_status=upstream.status_code, duration_ms=_elapsed_ms(started)
+            )
+            raise _timeout_exception(timeout)
+        except Exception:
+            ref = new_error_ref()
+            logger.exception("ref=%s LLM proxy answer from the upstream provider (%s) failed mid-response", ref, endpoint)
+            await llm_usage.finish_call(
+                call_id, result=llm_usage.RESULT_FAILED, upstream_status=upstream.status_code, duration_ms=_elapsed_ms(started)
+            )
+            raise HTTPException(status_code=500, detail=error_detail("llm_request_failed", ref))
+        finally:
+            await upstream.aclose()
+            await http_client.aclose()
+        await llm_usage.finish_call(
+            call_id, result=llm_usage.RESULT_OK, upstream_status=upstream.status_code, duration_ms=_elapsed_ms(started)
+        )
+        return Response(content=b"".join(body_parts), media_type=content_type)
+
     async def _pump():
         completed = False
         try:
-            async for chunk in upstream.aiter_bytes():
+            while True:
+                try:
+                    chunk = await _within(chunks.__anext__(), timeout)
+                except StopAsyncIteration:
+                    break
                 yield chunk
             completed = True
+        except _ProviderTimeout:
+            # Headers are already sent: the stream just ends, recorded as
+            # failed (no new status code can reach the client any more).
+            logger.warning("LLM provider (%s) stream stalled for %s s; ended", endpoint, timeout)
         except Exception:
             # Response headers are already sent by this point, so the
             # client can't be given a fresh status code -- the stream just
@@ -223,5 +309,4 @@ async def llm_proxy(
             await upstream.aclose()
             await http_client.aclose()
 
-    content_type = upstream.headers.get("content-type", "application/json")
     return StreamingResponse(_pump(), media_type=content_type)

@@ -175,3 +175,116 @@ export function dossierReferenceWarnings(mainXml, files, parseXml, mainPath = DO
 export function dossierWarningText(w) {
   return `file "${w.file}": @${w.attr}="${w.value}" points to a file that is not in the dossier`;
 }
+
+// ─── "WHERE THE RULE LOOKS" (Test de reglas, progreso y causas, Part 1.5) ──
+// The expressions of a dossier rule that navigate the dossier's files,
+// quoted in the examples prompt so the AI places every value exactly where
+// the rule looks for it (real case: Navantia BRDP-EXT-00004/00008, where the
+// AI invented where the values went -- the Proposal does not say it).
+//
+// Which expressions, decided from the rule's text (never guessed):
+//   - the dossier-derived set D, to a fixed point: a sch:let whose value
+//     calls doc(), doc-available() or document(); one whose value names a
+//     $variable of D; a function let ("function(") called from a value of D
+//     (EXT-00004's $escalonPlan, applied to $tablasPlan's nodes by
+//     $valoresPlan); and a rule's @context / an assert's or report's @test
+//     that names a $variable of D;
+//   - of those, only the ones that navigate: a "/" or "@" outside string
+//     literals ($docs//entry[...], $tr/@href). One that only combines values
+//     ("exists($tablasPlan) = exists($celdasProc)") says nothing about where
+//     a value goes.
+// In document order, at most DOSSIER_LOOK_MAX; whitespace outside string
+// literals collapsed (the same criterion as _normSpace), each cut at
+// DOSSIER_LOOK_MAX_CHARS with an explicit mark. Returns
+// { expressions: [{ kind: 'let'|'test'|'context', name, text, cut }], omitted }.
+export const DOSSIER_LOOK_MAX = 10;
+export const DOSSIER_LOOK_MAX_CHARS = 700;
+const SCH_NS = 'http://purl.oclc.org/dsdl/schematron';
+const DOC_CALL_RE = /\b(?:doc|doc-available|document)\s*\(/;
+
+// The text outside string literals (literals emptied: '' / "").
+function outsideLiterals(text) {
+  return String(text || '').replace(/"[^"]*"|'[^']*'/g, (m) => m[0] + m[0]);
+}
+const varRefs = (code) => new Set([...code.matchAll(/\$([\p{L}_][\p{L}\p{N}_.-]*)/gu)].map((m) => m[1]));
+const varCalls = (code) => new Set([...code.matchAll(/\$([\p{L}_][\p{L}\p{N}_.-]*)\s*\(/gu)].map((m) => m[1]));
+
+function collapseOutsideLiterals(text) {
+  let out = '';
+  let quote = '';
+  let space = false;
+  for (const ch of String(text || '')) {
+    if (quote) {
+      out += ch;
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      space = out.length > 0;
+      continue;
+    }
+    if (space) out += ' ';
+    space = false;
+    if (ch === "'" || ch === '"') quote = ch;
+    out += ch;
+  }
+  return out;
+}
+
+function schElements(doc) {
+  const out = [];
+  const walk = (el) => {
+    for (let n = el.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType !== 1) continue;
+      const local = n.localName || String(n.nodeName).replace(/^.*:/, '');
+      const ns = n.namespaceURI;
+      if (!ns || ns === SCH_NS) {
+        if (local === 'let' && n.getAttribute('name')) out.push({ kind: 'let', name: n.getAttribute('name'), text: n.getAttribute('value') || '' });
+        else if (local === 'rule' && n.getAttribute('context')) out.push({ kind: 'context', name: null, text: n.getAttribute('context') });
+        else if ((local === 'assert' || local === 'report') && n.getAttribute('test')) {
+          out.push({ kind: 'test', name: n.getAttribute('id') || null, check: local, text: n.getAttribute('test') });
+        }
+      }
+      walk(n);
+    }
+  };
+  walk(doc.documentElement);
+  return out;
+}
+
+export function dossierLookExpressions(ruleXml, parseXml) {
+  let doc;
+  try {
+    doc = parseXml(`<root xmlns:sch="${SCH_NS}">${String(ruleXml || '')}</root>`);
+  } catch {
+    return { expressions: [], omitted: 0 };
+  }
+  if (!doc?.documentElement) return { expressions: [], omitted: 0 };
+  const items = schElements(doc).map((it) => ({ ...it, code: outsideLiterals(it.text) }));
+  const lets = items.filter((it) => it.kind === 'let');
+  const derived = new Set(lets.filter((l) => DOC_CALL_RE.test(l.code)).map((l) => l.name));
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const l of lets) {
+      if (derived.has(l.name)) continue;
+      const usesDerived = [...varRefs(l.code)].some((v) => derived.has(v));
+      const calledFromDerived =
+        /^\s*function\s*\(/.test(l.code) && lets.some((o) => derived.has(o.name) && varCalls(o.code).has(l.name));
+      if (usesDerived || calledFromDerived) {
+        derived.add(l.name);
+        changed = true;
+      }
+    }
+  }
+  const navigates = (code) => /[/@]/.test(code);
+  const chosen = items.filter((it) => {
+    const inD = it.kind === 'let' ? derived.has(it.name) : [...varRefs(it.code)].some((v) => derived.has(v));
+    return inD && navigates(it.code);
+  });
+  const expressions = chosen.slice(0, DOSSIER_LOOK_MAX).map((it) => {
+    const full = collapseOutsideLiterals(it.text);
+    const cut = full.length > DOSSIER_LOOK_MAX_CHARS ? full.length - DOSSIER_LOOK_MAX_CHARS : 0;
+    return { kind: it.kind, name: it.name, text: cut ? full.slice(0, DOSSIER_LOOK_MAX_CHARS) : full, cut };
+  });
+  return { expressions, omitted: Math.max(0, chosen.length - DOSSIER_LOOK_MAX) };
+}

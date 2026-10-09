@@ -40,6 +40,8 @@ export const KNOWN_CODES = new Set([
   'llm_not_configured',
   'llm_request_failed',
   'llm_upstream_error',
+  // The provider did not answer within Settings.llm_request_timeout_seconds.
+  'llm_timeout',
   'llm_params_not_allowed',
   'llm_messages_invalid',
   'llm_temperature_invalid',

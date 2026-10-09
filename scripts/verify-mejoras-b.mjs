@@ -163,7 +163,7 @@ async function main() {
     assert(corrections().length === 0, "S1-00123: the accepted reject example is not sent to the correction round");
     const skipped = page.getByTestId("rule-test-predicate-skipped");
     assert((await skipped.count()) === 1 && (await skipped.textContent()).startsWith("1 example meant to be rejected was not sent to the automatic correction"), `S1-00123: note about the example kept out of the correction (${(await skipped.count()) ? await skipped.textContent() : "none"})`);
-    assert((await verdict().textContent()).startsWith("The rule accepted an example meant to violate it."), `S1-00123: failed verdict (${await verdict().textContent()})`);
+    assert((await verdict().textContent()).startsWith("Test failed."), `S1-00123: failed verdict (${await verdict().textContent()})`);
     const cause = page.getByTestId("rule-test-accept-cause").first();
     assert((await cause.textContent()) === "Why the rule accepted it: the example has 2 children of <entry> and none has @applicRefId.", `S1-00123: cause EN (${await cause.textContent()})`);
     const neutral = page.getByTestId("rule-test-cause").first();

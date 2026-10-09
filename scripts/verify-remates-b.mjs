@@ -140,7 +140,7 @@ async function main() {
     await page.waitForTimeout(400);
     const corrections = llmCalls.filter((m) => m.startsWith("Some examples are not valid."));
     assert(corrections.length === 0, `condition case b: no correction round (${llmCalls.length} LLM call(s))`);
-    assert((await verdict.textContent()).startsWith("The rule accepted an example meant to violate it."), `condition case b: failed verdict (${await verdict.textContent()})`);
+    assert((await verdict.textContent()).startsWith("Test failed."), `condition case b: failed verdict (${await verdict.textContent()})`);
     const skipped = page.getByTestId("rule-test-predicate-skipped");
     assert((await skipped.count()) === 1 && (await skipped.textContent()).startsWith("1 example meant to be rejected was not sent to the automatic correction"), "condition case b: counted with the examples kept out of the correction");
     const cause = page.getByTestId("rule-test-accept-cause").first();

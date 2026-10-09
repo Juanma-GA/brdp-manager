@@ -2,6 +2,7 @@
 GET /api/admin/llm-usage. The provider is mocked at the network boundary
 (httpx.MockTransport), as in test_llm_proxy.py; the database is real.
 """
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -132,12 +133,98 @@ class _CutStream(httpx.AsyncByteStream):
 
 
 async def test_stream_cut_midway_is_recorded_as_failed(client, user):
+    # A JSON answer is read whole before it is sent on (timeout ronda), so a
+    # cut answer is a sanitized 500 the page can show, never a half answer.
     _mock(lambda request: httpx.Response(200, stream=_CutStream(), headers={"content-type": "application/json"}))
-    with pytest.raises(Exception):
-        await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "llm_request_failed"
     [row] = await _rows(user.id)
     assert (row.result, row.upstream_status) == ("failed", 200)
     assert row.duration_ms is not None
+
+
+# --- Time limit on chat calls (Settings.llm_request_timeout_seconds) --------
+
+
+@pytest.fixture
+def request_timeout(monkeypatch):
+    from app.core.config import get_settings
+
+    def set_timeout(seconds):
+        monkeypatch.setattr(get_settings(), "llm_request_timeout_seconds", seconds)
+
+    return set_timeout
+
+
+class _StallAfterFirstChunk(httpx.AsyncByteStream):
+    def __init__(self, stall_seconds: float):
+        self.stall_seconds = stall_seconds
+
+    async def __aiter__(self):
+        yield b'{"choices":'
+        await asyncio.sleep(self.stall_seconds)
+        yield b'[{"message":{"content":"late"},"finish_reason":"stop"}]}'
+
+
+async def test_provider_not_answering_ends_in_504_and_a_failed_row(client, user, request_timeout):
+    request_timeout(1)
+
+    async def handler(request):
+        await asyncio.sleep(3)
+        return httpx.Response(200, content=SSE_BODY, headers={"content-type": "application/json"})
+
+    _mock(handler)
+    response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    assert response.status_code == 504
+    assert response.json()["detail"] == {"code": "llm_timeout", "seconds": 1}
+    [row] = await _rows(user.id)
+    assert (row.kind, row.result, row.upstream_status) == ("chat", "failed", None)
+    assert 900 <= row.duration_ms < 3000
+
+
+async def test_answer_stalling_between_bytes_ends_in_504(client, user, request_timeout):
+    request_timeout(1)
+    _mock(lambda request: httpx.Response(200, stream=_StallAfterFirstChunk(3), headers={"content-type": "application/json"}))
+    response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    assert response.status_code == 504
+    assert response.json()["detail"]["code"] == "llm_timeout"
+    [row] = await _rows(user.id)
+    assert (row.result, row.upstream_status) == ("failed", 200)
+    assert row.duration_ms >= 900
+
+
+async def test_sse_stream_stalling_mid_way_ends_and_is_failed(client, user, request_timeout):
+    request_timeout(1)
+    _mock(lambda request: httpx.Response(200, stream=_StallAfterFirstChunk(3), headers={"content-type": "text/event-stream"}))
+    response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    # Headers were already sent: the stream just ends after the first chunk.
+    assert response.status_code == 200
+    assert response.content == b'{"choices":'
+    [row] = await _rows(user.id)
+    assert (row.result, row.upstream_status) == ("failed", 200)
+
+
+async def test_slow_answer_within_the_limit_is_ok(client, user, request_timeout):
+    request_timeout(2)
+    _mock(lambda request: httpx.Response(200, stream=_StallAfterFirstChunk(1), headers={"content-type": "application/json"}))
+    response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "late"
+    [row] = await _rows(user.id)
+    assert row.result == "ok"
+
+
+async def test_zero_timeout_means_no_limit(client, user, request_timeout):
+    from app.api.routes.llm_proxy import _timeout_seconds
+
+    request_timeout(0)
+    assert _timeout_seconds() is None
+    _mock(lambda request: httpx.Response(200, stream=_StallAfterFirstChunk(1.2), headers={"content-type": "application/json"}))
+    response = await client.post("/api/llm-proxy", json={"payload": _payload()}, headers=_headers(user))
+    assert response.status_code == 200
+    [row] = await _rows(user.id)
+    assert row.result == "ok"
 
 
 async def test_record_failure_never_breaks_the_call(client, user, monkeypatch, caplog):

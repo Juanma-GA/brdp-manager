@@ -18,7 +18,7 @@ import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROP
 import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { analyzeRule, describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootSelfPath } from './ruleTestEngine.js';
-import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures } from './ruleTestDossier.js';
+import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions } from './ruleTestDossier.js';
 import { minimalDocumentRuns } from './ruleMinimalDocuments.js';
 import { stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
@@ -881,6 +881,10 @@ export async function checkRuleImplementsProposal({ brdp, standard, format, rule
 //   | null when isCurrent() turned false (a newer generation started).
 // onPrompt(systemPrompt) is called as soon as the prompt exists (Copy test
 // prompt works even if the LLM then fails).
+// onStep({ step, count? }) (Test de reglas, progreso, Part 1.2): what the
+// test is doing now, for the panel -- 'preparing' (schemas, no AI yet),
+// 'waiting' (the examples' answer), 'correcting' (count: examples sent back
+// once) and 'proposal' (only the Proposal check is still pending).
 export async function generateRuleTestExamples({
   ruleXml,
   format,
@@ -897,6 +901,7 @@ export async function generateRuleTestExamples({
   parseXml = parseXmlDocument,
   isCurrent = () => true,
   onPrompt,
+  onStep = () => {},
   previousReview = null,
   // Barrido final 1/2: the Proposal check, run in parallel with the
   // examples (one more LLM call per test). Without askProposalCheck no
@@ -907,6 +912,7 @@ export async function generateRuleTestExamples({
   let systemPrompt = null;
   const responses = [];
   try {
+    onStep({ step: 'preparing' });
     const graph = await loadGraph(fetchSchemaGraph, standard);
     if (!isCurrent()) return null;
     const pathReview = impossiblePathReview({ ruleXml, format, schemaLocation, graph, parseXml });
@@ -915,6 +921,7 @@ export async function generateRuleTestExamples({
     const rootTest = rootRuleTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml });
     if (rootTest) {
       const checkable = !rootTest.coverage && askProposalCheck && ruleDescription != null;
+      if (checkable) onStep({ step: 'proposal' });
       const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck }) : null;
       if (!isCurrent()) return null;
       return {
@@ -933,6 +940,7 @@ export async function generateRuleTestExamples({
     const presenceTest = documentPresenceTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml });
     if (presenceTest) {
       const checkable = !presenceTest.coverage && askProposalCheck && ruleDescription != null;
+      if (checkable) onStep({ step: 'proposal' });
       const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck }) : null;
       if (!isCurrent()) return null;
       return {
@@ -973,10 +981,14 @@ export async function generateRuleTestExamples({
     const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema), dossier: dossierRule };
     // With the schema already covering the rule there is no "correct" to
     // turn into "review": the Proposal check is not asked.
-    const checkPromise =
+    let checkSettled = false;
+    const checkPromise = (
       askProposalCheck && ruleDescription != null && !coverage
         ? checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck })
-        : Promise.resolve(null);
+        : Promise.resolve(null)
+    ).finally(() => {
+      checkSettled = true;
+    });
     systemPrompt = buildRuleTestExamplesPrompt({
       brdp,
       standard,
@@ -992,11 +1004,14 @@ export async function generateRuleTestExamples({
       acceptOnly: coverage ? { reasons: coverage.items.map(coverageItemEnglish) } : null,
       limits: prepared.limits || [],
       several: prepared.several || [],
-      dossier: dossierRule ? { mainPath: DOSSIER_MAIN_PATH, maxFiles: DOSSIER_MAX_FILES, maxLines: DOSSIER_MAX_FILE_LINES, types: DOSSIER_FILE_TYPES } : null,
+      dossier: dossierRule
+        ? { mainPath: DOSSIER_MAIN_PATH, maxFiles: DOSSIER_MAX_FILES, maxLines: DOSSIER_MAX_FILE_LINES, types: DOSSIER_FILE_TYPES, look: dossierLookExpressions(ruleXml, parseXml) }
+        : null,
     });
     onPrompt?.(systemPrompt);
     const run = (examples) => runRuleTestExamples(examples, { ruleXml, format, setup: prepared.setup, vocabulary, parseXml });
     const first = [{ role: 'user', content: RULE_TEST_USER_MESSAGE }];
+    onStep({ step: 'waiting' });
     const answer = await ask(first, systemPrompt);
     responses.push(answer);
     if (!isCurrent()) return null;
@@ -1031,6 +1046,7 @@ export async function generateRuleTestExamples({
       // them; Mejoras B, Part 6).
       correction = { attempted: failures.length, fixed: 0, failed: null, problems: failures.map((f) => ({ label: f.label, problems: f.problems })) };
       try {
+        onStep({ step: 'correcting', count: failures.length });
         const again = await ask(
           [...first, { role: 'assistant', content: answer }, { role: 'user', content: buildRuleTestCorrectionMessage(failures, { dossier: dossierRule }) }],
           systemPrompt
@@ -1071,6 +1087,8 @@ export async function generateRuleTestExamples({
         if (err?.code === LLM_TRUNCATED) correction.truncated = true;
       }
     }
+    // Only the Proposal check still pending: said as such.
+    if (!checkSettled) onStep({ step: 'proposal' });
     const proposalCheck = await checkPromise;
     if (!isCurrent()) return null;
     return {

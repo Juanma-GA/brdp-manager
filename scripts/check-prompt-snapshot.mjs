@@ -254,6 +254,12 @@
 // the listed children of <avee>): the schema already rules out what the
 // rule forbids, so the prompt asks for examples meant to be accepted only
 // and says why. Every earlier case is unchanged.
+//
+// Test de reglas, progreso y causas, Part 1.5: the two dossier cases
+// (ruleTestExamples/dita-xpath3-dossier-safety-topic and
+// dita-xpath2-dossier-safety-topic) gain the "WHERE THE RULE LOOKS" block,
+// quoting the rule's expressions on the dossier's files. Only these two
+// change; every other prompt is identical.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

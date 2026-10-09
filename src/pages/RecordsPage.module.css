@@ -1177,6 +1177,21 @@
   border-radius: 4px;
 }
 
+/* Test de reglas, progreso: step, elapsed time and Cancel on one line. */
+.ruleTestProgress {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0;
+}
+
+.ruleTestElapsed {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
 /* "Edited" mark of an example edited by hand (the verdict is not recorded). */
 .ruleTestEditedMark {
   padding: 0 6px;
