@@ -127,8 +127,10 @@ const COMMON = {
 const TEMPLATE_CASES = {
   'dita-xpath2': {
     ...COMMON,
-    'BRDP-EXT-00007': { notExecutable: 'external_document' },
-    'BRDP-EXT-00008': { notExecutable: 'external_document' },
+    // They read the dossier AND carry '@@URI-CARPETA-DOSIER@@' (Dosier,
+    // Part 1: the marker wins, they stay not executable).
+    'BRDP-EXT-00007': { notExecutable: 'external_placeholder' },
+    'BRDP-EXT-00008': { notExecutable: 'external_placeholder' },
     // T4b: its only test compares '@@URI-CARPETA-DOSIER@@', a value the
     // project's tooling replaces after Generate, with 'file:' -- the stored
     // rule is not the rule that runs, so it is not executable here.
@@ -141,10 +143,12 @@ const TEMPLATE_CASES = {
   },
   'dita-xpath3': {
     ...COMMON,
-    'BRDP-EXT-00004': { notExecutable: 'external_document' },
-    'BRDP-EXT-00007': { notExecutable: 'external_document' },
-    'BRDP-EXT-00008': { notExecutable: 'external_document' },
-    'BRDP-EXT-00009': { notExecutable: 'external_document' },
+    // Dosier, Part 1: dossier rules -- their dossiers that break and comply
+    // are in scripts/test-rule-test-dossier.mjs.
+    'BRDP-EXT-00004': { dossier: true },
+    'BRDP-EXT-00007': { dossier: true },
+    'BRDP-EXT-00008': { dossier: true },
+    'BRDP-EXT-00009': { dossier: true },
     'BRDP-EXT-00006': {
       ...COMMON['BRDP-EXT-00006'],
       // sch:value-of in the message, evaluated.
@@ -165,6 +169,11 @@ for (const [suffix, cases] of Object.entries(TEMPLATE_CASES)) {
     const c = cases[row.ID];
     if (!c) continue;
     const name = `${suffix} ${row.ID}`;
+    if (c.dossier) {
+      const a = analyze(row.Rule);
+      check(`${name}: analyzeRule executable, a dossier rule`, a.status === 'executable' && a.dossier === true, JSON.stringify(a));
+      continue;
+    }
     if (c.notExecutable) {
       const r = expect(`${name}, not executable`, run(row.Rule, topic('<p/>')), 'not_executable', { reason: c.notExecutable });
       const a = analyze(row.Rule);
@@ -346,7 +355,7 @@ expect(
 {
   const rule =
     sch('<§pattern id="ok"><§rule context="note"><§assert id="OK" test="@type">x</§assert></§rule></§pattern>') +
-    sch('<§pattern id="ext"><§rule context="map"><§assert id="EX" test="doc-available(\'x.dita\')">x</§assert></§rule></§pattern>');
+    sch('<§pattern id="ext"><§rule context="map"><§assert id="EX" test="exists(collection())">x</§assert></§rule></§pattern>');
   const r = expect('partial: one pattern not executable', run(rule, topic('<note>x</note>')), 'rejected', { ids: ['OK'] });
   check('  the other pattern is reported', r.notExecutableParts.length === 1 && r.notExecutableParts[0].ruleId === 'ext' && r.notExecutableParts[0].reason.code === 'external_document');
   check('  analyzeRule: partial', analyze(rule).status === 'partial');
@@ -356,8 +365,6 @@ expect(
 {
   const one = (test, extra = '') => sch(`<§pattern id="x"${extra}><§rule context="p"><§assert id="X" test="${test}">x</§assert></§rule></§pattern>`);
   const cases = [
-    ['doc()', one("exists(doc('common.dita'))"), 'external_document', { fn: 'doc()' }],
-    ['document()', one("exists(document('common.dita'))"), 'external_document', { fn: 'document()' }],
     ['collection()', one('exists(collection())'), 'external_document', { fn: 'collection()' }],
     ['unparsed-text()', one("unparsed-text('a.txt') != ''"), 'external_document', { fn: 'unparsed-text()' }],
     ['extension function', one('saxon:evaluate(.)'), 'extension_function', { name: 'saxon:evaluate' }],
@@ -465,7 +472,7 @@ for (const [lang, t] of [['en', i18n.getFixedT('en')], ['es', i18n.getFixedT('es
   check('describe: whitespace collapsed outside literals', !/\s{2,}/.test(x3en[1]), x3en[1]);
   const docRule = describe(templateRules['dita-xpath3'].find((r) => r.ID === 'BRDP-EXT-00009').Rule);
   const docLines = formatRuleDescription(docRule, i18n.getFixedT('en')).lines;
-  check('describe doc() rule: not-executable line first', docLines[0].startsWith('Not checked by the test engine: The rule reads another file'), docLines[0]);
+  check('describe doc() rule: the dossier line first (Dosier, Part 1)', docLines[0].startsWith('Reads other files of the dossier'), docLines[0]);
   check('describe: the XPath 2.0 templates all describe', templateRules['dita-xpath2'].every((r) => describe(r.Rule).available));
   for (const suffix of Object.keys(templateRules)) {
     for (const row of templateRules[suffix]) {

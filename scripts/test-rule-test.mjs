@@ -521,9 +521,14 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const { verifyWarning } = await importRuleTestStatus();
   const approval = (fields) => ({ status: 'pending_review', last_test_result: null, last_test_reason: null, last_test_at: null, last_test_up_to_date: null, ...fields });
   check('T4 verify: DITA rule never tested → dialog with Test now', verifyWarning(approval({ rule_xml: NOTE }), 'SCH-DITA', { parseXml }).kind === 'not_tested');
+  // Dosier, Part 1: doc() on the ditamap is a dossier rule (testable);
+  // collection() still is not.
   const docDita = '<sch:pattern><sch:rule context="map"><sch:assert test="doc-available(\'a.dita\')">x</sch:assert></sch:rule></sch:pattern>';
   const docW = verifyWarning(approval({ rule_xml: docDita }), 'SCH-DITA', { parseXml });
-  check('T4 verify: doc() on the ditamap → not executable, explained', docW.kind === 'not_executable' && !docW.canTestNow && docW.reason.code === 'external_document', JSON.stringify(docW));
+  check('T4 verify: doc() on the ditamap → a dossier rule, Test now', docW.kind === 'not_tested' && docW.canTestNow, JSON.stringify(docW));
+  const colDita = '<sch:pattern><sch:rule context="map"><sch:assert test="exists(collection())">x</sch:assert></sch:rule></sch:pattern>';
+  const colW = verifyWarning(approval({ rule_xml: colDita }), 'SCH-DITA', { parseXml });
+  check('T4 verify: collection() → not executable, explained', colW.kind === 'not_executable' && !colW.canTestNow && colW.reason.code === 'external_document', JSON.stringify(colW));
 }
 
 // ─── T4b: examples the rule never runs on, DITA topic titles ────────────────

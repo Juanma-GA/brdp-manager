@@ -47,8 +47,11 @@
 // | fn:analyze-string        | not in fontoxpath: registered here (same result element, match /     | TPL (EXT-00006 |
 // |                          | non-match children; no fn:group, JavaScript regex dialect)           | xpath3) |
 // | sch:phase                | ignored: every pattern runs (a validator with no phase selected)     | ISO    |
-// | Not executable           | doc()/document()/collection()/doc-available()/unparsed-text*()       | —      |
-// |                          | (external_document); a prefixed function outside fn/xs/math/map/     |        |
+// | Dossier (other files)    | doc(), doc-available(), document() read the example's DOSSIER only:  | XPath F&O, |
+// |                          | a virtual folder file:///dossier/ with the main document (the        | XSLT 2.0 |
+// |                          | ditamap) and up to 4 more files. See "The dossier" below             |        |
+// | Not executable           | collection()/unparsed-text*() (external_document); a prefixed        | —      |
+// |                          | function outside fn/xs/math/map/                                      |        |
 // |                          | array (extension_function); sch:include, abstract patterns (is-a),   |        |
 // |                          | sch:extends (sch_unsupported); a missing @context/@test/@value       |        |
 // |                          | (sch_missing_attribute); an XPath error (xpath_error); a literal      |        |
@@ -64,7 +67,6 @@ import {
   EXTERNAL_PLACEHOLDER_RE,
   KNOWN_NAMESPACES,
   NotExecutable,
-  OTHER_FILE_RE,
   XPATH_LANGUAGE,
   combinedReason,
   localName,
@@ -147,6 +149,146 @@ for (const [params, fn] of [
   } catch {
     // already registered (module reloaded)
   }
+}
+
+
+// ─── The dossier: doc(), doc-available(), document(), base-uri(), resolve-uri()
+// A DITA rule may read the files its ditamap points to (the XPath 3.0
+// template: BRDP-EXT-00004/7/8/9 open each topicref with
+// doc(resolve-uri(@href, base-uri(.))) after doc-available(), and follow
+// conrefs the same way). In a test, the example is a DOSSIER: a virtual
+// folder DOSSIER_BASE_URI holding the main document (the ditamap the rule
+// runs on) and a few more files, each a relative path and its whole XML.
+//
+// fontoxpath (3.34) implements none of these five functions (XPST0017), so
+// they are registered here as custom functions, like fn:analyze-string
+// above, over the dossier of the current run (activeDossier, set at the
+// start of every evaluation -- the runs are synchronous):
+//   base-uri($n)        the URI of the dossier file the node belongs to: its
+//                       Document is looked up in a WeakMap filled when each
+//                       file is parsed (DOMParser in the browser and xmldom
+//                       in Node give documents without a usable documentURI,
+//                       so it is never read from the DOM). xml:base is not
+//                       honoured (DITA dossiers do not use it). A node of no
+//                       dossier file (an analyze-string result) → ().
+//                       base-uri() with no argument is rewritten to
+//                       base-uri(.) before evaluating (a custom function
+//                       cannot see the context item).
+//   resolve-uri($r, $b) WHATWG URL resolution (new URL($r, $b)), the same
+//                       in the browser and in Node: '../', '#fragment' and
+//                       absolute URIs as RFC 3986. With one argument, the
+//                       base is the main document's URI (a validator's
+//                       static base URI is the stylesheet's; ours has none).
+//   doc($u)             the dossier file whose URI is $u (resolved against
+//                       the main document if relative): any other URI --
+//                       another folder, http, a path not in the dossier, a
+//                       file that does not parse -- is the error FODC0002,
+//                       i.e. the rule failing on that example (a test
+//                       failed with its reason, never "not executable").
+//   doc-available($u)   true only for a dossier file that parses; never an
+//                       error.
+//   document($u[, $n])  XSLT's document(): as doc(), relative to the main
+//                       document or to base-uri($n).
+// Return types are xs:string, not xs:anyURI: fontoxpath cannot adapt a
+// JavaScript value to xs:anyURI; every use in a rule (string functions,
+// another resolve-uri, doc) accepts a string the same way.
+export const DOSSIER_BASE_URI = 'file:///dossier/';
+export const DOSSIER_MAX_FILES = 4;
+// Functions that read another file of the dossier / that never can.
+export const DOSSIER_FILE_RE = /(?<![\w.$:-])(?:fn:)?(doc-available|document|doc)\s*\(/;
+const NON_DOSSIER_FILE_RE = /(?<![\w.$:-])(?:fn:)?(collection|unparsed-text(?:-lines|-available)?)\s*\(/;
+
+export function dossierUri(path, base = DOSSIER_BASE_URI) {
+  try {
+    return new URL(String(path), base).href;
+  } catch {
+    return null;
+  }
+}
+
+let activeDossier = null;
+
+// The dossier of a run: main document (already parsed) at mainPath, and the
+// other files parsed lazily on first read.
+function startDossier(mainDoc, dossier, parseXml) {
+  const mainUri = dossierUri(dossier?.mainPath || 'document.xml');
+  const files = new Map();
+  const uriOf = new WeakMap();
+  files.set(mainUri, { doc: mainDoc });
+  uriOf.set(mainDoc, mainUri);
+  for (const f of dossier?.files || []) {
+    const uri = dossierUri(f.path);
+    if (uri && !files.has(uri)) files.set(uri, { xml: String(f.xml ?? f.content ?? '') });
+  }
+  activeDossier = { mainUri, files, uriOf, parseXml };
+}
+
+function dossierDocument(uri) {
+  const entry = uri ? activeDossier?.files.get(uri) : null;
+  if (!entry) return null;
+  if (entry.doc === undefined) {
+    try {
+      const doc = activeDossier.parseXml(entry.xml);
+      entry.doc = doc?.documentElement ? doc : null;
+    } catch {
+      entry.doc = null;
+    }
+    if (entry.doc) activeDossier.uriOf.set(entry.doc, uri);
+  }
+  return entry.doc;
+}
+
+function resolveAgainst(relative, base) {
+  if (relative === null || relative === undefined) return null;
+  try {
+    return new URL(String(relative), base).href;
+  } catch {
+    throw new Error(`FORG0002: invalid URI reference '${relative}' against '${base}'`);
+  }
+}
+
+function readDossierFile(uri, base) {
+  if (uri === null || uri === undefined) return null;
+  const absolute = dossierUri(uri, base || activeDossier?.mainUri || DOSSIER_BASE_URI);
+  const doc = dossierDocument(absolute);
+  if (!doc) throw new Error(`FODC0002: there is no document at ${absolute || uri} in the example's dossier`);
+  return doc;
+}
+
+const baseUriOf = (node) => {
+  if (!node) return null;
+  const doc = node.nodeType === 9 ? node : node.ownerDocument;
+  return (doc && activeDossier?.uriOf.get(doc)) || null;
+};
+
+for (const [name, params, returns, fn] of [
+  ['base-uri', ['node()?'], 'xs:string?', (_c, n) => baseUriOf(n)],
+  ['document-uri', ['node()?'], 'xs:string?', (_c, n) => (n && n.nodeType === 9 ? baseUriOf(n) : null)],
+  ['resolve-uri', ['xs:string?'], 'xs:string?', (_c, r) => resolveAgainst(r, activeDossier?.mainUri || DOSSIER_BASE_URI)],
+  ['resolve-uri', ['xs:string?', 'xs:string'], 'xs:string?', (_c, r, b) => resolveAgainst(r, b)],
+  ['doc-available', ['xs:string?'], 'xs:boolean', (_c, u) => {
+    if (u === null || u === undefined) return false;
+    return Boolean(dossierDocument(dossierUri(u, activeDossier?.mainUri || DOSSIER_BASE_URI)));
+  }],
+  ['doc', ['xs:string?'], 'document-node()?', (_c, u) => readDossierFile(u)],
+  ['document', ['xs:string?'], 'document-node()?', (_c, u) => readDossierFile(u)],
+  ['document', ['xs:string?', 'node()'], 'document-node()?', (_c, u, n) => readDossierFile(u, baseUriOf(n))],
+]) {
+  try {
+    fontoxpath.registerCustomXPathFunction({ namespaceURI: FN_NS, localName: name }, params, returns, fn);
+  } catch {
+    // already registered (module reloaded)
+  }
+}
+
+// base-uri() with no argument → base-uri(.), outside string literals.
+function explicitBaseUri(expression) {
+  return String(expression).split(/('[^']*'|"[^"]*")/).map((part, i) => (i % 2 ? part : part.replace(/(?<![\w.$:-])((?:fn:)?base-uri)\s*\(\s*\)/g, '$1(.)'))).join('');
+}
+
+// True when the expression reads another file of the dossier.
+export function readsDossier(expression) {
+  return DOSSIER_FILE_RE.test(stripLiterals(expression));
 }
 
 // ─── Reading the rule ───────────────────────────────────────────────────────
@@ -276,7 +418,7 @@ function staticChecks(pattern, globalLets, globalUnsupported) {
   for (const l of [...globalLets, ...pattern.lets]) if (l.value === null) throw new NotExecutable(REASON.missing('let', 'value'));
   const expressions = patternExpressions(pattern, globalLets);
   for (const e of expressions) {
-    const other = OTHER_FILE_RE.exec(stripLiterals(e));
+    const other = NON_DOSSIER_FILE_RE.exec(stripLiterals(e));
     if (other) throw new NotExecutable(REASON.otherFile(`${other[1]}()`));
   }
   for (const e of expressions) {
@@ -324,7 +466,8 @@ function makeEvaluator(doc, ruleNamespaces) {
       prefix ? BUILTIN_PREFIXES[prefix] ?? ruleNamespaces[prefix] ?? declared[prefix] ?? KNOWN_NAMESPACES[prefix] ?? null : null,
   };
   const { evaluateXPath } = fontoxpath;
-  return (expression, contextNode, kind) => {
+  return (raw, contextNode, kind) => {
+    const expression = explicitBaseUri(raw);
     try {
       if (kind === 'boolean') return fontoxpath.evaluateXPathToBoolean(expression, contextNode, null, null, options);
       if (kind === 'string') return fontoxpath.evaluateXPathToString(expression, contextNode, null, null, options);
@@ -422,6 +565,7 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
   if (!patterns.length) return notExecutable(REASON.noRule('pattern'));
 
   activeParseXml = parseXml;
+  startDossier(doc, options.dossier, parseXml);
   const evaluate = makeEvaluator(doc, namespaces);
   const violations = [];
   const warnings = [];
@@ -512,6 +656,7 @@ export function schematronAcceptanceDetails(ruleXml, fragmentXml, options = {}) 
   }
   const { patterns, globalLets, namespaces } = parseSchematron(ruleDoc.documentElement);
   activeParseXml = parseXml;
+  startDossier(doc, options.dossier, parseXml);
   const evaluate = makeEvaluator(doc, namespaces);
   const out = [];
   for (const pattern of patterns) {
@@ -608,6 +753,7 @@ export function analyzeSchematron(ruleXml, options = {}) {
 
   activeParseXml = parseXml;
   const doc = parseXml('<topic/>');
+  startDossier(doc, null, parseXml);
   const evaluate = makeEvaluator(doc, namespaces);
   const staticOnly = (fn) => {
     try {
@@ -619,6 +765,7 @@ export function analyzeSchematron(ruleXml, options = {}) {
   };
   const notRun = [];
   const features = new Set();
+  let dossier = false;
   for (const pattern of patterns) {
     for (const e of patternExpressions(pattern, globalLets)) for (const f of xpath3Features(e)) features.add(f);
     try {
@@ -631,6 +778,7 @@ export function analyzeSchematron(ruleXml, options = {}) {
           staticOnly(() => messageOf(check.element, (body) => evaluate(nodeExpr(lets, rule.lets, body), doc.documentElement, 'string')));
         }
       }
+      if (patternExpressions(pattern, globalLets).some(readsDossier)) dossier = true;
     } catch (err) {
       if (!(err instanceof NotExecutable)) throw err;
       notRun.push({ ruleId: pattern.ruleId, reason: err.reason });
@@ -646,6 +794,10 @@ export function analyzeSchematron(ruleXml, options = {}) {
     parts: notRun,
     total: patterns.length,
     warnings,
+    // A dossier rule: an executable pattern reads other files of the
+    // dossier (doc(), doc-available(), document()); its examples are
+    // dossiers, with the ditamap as the main document.
+    dossier,
   };
 }
 
@@ -657,6 +809,8 @@ export function analyzeSchematron(ruleXml, options = {}) {
 //   describe_sch_assert {context, test, message, warning}  "must hold"
 //   describe_sch_report {context, test, message, warning}  "must not occur"
 //   describe_not_executable {reason}                       a pattern the engine cannot run
+//   describe_dossier {}                                    first, when an executable pattern
+//                                                          reads other files of the dossier
 // warning: role warning/info (never rejects). constant (T4b): the test does
 // not depend on the document at all (it evaluates with no context node),
 // and an assert that always holds / a report that never occurs can never
@@ -707,11 +861,14 @@ export function describeSchematron(ruleXml, options = {}) {
   const statements = [];
   let rejecting = false;
   let executable = 0;
+  let dossier = false;
+  activeDossier = null;
   for (const pattern of patterns) {
     let runs = true;
     try {
       staticChecks(pattern, globalLets, globalUnsupported);
       executable += 1;
+      if (patternExpressions(pattern, globalLets).some(readsDossier)) dossier = true;
     } catch (err) {
       if (!(err instanceof NotExecutable)) throw err;
       runs = false;
@@ -740,7 +897,8 @@ export function describeSchematron(ruleXml, options = {}) {
       }
     }
   }
-  return { available: true, statements, cannotReject: executable > 0 && !rejecting };
+  if (dossier) statements.unshift({ ruleIds: patterns.map((p) => p.ruleId), statement: { code: 'describe_dossier', params: {} }, schemas: [] });
+  return { available: true, statements, cannotReject: executable > 0 && !rejecting, dossier };
 }
 
 // T4b: true when the check can never reject -- its test evaluates with no
