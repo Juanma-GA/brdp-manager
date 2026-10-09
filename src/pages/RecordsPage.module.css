@@ -1696,3 +1696,76 @@
 .ruleTestPre {
   white-space: pre-wrap;
 }
+
+/* Formatted rule view (Test de reglas, progreso y causas, Part 2.2):
+   read-only, formatted by default, "As saved" for the raw text. Token
+   colours from the brand variables (AA on white). */
+.ruleXmlView {
+  margin: 4px 0;
+}
+
+.ruleXmlViewBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.viewToggle,
+.viewToggleActive {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.viewToggleActive {
+  background: var(--primary-tint);
+  border-color: var(--primary-tint-border);
+  color: var(--primary-dark);
+}
+
+.ruleXmlFormatted {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ruleXmlLine {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ruleTokElement {
+  color: var(--primary-dark);
+}
+
+.ruleTokAttribute {
+  color: var(--warning-text);
+}
+
+.ruleTokValue {
+  color: var(--text);
+}
+
+.ruleTokVariable {
+  color: #6d28d9;
+}
+
+.ruleTokString {
+  color: var(--success-text);
+}
+
+.ruleTokComment {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.ruleTokKeyword {
+  color: var(--error-text);
+  font-weight: 600;
+}

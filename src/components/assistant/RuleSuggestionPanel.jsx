@@ -1,3 +1,4 @@
+import RuleXmlView from './RuleXmlView.jsx';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
@@ -239,7 +240,7 @@ export default function RuleSuggestionPanel({
       {(entry.text || entry.notCheckable !== undefined) && <AppliesTo entry={entry} />}
       {entry.text && (
         <>
-          <div className={styles.suggestionCode}>{entry.text}</div>
+          <RuleXmlView ruleXml={entry.text} format={entry.format} className={styles.suggestionCode} testId="suggested-rule-view" />
           <RuleSplitNote split={entry.split} />
           <RuleIdsNote renamed={entry.idsRenamed} />
           <RuleValidationWarnings validation={generatedValidation} standard={standard} proposal={brdp?.proposal ?? null} />
@@ -352,7 +353,7 @@ export default function RuleSuggestionPanel({
           {pasted && pastedFinal !== pasted && (
             <>
               {hasSchemas && <AppliesTo entry={entry} />}
-              <div className={styles.suggestionCode}>{pastedFinal}</div>
+              <RuleXmlView ruleXml={pastedFinal} format={entry.format} className={styles.suggestionCode} testId="pasted-rule-view" />
             </>
           )}
           <RuleSplitNote split={pastedSplit} />

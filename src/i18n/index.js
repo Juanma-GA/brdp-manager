@@ -896,6 +896,17 @@ const resources = {
             title: 'Checked by code on the saved rules; open a BRDP to accept or discard its correction',
           },
         },
+        // Formatted rule view (progreso y causas, Part 2.2).
+        ruleView: {
+          label: 'How to show the rule',
+          formatted: 'Formatted',
+          raw: 'As saved',
+          copy: 'Copy rule',
+          copied: 'Copied',
+          copyFailed: 'Could not copy',
+          notWellFormed: 'The rule is not well-formed XML: shown as saved, without formatting.',
+          declaredInEach: 'declared in each function',
+        },
         ruleTest: {
           button: 'Test rule',
           buttonTitle: 'See the rule run on example manual fragments: one that complies and one that breaks it',
@@ -2760,6 +2771,16 @@ const resources = {
             failed: 'No se han podido revisar las reglas: {{reason}}',
             title: 'Revisadas por código sobre las reglas guardadas; abre una BRDP para aceptar o descartar su corrección',
           },
+        },
+        ruleView: {
+          label: 'Cómo mostrar la regla',
+          formatted: 'Formateada',
+          raw: 'Tal como se guardó',
+          copy: 'Copiar regla',
+          copied: 'Copiada',
+          copyFailed: 'No se pudo copiar',
+          notWellFormed: 'La regla no es XML bien formado: se muestra tal como se guardó, sin formato.',
+          declaredInEach: 'declarado en cada función',
         },
         ruleTest: {
           button: 'Probar regla',

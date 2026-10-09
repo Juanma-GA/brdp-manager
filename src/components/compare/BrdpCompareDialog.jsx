@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { authFetchJson } from '../../services/apiClient';
 import { errorMessage } from '../../services/apiErrors';
+import RuleXmlView from '../assistant/RuleXmlView.jsx';
 import { compareDetails, diffRuleLines, diffText, foldEqualRows, lastTestOfDetail, ruleStateOfDetail } from '../../utils/brdpCompare.js';
 import { validateRuleXml } from '../../hooks/useSuggestions';
 import { RuleValidationWarnings } from '../assistant/RuleSuggestionPanel';
@@ -161,7 +162,16 @@ function RuleComparison({ facts, left, right }) {
           </button>
         </div>
       )}
-      {hasStructure && view === 'structure' ? (
+      {rule.status === 'missing' ? (
+        // Only one side has a rule: nothing to diff -- the whole rule, in
+        // the formatted view (progreso y causas, Part 2.2).
+        <RuleXmlView
+          ruleXml={rule.side === 'left' ? right.rule.rule_xml : left.rule.rule_xml}
+          format={rule.side === 'left' ? right.rule_format : left.rule_format}
+          className={recordsStyles.suggestionCode}
+          testId="compare-rule-view"
+        />
+      ) : hasStructure && view === 'structure' ? (
         <ul className={styles.structure} data-testid="compare-structure">
           {s.items.map((item, i) => (
             <StructureItem key={i} item={item} />

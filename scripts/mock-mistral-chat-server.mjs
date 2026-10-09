@@ -1008,7 +1008,9 @@ function ruleTestReviewReply(systemPrompt) {
 // regardless of which BRDP it's for), so a flag armed/consumed per call
 // is simpler and more reliable than a content marker here.
 const SLOW_RESPONSE_DELAY_MS = 2500;
-let slowNextArmed = false;
+let slowNextArmed = 0;
+let chatCalls = 0;
+let slowNextDelayMs = SLOW_RESPONSE_DELAY_MS;
 // "Aviso ligado al texto" round: content-independent trigger, armed via
 // POST /step-next (one-shot, same convention as /slow-next/-error-next
 // above) -- Suggest Definition/Rule's own fixed messages already own a
@@ -1124,6 +1126,11 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true }));
     return;
   }
+  if (req.method === "GET" && req.url === "/chat-calls") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ calls: chatCalls }));
+    return;
+  }
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(lastRequest));
@@ -1134,7 +1141,8 @@ const server = http.createServer((req, res) => {
     lastProposalCheck = null;
     proposalCheckCalls = 0;
     proposalCheckFailNext = false;
-    slowNextArmed = false;
+    slowNextArmed = 0;
+    chatCalls = 0;
     extractDelayMs = 0;
     extractBroken = false;
     extractCalls = 0;
@@ -1145,10 +1153,14 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true }));
     return;
   }
-  if (req.method === "POST" && req.url === "/slow-next") {
-    slowNextArmed = true;
+  if (req.method === "POST" && (req.url === "/slow-next" || req.url.startsWith("/slow-next?"))) {
+    // ?ms=N (progreso y límite de tiempo): a longer delay, to go past the
+    // proxy's LLM_REQUEST_TIMEOUT_SECONDS; ?count=N delays the next N calls.
+    const params = new URL(req.url, "http://x").searchParams;
+    slowNextArmed = Number(params.get("count")) || 1;
+    slowNextDelayMs = Number(params.get("ms")) || SLOW_RESPONSE_DELAY_MS;
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, delayMs: SLOW_RESPONSE_DELAY_MS }));
+    res.end(JSON.stringify({ ok: true, delayMs: slowNextDelayMs, count: slowNextArmed }));
     return;
   }
   if (req.method === "POST" && req.url === "/error-next") {
@@ -1187,6 +1199,9 @@ const server = http.createServer((req, res) => {
       res.end("bad json");
       return;
     }
+    // Every chat call, counted (GET /chat-calls; progreso y límite de
+    // tiempo: "Cancel" sends nothing more).
+    chatCalls += 1;
     // Barrido final 1/2: the Proposal check runs in parallel with the
     // examples of every rule test. It is answered here, apart: it never
     // becomes the /last-request and never consumes a one-shot flag armed
@@ -1327,10 +1342,10 @@ const server = http.createServer((req, res) => {
     };
     if (extractDelayMs && userText === "Write the texts for these BRDPs.") {
       setTimeout(send, extractDelayMs);
-    } else if (slowNextArmed) {
-      slowNextArmed = false; // one-shot -- doesn't affect the next unrelated call
-      console.log(`chat call -- delaying ${SLOW_RESPONSE_DELAY_MS}ms (armed via /slow-next)`);
-      setTimeout(send, SLOW_RESPONSE_DELAY_MS);
+    } else if (slowNextArmed > 0) {
+      slowNextArmed -= 1; // one-shot by default -- doesn't affect later unrelated calls
+      console.log(`chat call -- delaying ${slowNextDelayMs}ms (armed via /slow-next)`);
+      setTimeout(send, slowNextDelayMs);
     } else {
       send();
     }

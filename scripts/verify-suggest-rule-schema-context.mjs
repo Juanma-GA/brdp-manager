@@ -53,6 +53,14 @@ function assert(cond, msg) {
   }
 }
 
+// The rule as saved (Test de reglas, vista formateada: the view shows it
+// formatted by default; the toggle shows the stored text).
+let page;
+async function rawRule(testId) {
+  await page.getByTestId(`${testId}-raw`).click();
+  return page.getByTestId(`${testId}-content`).textContent();
+}
+
 async function main() {
   const token = (
     await fetch(`${API}/api/auth/login`, {
@@ -124,7 +132,7 @@ async function main() {
   for (const p of [p42, p41, p301, pMaster, pDita]) await embed(p);
 
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
-  const page = await (await browser.newContext({ viewport: { width: 1440, height: 1300 } })).newPage();
+  page = await (await browser.newContext({ viewport: { width: 1440, height: 1300 } })).newPage();
   page.on("dialog", (d) => d.accept());
   const ruleButton = () => page.getByRole("button", { name: "Suggest Rule" });
   const limitLink = () => page.getByRole("button", { name: "Limit to specific schemas…" });
@@ -207,7 +215,7 @@ async function main() {
     system = await lastSystemPrompt();
     assert(system.includes("The rule applies ONLY to documents written against the\nschema proced."), "chosen schema reaches the prompt");
     assert(await page.locator("text=Applies to: proced").isVisible(), "'Applies to: proced' shown");
-    const shown = await page.locator('[class*="suggestionCode"]').first().innerText();
+    const shown = await rawRule("suggested-rule-view");
     assert(
       shown.startsWith('<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd">') &&
         (shown.match(/<contextRules /g) || []).length === 1 &&
@@ -390,7 +398,7 @@ async function main() {
     assert(await checkbox("descript").isChecked(), "3.0.1 master: 'descriptive' pre-checks descript");
     await selector().getByRole("button", { name: "Generate" }).click();
     await waitForRule();
-    const masterShown = await page.locator('[class*="suggestionCode"]').first().innerText();
+    const masterShown = await rawRule("suggested-rule-view");
     assert(
       masterShown.startsWith('<contextrules context="http://www.s1000d.org/S1000D_3-0-1/xml_schema_master/dm/descriptSchema.xsd">'),
       `3.0.1 master: context="…/xml_schema_master/dm/descriptSchema.xsd" (${masterShown.split("\n")[0]})`

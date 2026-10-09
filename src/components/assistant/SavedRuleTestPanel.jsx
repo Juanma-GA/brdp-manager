@@ -5,6 +5,7 @@ import { runExample } from '../../utils/ruleTest.js';
 import { runSavedTest, savedExamplesDate } from '../../utils/ruleTestSaved.js';
 import { passedTestToReplaceAt } from '../../utils/ruleTestStatus.js';
 import VerdictCauseHint from './VerdictCauseHint';
+import RuleXmlView from './RuleXmlView.jsx';
 import { ExampleCard, ReplacePassedQuestion, TONE_CLASS, formatTestDate, verdictView } from './RuleTestPanel';
 
 // Guardar la prueba aprobada: the last passed test of the rule, read-only --
@@ -130,9 +131,7 @@ export default function SavedRuleTestPanel({ saved, format, standard, schemaLoca
         </>
       )}
       <p className={styles.hint}>{t(current ? 'records.ruleTest.saved.currentRuleLabel' : 'records.ruleTest.saved.ruleLabel')}</p>
-      <pre className={styles.ruleTestXml} data-testid="saved-rule-test-rule">
-        {current ? current.ruleXml : saved.ruleXml}
-      </pre>
+      <RuleXmlView ruleXml={current ? current.ruleXml : saved.ruleXml} format={format} className={styles.ruleTestXml} testId="saved-rule-test-rule" />
       <p className={styles.hint}>{t('records.ruleTest.skeletonLegend')}</p>
       {saved.examples.map((ex, i) => (
         <ExampleCard

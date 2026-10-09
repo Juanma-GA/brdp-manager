@@ -227,7 +227,9 @@ async function main() {
     assert(await selector.locator('input[value="proced"]').isChecked(), "proced pre-checked");
     await selector.getByRole("button", { name: "Generate" }).click();
     await page.getByRole("button", { name: "Discard" }).waitFor({ timeout: 15000 });
-    const shown = await page.locator('[class*="suggestionCode"]').first().innerText();
+    // The view is formatted by default; the toggle shows the stored text.
+    await page.getByTestId("suggested-rule-view-raw").click();
+    const shown = await page.getByTestId("suggested-rule-view-content").textContent();
     assert(shown.startsWith('<contextRules rulesContext="../schemas/proced.xsd">'), `suggestion wrapped with the pattern (${shown.split("\n")[0]})`);
 
     // 4. "Test rule" on that rule: examples with the same xsi path, verdict correct.

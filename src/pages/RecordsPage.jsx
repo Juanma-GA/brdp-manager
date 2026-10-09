@@ -54,6 +54,7 @@ import RuleSchemaSelector from '../components/assistant/RuleSchemaSelector';
 import { schemaLocationOf, supportsSchemaContext } from '../utils/ruleSchemaContext.js';
 import { hasUnfilledMarkers } from '../utils/proposalMarkers';
 import RuleStatusStepper from '../components/RuleStatusStepper';
+import RuleXmlView from '../components/assistant/RuleXmlView.jsx';
 import RuleTestPanel, { canTestRule, formatTestDate, TestRuleButton } from '../components/assistant/RuleTestPanel';
 import { RuleTestIndicator, VerifyWarningDialog } from '../components/assistant/RuleTestIndicator';
 import SavedRuleTestPanel from '../components/assistant/SavedRuleTestPanel';
@@ -2350,13 +2351,7 @@ export default function RecordsPage() {
                     />
                   )}
                   {rulePreviewOpen && ruleStateOf(ruleApproval) === 'verified' && (
-                    <textarea
-                      className={styles.ruleTextarea}
-                      value={ruleApproval.rule_xml}
-                      readOnly
-                      spellCheck={false}
-                      aria-label={t('records.rule.preview')}
-                    />
+                    <RuleXmlView ruleXml={ruleApproval.rule_xml} format={ruleFormat} className={styles.suggestionCode} testId="rule-preview" />
                   )}
                 </div>
               )}
