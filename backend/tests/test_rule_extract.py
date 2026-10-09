@@ -1585,3 +1585,149 @@ async def test_project_41_own_catalog_and_42_only_identifier(client, project_41_
             for row in added:
                 await session.delete(await session.get(BRDPCatalog, row.id))
             await session.commit()
+
+
+# ── Own identifier prefixes (BRDP-ENV-00001) ──────────────────────────────
+
+
+def test_own_prefix_criterion():
+    from app.services.rule_extract_jobs import own_prefix
+
+    catalog = {"S1", "D1", "CAT"}
+    assert own_prefix("BRDP-ENV-00001", catalog) == "ENV"
+    assert own_prefix("BRDP-AB-00001", catalog) == "AB"
+    assert own_prefix("BRDP-ABCDEF-00001", catalog) == "ABCDEF"
+    for identifier in (
+        "BRDP-EXT-00001",  # EXT keeps its own treatment
+        "BRDP-S1-00001",  # prefixes with digits are official codes
+        "BRDP-A1-00001",
+        "BRDP-CAT-00001",  # a prefix of a loaded catalog
+        "BRDP-E-00001",  # one letter
+        "BRDP-ABCDEFG-00001",  # seven letters
+        "BRDP-env-00001",  # lower case
+        "BRDP-ENV-0001",  # four digits
+        "BRDP-ENV-00001-4.1",
+        None,
+    ):
+        assert own_prefix(identifier, catalog) is None, identifier
+
+
+def _id_rule(identifier, path):
+    return (
+        f'<structureObjectRule id="{identifier}"><objectPath allowedObjectFlag="0">{path}</objectPath>'
+        f"<objectUse>{identifier}. Decision.</objectUse></structureObjectRule>"
+    )
+
+
+async def test_own_prefix_candidates_keep_their_numbers_and_round_trip(client, project_users, synthetic_standard):
+    """"Keep ENV" is the default and keeps the file's number when it is free;
+    an ENV number taken with another rule is "changed"; switching to a new
+    EXT and back recovers the ENV identifier; "Keep ENV" on a taken number
+    gives the next free ENV; EXT and S1 identifiers are as before; a prefix
+    of a loaded catalog is never an own prefix."""
+    project, editor, _ = project_users
+    await _seed(project.id, "BRDP-ENV-00002", _rule("BRDP-ENV-00002", "//other"))
+    async with async_session_factory() as session:
+        session.add(BRDPCatalog(standard=synthetic_standard, identifier="BRDP-CATX-00001", title="T", definition="D"))
+        await session.commit()
+    content = "<contextRules>" + "".join(
+        _id_rule(i, p)
+        for i, p in (
+            ("BRDP-ENV-00001", "//a"),
+            ("BRDP-ENV-00003", "//b"),
+            ("BRDP-ENV-00002", "//c"),
+            ("BRDP-S1-99999", "//d"),
+            ("BRDP-EXT-00004", "//e"),
+            ("BRDP-CATX-00007", "//f"),
+        )
+    ) + "</contextRules>"
+    job, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+    by_origin = {c["origin_identifier"]: c for c in cands}
+    got = {o: (c["classification"], c["identifier"], c["selected"], c["options"]) for o, c in by_origin.items()}
+    assert got["BRDP-ENV-00001"] == ("own_prefix", "BRDP-ENV-00001", True, ["own_prefix", "new_ext"])
+    assert got["BRDP-ENV-00003"] == ("own_prefix", "BRDP-ENV-00003", True, ["own_prefix", "new_ext"])
+    assert got["BRDP-ENV-00002"] == ("changed", "BRDP-ENV-00002", True, ["changed", "own_prefix", "new_ext"])
+    assert got["BRDP-S1-99999"][:2] == ("new_ext", "BRDP-EXT-00005") and got["BRDP-S1-99999"][3] == ["new_ext"]
+    assert got["BRDP-EXT-00004"][:2] == ("new_ext", "BRDP-EXT-00004")
+    assert got["BRDP-CATX-00007"][:2] == ("new_ext", "BRDP-EXT-00006")
+    assert by_origin["BRDP-ENV-00001"]["own_prefix"] == "ENV"
+    assert "own_prefix" not in by_origin["BRDP-CATX-00007"]
+    # Texts as for a new EXT: the Proposal from the objectUse, the rest by the AI.
+    assert by_origin["BRDP-ENV-00001"]["ai_fields"] == ["title", "definition"]
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    k1, k2 = by_origin["BRDP-ENV-00001"]["key"], by_origin["BRDP-ENV-00002"]["key"]
+
+    async def reclassify(key, classification):
+        res = await client.patch(f"{url}/candidates", headers=editor, json={"items": [{"key": key, "classification": classification}]})
+        assert res.status_code == 200, res.text
+        return res.json()["candidates"][0]
+
+    c1 = await reclassify(k1, "new_ext")
+    assert c1["identifier"] == "BRDP-EXT-00007"
+    [w] = [w for w in c1["warnings"] if w["code"] == "rule_ids_from_file"]
+    assert w["params"] == {"identifier": "BRDP-EXT-00007", "origin": "BRDP-ENV-00001", "ids": ["BRDP-ENV-00001"]}
+    c1 = await reclassify(k1, "own_prefix")
+    assert c1["identifier"] == "BRDP-ENV-00001" and not any(w["code"] == "rule_ids_from_file" for w in c1["warnings"])
+    # "Keep ENV" on a number taken in the project: the next free ENV, after
+    # the project's (00002) and the file's (00001, 00003).
+    c2 = await reclassify(k2, "own_prefix")
+    assert c2["identifier"] == "BRDP-ENV-00004"
+    assert [w["params"]["ids"] for w in c2["warnings"] if w["code"] == "rule_ids_from_file"] == [["BRDP-ENV-00002"]]
+    c2 = await reclassify(k2, "changed")
+    assert c2["identifier"] == "BRDP-ENV-00002"
+    c2 = await reclassify(k2, "own_prefix")
+    assert c2["identifier"] == "BRDP-ENV-00004"
+    # BRDP-ENV-00003 taken meanwhile: imported as the next free ENV.
+    await _seed(project.id, "BRDP-ENV-00003")
+    res = await _apply(client, url, editor, {"keys": [c["key"] for c in cands]})
+    assert res.status_code == 200, res.text
+    created = {c["key"]: c["identifier"] for c in res.json()["created_identifiers"]}
+    assert [created[by_origin[o]["key"]] for o in ("BRDP-ENV-00001", "BRDP-ENV-00003", "BRDP-ENV-00002")] == [
+        "BRDP-ENV-00001", "BRDP-ENV-00005", "BRDP-ENV-00004",
+    ]
+    # Re-import: found by their identifier or their origin.
+    _, again = await _extract(client, project.id, editor, _brex("4.2", content))
+    again = {c["origin_identifier"]: c for c in again}
+    assert (again["BRDP-ENV-00001"]["classification"], again["BRDP-ENV-00001"]["identifier"]) == ("same", "BRDP-ENV-00001")
+    assert again["BRDP-ENV-00001"]["options"] == ["same", "own_prefix", "new_ext"]
+
+
+async def test_own_prefix_bulk_classify_and_no_content(client, project_users):
+    """"Clasificar las mostradas como…" works for own prefixes too, and an
+    own-prefix candidate without content can be "empty"."""
+    project, editor, _ = project_users
+    content = "<contextRules>" + _id_rule("BRDP-ENV-00001", "//a") + _id_rule("BRDP-NAV-00001", "//b") + "</contextRules>"
+    job, cands = await _extract(client, project.id, editor, _brex("4.2", content))
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{job['id']}"
+    res = await client.patch(
+        f"{url}/candidates", headers=editor, json={"items": [{"key": c["key"], "classification": "new_ext"} for c in cands]}
+    )
+    assert [c["identifier"] for c in res.json()["candidates"]] == ["BRDP-EXT-00001", "BRDP-EXT-00002"]
+    res = await client.patch(
+        f"{url}/candidates", headers=editor, json={"items": [{"key": c["key"], "classification": "own_prefix"} for c in cands]}
+    )
+    assert [c["identifier"] for c in res.json()["candidates"]] == ["BRDP-ENV-00001", "BRDP-NAV-00001"]
+
+
+async def test_next_identifier_per_prefix(client, project_users):
+    project, editor, viewer = project_users
+    url = f"/api/projects/{project.id}/brdps/next-ext-identifier"
+    assert (await client.get(url, headers=editor)).json() == {"identifier": "BRDP-EXT-00001"}
+    assert (await client.get(url, params={"prefix": "ENV"}, headers=editor)).json() == {"identifier": "BRDP-ENV-00001"}
+    await _seed(project.id, "BRDP-ENV-00002")
+    await _seed(project.id, "BRDP-EXT-00007")
+    assert (await client.get(url, params={"prefix": "ENV"}, headers=editor)).json() == {"identifier": "BRDP-ENV-00003"}
+    assert (await client.get(url, headers=editor)).json() == {"identifier": "BRDP-EXT-00008"}
+    for bad in ("env", "E", "ENVIRONMENT", "EN1", "", "E-V"):
+        res = await client.get(url, params={"prefix": bad}, headers=editor)
+        assert res.status_code == 422, bad
+        assert res.json()["detail"]["code"] == "brdp_prefix_invalid"
+        assert res.json()["detail"]["prefix"] == bad
+    assert (await client.get(url, params={"prefix": "ENV"}, headers=viewer)).status_code == 403
+    # Creating a BRDP with that identifier, then the next one moves on.
+    res = await client.post(
+        f"/api/projects/{project.id}/brdps", headers=editor,
+        json={"identifier": "BRDP-ENV-00003", "title": "T", "definition": "", "proposal": "", "validation": "Pending"},
+    )
+    assert res.status_code == 201, res.text
+    assert (await client.get(url, params={"prefix": "ENV"}, headers=editor)).json() == {"identifier": "BRDP-ENV-00004"}

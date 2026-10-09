@@ -64,17 +64,11 @@ _HISTORY_FIELDS = {
     "comments": "refusal_reason",
 }
 
-# Deliberately its own numbering, scoped to ONLY this exact prefix -- NOT
-# a port of v1's extractBRDPs.js generateIds() (frontend, removed with AI
-# Extract 2/2), which looked at the highest number across ANY prefix. Confirmed
-# with the user: a project seeded from the catalog (identifiers like
-# "BRDP-S1-00001") must still start its first manually-added BRDP at
-# BRDP-EXT-00001, not continue from the catalog's numbers -- so catalog
-# identifiers need to be ignored entirely here, not just deprioritized.
-# NOTE for a future round: AI Extract's generateIds() has this same
-# mixed-prefix bug and will need the identical fix when that feature is
-# revisited -- not done here, out of scope for this round.
-_EXT_IDENTIFIER_PATTERN = re.compile(r"^BRDP-EXT-(\d+)$")
+# Each prefix has its own numbering (EXT by default; a project's own prefix
+# such as ENV): a project seeded from the catalog (identifiers like
+# "BRDP-S1-00001") still starts its first manually-added BRDP at
+# BRDP-EXT-00001, never continuing from other prefixes' numbers.
+_PREFIX_PATTERN = re.compile(r"^[A-Z]{2,6}$")
 
 
 async def _identifier_taken(project_id: uuid.UUID, identifier: str, db: AsyncSession) -> bool:
@@ -228,14 +222,28 @@ async def get_brdp_stats(
 @router.get("/next-ext-identifier", response_model=NextExtIdentifierOut)
 async def get_next_ext_identifier(
     project_id: uuid.UUID,
+    prefix: str = "EXT",
     _editor: User = Depends(require_project_role("editor")),
     db: AsyncSession = Depends(get_db),
 ) -> NextExtIdentifierOut:
-    """Powers Add BRDP's pre-filled, locked ID field. Editor-gated since
-    it only ever matters to the creation flow, which is itself editor+.
-    Only considers ACTIVE identifiers -- a trashed BRDP-EXT-NNNNN's number
-    is free to be reissued, consistent with the partial unique index.
+    """Powers Add BRDP's pre-filled, locked ID field: the next free
+    BRDP-<prefix>-nnnnn (EXT by default; a project's own prefix such as ENV),
+    numbered per prefix. The prefix is 2-6 uppercase letters, else 422.
+    Editor-gated since it only ever matters to the creation flow, which is
+    itself editor+. Only considers ACTIVE identifiers -- a trashed
+    BRDP-EXT-NNNNN's number is free to be reissued, consistent with the
+    partial unique index.
     """
+    if not _PREFIX_PATTERN.match(prefix):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=error_detail(
+                "brdp_prefix_invalid",
+                message=f"The prefix {prefix!r} must be 2 to 6 uppercase letters (A-Z), like EXT or ENV",
+                prefix=prefix,
+            ),
+        )
+    pattern = re.compile(r"^BRDP-" + prefix + r"-(\d+)$")
     identifiers = (
         (await db.execute(select(BRDP.identifier).where(BRDP.project_id == project_id, ACTIVE_BRDP_FILTER)))
         .scalars()
@@ -243,10 +251,10 @@ async def get_next_ext_identifier(
     )
     highest = 0
     for identifier in identifiers:
-        match = _EXT_IDENTIFIER_PATTERN.match(identifier)
+        match = pattern.match(identifier)
         if match:
             highest = max(highest, int(match.group(1)))
-    return NextExtIdentifierOut(identifier=f"BRDP-EXT-{highest + 1:05d}")
+    return NextExtIdentifierOut(identifier=f"BRDP-{prefix}-{highest + 1:05d}")
 
 
 @router.post("", response_model=BRDPOut, status_code=status.HTTP_201_CREATED)

@@ -57,10 +57,13 @@ const ALL_LABELS = {
   en: [
     "New EXT", "From catalog", "From catalog (S1000D 4.1)", "Other specification (S2000M)",
     "Already exists (changes)", "Already exists (same)", "Default rule of S1000D", "No content",
+    // An own prefix of 6 letters, the longest possible.
+    "Keep ENV", "Keep NAVSUB",
   ],
   es: [
     "Nueva EXT", "De catálogo", "De catálogo (S1000D 4.1)", "Otra especificación (S2000M)",
     "Ya existe (cambia)", "Ya existe (igual)", "Regla por defecto de S1000D", "Sin contenido",
+    "Conservar ENV", "Conservar NAVSUB",
   ],
 };
 

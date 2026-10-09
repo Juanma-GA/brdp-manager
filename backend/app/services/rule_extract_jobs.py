@@ -72,7 +72,7 @@ from datetime import datetime, timezone
 
 import httpx
 from lxml import etree
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes.approvals import _rule_state, _wrap_rule_xml_fragment
@@ -91,6 +91,11 @@ from app.services.rule_wrappers import unwrap_rule_xml
 
 _EXT_RE = re.compile(r"^BRDP-EXT-(\d+)$")
 _OFFICIAL_RE = re.compile(r"^BRDP-([A-Z])(\d)-\d{5}$")
+# A project's own identifier prefix (BRDP-ENV-00001): 2-6 uppercase letters,
+# not EXT and not a prefix of any loaded catalog. Prefixes with digits (S1,
+# S2, D1, A1) are official codes and are not own prefixes.
+_OWN_PREFIX_RE = re.compile(r"^BRDP-([A-Z]{2,6})-(\d{5})$")
+OWN_PREFIX_PATTERN = re.compile(r"^[A-Z]{2,6}$")
 
 # Specification of each official identifier code.
 SPECIFICATIONS = {
@@ -187,7 +192,7 @@ def set_texts(c: dict, keep_written: bool = False) -> None:
         c["draft_status"] = "pending"
 
 
-_WRITES_TITLE = ("new_ext", "other_spec", "default_rule")
+_WRITES_TITLE = ("new_ext", "own_prefix", "other_spec", "default_rule")
 
 
 def text_state(c: dict) -> str:
@@ -475,13 +480,37 @@ async def _extracted_origins(project_id: uuid.UUID, existing: dict[str, BRDP], d
     return out
 
 
-def _next_ext_numbers(identifiers) -> int:
+def _next_numbers(identifiers, prefix: str = "EXT") -> int:
+    """The highest number of BRDP-<prefix>-nnnnn among the identifiers (0
+    when none): the next free one is that + 1, per prefix."""
+    pattern = re.compile(r"^BRDP-" + re.escape(prefix) + r"-(\d+)$")
     highest = 0
     for identifier in identifiers:
-        m = _EXT_RE.match(identifier)
+        m = pattern.match(identifier or "")
         if m:
             highest = max(highest, int(m.group(1)))
     return highest
+
+
+def _next_ext_numbers(identifiers) -> int:
+    return _next_numbers(identifiers, "EXT")
+
+
+async def catalog_prefixes(db: AsyncSession) -> set[str]:
+    """The identifier prefixes used by any loaded catalog, of any standard
+    (BRDP-S1-… → S1): a prefix in this set is never a project's own one."""
+    rows = (
+        await db.execute(select(func.distinct(func.substring(BRDPCatalog.identifier, r"^BRDP-([A-Za-z0-9]+)-"))))
+    ).scalars().all()
+    return {r for r in rows if r}
+
+
+def own_prefix(identifier: str | None, catalog_prefix_set: set[str]) -> str | None:
+    """"ENV" for BRDP-ENV-00001 (a project's own prefix), else None."""
+    m = _OWN_PREFIX_RE.match(identifier or "")
+    if not m or m.group(1) == "EXT" or m.group(1) in catalog_prefix_set:
+        return None
+    return m.group(1)
 
 
 async def classify_candidates(project: Project, candidates: list[dict], db: AsyncSession) -> None:
@@ -532,6 +561,8 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
     # candidate that needs a new number gets the next one after both the
     # project's and the file's (never one the file itself uses).
     next_ext = max(_next_ext_numbers(existing), _next_ext_numbers(origin_ids)) + 1
+    # A project's own prefix (BRDP-ENV-00001): "Keep ENV" keeps the number.
+    prefixes = await catalog_prefixes(db)
     own_spec = "DITA" if project.standard.startswith("DITA") else "S1000D"
     for c in candidates:
         origin = c["origin_identifier"]
@@ -540,6 +571,9 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         if origin and origin in catalog:
             c["catalog_texts"] = {"title": catalog[origin].title, "definition": catalog[origin].definition}
         brdp = match(origin)
+        prefix = own_prefix(origin, prefixes)
+        if prefix:
+            c["own_prefix"] = prefix
         if brdp is not None:
             approval = approvals.get(brdp.id)
             stored = approval.rule_xml if approval is not None else ""
@@ -564,7 +598,9 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             c["project_texts"] = {"title": brdp.title, "definition": brdp.definition, "proposal": brdp.proposal}
             c["identifier"] = brdp.identifier
             c["option_identifiers"] = {base: brdp.identifier}
-            options = [base, "new_ext"]
+            # "Keep ENV" then gives the next free ENV number (the origin's is
+            # taken), on demand (apply_edit).
+            options = [base, "own_prefix", "new_ext"] if prefix else [base, "new_ext"]
         elif origin and origin in catalog:
             base = "catalog"
             c["identifier"] = origin
@@ -602,6 +638,12 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             c["specification"] = other_specification(origin, project.standard)
             c["identifier"] = origin
             options = ["other_spec", "new_ext"]
+        elif prefix:
+            # Not in the project (it would have matched): its number is free.
+            base = "own_prefix"
+            c["identifier"] = origin
+            c["option_identifiers"] = {"own_prefix": origin}
+            options = ["own_prefix", "new_ext"]
         else:
             base = "new_ext"
             # A free EXT number of the file keeps its number.
@@ -620,7 +662,9 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             options = ["new_ext"]
         c["base_classification"] = base
         classification = (
-            "empty" if c.get("no_content") and base in ("catalog", "catalog_edition", "new_ext", "other_spec", "default_rule") else base
+            "empty"
+            if c.get("no_content") and base in ("catalog", "catalog_edition", "new_ext", "own_prefix", "other_spec", "default_rule")
+            else base
         )
         if classification == "empty":
             options = ["empty"] + options
@@ -636,7 +680,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         c["classification"] = classification
         _renumber_warning(c)
         c["options"] = list(dict.fromkeys(options))
-        c["selected"] = classification in ("new_ext", "catalog", "other_spec", "changed")
+        c["selected"] = classification in ("new_ext", "own_prefix", "catalog", "other_spec", "changed")
         c["own_specification"] = own_spec
         set_texts(c)
 
@@ -661,14 +705,15 @@ def _ids_inside_rule(rule_xml: str, origin: str | None) -> list[str]:
 
 def _renumber_warning(c: dict) -> None:
     """Adds (or removes) the warning that the identifiers inside the rule
-    are still the file's, when an EXT identifier of the file is imported
-    under another EXT number (it was taken in the project)."""
+    are still the file's, when an EXT or own-prefix identifier of the file
+    (BRDP-ENV-00001) is imported under another identifier: another number
+    (it was taken in the project), or a new EXT."""
     c["warnings"] = [w for w in c.get("warnings", []) if w.get("code") != "rule_ids_from_file"]
     origin = c.get("origin_identifier")
     classification = c.get("classification")
     if classification == "empty":
         classification = c.get("base_classification")
-    if classification != "new_ext" or not _EXT_RE.match(origin or ""):
+    if classification not in ("new_ext", "own_prefix") or not (_EXT_RE.match(origin or "") or c.get("own_prefix")):
         return
     if c.get("identifier") and c["identifier"] != origin and c.get("rule_ids"):
         c["warnings"].append(
@@ -697,7 +742,7 @@ async def check_similar(
     text is at or above MIN_SIMILARITY of an embedded BRDP of the project.
     Returns a file-level warning when the check could not run (HR7), or
     None. No call at all when the project has no embedded BRDP."""
-    targets = [c for c in candidates if c["classification"] == "new_ext" and _similarity_text(c)]
+    targets = [c for c in candidates if c["classification"] in ("new_ext", "own_prefix") and _similarity_text(c)]
     if not targets:
         return None
     has_embedded = (
@@ -925,7 +970,7 @@ async def run_extract_job(
         await _progress(progress, job_id, phase="classifying", total_items=len(candidates), processed_items=0)
         await classify_candidates(project, candidates, work)
         await _progress(progress, job_id, processed_items=len(candidates))
-        similar_targets = sum(1 for c in candidates if c["classification"] == "new_ext")
+        similar_targets = sum(1 for c in candidates if c["classification"] in ("new_ext", "own_prefix"))
         await _progress(progress, job_id, phase="similar", total_items=similar_targets, processed_items=0)
 
         async def on_progress(done):
@@ -1060,7 +1105,7 @@ async def run_text_extract_job(
         await _progress(progress, job_id, phase="classifying", total_items=len(candidates), processed_items=0)
         await classify_text_candidates(project, candidates, work)
         await _progress(progress, job_id, processed_items=len(candidates))
-        similar_targets = sum(1 for c in candidates if c["classification"] == "new_ext")
+        similar_targets = sum(1 for c in candidates if c["classification"] in ("new_ext", "own_prefix"))
         await _progress(progress, job_id, phase="similar", total_items=similar_targets, processed_items=0)
 
         async def on_progress(done):
@@ -1188,6 +1233,10 @@ def apply_edit(data: dict, edit: dict, new_ext_identifier=None) -> dict:
                 target = out.get("base_classification") if value == "empty" else value
                 if target not in identifiers and target == "new_ext" and new_ext_identifier is not None:
                     identifiers["new_ext"] = new_ext_identifier()
+                if target not in identifiers and target == "own_prefix" and new_ext_identifier is not None and out.get("own_prefix"):
+                    # The origin's number is taken: the next free one with
+                    # its prefix (or the origin itself, when it is free).
+                    identifiers["own_prefix"] = new_ext_identifier(out["own_prefix"], out.get("origin_identifier"))
                 out["option_identifiers"] = identifiers
                 if identifiers.get(target):
                     out["identifier"] = identifiers[target]
@@ -1227,21 +1276,32 @@ def apply_edit(data: dict, edit: dict, new_ext_identifier=None) -> dict:
 
 
 async def next_ext_allocator(job: RuleExtractJob, db: AsyncSession):
-    """A function giving, on each call, the next free EXT number for a
-    candidate reclassified as a new EXT: after the project's numbers and
-    every number the extraction already uses (the file's and the ones
-    proposed to its candidates)."""
+    """A function giving, on each call, the next free number with a prefix
+    (EXT by default; ENV for "Keep ENV") for a reclassified candidate: after
+    the project's numbers and every number the extraction already uses (the
+    file's and the ones proposed to its candidates), per prefix. With
+    preferred (the candidate's own origin), that identifier when it is free:
+    not in the project and not proposed to another candidate."""
     existing = await _active_identifiers(job.project_id, db)
     rows = (await db.execute(select(RuleExtractCandidate.data).where(RuleExtractCandidate.job_id == job.id))).scalars().all()
     used = list(existing)
+    proposed: set[str] = set()
     for data in rows:
         used.append(data.get("origin_identifier") or "")
         used.extend((data.get("option_identifiers") or {}).values())
-    counter = [_next_ext_numbers(used)]
+        proposed.update(v for v in (data.get("option_identifiers") or {}).values() if v)
+    counters: dict[str, int] = {}
 
-    def allocate() -> str:
-        counter[0] += 1
-        return f"BRDP-EXT-{counter[0]:05d}"
+    def allocate(prefix: str = "EXT", preferred: str | None = None) -> str:
+        if preferred and preferred.startswith(f"BRDP-{prefix}-") and preferred not in existing and preferred not in proposed:
+            proposed.add(preferred)
+            return preferred
+        if prefix not in counters:
+            counters[prefix] = _next_numbers(used, prefix)
+        counters[prefix] += 1
+        identifier = f"BRDP-{prefix}-{counters[prefix]:05d}"
+        proposed.add(identifier)
+        return identifier
 
     return allocate
 
@@ -1356,7 +1416,7 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
     existing = await _active_identifiers(project.id, db)
     all_data = (await db.execute(select(RuleExtractCandidate.data).where(RuleExtractCandidate.job_id == job.id))).scalars().all()
     file_numbers = [d.get("origin_identifier") or "" for d in all_data] + [d.get("identifier") or "" for d in all_data]
-    next_ext = [max(_next_ext_numbers(existing), _next_ext_numbers(file_numbers))]
+    counters: dict[str, int] = {}
     taken: set[str] = set()
     updated_keys: set[str] = set()
     result = {
@@ -1368,12 +1428,17 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
         result["omitted"] += 1
         result["omitted_detail"].append({"key": c["key"], "identifier": _label(c), "origin_identifier": c.get("origin_identifier"), "reason": reason})
 
-    def new_ext(shown: str | None) -> str:
-        if shown and _EXT_RE.match(shown) and shown not in existing and shown not in taken:
+    def new_identifier(shown: str | None, prefix: str = "EXT") -> str:
+        """The identifier shown for the candidate if it still has the prefix
+        and is free; otherwise the next free number with that prefix, after
+        the project's, the file's and the ones being imported."""
+        if shown and re.match(rf"^BRDP-{re.escape(prefix)}-\d+$", shown) and shown not in existing and shown not in taken:
             return shown
+        if prefix not in counters:
+            counters[prefix] = max(_next_numbers(existing, prefix), _next_numbers(file_numbers, prefix))
         while True:
-            next_ext[0] += 1
-            identifier = f"BRDP-EXT-{next_ext[0]:05d}"
+            counters[prefix] += 1
+            identifier = f"BRDP-{prefix}-{counters[prefix]:05d}"
             if identifier not in existing and identifier not in taken:
                 return identifier
 
@@ -1417,7 +1482,12 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
             result["updated_identifiers"].append({"key": c["key"], "identifier": brdp.identifier})
             continue
         if classification == "new_ext":
-            identifier = new_ext(c.get("identifier"))
+            identifier = new_identifier(c.get("identifier"))
+        elif classification == "own_prefix":
+            if not c.get("own_prefix"):
+                omit(c, "no own prefix")
+                continue
+            identifier = new_identifier(c.get("identifier"), c["own_prefix"])
         elif classification == "catalog_edition":
             identifier = (c.get("option_identifiers") or {}).get(classification) or c.get("identifier")
             if not identifier or identifier in existing or identifier in taken:

@@ -23,7 +23,7 @@ import { readLlmJson } from './llmJson.js';
 export const EXTRACT_USER_MESSAGE = 'Write the texts for these BRDPs.';
 
 const TEXT_FIELDS = ['title', 'definition', 'proposal'];
-const WRITES_TITLE = new Set(['new_ext', 'other_spec', 'default_rule']);
+const WRITES_TITLE = new Set(['new_ext', 'own_prefix', 'other_spec', 'default_rule']);
 
 // The fields the AI writes for a candidate. ai_fields comes from the
 // backend; an extraction saved before it existed falls back to the

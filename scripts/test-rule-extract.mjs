@@ -271,5 +271,20 @@ const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), 
   }
 }
 
+// ── Own identifier prefix: "Keep ENV" / "Conservar ENV" ──────────────────
+{
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const env = { classification: 'own_prefix', options: ['own_prefix', 'new_ext'], own_prefix: 'ENV' };
+  const nav = { classification: 'own_prefix', options: ['own_prefix', 'new_ext'], own_prefix: 'NAV' };
+  check('own_prefix row ES "Conservar ENV"', classLabel(es, env) === 'Conservar ENV', classLabel(es, env));
+  check('own_prefix row EN "Keep ENV"', classLabel(en, env) === 'Keep ENV', classLabel(en, env));
+  check('own_prefix filter, one prefix', groupClassLabel(es, [env, env], 'own_prefix') === 'Conservar ENV');
+  check('own_prefix filter, several / none: generic, never "Conservar "', groupClassLabel(es, [env, nav], 'own_prefix') === 'Conservar prefijo propio' && groupClassLabel(en, [], 'own_prefix') === 'Keep own prefix');
+  check('own_prefix in the Show filter', EXTRACT_FILTERS.includes('own_prefix'));
+  check('own_prefix label never empty or raw', ![classLabel(es, {}, 'own_prefix'), classLabel(en, {}, 'own_prefix')].some((l) => !l.trim() || l.includes('config.') || l.endsWith(' ')));
+  check('existing row with an own prefix offers "Keep ENV" too', classLabel(es, { classification: 'changed', own_prefix: 'ENV' }, 'own_prefix') === 'Conservar ENV');
+}
+
 console.log(`${checks - failures}/${checks} checks passed`);
 process.exit(failures ? 1 : 0);

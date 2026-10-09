@@ -6,7 +6,7 @@
 //     the specification / edition when every row of it shares one, and
 //     uses config.ruleExtract.classesGeneric.* otherwise).
 const EXTRACT_CLASSES = [
-  'new_ext', 'catalog', 'catalog_edition', 'other_spec', 'default_rule', 'changed', 'same', 'empty',
+  'new_ext', 'own_prefix', 'catalog', 'catalog_edition', 'other_spec', 'default_rule', 'changed', 'same', 'empty',
 ];
 export const EXTRACT_FILTERS = ['all', ...EXTRACT_CLASSES, 'warnings', 'blocking'];
 const NON_CLASS_FILTERS = new Set(['all', 'warnings', 'blocking']);
@@ -30,6 +30,13 @@ export function classLabel(t, c, classification = c.classification, textJob = fa
   if (classification === 'catalog_edition') {
     return t(`config.ruleExtract.classes.${classification}`, { edition: c.catalog_edition || '' });
   }
+  // "Keep ENV": the project's own identifier prefix of the file
+  // (BRDP-ENV-00001); without one (no rows, several prefixes) the generic name.
+  if (classification === 'own_prefix') {
+    return c.own_prefix
+      ? t('config.ruleExtract.classes.own_prefix', { prefix: c.own_prefix })
+      : t('config.ruleExtract.classesGeneric.own_prefix');
+  }
   return t(`config.ruleExtract.classes.${classification}`);
 }
 
@@ -39,7 +46,9 @@ export function classLabel(t, c, classification = c.classification, textJob = fa
 // and a generic name of its own otherwise (no rows, or rows of several
 // editions / specifications: "From catalog (another edition)"), never the
 // bare "From catalog" of the project's own catalog.
-const GROUP_FIELD = { catalog_edition: 'catalog_edition', other_spec: 'specification', default_rule: 'specification' };
+const GROUP_FIELD = {
+  catalog_edition: 'catalog_edition', other_spec: 'specification', default_rule: 'specification', own_prefix: 'own_prefix',
+};
 export function groupClassLabel(t, candidates, k, textJob = false) {
   const field = GROUP_FIELD[k];
   if (!field) return classLabel(t, {}, k, textJob);

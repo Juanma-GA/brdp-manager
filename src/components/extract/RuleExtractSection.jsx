@@ -52,7 +52,7 @@ import styles from './RuleExtractSection.module.css';
 const EXTRACT_PAGE_SIZE = 25;
 const POLL_MS = 1000;
 const DRAFT_CLASSES = DRAFTED_CLASSES;
-const WRITES_TITLE = new Set(['new_ext', 'other_spec', 'default_rule']);
+const WRITES_TITLE = new Set(['new_ext', 'own_prefix', 'other_spec', 'default_rule']);
 const TEXT_KEYS = ['title', 'definition', 'proposal'];
 // Which fields of a row a save owns, so its answer (or its failure) never
 // touches what another save changed meanwhile: a batch of AI texts never
@@ -1174,7 +1174,7 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
                 <option value="">…</option>
                 {commonOptions.map((o) => (
                   <option key={o} value={o}>
-                    {classLabel(t, visible[0], o, textJob)}
+                    {groupClassLabel(t, visible, o, textJob)}
                   </option>
                 ))}
               </select>

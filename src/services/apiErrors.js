@@ -65,6 +65,7 @@ export const KNOWN_CODES = new Set([
   // language.
   'brdp_not_found',
   'brdp_identifier_taken',
+  'brdp_prefix_invalid',
   'brdp_restore_identifier_taken',
   'trashed_brdp_not_found',
   'rule_not_found',

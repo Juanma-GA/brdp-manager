@@ -420,6 +420,21 @@
   min-height: 0;
 }
 
+.identifierRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.prefixField {
+  flex: 0 0 90px;
+}
+
+.identifierField {
+  flex: 1;
+  min-width: 0;
+}
+
 .input {
   width: 100%;
   box-sizing: border-box;

@@ -89,6 +89,9 @@ const ANSWER_ISSUE_TEST_IDS = {
 };
 
 const VALIDATION_OPTIONS = ['Pending', 'Validated', 'Refused'];
+// Add BRDP's identifier prefix: 2-6 uppercase letters (EXT, ENV…), as the
+// server checks (next-ext-identifier, 422 brdp_prefix_invalid).
+const BRDP_PREFIX_RE = /^[A-Z]{2,6}$/;
 // The label of each text field saved on its own (AACF 1, Part 1).
 const FIELD_LABEL_KEYS = {
   title: 'records.fieldTitle',
@@ -557,6 +560,12 @@ export default function RecordsPage() {
   // just blank, before one).
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [newBrdpIdentifier, setNewBrdpIdentifier] = useState(null);
+  // The identifier's prefix (EXT by default; a project's own one such as
+  // ENV): the proposed identifier is the next free number with it. Only the
+  // last request counts (a slower answer for a prefix typed before is
+  // dropped).
+  const [newBrdpPrefix, setNewBrdpPrefix] = useState('EXT');
+  const nextIdentifierRequestRef = useRef(0);
   const [newBrdpTitle, setNewBrdpTitle] = useState('');
   const [newBrdpDefinition, setNewBrdpDefinition] = useState('');
   const [newBrdpProposal, setNewBrdpProposal] = useState('');
@@ -1391,16 +1400,39 @@ export default function RecordsPage() {
     setIsCreatingNew(true);
     setCreateError(null);
     setNewBrdpIdentifier(null); // loading, until next-ext-identifier resolves
+    setNewBrdpPrefix('EXT');
     setNewBrdpTitle('');
     setNewBrdpDefinition('');
     setNewBrdpProposal('');
     setNewBrdpProposalStatus('Pending');
     setCatalogSearchQuery('');
     setCatalogEntries([]);
-    authFetchJson(`/api/projects/${projectId}/brdps/next-ext-identifier`)
-      .then((data) => setNewBrdpIdentifier(data.identifier))
-      .catch((err) => setCreateError(errorMessage(err, t)));
+    loadNextIdentifier('EXT');
     loadCreateCatalog();
+  };
+
+  const loadNextIdentifier = (prefix) => {
+    const request = ++nextIdentifierRequestRef.current;
+    setNewBrdpIdentifier(null);
+    authFetchJson(`/api/projects/${projectId}/brdps/next-ext-identifier?prefix=${encodeURIComponent(prefix)}`)
+      .then((data) => {
+        if (request === nextIdentifierRequestRef.current) setNewBrdpIdentifier(data.identifier);
+      })
+      .catch((err) => {
+        if (request === nextIdentifierRequestRef.current) setCreateError(errorMessage(err, t));
+      });
+  };
+
+  // A prefix is 2-6 uppercase letters (the server checks the same: 422).
+  const newBrdpPrefixValid = BRDP_PREFIX_RE.test(newBrdpPrefix);
+  const changeNewBrdpPrefix = (value) => {
+    setNewBrdpPrefix(value);
+    setCreateError(null);
+    if (BRDP_PREFIX_RE.test(value)) loadNextIdentifier(value);
+    else {
+      ++nextIdentifierRequestRef.current;
+      setNewBrdpIdentifier(null);
+    }
   };
 
   // Global reference data (not project-scoped) -- naturally empty for a
@@ -1636,7 +1668,7 @@ export default function RecordsPage() {
               placeholder={t('records.searchPlaceholder')}
             />
             {canEdit && (
-              <button type="button" onClick={openCreatePanel}>
+              <button type="button" onClick={openCreatePanel} data-testid="add-brdp">
                 {t('records.addButton')}
               </button>
             )}
@@ -1805,8 +1837,34 @@ export default function RecordsPage() {
         <div className={styles.detailPanel} style={{ width: split.size }}>
           {isCreatingNew ? (
             <>
-              <label className={styles.fieldLabel}>{t('records.fieldId')}</label>
-              <input className={styles.input} value={newBrdpIdentifier ?? '…'} disabled />
+              <div className={styles.identifierRow}>
+                <div className={styles.prefixField}>
+                  <label className={styles.fieldLabel} htmlFor="new-brdp-prefix">{t('records.fieldPrefix')}</label>
+                  <input
+                    id="new-brdp-prefix"
+                    className={styles.input}
+                    value={newBrdpPrefix}
+                    onChange={(e) => changeNewBrdpPrefix(e.target.value)}
+                    aria-invalid={!newBrdpPrefixValid}
+                    aria-describedby={newBrdpPrefixValid ? undefined : 'new-brdp-prefix-error'}
+                    data-testid="new-brdp-prefix"
+                  />
+                </div>
+                <div className={styles.identifierField}>
+                  <label className={styles.fieldLabel}>{t('records.fieldId')}</label>
+                  <input
+                    className={styles.input}
+                    value={newBrdpPrefixValid ? (newBrdpIdentifier ?? '…') : ''}
+                    disabled
+                    data-testid="new-brdp-identifier"
+                  />
+                </div>
+              </div>
+              {!newBrdpPrefixValid && (
+                <div id="new-brdp-prefix-error">
+                  <ErrorNotice testId="new-brdp-prefix-error" message={t('records.prefixInvalid', { prefix: newBrdpPrefix })} />
+                </div>
+              )}
 
               <label className={styles.fieldLabel}>{t('records.fieldTitle')}</label>
               <input
@@ -1925,7 +1983,7 @@ export default function RecordsPage() {
               )}
 
               <div className={styles.suggestionActions}>
-                <button onClick={saveNewBrdp} disabled={creatingBusy || !newBrdpIdentifier}>
+                <button onClick={saveNewBrdp} disabled={creatingBusy || !newBrdpIdentifier || !newBrdpPrefixValid} data-testid="new-brdp-save">
                   {creatingBusy ? t('records.newBrdp.saving') : t('records.newBrdp.save')}
                 </button>
                 <button onClick={closeCreatePanel} disabled={creatingBusy}>

@@ -68,6 +68,7 @@ const resources = {
           // AACF 3, Part 3: messages seen in normal use, now coded.
           brdp_not_found: 'That BRDP no longer exists (it may have been deleted).',
           brdp_identifier_taken: 'A BRDP with the identifier {{identifier}} already exists in this project.',
+          brdp_prefix_invalid: 'The prefix "{{prefix}}" is not valid: use 2 to 6 uppercase letters (A-Z), like EXT or ENV.',
           brdp_restore_identifier_taken: 'It cannot be restored: another active BRDP in this project now uses the identifier {{identifier}}. Rename or remove that one first.',
           trashed_brdp_not_found: 'That BRDP is no longer in the Trash.',
           rule_not_found: 'This BRDP has no saved rule.',
@@ -386,6 +387,7 @@ const resources = {
           colWarnings: 'Warnings',
           classes: {
             new_ext: 'New EXT',
+            own_prefix: 'Keep {{prefix}}',
             catalog: 'From catalog',
             other_spec: 'Other specification ({{spec}})',
             changed: 'Already exists (changes)',
@@ -401,6 +403,7 @@ const resources = {
             catalog_edition: 'From catalog (another edition)',
             other_spec: 'Other specification',
             default_rule: 'Default rule of the standard',
+            own_prefix: 'Keep own prefix',
           },
           sources: {
             file: 'from the file',
@@ -742,6 +745,8 @@ const resources = {
         deleteAria: 'Delete {{identifier}}',
         deleteConfirm: 'Delete BRDP "{{identifier}}"? It moves to the Trash -- an admin can restore it later.',
         fieldId: 'ID',
+        fieldPrefix: 'Prefix',
+        prefixInvalid: 'The prefix "{{prefix}}" is not valid: use 2 to 6 uppercase letters (A-Z), like EXT or ENV.',
         fieldTitle: 'Title',
         fieldDefinition: 'Definition',
         fieldProposal: 'Proposal',
@@ -1965,6 +1970,7 @@ const resources = {
           user_email_taken: 'Ya hay un usuario activo con el correo {{email}}.',
           brdp_not_found: 'Ese BRDP ya no existe (puede que se haya borrado).',
           brdp_identifier_taken: 'Ya existe un BRDP con el identificador {{identifier}} en este proyecto.',
+          brdp_prefix_invalid: 'El prefijo "{{prefix}}" no es válido: usa de 2 a 6 letras mayúsculas (A-Z), como EXT o ENV.',
           brdp_restore_identifier_taken: 'No se puede restaurar: otro BRDP activo de este proyecto usa ahora el identificador {{identifier}}. Renómbralo o quítalo antes.',
           trashed_brdp_not_found: 'Ese BRDP ya no está en la Papelera.',
           rule_not_found: 'Este BRDP no tiene regla guardada.',
@@ -2266,6 +2272,7 @@ const resources = {
           colWarnings: 'Avisos',
           classes: {
             new_ext: 'Nueva EXT',
+            own_prefix: 'Conservar {{prefix}}',
             catalog: 'De catálogo',
             other_spec: 'Otra especificación ({{spec}})',
             changed: 'Ya existe (cambia)',
@@ -2279,6 +2286,7 @@ const resources = {
             catalog_edition: 'De catálogo (otra edición)',
             other_spec: 'Otra especificación',
             default_rule: 'Regla por defecto del estándar',
+            own_prefix: 'Conservar prefijo propio',
           },
           sources: {
             file: 'del fichero',
@@ -2619,6 +2627,8 @@ const resources = {
         deleteAria: 'Eliminar {{identifier}}',
         deleteConfirm: '¿Eliminar el BRDP "{{identifier}}"? Pasará a la Papelera -- un admin podrá restaurarlo después.',
         fieldId: 'ID',
+        fieldPrefix: 'Prefijo',
+        prefixInvalid: 'El prefijo "{{prefix}}" no es válido: usa de 2 a 6 letras mayúsculas (A-Z), como EXT o ENV.',
         fieldTitle: 'Título',
         fieldDefinition: 'Definición',
         fieldProposal: 'Propuesta',
