@@ -3,46 +3,9 @@ import { ApiError, apiErrorFromResponse, networkError } from '../services/apiErr
 import i18n from '../i18n/index.js';
 import { LLM_TRUNCATED, isTruncatedAnswer, truncatedAnswerError } from './llmTruncation.js';
 import { LLM_CANCELLED, sendWithRateLimitRetry } from './llmRateLimit.js';
+import { DEFAULT_MAX_TOKENS, answerContent, buildRequestBody } from './llmRequest.js';
 
 export { LLM_CANCELLED };
-
-// The output limit of an answer, unless the use sets its own (the rule
-// test's examples need more: src/prompts/shared.js RULE_TEST_MAX_TOKENS).
-const DEFAULT_MAX_TOKENS = 4000;
-
-/**
- * Build request body based on provider. The model is never sent: the
- * server sets it from .env (AACF 1, Part 5 -- the proxy accepts only
- * messages, temperature and max_tokens and refuses anything else).
- * @param {string} provider - Provider name
- * @param {Array} messages - Message history
- * @param {string} systemPrompt - System prompt
- * @param {number} temperature - Temperature parameter for sampling
- * @returns {Object} Request body
- */
-function buildRequestBody(provider, messages, systemPrompt, temperature, maxTokens = DEFAULT_MAX_TOKENS) {
-  const baseBody = {
-    max_tokens: maxTokens,
-    temperature,
-  };
-
-  if (provider === 'Anthropic') {
-    return {
-      ...baseBody,
-      system: systemPrompt,
-      messages,
-    };
-  }
-
-  // OpenAI and Custom providers include system in messages
-  return {
-    ...baseBody,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...messages,
-    ],
-  };
-}
 
 /**
  * Send a message to the configured LLM provider
@@ -108,19 +71,7 @@ async function sendOnce(provider, payload) {
     const data = await response.json();
     if (isTruncatedAnswer(provider, data)) throw truncatedAnswerError();
 
-    // Extract message content based on provider response format
-    if (provider === 'Anthropic') {
-      return {
-        role: 'assistant',
-        content: data.content[0].text,
-      };
-    }
-
-    // OpenAI and Custom
-    return {
-      role: 'assistant',
-      content: data.choices[0].message.content,
-    };
+    return { role: 'assistant', content: answerContent(provider, data) };
   } catch (error) {
     if (error.code === LLM_TRUNCATED || error instanceof ApiError) {
       throw error;

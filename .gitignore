@@ -48,3 +48,7 @@ scripts/prompt-eval/report/
 # Every saved run (C3): scripts/prompt-eval/runs/<commit>-<time>/ -- same
 # reason, real LLM answers.
 scripts/prompt-eval/runs/
+# The report of each pass of scripts/run-project-rule-tests.mjs (every rule
+# of a project tested): scripts/rule-test-runs/<project>-<date>/ -- real
+# examples and results of the user's projects, never committed.
+scripts/rule-test-runs/

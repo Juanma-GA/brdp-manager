@@ -1,0 +1,364 @@
+#!/usr/bin/env node
+// Tests every saved rule of a project with "Test rule", exactly as the panel
+// does, and records each result in the app as if it had been tested by hand.
+//
+//   PROMPT_EVAL_EMAIL=... PROMPT_EVAL_PASSWORD=... \
+//     node scripts/run-project-rule-tests.mjs --project "Official Default CMP ATA - 1000BR 4.2"
+//
+// Options:
+//   --project "<exact name>"  required; with no exact match, the similar names
+//                             are listed and nothing is tested (exit 2)
+//   --all                     test every rule, also the ones whose last test
+//                             passed on the same saved rule (skipped by default)
+//   --only EXT-00041,EXT-00107  only these identifiers (BRDP- prefix optional)
+//   --limit N                 stop after testing N rules (skipped ones do not count)
+//   --parallel 2              two rules at a time (1 by default, 2 at most)
+//   --lang en                 the report and the reasons in English (Spanish by default)
+//   PROMPT_EVAL_API_URL       the backend (http://localhost:8000 by default)
+//
+// It reimplements nothing: the same code and the same endpoints as the
+// panel (useRuleTest.js), against the running backend --
+//   analyzeRule / describeRule / thresholdMismatch (what is known without an
+//   example), generateRuleTestExamples (impossible path, dossier, examples,
+//   checks, correction round, Proposal check, engine), generationOutcome (the
+//   record), POST .../approvals/{format}/test with ruleTestRequestBody (as the
+//   panel after a new test: never "keep the previous one") and, when a
+//   Verified rule fails, POST .../approvals/{format}/revoke (the stepper's
+//   Verified → Draft: rule_xml kept, History "verified → draft"). Nothing is
+//   written to the database directly; History shows the logged-in user.
+//
+// Never: promote a rule to Verified, touch a rule, a Proposal or its
+// validation. Only a FAILED test moves a rule (a Verified one) to Draft.
+// An error (timeout, an answer that cannot be used, the Proposal check that
+// could not be made) records nothing and changes nothing; the next rule goes
+// on. The AI's per-minute limit is waited out; its per-day limit stops the
+// pass cleanly (what is done stays in the app and the report).
+//
+// Report: scripts/rule-test-runs/<project>-<date>/informe.md and
+// resultados.json (every example and reason), written after each rule. The
+// same project on the same day goes on in the same folder.
+//
+// Exit codes: 0 done, 2 cannot start (credentials, backend down, project,
+// role), 3 stopped before the end (AI daily limit, session lost), 130 Ctrl+C.
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { DOMParser as XmlDomParser } from '@xmldom/xmldom';
+
+import i18n from '../src/i18n/index.js';
+import { STANDARD_TO_RULE_FORMAT } from '../src/constants/ruleFormats.js';
+import { STANDARD_TO_VOCABULARY_FILE } from '../src/validation/schemaValidation.js';
+import { schemaLocationOf } from '../src/utils/ruleSchemaContext.js';
+import { analyzeRule, describeRule } from '../src/utils/ruleTestEngine.js';
+import { thresholdMismatch } from '../src/utils/ruleThreshold.js';
+import { generateRuleTestExamples } from '../src/utils/ruleTestRun.js';
+import { generationOutcome, notExecutableRecord } from '../src/utils/ruleTestOutcome.js';
+import { formatRuleTestReason, ruleDescriptionText } from '../src/utils/ruleTestReasons.js';
+import { exampleProblems } from '../src/utils/ruleTest.js';
+import { ruleXmlHash } from '../src/utils/ruleHash.js';
+import { ruleTestRequestBody } from '../src/api/ruleTestRequest.js';
+import { answerContent, buildRequestBody } from '../src/api/llmRequest.js';
+import { isTruncatedAnswer, truncatedAnswerError } from '../src/api/llmTruncation.js';
+import { RULE_PROPOSAL_CHECK_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
+import { createEvalClient, LlmLimitError, LoginError, SessionLostError } from './prompt-eval/session.mjs';
+import { lintRule } from './lib/ruleLint.mjs';
+import {
+  buildReport,
+  errorKind,
+  findProject,
+  loadResults,
+  parseArgs,
+  planRules,
+  progressLine,
+  runDir,
+  shouldRevoke,
+  skipReason,
+  writeFileAtomic,
+} from './lib/projectRuleTests.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '..');
+const RUNS_DIR = path.join(__dirname, 'rule-test-runs');
+const API = process.env.PROMPT_EVAL_API_URL || 'http://localhost:8000';
+const REVOKE_RETRY_MS = 3000;
+
+function fail(message, code = 2) {
+  console.error(`ERROR: ${message}`);
+  process.exit(code);
+}
+
+const opts = parseArgs(process.argv.slice(2));
+if (opts.error) fail(`${opts.error}\nUsage: node scripts/run-project-rule-tests.mjs --project "<exact name>" [--all] [--only ID,ID] [--limit N] [--parallel 2] [--lang en]`);
+const t = i18n.getFixedT(opts.lang);
+const tEn = i18n.getFixedT('en');
+
+function xmldomParse(text) {
+  const messages = [];
+  const doc = new XmlDomParser({ errorHandler: (_level, msg) => messages.push(msg) }).parseFromString(text, 'text/xml');
+  if (messages.length) throw new Error(String(messages[0]).replace(/^\[xmldom \w+\]\s*/, '').split('\n')[0]);
+  return doc;
+}
+
+// The vocabulary the panel loads (useVocabularyCheck → public/schema-vocabulary-*.json).
+function loadVocabulary(standard) {
+  const file = STANDARD_TO_VOCABULARY_FILE[standard];
+  if (!file) return null;
+  const json = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'public', file), 'utf8'));
+  return { elements: new Set(json.elements || []), attributes: new Set(json.attributes || []) };
+}
+
+// ── Start: login, project, role, rules ──────────────────────────────────
+const client = createEvalClient({
+  api: API,
+  email: process.env.PROMPT_EVAL_EMAIL,
+  password: process.env.PROMPT_EVAL_PASSWORD,
+  log: (line) => console.log(line),
+});
+const get = (p) => client.apiFetch(p);
+const enc = encodeURIComponent;
+
+try {
+  await client.login();
+} catch (err) {
+  if (err instanceof LoginError) fail(err.message.replace(/an admin account/, 'an account with the editor role on the project'));
+  throw err;
+}
+const me = await get('/api/auth/me');
+const projects = await get('/api/projects');
+const found = findProject(projects, opts.project);
+if (!found.project) {
+  const list = found.similar.length ? `Similar projects:\n${found.similar.map((n) => `  - ${n}`).join('\n')}` : 'No project has a similar name.';
+  fail(`No project is named exactly "${opts.project}". Nothing was tested.\n${list}`);
+}
+const project = found.project;
+if (project.effective_role !== 'editor') {
+  fail(`${me.email} has the ${project.effective_role} role on "${project.name}": recording a test and moving a rule to Draft need the editor role. Nothing was tested.`);
+}
+const format = STANDARD_TO_RULE_FORMAT[project.standard];
+if (!format) fail(`"${project.name}" is ${project.standard}, which has no rule format: there are no rules to test.`);
+const aiProvider = await get('/api/config/ai-provider');
+const schemaLocation = schemaLocationOf(project.project_config, project.standard);
+const vocabulary = loadVocabulary(project.standard);
+const brdps = await get(`/api/projects/${project.id}/brdps`);
+const approvals = await get(`/api/projects/${project.id}/approvals/${enc(format)}/export`);
+const graph = await get(`/api/schema-cards/graph?standard=${enc(project.standard)}`);
+const { queue, withoutRule, unmatchedOnly } = planRules(brdps, approvals, { only: opts.only });
+if (unmatchedOnly.length) console.log(`WARNING: --only ${unmatchedOnly.join(',')}: no BRDP with a saved rule has that identifier.`);
+
+// ── The run folder (the same project on the same day goes on in it) ─────
+const dir = runDir(RUNS_DIR, project.name);
+fs.mkdirSync(dir, { recursive: true });
+const results = loadResults(dir) || { project: { id: project.id, name: project.name, standard: project.standard, format }, runs: [], entries: [] };
+results.without_rule = withoutRule;
+const run = {
+  started_at: new Date().toISOString(),
+  finished_at: null,
+  user: me.email,
+  provider: `${aiProvider.provider} / ${aiProvider.model}`,
+  options: { all: opts.all, only: opts.only, limit: opts.limit, parallel: opts.parallel },
+  stopped: null,
+};
+results.runs.push(run);
+const reportFile = path.join(dir, 'informe.md');
+const jsonFile = path.join(dir, 'resultados.json');
+function save() {
+  writeFileAtomic(jsonFile, `${JSON.stringify(results, null, 2)}\n`);
+  writeFileAtomic(reportFile, `${buildReport(results, { lang: opts.lang })}\n`);
+}
+
+console.log(`Project: ${project.name} (${project.standard}, ${format}) -- user ${me.email}, AI ${run.provider}`);
+console.log(`${queue.length} rule(s) to go through${opts.all ? '' : ' (the ones whose last test passed on the same rule are skipped)'}; ${withoutRule} BRDP(s) without a saved rule.`);
+console.log(`Report: ${reportFile}`);
+save();
+
+// ── One rule, as the panel ───────────────────────────────────────────────
+const LLM = (temperature, maxTokens) => async (messages, systemPrompt) => {
+  const res = await client.llmProxy(buildRequestBody(aiProvider.provider, messages, systemPrompt, temperature, maxTokens));
+  if (isTruncatedAnswer(aiProvider.provider, res)) throw truncatedAnswerError();
+  return answerContent(aiProvider.provider, res);
+};
+
+function examplesOf(result) {
+  if (!result?.examples) return [];
+  return result.examples.map((ex, i) => {
+    const run = result.runs?.[i];
+    return {
+      label: ex.label,
+      expected: ex.expected,
+      schema: ex.schema ?? null,
+      xml: ex.xml ?? null,
+      ...(Array.isArray(ex.files) ? { files: ex.files.map((f) => ({ path: f.path, xml: f.xml ?? f.content })) } : {}),
+      runnable: Boolean(run?.validation?.runnable),
+      problems: run?.validation && !run.validation.runnable ? exampleProblems(run.validation, { standard: project.standard, schema: ex.schema }) : [],
+      result: run?.result?.status ?? null,
+      matches: run?.matches ?? null,
+    };
+  });
+}
+
+async function postRevoke(brdpId) {
+  const res = await client.rawFetch(`/api/projects/${project.id}/brdps/${brdpId}/approvals/${enc(format)}/revoke`, { method: 'POST' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+}
+
+async function testRule(item) {
+  const { brdp } = item;
+  const startedAt = Date.now();
+  const entry = { identifier: brdp.identifier, brdp_id: brdp.id, title: brdp.title, run: run.started_at, at: new Date().toISOString() };
+  const done = (fields) => ({ ...entry, ...fields, duration_ms: Date.now() - startedAt });
+  // The saved rule as it is now (another person may have changed it).
+  const approval = await get(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${enc(format)}`);
+  const ruleXml = approval?.rule_xml || '';
+  if (!ruleXml.trim()) return done({ result: 'error', error: 'the rule was removed meanwhile', status_before: null, status_after: null });
+  entry.status_before = approval.status;
+  entry.status_after = approval.status;
+  entry.rule_hash = ruleXmlHash(ruleXml);
+  entry.lint = lintRule(ruleXml, format, { graph: graph?.available ? graph : false }).map(({ kind, detail, known }) => ({ kind, detail, known: Boolean(known) }));
+  if (skipReason(approval, { all: opts.all })) return done({ result: 'skipped', duration_ms: 0 });
+
+  const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse, standard: project.standard });
+  const description = describeRule(ruleXml, format, { parseXml: xmldomParse, schemaLocation });
+  const threshold = thresholdMismatch(ruleXml, format, brdp.proposal, { parseXml: xmldomParse });
+  let record = notExecutableRecord(analysis);
+  let result = null;
+  if (!record) {
+    result = await generateRuleTestExamples({
+      ruleXml,
+      format,
+      standard: project.standard,
+      schemaLocation,
+      brdp,
+      vocabulary,
+      ask: LLM(RULE_TEST_TEMPERATURE, RULE_TEST_MAX_TOKENS),
+      fetchSchemaCards: (standard, names) => get(`/api/schema-cards?standard=${enc(standard)}&names=${enc(names.join(','))}`),
+      fetchStructure: (standard, schema) => get(`/api/schema-cards/structure?standard=${enc(standard)}&schema=${enc(schema)}`),
+      fetchSchemaAttribute: (standard, name) => get(`/api/schema-cards/attribute?standard=${enc(standard)}&name=${enc(name)}`),
+      fetchSchemaGraph: async () => graph,
+      parseXml: xmldomParse,
+      ruleDescription: ruleDescriptionText(description, tEn),
+      askProposalCheck: LLM(RULE_PROPOSAL_CHECK_TEMPERATURE, undefined),
+    });
+    // The AI's daily limit or a lost session: nothing of this rule is
+    // recorded, the pass stops.
+    if (client.lost) throw client.lost;
+    record = generationOutcome(result, { analysis, threshold, proposal: brdp.proposal }).record;
+  }
+  const details = {
+    examples: examplesOf(result),
+    proposal_check: result?.proposalCheck ? { status: result.proposalCheck.status, reason: result.proposalCheck.reason ?? null, error: result.proposalCheck.error ?? null } : null,
+    correction: result?.correction ?? null,
+  };
+  if (!record) {
+    const message = result?.truncated ? 'the AI answer was cut by its length limit' : result?.error || 'no result';
+    return done({ result: 'error', error: message, error_kind: errorKind(message), ...details });
+  }
+  // The Proposal check could not be made (timeout, an unreadable answer):
+  // the panel shows "Review: the Proposal could not be checked"; unattended,
+  // that is an error of the run, not a result of the rule -- nothing recorded.
+  if (record.reason?.code === 'test_proposal_unchecked') {
+    const message = `the Proposal check could not be made: ${record.reason.params?.error || ''}`.trim();
+    return done({ result: 'error', error: message, error_kind: errorKind(message), ...details });
+  }
+  const res = await client.rawFetch(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${enc(format)}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ruleTestRequestBody(ruleXml, record)),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    const why = res.status === 409 ? 'the rule changed during the test; nothing recorded' : `recording the test failed (HTTP ${res.status}: ${body})`;
+    return done({ result: 'error', error: why, error_kind: why, ...details });
+  }
+  const fields = { result: record.result, reason: record.reason, reason_text: record.reason ? formatRuleTestReason(record.reason, t) : '', ...details };
+  if (shouldRevoke(record, approval.status)) {
+    // Network failure between recording and revoking: once more, then the
+    // report says it is to be done by hand.
+    try {
+      await postRevoke(brdp.id);
+      return done({ ...fields, moved_to_draft: true, status_after: 'pending_review' });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, REVOKE_RETRY_MS));
+      try {
+        await postRevoke(brdp.id);
+        return done({ ...fields, moved_to_draft: true, status_after: 'pending_review' });
+      } catch (err) {
+        return done({ ...fields, moved_to_draft: false, revoke_failed: err.message });
+      }
+    }
+  }
+  return done(fields);
+}
+
+// ── The loop ─────────────────────────────────────────────────────────────
+let next = 0;
+let tested = 0;
+let finished = 0;
+let stopping = null; // why no new rule is taken
+const processed = new Set();
+
+process.on('SIGINT', () => {
+  if (stopping === 'Ctrl+C') {
+    run.stopped = 'Ctrl+C';
+    results.pending = queue.filter((q) => !processed.has(q.brdp.identifier)).map((q) => q.brdp.identifier);
+    save();
+    console.log('\nStopped now. What is done stays in the app and the report.');
+    process.exit(130);
+  }
+  stopping = 'Ctrl+C';
+  console.log('\nStopping after the rule(s) in progress... (Ctrl+C again to stop now)');
+});
+
+async function worker() {
+  while (!stopping) {
+    if (opts.limit && tested >= opts.limit) return;
+    if (next >= queue.length) return;
+    const index = next + 1;
+    const item = queue[next];
+    next += 1;
+    let entry;
+    try {
+      entry = await testRule(item);
+    } catch (err) {
+      if (err instanceof LlmLimitError || err instanceof SessionLostError) {
+        if (!stopping) stopping = err.message;
+        return;
+      }
+      entry = { identifier: item.brdp.identifier, brdp_id: item.brdp.id, run: run.started_at, at: new Date().toISOString(), result: 'error', error: err.message, error_kind: errorKind(err.message) };
+    }
+    if (entry.result !== 'skipped') tested += 1;
+    finished += 1;
+    processed.add(item.brdp.identifier);
+    results.entries.push(entry);
+    save();
+    console.log(progressLine(index, queue.length, entry, opts.lang));
+  }
+}
+
+const startedAt = Date.now();
+await Promise.all(Array.from({ length: Math.min(opts.parallel, Math.max(queue.length, 1)) }, worker));
+
+const remaining = queue.filter((q) => !processed.has(q.brdp.identifier)).map((q) => q.brdp.identifier);
+run.finished_at = new Date().toISOString();
+if (stopping) run.stopped = stopping;
+else if (opts.limit && remaining.length) run.stopped = `--limit ${opts.limit}`;
+results.pending = remaining;
+save();
+
+const latestRun = results.entries.filter((e) => e.run === run.started_at);
+const by = (r) => latestRun.filter((e) => e.result === r).length;
+console.log('');
+console.log(
+  `Done in ${Math.round((Date.now() - startedAt) / 1000)} s: ${finished} rule(s) -- passed ${by('passed') + by('schema_covered')}, failed ${by('failed')}, review ${by('review')}, inconclusive ${by('inconclusive')}, not executable ${by('not_executable')}, error ${by('error')}, skipped ${by('skipped')}; moved to Draft ${latestRun.filter((e) => e.moved_to_draft).length}.`
+);
+const manual = latestRun.filter((e) => e.revoke_failed);
+if (manual.length) console.log(`To move to Draft by hand (the request failed twice): ${manual.map((e) => e.identifier).join(', ')}`);
+console.log(`Report: ${reportFile}`);
+if (stopping && stopping !== 'Ctrl+C') {
+  console.log(
+    `\nSTOPPED: ${stopping}\n${remaining.length} rule(s) not tested. What is done is recorded in the app and in the report. ` +
+      'To go on, run the same command again when the limit allows it: the rules whose last test passed are skipped.'
+  );
+  process.exit(3);
+}
+if (stopping === 'Ctrl+C') process.exit(130);
+process.exit(0);

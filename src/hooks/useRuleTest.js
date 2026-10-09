@@ -35,7 +35,8 @@ import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
 import { thresholdMismatch } from '../utils/ruleThreshold.js';
 import { passedTestToReplaceAt } from '../utils/ruleTestStatus.js';
 import { withPassedTest } from '../utils/ruleTestSaved.js';
-import { ruleDescriptionText, verdictToTestRecord } from '../utils/ruleTestReasons.js';
+import { ruleDescriptionText } from '../utils/ruleTestReasons.js';
+import { generationOutcome, notExecutableRecord } from '../utils/ruleTestOutcome.js';
 import { cleanInternalNames } from '../utils/answerCleanup.js';
 
 async function fetchStructure(standard, schema) {
@@ -201,17 +202,19 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
         ).content,
     });
     if (!result) return; // a newer generation started
+    // What this run records: the same function as the script that tests
+    // every rule of a project (utils/ruleTestOutcome.js).
+    const { record } = generationOutcome(result, { analysis, threshold, proposal: brdp?.proposal });
     if (result.status === 'not_executable') {
       setLateAnalysis({ status: 'not_executable', reason: result.reason, unreachable: true });
       setState({ status: 'idle' });
-      if (!onDemand) report({ result: 'not_executable', reason: result.reason });
+      if (!onDemand) report(record);
       return;
     }
     if (result.status === 'path_review') {
       // Mejoras C, Part 1: the path cannot exist -- "review", no LLM call.
       setState({ status: 'path_review', reason: result.reason });
       if (!onDemand) {
-        const record = verdictToTestRecord({ kind: 'review', path: result.reason });
         recordedRef.current = record;
         report(record);
       }
@@ -226,7 +229,6 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
     setState({ status: 'ready', proposalCheck, examples, runs, correction, predicateSkipped, untested, coverage, several, presence });
     if (!onDemand) {
       // A passed test keeps its examples (Guardar la prueba aprobada).
-      const record = withPassedTest(verdictToTestRecord(ruleTestVerdict(examples, runs, analysis, proposalCheck, threshold, coverage)), examples, runs, brdp?.proposal);
       recordedRef.current = record;
       report(record);
     }
@@ -241,7 +243,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   useEffect(() => {
     if (openedRef.current) return;
     openedRef.current = true;
-    if (onDemand) report({ result: 'not_executable', reason: analysis.reason });
+    if (onDemand) report(notExecutableRecord(analysis));
     else generate();
     // Once per panel on purpose (see above); a later Regenerate calls generate() itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
