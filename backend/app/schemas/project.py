@@ -1,13 +1,23 @@
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from app.core.config import get_settings
 from app.schemas.status_counts import ProposalStatusCounts, RuleStatusCounts
+
+# A project name, as created, renamed, restored or duplicated: trimmed, never
+# empty, at most project_name_max_chars characters (422 with the limit
+# otherwise, never cut).
+ProjectName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=get_settings().project_name_max_chars),
+]
 
 
 class ProjectCreate(BaseModel):
-    name: str
+    name: ProjectName
     # e.g. "S1000D 4.2" -- fixed for the project's lifetime (docs/v2 §2).
     standard: str
     project_config: dict = {}
@@ -26,7 +36,16 @@ class ProjectRename(BaseModel):
     # standard is deliberately absent here and everywhere else in the API --
     # fixed for the project's lifetime once created (docs/v2 §2), never
     # editable through any endpoint.
-    name: str
+    name: ProjectName
+
+
+class ProjectDuplicate(BaseModel):
+    """POST /api/projects/{id}/duplicate: the copy's name -- the only thing
+    the caller chooses; everything else is copied from the source."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: ProjectName = Field(description="Name of the copy; must differ from every active project (ignoring case and accents).")
 
 
 class ProjectOut(BaseModel):

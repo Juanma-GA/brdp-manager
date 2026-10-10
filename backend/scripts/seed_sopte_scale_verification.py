@@ -16,7 +16,8 @@ import uuid
 from pathlib import Path
 
 for _stream in (sys.stdout, sys.stderr):  # UTF-8 on any console or pipe, Windows included (Protecciones 1c)
-    _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+    if hasattr(_stream, "reconfigure"):  # imported by a test under pytest's capture
+        _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -38,6 +39,61 @@ N_TODO = TOTAL - N_VERIFIED - N_DRAFT
 N_PENDING = 1200
 N_VALIDATED = 1400
 N_REFUSED = TOTAL - N_PENDING - N_VALIDATED
+
+
+def scale_rows(project_id):
+    """The BRDP and rule_approvals rows of the scale project, as dicts for a
+    bulk insert -- also used by backend/tests/test_project_duplicate.py to
+    seed the same 2819-BRDP project in the test database."""
+    # Proposal status assignment, in fixed contiguous blocks by index so
+    # the ground truth is trivially reconstructible: [0,1200) Pending,
+    # [1200,2600) Validated, [2600,2819) Refused.
+    def proposal_status_for(i):
+        if i < N_PENDING:
+            return "Pending"
+        if i < N_PENDING + N_VALIDATED:
+            return "Validated"
+        return "Refused"
+
+    # Rule status assignment, independent contiguous blocks so the two
+    # dimensions overlap realistically (not perfectly correlated):
+    # [0,1500) verified, [1500,2100) draft, [2100,2819) to_do.
+    def rule_status_for(i):
+        if i < N_VERIFIED:
+            return "verified"
+        if i < N_VERIFIED + N_DRAFT:
+            return "draft"
+        return "to_do"
+
+    brdp_rows = []
+    approval_rows = []
+    for i in range(TOTAL):
+        bid = uuid.uuid4()
+        identifier = f"BRDP-SOPT-{i:05d}"
+        brdp_rows.append(
+            {
+                "id": bid,
+                "project_id": project_id,
+                "identifier": identifier,
+                "title": f"Synthetic SOPTE rule {i}",
+                "definition": f"Definition text for {identifier}.",
+                "proposal": f"Proposal text for {identifier}.",
+                "validation": proposal_status_for(i),
+            }
+        )
+        rstate = rule_status_for(i)
+        if rstate != "to_do":
+            approval_rows.append(
+                {
+                    "brdp_id": bid,
+                    "format": "BREX-4.2",
+                    "status": "approved" if rstate == "verified" else "pending_review",
+                    "rule_xml": f"<structureObjectRule id=\"{identifier}\"><objectPath allowedObjectFlag=\"1\">//dmodule</objectPath></structureObjectRule>",
+                    "source": "manual",
+                }
+            )
+
+    return brdp_rows, approval_rows
 
 
 async def main():
@@ -83,53 +139,7 @@ async def main():
             db.add(UserProjectRole(user_id=admin.id, project_id=project.id, role="editor"))
             await db.commit()
 
-        # Proposal status assignment, in fixed contiguous blocks by index so
-        # the ground truth is trivially reconstructible: [0,1200) Pending,
-        # [1200,2600) Validated, [2600,2819) Refused.
-        def proposal_status_for(i):
-            if i < N_PENDING:
-                return "Pending"
-            if i < N_PENDING + N_VALIDATED:
-                return "Validated"
-            return "Refused"
-
-        # Rule status assignment, independent contiguous blocks so the two
-        # dimensions overlap realistically (not perfectly correlated):
-        # [0,1500) verified, [1500,2100) draft, [2100,2819) to_do.
-        def rule_status_for(i):
-            if i < N_VERIFIED:
-                return "verified"
-            if i < N_VERIFIED + N_DRAFT:
-                return "draft"
-            return "to_do"
-
-        brdp_rows = []
-        approval_rows = []
-        for i in range(TOTAL):
-            bid = uuid.uuid4()
-            identifier = f"BRDP-SOPT-{i:05d}"
-            brdp_rows.append(
-                {
-                    "id": bid,
-                    "project_id": project.id,
-                    "identifier": identifier,
-                    "title": f"Synthetic SOPTE rule {i}",
-                    "definition": f"Definition text for {identifier}.",
-                    "proposal": f"Proposal text for {identifier}.",
-                    "validation": proposal_status_for(i),
-                }
-            )
-            rstate = rule_status_for(i)
-            if rstate != "to_do":
-                approval_rows.append(
-                    {
-                        "brdp_id": bid,
-                        "format": "BREX-4.2",
-                        "status": "approved" if rstate == "verified" else "pending_review",
-                        "rule_xml": f"<structureObjectRule id=\"{identifier}\"><objectPath allowedObjectFlag=\"1\">//dmodule</objectPath></structureObjectRule>",
-                        "source": "manual",
-                    }
-                )
+        brdp_rows, approval_rows = scale_rows(project.id)
 
         await db.execute(BRDP.__table__.insert(), brdp_rows)
         await db.commit()
@@ -141,4 +151,5 @@ async def main():
         print(f"  rule_status_counts = to_do:{N_TODO} draft:{N_DRAFT} verified:{N_VERIFIED}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

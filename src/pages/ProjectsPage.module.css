@@ -319,3 +319,18 @@
   padding: 8px 10px;
   margin: 0 0 10px;
 }
+
+/* Duplicar un proyecto: the notice after a copy, with a link to open it. */
+.successNotice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--success-text);
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 7px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+}

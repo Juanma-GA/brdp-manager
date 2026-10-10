@@ -10,6 +10,7 @@ already excluded trashed BRDPs also excludes the BRDPs of a deleted
 project -- Suggest, Comparar, the BRDP Papelera, jobs and Excel at once,
 by construction, not by a fix per query.
 """
+import unicodedata
 import uuid
 
 from sqlalchemy import select
@@ -52,11 +53,23 @@ async def get_deleted_user(user_id: uuid.UUID, db: AsyncSession) -> User | None:
     return user
 
 
+def comparable_project_name(name: str) -> str:
+    """A project name as two names are compared: trimmed, without accents
+    (NFKD, combining marks dropped) and case-folded -- "Proyecto Ñ" and
+    "proyecto n" are the same name."""
+    decomposed = unicodedata.normalize("NFKD", name.strip())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
+
+
 async def active_project_name_taken(name: str, db: AsyncSession, exclude_id: uuid.UUID | None = None) -> bool:
-    """Whether an active project already has this name (trimmed, case
-    insensitive) -- what a restore must not duplicate."""
-    query = select(Project.id).where(ACTIVE_PROJECT_FILTER, Project.name.ilike(name.strip()))
+    """Whether an active project already has this name, ignoring case and
+    accents -- what a restore or a duplicate must not repeat. Compared in
+    Python over the active names (a few hundred at most): Postgres has no
+    accent folding without the unaccent extension, and ILIKE would read a
+    "%" or "_" in the name as a wildcard. A project in the Papelera never
+    counts."""
+    query = select(Project.id, Project.name).where(ACTIVE_PROJECT_FILTER)
     if exclude_id is not None:
         query = query.where(Project.id != exclude_id)
-    rows = (await db.execute(query)).scalars().all()
-    return bool(rows)
+    wanted = comparable_project_name(name)
+    return any(comparable_project_name(row.name) == wanted for row in (await db.execute(query)).all())

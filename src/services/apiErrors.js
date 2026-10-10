@@ -24,6 +24,7 @@ const defaultT = (key, params) => i18n.t(key, params);
 
 // Request fields named by a validation error -> their label in the UI.
 const FIELD_LABEL_KEYS = {
+  name: 'projects.name',
   title: 'records.fieldTitle',
   definition: 'records.fieldDefinition',
   proposal: 'records.fieldProposal',
@@ -177,7 +178,12 @@ export function describeErrorDetail(status, detail, t = defaultT) {
         params.window = t(`errors.rateWindows.${params.window}`, { defaultValue: params.window });
         params.retry_in = retryInText(params.retry_after_seconds, t);
       }
-      const text = t(`errors.codes.${code}`, formatParams(params));
+      // A code shared by several actions (project_name_taken for a restore
+      // or a duplicate) reads per action when the server names it:
+      // errors.codes.<code>_<action>, else errors.codes.<code>.
+      const { action, ...rest } = params;
+      const key = action && i18n.exists(`errors.codes.${code}_${action}`) ? `errors.codes.${code}_${action}` : `errors.codes.${code}`;
+      const text = t(key, formatParams(rest));
       return ref ? t('errors.withRef', { text: text.replace(/\.$/, ''), ref }) : text;
     }
     if (typeof detail.message === 'string' && detail.message) return detail.message;

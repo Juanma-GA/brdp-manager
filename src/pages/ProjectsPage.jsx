@@ -6,6 +6,7 @@ import { useProjectContext } from '../context/ProjectContext';
 import { authFetchJson } from '../services/apiClient';
 import { errorMessage } from '../services/apiErrors';
 import ErrorNotice from '../components/ErrorNotice';
+import Button from '../components/Button';
 import SortableHeader from '../components/SortableHeader';
 import { ProposalStatusSummary, RuleStatusSummary } from '../components/StatusCountsSummary';
 import styles from './ProjectsPage.module.css';
@@ -273,6 +274,69 @@ function DeleteProjectModal({ project, onDeleted, onCancel }) {
   );
 }
 
+// Duplicar un proyecto (admin): a snapshot copy under another name. The
+// request can take a while with thousands of BRDPs -- the button stays busy
+// with no client timeout; a refusal (name taken, job running) is shown here
+// with its reason.
+function DuplicateProjectModal({ project, onDuplicated, onCancel }) {
+  const { t } = useTranslation();
+  const [name, setName] = useState(() => t('projects.duplicate.defaultName', { name: project.name }));
+  const [duplicating, setDuplicating] = useState(false);
+  const [error, setError] = useState(null);
+  const trimmed = name.trim();
+
+  const handleDuplicate = async (e) => {
+    e.preventDefault();
+    if (!trimmed || duplicating) return;
+    setDuplicating(true);
+    setError(null);
+    try {
+      const copy = await authFetchJson(`/api/projects/${project.id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      onDuplicated(copy);
+    } catch (err) {
+      setError(errorMessage(err, t));
+      setDuplicating(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalOverlay} onClick={duplicating ? undefined : onCancel}>
+      <form className={styles.modal} onClick={(e) => e.stopPropagation()} onSubmit={handleDuplicate} data-testid="duplicate-project-dialog">
+        <h3 className={styles.formTitle}>{t('projects.duplicate.title')}</h3>
+        <p className={styles.projectName}>{project.name}</p>
+        <p className={styles.hint}>{t('projects.duplicate.copied')}</p>
+        <p className={styles.hint}>{t('projects.duplicate.notCopied')}</p>
+        <div className={styles.formGroup}>
+          <label className={styles.label} htmlFor="duplicate-project-name">{t('projects.duplicate.nameLabel')}</label>
+          <input
+            id="duplicate-project-name"
+            className={styles.input}
+            value={name}
+            disabled={duplicating}
+            onChange={(e) => {
+              setName(e.target.value);
+              setError(null);
+            }}
+          />
+        </div>
+        {error && <ErrorNotice testId="duplicate-project-error" message={error} />}
+        <div className={styles.formActions}>
+          <Button type="submit" busy={duplicating} busyLabel={t('projects.duplicate.duplicating')} disabled={!trimmed}>
+            {t('projects.duplicate.confirmButton')}
+          </Button>
+          <button type="button" className={styles.buttonSecondary} onClick={onCancel} disabled={duplicating}>
+            {t('projects.duplicate.cancel')}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export default function ProjectsPage() {
   const { t } = useTranslation();
   const { user } = useAuthContext();
@@ -283,6 +347,10 @@ export default function ProjectsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
+  const [duplicatingProject, setDuplicatingProject] = useState(null);
+  // The last copy made here: { source, copy } -- the list shows it and this
+  // notice links to it.
+  const [duplicated, setDuplicated] = useState(null);
 
   // Same simple (non-nested-functional-updater) toggle pattern as Records/
   // User Management -- avoids the StrictMode double-toggle bug seen earlier.
@@ -332,6 +400,18 @@ export default function ProjectsPage() {
           }}
           onCancel={() => setShowCreate(false)}
         />
+      )}
+
+      {duplicated && (
+        <div className={styles.successNotice} role="status" data-testid="duplicate-project-done">
+          <span>{t('projects.duplicate.done', { name: duplicated.source, copy: duplicated.copy.name })}</span>
+          <button type="button" className={styles.navAction} onClick={() => navigate(`/projects/${duplicated.copy.id}/records`)}>
+            {t('projects.duplicate.open')}
+          </button>
+          <button type="button" className={styles.buttonSecondary} onClick={() => setDuplicated(null)}>
+            {t('projects.duplicate.dismiss')}
+          </button>
+        </div>
       )}
 
       {isLoading && <p>…</p>}
@@ -408,6 +488,11 @@ export default function ProjectsPage() {
                       <button onClick={() => setRenamingId(p.id)}>{t('projects.rename.button')}</button>
                     )}
                     {isAdmin && (
+                      <button onClick={() => setDuplicatingProject(p)} data-testid={`duplicate-project-${p.id}`}>
+                        {t('projects.duplicate.button')}
+                      </button>
+                    )}
+                    {isAdmin && (
                       <button className={styles.dangerLink} onClick={() => setDeletingProject(p)}>
                         {t('projects.delete.button')}
                       </button>
@@ -418,6 +503,18 @@ export default function ProjectsPage() {
             ))}
           </tbody>
         </table>
+      )}
+
+      {duplicatingProject && (
+        <DuplicateProjectModal
+          project={duplicatingProject}
+          onDuplicated={(copy) => {
+            setDuplicated({ source: duplicatingProject.name, copy });
+            setDuplicatingProject(null);
+            refreshProjects();
+          }}
+          onCancel={() => setDuplicatingProject(null)}
+        />
       )}
 
       {deletingProject && (

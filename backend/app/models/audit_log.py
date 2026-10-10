@@ -9,7 +9,7 @@ from app.db.base import Base
 
 _ACTIONS_SQL = (
     "action IN ('brdp.deleted_permanently', 'project.trashed', 'project.restored', "
-    "'project.deleted_permanently', 'user.created', 'user.updated', 'user.password_reset', "
+    "'project.deleted_permanently', 'project.duplicated', 'user.created', 'user.updated', 'user.password_reset', "
     "'user.trashed', 'user.restored', 'user.deleted_permanently', 'project_role.assigned', "
     "'project_role.changed', 'project_role.removed')"
 )

@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     brdp_title_max_chars: int = 2000
     brdp_text_max_chars: int = EXCEL_CELL_CHAR_LIMIT
 
+    # --- Project name (Duplicar un proyecto) ---
+    # One limit for creating, renaming, restoring and duplicating a project:
+    # the name is trimmed and must be 1..N characters; over it, 422 with the
+    # limit, never cut.
+    project_name_max_chars: int = 200
+
     # --- LLM proxy limits (AACF 1, Part 5) ---
     # The largest max_tokens the app asks for (the rule test's examples,
     # src/prompts/shared.js RULE_TEST_MAX_TOKENS); a request over it is

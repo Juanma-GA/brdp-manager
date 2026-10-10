@@ -194,6 +194,18 @@ function formatRuleCopiedValue(value) {
   }
 }
 
+// Duplicar un proyecto: the "copied_from" event's value is JSON
+// ({ project_id, project_name, standard }) -- it reads as the source
+// project's name ("Copied from <project>").
+function formatCopiedFromValue(value) {
+  if (!value) return '—';
+  try {
+    return JSON.parse(value).project_name || value;
+  } catch {
+    return value;
+  }
+}
+
 // AI Extract: the "extracted_from" event's value is JSON ({ file,
 // origin_identifier, in_force?, catalog_edition?, catalog_standard? }); it
 // reads as "<file> (source ID <id>)",
@@ -263,6 +275,7 @@ function extractedQuoteLength(value) {
 function historyValueTitle(t, fieldName, value) {
   if (!value) return undefined;
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
+  if (fieldName === 'copied_from') return formatCopiedFromValue(value);
   if (fieldName === 'rule_corrected') return formatRuleCorrectedValue(t, value);
   if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   if (fieldName === 'catalog_edition') return formatCatalogEditionValue(t, value);
@@ -298,7 +311,7 @@ function isLongHistoryEntry(entry) {
   // An extraction from free text carries its quote: long when the quote is.
   if (entry.field_name === 'extracted_from') return extractedQuoteLength(entry.new_value) > HISTORY_MAX_CHARS - 60;
   if (entry.field_name === 'rule_corrected') return formatRuleCorrectedValue(i18n.t.bind(i18n), entry.new_value).length > HISTORY_MAX_CHARS;
-  if (HISTORY_TRANSLATED_FIELDS[entry.field_name] || entry.field_name === 'rule_copied' || entry.field_name === 'catalog_edition') return false;
+  if (HISTORY_TRANSLATED_FIELDS[entry.field_name] || entry.field_name === 'rule_copied' || entry.field_name === 'copied_from' || entry.field_name === 'catalog_edition') return false;
   return [entry.old_value, entry.new_value].some((v) => historyText(entry.field_name, v).length > HISTORY_MAX_CHARS);
 }
 
@@ -312,7 +325,7 @@ function historyText(fieldName, value) {
 function fullHistoryValue(t, fieldName, value) {
   if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   if (fieldName === 'rule_corrected') return formatRuleCorrectedValue(t, value);
-  if (fieldName === 'rule_test' || fieldName === 'rule_copied' || fieldName === 'extracted_from' || fieldName === 'catalog_edition' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
+  if (fieldName === 'rule_test' || fieldName === 'rule_copied' || fieldName === 'copied_from' || fieldName === 'extracted_from' || fieldName === 'catalog_edition' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
   return value || '—';
 }
 
@@ -330,6 +343,7 @@ function formatHistoryValue(t, fieldName, value) {
     return text.length > HISTORY_MAX_CHARS ? `${text.slice(0, HISTORY_MAX_CHARS)}…` : text;
   }
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
+  if (fieldName === 'copied_from') return formatCopiedFromValue(value);
   if (fieldName === 'catalog_edition') return formatCatalogEditionValue(t, value);
   if (fieldName === 'extracted_from') {
     const text = formatExtractedFromValue(t, value);

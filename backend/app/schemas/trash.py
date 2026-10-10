@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.core.config import get_settings
 
 
 class TrashedBRDPOut(BaseModel):
@@ -45,5 +47,5 @@ class TrashedProjectOut(BaseModel):
 
 class ProjectRestoreRequest(BaseModel):
     # Only when an active project already has this project's name: restore
-    # it under this other name instead.
-    name: str | None = None
+    # it under this other name instead. Same length limit as any project name.
+    name: str | None = Field(default=None, max_length=get_settings().project_name_max_chars)

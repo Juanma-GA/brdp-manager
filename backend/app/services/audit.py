@@ -19,12 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import AuditLog, User
 
 # Every action the log knows; the table's CHECK constraint (migration
-# 0028) lists the same values.
+# 0028, "project.duplicated" added by 0030) lists the same values.
 AUDIT_ACTIONS = (
     "brdp.deleted_permanently",
     "project.trashed",
     "project.restored",
     "project.deleted_permanently",
+    "project.duplicated",
     "user.created",
     "user.updated",
     "user.password_reset",

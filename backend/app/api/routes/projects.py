@@ -1,3 +1,5 @@
+import copy
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -9,10 +11,11 @@ from app.api.deps import get_current_user, project_not_found, require_admin, req
 from app.db.base import get_db
 from app.models import BRDP, BRDPCatalog, Project, User, UserProjectRole
 from app.repositories.brdp_repository import compute_status_counts
-from app.repositories.project_repository import ACTIVE_PROJECT_FILTER, get_active_project
-from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectOut, ProjectRename
+from app.repositories.project_repository import ACTIVE_PROJECT_FILTER, active_project_name_taken, get_active_project
+from app.schemas.project import ProjectConfigUpdate, ProjectCreate, ProjectDuplicate, ProjectOut, ProjectRename
 from app.services.audit import record, record_project_deleted_permanently
 from app.services.project_config import project_config_problem
+from app.services.project_duplicate import copy_project_contents
 from app.services.rule_formats import SUPPORTED_STANDARDS
 from app.services.schema_location import schema_location_problem
 
@@ -250,6 +253,97 @@ async def running_job_kinds(project_id: uuid.UUID, db: AsyncSession) -> list[str
     return kinds
 
 
+def _running_job_conflict(kinds: list[str], action: str) -> HTTPException:
+    """409 project_has_running_job naming the jobs; `action` ("delete" |
+    "duplicate") picks the interface sentence."""
+    verb = "duplicating" if action == "duplicate" else "deleting"
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "project_has_running_job",
+            "jobs": kinds,
+            "action": action,
+            "message": f"A background job ({', '.join(kinds)}) is running on this project; wait for it to finish before {verb} the project.",
+        },
+    )
+
+
+@router.post("/{project_id}/duplicate", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+async def duplicate_project(
+    project_id: uuid.UUID,
+    body: ProjectDuplicate,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ProjectOut:
+    """Duplicar un proyecto: a new project with another name, a snapshot of
+    the source -- afterwards the two are independent. Admin-only, like
+    creating a project.
+
+    Same standard and a deep copy of project_config; the active BRDPs with
+    their embeddings, their rules (any format) with their status and last
+    test, and one "copied_from" History entry per BRDP
+    (app/services/project_duplicate.py). One transaction: a failure
+    anywhere leaves nothing behind.
+
+    404 if the source does not exist or is in the Papelera; 409
+    project_name_taken if an active project already has the name (ignoring
+    case and accents; a project in the Papelera does not count); 409
+    project_has_running_job while an import, embeddings or extraction job
+    runs on the source.
+    """
+    source = await get_active_project(project_id, db)
+    if source is None:
+        raise project_not_found()
+    name = body.name
+    if await active_project_name_taken(name, db):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "project_name_taken",
+                "name": name,
+                "action": "duplicate",
+                "message": f"An active project is already called {name!r}; choose another name for the copy.",
+            },
+        )
+    kinds = await running_job_kinds(project_id, db)
+    if kinds:
+        raise _running_job_conflict(kinds, "duplicate")
+
+    started = time.monotonic()
+    copy_ = Project(name=name, standard=source.standard, project_config=copy.deepcopy(source.project_config))
+    db.add(copy_)
+    await db.flush()
+    counts = await copy_project_contents(
+        db,
+        source_id=source.id,
+        source_name=source.name,
+        standard=source.standard,
+        new_id=copy_.id,
+        actor=admin,
+    )
+    record(
+        db,
+        admin,
+        "project.duplicated",
+        target_type="project",
+        target_id=copy_.id,
+        target_label=copy_.name,
+        project_id=copy_.id,
+        project_name=copy_.name,
+        detail={
+            "source_project_id": str(source.id),
+            "source_project_name": source.name,
+            "standard": source.standard,
+            "brdp_count": counts["brdp_count"],
+            "rule_count": counts["rule_count"],
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        },
+    )
+    await db.commit()
+    await db.refresh(copy_)
+    return await _to_out(db, copy_, _resolve_effective_role(admin, None))
+
+
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     project_id: uuid.UUID,
@@ -278,14 +372,7 @@ async def delete_project(
         raise project_not_found()
     kinds = await running_job_kinds(project_id, db)
     if kinds:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "project_has_running_job",
-                "jobs": kinds,
-                "message": f"A background job ({', '.join(kinds)}) is running on this project; wait for it to finish before deleting the project.",
-            },
-        )
+        raise _running_job_conflict(kinds, "delete")
     if permanent:
         await record_project_deleted_permanently(db, admin, project)
         await db.delete(project)
