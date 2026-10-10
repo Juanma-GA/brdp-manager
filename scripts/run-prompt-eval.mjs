@@ -428,6 +428,18 @@ async function runCheck(check, answer, ctx = {}) {
       const matches = !check.pattern || new RegExp(check.pattern, check.flags || "").test(text);
       return { status: matches && calls === 0 ? "pass" : "fail", detail: `${calls} LLM call(s); reason: ${text}` };
     }
+    case "rule_test_not_executable": {
+      // GMC, Part 2: a rule the examples cannot test is "not executable"
+      // before any LLM call -- the reason (English text) must match
+      // `pattern` when given.
+      const r = ctx.ruleTest;
+      if (!r) return { status: "fail", detail: "no test" };
+      const calls = (r.responses || []).length;
+      const text = r.reason ? formatRuleTestReason(r.reason, i18n.getFixedT("en")) : "";
+      if (r.status !== "not_executable") return { status: "fail", detail: `status ${r.status}, expected not_executable; ${calls} LLM call(s)` };
+      const matches = !check.pattern || new RegExp(check.pattern, check.flags || "").test(text);
+      return { status: matches && calls === 0 ? "pass" : "fail", detail: `${calls} LLM call(s); reason: ${text}` };
+    }
     case "rule_test_verdict_correct": {
       const r = ctx.ruleTest;
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
@@ -560,7 +572,10 @@ async function runCheck(check, answer, ctx = {}) {
       // reference); the content otherwise.
       // Dosier, Part 2: "target": "files" -- every other file of the
       // example's dossier (the ditamap is "content").
+      // GMC, Part 1.3: "target": "root_attributes" -- the attributes the
+      // example puts on the document root ("rootAttributes"), as name="value".
       const text = (ex) => (check.target === "metadata" ? ex.metadata || ""
+        : check.target === "root_attributes" ? Object.entries(ex.rootAttributes || {}).map(([k, v]) => `${k}="${v}"`).join(" ")
         : check.target === "files" ? (ex.files || []).map((f) => f.content).join("\n")
         : check.target === "all" ? `${ex.metadata || ""}\n${ex.content || ""}` : ex.content);
       const bad = rejects.filter((ex) => !re.test(text(ex)));
@@ -1057,6 +1072,7 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
         schema: ex.schema,
         content: ex.content,
         metadata: ex.metadata ?? null,
+        rootAttributes: ex.rootAttributes ?? null,
         xml: ex.xml,
         runnable: result.runs[i].validation.runnable,
         problems: result.runs[i].validation.runnable ? [] : exampleProblems(result.runs[i].validation, { standard: testCase.standard, schema: ex.schema }),

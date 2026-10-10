@@ -262,9 +262,9 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // executable at all (its illustrative examples record nothing).
   // Dosier, Part 2: `files` ([{ path, content }]), when one file of a
   // dossier example was edited.
-  const runAgain = async (index, content, metadata, files) => {
+  const runAgain = async (index, content, metadata, files, rootAttributes) => {
     if (state.status !== 'ready') return;
-    const example = editExample(state.examples[index], content, metadata, setupRef.current, undefined, files);
+    const example = editExample(state.examples[index], content, metadata, setupRef.current, undefined, files, rootAttributes);
     const examples = state.examples.map((ex, i) => (i === index ? example : ex));
     const runs = state.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary, schemaLocation, graph: setupRef.current?.graph || null }) : r));
     setState({ ...state, examples, runs });

@@ -27,7 +27,7 @@
 // context anchored at the document root (/*, /topic) makes the example the
 // whole document: the LLM writes the complete root element.
 import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js';
-import { sectionRoutes } from './schemaPlacement.js';
+import { sectionCarrierWay, sectionRoutes } from './schemaPlacement.js';
 import { extractRuleXPaths, extractXPathNames } from '../validation/schemaValidation.js';
 import { stripLiterals } from './ruleTestCommon.js';
 import { fragmentWellFormedProblem } from './ruleWrappers.js';
@@ -192,6 +192,8 @@ function conditionOperands(expression) {
 const NAME_RE = /^[A-Za-z_][\w.-]*$/;
 const AXIS_RE = /^(?:child|descendant|descendant-or-self|self|following-sibling|preceding-sibling|following|preceding|ancestor|ancestor-or-self|parent)::/;
 
+const PREFIXED_STEP_RE = /^[A-Za-z_][\w.-]*:[A-Za-z_][\w.-]*$/;
+
 function stepName(segment) {
   const step = segment.trim().replace(AXIS_RE, '');
   return NAME_RE.test(step) ? step : null;
@@ -252,6 +254,12 @@ function analyzeAlternative(alternative, out) {
   const steps = [];
   let attribute = null;
   let opaque = false;
+  // GMC, Part 2.2: element steps with a namespace prefix (rdf:Description).
+  // The structures list local names only, and the documents the examples
+  // are built on declare no other namespace: an example can never contain
+  // one (classifyRuleTargets counts the alternative as unreachable).
+  const prefixedSteps = [];
+  let descendantAttribute = false;
   // Descendant steps "A//B" (or descendant::B): the pairs [A, B], so the
   // prompt can give the valid nesting between them (nestingPaths).
   const descendantPairs = [];
@@ -274,8 +282,12 @@ function analyzeAlternative(alternative, out) {
     }
     const attr = /^(?:@|attribute::)([A-Za-z_][\w.-]*)$/.exec(seg);
     if (attr) {
-      if (i === segments.length - 1) attribute = attr[1];
-      else opaque = true;
+      if (i === segments.length - 1) {
+        attribute = attr[1];
+        // GMC, Part 1.4: X//@a -- the attribute is on X's descendants that
+        // carry it, never on X itself (X/@a stays as before).
+        descendantAttribute = descendant && steps.length > 0;
+      } else opaque = true;
       previous = null;
       return;
     }
@@ -285,13 +297,15 @@ function analyzeAlternative(alternative, out) {
       if (previous && (descendant || /^descendant(?:-or-self)?::/.test(seg))) descendantPairs.push([previous, name]);
       previous = name;
     } else {
+      const prefixed = PREFIXED_STEP_RE.exec(seg.replace(AXIS_RE, ''));
+      if (prefixed) prefixedSteps.push(prefixed[0]);
       opaque = true;
       previous = null;
     }
     descendant = false;
   });
   if (steps.length === 0 && !attribute) opaque = true;
-  out.alternatives.push({ steps, attribute, checked, absolutePrefix, opaque, descendantPairs });
+  out.alternatives.push({ steps, attribute, checked, absolutePrefix, opaque, descendantPairs, prefixedSteps, descendantAttribute });
 }
 
 const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
@@ -950,16 +964,26 @@ function classifyRuleTargets(structure, targets) {
   const metadataAlternatives = [];
   const unreachableNames = [];
   let allUnreachable = true;
+  let wrongRoot = false;
   const alternatives = targets?.alternatives || [];
   const missingNames = [];
   let allMissing = alternatives.length > 0;
   for (const alt of alternatives) {
-    const needs = missing ? sectionOnlyNames(alt, missing, elements) : null;
+    // An absolute path that starts at another root never reaches this
+    // document's section either (GMC, Part 2.3: unreachable, with the root).
+    const otherRoot = alt.absolutePrefix && alt.absolutePrefix[0] !== root;
+    const needs = missing && !otherRoot ? sectionOnlyNames(alt, missing, elements) : null;
     if (needs) {
       missingNames.push(...needs);
       continue;
     }
     allMissing = false;
+    // GMC, Part 2.2: a prefixed element step the structure does not have.
+    const foreign = (alt.prefixedSteps || []).filter((n) => !elements[n]);
+    if (foreign.length > 0) {
+      unreachableNames.push(...foreign.map((n) => `<${n}>`));
+      continue;
+    }
     if (alt.opaque) {
       content = true;
       contentAlternatives.push(alt);
@@ -999,6 +1023,9 @@ function classifyRuleTargets(structure, targets) {
       continue;
     }
     const unknown = alt.steps.find((s) => !M.has(s) && !C.has(s));
+    // GMC, Part 2.3: what is missing is the first step of an absolute path,
+    // and this document has another root (/dmodule… in a comment).
+    if (prefix && prefix[0] !== root && unknown === prefix[0]) wrongRoot = true;
     unreachableNames.push(
       unknown ? `<${unknown}>` : alt.steps.length > 0 ? alt.steps.map((s) => `<${s}>`).join('/') : `@${alt.attribute}`
     );
@@ -1008,19 +1035,22 @@ function classifyRuleTargets(structure, targets) {
     ? { element: missing.element, names: [...new Set(missingNames)], all: allMissing }
     : null;
   if (sectionMissing?.all) {
-    return { metadata: false, content: false, contentAlternatives: [], metadataAlternatives: [], unreachable: null, sectionMissing };
+    return { metadata: false, content: false, contentAlternatives: [], metadataAlternatives: [], unreachable: null, sectionMissing, rootMismatch: null };
   }
   // A predicate that reads the other part: an element only the section has
   // (dmStatus, updateCode, …) makes the LLM write the section too; an
   // element only the content has (zoneSpec, …), the content.
   const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n]);
   if (section && predicateNames.some((n) => M.has(n) && !C.has(n))) metadata = true;
-  if (predicateNames.some((n) => C.has(n) && !M.has(n))) content = true;
+  const predicateContent = predicateNames.some((n) => C.has(n) && !M.has(n));
+  if (predicateContent) content = true;
   const unreachable =
     alternatives.length > 0 && allUnreachable && !metadata && !content ? [...new Set(unreachableNames)] : null;
   // A rule nothing can be said about keeps the content placement.
   if (!metadata && !content && !unreachable) content = true;
-  return { metadata, content, contentAlternatives, metadataAlternatives, unreachable, sectionMissing };
+  // rootMismatch: this document's root, when an unreachable alternative
+  // starts at another one (only said with the unreachable names).
+  return { metadata, content, contentAlternatives, metadataAlternatives, unreachable, sectionMissing, rootMismatch: unreachable && wrongRoot ? root : null, predicateContent };
 }
 
 // The identification and status section of a document the application does
@@ -1105,6 +1135,148 @@ function wholeDocumentMetadata(structure, targets, section) {
   return metadata;
 }
 
+// ─── Attributes the rule checks: where they go (GMC, Part 1) ─────────────────
+
+// How many carriers of an attribute the prompt lists by name.
+export const CARRIER_LIST_MAX = 20;
+
+// The elements of this schema that carry the attribute an alternative ends
+// on: //@a, every carrier; X//@a (Part 1.4), only those below X -- never X
+// itself; X/@a, X when it carries it.
+function alternativeCarriers(elements, alt) {
+  const carries = (n) => (elements[n]?.attributes || []).includes(alt.attribute);
+  if (alt.steps.length === 0) return Object.keys(elements).filter(carries).sort();
+  const last = alt.steps[alt.steps.length - 1];
+  if (alt.descendantAttribute) return [...reachableSet(elements, elements[last]?.children || [])].filter(carries).sort();
+  return carries(last) ? [last] : [];
+}
+
+// Part 1.3: //@a whose only carrier here is the document's root (or the root
+// of an identification and status section the application writes) -- the
+// LLM never writes those elements, so the example gives the values in
+// "rootAttributes" and the application puts them there (assembleExample).
+// → [{ attribute, element, alternatives }]
+function rootAttributeTargets(structure, targets, section, sectionWritten) {
+  const elements = structure.elements;
+  const root = structure.skeleton.path[0];
+  const holders = new Set([root, ...(section && !sectionWritten ? [section.element] : [])]);
+  const out = [];
+  for (const alt of targets?.alternatives || []) {
+    if (alt.opaque || !alt.attribute || alt.steps.length > 0 || alt.absolutePrefix) continue;
+    const carriers = alternativeCarriers(elements, alt);
+    if (carriers.length === 0 || !carriers.every((c) => holders.has(c))) continue;
+    const element = carriers.includes(root) ? root : carriers[0];
+    const known = out.find((r) => r.attribute === alt.attribute && r.element === element);
+    if (known) known.alternatives.push(alt);
+    else out.push({ attribute: alt.attribute, element, alternatives: [alt] });
+  }
+  return out;
+}
+
+// Breadth-first distance of every element below `from` (its children at 1).
+function distancesFrom(elements, from) {
+  const dist = new Map();
+  let frontier = [from];
+  for (let depth = 1; frontier.length; depth += 1) {
+    const next = [];
+    for (const name of frontier) {
+      for (const child of elements[name]?.children || []) {
+        if (dist.has(child) || !elements[child]) continue;
+        dist.set(child, depth);
+        next.push(child);
+      }
+    }
+    frontier = next;
+  }
+  return dist;
+}
+
+// Part 1.2: for each attribute the rule's alternatives end on (other than the
+// root ones), the elements of this schema that carry it -- nearest first
+// from where the LLM writes (the insertion point, or the identification and
+// status section when it writes that) -- and the valid way to the nearest.
+// `inPrompt`: an attribute-only alternative (//@a) or X//@a; the prompt lists
+// those (X/@a names its element already), the correction round all of them.
+// → [{ attribute, total, names, inPrompt, nearest: { name, from: 'content',
+//      way } | { name, from: 'section', way, inMinimal, position, minimal,
+//      several, paths } | null }]
+function attributeCarrierInfos(structure, placed, alternatives) {
+  const elements = structure.elements;
+  const byAttribute = new Map();
+  for (const alt of alternatives) {
+    if (alt.opaque || !alt.attribute) continue;
+    const info = byAttribute.get(alt.attribute) || { attribute: alt.attribute, carriers: new Set(), inPrompt: false, alternatives: [] };
+    for (const c of alternativeCarriers(elements, alt)) info.carriers.add(c);
+    info.inPrompt = info.inPrompt || alt.steps.length === 0 || alt.descendantAttribute;
+    info.alternatives.push(alt);
+    byAttribute.set(alt.attribute, info);
+  }
+  const content = placed.contentInsertion !== false && placed.insertion ? placed.insertion : null;
+  const section = placed.metadata?.insertion ? placed.metadata : null;
+  const contentDist = content ? distancesFrom(elements, content) : new Map();
+  const sectionDist = section ? distancesFrom(elements, section.element) : new Map();
+  const skeleton = new Set(placed.path || []);
+  const out = [];
+  for (const info of byAttribute.values()) {
+    const carriers = [...info.carriers];
+    if (carriers.length === 0) continue;
+    const cd = (c) => (content && !skeleton.has(c) ? contentDist.get(c) : undefined);
+    const sd = (c) => (section ? sectionDist.get(c) : undefined);
+    const best = (c) => Math.min(cd(c) ?? Infinity, sd(c) ?? Infinity);
+    const names = carriers.sort((a, b) => best(a) - best(b) || a.localeCompare(b));
+    let nearest = null;
+    for (const name of names) {
+      if (best(name) === Infinity) break;
+      if (cd(name) !== undefined && cd(name) <= (sd(name) ?? Infinity)) {
+        const alt = info.alternatives.find((a) => a.descendantAttribute);
+        let way = null;
+        if (alt) {
+          const placedSteps = alt.steps.filter((n) => !skeleton.has(n));
+          way = writePathOf(elements, content, [...placedSteps, name]);
+        }
+        way = way || nestingPath(elements, content, name);
+        if (way) {
+          nearest = { name, from: 'content', way };
+          break;
+        }
+      }
+      const w = section ? sectionCarrierWay(structure, section, name) : null;
+      if (w) {
+        nearest = { name, from: 'section', way: w.path, inMinimal: w.inMinimal, position: w.position, minimal: w.minimal, several: w.several, paths: w.paths || null };
+        break;
+      }
+    }
+    out.push({ attribute: info.attribute, total: names.length, names, inPrompt: info.inPrompt, nearest });
+  }
+  return out;
+}
+
+// The English lines of one attribute's carriers (the prompt indents them;
+// the correction round joins them): "@x goes on: <a>, <b>, <c> (N)", then
+// the way to the nearest.
+export function attributeCarrierLines(info, { withMinimal = false } = {}) {
+  const shown = info.names.slice(0, CARRIER_LIST_MAX).map((n) => `<${n}>`).join(', ');
+  const more = info.total > CARRIER_LIST_MAX ? `, +${info.total - CARRIER_LIST_MAX} more` : '';
+  const lines = [`@${info.attribute} goes on: ${shown}${more} (${info.total}).`];
+  const n = info.nearest;
+  if (n?.from === 'content') {
+    lines.push(`The valid way to the nearest, <${n.name}>, from <${n.way[0]}>: ${n.way.join('/')}.`);
+  } else if (n?.from === 'section') {
+    if (n.inMinimal) {
+      lines.push(`The nearest, <${n.name}>, is already in the minimal identification and status section: ${n.way.join('/')}.`);
+    } else if (n.several && n.paths?.length > 1) {
+      lines.push(`The valid ways to the nearest, <${n.name}>, from the identification and status section (use one): ${n.paths.map((p) => p.join('/')).join('; ')}.`);
+    } else {
+      const pos = n.position;
+      const where = !pos ? '' : pos.after ? `, right after <${pos.after}>` : pos.before ? `, right before <${pos.before}>` : ', as its first child';
+      const goes = pos ? ` <${pos.container}> goes inside <${pos.parent}>${where}` : '';
+      lines.push(`The valid way to the nearest, <${n.name}>, from the identification and status section: ${n.way.join('/')}.${goes}${goes ? '.' : ''}`);
+      if (withMinimal && n.minimal && n.minimal.trim() !== `<${n.name}/>`) lines.push(`A minimum valid one, with its required children ("…" is text you write):\n${n.minimal}`);
+    }
+  }
+  return lines;
+}
+
 // { path, insertion, root, allowedChildren, titled, metadata,
 //   contentInsertion, unreachable } for one schema's structure (GET
 // /api/schema-cards/structure) and the rule's targets. A whole-document
@@ -1177,11 +1349,24 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     const routes = metadataRoutes(structure, targets, classes.metadataAlternatives);
     if (routes.length) metadata.routes = routes;
   }
+  // GMC, Part 1.3: //@a carried here only by the root (EXT-00057, @pmType
+  // on <pm>): those alternatives need no content -- the example gives the
+  // values in "rootAttributes".
+  const rootAttributes = rootAttributeTargets(structure, targets, section, classes.metadata);
+  const rootAlts = new Set(rootAttributes.flatMap((r) => r.alternatives));
+  const contentAlternatives = classes.contentAlternatives.filter((a) => !rootAlts.has(a));
+  const onlyRootContent = rootAlts.size > 0 && classes.contentAlternatives.length > 0 && contentAlternatives.length === 0 && !classes.predicateContent;
   // What the content placement looks at: the alternatives about the content.
   const contentChecked = [
-    ...new Set(classes.contentAlternatives.map((a) => a.checked).filter((name) => name && elements[name])),
+    ...new Set(contentAlternatives.map((a) => a.checked).filter((name) => name && elements[name])),
   ];
-  const contentPrefixes = classes.contentAlternatives.map((a) => a.absolutePrefix).filter(Boolean);
+  const contentPrefixes = contentAlternatives.map((a) => a.absolutePrefix).filter(Boolean);
+  const carrierAlternatives = (targets?.alternatives || []).filter((a) => !rootAlts.has(a));
+  const withAttributes = (placed) => {
+    placed.rootAttributes = rootAttributes.map(({ attribute, element }) => ({ attribute, element }));
+    placed.attributeCarriers = attributeCarrierInfos(structure, placed, carrierAlternatives);
+    return placed;
+  };
   const whole = (insertion, path, contentInsertion) => ({
     path,
     insertion,
@@ -1191,10 +1376,11 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     metadata,
     contentInsertion,
     unreachable: classes.unreachable,
+    rootMismatch: classes.rootMismatch,
     sectionMissing: classes.sectionMissing,
     nestings: nestingPaths(structure, targets),
   });
-  if (!classes.content) return whole(chain[chain.length - 1], chain, false);
+  if (!classes.content || onlyRootContent) return withAttributes(whole(chain[chain.length - 1], chain, false));
 
   // The example that complies must be able to leave out what the rule
   // checks, so the skeleton stops before the first element it checks.
@@ -1220,12 +1406,19 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // <supportEquipDescr>, <supplyDescr> or <spareDescr>, inside
   // <preliminaryRqmts>, not under <mainProcedure>). The insertion point is
   // the deepest one from which one of its carriers can be reached.
-  const carrierSets = classes.contentAlternatives
+  const carrierSets = contentAlternatives
     .filter((a) => !a.opaque && a.attribute && (a.steps || []).length === 0)
     .map((a) => Object.keys(elements).filter((n) => (elements[n].attributes || []).includes(a.attribute)))
     .filter((set) => set.length > 0);
-  const attributeOnlyChecked = classes.contentAlternatives
-    .filter((a) => !a.opaque && a.attribute && (a.steps || []).length === 0)
+  // GMC, Part 1.4: X//@a -- the insertion point must also reach a carrier
+  // below X (EXT-00107: <unitOfIssueQualificationSegment> under
+  // <partRepository> in comrep).
+  const descendantCarrierSets = contentAlternatives
+    .filter((a) => !a.opaque && a.attribute && a.descendantAttribute)
+    .map((a) => alternativeCarriers(elements, a))
+    .filter((set) => set.length > 0);
+  const attributeOnlyChecked = contentAlternatives
+    .filter((a) => !a.opaque && a.attribute && ((a.steps || []).length === 0 || a.descendantAttribute))
     .map((a) => a.attribute);
   // Mejoras A, Part 2: the examples of this schema have the checked element
   // inside (or outside) another one (relation, see relationCases): the
@@ -1239,6 +1432,7 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     contentChecked.every((name) => reachable(elements, chain[i], name))
     && containNames.every((name) => reachable(elements, chain[i], name))
     && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
+    && descendantCarrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name, 16)))
     && relationOk(i);
   // Mejoras D, Part 1: the insertion point must also hold the OUTERMOST
   // element each content alternative makes the example write -- its first
@@ -1260,7 +1454,7 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     if (!entry) return true;
     return under(chain[i]).has(entry) && writePathOf(elements, chain[i], alt.steps.slice(alt.steps.indexOf(entry))) !== null;
   };
-  const steppedAlternatives = classes.contentAlternatives.filter((a) => !a.opaque && (a.steps || []).length > 0);
+  const steppedAlternatives = contentAlternatives.filter((a) => !a.opaque && (a.steps || []).length > 0);
   // An alternative no point of the skeleton holds counts only when every
   // alternative is like that: a union keeps testing what it can.
   const heldSomewhere = steppedAlternatives.filter((a) => chain.slice(0, limit).some((_n, i) => holds(a, i)));
@@ -1318,7 +1512,7 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // checked element when it has no named step (//@x, //*[…]). Never a later
   // step on its own: the shortest way to levelledPara/title's <title> alone
   // would go through <figure>.
-  const entryNames = classes.contentAlternatives.map((a) => {
+  const entryNames = contentAlternatives.map((a) => {
     const entry = (a.steps || []).find((n) => elements[n] && !placed.path.includes(n));
     return entry || a.checked;
   }).filter((n) => n && elements[n]);
@@ -1336,7 +1530,7 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   placed.routes = withRoutes
     ? contentRoutes(structure, placed.insertion, [...new Set([...entryNames, ...predicateNames])], useNames, attributeOnlyChecked)
     : null;
-  return placed;
+  return withAttributes(placed);
 }
 
 // Mejoras D, Part 1: the way from `from` through every element step of an
@@ -1565,13 +1759,40 @@ function followSharedCode(text, brex, codeName) {
 // rule looks at it (metadata.insertion) -- the section the LLM wrote
 // (`metadata`), as it wrote it. The content is left empty when the rule
 // looks only at the metadata (placement.contentInsertion === false).
-export function assembleExample({ standard, schema, schemaLocation, placement, content, metadata = null }) {
+// GMC, Part 1.3: rootAttributes ({ name: value }, the example's values for
+// attributes only the root carries) go on the document's root -- or on the
+// root of the minimal section the application writes, when that is the
+// element that carries them. Never a namespace declaration nor an xsi:
+// attribute: those are the application's (rootAttributeProblems). Their
+// paths go into skeletonNodePaths marked CONTENT_NODE_MARK, so the panel
+// shows them as the example's, not the skeleton's.
+export const CONTENT_NODE_MARK = '!';
+const RESERVED_ROOT_ATTRIBUTE_RE = /^(?:xmlns(?::|$)|xsi:)/;
+const ATTRIBUTE_NAME_RE = /^[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?$/;
+
+export function assembleExample({ standard, schema, schemaLocation, placement, content, metadata = null, rootAttributes = null }) {
   const path = placement.path;
   const body = placement.contentInsertion === false ? '' : String(content ?? '').trim();
-  if (path.length === 0) return { xml: String(content ?? '').trim(), skeletonNodePaths: [] };
+  if (path.length === 0) return { xml: String(content ?? '').trim(), skeletonNodePaths: [], rootAttributeProblems: [] };
   const withSchemaLocation = supportsSchemaContext(standard);
   const rootAttrs = withSchemaLocation ? [`xmlns:xsi="${XSI_NS}"`] : [];
-  const section = placement.metadata || null;
+  let section = placement.metadata || null;
+  const contentMarks = [];
+  const rootAttributeProblems = [];
+  for (const [name, value] of Object.entries(rootAttributes || {})) {
+    const target = (placement.rootAttributes || []).find((r) => r.attribute === name)?.element || path[0];
+    if (RESERVED_ROOT_ATTRIBUTE_RE.test(name) || !ATTRIBUTE_NAME_RE.test(name)) {
+      rootAttributeProblems.push({ kind: 'reservedRootAttribute', attribute: name, element: target });
+      continue;
+    }
+    if (section && !section.insertion && target === section.element) {
+      section = { ...section, tree: { ...section.tree, attributes: [...(section.tree.attributes || []), [name, value]] } };
+      contentMarks.push(`${CONTENT_NODE_MARK}/${path[0]}[1]/${section.element}[1]/@${name}`);
+    } else {
+      rootAttrs.push(`${name}="${escXmlAttr(value)}"`);
+      contentMarks.push(`${CONTENT_NODE_MARK}/${path[0]}[1]/@${name}`);
+    }
+  }
   const sectionText = section?.insertion ? String(metadata ?? '').trim() : '';
   if (/\bxlink:/.test(body) || /\bxlink:/.test(sectionText)) rootAttrs.push(`xmlns:xlink="${XLINK_NS}"`);
   if (withSchemaLocation && schema) {
@@ -1620,7 +1841,7 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
   }
   // Mejoras F, Part 1.4: the insertion point holds what was written for the
   // test, so it is never counted as the application's.
-  return { xml: lines.join('\n'), skeletonNodePaths: [...skeletonNodePaths, ...sectionPaths], insertionPath: prefix };
+  return { xml: lines.join('\n'), skeletonNodePaths: [...skeletonNodePaths, ...sectionPaths, ...contentMarks], insertionPath: prefix, rootAttributeProblems };
 }
 
 // ─── Model table with a merged row (Barrido final 1/2) ─────────────────────

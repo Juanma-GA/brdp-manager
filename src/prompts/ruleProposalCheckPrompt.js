@@ -9,6 +9,7 @@
 // comes from its answer; a failed call never counts as "implements".
 
 import { readLlmJson } from './llmJson.js';
+import { ruleValueLegend } from './shared.js';
 
 export const RULE_PROPOSAL_CHECK_USER_MESSAGE = 'Check whether the rule implements the Proposal.';
 
@@ -37,7 +38,7 @@ What the rule checks (computed by the application from its XML — exact):
 ${ruleDescription}
 
 The rule (${format}):
-${ruleXml}
+${ruleXml}${ruleValueLegend(ruleXml)}
 
 HOW TO DECIDE — answer one of three levels:
 - "yes": what the rule rejects is what the Proposal decides: what the

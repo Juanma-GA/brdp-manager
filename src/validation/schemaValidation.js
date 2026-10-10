@@ -1803,6 +1803,8 @@ export function formatStructureProblem(problem, schema) {
       return `@${problem.attribute} does not exist on <${problem.element}>`;
     case 'wrongRoot':
       return `the root element is <${problem.element}>, not <${problem.expected}>`;
+    case 'reservedRootAttribute':
+      return `@${problem.attribute} of <${problem.element}> is written by the application: leave it out of "rootAttributes"`;
     default:
       return String(problem.kind);
   }
@@ -2061,6 +2063,7 @@ export const SCHEMA_ISSUE_KEYS = {
     tooMany: 'records.ruleTest.structure.tooMany',
     unknownAttribute: 'records.ruleTest.structure.unknownAttribute',
     wrongRoot: 'records.ruleTest.structure.wrongRoot',
+    reservedRootAttribute: 'records.ruleTest.structure.reservedRootAttribute',
     spannedEntry: 'records.ruleTest.structure.spannedEntry',
     morerowsPastEnd: 'records.ruleTest.structure.morerowsPastEnd',
     rowFullyCovered: 'records.ruleTest.structure.rowFullyCovered',

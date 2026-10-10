@@ -4301,6 +4301,230 @@
           "note": "every reject example has a warning (or a conref to one) in its files"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-gmc-values-with-text-interchangeability",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "GMC pass, BRDP-EXT-00022 (//interchangeability, flag 2, objectValue 1 'One-Way' / 2 'Two-Way'). Before: the examples wrote the objectValue's text ('One-Way') as the value and the test failed. Now the prompt says the value is @valueAllowed.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-GMC22",
+        "title": "Interchangeability codes",
+        "definition": "Decide which interchangeability codes are used in the parts catalog.",
+        "proposal": "The element interchangeability can only have the codes allowed by ATA Spec 2000: 1 (One-Way) and 2 (Two-Way).",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-GMC22\"><objectPath allowedObjectFlag=\"2\">//interchangeability</objectPath><objectUse>The element \"interchangeability\" can only have codes allowed by ATA Spec 2000.</objectUse><objectValue valueAllowed=\"1\" valueForm=\"single\">One-Way</objectValue><objectValue valueAllowed=\"2\" valueForm=\"single\">Two-Way</objectValue></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule judges the examples as they expect"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "VALUES: in this rule, the value of each <objectValue> is its @valueAllowed",
+          "note": "the prompt says the value is @valueAllowed"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "\"1\" \\(One-Way\\), \"2\" \\(Two-Way\\)",
+          "note": "with each value and its description"
+        },
+        {
+          "type": "rule_test_accept_examples_contain",
+          "pattern": "<interchangeability\\b[^>]*>\\s*[12]\\s*</interchangeability>",
+          "note": "the accept examples write the code (1 or 2), never its description"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-gmc-attribute-carriers-commercial-classification",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "GMC pass, BRDP-EXT-00037 (//@commercialClassification, only cc51). Before: the examples put the attribute on elements that do not have it (<language>). Now the prompt lists the elements that carry it (84, cut at 20) and the way to the nearest; the correction round brings the same list.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-GMC37",
+        "title": "Commercial classification codes",
+        "definition": "Decide which commercial classification codes are used.",
+        "proposal": "The attribute commercialClassification can only have the code cc51 (COC marking).",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-GMC37\"><objectPath allowedObjectFlag=\"2\">//@commercialClassification</objectPath><objectUse>The attribute \"commercialClassification\" can only have code \"cc51\".</objectUse><objectValue valueForm=\"single\" valueAllowed=\"cc51\">COC marking</objectValue></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule judges the examples as they expect"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "@commercialClassification goes on: (<\\w+>, ){20}\\+\\d+ more \\(\\d+\\)\\.",
+          "note": "the prompt lists the carriers, cut at 20 with +N more"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "The valid way to the nearest, <\\w+>, from <para>",
+          "note": "and the way to the nearest from the insertion point"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "all",
+          "pattern": "commercialClassification=[\"'](?!cc51)",
+          "note": "every reject example writes a code other than cc51"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-gmc-root-attributes-pmtype",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "GMC pass, BRDP-EXT-00057 (//@pmType, pt01-pt03): @pmType only goes on the <pm> root, which the application writes. The examples give its value in \"rootAttributes\".",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-GMC57",
+        "title": "Publication module types",
+        "definition": "Decide which publication module types are used.",
+        "proposal": "The attribute pmType can only have the codes pt01 (Component Maintenance Publication), pt02 and pt03.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-GMC57\"><objectPath allowedObjectFlag=\"2\">//@pmType</objectPath><objectUse>The attribute \"pmType\" can only have codes \"pt01\" thru \"pt03\".</objectUse><objectValue valueAllowed=\"pt01\" valueForm=\"single\">Component Maintenance Publication</objectValue><objectValue valueAllowed=\"pt02\" valueForm=\"single\">x</objectValue><objectValue valueAllowed=\"pt03\" valueForm=\"single\">y</objectValue></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule judges the examples as they expect"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "@pmType goes only on <pm>, which the application writes",
+          "note": "the prompt asks for rootAttributes"
+        },
+        {
+          "type": "rule_test_accept_examples_contain",
+          "target": "root_attributes",
+          "pattern": "pmType=\"pt0[123]\"",
+          "note": "the accept examples give an allowed @pmType in rootAttributes"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "root_attributes",
+          "pattern": "pmType=\"(?!pt0[123]\")",
+          "note": "the reject examples give another @pmType in rootAttributes"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-gmc-descendant-attribute-unit-of-measure",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "GMC pass, BRDP-EXT-00107 (/dmodule/content/commonRepository/partRepository//@unitOfMeasure, EA/KG). Before: 'inconclusive' (the examples had no carrier below <partRepository>). Now the carriers of X//@a are the descendants of X that have it: comrep, with the way to <unitOfIssueQualificationSegment>.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-GMC107",
+        "title": "Units of measure in the part repository",
+        "definition": "Decide which units of measure are used in the part repository.",
+        "proposal": "The attribute unitOfMeasure can only have the codes allowed by ATA Spec 2000: EA (Each) and KG (Kilogram).",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-GMC107\"><objectPath allowedObjectFlag=\"2\">/dmodule/content/commonRepository/partRepository//@unitOfMeasure</objectPath><objectUse>The attribute \"unitOfMeasure\" can only have codes allowed by ATA Spec 2000.</objectUse><objectValue valueAllowed=\"EA\" valueForm=\"single\">Each</objectValue><objectValue valueAllowed=\"KG\" valueForm=\"single\">Kilogram</objectValue></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule judges the examples as they expect"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "\"schema\": \"comrep\"",
+          "note": "the examples use comrep"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "@unitOfMeasure goes on: <unitOfIssueQualificationSegment> \\(1\\)\\.",
+          "note": "the carriers below <partRepository>"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "partRepository/partSpec/techData/unitOfIssueQualificationSegment",
+          "note": "and the way down to it"
+        },
+        {
+          "type": "rule_test_some_example_runs",
+          "note": "at least one example runs"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-gmc-unknown-context-schema",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "GMC pass, BRDP-EXT-00154: a context block pointing to scormContentPackage.xsd, which is not an S1000D 4.2 schema (scormcontentpackage.xsd is). Before: an exception. Now 'not executable' with the reason, before any LLM call.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-GMC154",
+        "title": "SCORM content package module",
+        "definition": "Decide whether the SCORM content package module is used.",
+        "proposal": "The SCORM content package module shall not be used.",
+        "validation": "Validated"
+      },
+      "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/scormContentPackage.xsd\"><structureObjectRuleGroup><structureObjectRule id=\"BRDP-EVAL-RT-GMC154\"><objectPath allowedObjectFlag=\"0\">/dmodule</objectPath><objectUse>The scorm content package module shall not be used.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "checks": [
+        {
+          "type": "rule_test_not_executable",
+          "pattern": "points to scormContentPackage\\.xsd, which is not one of the S1000D 4\\.2 schemas \\(scormcontentpackage\\.xsd is, written in lower case\\)",
+          "note": "not executable with the reason, no LLM call"
+        }
+      ]
     }
   ]
 }

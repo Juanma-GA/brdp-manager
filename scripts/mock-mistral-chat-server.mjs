@@ -301,7 +301,8 @@ function isRuleTest(text) {
 // the prompt quotes and change what the rule looks at (@infoCode,
 // @issueType, the responsible partner company, applic / applicRef,
 // @assyCode -- the Lufthansa S1-00052/53/70/316/338 cases).
-function metadataReply(systemPrompt, rule, answer) {
+const lastUserOf = (messages) => [...(messages || [])].reverse().find((m) => m.role === "user")?.content || "";
+function metadataReply(systemPrompt, rule, answer, messages = []) {
   const element = (systemPrompt.match(/your "metadata" is the WHOLE <([\w-]+)>/) || [])[1];
   if (!element) return null;
   // Condiciones con raíz absoluta, y cabecera de pm/ddn/dml (BRDP-EXT-00029,
@@ -429,6 +430,18 @@ function metadataReply(systemPrompt, rule, answer) {
   if (/@assyCode/.test(rule)) {
     const dmRef = (assy) => `See <dmRef><dmRefIdent><dmCode modelIdentCode="EXAMPLE" systemDiffCode="A" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="${assy}" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/></dmRefIdent></dmRef>.`;
     return answer([ex("Two-character codes", "accept", base, dmRef("01")), ex("Four characters in a reference", "reject", base, dmRef("0301")), ex("Three characters in the own code", "reject", ownCode("assyCode", "001"), dmRef("01"))]);
+  }
+  if (/\/\/@commercialClassification/.test(rule)) {
+    // GMC EXT-00037: the first answer puts cc99 on <language>, which has no
+    // such attribute (the real run); the correction round -- which now
+    // carries where @commercialClassification goes -- moves it to a
+    // <changeInline> in the content.
+    const fixed = /@commercialClassification goes on:/.test(lastUserOf(messages));
+    const inline = (cc) => `Torque the bolts to <changeInline commercialClassification="${cc}">10 N.m</changeInline>.`;
+    return answer([
+      ex("COC-marked torque value", "accept", base, inline("cc51")),
+      fixed ? ex("Other commercial classification", "reject", base, inline("cc99")) : ex("Other commercial classification", "reject", base.replace("<language ", '<language commercialClassification="cc99" '), "Torque the bolts to 10 N.m."),
+    ]);
   }
   return null;
 }
@@ -641,7 +654,44 @@ function ruleTestReply(systemPrompt, messages) {
   // notes file an unknown root (<notes>); the correction round, which names
   // that file, gives it a real <topic>.
   if (/each example is a DOSSIER/.test(systemPrompt)) return answer(dossierExamples(rule, correcting, lastUser));
-  const metadata = metadataReply(systemPrompt, rule, answer);
+  // GMC (pasada «Official Default GMC ATA - 1000BR 4.2 - 015»), Part 1.
+  // EXT-00022: like the real run, without the VALUES block the values are
+  // written as the objectValue's text ("One-Way"); with it, as
+  // @valueAllowed ("1").
+  if (/\/\/interchangeability</.test(rule)) {
+    const legend = /VALUES: in this rule, the value of each <objectValue> is its @valueAllowed/.test(systemPrompt);
+    const csn = (value) => `<catalogSeqNumber><itemSeqNumber><applicabilitySegment><interchangeability>${value}</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
+    return answer([
+      { label: "One-way interchangeable part", expected: "accept", schema: ruleSchema, content: csn(legend ? "1" : "One-Way") },
+      { label: "Code not allowed by ATA Spec 2000", expected: "reject", schema: ruleSchema, content: csn(legend ? "3" : "Three-Way") },
+    ]);
+  }
+  // EXT-00057: @pmType only goes on the <pm> root -- the values go in
+  // "rootAttributes" when the prompt asks for them (never in a content).
+  if (/\/\/@pmType</.test(rule)) {
+    const schema = (systemPrompt.match(/every example uses the "([\w-]+)" schema/) || [])[1] || "pm";
+    if (!/"rootAttributes"/.test(systemPrompt)) {
+      return answer([
+        { label: "Publication of type pt02", expected: "accept", schema, content: '<pmEntry pmType="pt02"/>' },
+        { label: "Publication of type pt09", expected: "reject", schema, content: '<pmEntry pmType="pt09"/>' },
+      ]);
+    }
+    return answer([
+      { label: "Publication of type pt02", expected: "accept", schema, rootAttributes: { pmType: "pt02" } },
+      { label: "Publication of type pt09", expected: "reject", schema, rootAttributes: { pmType: "pt09" } },
+    ]);
+  }
+  // EXT-00107: //…/partRepository//@unitOfMeasure -- the carrier the prompt
+  // names, along the way it gives from <commonRepository>.
+  if (/partRepository\/\/@unitOfMeasure/.test(rule)) {
+    const part = (unit) => `<partRepository><partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><techData><unitOfIssueQualificationSegment unitOfMeasure="${unit}"/></techData></partSpec></partRepository>`;
+    const way = /partRepository\/partSpec\/techData\/unitOfIssueQualificationSegment/.test(systemPrompt);
+    return answer([
+      { label: "Bolts issued by each", expected: "accept", schema: ruleSchema, content: way ? part("EA") : '<partRepository unitOfMeasure="EA"/>' },
+      { label: "Bolts issued by pound", expected: "reject", schema: ruleSchema, content: way ? part("LB") : '<partRepository unitOfMeasure="LB"/>' },
+    ]);
+  }
+  const metadata = metadataReply(systemPrompt, rule, answer, messages);
   if (metadata) return metadata;
   // T4, DITA Schematron: the topic type the prompt offers; the examples
   // follow the rule's context (step, the document root, or note).

@@ -260,6 +260,19 @@
 // dita-xpath2-dossier-safety-topic) gain the "WHERE THE RULE LOOKS" block,
 // quoting the rule's expressions on the dossier's files. Only these two
 // change; every other prompt is identical.
+//
+// GMC (valores, atributos y casos no ejecutables): the four rules that check
+// an attribute on its own (//@x) gain, on purpose, where that attribute goes
+// -- "@x goes on: <a>, <b> (N)" and the valid way to the nearest carrier
+// (Part 1.2): ruleTestExamples/brex-4-2-value-list and
+// brex-4-2-value-list-previous-review (//@emphasisType), brex-4-2-metadata-
+// and-content-assycode (//@assyCode[…]) and brex-4-2-attribute-only-material-
+// usage (//@materialUsage). New cases with the real GMC rules: EXT-00022
+// (VALUES block: the value is @valueAllowed, Part 1.1; also in
+// ruleProposalCheck), EXT-00037 (84 carriers, cut at 20), EXT-00057
+// ("rootAttributes", Part 1.3), EXT-00079 (carrier in the identification
+// and status section) and EXT-00107 (X//@a, Part 1.4). Every other prompt
+// is identical.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

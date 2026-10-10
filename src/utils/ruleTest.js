@@ -29,7 +29,7 @@ import {
   formatStructureProblem,
   removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
-import { SKELETON_TEXT_SUFFIX, assembleExample, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
+import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { placeSentence, relocateMisplacedElements, relocateToOnlyParent } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
 import {
@@ -116,7 +116,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   const rule = setup.rule;
   if (rule?.names?.length && entry.structure?.elements) {
     const decides = (content, metadata) => {
-      const { xml } = assembleExample({ standard: setup.standard, schema, schemaLocation: setup.schemaLocation, placement: entry.placement, content, metadata });
+      const { xml } = assembleExample({ standard: setup.standard, schema, schemaLocation: setup.schemaLocation, placement: entry.placement, content, metadata, rootAttributes: adjusted.rootAttributes || null });
       if (!xml) return null;
       const r = runRuleOnFragment(rule.ruleXml, rule.format, xml, schema, { parseXml, schemaLocation: setup.schemaLocation });
       return JSON.stringify([r.status, r.selectedNodePaths.length, (r.conditions || []).map((c) => c.holds), (r.violations || []).length]);
@@ -157,13 +157,15 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     adjusted.brexReferenceNormalized = normalized.changed && !normalized.shared;
     if (normalized.shared) adjusted.brexModelIdentFollowed = true;
   }
-  const { xml, skeletonNodePaths, insertionPath } = assembleExample({
+  const { xml, skeletonNodePaths, insertionPath, rootAttributeProblems } = assembleExample({
     standard: setup.standard,
     schema,
     schemaLocation: setup.schemaLocation,
     placement: entry.placement,
     content: adjusted.content,
     metadata,
+    // GMC, Part 1.3: the values the example gives for the root's attributes.
+    rootAttributes: adjusted.rootAttributes || null,
   });
   const missingMetadata =
     section?.insertion && entry.placement.path.length > 0 && !String(example.metadata || '').trim() ? section.element : null;
@@ -188,6 +190,10 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     // nothing in it is the LLM's, so nothing can be edited.
     rootOnly: entry.placement.rootOnly === true,
     missingMetadata,
+    rootAttributeProblems: rootAttributeProblems || [],
+    // GMC, Part 1.3: the attributes this example may give for the root
+    // (the panel's editor for them).
+    rootAttributeNames: (entry.placement.rootAttributes || []).map((r) => r.attribute),
   };
 }
 
@@ -221,6 +227,8 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
       : []),
     ...checkCalsColspecs(doc),
     ...checkCalsTableSpans(doc),
+    // GMC, Part 1.3: a "rootAttributes" name the application never writes.
+    ...(options.rootAttributeProblems || []),
   ];
   return {
     wellFormed: true,
@@ -334,13 +342,17 @@ const PLAIN_TEXT_HINT = 'If this element is not needed to test the rule, remove 
 // Dosier, Part 2: `files` ([{ path, content }]) replaces the dossier's other
 // files (one edited file, the rest as they were).
 const filesText = (files) => JSON.stringify((files || []).map((f) => [f.path, f.content]));
-export function editExample(current, content, metadata, setup, parseXml = parseXmlDocument, files = undefined) {
+const rootAttributesText = (attrs) => JSON.stringify(attrs || {});
+export function editExample(current, content, metadata, setup, parseXml = parseXmlDocument, files = undefined, rootAttributes = undefined) {
   const generated = current.generated || {
     content: current.content,
     metadata: current.metadata ?? null,
     ...(Array.isArray(current.files) ? { files: current.files.map((f) => ({ path: f.path, content: f.content })) } : {}),
+    // GMC, Part 1.3: the root's attribute values the generation gave.
+    rootAttributes: current.rootAttributes || null,
   };
   const edited = { ...current, content, generated };
+  if (rootAttributes !== undefined) edited.rootAttributes = rootAttributes;
   if (files !== undefined) edited.files = files.map((f) => ({ path: f.path, content: f.content }));
   else if (Array.isArray(current.files)) edited.files = current.files.map((f) => ({ path: f.path, content: f.content }));
   const filesChanged = files !== undefined && filesText(files) !== filesText(current.files);
@@ -350,6 +362,7 @@ export function editExample(current, content, metadata, setup, parseXml = parseX
   if (metadata !== undefined) edited.metadata = metadata;
   edited.editedByUser =
     edited.content !== generated.content ||
+    rootAttributesText(edited.rootAttributes) !== rootAttributesText(generated.rootAttributes) ||
     (edited.metadata ?? null) !== generated.metadata ||
     (generated.files !== undefined && filesText(edited.files) !== filesText(generated.files));
   return materializeExample(edited, setup, parseXml);
@@ -428,8 +441,11 @@ function sectionPlaceHint(problem, places) {
   return `In this section <${problem.element}> goes inside <${path[path.length - 2]}> (${path.join('/')}), as in the minimal section; do not repeat it elsewhere`;
 }
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, places: rulePlaces = [] } = {}) {
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, places: rulePlaces = [], carriers = [], rootAttributes = [] } = {}) {
   const places = sectionTree ? minimalSectionPlaces(sectionTree) : null;
+  // GMC, Part 1.3: an attribute given for the root is never "markup of an
+  // element the rule does not name": no plain-text hint for it.
+  const rootElements = new Set(rootAttributes.map((r) => r.element));
   const ruleElements = new Set(ruleNames?.elements || []);
   const ruleAttributes = new Set(ruleNames?.attributes || []);
   const offer = (line, element, alsoAttribute = false) =>
@@ -465,11 +481,22 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     // Mejoras C, Part 2: an element the rule names, put where the schema
     // does not allow it -- the same "goes inside" sentence as the prompt.
     const rulePlace = p.kind === 'notAllowed' ? rulePlaces.find((x) => x.element === p.element) : null;
+    // GMC, Part 1.2: an attribute the rule checks, put on an element that
+    // does not carry it -- the elements that do, and the way to the nearest.
+    const carrier = p.kind === 'unknownAttribute' ? carriers.find((c) => c.attribute === p.attribute) : null;
+    if (carrier) {
+      out.push(`${formatStructureProblem(p, schema)}. ${attributeCarrierLines(carrier).join(' ')}`);
+      continue;
+    }
     if (rulePlace) {
       out.push(`${formatStructureProblem(p, schema)}. ${placeSentence(rulePlace)}`);
       continue;
     }
     const element = ['unknownElement', 'notAllowed', 'unknownAttribute'].includes(p.kind) ? p.element : null;
+    if (p.kind === 'unknownAttribute' && rootElements.has(p.element)) {
+      out.push(formatStructureProblem(p, schema));
+      continue;
+    }
     out.push(offer(formatStructureProblem(p, schema), element));
   }
   for (const card of validation.cards || []) out.push(formatElementCard(card, schema));
@@ -495,6 +522,7 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
   const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, {
     unknownSchema,
     missingMetadata: example.missingMetadata || null,
+    rootAttributeProblems: example.rootAttributeProblems || [],
   });
   // Dosier, Part 2: every file of the example's dossier is validated with
   // the structure of its own type; a problem in any of them (or in the
@@ -587,7 +615,9 @@ export function rejectionDetails(example, result) {
   if (paths.length === 0) return null;
   const skeleton = new Set((example.skeletonNodePaths || []).filter((p) => !p.endsWith('/text()')));
   if (example.insertionPath) skeleton.delete(example.insertionPath);
-  const appBuilt = (p) => example.minimalDocument === true || skeleton.has(p.replace(/\/@[^/]+$/, ''));
+  // GMC, Part 1.3: an attribute the example gave for the root is its own.
+  const appBuilt = (p) =>
+    example.minimalDocument === true || (!skeleton.has(`${CONTENT_NODE_MARK}${p}`) && skeleton.has(p.replace(/\/@[^/]+$/, '')));
   return {
     nodes: paths.slice(0, REJECTION_SHOWN),
     more: Math.max(0, paths.length - REJECTION_SHOWN),
@@ -874,8 +904,11 @@ export function xmlDisplayLines(xml, selectedNodePaths = [], parseXml = parseXml
     const sk = skeleton.has(path);
     const segments = [{ text: `<${el.nodeName}`, highlight: hl, skeleton: sk }];
     for (const a of Array.from(el.attributes || [])) {
-      segments.push({ text: ' ', highlight: false, skeleton: sk });
-      segments.push({ text: `${a.name}="${escAttr(a.value)}"`, highlight: selected.has(nodePath(a)), skeleton: sk });
+      // GMC, Part 1.3: an attribute the example gave for the root is shown as
+      // the example's content, not dimmed with the skeleton.
+      const own = skeleton.has(`${CONTENT_NODE_MARK}${nodePath(a)}`);
+      segments.push({ text: ' ', highlight: false, skeleton: sk && !own });
+      segments.push({ text: `${a.name}="${escAttr(a.value)}"`, highlight: selected.has(nodePath(a)), skeleton: sk && !own });
     }
     segments.push({ text: selfClose ? '/>' : '>', highlight: hl, skeleton: sk });
     return segments;

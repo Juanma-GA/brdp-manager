@@ -16,7 +16,7 @@ from pathlib import Path
 from app.services.rule_test_skeletons import get_schema_structure
 
 _REQUESTS = [
-    ("S1000D 4.2", ["descript", "proced", "process", "fault", "ipd", "pm", "sb", "ddn", "dml", "comment", "schedul"]),
+    ("S1000D 4.2", ["descript", "proced", "process", "fault", "ipd", "pm", "sb", "ddn", "dml", "comment", "schedul", "comrep"]),
     ("S1000D 4.1", ["descript", "proced", "update", "ipd", "schedul"]),
     ("S1000D 3.0.1", ["descript", "proced", "pm", "ddn", "schedul"]),
     # T4: DITA topic types (the XPath 3.0 standard has the same graphs).

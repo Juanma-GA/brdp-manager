@@ -223,13 +223,26 @@ async function splitByRelation({ ruleXml, targets, cards, elementSchemas, testSc
   return { parts };
 }
 
+// GMC, Part 2.1: the reason for a context block whose schema the standard
+// does not have: the file its URL names, and the document schema with the
+// same name in other capitals, if any (scormcontentpackage).
+function unknownContextReason({ schema, url }, documentSchemas, standard) {
+  const file = (/([^/\\]+)$/.exec(url) || [null, url])[1];
+  const similar = documentSchemas.find((d) => d !== schema && d.toLowerCase() === String(schema).toLowerCase()) || null;
+  return {
+    code: 'context_schema_unknown',
+    params: { schema, file, standard, similar: similar ? file.replace(schema, similar) : null },
+  };
+}
+
 // The schemas the examples use and where each takes the LLM's content.
 // acceptOnly (Mejoras E, Part 1.4): the schema already rules out what the
 // rule forbids (schemaCoverage.js) -- only examples meant to be accepted are
 // written, so the relation split (one example inside, one outside) is not
 // needed: the "outside" example cannot exist.
 export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly = false, format = null, parseXml = parseXmlDocument }) {
-  const contextSchemas = contextSchemasOfRule(ruleXml, schemaLocation).schemas;
+  const contextInfo = contextSchemasOfRule(ruleXml, schemaLocation);
+  let contextSchemas = contextInfo.schemas;
   // Mejoras F, Part 1.3: absolute paths the checked step's condition needs
   // (BREX only; Schematron DITA unchanged).
   const conditionRequirements = format && format.startsWith('BREX') ? absoluteConditionRequirements(ruleXml, format, { parseXml, schemaLocation }) : [];
@@ -264,6 +277,29 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     // no facts
   }
   const schemaFacts = factNames.filter((n) => cards[n]).map((name) => ({ name, entry: cards[name] }));
+  const notExecutable = (reason, untested = []) => ({
+    contextSchemas,
+    schemaFacts,
+    promptPlacements: [],
+    untested,
+    unreachable: reason,
+    setup: { standard, schemaLocation, placements: {}, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
+  });
+  // GMC, Part 2.1: a context block whose schema is not one of the
+  // standard's document schemas (exact comparison, as a validator compares
+  // the URL: scormContentPackage.xsd is not scormcontentpackage.xsd) never
+  // applies -- said before any LLM call. Every block like that: the rule
+  // is not executable; some: those blocks are not tested, and the result
+  // says so. Without the document schemas (cards not loaded) nothing is
+  // judged.
+  const unknownContexts = documentSchemas.length
+    ? contextInfo.urls.filter((u) => !documentSchemas.includes(u.schema)).map((u) => unknownContextReason(u, documentSchemas, standard))
+    : [];
+  if (unknownContexts.length > 0) {
+    if (unknownContexts.length === contextSchemas.length) return notExecutable(unknownContexts[0]);
+    contextSchemas = contextSchemas.filter((s) => documentSchemas.includes(s));
+  }
+  const unknownContextNotes = unknownContexts.map((reason) => ({ schema: reason.params.schema, kind: 'context_unknown', reason }));
   const attributeSchemas = await attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, elementSchemas);
   const { testSchema, otherSchema, groups, candidates, noConditionSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets, conditionRequirements });
   if (noConditionSchema) {
@@ -306,7 +342,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   // …): that schema is not offered -- the examples could only be invalid
   // (Mistral put <pmStatus> inside <content> before the pm had a section) --
   // and the result says which part was not tested and why.
-  const untested = [];
+  const untested = [...unknownContextNotes];
   // One schema per part of the rule (groups), or the test schema and, for
   // a context-scoped rule, the "does not apply" one.
   const wanted = split
@@ -401,6 +437,12 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     };
   }
   if (promptPlacements.length === 0) throw new Error(`No schema structure is available for ${standard}.`);
+  // GMC, Part 2.1: no structure for the schema the rule is tested on (only
+  // the "does not apply" one was built): a reason, never a crash further on.
+  if (!promptPlacements.some((p) => p.role === 'rule')) {
+    const schemas = [...new Set(wanted.filter((w) => w.role === 'rule' && w.schema).map((w) => w.schema))];
+    return notExecutable({ code: 'test_schema_unavailable', params: { schemas: schemas.join(', '), standard } }, untested);
+  }
   // Rule test on DM metadata, Part 3: when nothing the examples of the test
   // schema(s) can contain is on any path of the rule, no example can ever
   // show it working -- said now, before any LLM call, instead of an
@@ -408,7 +450,16 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   const rulePlacements = promptPlacements.filter((p) => p.role === 'rule');
   const unreachable =
     rulePlacements.length > 0 && rulePlacements.every((p) => p.unreachable)
-      ? { code: 'unreachable_target', params: { names: [...new Set(rulePlacements.flatMap((p) => p.unreachable))].join(', ') } }
+      ? {
+          code: 'unreachable_target',
+          params: {
+            names: [...new Set(rulePlacements.flatMap((p) => p.unreachable))].join(', '),
+            // GMC, Part 2.3: "in the comment schema the root is <comment>".
+            ...(rulePlacements.some((p) => p.rootMismatch)
+              ? { roots: rulePlacements.filter((p) => p.rootMismatch).map((p) => ({ schema: p.schema, root: p.rootMismatch })) }
+              : {}),
+          },
+        }
       : null;
   // Barrido final 1/2: a rule that looks at tables gets a model table with a
   // merged row in the prompt, built from the first test schema's structure.
@@ -728,6 +779,8 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             // every element of the rule, also those its own path places (the
             // prompt leaves those out): the example still put one elsewhere
             places: correctionPlaces(setup?.placements?.[materialized[index].schema], ruleNames.elements),
+            carriers: setup?.placements?.[materialized[index].schema]?.placement?.attributeCarriers || [],
+            rootAttributes: setup?.placements?.[materialized[index].schema]?.placement?.rootAttributes || [],
           });
       if (problems.length > 0 && !missing && keep && examples[index].expected === 'reject') problems.push(keep);
       return { index, label: examples[index].label, problems };
@@ -978,7 +1031,13 @@ export async function generateRuleTestExamples({
     }
     // The schemas whose examples the application builds whole (rootOnly):
     // their examples come with no "content".
-    const parseOptions = { contentOptionalSchemas: prepared.promptPlacements.filter((p) => p.rootOnly).map((p) => p.schema), dossier: dossierRule };
+    // GMC, Part 1.3: and those whose examples only give "rootAttributes".
+    const parseOptions = {
+      contentOptionalSchemas: prepared.promptPlacements
+        .filter((p) => p.rootOnly || (p.contentInsertion === false && !p.metadata?.insertion))
+        .map((p) => p.schema),
+      dossier: dossierRule,
+    };
     // With the schema already covering the rule there is no "correct" to
     // turn into "review": the Proposal check is not asked.
     let checkSettled = false;
@@ -1048,7 +1107,7 @@ export async function generateRuleTestExamples({
       try {
         onStep({ step: 'correcting', count: failures.length });
         const again = await ask(
-          [...first, { role: 'assistant', content: answer }, { role: 'user', content: buildRuleTestCorrectionMessage(failures, { dossier: dossierRule }) }],
+          [...first, { role: 'assistant', content: answer }, { role: 'user', content: buildRuleTestCorrectionMessage(failures, { dossier: dossierRule, rootAttributes: prepared.promptPlacements.some((p) => (p.rootAttributes || []).length > 0) }) }],
           systemPrompt
         );
         responses.push(again);

@@ -436,6 +436,11 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
   // Rule test on DM metadata: the identification and status section the
   // LLM wrote, editable like the content.
   const [metadataDraft, setMetadataDraft] = useState(example.metadata || '');
+  // GMC, Part 1.3: the root's attribute values, edited as JSON.
+  const rootAttributesJson = () => JSON.stringify(example.rootAttributes || {}, null, 2);
+  const [rootDraft, setRootDraft] = useState(rootAttributesJson);
+  const [rootDraftError, setRootDraftError] = useState(null);
+  const editsRoot = (example.rootAttributeNames || []).length > 0;
   const [copied, setCopied] = useState(false);
   const result = run.result;
   const tone = !result || result.status === 'not_executable' ? 'warn' : result.status === 'accepted' ? 'ok' : 'bad';
@@ -590,10 +595,39 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
               </p>
             </>
           )}
+          {editsRoot && (
+            <>
+              <textarea
+                className={styles.ruleTestEditor}
+                value={rootDraft}
+                onChange={(e) => {
+                  setRootDraft(e.target.value);
+                  setRootDraftError(null);
+                }}
+                spellCheck={false}
+                rows={Math.min(8, Math.max(3, rootDraft.split('\n').length + 1))}
+                data-testid="rule-test-root-attributes-editor"
+              />
+              <p className={styles.hint}>{t('records.ruleTest.editRootAttributesHint', { root: example.xml ? rootName(example.xml) : example.schema })}</p>
+              {rootDraftError && (
+                <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-root-attributes-error">
+                  {rootDraftError}
+                </p>
+              )}
+            </>
+          )}
           <div className={styles.suggestionActions}>
             <button
               onClick={() => {
-                onRunAgain(draft, example.metadataElement ? metadataDraft : undefined);
+                let rootAttributes;
+                if (editsRoot) {
+                  rootAttributes = parseRootAttributesDraft(rootDraft);
+                  if (!rootAttributes) {
+                    setRootDraftError(t('records.ruleTest.rootAttributesInvalid'));
+                    return;
+                  }
+                }
+                onRunAgain(draft, example.metadataElement ? metadataDraft : undefined, undefined, rootAttributes);
                 setEditing(false);
               }}
             >
@@ -603,6 +637,8 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
               onClick={() => {
                 setDraft(example.content);
                 setMetadataDraft(example.metadata || '');
+                setRootDraft(rootAttributesJson());
+                setRootDraftError(null);
                 setEditing(false);
               }}
             >
@@ -635,6 +671,8 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
                 onClick={() => {
                   setDraft(example.content);
                   setMetadataDraft(example.metadata || '');
+                  setRootDraft(rootAttributesJson());
+                  setRootDraftError(null);
                   setEditing(true);
                 }}
               >
@@ -713,6 +751,22 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
   );
 }
 
+// GMC, Part 1.3: { name: "value" } from the editor's JSON, or null.
+function parseRootAttributesDraft(text) {
+  try {
+    const value = JSON.parse(text || '{}');
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (!['string', 'number', 'boolean'].includes(typeof v)) return null;
+      out[k.trim()] = String(v);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 const rootName = (xml) => (/<([A-Za-z_][\w.-]*)/.exec(String(xml).replace(/<\?[\s\S]*?\?>/g, '')) || [])[1] || '';
 
 // Parts of the rule the examples could not test: the document they look
@@ -722,7 +776,10 @@ function UntestedNote({ untested }) {
   if (!untested || untested.length === 0) return null;
   return untested.map((u) => (
     <p key={u.schema} className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-untested">
-      ⚠ {t('records.ruleTest.untestedPart', { names: u.names.join(', '), schema: u.schema, element: u.element })}
+      ⚠{' '}
+      {u.kind === 'context_unknown'
+        ? t('records.ruleTest.untestedContext', { reason: formatRuleTestReason(u.reason, t) })
+        : t('records.ruleTest.untestedPart', { names: u.names.join(', '), schema: u.schema, element: u.element })}
     </p>
   ));
 }
@@ -1088,7 +1145,7 @@ export default function RuleTestPanel({
               standard={standard}
               dita={format === 'SCH-DITA'}
               showResult={showResults}
-              onRunAgain={(content, metadata, files) => runAgain(i, content, metadata, files)}
+              onRunAgain={(content, metadata, files, rootAttributes) => runAgain(i, content, metadata, files, rootAttributes)}
             />
           ))}
         </>

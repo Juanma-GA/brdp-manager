@@ -3189,5 +3189,158 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('MB5 Schematron format rules unchanged (no per-requirement line)', !/per requirement/.test(sch));
 }
 
+// ---- GMC (pasada «Official Default GMC ATA - 1000BR 4.2 - 015»): values,
+// attributes and cases that cannot be tested. The real rules of the pass,
+// on the real structures and cards (no special case by identifier).
+{
+  const { ruleValueLegend } = await import('../src/prompts/shared.js');
+  const { buildRuleTestExamplesPrompt, buildRuleTestCorrectionMessage } = await import('../src/prompts/ruleTestExamplesPrompt.js');
+  const { buildRuleProposalCheckPrompt } = await import('../src/prompts/ruleProposalCheckPrompt.js');
+  const { ruleTestVerdict, runExample, materializeExample, xmlDisplayLines, rejectionDetails } = await import('../src/utils/ruleTest.js');
+  const S42 = 'S1000D 4.2';
+  const cards42 = JSON.parse(fs.readFileSync(new URL('../backend/schema_cards/schema-cards-4-2.json', import.meta.url))).cards;
+  const docs42 = [...new Set(Object.values(cards42).flatMap((vs) => vs.flatMap((v) => v.schemas)))].filter((s) => !['dc', 'rdf', 'xlink', 'xcf'].includes(s)).sort();
+  const io = {
+    fetchSchemaCards: async (_s, names) => ({ cards: Object.fromEntries(names.filter((n) => cards42[n]).map((n) => [n, { variants: cards42[n] }])), document_schemas: docs42 }),
+    fetchStructure: async (std, schema) => {
+      const st = structureOf(std, schema);
+      return st ? { available: true, ...st } : { available: false };
+    },
+    fetchSchemaAttribute: async (_s, name) => {
+      const owners = [];
+      for (const [element, vs] of Object.entries(cards42)) for (const v of vs) if ((v.attributes || []).some((a) => a.name === name)) owners.push({ element, schemas: v.schemas });
+      return { available: true, owners };
+    },
+  };
+  const voc42 = { elements: vocabulary.elements, attributes: vocabulary.attributes };
+  const brdpOf = (identifier, proposal) => ({ identifier, title: identifier, definition: 'Decide.', proposal });
+  const run = async (ruleXml, answers, extra = {}) => {
+    const asked = [];
+    let prompt = null;
+    const result = await generateRuleTestExamples({
+      ruleXml, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat', brdp: brdpOf('GMC', 'p'), vocabulary: voc42,
+      ask: async (messages) => { asked.push(messages); return JSON.stringify(answers[Math.min(asked.length - 1, answers.length - 1)]); },
+      onPrompt: (p) => { prompt = p; }, ...io, parseXml, ...extra,
+    });
+    const verdict = result?.examples ? ruleTestVerdict(result.examples, result.runs, analyzeRule(ruleXml, 'BREX-4.2', { parseXml })) : null;
+    return { result, asked, prompt, verdict };
+  };
+
+  const EXT22 = '<structureObjectRule><objectPath allowedObjectFlag="2">//interchangeability</objectPath><objectUse>The element "interchangeability" can only have codes allowed by ATA Spec 2000.</objectUse><objectValue valueAllowed="1" valueForm="single">One-Way</objectValue><objectValue valueAllowed="2" valueForm="single">Two-Way</objectValue></structureObjectRule>';
+  const EXT37 = '<structureObjectRule><objectPath allowedObjectFlag="2">//@commercialClassification</objectPath><objectUse>The attribute "commercialClassification" can only have code "cc51".</objectUse><objectValue valueForm="single" valueAllowed="cc51">COC marking</objectValue></structureObjectRule>';
+  const EXT107 = '<structureObjectRule><objectPath allowedObjectFlag="2">/dmodule/content/commonRepository/partRepository//@unitOfMeasure</objectPath><objectUse>The attribute "unitOfMeasure" can only have codes allowed by ATA Spec 2000.</objectUse><objectValue valueAllowed="EA" valueForm="single">Each</objectValue><objectValue valueAllowed="KG" valueForm="single">Kilogram</objectValue></structureObjectRule>';
+  const EXT154 = '<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/scormContentPackage.xsd"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">/dmodule</objectPath><objectUse>The scorm content package module shall not be used.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>';
+  const EXT57 = '<structureObjectRule><objectPath allowedObjectFlag="2">//@pmType</objectPath><objectUse>The attribute "pmType" can only have codes "pt01" thru "pt03".</objectUse><objectValue valueAllowed="pt01" valueForm="single">Component Maintenance Publication</objectValue><objectValue valueAllowed="pt02" valueForm="single">x</objectValue><objectValue valueAllowed="pt03" valueForm="single">y</objectValue></structureObjectRule>';
+  const EXT29 = '<structureObjectRule><objectPath allowedObjectFlag="0">/dmodule/rdf:Description</objectPath><objectUse>rdf and dc metadata are not allowed.</objectUse></structureObjectRule>';
+  const EXT79 = '<structureObjectRule><objectPath allowedObjectFlag="2">//@updateReasonType</objectPath><objectUse>The attribute "updateReasonType" can only have codes "urt01" or "urt02".</objectUse><objectValue valueAllowed="urt01" valueForm="single"/><objectValue valueAllowed="urt02" valueForm="single"/></structureObjectRule>';
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+
+  // 1.1 Values with text: the VALUES block, only then.
+  const legend = ruleValueLegend(EXT22);
+  check('GMC 1.1: value legend says the value is @valueAllowed', /VALUES: in this rule, the value of each <objectValue> is its @valueAllowed/.test(legend) && /"1" \(One-Way\), "2" \(Two-Way\)/.test(legend), legend);
+  check('GMC 1.1: no text in any objectValue -> no legend', ruleValueLegend(EXT79) === '' && ruleValueLegend('<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath></structureObjectRule>') === '');
+  check('GMC 1.1: 3.0.1 objval -> @val1', /@val1/.test(ruleValueLegend('<objrule><objpath>//x/@y</objpath><objval valtype="single" val1="a">Alpha</objval></objrule>')));
+  const checkPrompt = buildRuleProposalCheckPrompt({ brdp: brdpOf('BRDP-EXT-00022', 'codes 1 and 2'), standard: S42, format: 'BREX-4.2', ruleXml: EXT22, ruleDescription: '- x' });
+  check('GMC 1.1: the Proposal check gets the same legend', checkPrompt.includes(legend.trim()));
+  const ext22 = await run(EXT22, [{ examples: [
+    { label: 'one-way', expected: 'accept', schema: 'ipd', content: '<catalogSeqNumber><itemSeqNumber><applicabilitySegment><interchangeability>1</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>' },
+    { label: 'other code', expected: 'reject', schema: 'ipd', content: '<catalogSeqNumber><itemSeqNumber><applicabilitySegment><interchangeability>3</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>' },
+  ] }]);
+  check('GMC 1.1: EXT-00022 prompt has the VALUES block', ext22.prompt?.includes('"1" (One-Way), "2" (Two-Way)'));
+  check('GMC 1.1: EXT-00022 examples 1 / 3 -> correct', ext22.verdict?.kind === 'correct', JSON.stringify(ext22.verdict));
+
+  // 1.2 Where the attribute goes: EXT-00037 (84 carriers), EXT-00079 (in the section).
+  // The rule also looks at the section (<security> carries it), so every
+  // example writes it -- starting from the minimal one.
+  const section37 = metadataXml(structureOf(S42, 'descript').skeleton.metadata.tree).xml;
+  const ext37 = await run(EXT37, [
+    { examples: [
+      { label: 'cc51', expected: 'accept', schema: 'descript', content: 'Torque <changeInline commercialClassification="cc51">10</changeInline>.', metadata: section37 },
+      { label: 'cc99 on language', expected: 'reject', schema: 'descript', content: 'Text.', metadata: section37.replace('<language ', '<language commercialClassification="cc99" ') },
+    ] },
+    { examples: [
+      { label: 'cc51', expected: 'accept', schema: 'descript', content: 'Torque <changeInline commercialClassification="cc51">10</changeInline>.', metadata: section37 },
+      { label: 'cc99 on language', expected: 'reject', schema: 'descript', content: 'Torque <changeInline commercialClassification="cc99">10</changeInline>.', metadata: section37 },
+    ] },
+  ]);
+  check('GMC 1.2: EXT-00037 prompt lists the carriers, cut at 20', /@commercialClassification goes on: (<\w+>, ){20}\+64 more \(84\)\./.test(ext37.prompt || ''), (ext37.prompt || '').match(/@commercialClassification goes on:.*/)?.[0]);
+  check('GMC 1.2: EXT-00037 prompt gives the way to the nearest', /The valid way to the nearest, <\w+>, from <para>: para\/\w+\./.test(ext37.prompt || ''));
+  const correction37 = ext37.asked[1]?.at(-1)?.content || '';
+  check('GMC 1.2: on <language> -> the correction brings the list and the way', /@commercialClassification does not exist on <language>\. @commercialClassification goes on: .*\(84\)\. The valid way to the nearest/.test(correction37), correction37);
+  check("GMC 1.2: EXT-00037 after the correction -> correct", ext37.verdict?.kind === "correct", JSON.stringify(ext37.verdict) + JSON.stringify(ext37.result.runs.map((r) => [r.result?.status, r.validation.runnable, r.validation.structure])));
+  const setup79 = await prepareRuleTestSetup({ ruleXml: EXT79, standard: S42, schemaLocation: 'flat', format: 'BREX-4.2', parseXml, ...io });
+  const prompt79 = buildRuleTestExamplesPrompt({ brdp: brdpOf('BRDP-EXT-00079', 'urt01 or urt02'), standard: S42, format: 'BREX-4.2', ruleXml: EXT79, placements: setup79.promptPlacements });
+  check('GMC 1.2: EXT-00079 lists <reasonForUpdate> and the way from dmStatus', prompt79.includes('@updateReasonType goes on: <reasonForUpdate> (1).') && prompt79.includes('identAndStatusSection/dmStatus/reasonForUpdate') && prompt79.includes('<reasonForUpdate> goes inside <dmStatus>'), prompt79.match(/@updateReasonType[\s\S]{0,300}/)?.[0]);
+  const s151 = await prepareRuleTestSetup({ ruleXml: '<structureObjectRule id="BRDP-S1-00151"><objectPath allowedObjectFlag="0">//@materialUsage</objectPath><objectUse>x</objectUse></structureObjectRule>', standard: S42, schemaLocation: 'flat', format: 'BREX-4.2', parseXml, ...io });
+  check('GMC 1.2: S1-00151 keeps proced and lists the 6 carriers', s151.promptPlacements[0].schema === 'proced' && s151.promptPlacements[0].attributeCarriers[0].total === 6);
+  const setupXa = await prepareRuleTestSetup({ ruleXml: '<structureObjectRule><objectPath allowedObjectFlag="2">//emphasis/@emphasisType</objectPath><objectUse>x</objectUse><objectValue valueAllowed="em01" valueForm="single"/></structureObjectRule>', standard: S42, schemaLocation: 'flat', format: 'BREX-4.2', parseXml, ...io });
+  const promptXa = buildRuleTestExamplesPrompt({ brdp: brdpOf('X', 'p'), standard: S42, format: 'BREX-4.2', ruleXml: '<x/>', placements: setupXa.promptPlacements });
+  check('GMC 1.4: X/@a (no //) -> no carriers line, as today', !/goes on:/.test(promptXa));
+
+  // 1.3 rootAttributes: EXT-00057 in pm.
+  const ext57 = await run(EXT57, [{ examples: [
+    { label: 'pt02', expected: 'accept', schema: 'pm', rootAttributes: { pmType: 'pt02' } },
+    { label: 'pt09', expected: 'reject', schema: 'pm', rootAttributes: { pmType: 'pt09' } },
+  ] }]);
+  check('GMC 1.3: EXT-00057 asks for rootAttributes', /"rootAttributes": \{"pmType": "…"\}/.test(ext57.prompt || '') && /@pmType goes only on <pm>/.test(ext57.prompt || ''));
+  check('GMC 1.3: EXT-00057 on pm, no content', ext57.result.setup.placements.pm?.placement.contentInsertion === false);
+  check('GMC 1.3: <pm pmType="pt02"> accepted, pt09 rejected, correct', ext57.result.runs[0].result.status === 'accepted' && ext57.result.runs[1].result.status === 'rejected' && ext57.verdict?.kind === 'correct' && /<pm [^>]*pmType="pt02"/.test(ext57.result.examples[0].xml));
+  check('GMC 1.3: never touches xsi:noNamespaceSchemaLocation nor xmlns', /xsi:noNamespaceSchemaLocation="http:\/\/www\.s1000d\.org\/S1000D_4-2\/xml_schema_flat\/pm\.xsd"/.test(ext57.result.examples[0].xml) && (ext57.result.examples[0].xml.match(/xmlns:xsi=/g) || []).length === 1);
+  const lines57 = xmlDisplayLines(ext57.result.examples[0].xml, [], parseXml, ext57.result.examples[0].skeletonNodePaths);
+  const seg57 = lines57[0].segments.find((sg) => sg.text.startsWith('pmType='));
+  const segRoot = lines57[0].segments[0];
+  check('GMC 1.3: the root attribute is shown as content, the root as skeleton', seg57 && seg57.skeleton === false && segRoot.skeleton === true);
+  const bad57 = await run(EXT57, [
+    { examples: [{ label: 'a', expected: 'accept', schema: 'pm', rootAttributes: { pmType: 'pt01' } }, { label: 'b', expected: 'reject', schema: 'pm', rootAttributes: { pmTyp: 'pt09', 'xsi:noNamespaceSchemaLocation': 'x.xsd' } }] },
+    { examples: [{ label: 'a', expected: 'accept', schema: 'pm', rootAttributes: { pmType: 'pt01' } }, { label: 'b', expected: 'reject', schema: 'pm', rootAttributes: { pmType: 'pt09' } }] },
+  ]);
+  const correction57 = bad57.asked[1]?.at(-1)?.content || '';
+  check('GMC 1.3: a root attribute <pm> does not admit -> correction round', /@pmTyp does not exist on <pm>/.test(correction57) && !/pmTyp does not exist on <pm>\. If this element/.test(correction57) && /"rootAttributes"/.test(correction57), correction57);
+  check('GMC 1.3: xsi:… in rootAttributes -> problem, never written', /@xsi:noNamespaceSchemaLocation of <pm> is written by the application/.test(correction57) && !bad57.result.examples.some((e) => /x\.xsd/.test(e.xml || '')));
+  check('GMC 1.3: after the correction -> correct', bad57.verdict?.kind === 'correct', JSON.stringify(bad57.verdict));
+  check('GMC 1.3: a rule without root attributes asks for none', !/rootAttributes/.test(prompt79) && !/rootAttributes/.test(ext22.prompt || ''));
+  check('GMC 1.3: the root attribute is the example\'s own in the reject cause', rejectionDetails(ext57.result.examples[1], ext57.result.runs[1].result)?.allAppBuilt === false);
+
+  // 1.4 X//@a: EXT-00107 in comrep.
+  const ext107 = await run(EXT107, [{ examples: [
+    { label: 'EA', expected: 'accept', schema: 'comrep', content: '<partRepository><partSpec><techData><unitOfIssueQualificationSegment unitOfMeasure="EA"/></techData></partSpec></partRepository>' },
+    { label: 'LB', expected: 'reject', schema: 'comrep', content: '<partRepository><partSpec><techData><unitOfIssueQualificationSegment unitOfMeasure="LB"/></techData></partSpec></partRepository>' },
+  ] }]);
+  check('GMC 1.4: EXT-00107 on comrep with the carrier below <partRepository>', ext107.result.setup.placements.comrep && /@unitOfMeasure goes on: <unitOfIssueQualificationSegment> \(1\)\./.test(ext107.prompt) && /partRepository\/partSpec\/techData\/unitOfIssueQualificationSegment/.test(ext107.prompt));
+  check('GMC 1.4: the examples select nodes, verdict correct (not inconclusive)', ext107.result.runs.every((r) => r.result.selectedNodePaths.length > 0) && ext107.verdict?.kind === 'correct', JSON.stringify(ext107.verdict));
+
+  // 2.1 Unknown context schema (EXT-00154): not executable, no LLM call, no exception.
+  const ext154 = await run(EXT154, [{ examples: [] }]);
+  check('GMC 2.1: EXT-00154 -> not executable, no call', ext154.result.status === 'not_executable' && ext154.asked.length === 0 && ext154.result.reason.code === 'context_schema_unknown', JSON.stringify(ext154.result.reason));
+  check('GMC 2.1: EN text', formatRuleTestReason(ext154.result.reason, en) === 'the context block points to scormContentPackage.xsd, which is not one of the S1000D 4.2 schemas (scormcontentpackage.xsd is, written in lower case). Validators compare the exact URL, so they would never apply this block.', formatRuleTestReason(ext154.result.reason, en));
+  check('GMC 2.1: ES text', formatRuleTestReason(ext154.result.reason, es) === 'el bloque de contexto apunta a scormContentPackage.xsd, que no es un esquema de S1000D 4.2 (scormcontentpackage.xsd sí lo es, en minúsculas). Los validadores comparan la URL exacta, así que nunca aplicarían este bloque.');
+  const noSimilar = await run(EXT154.replace('scormContentPackage', 'pokemon'), [{ examples: [] }]);
+  check('GMC 2.1: no lower-case twin -> the plain text', /^the context block points to pokemon\.xsd, which is not one of the S1000D 4\.2 schemas\. Validators/.test(formatRuleTestReason(noSimilar.result.reason, en)));
+  for (const [label, url, location] of [
+    ['flat', 'http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd', 'flat'],
+    ['master', 'http://www.s1000d.org/S1000D_4-2/xml_schema_master/dm/procedSchema.xsd', 'master'],
+    ['custom pattern', '../schemas/proced.xsd', '../schemas/{schema}.xsd'],
+  ]) {
+    const rule = `<contextRules rulesContext="${url}"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>x</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+    const setup = await prepareRuleTestSetup({ ruleXml: rule, standard: S42, schemaLocation: location, format: 'BREX-4.2', parseXml, ...io });
+    check(`GMC 2.1: proced context (${label}) as today`, !setup.unreachable && setup.promptPlacements.some((p) => p.role === 'rule' && p.schema === 'proced'));
+  }
+  const mixed = `<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>x</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>${EXT154}`;
+  const setupMixed = await prepareRuleTestSetup({ ruleXml: mixed, standard: S42, schemaLocation: 'flat', format: 'BREX-4.2', parseXml, ...io });
+  check('GMC 2.1: one unknown block among known ones -> tested, the block reported as not tested', !setupMixed.unreachable && setupMixed.untested.some((u) => u.kind === 'context_unknown'));
+
+  // 2.2 Prefixed step (EXT-00029).
+  const ext29 = await run(EXT29, [{ examples: [] }]);
+  check('GMC 2.2: EXT-00029 -> not executable <rdf:Description>, no call', ext29.result.status === 'not_executable' && ext29.asked.length === 0 && formatRuleTestReason(ext29.result.reason, en) === 'the rule looks at <rdf:Description>, which the examples cannot contain.', JSON.stringify(ext29.result.reason));
+  check('GMC 2.2: ES', formatRuleTestReason(ext29.result.reason, es) === 'la regla mira <rdf:Description>, que los ejemplos no pueden contener.');
+
+  // 2.3 Wrong root (/dmodule… in a comment).
+  const ext103 = await run('<contextRules rulesContext="http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comment.xsd"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">/dmodule/content//para</objectPath><objectUse>x</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>', [{ examples: [] }]);
+  check('GMC 2.3: comment -> "the root is <comment>"', ext103.result.status === 'not_executable' && formatRuleTestReason(ext103.result.reason, en) === 'the rule looks at <dmodule>, which the examples cannot contain (in the comment schema the root is <comment>).' && formatRuleTestReason(ext103.result.reason, es) === 'la regla mira <dmodule>, que los ejemplos no pueden contener (en el esquema comment la raíz es <comment>).', formatRuleTestReason(ext103.result.reason, en));
+  check('GMC: correction message names rootAttributes only when asked', /"rootAttributes"/.test(buildRuleTestCorrectionMessage([{ index: 0, label: 'a', problems: ['x'] }], { rootAttributes: true })) && !/rootAttributes/.test(buildRuleTestCorrectionMessage([{ index: 0, label: 'a', problems: ['x'] }])));
+  void materializeExample; void runExample;
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

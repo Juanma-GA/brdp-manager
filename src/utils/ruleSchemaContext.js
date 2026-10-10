@@ -427,17 +427,28 @@ const CONTEXT_BLOCK_RE =
 export function contextSchemasOfRule(ruleXml, location = null) {
   const text = (ruleXml || '').replace(/<!--[\s\S]*?-->/g, '');
   const schemas = [];
+  const urls = [];
   let rest = text;
   for (const m of text.matchAll(CONTEXT_BLOCK_RE)) {
     const attr = m[1] === 'contextRules' ? 'rulesContext' : 'context';
     const value = new RegExp(String.raw`\b${attr}\s*=\s*(["'])([^"']*)\1`).exec(m[2]);
     if (!value || !value[2].trim()) continue;
     const name = schemaNameFromContext(value[2], location);
-    if (!schemas.includes(name)) schemas.push(name);
+    if (!schemas.includes(name)) {
+      schemas.push(name);
+      urls.push({ schema: name, url: value[2].trim() });
+    }
     rest = rest.replace(m[0], '');
   }
   const general = /<(?:[\w.-]+:)?(?:structureObjectRule|objrule|pattern|rule)[\s>/]/.test(rest);
-  return { schemas, general: schemas.length === 0 ? true : general };
+  return Object.defineProperty({ schemas, general: schemas.length === 0 ? true : general }, 'urls', { value: urls, enumerable: false });
+}
+
+// GMC, Part 2.1: the URL each context schema was read from (the first block
+// of each), so the rule test can name the file of a block whose schema the
+// standard does not have (scormContentPackage.xsd). → [{ schema, url }]
+export function contextUrlsOfRule(ruleXml, location = null) {
+  return contextSchemasOfRule(ruleXml, location).urls;
 }
 
 // ---------------------------------------------------------------------------

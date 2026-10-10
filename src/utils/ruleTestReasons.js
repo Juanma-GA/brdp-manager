@@ -38,6 +38,13 @@
 //     example_no_room {outer, checked, standard} (Mejoras D, Part 1) -- no
 //     insertion point of any candidate schema holds the outermost element
 //     of the rule's path (<figure>) with the checked one (<def>) inside;
+//     context_schema_unknown {schema, file, standard, similar} (GMC, Part
+//     2.1) -- a context block whose schema is not one of the standard's
+//     document schemas (exact, as validators compare the URL);
+//     test_schema_unavailable {schemas, standard} -- no structure for the
+//     schema the rule is tested on; unreachable_target may carry roots
+//     [{schema, root}] (GMC, Part 2.3) when an absolute path starts at
+//     another root;
 //   analyzeRule (C3): rule_format {problem, ...params} -- the stored XML is
 //     not a rule of its format; `problem` is checkRuleFormat's code
 //     (rule_format_missing, …), shown with the same text as on save;
@@ -60,7 +67,7 @@ export const ENGINE_REASON_CODES = [
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
-  'example_no_room', 'condition_no_schema',
+  'example_no_room', 'condition_no_schema', 'context_schema_unknown', 'test_schema_unavailable',
 ];
 export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_engine_error', 'test_root_rejects_all'];
 
@@ -102,6 +109,15 @@ export function formatRuleTestReason(reason, t) {
     const { problem, ...problemParams } = params;
     const detail = formatSchemaIssue({ source: 'rule', code: problem, params: problemParams }, t);
     return t('records.ruleTest.reasons.rule_format', { detail, defaultValue: detail });
+  }
+  // GMC, Part 2.1: the same file in other capitals, when the standard has it.
+  if (reason.code === 'context_schema_unknown') {
+    return t(`records.ruleTest.reasons.context_schema_unknown${params.similar ? '_similar' : ''}`, { ...params, defaultValue: reason.code });
+  }
+  // GMC, Part 2.3: the first step of an absolute path is another root.
+  if (reason.code === 'unreachable_target' && (params.roots || []).length > 0) {
+    const roots = params.roots.map((r) => t('records.ruleTest.reasons.rootIs', r)).join('; ');
+    return t('records.ruleTest.reasons.unreachable_target_root', { names: params.names, roots });
   }
   if (reason.code === 'example_impossible') {
     const where = `${params.axis === 'parent' ? 'parent' : 'ancestor'}${params.inside ? 'Inside' : 'Outside'}`;

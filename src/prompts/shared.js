@@ -338,3 +338,52 @@ export function referenceSourceText(candidate) {
       return '';
   }
 }
+
+
+// GMC, Part 1.1: a rule whose <objectValue> (3.0.1: <objval>) carries text.
+// The value is the attribute (@valueAllowed; 3.0.1 @val1, and @val2 for a
+// range), the text only describes it -- a real run wrote "Two-Way" for
+// valueAllowed="2" (EXT-00022), and the Proposal check confused them too.
+// → '' when no value element has text (the prompts do not change), else a
+// block that starts with a blank line.
+const VALUE_LEGEND_MAX = 20;
+const decodeText = (t) =>
+  String(t)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+const attrOf = (attrs, name) => {
+  const m = new RegExp(String.raw`\b${name}\s*=\s*(?:"([^"]*)"|'([^']*)')`).exec(attrs);
+  return m ? decodeText(m[1] ?? m[2]) : null;
+};
+
+export function ruleValueLegend(ruleXml) {
+  const text = String(ruleXml || '').replace(/<!--[\s\S]*?-->/g, '');
+  const values = [];
+  let brex301 = false;
+  for (const m of text.matchAll(/<(objectValue|objval)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1\s*>)/g)) {
+    const description = decodeText(m[3] || '');
+    if (m[1] === 'objval') brex301 = true;
+    const value = m[1] === 'objval'
+      ? [attrOf(m[2], 'val1'), attrOf(m[2], 'val2')].filter((v) => v !== null).join('~')
+      : attrOf(m[2], 'valueAllowed');
+    values.push({ value: value ?? '', description });
+  }
+  if (!values.some((v) => v.description)) return '';
+  const shown = values.slice(0, VALUE_LEGEND_MAX).map((v) => `"${v.value}"${v.description ? ` (${v.description})` : ''}`);
+  const more = values.length > VALUE_LEGEND_MAX ? `, +${values.length - VALUE_LEGEND_MAX} more` : '';
+  const where = brex301
+    ? 'the value of each <objval> is its @val1 (and @val2, for a range)'
+    : 'the value of each <objectValue> is its @valueAllowed';
+  const attribute = brex301 ? '@val1/@val2' : '@valueAllowed';
+  return `
+
+VALUES: in this rule, ${where};
+the text inside the element only describes that value. In the examples,
+write the values exactly as ${attribute}: ${shown.join(', ')}${more}.`;
+}

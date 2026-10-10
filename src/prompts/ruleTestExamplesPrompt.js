@@ -12,9 +12,9 @@
 // insertion point), checks it, runs the rule on it (utils/ruleTestEngine.js)
 // and gives the verdict.
 import { readLlmJson } from './llmJson.js';
-import { buildSchemaFactsBlock } from './shared.js';
+import { buildSchemaFactsBlock, ruleValueLegend } from './shared.js';
 import { placeSentence } from '../utils/schemaPlacement.js';
-import { metadataXml } from '../utils/ruleTestSkeleton.js';
+import { attributeCarrierLines, metadataXml } from '../utils/ruleTestSkeleton.js';
 
 export const RULE_TEST_USER_MESSAGE = 'Write the test examples for this rule.';
 
@@ -202,6 +202,20 @@ function routeLines(p) {
   What those elements contain (use only these names, never invented attributes):${cards.join('')}`;
 }
 
+// GMC, Part 1.2: the elements that carry each attribute the rule checks
+// (//@x or X//@x), nearest first, and the valid way to the nearest; Part
+// 1.3: an attribute only the root carries goes in "rootAttributes". Nothing
+// for a rule without such attributes: the prompt does not change.
+function carrierLines(p) {
+  const lines = (p.attributeCarriers || [])
+    .filter((c) => c.inPrompt)
+    .flatMap((info) => attributeCarrierLines(info, { withMinimal: true }));
+  for (const r of p.rootAttributes || []) {
+    lines.push(`@${r.attribute} goes only on <${r.element}>, which the application writes: give its value in the example's "rootAttributes" ({"${r.attribute}": "…"}), never in the content.`);
+  }
+  return lines.map((l) => `\n${indentBlock(l, '  ')}`).join('');
+}
+
 // Mejoras C, Part 2: where each element the rule names goes when it does
 // not fit where this example is written (elementPlaces, schemaPlacement.js)
 // -- its parent, the way down from the root and, in the identification and
@@ -240,7 +254,12 @@ ${minimalSection(p)}` : ''
   if (p.metadata?.insertion && p.contentInsertion === false) {
     return `- ${kind} "${p.schema}": the application builds the rest of the document
   (${p.path.join('/')}); write no "content".
-${metadataLine(p)}${placeLines(p)}`;
+${metadataLine(p)}${carrierLines(p)}${placeLines(p)}`;
+  }
+  // GMC, Part 1.3: the rule only checks attributes the root carries.
+  if (p.contentInsertion === false && (p.rootAttributes || []).length > 0) {
+    return `- ${kind} "${p.schema}": the application builds the whole document
+  (${p.path.join('/')}${p.metadata ? ', with its minimal identification and status section' : ''}); write no "content".${carrierLines(p)}${placeLines(p)}`;
   }
   // T4b: the skeleton's own <title> (a DITA topic's, mandatory).
   const titleLine =
@@ -257,7 +276,7 @@ ${metadataLine(p)}${placeLines(p)}`;
   Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''
-  }${placeLines(p)}`;
+  }${carrierLines(p)}${placeLines(p)}`;
 }
 
 // T4b: a rule whose context depends on the title of an element (for example
@@ -336,6 +355,13 @@ ${model}
 // T4: how each example is built, for the placements offered.
 function buildingInstructions(standard, placements, dita) {
   const kind = dita ? 'topic type' : 'schema';
+  // GMC, Part 1.3: every example only gives the root's attribute values.
+  if (placements.every((p) => p.contentInsertion === false && !p.metadata?.insertion && (p.rootAttributes || []).length > 0)) {
+    return `HOW EACH EXAMPLE IS BUILT: the application builds the whole ${standard}
+document of the example's ${kind}, root included; you only give the values
+of the root's attributes the rule checks, in "rootAttributes".
+${placements.map((p) => placementLine(p, dita)).join('\n')}`;
+  }
   if (placements.every((p) => !p.insertion)) {
     return `HOW EACH EXAMPLE IS BUILT: the rule checks the document's root element, so
 your "content" is the whole ${standard} document of the example's ${kind}:
@@ -438,6 +464,9 @@ export function buildRuleTestExamplesPrompt({
   const withMetadata = placements.some((p) => p.insertion && p.metadata?.insertion);
   const withContent = placements.some((p) => !p.insertion || p.contentInsertion !== false);
   const metadataOnly = withMetadata && !withContent;
+  // GMC, Part 1.3: values for attributes only the document's root carries.
+  const withRootAttributes = placements.some((p) => (p.rootAttributes || []).length > 0);
+  const rootAttributesOnly = withRootAttributes && !withMetadata && !withContent;
   const hasFacts = schemaFacts && schemaFacts.length > 0;
   const namesLine = hasFacts
     ? `use only element and attribute names that appear in
@@ -457,7 +486,7 @@ Proposal: ${brdp.proposal}
 
 The rule under test (${format}) — use it only to know which elements,
 attributes and schemas are involved:
-${ruleXml}
+${ruleXml}${ruleValueLegend(ruleXml)}
 
 WHAT TO WRITE:
 ${acceptOnly ? acceptOnlyInstructions(standard, acceptOnly) : `- "examples": at least two examples, written from the Proposal's DECISION,
@@ -482,6 +511,9 @@ ${
       : metadataOnly
       ? `- Only the identification and status section, starting from the minimal one
   above: change what the decision is about and keep the rest as it is.`
+      : rootAttributesOnly
+      ? `- Only "rootAttributes": the values of the root's attributes the decision is
+  about. The application builds the rest of the document.`
       : `- A short piece of ${dita ? 'a ship or aircraft maintenance manual' : 'an aircraft maintenance manual'}: maintenance steps,
   removal of components, torque values and the like. In English, at most 10
   lines of content.`
@@ -527,9 +559,13 @@ Write new examples that do not repeat this mistake.`;
   }
 
   const firstSchema = placements[0]?.schema || 'descript';
+  const rootExample = withRootAttributes
+    ? `"rootAttributes": {${[...new Set(placements.flatMap((p) => (p.rootAttributes || []).map((r) => r.attribute)))].map((a) => `"${a}": "…"`).join(', ')}}`
+    : null;
   const fields = [
     withMetadata ? `"metadata": "<${placements.find((p) => p.metadata?.insertion).metadata.element}>…"` : null,
     withContent ? '"content": "…"' : null,
+    rootExample,
   ].filter(Boolean);
   if (dossier) {
     prompt += `
@@ -558,12 +594,17 @@ function acceptOnlyInstructions(standard, acceptOnly) {
 // T2b, the one automatic correction round: the exact problems of each
 // failing example, sent as the next user message after the LLM's first
 // answer. `failures`: [{ index (0-based), label, problems: [English] }].
-export function buildRuleTestCorrectionMessage(failures, { dossier = false } = {}) {
+export function buildRuleTestCorrectionMessage(failures, { dossier = false, rootAttributes = false } = {}) {
   const blocks = failures.map(
     (f) => `Example ${f.index + 1} ("${f.label}"):\n${f.problems.map((p) => `- ${p}`).join('\n')}`
   );
-  // Dosier, Part 2: the files are part of what may change.
-  const what = dossier ? '"content" and "files"' : '"content" (and "metadata", if it has one)';
+  // Dosier, Part 2: the files are part of what may change. GMC, Part 1.3:
+  // and the root's attribute values.
+  const what = dossier
+    ? '"content" and "files"'
+    : rootAttributes
+      ? '"content" (and "metadata", if it has one) and "rootAttributes"'
+      : '"content" (and "metadata", if it has one)';
   return `Some examples are not valid. Fix exactly these problems and
 return the complete JSON again: the same examples in the same order with the same "expected" and "schema" — change only the
 ${what} of the examples listed.
@@ -612,6 +653,21 @@ export function parseRuleTestResponse(raw, { contentOptionalSchemas = [], dossie
     const content = typeof ex.content === 'string' ? ex.content : typeof ex.xml === 'string' ? ex.xml : '';
     const metadata = typeof ex.metadata === 'string' ? ex.metadata.trim() : '';
     const contentOptional = typeof ex.schema === 'string' && contentOptionalSchemas.includes(ex.schema);
+    // GMC, Part 1.3: { attribute: value } for the root (strings; numbers and
+    // booleans written as text).
+    let rootAttributes = null;
+    if (ex.rootAttributes !== undefined && ex.rootAttributes !== null) {
+      if (typeof ex.rootAttributes !== 'object' || Array.isArray(ex.rootAttributes)) {
+        return { ok: false, error: `${where} has "rootAttributes" that is not an object.` };
+      }
+      rootAttributes = {};
+      for (const [name, value] of Object.entries(ex.rootAttributes)) {
+        if (!['string', 'number', 'boolean'].includes(typeof value)) {
+          return { ok: false, error: `${where} has a "rootAttributes" value for "${name}" that is not text.` };
+        }
+        rootAttributes[name.trim()] = String(value);
+      }
+    }
     if (!content.trim() && !metadata && !contentOptional) return { ok: false, error: `${where} has no "content".` };
     if (ex.schema !== undefined && ex.schema !== null && typeof ex.schema !== 'string') {
       return { ok: false, error: `${where} has a "schema" that is not text or null.` };
@@ -633,6 +689,7 @@ export function parseRuleTestResponse(raw, { contentOptionalSchemas = [], dossie
       schema: ex.schema && ex.schema !== 'null' ? ex.schema : null,
       content: content.trim(),
       ...(metadata ? { metadata } : {}),
+      ...(rootAttributes ? { rootAttributes } : {}),
       ...(files ? { files } : {}),
     });
   }

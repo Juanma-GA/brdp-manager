@@ -270,6 +270,59 @@ export function sectionRoutes(structure, section, names, requiredSteps = {}) {
   );
 }
 
+// GMC, Part 1.2: the way from the identification and status section to an
+// element that carries an attribute the rule checks (<reasonForUpdate> for
+// //@updateReasonType) -- { path (from the section element), inMinimal,
+// position, minimal, several }:
+//   in the minimal section → its path there (inMinimal);
+//   a direct child of one of its elements → that element's path, with where
+//     it goes among the existing children (XSD order) and a minimum valid
+//     one of it;
+//   deeper → the same routes as <copyright> (sectionRoutes).
+// null when it cannot be reached from the section.
+export function sectionCarrierWay(structure, section, target) {
+  const elements = structure?.elements || {};
+  const models = structure?.models || {};
+  if (!section?.tree || !elements[target]) return null;
+  const treePaths = new Map();
+  const walk = (node, path) => {
+    const here = [...path, node.name];
+    if (!treePaths.has(node.name) || treePaths.get(node.name).length > here.length) treePaths.set(node.name, here);
+    for (const child of node.children || []) walk(child, here);
+  };
+  walk(section.tree, []);
+  if (treePaths.has(target)) return { path: treePaths.get(target), inMinimal: true, position: null, minimal: null, several: false };
+  const nodes = treeNodes(section.tree);
+  const parents = nodes
+    .filter((n) => (elements[n.name]?.children || []).includes(target))
+    .sort((a, b) => treePaths.get(a.name).length - treePaths.get(b.name).length);
+  if (parents.length) {
+    const parent = parents[0];
+    const order = models[parent.name]?.order || [];
+    const at = order.indexOf(target);
+    const existing = (parent.children || []).map((c) => c.name).filter((n) => order.indexOf(n) >= 0);
+    const after = at >= 0 ? [...existing].reverse().find((n) => order.indexOf(n) < at) : null;
+    const before = at >= 0 ? existing.find((n) => order.indexOf(n) > at) : null;
+    const position = after
+      ? { parent: parent.name, container: target, after }
+      : before
+        ? { parent: parent.name, container: target, before }
+        : { parent: parent.name, container: target, first: true };
+    const leaf = minimalNode(models, target);
+    return {
+      path: [...treePaths.get(parent.name), target],
+      inMinimal: false,
+      position,
+      minimal: leaf ? renderNode(leaf, { indent: '  ', placeholder: '…' }) : null,
+      several: false,
+    };
+  }
+  const [route] = sectionRoutes(structure, section, [target]);
+  if (!route) return null;
+  const full = (p) => [...(treePaths.get(p[0]) || [p[0]]), ...p.slice(1)];
+  return { path: full(route.paths[0]), inMinimal: false, position: route.position, minimal: route.minimal, several: route.several, paths: route.paths.map(full) };
+}
+
 // ─── Part 2: moving a misplaced element down the only valid way ─────────────
 
 const TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;

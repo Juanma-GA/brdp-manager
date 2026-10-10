@@ -1164,3 +1164,46 @@ export const ruleProposalCheckCases = [
     ],
   },
 ];
+
+// GMC (pasada «Official Default GMC ATA - 1000BR 4.2 - 015»): values given
+// as @valueAllowed when the <objectValue> has text (Part 1.1), where an
+// attribute the rule checks goes (Part 1.2), the root's attributes in
+// "rootAttributes" (Part 1.3) and X//@a (Part 1.4). The rules are the real
+// ones of the pass, copied as they are.
+export const ruleGmc22 =
+  '<structureObjectRule><objectPath allowedObjectFlag="2">//interchangeability</objectPath><objectUse>The element "interchangeability" can only have codes allowed by ATA Spec 2000.</objectUse><objectValue valueAllowed="1" valueForm="single">One-Way</objectValue><objectValue valueAllowed="2" valueForm="single">Two-Way</objectValue></structureObjectRule>';
+export const ruleGmc37 =
+  '<structureObjectRule><objectPath allowedObjectFlag="2">//@commercialClassification</objectPath><objectUse>The attribute "commercialClassification" can only have code "cc51".</objectUse><objectValue valueForm="single" valueAllowed="cc51">COC marking</objectValue></structureObjectRule>';
+export const ruleGmc57 =
+  '<structureObjectRule><objectPath allowedObjectFlag="2">//@pmType</objectPath><objectUse>The attribute "pmType" can only have codes "pt01" thru "pt03".</objectUse><objectValue valueAllowed="pt01" valueForm="single">Component Maintenance Publication</objectValue><objectValue valueAllowed="pt02" valueForm="single">x</objectValue><objectValue valueAllowed="pt03" valueForm="single">y</objectValue></structureObjectRule>';
+export const ruleGmc79 =
+  '<structureObjectRule><objectPath allowedObjectFlag="2">//@updateReasonType</objectPath><objectUse>The attribute "updateReasonType" can only have codes "urt01" or "urt02".</objectUse><objectValue valueAllowed="urt01" valueForm="single">Technical change</objectValue><objectValue valueAllowed="urt02" valueForm="single">Editorial change</objectValue></structureObjectRule>';
+export const ruleGmc107 =
+  '<structureObjectRule><objectPath allowedObjectFlag="2">/dmodule/content/commonRepository/partRepository//@unitOfMeasure</objectPath><objectUse>The attribute "unitOfMeasure" can only have codes allowed by ATA Spec 2000.</objectUse><objectValue valueAllowed="EA" valueForm="single">Each</objectValue><objectValue valueAllowed="KG" valueForm="single">Kilogram</objectValue></structureObjectRule>';
+const brdpGmc = (identifier, title, proposal) => ({ ...brdpRuleTest, identifier, title, definition: `Decide on ${title.toLowerCase()}.`, proposal });
+ruleTestExamplesCases.push(
+  {
+    name: 'brex-4-2-gmc-values-with-text-interchangeability',
+    args: [{ brdp: brdpGmc('BRDP-EXT-00022', 'Interchangeability codes', 'Interchangeability uses the ATA Spec 2000 codes 1 (one-way) and 2 (two-way).'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc22, placements: appPlacementsFor('S1000D 4.2', ruleGmc22, [['ipd', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-gmc-attribute-carriers-commercial-classification',
+    args: [{ brdp: brdpGmc('BRDP-EXT-00037', 'Commercial classification', 'Only the commercial classification cc51 (COC marking) is used.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc37, placements: appPlacementsFor('S1000D 4.2', ruleGmc37, [['descript', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-gmc-root-attributes-pmtype',
+    args: [{ brdp: brdpGmc('BRDP-EXT-00057', 'Publication module type', 'The publication module type is pt01, pt02 or pt03.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc57, placements: appPlacementsFor('S1000D 4.2', ruleGmc57, [['pm', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-gmc-attribute-in-section-update-reason',
+    args: [{ brdp: brdpGmc('BRDP-EXT-00079', 'Reason for update type', 'The reason for update type is urt01 or urt02.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc79, placements: appPlacementsFor('S1000D 4.2', ruleGmc79, [['descript', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-gmc-descendant-attribute-unit-of-measure',
+    args: [{ brdp: brdpGmc('BRDP-EXT-00107', 'Units of measure in the parts repository', 'Units of measure follow ATA Spec 2000: EA (each) and KG (kilogram).'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc107, placements: appPlacementsFor('S1000D 4.2', ruleGmc107, [['comrep', 'rule']]) }],
+  },
+);
+ruleProposalCheckCases.push({
+  name: 'brex-4-2-gmc-values-with-text-interchangeability',
+  args: [{ brdp: brdpGmc('BRDP-EXT-00022', 'Interchangeability codes', 'Interchangeability uses the ATA Spec 2000 codes 1 (one-way) and 2 (two-way).'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc22, ruleDescription: describeText(ruleGmc22, 'BREX-4.2') }],
+});
