@@ -69,6 +69,19 @@ async function readDetail(res) {
 
 const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// A cut connection, not an answer of the backend: Node's fetch says
+// "fetch failed" (cause ECONNRESET, UND_ERR_SOCKET, ...) or "other side
+// closed" -- typically a keep-alive connection uvicorn had already closed.
+// Retried once before it counts as an error.
+const SOCKET_CODES = new Set(['ECONNRESET', 'UND_ERR_SOCKET']);
+export const SOCKET_RETRY_DELAY_MS = 250;
+export function isSocketError(err) {
+  if (!err) return false;
+  const text = `${err.message || ''} ${err.cause?.message || ''}`;
+  if (/fetch failed|other side closed/i.test(text)) return true;
+  return SOCKET_CODES.has(err.code) || SOCKET_CODES.has(err.cause?.code);
+}
+
 export function createEvalClient({ api, email, password, fetchImpl = fetch, sleepImpl = realSleep, log = console.log }) {
   let accessToken = null;
   let relogins = 0;
@@ -77,6 +90,20 @@ export function createEvalClient({ api, email, password, fetchImpl = fetch, slee
   // a caller may catch the error (the rule test turns a failed call into its
   // own error state) and the pass must stop all the same.
   let lost = null;
+  let socketRetries = 0;
+
+  // One fetch; a socket error is retried once (the second one is thrown).
+  async function fetchRetry(url, init) {
+    try {
+      return await fetchImpl(url, init);
+    } catch (err) {
+      if (!isSocketError(err)) throw err;
+      socketRetries += 1;
+      log(`  connection cut (${err.cause?.code || err.message}): retrying once`);
+      await sleepImpl(SOCKET_RETRY_DELAY_MS);
+      return fetchImpl(url, init);
+    }
+  }
 
   async function login() {
     if (!email || !password) {
@@ -88,7 +115,7 @@ export function createEvalClient({ api, email, password, fetchImpl = fetch, slee
     }
     let res;
     try {
-      res = await fetchImpl(`${api}/api/auth/login`, {
+      res = await fetchRetry(`${api}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -112,7 +139,7 @@ export function createEvalClient({ api, email, password, fetchImpl = fetch, slee
     const attempt = () => {
       const headers = { ...(init.headers || {}) };
       if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-      return fetchImpl(`${api}${path}`, { ...init, headers });
+      return fetchRetry(`${api}${path}`, { ...init, headers });
     };
     let res = await attempt();
     if (res.status !== 401) return res;
@@ -180,6 +207,9 @@ export function createEvalClient({ api, email, password, fetchImpl = fetch, slee
     },
     get rateLimitWaits() {
       return rateLimitWaits;
+    },
+    get socketRetries() {
+      return socketRetries;
     },
     get accessToken() {
       return accessToken;

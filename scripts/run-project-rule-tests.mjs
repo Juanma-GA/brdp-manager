@@ -14,6 +14,8 @@
 //   --limit N                 stop after testing N rules (skipped ones do not count)
 //   --parallel 2              two rules at a time (1 by default, 2 at most)
 //   --lang en                 the report and the reasons in English (Spanish by default)
+//   --no-retry                one attempt per rule: a Verified rule that does not
+//                             pass goes to Draft without being tested again
 //   PROMPT_EVAL_API_URL       the backend (http://localhost:8000 by default)
 //
 // It reimplements nothing: the same code and the same endpoints as the
@@ -29,8 +31,13 @@
 //
 // Never: promote a rule to Verified, touch a rule, a Proposal or its
 // validation. A Verified rule stays Verified only when it passes ("passes"
-// or "already covered by the schema"); with any other result -- fails,
-// review, inconclusive, not executable, error -- it goes to Draft. An error
+// or "already covered by the schema"). One that does not is tested once
+// more, with new examples (the AI's examples change from one generation to
+// the next), and only that second attempt is recorded: if it passes the
+// rule stays Verified; with any other result -- fails, review,
+// inconclusive, not executable, error -- it goes to Draft. Not repeated:
+// a result known without the AI (not executable), an error of the backend,
+// a Draft or To Do rule, --no-retry. An error
 // of the AI part (timeout, an answer that cannot be used, the Proposal check
 // that could not be made) records no test but still moves it to Draft; an
 // error that is not the rule's (the backend, the rule edited meanwhile)
@@ -38,8 +45,17 @@
 // cleanly, blaming no rule. The per-minute limit is waited out. A Draft or
 // To Do rule keeps its status whatever the result.
 //
+// A cut connection to the backend (fetch failed, "other side closed",
+// ECONNRESET, UND_ERR_SOCKET), on any request including the AI's through
+// llm-proxy, is retried once (scripts/prompt-eval/session.mjs); a second
+// one is an error of the backend: the rule is not touched.
+//
 // Report: scripts/rule-test-runs/<project>-<date>/informe.md and
-// resultados.json (every example and reason), written after each rule. The
+// resultados.json (every example and reason, both attempts of a repeated
+// rule), written after each tested rule; after skipped ones only every 25
+// and never more than once a second (Windows locked the file when it was
+// rewritten several times a second), and always at the end, on Ctrl+C and
+// when the pass stops. The
 // same project on the same day goes on in the same folder. A file that
 // cannot be saved (on Windows, open in another program) is retried a few
 // seconds, then written directly; if even that fails the pass goes on, says
@@ -72,6 +88,7 @@ import { createEvalClient, LlmLimitError, LoginError, SessionLostError } from '.
 import { lintRule } from './lib/ruleLint.mjs';
 import {
   buildReport,
+  createSaveSchedule,
   errorGoesToDraft,
   errorKind,
   findProject,
@@ -83,6 +100,7 @@ import {
   runDir,
   savedDirectLine,
   saveFailedLine,
+  shouldRepeat,
   shouldRevoke,
   skipReason,
   writeFileAtomic,
@@ -107,7 +125,7 @@ process.on('uncaughtException', (err) => onUnexpected(err));
 process.on('unhandledRejection', (err) => onUnexpected(err));
 
 const opts = parseArgs(process.argv.slice(2));
-if (opts.error) fail(`${opts.error}\nUsage: node scripts/run-project-rule-tests.mjs --project "<exact name>" [--all] [--only ID,ID] [--limit N] [--parallel 2] [--lang en]`);
+if (opts.error) fail(`${opts.error}\nUsage: node scripts/run-project-rule-tests.mjs --project "<exact name>" [--all] [--only ID,ID] [--limit N] [--parallel 2] [--lang en] [--no-retry]`);
 const t = i18n.getFixedT(opts.lang);
 const tEn = i18n.getFixedT('en');
 
@@ -186,7 +204,7 @@ const run = {
   finished_at: null,
   user: me.email,
   provider: `${aiProvider.provider} / ${aiProvider.model}`,
-  options: { all: opts.all, only: opts.only, limit: opts.limit, parallel: opts.parallel },
+  options: { all: opts.all, only: opts.only, limit: opts.limit, parallel: opts.parallel, no_retry: opts.noRetry },
   stopped: null,
 };
 results.runs.push(run);
@@ -195,7 +213,9 @@ const jsonFile = path.join(dir, 'resultados.json');
 // → true when both files are saved. A failure is said in one line and the
 // next save (after the next rule) writes them again.
 let lastSaveFailed = null; // the files of the last save that failed
+const saveSchedule = createSaveSchedule();
 function save() {
+  saveSchedule.saved();
   const failed = [];
   for (const [file, text] of [
     [jsonFile, () => `${JSON.stringify(results, null, 2)}\n`],
@@ -266,8 +286,20 @@ async function toDraft(brdpId, fields, { noTestRecorded = false, ruleHash = null
       await postRevoke(brdpId);
       return moved;
     } catch (err) {
+      // A revoke done but whose answer was lost (a cut connection retried):
+      // the rule is Draft already.
+      if (await isDraftNow(brdpId)) return moved;
       return { ...fields, moved_to_draft: false, revoke_failed: err.message };
     }
+  }
+}
+
+async function isDraftNow(brdpId) {
+  try {
+    const now = await get(`/api/projects/${project.id}/brdps/${brdpId}/approvals/${enc(format)}`);
+    return now?.status === 'pending_review';
+  } catch {
+    return false;
   }
 }
 
@@ -277,6 +309,62 @@ async function errorEntry(brdpId, approval, ruleHash, fields) {
   if (!shouldRevoke('error', approval?.status)) return fields;
   if (!errorGoesToDraft(fields.error)) return { ...fields, draft_skipped: 'backend_error' };
   return toDraft(brdpId, fields, { noTestRecorded: true, ruleHash });
+}
+
+// One generation of examples and its outcome, not recorded yet.
+//   → { kind: 'record', record, details, deterministic }
+//   | { kind: 'error', fields }
+// deterministic: the result is known without the AI (not executable, an
+// impossible path) -- the same again if repeated.
+async function attemptTest(ruleXml, brdp, analysis, description, threshold) {
+  const known = notExecutableRecord(analysis);
+  if (known) return { kind: 'record', record: known, details: { examples: [], proposal_check: null, correction: null }, deterministic: true };
+  const result = await generateRuleTestExamples({
+    ruleXml,
+    format,
+    standard: project.standard,
+    schemaLocation,
+    brdp,
+    vocabulary,
+    ask: LLM(RULE_TEST_TEMPERATURE, RULE_TEST_MAX_TOKENS),
+    fetchSchemaCards: (standard, names) => get(`/api/schema-cards?standard=${enc(standard)}&names=${enc(names.join(','))}`),
+    fetchStructure: (standard, schema) => get(`/api/schema-cards/structure?standard=${enc(standard)}&schema=${enc(schema)}`),
+    fetchSchemaAttribute: (standard, name) => get(`/api/schema-cards/attribute?standard=${enc(standard)}&name=${enc(name)}`),
+    fetchSchemaGraph: async () => graph,
+    parseXml: xmldomParse,
+    ruleDescription: ruleDescriptionText(description, tEn),
+    askProposalCheck: LLM(RULE_PROPOSAL_CHECK_TEMPERATURE, undefined),
+  });
+  // The AI's daily limit or a lost session: nothing of this rule is
+  // recorded, the pass stops.
+  if (client.lost) throw client.lost;
+  const record = generationOutcome(result, { analysis, threshold, proposal: brdp.proposal }).record;
+  const details = {
+    examples: examplesOf(result),
+    proposal_check: result?.proposalCheck ? { status: result.proposalCheck.status, reason: result.proposalCheck.reason ?? null, error: result.proposalCheck.error ?? null } : null,
+    correction: result?.correction ?? null,
+  };
+  if (!record) {
+    const message = result?.truncated ? 'the AI answer was cut by its length limit' : result?.error || 'no result';
+    return { kind: 'error', fields: { result: 'error', error: message, error_kind: errorKind(message), ...details } };
+  }
+  // The Proposal check could not be made (timeout, an unreadable answer):
+  // the panel shows "Review: the Proposal could not be checked"; unattended,
+  // that is an error of the run -- no test recorded, but a Verified rule
+  // still goes to Draft.
+  if (record.reason?.code === 'test_proposal_unchecked') {
+    const message = `the Proposal check could not be made: ${record.reason.params?.error || ''}`.trim();
+    return { kind: 'error', fields: { result: 'error', error: message, error_kind: errorKind(message), ...details } };
+  }
+  const deterministic = result?.status === 'not_executable' || result?.status === 'path_review';
+  return { kind: 'record', record, details, deterministic };
+}
+
+// What an attempt is, for the entry and for shouldRepeat.
+function attemptSummary(a) {
+  if (a.kind === 'error') return { ...a.fields };
+  const { record } = a;
+  return { result: record.result, reason: record.reason, reason_text: record.reason ? formatRuleTestReason(record.reason, t) : '', ...a.details, ...(a.deterministic ? { deterministic: true } : {}) };
 }
 
 async function testRule(item) {
@@ -297,47 +385,19 @@ async function testRule(item) {
   const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse, standard: project.standard });
   const description = describeRule(ruleXml, format, { parseXml: xmldomParse, schemaLocation });
   const threshold = thresholdMismatch(ruleXml, format, brdp.proposal, { parseXml: xmldomParse });
-  let record = notExecutableRecord(analysis);
-  let result = null;
-  if (!record) {
-    result = await generateRuleTestExamples({
-      ruleXml,
-      format,
-      standard: project.standard,
-      schemaLocation,
-      brdp,
-      vocabulary,
-      ask: LLM(RULE_TEST_TEMPERATURE, RULE_TEST_MAX_TOKENS),
-      fetchSchemaCards: (standard, names) => get(`/api/schema-cards?standard=${enc(standard)}&names=${enc(names.join(','))}`),
-      fetchStructure: (standard, schema) => get(`/api/schema-cards/structure?standard=${enc(standard)}&schema=${enc(schema)}`),
-      fetchSchemaAttribute: (standard, name) => get(`/api/schema-cards/attribute?standard=${enc(standard)}&name=${enc(name)}`),
-      fetchSchemaGraph: async () => graph,
-      parseXml: xmldomParse,
-      ruleDescription: ruleDescriptionText(description, tEn),
-      askProposalCheck: LLM(RULE_PROPOSAL_CHECK_TEMPERATURE, undefined),
-    });
-    // The AI's daily limit or a lost session: nothing of this rule is
-    // recorded, the pass stops.
-    if (client.lost) throw client.lost;
-    record = generationOutcome(result, { analysis, threshold, proposal: brdp.proposal }).record;
+  // A Verified rule that does not pass is tested once more before it goes
+  // to Draft; only the last attempt is recorded (shouldRepeat).
+  const attempts = [await attemptTest(ruleXml, brdp, analysis, description, threshold)];
+  if (shouldRepeat(attemptSummary(attempts[0]), approval.status, { noRetry: opts.noRetry })) {
+    attempts.push(await attemptTest(ruleXml, brdp, analysis, description, threshold));
   }
-  const details = {
-    examples: examplesOf(result),
-    proposal_check: result?.proposalCheck ? { status: result.proposalCheck.status, reason: result.proposalCheck.reason ?? null, error: result.proposalCheck.error ?? null } : null,
-    correction: result?.correction ?? null,
-  };
-  if (!record) {
-    const message = result?.truncated ? 'the AI answer was cut by its length limit' : result?.error || 'no result';
-    return done(await errorEntry(brdp.id, approval, entry.rule_hash, { result: 'error', error: message, error_kind: errorKind(message), ...details }));
-  }
-  // The Proposal check could not be made (timeout, an unreadable answer):
-  // the panel shows "Review: the Proposal could not be checked"; unattended,
-  // that is an error of the run -- no test recorded, but a Verified rule
-  // still goes to Draft.
-  if (record.reason?.code === 'test_proposal_unchecked') {
-    const message = `the Proposal check could not be made: ${record.reason.params?.error || ''}`.trim();
-    return done(await errorEntry(brdp.id, approval, entry.rule_hash, { result: 'error', error: message, error_kind: errorKind(message), ...details }));
-  }
+  const final = attempts[attempts.length - 1];
+  // Both attempts in resultados.json; the top-level fields are the last one's.
+  const withAttempts = (fields, recorded) =>
+    attempts.length > 1 ? { ...fields, attempts: attempts.map((a, i) => ({ ...attemptSummary(a), recorded: i === attempts.length - 1 && recorded })) } : fields;
+
+  if (final.kind === 'error') return done(await errorEntry(brdp.id, approval, entry.rule_hash, withAttempts(final.fields, false)));
+  const { record, details } = final;
   const res = await client.rawFetch(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${enc(format)}/test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -347,12 +407,12 @@ async function testRule(item) {
     const body = await res.text();
     const changed = res.status === 409;
     const why = changed ? 'the rule changed during the test; nothing recorded' : `recording the test failed (HTTP ${res.status}: ${body})`;
-    const fields = { result: 'error', error: why, error_kind: why, ...details };
+    const fields = withAttempts({ result: 'error', error: why, error_kind: why, ...details }, false);
     // Neither is the rule's fault: its status is left as it is.
     if (shouldRevoke('error', approval.status)) fields.draft_skipped = changed ? 'rule_changed' : 'backend_error';
     return done(fields);
   }
-  const fields = { result: record.result, reason: record.reason, reason_text: record.reason ? formatRuleTestReason(record.reason, t) : '', ...details };
+  const fields = withAttempts({ result: record.result, reason: record.reason, reason_text: record.reason ? formatRuleTestReason(record.reason, t) : '', ...details }, true);
   if (shouldRevoke(record.result, approval.status)) return done(await toDraft(brdp.id, fields));
   return done(fields);
 }
@@ -409,7 +469,8 @@ async function worker() {
       finished += 1;
       processed.add(item.brdp.identifier);
       results.entries.push(entry);
-      save();
+      // Every tested rule; skipped ones only now and then (createSaveSchedule).
+      if (saveSchedule.after(entry, { isLast: next >= queue.length })) save();
       console.log(progressLine(index, queue.length, entry, opts.lang));
     } catch (err) {
       stopUnexpected(err, item.brdp.identifier);

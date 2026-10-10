@@ -9,9 +9,9 @@ import path from 'node:path';
 export const MAX_PARALLEL = 2;
 
 // ── Options ──────────────────────────────────────────────────────────────
-// → { project, all, only, limit, parallel, lang } or { error }
+// → { project, all, only, limit, parallel, lang, noRetry } or { error }
 export function parseArgs(argv) {
-  const opts = { project: null, all: false, only: [], limit: null, parallel: 1, lang: 'es' };
+  const opts = { project: null, all: false, only: [], limit: null, parallel: 1, lang: 'es', noRetry: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const value = () => {
@@ -23,6 +23,7 @@ export function parseArgs(argv) {
     try {
       if (arg === '--project') opts.project = value();
       else if (arg === '--all') opts.all = true;
+      else if (arg === '--no-retry') opts.noRetry = true;
       else if (arg === '--only')
         opts.only = value()
           .split(',')
@@ -133,6 +134,46 @@ export const REVOKING_RESULTS = new Set(['failed', 'review', 'inconclusive', 'no
 export function shouldRevoke(result, ruleStatus) {
   const r = result && typeof result === 'object' ? result.result : result;
   return Boolean(REVOKING_RESULTS.has(r) && ruleStatus === 'approved');
+}
+
+// A Verified rule that does not pass is tested once more, with new
+// examples, before it goes to Draft: the examples are the AI's and change
+// from one generation to the next. Not repeated: a pass, a result known
+// without the AI (not executable, an impossible path: the same again), an
+// error of the backend (the socket retry already covers a cut connection),
+// a Draft or To Do rule (its status never changes), or --no-retry.
+//   attempt: { result, error?, deterministic? }
+export function shouldRepeat(attempt, ruleStatus, { noRetry = false } = {}) {
+  if (noRetry || ruleStatus !== 'approved' || !attempt) return false;
+  if (isPassing(attempt.result) || attempt.deterministic) return false;
+  if (attempt.result === 'error' && !errorGoesToDraft(attempt.error)) return false;
+  return true;
+}
+
+// When to save the report: after every TESTED rule (each takes seconds);
+// after skipped ones (a GET each, several per second) only every
+// SKIPPED_SAVE_EVERY of them and at least SKIPPED_SAVE_MIN_INTERVAL_MS after
+// the last save -- never several saves a second, which is what made Windows
+// lock the file. The end, Ctrl+C and a stop always save on their own.
+//   const schedule = createSaveSchedule(); schedule.saved() after each save;
+//   schedule.after(entry, { isLast }) → whether to save now.
+export const SKIPPED_SAVE_EVERY = 25;
+export const SKIPPED_SAVE_MIN_INTERVAL_MS = 1000;
+export function createSaveSchedule({ every = SKIPPED_SAVE_EVERY, minIntervalMs = SKIPPED_SAVE_MIN_INTERVAL_MS, now = Date.now } = {}) {
+  let skipped = 0;
+  let lastSave = -Infinity;
+  return {
+    saved() {
+      skipped = 0;
+      lastSave = now();
+    },
+    after(entry, { isLast = false } = {}) {
+      if (entry?.result !== 'skipped') return true;
+      skipped += 1;
+      if (isLast) return false; // the final save follows
+      return skipped >= every && now() - lastSave >= minIntervalMs;
+    },
+  };
 }
 
 // What to report for a run that recorded nothing: why it failed, short.
@@ -324,11 +365,26 @@ export function formatDuration(ms) {
   return `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
-export function progressLine(index, total, entry, lang = 'es') {
+// One result's label: «falla», «error: timeout».
+function resultLabel(attempt, lang, detail) {
   const labels = RESULT_LABELS[lang];
-  let label = labels[entry.result] || entry.result;
-  if (entry.result === 'error') label = `${label}: ${entry.error_kind || entry.error || ''}`.trim();
-  let line = `[${index}/${total}] ${entry.identifier} ${label.toUpperCase()}`;
+  let label = labels[attempt.result] || attempt.result;
+  if (detail && attempt.result === 'error') label = `${label}: ${attempt.error_kind || attempt.error || ''}`.trim();
+  return label;
+}
+
+// Both results of a repeated rule: «FALLA, PASA al repetir»; one result
+// otherwise. upper: the progress line's capitals; detail: an error's kind
+// («error: timeout»; the report has its own Reason column).
+export function attemptsLabel(entry, lang = 'es', { upper = false, detail = true } = {}) {
+  const u = (s) => (upper ? s.toUpperCase() : s);
+  const attempts = entry.attempts?.length > 1 ? entry.attempts : null;
+  if (!attempts) return u(resultLabel(entry, lang, detail));
+  return `${u(resultLabel(attempts[0], lang, detail))}, ${u(resultLabel(attempts[1], lang, detail))} ${lang === 'es' ? 'al repetir' : 'on repeat'}`;
+}
+
+export function progressLine(index, total, entry, lang = 'es') {
+  let line = `[${index}/${total}] ${entry.identifier} ${attemptsLabel(entry, lang, { upper: true })}`;
   if (entry.moved_to_draft) line += entry.no_test_recorded ? (lang === 'es' ? ' → Draft (sin prueba registrada)' : ' → Draft (no test recorded)') : ' → Draft';
   if (entry.revoke_failed) line += lang === 'es' ? ' (NO se pudo pasar a Draft: hazlo a mano)' : ' (could NOT be moved to Draft: do it by hand)';
   if (entry.result !== 'skipped') line += ` (${formatDuration(entry.duration_ms || 0)})`;
@@ -391,7 +447,7 @@ export function buildReport(results, { lang = 'es' } = {}) {
   out.push('');
   out.push(`- ${es ? 'Proyecto' : 'Project'}: ${p.name} (${p.standard}, ${p.format})`);
   for (const run of results.runs || []) {
-    const opts = [run.options?.all ? '--all' : null, run.options?.only?.length ? `--only ${run.options.only.join(',')}` : null, run.options?.limit ? `--limit ${run.options.limit}` : null, run.options?.parallel > 1 ? `--parallel ${run.options.parallel}` : null]
+    const opts = [run.options?.all ? '--all' : null, run.options?.only?.length ? `--only ${run.options.only.join(',')}` : null, run.options?.limit ? `--limit ${run.options.limit}` : null, run.options?.parallel > 1 ? `--parallel ${run.options.parallel}` : null, run.options?.no_retry ? '--no-retry' : null]
       .filter(Boolean)
       .join(' ');
     const end = run.finished_at ? run.finished_at : es ? 'sin terminar' : 'not finished';
@@ -410,10 +466,20 @@ export function buildReport(results, { lang = 'es' } = {}) {
   }
   out.push(`| ${es ? 'total pasadas a Draft' : 'total moved to Draft'} | | ${movedToDraft} |`);
   out.push('');
+  const repeated = latest.filter((e) => e.attempts?.length > 1);
+  if (repeated.length) {
+    const passedOnRepeat = repeated.filter((e) => isPassing(e.result)).length;
+    out.push(
+      es
+        ? `Repetidas antes de pasar a Draft: ${repeated.length} (pasan al repetir: ${passedOnRepeat}; no pasan tampoco al repetir: ${repeated.length - passedOnRepeat}).`
+        : `Repeated before going to Draft: ${repeated.length} (pass on repeat: ${passedOnRepeat}; do not pass on repeat either: ${repeated.length - passedOnRepeat}).`
+    );
+    out.push('');
+  }
   out.push(
     es
-      ? 'Una regla Verified pasa a Draft con cualquier resultado que no sea «pasa»: falla, revisar, no concluyente, no ejecutable o error (en un error no se registra prueba). Un error de sesión, del límite diario de la IA o del propio backend no la cambia.'
-      : 'A Verified rule goes to Draft with any result other than a pass: fails, review, inconclusive, not executable or error (an error records no test). An error of the session, of the AI daily limit or of the backend itself does not change it.'
+      ? 'Una regla Verified que no pasa se prueba una vez más, con ejemplos nuevos (salvo con --no-retry, o si el resultado se sabe sin IA: no ejecutable); queda registrado el segundo intento. Pasa a Draft si tampoco entonces da «pasa»: falla, revisar, no concluyente, no ejecutable o error (en un error no se registra prueba). Un error de sesión, del límite diario de la IA o del propio backend no la cambia. Los totales cuentan el resultado final.'
+      : 'A Verified rule that does not pass is tested once more, with new examples (not with --no-retry, nor when the result is known without the AI: not executable); the second attempt is the one recorded. It goes to Draft when that does not pass either: fails, review, inconclusive, not executable or error (an error records no test). An error of the session, of the AI daily limit or of the backend itself does not change it. The totals count the final result.'
   );
   out.push('');
 
@@ -427,7 +493,7 @@ export function buildReport(results, { lang = 'es' } = {}) {
     for (const e of notPassing) {
       const draft = draftCell(e, es);
       const reason = e.result === 'error' ? e.error : e.reason_text;
-      out.push(`| ${cell(e.identifier)} | ${cell(L[e.result] || e.result)} | ${cell(draft)} | ${cell(reason || '—')} | ${cell(lintCell(e.lint, es))} |`);
+      out.push(`| ${cell(e.identifier)} | ${cell(attemptsLabel(e, lang, { detail: false }))} | ${cell(draft)} | ${cell(reason || '—')} | ${cell(lintCell(e.lint, es))} |`);
     }
   }
   out.push('');
@@ -444,7 +510,11 @@ export function buildReport(results, { lang = 'es' } = {}) {
   out.push(es ? `## Pasan (${passing.length})` : `## Pass (${passing.length})`);
   out.push('');
   if (passing.length === 0) out.push(es ? 'Ninguna.' : 'None.');
-  else for (const e of passing) out.push(`- ${e.identifier} — ${statusLabel(e.status_after)}${e.result === 'schema_covered' ? ` (${L.schema_covered})` : ''}`);
+  else
+    for (const e of passing) {
+      const note = e.attempts?.length > 1 ? attemptsLabel(e, lang, { detail: false }) : e.result === 'schema_covered' ? L.schema_covered : '';
+      out.push(`- ${e.identifier} — ${statusLabel(e.status_after)}${note ? ` (${note})` : ''}`);
+    }
   out.push('');
 
   const skipped = latest.filter((e) => e.result === 'skipped');

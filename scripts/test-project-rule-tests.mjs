@@ -8,7 +8,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  attemptsLabel,
   buildReport,
+  createSaveSchedule,
   errorGoesToDraft,
   errorKind,
   findProject,
@@ -25,14 +27,17 @@ import {
   runDir,
   savedDirectLine,
   saveFailedLine,
+  shouldRepeat,
   shouldRevoke,
   skipReason,
+  SKIPPED_SAVE_EVERY,
   writeFileAtomic,
 } from './lib/projectRuleTests.mjs';
 import { ruleTestRequestBody } from '../src/api/ruleTestRequest.js';
 import { answerContent, buildRequestBody } from '../src/api/llmRequest.js';
 import { generationOutcome, notExecutableRecord } from '../src/utils/ruleTestOutcome.js';
 import { ruleXmlHash } from '../src/utils/ruleHash.js';
+import { createEvalClient, isSocketError } from './prompt-eval/session.mjs';
 
 let checks = 0;
 let failures = 0;
@@ -46,7 +51,7 @@ function check(name, ok, detail = '') {
 const eq = (name, got, want) => check(name, JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 
 // ── Options ──
-eq('only project', parseArgs(['--project', 'P']), { project: 'P', all: false, only: [], limit: null, parallel: 1, lang: 'es' });
+eq('only project', parseArgs(['--project', 'P']), { project: 'P', all: false, only: [], limit: null, parallel: 1, lang: 'es', noRetry: false });
 eq('all options', parseArgs(['--project', 'P', '--all', '--only', 'EXT-00041, EXT-00107', '--limit', '5', '--parallel', '2', '--lang', 'en']), {
   project: 'P',
   all: true,
@@ -54,7 +59,9 @@ eq('all options', parseArgs(['--project', 'P', '--all', '--only', 'EXT-00041, EX
   limit: 5,
   parallel: 2,
   lang: 'en',
+  noRetry: false,
 });
+check('--no-retry', parseArgs(['--project', 'P', '--no-retry']).noRetry === true);
 check('project required', /--project/.test(parseArgs(['--all']).error || ''));
 check('parallel at most 2', /--parallel/.test(parseArgs(['--project', 'P', '--parallel', '3']).error || ''));
 check('limit whole number', /--limit/.test(parseArgs(['--project', 'P', '--limit', '0']).error || ''));
@@ -319,7 +326,7 @@ check('totals: no concluyente 1 to Draft', /\| no concluyente \| 1 \| 1 \|/.test
 check('totals: no ejecutable 2, 1 to Draft', /\| no ejecutable \| 2 \| 1 \|/.test(report));
 check('totals: error 2, 1 to Draft', /\| error \| 2 \| 1 \|/.test(report));
 check('totals: 7 moved to Draft in all', /\| total pasadas a Draft \| \| 7 \|/.test(report));
-check('the Draft criterion is said', /Una regla Verified pasa a Draft con cualquier resultado que no sea «pasa»/.test(report));
+check('the Draft criterion is said', /se prueba una vez más, con ejemplos nuevos/.test(report) && /Pasa a Draft si tampoco entonces da «pasa»/.test(report));
 check('BRDPs without a saved rule', /sin regla guardada \(no se prueban\): 3/.test(report));
 const notPassing = section('Reglas que no pasan');
 check('failing table first', report.indexOf('## Reglas que no pasan') < report.indexOf('## Pasan pero siguen en Draft'));
@@ -336,6 +343,148 @@ check('passes but still Draft', /- BRDP-EXT-00002/.test(section('Pasan pero sigu
 check('a skipped Draft rule (it had passed) is in "passes but still Draft"', /- BRDP-EXT-00009 \(saltada: ya había pasado\)/.test(section('Pasan pero siguen en Draft')));
 check('passing list', /BRDP-EXT-00005 — Verified/.test(section('Pasan (')));
 check('English report', /## Rules that do not pass/.test(buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [], entries }, { lang: 'en' })));
+
+
+// ── Saving: every tested rule; skipped ones every 25, never several a second ──
+{
+  // 100 skipped rules in a row, 50 ms apart (two GETs on a fast backend).
+  let clock = 0;
+  const schedule = createSaveSchedule({ now: () => clock });
+  let saves = 1; // the save at the start
+  schedule.saved();
+  for (let i = 1; i <= 100; i += 1) {
+    clock += 50;
+    if (schedule.after({ result: 'skipped' }, { isLast: i === 100 })) {
+      saves += 1;
+      schedule.saved();
+    }
+  }
+  saves += 1; // the end always saves
+  check('100 skipped rules: at most 4-5 saves', saves <= 5, `${saves} saves`);
+  eq('every 25', SKIPPED_SAVE_EVERY, 25);
+  // So fast that 25 come in less than a second: never several saves a second.
+  clock = 0;
+  const fast = createSaveSchedule({ now: () => clock });
+  fast.saved();
+  const at = [];
+  for (let i = 1; i <= 200; i += 1) {
+    clock += 5;
+    if (fast.after({ result: 'skipped' })) {
+      at.push(clock);
+      fast.saved();
+    }
+  }
+  check('skipped saves at least 1 s apart', at.every((t, i) => t - (i ? at[i - 1] : 0) >= 1000), JSON.stringify(at));
+  // A tested rule always saves, and restarts the skipped count.
+  const mixed = createSaveSchedule({ now: () => (clock += 2000) });
+  mixed.saved();
+  check('a tested rule saves', mixed.after({ result: 'failed' }));
+  check('an error saves', mixed.after({ result: 'error' }));
+  mixed.saved();
+  let saved = 0;
+  for (let i = 0; i < 24; i += 1) if (mixed.after({ result: 'skipped' })) saved += 1;
+  check('24 skipped after a save: none saved', saved === 0);
+  check('the 25th skipped saves', mixed.after({ result: 'skipped' }));
+}
+
+// ── A cut connection: retried once (simulated fetch) ──
+{
+  const socketError = () => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) });
+  check('socket error: fetch failed / UND_ERR_SOCKET', isSocketError(socketError()));
+  check('socket error: ECONNRESET', isSocketError(Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })));
+  check('socket error: other side closed', isSocketError(new Error('other side closed')));
+  check('not a socket error: HTTP 500 text', !isSocketError(new Error('GET /api/x -> 500: {}')));
+  const ok = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const make = (failures) => {
+    let calls = 0;
+    const lines = [];
+    const fetchImpl = async (url) => {
+      calls += 1;
+      if (url.endsWith('/api/auth/login')) return ok({ access_token: 'tok' });
+      if (calls - 1 <= failures) throw socketError();
+      return ok({ answer: url.endsWith('llm-proxy') ? 'llm' : 'api' });
+    };
+    const client = createEvalClient({ api: 'http://x', email: 'e', password: 'p', fetchImpl, sleepImpl: async () => {}, log: (l) => lines.push(l) });
+    return { client, lines, calls: () => calls };
+  };
+  const once = make(1);
+  await once.client.login();
+  eq('fetch failed once: the API request is retried and answers', await once.client.apiFetch('/api/projects'), { answer: 'api' });
+  check('fetch failed once: 3 calls (login + 2)', once.calls() === 3, String(once.calls()));
+  check('fetch failed once: counted and said', once.client.socketRetries === 1 && once.lines.some((l) => /retrying once/.test(l)));
+  const llmOnce = make(1);
+  await llmOnce.client.login();
+  eq('fetch failed once: llm-proxy retried too', await llmOnce.client.llmProxy({}), { answer: 'llm' });
+  const twice = make(2);
+  await twice.client.login();
+  let err = null;
+  try {
+    await twice.client.apiFetch('/api/projects');
+  } catch (e) {
+    err = e;
+  }
+  check('fetch failed twice: an error', err && /fetch failed/.test(err.message));
+  check('fetch failed twice: a backend error, never Draft', err && !errorGoesToDraft(err.message));
+  const llmTwice = make(2);
+  await llmTwice.client.login();
+  let llmErr = null;
+  try {
+    await llmTwice.client.llmProxy({});
+  } catch (e) {
+    llmErr = e;
+  }
+  check('llm-proxy cut twice: not the rule (no Draft)', llmErr && !errorGoesToDraft(llmErr.message));
+}
+
+// ── Repeat once before Draft ──
+check('Verified fails → repeat', shouldRepeat({ result: 'failed' }, 'approved'));
+check('Verified review → repeat', shouldRepeat({ result: 'review' }, 'approved'));
+check('Verified inconclusive → repeat', shouldRepeat({ result: 'inconclusive' }, 'approved'));
+check('Verified AI timeout → repeat', shouldRepeat({ result: 'error', error: 'POST /api/llm-proxy -> 504: {"code":"llm_timeout"}' }, 'approved'));
+check('Verified passes → no repeat', !shouldRepeat({ result: 'passed' }, 'approved') && !shouldRepeat({ result: 'schema_covered' }, 'approved'));
+check('Verified not executable (known without the AI) → no repeat', !shouldRepeat({ result: 'not_executable', deterministic: true }, 'approved'));
+check('Verified impossible path (no AI) → no repeat', !shouldRepeat({ result: 'review', deterministic: true }, 'approved'));
+check('backend error → no repeat', !shouldRepeat({ result: 'error', error: 'GET /api/schema-cards -> 500: {}' }, 'approved') && !shouldRepeat({ result: 'error', error: 'fetch failed' }, 'approved'));
+check('Draft or To Do → one attempt', !shouldRepeat({ result: 'failed' }, 'pending_review') && !shouldRepeat({ result: 'failed' }, undefined));
+check('--no-retry → one attempt', !shouldRepeat({ result: 'failed' }, 'approved', { noRetry: true }));
+
+// ── Both results in the progress line and the report ──
+{
+  const repaired = { identifier: 'BRDP-EXT-00101', result: 'passed', status_before: 'approved', status_after: 'approved', duration_ms: 70000, attempts: [{ result: 'failed', recorded: false }, { result: 'passed', recorded: true }] };
+  const twiceBad = {
+    identifier: 'BRDP-EXT-00102',
+    result: 'failed',
+    reason_text: 'Prueba fallida.',
+    status_before: 'approved',
+    status_after: 'pending_review',
+    moved_to_draft: true,
+    duration_ms: 90000,
+    attempts: [{ result: 'inconclusive', recorded: false }, { result: 'failed', recorded: true }],
+  };
+  const timeouts = {
+    identifier: 'BRDP-EXT-00103',
+    result: 'error',
+    error: 'POST /api/llm-proxy -> 504',
+    error_kind: 'timeout',
+    status_before: 'approved',
+    status_after: 'pending_review',
+    moved_to_draft: true,
+    no_test_recorded: true,
+    duration_ms: 600000,
+    attempts: [{ result: 'error', error_kind: 'timeout' }, { result: 'error', error_kind: 'timeout' }],
+  };
+  eq('progress: fails, passes on repeat', progressLine(1, 3, repaired), '[1/3] BRDP-EXT-00101 FALLA, PASA al repetir (1 min 10 s)');
+  eq('progress: inconclusive, fails on repeat → Draft', progressLine(2, 3, twiceBad), '[2/3] BRDP-EXT-00102 NO CONCLUYENTE, FALLA al repetir → Draft (1 min 30 s)');
+  eq('progress: timeout twice → Draft without a test', progressLine(3, 3, timeouts), '[3/3] BRDP-EXT-00103 ERROR: TIMEOUT, ERROR: TIMEOUT al repetir → Draft (sin prueba registrada) (10 min 0 s)');
+  eq('progress in English', progressLine(1, 3, repaired, 'en'), '[1/3] BRDP-EXT-00101 FAILS, PASSES on repeat (1 min 10 s)');
+  eq('one attempt: one result', attemptsLabel({ result: 'failed' }), 'falla');
+  const report = buildReport({ project: { name: 'P', standard: 'S1000D 4.2', format: 'BREX-4.2' }, runs: [{ started_at: 'a', user: 'u', options: { no_retry: true } }], entries: [repaired, twiceBad, timeouts] });
+  check('report: repeated count', /Repetidas antes de pasar a Draft: 3 \(pasan al repetir: 1; no pasan tampoco al repetir: 2\)/.test(report), report);
+  check('report: both results in the failing table', /BRDP-EXT-00102 \| no concluyente, falla al repetir \| → Draft \|/.test(report));
+  check('report: passing list says it passed on repeat', /- BRDP-EXT-00101 — Verified \(falla, pasa al repetir\)/.test(report));
+  check('report: --no-retry in the pass line', /--no-retry/.test(report));
+  check('report: the final result is counted', /\| pasa \| 1 \|/.test(report) && /\| falla \| 1 \| 1 \|/.test(report));
+}
 
 console.log(`${checks - failures}/${checks} checks passed`);
 if (failures) process.exit(1);
