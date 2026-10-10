@@ -151,6 +151,28 @@ _MAX_PASSED_PATHS = 500
 _MAX_PROPOSAL = 20000
 
 
+# Remates: where the application put the example's content and the levels
+# above it where the same content could be written (fits: the schema lets
+# that level hold it). "Probar con los ejemplos guardados" uses it to tell a
+# rejection caused by the skeleton from a real one. Absent in tests saved
+# before (then no such diagnosis).
+_MAX_LIFT_LEVELS = 20
+_MAX_NODE_PATH = 1000
+
+
+class RuleTestSkeletonLiftLevel(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    path: str = Field(min_length=1, max_length=_MAX_NODE_PATH)
+    chain_path: str = Field(min_length=1, max_length=_MAX_NODE_PATH)
+    fits: bool
+
+
+class RuleTestSkeletonLift(BaseModel):
+    insertion: str = Field(min_length=1, max_length=200)
+    insertion_path: str = Field(min_length=1, max_length=_MAX_NODE_PATH)
+    levels: list[RuleTestSkeletonLiftLevel] = Field(min_length=1, max_length=_MAX_LIFT_LEVELS)
+
+
 class RuleTestPassedExample(BaseModel):
     label: str = Field(default="", max_length=500)
     expected: Literal["accept", "reject"]
@@ -164,6 +186,7 @@ class RuleTestPassedExample(BaseModel):
     # for a single-document example, and in every test saved before).
     main_path: str | None = Field(default=None, max_length=_MAX_DOSSIER_PATH)
     files: list[RuleTestDossierFile] = Field(default_factory=list, max_length=_MAX_DOSSIER_FILES)
+    skeleton_lift: RuleTestSkeletonLift | None = None
 
     model_config = {"populate_by_name": True}
 

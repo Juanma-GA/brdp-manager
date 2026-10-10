@@ -428,6 +428,9 @@ def _without_empty_dossier(example: dict) -> dict:
     if not example.get("files"):
         example.pop("files", None)
         example.pop("main_path", None)
+    # Remates: kept only when the panel sent it.
+    if example.get("skeleton_lift") is None:
+        example.pop("skeleton_lift", None)
     return example
 
 

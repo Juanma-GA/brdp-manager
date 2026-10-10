@@ -106,7 +106,7 @@ import { distinctSchemaNames, languageCheck, aiFieldLanguageCheck, loadSchemaCar
 import { compareRunDirs } from "./compare-prompt-eval.mjs";
 import { appendComparison, importBaselines, listRuns, previousRunOfOtherCommit, saveRun } from "./prompt-eval/runs.mjs";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
-import { cleanupLeftoverProjects, createEvalClient, LoginError, SessionLostError } from "./prompt-eval/session.mjs";
+import { cleanupLeftoverProjects, closeHttpClient, createEvalClient, exitCleanly, LoginError, SessionLostError } from "./prompt-eval/session.mjs";
 import { candidatesToDraft, draftCandidates } from "../src/utils/ruleExtractDraft.js";
 import { findDecisions } from "../src/utils/textExtract.js";
 import { FIND_DECISIONS_USER_MESSAGE } from "../src/prompts/extractFromTextPrompt.js";
@@ -508,7 +508,10 @@ async function runCheck(check, answer, ctx = {}) {
       if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
       const verdict = ruleTestVerdict(r.examples, r.runs, ctx.analysis, r.proposalCheck, ctx.threshold, r.coverage);
       const expect = check.expect || [];
-      return { status: expect.includes(verdict.kind) ? "pass" : "fail", detail: `engine verdict ${verdict.kind}, expected ${expect.join(" or ")}: ${JSON.stringify(verdict)}` };
+      // Remates: `why` also pins the reason of an inconclusive verdict
+      // (e.g. skeleton_placement).
+      const ok = expect.includes(verdict.kind) && (!check.why || verdict.why === check.why);
+      return { status: ok ? "pass" : "fail", detail: `engine verdict ${verdict.kind}${verdict.why ? ` (${verdict.why})` : ""}, expected ${expect.join(" or ")}${check.why ? ` (${check.why})` : ""}: ${JSON.stringify(verdict)}` };
     }
     case "rule_test_examples_by_app": {
       // Mejoras F, Part 1.2: a rule on the document root alone -- the
@@ -1511,11 +1514,16 @@ function writeReport(results, runs, meta) {
   console.log(`Full responses written to ${responsesPath}`);
 }
 
-main().catch((err) => {
-  // A login or session problem is a clear message, not a stack trace.
-  if (err instanceof LoginError || err instanceof SessionLostError) {
-    console.error(`\nSTOPPED: ${err.message}`);
-    if (err instanceof SessionLostError) console.error("The pass was stopped; no report was written for it. Run it again.");
-  } else console.error("FATAL:", err);
-  process.exit(1);
-});
+// Remates (Windows): never process.exit() with connections open -- the
+// exit code is set and the HTTP client closed (session.mjs, exitCleanly).
+main().then(
+  () => closeHttpClient(),
+  (err) => {
+    // A login or session problem is a clear message, not a stack trace.
+    if (err instanceof LoginError || err instanceof SessionLostError) {
+      console.error(`\nSTOPPED: ${err.message}`);
+      if (err instanceof SessionLostError) console.error("The pass was stopped; no report was written for it. Run it again.");
+    } else console.error("FATAL:", err);
+    return exitCleanly(1);
+  }
+);

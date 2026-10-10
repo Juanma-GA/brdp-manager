@@ -3342,5 +3342,127 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   void materializeExample; void runExample;
 }
 
+// ─── Remates: an example the skeleton makes impossible ─────────────────────
+// Real rules (CMP 4.2): BRDP-EXT-00043 (descript) and BRDP-EXT-00059
+// (proced), on the real 4.2 structures. The application writes the content
+// inside the skeleton's <levelledPara> / <proceduralStep>, so the example
+// meant to be accepted always sits inside one and the (correct) rule
+// rejects it: "inconclusive", never "failed".
+{
+  const S42 = 'S1000D 4.2';
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const { verdictToTestRecord } = await import('../src/utils/ruleTestReasons.js');
+  const { verdictCause, skeletonLiftLevels } = await import('../src/utils/ruleTest.js');
+  const { passedTestPayload, savedPassedTest, runSavedTest } = await import('../src/utils/ruleTestSaved.js');
+  const ctx = (schema) => `http://www.s1000d.org/S1000D_4-2/xml_schema_flat/${schema}.xsd`;
+  const EXT43 = `<contextRules rulesContext="${ctx('descript')}"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//description//levelledPara/levelledParaAlts</objectPath><objectUse>The &lt;levelledParaAlts&gt; element can only be used directly inside the &lt;description&gt; element.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+  const EXT59 = `<contextRules rulesContext="${ctx('proced')}"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//mainProcedure//proceduralStep/proceduralStepAlts</objectPath><objectUse>The &lt;proceduralStepAlts&gt; element can only be used directly inside the &lt;mainProcedure&gt; element.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+  const lpAlts = '<levelledParaAlts><levelledPara><title>Alternative A</title><para>Text of the first alternative.</para></levelledPara></levelledParaAlts>';
+  const lpNested = '<levelledPara><title>Outer</title><levelledParaAlts><levelledPara><para>Nested alternative.</para></levelledPara></levelledParaAlts></levelledPara>';
+  const psAlts = '<proceduralStepAlts><proceduralStep><para>Remove the panel.</para></proceduralStep></proceduralStepAlts>';
+  const psNested = '<proceduralStep><para>Open the door.</para><proceduralStepAlts><proceduralStep><para>Remove the panel.</para></proceduralStep></proceduralStepAlts></proceduralStep>';
+
+  const s43 = setupFor(S42, EXT43, ['descript']);
+  check('skeleton: EXT-00043 inserts inside the skeleton <levelledPara>', s43.placements.descript.placement.insertion === 'levelledPara');
+  const r43 = testRun(EXT43, [
+    { label: 'directly in description', expected: 'accept', schema: 'descript', content: lpAlts },
+    { label: 'inside a levelledPara', expected: 'reject', schema: 'descript', content: lpNested },
+  ], s43);
+  check('skeleton: EXT-00043 both examples valid', r43.runs.every((r) => r.validation.runnable), JSON.stringify(r43.runs.map((r) => r.validation.structure)));
+  check('skeleton: EXT-00043 accept example rejected (as built)', r43.runs[0].result.status === 'rejected' && r43.runs[0].matches === false);
+  check('skeleton: EXT-00043 diagnosis on the accept example', JSON.stringify(r43.runs[0].skeletonPlacement) === '{"inside":"levelledPara","at":"description"}', JSON.stringify(r43.runs[0].skeletonPlacement));
+  check('skeleton: EXT-00043 no diagnosis on the reject example', r43.runs[1].skeletonPlacement === undefined && r43.runs[1].matches === true);
+  check('skeleton: EXT-00043 verdict inconclusive (skeleton), never failed', r43.verdict.kind === 'inconclusive' && r43.verdict.why === 'skeleton_placement' && r43.verdict.inside === 'levelledPara' && r43.verdict.at === 'description', JSON.stringify(r43.verdict));
+  check('skeleton: shown document unchanged (still inside the levelledPara)', /<levelledPara><levelledParaAlts>/.test(r43.materialized[0].xml.replace(/\s+/g, '')));
+  check('skeleton: no "regenerate" cause', verdictCause(r43.verdict, r43.runs) === null);
+  const rec43 = verdictToTestRecord(r43.verdict);
+  check('skeleton: recorded as inconclusive with its own reason', rec43.result === 'inconclusive' && rec43.reason.code === 'test_skeleton_placement' && JSON.stringify(rec43.reason.params) === '{"inside":"levelledPara","at":"description"}', JSON.stringify(rec43));
+  check('skeleton: reason EN', formatRuleTestReason(rec43.reason, en) === 'the application builds the examples inside <levelledPara>, and the rule rejects them for that (written directly in <description>, it accepts them)', formatRuleTestReason(rec43.reason, en));
+  check('skeleton: reason ES', formatRuleTestReason(rec43.reason, es) === 'la aplicación monta los ejemplos dentro de <levelledPara>, y la regla los rechaza por eso (escritos directamente en <description>, los acepta)');
+  check('skeleton: example note EN', en('records.ruleTest.skeletonPlacementExample', r43.runs[0].skeletonPlacement) === 'The application builds this example inside <levelledPara> (dimmed part), and the rule rejects it for that. Written directly in <description>, the rule accepts it.');
+  check('skeleton: example note ES', es('records.ruleTest.skeletonPlacementExample', r43.runs[0].skeletonPlacement) === 'La app monta este ejemplo dentro de <levelledPara> (parte atenuada), y la regla lo rechaza por eso. Escrito directamente en <description>, la regla lo acepta.');
+  check('skeleton: verdict text EN/ES', /^Inconclusive: .*<levelledPara>.*<description>/.test(en('records.ruleTest.verdicts.skeletonPlacement', r43.verdict)) && /^No concluyente: .*<levelledPara>.*<description>/.test(es('records.ruleTest.verdicts.skeletonPlacement', r43.verdict)));
+
+  const s59 = setupFor(S42, EXT59, ['proced']);
+  const r59 = testRun(EXT59, [
+    { label: 'directly in mainProcedure', expected: 'accept', schema: 'proced', content: psAlts },
+    { label: 'inside a proceduralStep', expected: 'reject', schema: 'proced', content: psNested },
+  ], s59);
+  check('skeleton: EXT-00059 inserts inside the skeleton <proceduralStep>', s59.placements.proced.placement.insertion === 'proceduralStep');
+  check('skeleton: EXT-00059 verdict inconclusive (<proceduralStep> / <mainProcedure>)', r59.verdict.kind === 'inconclusive' && r59.verdict.why === 'skeleton_placement' && r59.verdict.inside === 'proceduralStep' && r59.verdict.at === 'mainProcedure', JSON.stringify([r59.verdict, r59.runs.map((r) => [r.validation.structure, r.result?.status])]));
+
+  // Control: a genuinely wrong rule (forbids <levelledParaAlts> everywhere)
+  // rejects the well-written example one level up too -> failed, as today.
+  const WRONG = `<contextRules rulesContext="${ctx('descript')}"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag="0">//levelledParaAlts</objectPath><objectUse>x</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
+  const rWrong = testRun(WRONG, [
+    { label: 'directly in description', expected: 'accept', schema: 'descript', content: lpAlts },
+    { label: 'inside a levelledPara', expected: 'reject', schema: 'descript', content: lpNested },
+  ], setupFor(S42, WRONG, ['descript']));
+  check('skeleton: wrong rule -> failed as today, no diagnosis', rWrong.verdict.kind === 'incorrect' && rWrong.verdict.strict === true && rWrong.runs[0].skeletonPlacement === undefined, JSON.stringify(rWrong.verdict));
+
+  // Mixed: the skeleton example plus a real disagreement (a reject example
+  // the rule accepts) -> failed; the note only on the first.
+  const rMixed = testRun(EXT43, [
+    { label: 'directly in description', expected: 'accept', schema: 'descript', content: lpAlts },
+    { label: 'plain paragraph', expected: 'reject', schema: 'descript', content: '<para>No alternatives here.</para>' },
+  ], s43);
+  check('skeleton: mixed -> failed', rMixed.verdict.kind === 'incorrect' && rMixed.verdict.permissive === true && rMixed.verdict.strict === true, JSON.stringify(rMixed.verdict));
+  check('skeleton: mixed -> note only on the skeleton example', Boolean(rMixed.runs[0].skeletonPlacement) && rMixed.runs[1].skeletonPlacement === undefined);
+
+  // Content that does not fit one level up (its <title> cannot go directly
+  // in <description>) -> no diagnosis, failed as today.
+  const rTitle = testRun(EXT43, [
+    { label: 'titled', expected: 'accept', schema: 'descript', content: `<title>Heading</title>${lpAlts}` },
+    { label: 'inside a levelledPara', expected: 'reject', schema: 'descript', content: lpNested },
+  ], s43);
+  const liftTitle = rTitle.materialized[0].skeletonLift;
+  check('skeleton: content that does not fit upstairs -> level marked as not fitting', liftTitle?.levels[0].name === 'description' && liftTitle.levels[0].fits === false && rTitle.runs[0].validation.runnable, JSON.stringify(liftTitle));
+  check('skeleton: content that does not fit upstairs -> no diagnosis, failed as today', rTitle.runs[0].skeletonPlacement === undefined && rTitle.verdict.kind === 'incorrect', JSON.stringify(rTitle.verdict));
+
+  // Top-level text, no levels, no content.
+  check('skeleton: top-level text never fits', skeletonLiftLevels(s43.placements.descript.placement, s43.placements.descript.structure, 'Loose text <para>x</para>', parseXml).levels.every((l) => !l.fits));
+  check('skeleton: empty content -> no lift', skeletonLiftLevels(s43.placements.descript.placement, s43.placements.descript.structure, '  ', parseXml) === null);
+
+  // A test passing today stays the same.
+  const rOk = testRun(EMPH, [
+    { label: 'no emphasis', expected: 'accept', schema: 'descript', content: 'Plain text.' },
+    { label: 'emphasis', expected: 'reject', schema: 'descript', content: 'An <emphasis>important</emphasis> word.' },
+  ], setupFor(S42, EMPH, ['descript']));
+  check('skeleton: a passing test stays correct', rOk.verdict.kind === 'correct' && rOk.runs.every((r) => r.skeletonPlacement === undefined), JSON.stringify(rOk.verdict));
+
+  // Through generateRuleTestExamples: one LLM call (no correction round),
+  // inconclusive.
+  const cards42 = JSON.parse(fs.readFileSync(new URL('../backend/schema_cards/schema-cards-4-2.json', import.meta.url))).cards;
+  const docs42 = [...new Set(Object.values(cards42).flatMap((vs) => vs.flatMap((v) => v.schemas)))].filter((sc) => !['dc', 'rdf', 'xlink', 'xcf'].includes(sc)).sort();
+  const fetchCards = async (_std, names) => ({ cards: Object.fromEntries(names.filter((n) => cards42[n]).map((n) => [n, { variants: cards42[n] }])), document_schemas: docs42 });
+  const fetchStructure = async (_std, schema) => { const st = structureOf(S42, schema); return st ? { available: true, ...st } : { available: false }; };
+  let calls = 0;
+  const g43 = await generateRuleTestExamples({
+    ruleXml: EXT43, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00043', title: 'Alternative levelled paragraphs', definition: 'Where <levelledParaAlts> may be used.', proposal: 'The <levelledParaAlts> element can only be used directly inside the <description> element.' },
+    vocabulary, parseXml,
+    ask: async () => { calls += 1; return JSON.stringify({ examples: [
+      { label: 'directly in description', expected: 'accept', schema: 'descript', content: lpAlts },
+      { label: 'inside a levelledPara', expected: 'reject', schema: 'descript', content: lpNested },
+    ] }); },
+    fetchSchemaCards: fetchCards, fetchStructure,
+  });
+  const gVerdict = g43.status === 'ready' ? ruleTestVerdict(g43.examples, g43.runs, analyzeRule(EXT43, 'BREX-4.2', { parseXml })) : null;
+  check('skeleton: pipeline -> one LLM call, inconclusive (skeleton)', g43.status === 'ready' && calls === 1 && gVerdict?.why === 'skeleton_placement', JSON.stringify([g43.status, calls, gVerdict]));
+
+  // "Probar con los ejemplos guardados": the saved examples keep where the
+  // content was put; re-run with the same rule, same diagnosis.
+  const fakeRuns = r43.runs.map((r) => ({ ...r, result: { ...r.result, status: 'accepted' }, matches: true }));
+  fakeRuns[1] = r43.runs[1];
+  const payload = passedTestPayload(r43.materialized, fakeRuns, 'p');
+  check('skeleton: saved payload keeps skeleton_lift', payload.examples[0].skeleton_lift?.insertion_path === '/dmodule[1]/content[1]/description[1]/levelledPara[1]' && payload.examples[0].skeleton_lift.levels[0].chain_path === '/dmodule[1]/content[1]/description[1]/levelledPara[1]', JSON.stringify(payload.examples[0].skeleton_lift));
+  const saved = savedPassedTest({ rule_xml: EXT43, last_passed_test: { ...payload, rule_hash: 'x' } });
+  const rerun = runSavedTest(saved, EXT43, 'BREX-4.2', { parseXml });
+  check('skeleton: saved examples re-run -> same diagnosis', rerun.verdict.why === 'skeleton_placement' && Boolean(rerun.runs[0].skeletonPlacement), JSON.stringify(rerun.verdict));
+  const oldSaved = savedPassedTest({ rule_xml: EXT43, last_passed_test: { ...payload, examples: payload.examples.map(({ skeleton_lift: _drop, ...rest }) => rest), rule_hash: 'x' } });
+  check('skeleton: a test saved before (no skeleton_lift) -> as today', runSavedTest(oldSaved, EXT43, 'BREX-4.2', { parseXml }).verdict.kind === 'incorrect');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

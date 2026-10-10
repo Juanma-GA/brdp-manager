@@ -55,7 +55,11 @@
 //     test_proposal_unchecked {error} (Barrido final 1/2),
 //     test_impossible_path {format, problems} (Mejoras C, Part 1: every
 //     path of the rule cannot exist in the standard; validation/
-//     rulePathCheck.js's problems, formatted with formatPathProblem).
+//     rulePathCheck.js's problems, formatted with formatPathProblem),
+//     test_skeleton_placement {inside, at} (Remates: every example that did
+//     not give what it expects was rejected only because the application
+//     put its content inside the skeleton's <inside>; written directly in
+//     <at>, the rule accepts it -- inconclusive).
 
 import { formatSchemaIssue } from '../validation/schemaValidation.js';
 import { formatPathProblem } from '../validation/rulePathCheck.js';
@@ -69,7 +73,7 @@ export const ENGINE_REASON_CODES = [
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
   'example_no_room', 'condition_no_schema', 'context_schema_unknown', 'test_schema_unavailable',
 ];
-export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_engine_error', 'test_root_rejects_all'];
+export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -174,6 +178,10 @@ export function verdictToTestRecord(verdict) {
     case 'schema_covered':
       return { result: 'schema_covered', reason: { code: 'test_schema_covered', params: { items: verdict.items, via: verdict.via } } };
     case 'inconclusive':
+      // Remates: the rejection came from the skeleton, not from the rule.
+      if (verdict.why === 'skeleton_placement') {
+        return { result: 'inconclusive', reason: { code: 'test_skeleton_placement', params: { inside: verdict.inside, at: verdict.at } } };
+      }
       return {
         result: 'inconclusive',
         reason: { code: verdict.why === 'nothing_selected' ? 'test_nothing_selected' : 'test_missing_expectation', params: {} },

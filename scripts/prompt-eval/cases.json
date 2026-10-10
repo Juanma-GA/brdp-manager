@@ -4303,6 +4303,46 @@
       ]
     },
     {
+      "id": "rule-test-4-2-skeleton-placement-levelledparaalts",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Remates, BRDP-EXT-00043 (CMP 4.2, correct rule): <levelledParaAlts> only directly inside <description>. The application writes the content inside the skeleton's <levelledPara>, so the example meant to be accepted always ends up inside one and the rule rightly rejects it. Expected: 'inconclusive' for that reason (the same content written directly in <description> is accepted), never 'failed'.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-EXT43",
+        "title": "Alternative levelled paragraphs",
+        "definition": "Decide where the <levelledParaAlts> element may be used.",
+        "proposal": "The <levelledParaAlts> element can only be used directly inside the <description> element.",
+        "validation": "Validated"
+      },
+      "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd\"><structureObjectRuleGroup><structureObjectRule id=\"BRDP-EVAL-RT-EXT43\"><objectPath allowedObjectFlag=\"0\">//description//levelledPara/levelledParaAlts</objectPath><objectUse>The &lt;levelledParaAlts&gt; element can only be used directly inside the &lt;description&gt; element.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_in",
+          "expect": [
+            "inconclusive",
+            "correct"
+          ],
+          "note": "never 'failed': if the accept example sits inside the skeleton's <levelledPara>, the verdict is inconclusive for that reason; 'correct' only if no example ends up there"
+        },
+        {
+          "type": "rule_test_verdict_in",
+          "expect": [
+            "inconclusive"
+          ],
+          "why": "skeleton_placement",
+          "note": "with the examples as they come (accept example inside the skeleton), the verdict is inconclusive because of the skeleton"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-gmc-values-with-text-interchangeability",
       "type": "rule-test",
       "standard": "S1000D 4.2",

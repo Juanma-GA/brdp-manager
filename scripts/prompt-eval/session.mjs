@@ -26,6 +26,37 @@
 
 export const EVAL_PROJECT_PREFIX = "Prompt Eval — ";
 
+// Remates (Windows): Node's fetch keeps its sockets open between requests
+// (keep-alive) in a global dispatcher. Calling process.exit() while one of
+// them is still closing aborts the process on Windows with "Assertion
+// failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c" (a
+// libuv check on Windows only; Linux has no such assertion, so it cannot be
+// reproduced here). The scripts that use this client never call
+// process.exit() while a request or connection is open: they set
+// process.exitCode, close the dispatcher with closeHttpClient() and let the
+// process end by itself. close() lets the requests in flight end (abort:
+// true stops them at once); either way, after `timeoutMs` the connections
+// are destroyed, never left closing.
+const GLOBAL_DISPATCHER = Symbol.for("undici.globalDispatcher.1");
+export async function closeHttpClient({ abort = false, timeoutMs = 3000 } = {}) {
+  const dispatcher = globalThis[GLOBAL_DISPATCHER];
+  if (!dispatcher || typeof dispatcher.close !== "function") return;
+  const within = (promise) =>
+    Promise.race([promise.then(() => true, () => true), new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs).unref())]);
+  if (!abort && (await within(dispatcher.close()))) return;
+  await within(dispatcher.destroy());
+}
+
+// The way out of a script: exit code set, connections closed, then the
+// process ends by itself. If something else still keeps it alive (a wait
+// before a retry), it is ended `graceMs` later -- by then no connection is
+// open or closing.
+export async function exitCleanly(code, { abort = false, graceMs = 2000 } = {}) {
+  process.exitCode = code;
+  await closeHttpClient({ abort });
+  setTimeout(() => process.exit(code), graceMs).unref();
+}
+
 export class SessionLostError extends Error {
   constructor(message) {
     super(message);

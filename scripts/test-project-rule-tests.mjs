@@ -486,5 +486,76 @@ check('--no-retry → one attempt', !shouldRepeat({ result: 'failed' }, 'approve
   check('report: the final result is counted', /\| pasa \| 1 \|/.test(report) && /\| falla \| 1 \| 1 \|/.test(report));
 }
 
+// ─── Remates: a clean exit (Windows) ─────────────────────────────────────
+// On Windows, process.exit() while a fetch connection is still closing
+// aborts with "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file
+// src\win\async.c" after the message (a libuv check Linux does not have, so
+// it cannot be reproduced here). The scripts never call process.exit() with
+// connections open: the exit code is set, the HTTP client closed
+// (prompt-eval/session.mjs's exitCleanly) and the process ends by itself.
+// Checked two ways: no process.exit( left in the code (only the fallback of
+// exitCleanly, after the connections are closed), and the real script run
+// against a local keep-alive server, with process.exit trapped -- exit code,
+// one-line message, no trace, never process.exit().
+{
+  const { spawn } = await import('node:child_process');
+  const http = await import('node:http');
+  const { pathToFileURL, fileURLToPath } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const codeOf = (file) =>
+    fs
+      .readFileSync(path.join(here, file), 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*\/\//.test(line))
+      .join('\n');
+  const exitsIn = (file) => (codeOf(file).match(/process\.exit\(/g) || []).length;
+  check('exit: run-project-rule-tests.mjs never calls process.exit()', exitsIn('run-project-rule-tests.mjs') === 0);
+  check('exit: run-prompt-eval.mjs never calls process.exit()', exitsIn('run-prompt-eval.mjs') === 0);
+  check('exit: session.mjs only in exitCleanly, after closing the client', exitsIn('prompt-eval/session.mjs') === 1 && /await closeHttpClient\(\{ abort \}\);\s*\n\s*setTimeout\(\(\) => process\.exit\(code\)/.test(codeOf('prompt-eval/session.mjs')));
+
+  const trapDir = fs.mkdtempSync(path.join(os.tmpdir(), 'exit-trap-'));
+  const trap = path.join(trapDir, 'trap.mjs');
+  fs.writeFileSync(trap, "const real = process.exit.bind(process);\nprocess.exit = (code) => { process.stderr.write('PROCESS_EXIT_CALLED\\n'); real(code); };\n");
+  // A backend that answers with keep-alive connections, like uvicorn.
+  const server = http.createServer((req, res) => {
+    const json = (body) => {
+      res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'keep-alive' });
+      res.end(JSON.stringify(body));
+    };
+    if (req.url === '/api/auth/login') return json({ access_token: 'token' });
+    if (req.url === '/api/auth/me') return json({ email: 'editor@example.com' });
+    if (req.url === '/api/projects') return json([{ id: 'p1', name: 'Another project', standard: 'S1000D 4.2', effective_role: 'editor', project_config: {} }, { id: 'p2', name: 'Viewer project', standard: 'S1000D 4.2', effective_role: 'viewer', project_config: {} }]);
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const api = `http://127.0.0.1:${server.address().port}`;
+  const runScript = (args, env) =>
+    new Promise((resolve) => {
+      const child = spawn(process.execPath, ['--import', pathToFileURL(trap).href, path.join(here, 'run-project-rule-tests.mjs'), ...args], {
+        env: { ...process.env, PROMPT_EVAL_API_URL: api, PROMPT_EVAL_EMAIL: 'editor@example.com', PROMPT_EVAL_PASSWORD: 'x', ...env },
+      });
+      let out = '';
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.on('data', (d) => (out += d));
+      const killer = setTimeout(() => child.kill(), 30000);
+      child.on('close', (code) => {
+        clearTimeout(killer);
+        resolve({ code, out });
+      });
+    });
+  const noTrace = (out) => !/\n\s+at /.test(out) && !/Assertion failed/.test(out);
+  const missing = await runScript(['--project', 'Does not exist']);
+  check('exit: project not found -> message, exit 2, no process.exit, no trace', missing.code === 2 && /No project is named exactly "Does not exist"/.test(missing.out) && !/PROCESS_EXIT_CALLED/.test(missing.out) && noTrace(missing.out), missing.out);
+  const viewer = await runScript(['--project', 'Viewer project']);
+  check('exit: no editor role -> exit 2, no process.exit', viewer.code === 2 && /need the editor role/.test(viewer.out) && !/PROCESS_EXIT_CALLED/.test(viewer.out) && noTrace(viewer.out), viewer.out);
+  const noArgs = await runScript([]);
+  check('exit: no --project -> exit 2, no process.exit', noArgs.code === 2 && /--project/.test(noArgs.out) && !/PROCESS_EXIT_CALLED/.test(noArgs.out), noArgs.out);
+  server.close();
+  const down = await runScript(['--project', 'x']);
+  check('exit: backend down -> exit 2, no process.exit, no trace', down.code === 2 && /Cannot reach the backend/.test(down.out) && !/PROCESS_EXIT_CALLED/.test(down.out) && noTrace(down.out), down.out);
+  fs.rmSync(trapDir, { recursive: true, force: true });
+}
+
 console.log(`${checks - failures}/${checks} checks passed`);
 if (failures) process.exit(1);

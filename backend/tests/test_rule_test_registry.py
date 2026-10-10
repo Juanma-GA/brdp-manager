@@ -442,6 +442,33 @@ async def test_passed_test_is_kept_with_its_examples(client, editor_viewer_and_p
     assert first["skeleton_node_paths"] == ["/dmodule[1]", "/dmodule[1]/content[1]"]
     # A viewer reads it too.
     assert (await client.get(url, headers=viewer_headers)).json()["last_passed_test"]["rule_hash"] == _hash(RULE)
+    # An example without skeleton_lift is stored without the key.
+    assert "skeleton_lift" not in first
+
+
+async def test_passed_test_keeps_the_skeleton_lift(client, editor_viewer_and_project):
+    # Remates: where the content was put and the levels above it, so "Probar
+    # con los ejemplos guardados" can tell a rejection the skeleton causes.
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    lift = {
+        "insertion": "levelledPara",
+        "insertion_path": "/dmodule[1]/content[1]/description[1]/levelledPara[1]",
+        "levels": [
+            {"name": "description", "path": "/dmodule[1]/content[1]/description[1]", "chain_path": "/dmodule[1]/content[1]/description[1]/levelledPara[1]", "fits": True},
+            {"name": "content", "path": "/dmodule[1]/content[1]", "chain_path": "/dmodule[1]/content[1]/description[1]", "fits": False},
+        ],
+    }
+    payload = _passed_payload()
+    payload["examples"][0]["skeleton_lift"] = lift
+    r = await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": payload}, headers=headers)
+    assert r.status_code == 200, r.text
+    examples = r.json()["last_passed_test"]["examples"]
+    assert examples[0]["skeleton_lift"] == lift and "skeleton_lift" not in examples[1]
+    # Malformed (no levels) -> 422, nothing stored.
+    payload["examples"][0]["skeleton_lift"] = {**lift, "levels": []}
+    bad = await client.post(url + "/test", json={"result": "passed", "rule_hash": _hash(RULE), "passed_test": payload}, headers=headers)
+    assert bad.status_code == 422
 
 
 async def test_a_failed_test_leaves_the_passed_test_and_a_new_pass_replaces_it(client, editor_viewer_and_project):

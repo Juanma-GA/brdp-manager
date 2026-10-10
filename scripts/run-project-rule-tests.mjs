@@ -84,7 +84,7 @@ import { ruleTestRequestBody } from '../src/api/ruleTestRequest.js';
 import { answerContent, buildRequestBody } from '../src/api/llmRequest.js';
 import { isTruncatedAnswer, truncatedAnswerError } from '../src/api/llmTruncation.js';
 import { RULE_PROPOSAL_CHECK_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_TEMPERATURE } from '../src/prompts/shared.js';
-import { createEvalClient, LlmLimitError, LoginError, SessionLostError } from './prompt-eval/session.mjs';
+import { createEvalClient, exitCleanly, LlmLimitError, LoginError, SessionLostError } from './prompt-eval/session.mjs';
 import { lintRule } from './lib/ruleLint.mjs';
 import {
   buildReport,
@@ -112,17 +112,35 @@ const RUNS_DIR = path.join(__dirname, 'rule-test-runs');
 const API = process.env.PROMPT_EVAL_API_URL || 'http://localhost:8000';
 const REVOKE_RETRY_MS = 3000;
 
+// Remates (Windows): no exit point calls process.exit() while a request or
+// a connection is open -- on Windows that aborts with "Assertion failed:
+// !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c" after the
+// message. Before the loop, fail() stops the script by throwing StopRun
+// (the handler below sets the exit code and closes the HTTP client, and
+// the process ends by itself); in and after the loop, finish() and Ctrl+C
+// do the same through exitCleanly (prompt-eval/session.mjs).
+class StopRun extends Error {
+  constructor(code) {
+    super('stop');
+    this.code = code;
+  }
+}
+
 function fail(message, code = 2) {
   console.error(`ERROR: ${message}`);
-  process.exit(code);
+  throw new StopRun(code);
 }
 
 // Anything unexpected: one line, never a trace. Before the loop nothing is
 // tested (exit 2); during it, what is done is saved and the pass stops
 // (exit 3) -- see onUnexpected below.
-let onUnexpected = (err) => fail(err?.message || String(err));
-process.on('uncaughtException', (err) => onUnexpected(err));
-process.on('unhandledRejection', (err) => onUnexpected(err));
+let onUnexpected = (err) => {
+  console.error(`ERROR: ${err?.message || String(err)}`);
+  exitCleanly(2);
+};
+const onUncaught = (err) => (err instanceof StopRun ? exitCleanly(err.code) : onUnexpected(err));
+process.on('uncaughtException', onUncaught);
+process.on('unhandledRejection', onUncaught);
 
 const opts = parseArgs(process.argv.slice(2));
 if (opts.error) fail(`${opts.error}\nUsage: node scripts/run-project-rule-tests.mjs --project "<exact name>" [--all] [--only ID,ID] [--limit N] [--parallel 2] [--lang en] [--no-retry]`);
@@ -418,6 +436,9 @@ async function testRule(item) {
 }
 
 // ── The loop ─────────────────────────────────────────────────────────────
+// closed: the pass has ended (finish() ran, or Ctrl+C twice) -- a rule
+// still in flight is not added to the report and nothing more is saved.
+let closed = false;
 let next = 0;
 let tested = 0;
 let finished = 0;
@@ -426,11 +447,15 @@ const processed = new Set();
 
 process.on('SIGINT', () => {
   if (stopping === 'Ctrl+C') {
+    if (closed) return;
+    closed = true;
     run.stopped = 'Ctrl+C';
     results.pending = queue.filter((q) => !processed.has(q.brdp.identifier)).map((q) => q.brdp.identifier);
     const saved = save();
     console.log(`\nStopped now. What is done stays in the app${saved ? ' and the report' : ` (the report could not be saved: ${lastSaveFailed.join(', ')})`}.`);
-    process.exit(130);
+    // The requests in flight are stopped (abort), never left closing.
+    exitCleanly(130, { abort: true });
+    return;
   }
   stopping = 'Ctrl+C';
   console.log('\nStopping after the rule(s) in progress... (Ctrl+C again to stop now)');
@@ -465,6 +490,7 @@ async function worker() {
         // nothing changes.
         entry = { identifier: item.brdp.identifier, brdp_id: item.brdp.id, run: run.started_at, at: new Date().toISOString(), result: 'error', error: err.message, error_kind: errorKind(err.message) };
       }
+      if (closed) return;
       if (entry.result !== 'skipped') tested += 1;
       finished += 1;
       processed.add(item.brdp.identifier);
@@ -489,6 +515,8 @@ await Promise.all(Array.from({ length: Math.min(opts.parallel, Math.max(queue.le
 finish();
 
 function finish() {
+  if (closed) return;
+  closed = true;
   const remaining = queue.filter((q) => !processed.has(q.brdp.identifier)).map((q) => q.brdp.identifier);
   run.finished_at = new Date().toISOString();
   if (stopping) run.stopped = stopping;
@@ -520,9 +548,10 @@ function finish() {
     console.log(
       `\nTHE REPORT IS NOT UP TO DATE: the last save of ${lastSaveFailed.join(' and ')} failed (see above). What was tested is recorded in the app; close the file and run the same command again to rebuild the report.`
     );
-    process.exit(3);
+    exitCleanly(3);
+    return;
   }
-  if (unexpected || (stopping && stopping !== 'Ctrl+C')) process.exit(3);
-  if (stopping === 'Ctrl+C') process.exit(130);
-  process.exit(0);
+  if (unexpected || (stopping && stopping !== 'Ctrl+C')) exitCleanly(3);
+  else if (stopping === 'Ctrl+C') exitCleanly(130);
+  else exitCleanly(0);
 }

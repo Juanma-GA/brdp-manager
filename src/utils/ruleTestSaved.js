@@ -31,11 +31,28 @@ export function passedTestPayload(examples, runs, proposal, examplesFrom = null)
       matches: runs[i].matches === true,
       // Dosier, Part 2: the dossier's other files, as they ran.
       ...(Array.isArray(ex.files) ? { main_path: ex.mainPath || null, files: ex.files.map((f) => ({ path: f.path, xml: f.xml ?? f.content })) } : {}),
+      // Remates: where the content was put and the levels above it, for the
+      // skeleton diagnosis when the saved examples are run again.
+      ...(ex.skeletonLift ? { skeleton_lift: liftToSaved(ex.skeletonLift) } : {}),
     });
   });
   if (kept.length === 0) return null;
   return { proposal: proposal || '', examples: kept, ...(examplesFrom ? { examples_from: examplesFrom } : {}) };
 }
+
+const liftToSaved = (lift) => ({
+  insertion: lift.insertion,
+  insertion_path: lift.insertionPath,
+  levels: lift.levels.map((l) => ({ name: l.name, path: l.path, chain_path: l.chainPath, fits: l.fits === true })),
+});
+const liftFromSaved = (lift) =>
+  lift && Array.isArray(lift.levels)
+    ? {
+        insertion: lift.insertion,
+        insertionPath: lift.insertion_path,
+        levels: lift.levels.map((l) => ({ name: l.name, path: l.path, chainPath: l.chain_path, fits: l.fits === true })),
+      }
+    : null;
 
 // A test record ({ result, reason, ... }) with the examples to keep when it
 // passed; any other result is returned as it is.
@@ -71,6 +88,7 @@ export function savedPassedTest(approval, currentProposal = null) {
       schema: ex.schema || null,
       xml: ex.xml,
       skeletonNodePaths: ex.skeleton_node_paths || [],
+      skeletonLift: liftFromSaved(ex.skeleton_lift),
       saved: { result: ex.result, matches: ex.matches === true },
       // Dosier, Part 2 (an older saved test has no files: a single document).
       ...(Array.isArray(ex.files) && ex.files.length > 0

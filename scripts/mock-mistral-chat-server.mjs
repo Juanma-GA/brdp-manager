@@ -666,6 +666,16 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Code not allowed by ATA Spec 2000", expected: "reject", schema: ruleSchema, content: csn(legend ? "3" : "Three-Way") },
     ]);
   }
+  // Remates: EXT-00043 (CMP 4.2) -- <levelledParaAlts> only directly in
+  // <description>. The application writes the content inside the skeleton's
+  // <levelledPara>, so the example meant to be accepted always sits inside
+  // one: the (correct) rule rejects it -- inconclusive, never failed.
+  if (/levelledPara\/levelledParaAlts</.test(rule)) {
+    return answer([
+      { label: "Alternatives directly in the description", expected: "accept", schema: ruleSchema || "descript", content: "<levelledParaAlts><levelledPara><title>Alternative A</title><para>Text of the first alternative.</para></levelledPara></levelledParaAlts>" },
+      { label: "Alternatives inside a levelled paragraph", expected: "reject", schema: ruleSchema || "descript", content: "<levelledPara><title>Outer</title><levelledParaAlts><levelledPara><para>Nested alternative.</para></levelledPara></levelledParaAlts></levelledPara>" },
+    ]);
+  }
   // EXT-00057: @pmType only goes on the <pm> root -- the values go in
   // "rootAttributes" when the prompt asks for them (never in a content).
   if (/\/\/@pmType</.test(rule)) {

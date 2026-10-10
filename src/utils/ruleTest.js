@@ -174,12 +174,20 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   const dossier = setup.dossier
     ? { mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: materializeDossierFiles(example.files || [], setup.dossier.structures, parseXml) }
     : null;
+  // Remates: the levels above the insertion point where the content could
+  // be written instead (skeletonLiftLevels) -- only for the diagnosis of an
+  // example meant to be accepted that the rule rejects (runExample).
+  const skeletonLift =
+    !dossier && entry.placement.contentInsertion !== false && entry.placement.rootOnly !== true
+      ? skeletonLiftLevels(entry.placement, entry.structure, adjusted.content, parseXml)
+      : null;
   return {
     ...adjusted,
     ...(dossier ? { mainPath: dossier.mainPath, files: dossier.files } : {}),
     schema,
     xml,
     skeletonNodePaths,
+    skeletonLift,
     insertionPath: entry.placement.contentInsertion === false ? null : insertionPath || null,
     structure: entry.structure,
     schemaLocation: setup.schemaLocation || null,
@@ -593,7 +601,172 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     const missing = documentPresenceTarget(ruleXml, format, { parseXml, schemaLocation: example.schemaLocation || schemaLocation });
     if (missing) rejection.missing = missing;
   }
-  return { validation, result, matches, rejectedByBrexReference: rejectedByBrexReference(result), acceptance, predicateMiss, rejection };
+  // Remates: the rejection comes from where the application put the
+  // content, not from the content (skeletonPlacementDiagnosis).
+  const skeletonPlacement =
+    example.expected === 'accept' && result.status === 'rejected'
+      ? skeletonPlacementDiagnosis(ruleXml, format, example, { parseXml, schemaLocation, dossier })
+      : null;
+  return {
+    validation,
+    result,
+    matches,
+    rejectedByBrexReference: rejectedByBrexReference(result),
+    acceptance,
+    predicateMiss,
+    rejection,
+    ...(skeletonPlacement ? { skeletonPlacement } : {}),
+  };
+}
+
+// ─── Remates: an example the skeleton makes impossible ─────────────────────
+// Real cases (CMP 4.2): BRDP-EXT-00043, //description//levelledPara/
+// levelledParaAlts in descript, and BRDP-EXT-00059, //mainProcedure//
+// proceduralStep/proceduralStepAlts in proced. The application writes the
+// content inside the skeleton's <levelledPara> / <proceduralStep>, so the
+// example meant to be accepted ("<levelledParaAlts> directly in
+// <description>") always sits inside one and a correct rule rejects it --
+// and no edit can fix it. Diagnosis only: the same content one level up
+// (in the parent of the insertion point), then the next, up to the
+// content's root (<content>, or the document's root), stopping at the
+// first level that accepts it; a level whose element the schema does not
+// let hold each top-level element of the content stops the climb (no
+// diagnosis). Never changes the document shown or saved.
+
+// The levels above the insertion point, nearest first:
+//   { insertion, insertionPath, levels: [{ name, path, chainPath, fits }] }
+// path: the level's node path in the assembled document; chainPath: the
+// skeleton element under it that holds the content (what the content
+// replaces); fits: the schema lets <name> hold each top-level element of
+// the content (and the content has no top-level text). null when there is
+// no level or no content.
+export function skeletonLiftLevels(placement, structure, content, parseXml = parseXmlDocument) {
+  const path = placement?.path || [];
+  if (path.length < 2 || !structure?.elements) return null;
+  const top = contentTopLevel(content, parseXml);
+  if (!top || top.names.length === 0) return null;
+  const pathOf = (i) => path.slice(0, i + 1).map((n) => `/${n}[1]`).join('');
+  const last = path.length - 1;
+  const contentIdx = path.indexOf('content');
+  const stop = contentIdx >= 0 && contentIdx < last ? contentIdx : 0;
+  const levels = [];
+  for (let i = last - 1; i >= stop; i -= 1) {
+    const children = structure.elements[path[i]]?.children || [];
+    levels.push({ name: path[i], path: pathOf(i), chainPath: pathOf(i + 1), fits: !top.text && top.names.every((n) => children.includes(n)) });
+  }
+  return levels.length ? { insertion: path[last], insertionPath: pathOf(last), levels } : null;
+}
+
+const LIFT_WRAPPER_NS = 'xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+function contentTopLevel(content, parseXml) {
+  const text = String(content ?? '').trim();
+  if (!text) return null;
+  let doc;
+  try {
+    doc = parseXml(`<lift-wrapper ${LIFT_WRAPPER_NS}>${text}</lift-wrapper>`);
+  } catch {
+    return null;
+  }
+  const names = [];
+  let hasText = false;
+  for (let n = doc.documentElement.firstChild; n; n = n.nextSibling) {
+    if (n.nodeType === 1) names.push(n.nodeName);
+    else if ((n.nodeType === 3 || n.nodeType === 4) && n.nodeValue.trim()) hasText = true;
+  }
+  return { names: [...new Set(names)], text: hasText };
+}
+
+// Element by node path (/a[1]/b[2]...) in a parsed document.
+function elementAt(doc, path) {
+  let el = null;
+  for (const step of String(path).split('/').filter(Boolean)) {
+    const m = /^(.+)\[(\d+)\]$/.exec(step);
+    if (!m) return null;
+    const [, name, nth] = m;
+    if (!el) {
+      el = doc.documentElement?.nodeName === name && nth === '1' ? doc.documentElement : null;
+    } else {
+      let count = 0;
+      let found = null;
+      for (let c = el.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 1 && c.nodeName === name && (count += 1) === Number(nth)) {
+          found = c;
+          break;
+        }
+      }
+      el = found;
+    }
+    if (!el) return null;
+  }
+  return el;
+}
+
+const escXmlText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escXmlAttr = (s) => escXmlText(s).replace(/"/g, '&quot;');
+// A plain serializer (the same in the browser and in Node): elements with
+// their attributes as written (xmlns declarations included), text, CDATA,
+// comments and processing instructions.
+function serializeNode(node) {
+  switch (node.nodeType) {
+    case 1: {
+      const attrs = Array.from(node.attributes || []).map((a) => ` ${a.name}="${escXmlAttr(a.value)}"`).join('');
+      let inner = '';
+      for (let c = node.firstChild; c; c = c.nextSibling) inner += serializeNode(c);
+      return `<${node.nodeName}${attrs}>${inner}</${node.nodeName}>`;
+    }
+    case 3:
+      return escXmlText(node.nodeValue);
+    case 4:
+      return `<![CDATA[${node.nodeValue}]]>`;
+    case 7:
+      return `<?${node.target} ${node.data}?>`;
+    case 8:
+      return `<!--${node.nodeValue}-->`;
+    default:
+      return '';
+  }
+}
+
+// The example's document with its content written directly in `level`:
+// the skeleton element under the level (chainPath) is replaced by the
+// content of the insertion point (the skeleton's own <title> left out).
+function liftedDocument(xml, lift, level, skeletonPaths, parseXml) {
+  let doc;
+  try {
+    doc = parseXml(String(xml || ''));
+  } catch {
+    return null;
+  }
+  const insertion = elementAt(doc, lift.insertionPath);
+  const chain = elementAt(doc, level.chainPath);
+  if (!insertion || !chain || !chain.parentNode) return null;
+  const skeleton = new Set(skeletonPaths || []);
+  const moved = [];
+  for (let c = insertion.firstChild; c; c = c.nextSibling) {
+    if (c.nodeType === 1 && skeleton.has(nodePath(c))) continue;
+    moved.push(c);
+  }
+  const parent = chain.parentNode;
+  for (const n of moved) parent.insertBefore(n, chain);
+  parent.removeChild(chain);
+  return serializeNode(doc.documentElement);
+}
+
+// → { inside, at } | null: the rule rejected the example inside the
+// skeleton's <inside> and accepts the same content written directly in
+// <at>.
+export function skeletonPlacementDiagnosis(ruleXml, format, example, { parseXml = parseXmlDocument, schemaLocation = null, dossier = null } = {}) {
+  const lift = example?.skeletonLift;
+  if (!lift || !example.xml || dossier) return null;
+  for (const level of lift.levels || []) {
+    if (!level.fits) return null;
+    const xml = liftedDocument(example.xml, lift, level, example.skeletonNodePaths, parseXml);
+    if (!xml) return null;
+    const r = runRuleOnFragment(ruleXml, format, xml, example.schema || null, { parseXml, schemaLocation: example.schemaLocation || schemaLocation });
+    if (r.status === 'accepted') return { inside: lift.insertion, at: level.name };
+    if (r.status !== 'rejected') return null;
+  }
+  return null;
 }
 
 // ─── Mejoras F, Part 1.4: why the rule rejected an example meant to be
@@ -829,6 +1002,14 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
   ) return inconclusive('nothing_selected');
   const ranExpectations = new Set(runs.map((r, i) => (r.result ? examples[i].expected : null)).filter(Boolean));
   const mismatches = runs.map((r, i) => (r.matches === false ? examples[i].expected : null)).filter(Boolean);
+  // Remates: every example that did not give what it expects was rejected
+  // only because of where the application put its content (written one
+  // level up, the rule accepts it) -- the test says nothing about the rule.
+  const mismatchRuns = runs.filter((r) => r.matches === false);
+  if (mismatchRuns.length > 0 && mismatchRuns.every((r) => r.skeletonPlacement)) {
+    const { inside, at } = mismatchRuns[0].skeletonPlacement;
+    return { kind: 'inconclusive', why: 'skeleton_placement', inside, at };
+  }
   if (mismatches.length > 0) {
     return {
       kind: 'incorrect',
@@ -861,6 +1042,8 @@ export function verdictCause(verdict, runs = []) {
   // Mejoras H, Part 1.3: the schema limits the example, regenerating it
   // will not help -- the verdict says why.
   if (verdict.kind === 'inconclusive' && verdict.schemaLimit) return null;
+  // Remates: the skeleton causes it; regenerating will not help.
+  if (verdict.kind === 'inconclusive' && verdict.why === 'skeleton_placement') return null;
   if (verdict.kind === 'no_runnable' || verdict.kind === 'inconclusive') return { cause: 'examples' };
   if (verdict.kind !== 'incorrect') return null;
   // Mejoras E, Part 2.3: the verdict itself says the error and its reason.

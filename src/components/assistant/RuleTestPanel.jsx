@@ -64,6 +64,10 @@ export function verdictView(t, verdict, standard) {
       // right below (VerdictCauseHint).
       return { tone: 'bad', text: t('records.ruleTest.verdicts.failed') };
     case 'inconclusive':
+      // Remates: the skeleton causes the rejection.
+      if (verdict.why === 'skeleton_placement') {
+        return { tone: 'warn', text: t('records.ruleTest.verdicts.skeletonPlacement', { inside: verdict.inside, at: verdict.at }) };
+      }
       return {
         tone: 'warn',
         text: [
@@ -718,6 +722,13 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
       {/* Mejoras F, Part 1.4: why the rule rejected an example meant to be
           accepted -- the nodes, and whether they are all the application's.
           A Schematron rule says which check failed instead (above). */}
+      {/* Remates: the rule rejected this example only because of where the
+          application put its content (written one level up, it accepts it). */}
+      {showResult && run?.matches === false && run?.skeletonPlacement && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-skeleton-placement">
+          {t('records.ruleTest.skeletonPlacementExample', run.skeletonPlacement)}
+        </p>
+      )}
       {showResult && run?.matches === false && run?.rejection && schematronFailedChecks(result).length === 0 && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad} ${styles.ruleTestPre}`} data-testid="rule-test-reject-cause" data-app-built={run.rejection.allAppBuilt ? 'true' : 'false'}>
           {rejectionText(run.rejection, t)}
