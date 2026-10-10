@@ -1,0 +1,294 @@
+.progress {
+  width: 100%;
+  max-width: 480px;
+  height: 10px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.table {
+  width: 100%;
+  /* Below this, the table scrolls sideways inside .tableWrap instead of
+     squeezing Title / Definition / Proposal to nothing. */
+  min-width: 1100px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12.5px;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.table th {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.colCheck {
+  width: 28px;
+}
+
+/* Classification drop-down with the ID under it. Wide enough for the
+   longest classification in EN and ES ("Otra especificación (S2000M)",
+   "Regla por defecto de S1000D", "De catálogo (S1000D 4.1)");
+   scripts/verify-rule-extract-columns.mjs measures it. */
+.colClass {
+  width: 232px;
+}
+
+/* Every drop-down fills its cell: same width on every row, never wider than
+   the column. Selects do not inherit the font by default. */
+.classSelect {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+/* The identifier (and its "source: …" line) on its own line, whole. */
+.identifier {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.identifierLine {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.colRule {
+  width: 18%;
+}
+
+.colWarnings {
+  width: 17%;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  resize: vertical;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ruleDetails summary {
+  cursor: pointer;
+  color: var(--primary);
+}
+
+.rulePre {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 4px;
+  margin: 4px 0;
+}
+
+.diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.diff th {
+  font-weight: 600;
+  text-align: left;
+}
+
+.diff td {
+  vertical-align: top;
+  width: 50%;
+}
+
+.diff pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.diff_removed td:first-child,
+.diff_changed td:first-child {
+  background: #fef2f2;
+}
+
+.diff_added td:last-child,
+.diff_changed td:last-child {
+  background: #f0fdf4;
+}
+
+.warnings {
+  margin: 0;
+  padding-left: 16px;
+  color: #b45309;
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 4px;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+  font-size: 13px;
+}
+
+.rulePreviewList {
+  max-height: 360px;
+  overflow: auto;
+}
+
+/* Where the text came from: the file, the catalog, the AI, a hand edit. */
+.sourceTag {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* Search by ID or title, next to the "Show" filter (like BRDP Records). */
+.search {
+  min-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+/* Sortable header (ID, Title): looks like the header text. */
+.sortButton {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.applyBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+/* Rows with texts still to write / that failed, with "Continue writing" /
+   "Retry the failed" (shown when no writing is running). */
+.resume {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  align-items: center;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+/* Why "Import selected" is disabled: same red as the other blocking
+   messages of the page. */
+.blocked {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--error-text);
+}
+
+/* AI Extract (2/2): "Import from text or document" */
+.textInput {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.textBox {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  resize: vertical;
+}
+.textBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.disabledLabel {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.wordCount {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+}
+.wordCountOver {
+  color: var(--error-text);
+  font-weight: 600;
+}
+.textHelp {
+  margin: 4px 0 12px;
+  color: #475569;
+}
+.quote {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-left: 3px solid var(--text-disabled);
+  background: var(--bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

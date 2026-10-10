@@ -1,0 +1,290 @@
+// AI Extract (1/2): the prompt that writes the missing texts and the batch
+// drafter, with real candidates read from the two BREX fixtures
+// (scripts/rule-test-fixtures/extract-candidates.json, written by
+// backend/scripts/dump_rule_extract_fixture.py). No backend, no LLM: `ask`
+// is a fake.
+//
+//     node scripts/test-rule-extract.mjs
+import { readFileSync } from 'node:fs';
+import { buildExtractFromRulesPrompt, EXTRACT_USER_MESSAGE, parseExtractFromRulesResponse } from '../src/prompts/extractFromRulesPrompt.js';
+import { candidatesToDraft, draftCandidates, extractTextState } from '../src/utils/ruleExtractDraft.js';
+import { LLM_TRUNCATED } from '../src/api/llmTruncation.js';
+import { classLabel, EXTRACT_FILTERS, filterLabelKey, groupClassLabel } from '../src/utils/ruleExtractFilters.js';
+import i18n from '../src/i18n/index.js';
+
+const fixture = JSON.parse(readFileSync(new URL('./rule-test-fixtures/extract-candidates.json', import.meta.url), 'utf-8'));
+let failures = 0;
+let checks = 0;
+function check(name, ok, detail = '') {
+  checks += 1;
+  if (!ok) {
+    failures += 1;
+    console.error(`FAIL ${name}${detail ? ` -- ${detail}` : ''}`);
+  }
+}
+
+const catalog = (id, extra = {}) => ({ ...fixture[id], classification: 'catalog', title: `T ${id}`, definition: `D ${id}`, draft_status: 'pending', ...extra });
+const fresh = (id, extra = {}) => ({ ...fixture[id], classification: 'new_ext', title: '', definition: '', draft_status: 'pending', ...extra });
+
+// ── Prompt ────────────────────────────────────────────────────────────────
+{
+  // The fixture's candidates carry the backend's set_texts: S1-00117 (new
+  // EXT with a nonContextRule) asks only the Title; S1-00006 (catalog, its
+  // objectUses only say who decided) only the Proposal; S1-00052 (new EXT,
+  // one objectUse shared by its rules = the Proposal) and BREX-S1-00242
+  // (default BREX rule, same) Title and Definition.
+  const prompt = buildExtractFromRulesPrompt({
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    candidates: [fixture['BRDP-S1-00117'], fixture['BRDP-S1-00006'], fixture['BRDP-S1-00052'], fixture['BREX-S1-00242']],
+  });
+  check('prompt names the standard', prompt.includes('uses S1000D 4.2.'));
+  check('no placeholders asked', prompt.includes('No placeholders, no brackets to fill in'));
+  check('literal texts given, not rewritten', prompt.includes('Proposal (from the file, do not rewrite): Captions shall not be used.')
+    && prompt.includes('Definition (from the file, do not rewrite): Decide whether inline captions affect'));
+  check('literal texts: only the title', /BRDP-S1-00117[\s\S]*?Write: title\n/.test(prompt));
+  check('catalog texts given, not rewritten', prompt.includes('Title (official, do not rewrite): Schemas'));
+  check('catalog: only the proposal', /BRDP-S1-00006[\s\S]*?Write: proposal\n/.test(prompt));
+  check('objectUse proposal given, not rewritten', prompt.includes('Proposal (from the file, do not rewrite): Allowed LHT infocodes, including 055 and 930 which are not allowed in ATA CMP.'));
+  check('objectUse proposal: title and definition asked', /BRDP-S1-00052[\s\S]*?Write: title, definition\n/.test(prompt));
+  check('the objectUse given as the Proposal is not repeated', !/> Allowed LHT infocodes/.test(prompt) && prompt.includes('  > Decision by Company.'));
+  check('default BREX rule: title and definition, its objectUse as the Proposal', /BREX-S1-00242[\s\S]*?Write: title, definition\n/.test(prompt));
+  check('default BREX rule named as such', prompt.includes('This is a rule of the S1000D default BREX, not a project decision'));
+  check('decision text shown, not as the Proposal source when given', prompt.includes('Decision text in the file (nonContextRule):\n'));
+  check('rule summary instead of XML', prompt.includes('- //caption — prohibited') && !prompt.includes('<structureObjectRule'));
+  check('values of an objectValue rule listed', /\/\/@updateReasonType — allowed[^\n]*values: urt01, urt02/.test(prompt));
+}
+{
+  // S1-00007: 4,500 rules → the compact summary, never 4,500 lines.
+  const prompt = buildExtractFromRulesPrompt({ standard: 'S1000D 4.2', ruleFormat: 'BREX-4.2', candidates: [catalog('BRDP-S1-00007')] });
+  check('big candidate: count and flags', prompt.includes('4500 rule(s): 4500 prohibited'));
+  check('big candidate: first 10 paths', (prompt.match(/\n {2}- \/dmodule/g) || []).length === 10);
+  check('big candidate: most repeated objectUse', prompt.includes('Most repeated objectUse (4500 rules)'));
+  check('big candidate: prompt stays small', prompt.length < 8000, String(prompt.length));
+}
+{
+  // S1-00052: two 10,000-character paths that list information codes as
+  // predicates. The path is cut with an explicit marker; the codes it
+  // compares are listed in full.
+  const prompt = buildExtractFromRulesPrompt({ standard: 'S1000D 4.2', ruleFormat: 'BREX-4.2', candidates: [catalog('BRDP-S1-00052')] });
+  check('long path cut with a marker, never silently', /… \[\d+ more characters\]/.test(prompt));
+  const allowed = prompt.split('\n').find((l) => l.includes('the path compares @infoCode') && l.includes('930'));
+  check('allowed codes listed in full, 055 and 930 included', !!allowed && allowed.includes('055'), allowed);
+  check('prohibited codes listed too', prompt.split('\n').filter((l) => l.includes('the path compares @infoCode')).length === 2);
+}
+{
+  const other = buildExtractFromRulesPrompt({ standard: 'S1000D 4.2', ruleFormat: 'BREX-4.2', candidates: [fresh('BRDP-S2-00002', { classification: 'other_spec', specification: 'S2000M' })] });
+  check('other specification named', other.includes('This is a decision point of S2000M'));
+  check('other specification writes title and definition', other.includes('Write: title, definition\n'));
+}
+{
+  const dita = buildExtractFromRulesPrompt({
+    standard: 'DITA 1.3 Xpath2.0',
+    ruleFormat: 'SCH-DITA',
+    candidates: [{ key: 'c1', origin_identifier: 'BRDP-EXT-00007', classification: 'new_ext', decision_texts: [], object_uses: ['Note needs a type.'], summary: { count: 1, asserts: 1, rules: [{ context: 'note', kind: 'assert', test: '@type', role: '', message: 'Note needs a type.' }], rules_more: 0 } }],
+  });
+  check('Schematron summary', dita.includes('for "note", assert test "@type": "Note needs a type."'));
+}
+
+// ── Parsing the answer ─────────────────────────────────────────────────────
+{
+  const ok = parseExtractFromRulesResponse('```json\n{"items":[{"key":"a","title":"","definition":"","proposal":"P."},{"key":"zzz","proposal":"x"}]}\n```', ['a', 'b']);
+  check('fenced JSON parsed', ok.items.get('a')?.proposal === 'P.');
+  check('unknown keys ignored', !ok.items.has('zzz'));
+  check('missing key absent', !ok.items.has('b'));
+  for (const [name, text, fields] of [
+    ['not JSON', 'Sorry, I cannot.'],
+    ['invalid JSON', '{"items": [}'],
+    ['no items', '{"foo": 1}'],
+    ['no proposal', '{"items":[{"key":"a","proposal":""}]}'],
+    ['a field asked left empty', '{"items":[{"key":"a","title":"","proposal":"P"}]}', new Map([['a', ['title', 'proposal']]])],
+  ]) {
+    let threw = false;
+    try {
+      parseExtractFromRulesResponse(text, ['a'], fields);
+    } catch {
+      threw = true;
+    }
+    check(`rejects ${name}`, threw);
+  }
+  // Only the title asked: an empty proposal is fine.
+  const titleOnly = parseExtractFromRulesResponse('{"items":[{"key":"a","title":"T","definition":"","proposal":""}]}', ['a'], new Map([['a', ['title']]]));
+  check('title-only item accepted', titleOnly.items.get('a')?.title === 'T');
+}
+
+// ── Drafting in batches ────────────────────────────────────────────────────
+function keysOf(system) {
+  return [...system.matchAll(/^BRDP key=(\S+)/gm)].map((m) => m[1]);
+}
+const many = Array.from({ length: 23 }, (_, i) => ({ ...fresh('BREX-S1-00242'), key: `k${i}` }));
+{
+  const calls = [];
+  const saved = [];
+  const results = await draftCandidates(many, {
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    ask: async ({ system, user }) => {
+      calls.push({ system, user });
+      return JSON.stringify({ items: keysOf(system).map((key) => ({ key, title: `T${key}`, definition: `D${key}`, proposal: `P${key}` })) });
+    },
+    onBatch: async (r) => saved.push(r.length),
+  });
+  check('3 batches of at most 10', calls.length === 3 && saved.sort().join(',') === '10,10,3', saved.join(','));
+  check('fixed user message', calls.every((c) => c.user === EXTRACT_USER_MESSAGE));
+  check('every candidate drafted', results.length === 23 && results.every((r) => r.draft_status === 'drafted' && r.title === `T${r.key}` && r.definition === `D${r.key}` && !('proposal' in r)));
+  check('no rule XML sent', calls.every((c) => !c.system.includes('<structureObjectRule')));
+}
+{
+  // Invalid JSON once → retried once and written.
+  let n = 0;
+  const results = await draftCandidates(many.slice(0, 2), {
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    ask: async ({ system }) => {
+      n += 1;
+      if (n === 1) return '{"items": [';
+      return JSON.stringify({ items: keysOf(system).map((key) => ({ key, title: 't', definition: 'd', proposal: 'p' })) });
+    },
+  });
+  check('invalid JSON retried once', n === 2 && results.every((r) => r.draft_status === 'drafted'));
+}
+{
+  // Truncated twice → not written, left to the user (HR7).
+  let n = 0;
+  const results = await draftCandidates(many.slice(0, 3), {
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    ask: async () => {
+      n += 1;
+      const err = new Error('cut');
+      err.code = LLM_TRUNCATED;
+      throw err;
+    },
+  });
+  check('truncated twice → failed, two calls', n === 2 && results.every((r) => r.draft_status === 'failed' && r.error === LLM_TRUNCATED));
+  check('failed candidates keep no invented text', results.every((r) => !('proposal' in r)));
+}
+{
+  // An answer that leaves one candidate out: only that one fails.
+  const results = await draftCandidates(many.slice(0, 2), {
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    ask: async ({ system }) => JSON.stringify({ items: [{ key: keysOf(system)[0], title: 't', definition: 'd', proposal: 'p' }] }),
+  });
+  check('missing item → only it fails', results[0].draft_status === 'drafted' && results[1].draft_status === 'failed');
+}
+{
+  // A catalog candidate never gets a title/definition from the AI.
+  const [r] = await draftCandidates([{ ...fixture['BRDP-S1-00006'], key: 'cat' }], {
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    ask: async () => JSON.stringify({ items: [{ key: 'cat', title: 'WRONG', definition: 'WRONG', proposal: 'Information codes shall be…' }] }),
+  });
+  check('catalog keeps its own title/definition', !('title' in r) && !('definition' in r) && r.proposal === 'Information codes shall be…');
+}
+{
+  // Literal Definition and Proposal: the AI's answer only gives the Title,
+  // and nothing else it writes is taken.
+  const [r] = await draftCandidates([{ ...fixture['BRDP-S1-00117'], key: 'lit' }], {
+    standard: 'S1000D 4.2',
+    ruleFormat: 'BREX-4.2',
+    ask: async () => JSON.stringify({ items: [{ key: 'lit', title: 'Inline captions', definition: 'WRONG', proposal: 'WRONG' }] }),
+  });
+  check('literal texts: only the title taken', r.title === 'Inline captions' && !('definition' in r) && !('proposal' in r) && r.draft_status === 'drafted');
+}
+{
+  // Real Lufthansa candidates with literal texts in a catalog project: nothing
+  // left for the AI, never sent.
+  const literal = { ...fixture['BRDP-S1-00037'], classification: 'catalog', ai_fields: [], draft_status: 'not_needed' };
+  check('nothing to write → not sent', candidatesToDraft([literal]).length === 0);
+}
+{
+  const list = [
+    { key: 'a', classification: 'new_ext', draft_status: 'pending' },
+    { key: 'b', classification: 'catalog', draft_status: 'drafted', proposal: 'P.' },
+    { key: 'c', classification: 'changed', draft_status: 'not_needed' },
+    { key: 'd', classification: 'other_spec', draft_status: 'pending' },
+    { key: 'e', classification: 'empty', draft_status: 'pending' },
+    { key: 'f', classification: 'catalog', draft_status: 'manual', proposal: 'Hand P.' },
+    { key: 'g', classification: 'default_rule', draft_status: 'pending', selected: false },
+    { key: 'h', classification: 'default_rule', draft_status: 'pending', selected: true },
+    { key: 'i', classification: 'new_ext', draft_status: 'pending', ai_fields: [] },
+    { key: 'j', classification: 'new_ext', draft_status: 'failed' },
+  ];
+  // Checked or not, every row with texts left is written; the checked ones
+  // first (a / h checked, d / g not), file order within each group.
+  list[0].selected = true;
+  check('pending candidates of the written classes, checked first', candidatesToDraft(list).map((c) => c.key).join(',') === 'a,h,d,g',
+    candidatesToDraft(list).map((c) => c.key).join(','));
+  check('failed rows only when asked (retry)', candidatesToDraft(list, { includeFailed: true }).map((c) => c.key).join(',') === 'a,h,d,g,j');
+  // The state comes from the data: texts present = complete, whatever the status says.
+  check('text state from the data', extractTextState({ classification: 'catalog', ai_fields: ['proposal'], proposal: '', draft_status: 'drafted' }) === 'pending'
+    && extractTextState({ classification: 'new_ext', ai_fields: ['title'], title: 'T', draft_status: 'failed' }) === 'complete'
+    && extractTextState({ classification: 'new_ext', ai_fields: ['title'], title: '', draft_status: 'failed' }) === 'failed'
+    && extractTextState({ classification: 'changed', ai_fields: ['title'], title: '' }) === 'complete'
+    && extractTextState({ classification: 'catalog_edition', ai_fields: ['proposal'], proposal: '', draft_status: 'pending' }) === 'pending');
+}
+
+// ── Every "Show" filter option has its text in EN and ES ─────────────────
+{
+  for (const lang of ['en', 'es']) {
+    for (const f of EXTRACT_FILTERS) {
+      const key = filterLabelKey(f);
+      check(`filter "${f}" has a ${lang} label (${key})`, i18n.exists(key, { lng: lang, fallbackLng: false }));
+    }
+  }
+  check('"blocking" label EN', i18n.getFixedT('en')(filterLabelKey('blocking')) === 'Blocking the import');
+  check('"blocking" label ES', i18n.getFixedT('es')(filterLabelKey('blocking')) === 'Bloquean la importación');
+}
+
+// ── Remates B, Part 2: "From catalog" classes always told apart ──────────
+{
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const row = (classification, extra = {}) => ({ classification, options: [classification, 'new_ext'], ...extra });
+  const one = [row('catalog'), row('catalog_edition', { catalog_edition: 'S1000D 4.2' }), row('catalog_edition', { catalog_edition: 'S1000D 4.2' })];
+  const several = [row('catalog_edition', { catalog_edition: 'S1000D 4.1' }), row('catalog_edition', { catalog_edition: 'S1000D 5.0' })];
+  check('one edition: ES "De catálogo (S1000D 4.2)"', groupClassLabel(es, one, 'catalog_edition') === 'De catálogo (S1000D 4.2)', groupClassLabel(es, one, 'catalog_edition'));
+  check('one edition: EN', groupClassLabel(en, one, 'catalog_edition') === 'From catalog (S1000D 4.2)');
+  check('several editions: ES "De catálogo (otra edición)"', groupClassLabel(es, several, 'catalog_edition') === 'De catálogo (otra edición)');
+  check('several editions: EN', groupClassLabel(en, several, 'catalog_edition') === 'From catalog (another edition)');
+  check('no rows: still distinguishable', groupClassLabel(es, [row('catalog')], 'catalog_edition') === 'De catálogo (otra edición)' && groupClassLabel(es, [], 'catalog_edition') === 'De catálogo (otra edición)');
+  check('own catalog: plain "De catálogo"', groupClassLabel(es, one, 'catalog') === 'De catálogo');
+  for (const [name, rows] of [['one', one], ['several', several], ['none', []]]) {
+    for (const t of [en, es]) {
+      check(`catalog vs catalog_edition differ (${name}, ${t === en ? 'EN' : 'ES'})`, groupClassLabel(t, rows, 'catalog') !== groupClassLabel(t, rows, 'catalog_edition'));
+    }
+  }
+  check('rows reclassified away still give the edition (option)', groupClassLabel(es, [{ classification: 'new_ext', options: ['catalog_edition', 'new_ext'], catalog_edition: 'S1000D 4.2' }], 'catalog_edition') === 'De catálogo (S1000D 4.2)');
+  check('several editions: each row keeps its own', classLabel(es, several[0]) === 'De catálogo (S1000D 4.1)' && classLabel(es, several[1]) === 'De catálogo (S1000D 5.0)');
+  const s2 = [row('other_spec', { specification: 'S2000M' })];
+  const sMany = [row('other_spec', { specification: 'S2000M' }), row('other_spec', { specification: 'S3000L' })];
+  check('other_spec one: "Otra especificación (S2000M)"', groupClassLabel(es, s2, 'other_spec') === 'Otra especificación (S2000M)');
+  check('other_spec several / none: "Otra especificación", never "()"', groupClassLabel(es, sMany, 'other_spec') === 'Otra especificación' && groupClassLabel(en, [], 'other_spec') === 'Other specification');
+  check('default_rule one: "Regla por defecto de S1000D"', groupClassLabel(es, [row('default_rule', { specification: 'S1000D' })], 'default_rule') === 'Regla por defecto de S1000D');
+  check('default_rule none: never a dangling "de"', groupClassLabel(es, [], 'default_rule') === 'Regla por defecto del estándar' && groupClassLabel(en, [], 'default_rule') === 'Default rule of the standard');
+  check('free text job: same labels', groupClassLabel(es, several, 'catalog_edition', true) === 'De catálogo (otra edición)' && groupClassLabel(es, one, 'catalog_edition', true) === 'De catálogo (S1000D 4.2)');
+  const labels = (t, rows) => EXTRACT_FILTERS.filter((f) => !['all', 'warnings', 'blocking'].includes(f)).map((f) => groupClassLabel(t, rows, f));
+  for (const t of [en, es]) {
+    const l = labels(t, []);
+    check(`no two class labels alike with zero rows (${t === en ? 'EN' : 'ES'})`, new Set(l).size === l.length, l.join(' | '));
+  }
+}
+
+// ── Own identifier prefix: "Keep ENV" / "Conservar ENV" ──────────────────
+{
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const env = { classification: 'own_prefix', options: ['own_prefix', 'new_ext'], own_prefix: 'ENV' };
+  const nav = { classification: 'own_prefix', options: ['own_prefix', 'new_ext'], own_prefix: 'NAV' };
+  check('own_prefix row ES "Conservar ENV"', classLabel(es, env) === 'Conservar ENV', classLabel(es, env));
+  check('own_prefix row EN "Keep ENV"', classLabel(en, env) === 'Keep ENV', classLabel(en, env));
+  check('own_prefix filter, one prefix', groupClassLabel(es, [env, env], 'own_prefix') === 'Conservar ENV');
+  check('own_prefix filter, several / none: generic, never "Conservar "', groupClassLabel(es, [env, nav], 'own_prefix') === 'Conservar prefijo propio' && groupClassLabel(en, [], 'own_prefix') === 'Keep own prefix');
+  check('own_prefix in the Show filter', EXTRACT_FILTERS.includes('own_prefix'));
+  check('own_prefix label never empty or raw', ![classLabel(es, {}, 'own_prefix'), classLabel(en, {}, 'own_prefix')].some((l) => !l.trim() || l.includes('config.') || l.endsWith(' ')));
+  check('existing row with an own prefix offers "Keep ENV" too', classLabel(es, { classification: 'changed', own_prefix: 'ENV' }, 'own_prefix') === 'Conservar ENV');
+}
+
+console.log(`${checks - failures}/${checks} checks passed`);
+process.exit(failures ? 1 : 0);

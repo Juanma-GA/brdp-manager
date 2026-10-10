@@ -1,0 +1,149 @@
+/**
+ * Central fetch wrapper for the v2 FastAPI backend. Injects the current
+ * access token, and on a 401 tries exactly one silent refresh (via the
+ * HttpOnly refresh_token cookie the browser sends automatically) before
+ * giving the caller the original 401 -- never retries more than once, to
+ * avoid looping forever against a genuinely-expired session.
+ *
+ * AuthContext registers its token getters/setters here at mount via
+ * configureAuth() instead of importing AuthContext directly, so plain
+ * modules (llmAPI.js, api/*.js) can call authFetch() without depending on
+ * React context.
+ */
+
+import { ApiError, apiErrorFromResponse, networkError } from './apiErrors.js';
+
+let getAccessToken = () => null;
+let setAccessToken = () => {};
+let onSessionExpired = () => {};
+
+export function configureAuth({ getAccessToken: get, setAccessToken: set, onSessionExpired: onExpired }) {
+  getAccessToken = get;
+  setAccessToken = set;
+  onSessionExpired = onExpired;
+}
+
+// The refresh token itself is no longer readable from JS at all -- the
+// backend sets it as an HttpOnly cookie (Set-Cookie on login/refresh,
+// cleared via Set-Cookie on logout), scoped to path=/api/auth. Every fetch
+// below needs credentials: 'include' so the browser actually attaches and
+// receives it.
+//
+// This also retires the old cross-tab race workaround: refresh tokens
+// rotate on use, so two callers racing on the same stored localStorage
+// value used to need a manual re-read-and-retry after a 401 (otherwise the
+// loser of the race got logged out even though the session was still
+// valid). Cookies are shared natively by the browser across tabs, so a
+// plain retry with credentials: 'include' now picks up whatever
+// refresh_token cookie is currently valid -- no bookkeeping needed. The
+// refreshPromise cache below still matters on its own: it keeps concurrent
+// callers on the SAME page (React 18 StrictMode's double-mount, or
+// authFetch's 401 handler racing AuthContext's restore-on-mount) from
+// firing independent /refresh requests that would race each other.
+let refreshPromise = null;
+
+// AACF 2, Part 1: "the server says there is no session" and "the server
+// did not answer" are two different things. Only the first (a 4xx from
+// /refresh: no cookie, revoked, expired, deleted user) is "log in again";
+// a network failure or a 5xx (the backend down behind the dev proxy or
+// nginx) says nothing about the session, which may be perfectly valid.
+// That case throws a network ApiError instead of returning false, so no
+// caller ever treats it as a logout.
+async function doRefresh() {
+  let res;
+  try {
+    res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch (err) {
+    throw networkError(err);
+  }
+  if (res.status >= 500) throw networkError(new Error(`refresh answered HTTP ${res.status}`));
+  if (!res.ok) return false;
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (err) {
+    throw networkError(err);
+  }
+  setAccessToken(data.access_token);
+  return true;
+}
+
+/**
+ * true: a fresh access token is set. false: the server says there is no
+ * session (log in again). Throws a network ApiError when the server could
+ * not be asked at all -- the session is then unknown, never "gone".
+ */
+export async function refreshAccessToken() {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    if (await doRefresh()) return true;
+
+    // Refresh tokens rotate on use, so two tabs (or React 18 StrictMode's
+    // double-mounted restore effect within one tab) racing on the same
+    // cookie value can have the loser's first attempt see an
+    // already-rotated, now-revoked token and fail. One retry is enough:
+    // by the time this second request goes out, the browser's cookie jar
+    // already holds whichever value won the race (cookie updates from the
+    // winner's response land in the shared jar immediately, before this
+    // retry is dispatched) -- no need to inspect or compare values, since
+    // the cookie isn't readable from JS in the first place.
+    return doRefresh();
+  })();
+
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+export async function authFetch(path, options = {}) {
+  const token = getAccessToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  let response = await fetch(path, { ...options, headers, credentials: 'include' });
+
+  if (response.status === 401) {
+    // A refresh the server could not answer throws (network ApiError): the
+    // caller shows the connection error and the session stays as it is.
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      const retryHeaders = { ...(options.headers || {}), Authorization: `Bearer ${getAccessToken()}` };
+      response = await fetch(path, { ...options, headers: retryHeaders, credentials: 'include' });
+    }
+  }
+
+  if (response.status === 401) {
+    setAccessToken(null);
+    onSessionExpired();
+  }
+
+  return response;
+}
+
+/**
+ * authFetch + JSON. A failed request throws an ApiError (services/
+ * apiErrors.js) whose message is already a sentence for the user -- never
+ * the server's technical text -- with `status`, `code`, `ref` and the raw
+ * `detail` for a caller that needs them. A request that never got an
+ * answer (no network, server down) throws one with `network: true`.
+ */
+export async function authFetchJson(path, options = {}) {
+  let response;
+  try {
+    response = await authFetch(path, options);
+  } catch (err) {
+    throw err instanceof ApiError ? err : networkError(err);
+  }
+  if (!response.ok) throw await apiErrorFromResponse(response);
+  if (response.status === 204) return null;
+  return response.json();
+}

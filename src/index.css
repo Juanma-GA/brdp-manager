@@ -3,28 +3,52 @@
 @tailwind utilities;
 
 :root {
-  --bg:        #f4f6f9;
-  --surface:   #ffffff;
-  --surface2:  #f8fafc;
-  --border:    #e8edf5;
-  --border2:   #dde3ec;
-  --text:      #111827;
-  --text-mid:  #374151;
-  --text-muted:#6b7280;
-  --text-faint:#9ca3af;
-  --blue:      #2563eb;
-  --blue-dark: #1d4ed8;
-  --blue-light:#eff6ff;
-  --blue-tag:  #dbeafe;
-  --green:     #ecfdf5;
-  --green-text:#065f46;
-  --green-bdr: #a7f3d0;
-  --red:       #fef2f2;
-  --red-text:  #991b1b;
-  --red-bdr:   #fecaca;
-  --amber:     #fffbeb;
-  --amber-text:#92400e;
-  --amber-bdr: #fde68a;
+  /* AACF 3, Part 2: the ATEXIS brand (aacf/styles/branding.md, Decisión 20)
+     on the app's own CSS variables. This is the single source of the
+     brand: every value is defined here once; the rest of the CSS uses the
+     variables. */
+
+  /* Primary. --primary-light is only for hover/background surfaces, never
+     small text on white (3.4:1); --primary-dark is the pressed state and
+     the primary colour as text where more contrast is needed. */
+  --primary:       #2e74b5;
+  --primary-light: #4a8ccb;
+  --primary-dark:  #245c90;
+
+  /* Neutrals. */
+  --bg:            #ffffff;
+  --surface:       #f8fafc;
+  --border:        #e2e8f0;
+  --text:          #0f172a;
+  --text-muted:    #64748b;
+  --text-disabled: #94a3b8;
+
+  /* Semantic. --info only where something is informational. */
+  --success:       #16a34a;
+  --warning:       #d97706;
+  --error:         #dc2626;
+  --info:          #2563eb;
+  /* The semantic colours as text: #16a34a and #d97706 are 3.3:1 and
+     3.2:1 on white, below AA (4.5:1) for text, and #dc2626 drops below it
+     on a tinted row (a selected row, a pale notice), so text uses these
+     darker shades of the same hues (6.5:1 or more, also on those tints);
+     the palette values stay for icons, borders and backgrounds. They are
+     the shades the app already used for this. */
+  --success-text:  #166534;
+  --warning-text:  #92400e;
+  --error-text:    #b91c1c;
+
+  /* Derived (not new colours): text on a primary background, and the pale
+     tint of the primary used behind active/hovered items and its border. */
+  --on-primary:    var(--bg);
+  --primary-tint:  color-mix(in srgb, var(--primary) 10%, var(--bg));
+  --primary-tint-border: color-mix(in srgb, var(--primary) 25%, var(--bg));
+
+  /* Fonts, served by the app (src/main.jsx). Fallbacks: the system UI
+     fonts, so a character Inter lacks never shows as an empty square. */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
   --radius-sm: 5px;
   --radius-md: 7px;
   --radius-lg: 10px;
@@ -37,7 +61,7 @@
 }
 
 body {
-  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;

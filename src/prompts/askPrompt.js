@@ -1,0 +1,124 @@
+// Prompt-refactor round: Ask's system prompt, moved out of RecordsPage.jsx
+// verbatim (no behavior change). Pure, framework-free -- see
+// src/prompts/shared.js's own header comment for the general convention.
+import { ruleStateOf } from '../utils/ruleState.js';
+import { RULE_STATUS_LABELS, ruleTextForAsk, buildSchemaFactsBlock, buildUnknownNamesBlock } from './shared.js';
+
+// Builds the "Ask a Question" system prompt: strictly scoped to the
+// selected BRDP (docs request), with its full live context -- including
+// Rule/Rule Status, which askGeneric previously never sent at all -- plus
+// an optional second BRDP (from Records or the official catalog) when the
+// user has picked one to compare against.
+// The compare block's source: this project's Records, the standard's
+// Catalog, or another project ("Comparar dos BRDP lado a lado": the same
+// BRDP in another project the user can see, with its standard).
+function compareSourceLabel(compareBrdp) {
+  if (compareBrdp.source === 'records') return 'Records';
+  if (compareBrdp.source === 'other_project') return `Project "${compareBrdp.projectName}" (${compareBrdp.standard})`;
+  return 'Catalog';
+}
+
+export function buildAskSystemPrompt(brdp, ruleApproval, compareBrdp, standard, vocabCheck, schemaFacts) {
+  const ruleState = ruleStateOf(ruleApproval);
+  // Ask-with-schema-cards follow-up round, points 2-3: a real report
+  // against this app showed two symptoms of the SAME root cause -- the
+  // old scope rule only ever mentioned "this specific BRDP", so a genuine
+  // schema question ("Where can <para> go?") could get refused the first
+  // time it was asked (the model reading "not about this specific BRDP"
+  // literally) and, even when answered correctly, sometimes still tacked
+  // on a leftover "if this isn't about this BRDP, rephrase" disclaimer
+  // after a schema answer it had ALREADY given. SCOPE is now explicitly
+  // widened to cover the schema facts this same prompt provides, and the
+  // model is told point-blank never to hedge an answer it just gave.
+  let prompt = `You are an expert in ${standard} business rules (BRDPs — Business Rule
+Decision Points), embedded in BRDP Manager.
+
+SCOPE: answer questions about the BRDP shown below AND questions about
+the ${standard} schema elements and attributes covered by SCHEMA FACTS.
+Only if the question has nothing to do with this BRDP, with ${standard}
+or with its schema, say so briefly and ask the user to rephrase.
+Never add scope reminders or disclaimers to an answer you have given.`;
+
+  if (compareBrdp) {
+    prompt += `\nThe BRDP being compared against (shown below) is also in scope: the user
+may ask you to compare it with the current one.`;
+  }
+
+  prompt += `
+
+Answer only what is asked: what an element can contain -> its children;
+where it can go / what it can be inside -> its parents. Do not list
+schema facts nobody asked for; never dump long lists of names — the full
+lists are in the card shown to the user.
+When the facts contain several schema variants, summarize: state what
+is common to all of them and mention only the notable differences.
+
+If a schema-facts list is marked as a partial list, say so (e.g. "among
+others") — never invent or state how many more there are; that count is
+not reliable information for you to report.
+
+Answer in at most 3 short paragraphs, even when the facts are long — be
+direct, no padding, no restating the question back to the user.
+
+Never state or suggest specification chapter, section or paragraph
+numbers, not even as possibilities ("it might be in chapter X"),
+unless the exact number appears in the BRDP content below. If the user
+asks where something is defined, say that you cannot give the exact
+location, and name the concept or element to look up in the ${standard}
+specification instead.
+
+Answer in the same language as the question.
+
+This project uses the standard: ${standard}.
+Answer strictly in terms of this standard and version — use its element
+names, rule vocabulary and conventions, and do not mix in other versions
+of S1000D or DITA unless the user explicitly asks for a comparison.
+
+When your answer names an element or attribute of the ${standard} schema,
+it must be one that appears in SCHEMA FACTS or is quoted from the BRDP
+context below. If the SCHEMA FACTS do not cover what is asked (for
+example a code, an identifier or a date that a document records), do not
+guess or name an element or attribute for it from memory: say that you
+cannot confirm the element or attribute name in the ${standard} schema,
+and suggest looking the concept up in the ${standard} specification.`;
+
+  // The paragraph above already says what to do when the facts do not
+  // cover the question, so the block's own closing sentence is left out
+  // here (Suggest Rule and the rule test keep it).
+  prompt += buildSchemaFactsBlock(standard, schemaFacts, { coverageNote: false, userFacingName: true });
+
+  prompt += `
+
+Current BRDP context:
+ID: ${brdp.identifier}
+Title: ${brdp.title}
+Definition: ${brdp.definition}
+Proposal: ${brdp.proposal}
+Proposal Status: ${brdp.validation}`;
+
+  if (brdp.validation === 'Refused' && brdp.comments) {
+    prompt += `\nRefusal reason: ${brdp.comments}`;
+  }
+
+  prompt += `
+Rule Status: ${RULE_STATUS_LABELS[ruleState]}
+Rule: ${ruleTextForAsk(ruleState, ruleApproval?.rule_xml)}`;
+
+  if (compareBrdp) {
+    prompt += `\n\nBRDP being compared against (source: ${compareSourceLabel(compareBrdp)}):
+ID: ${compareBrdp.identifier}
+Title: ${compareBrdp.title}
+Definition: ${compareBrdp.definition}`;
+    if (compareBrdp.source === 'records' || compareBrdp.source === 'other_project') {
+      prompt += `
+Proposal: ${compareBrdp.proposal}
+Proposal Status: ${compareBrdp.validation}
+Rule Status: ${RULE_STATUS_LABELS[compareBrdp.ruleState]}
+Rule: ${ruleTextForAsk(compareBrdp.ruleState, compareBrdp.ruleXml)}`;
+    }
+  }
+
+  prompt += buildUnknownNamesBlock(standard, vocabCheck);
+
+  return prompt;
+}

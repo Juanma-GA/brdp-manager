@@ -1,0 +1,380 @@
+// Test rule (T2 of 4, T2b): the panel's state. Everything but the LLM calls
+// is deterministic: analyzeRule (what can be known without an example, shown
+// from the start), the schema(s) and skeleton the examples are built on
+// (GET /api/schema-cards/structure + utils/ruleTestSkeleton.js), the checks
+// of each example, one automatic correction round for the examples that fail
+// them, and the engine run. The examples and any edits live only in this
+// component's memory (HR1).
+//
+// Recording (Test de reglas T3): `onResult({ result, reason })` is called
+// with the verdict of the examples AS THE LLM WROTE THEM and the
+// application validated them (after the correction round) -- once per
+// generation, and at mount for a rule that is not executable at all (the
+// analysis is the result; no example is needed to know it). Editing an
+// example and pressing "Run again" is a what-if for the user: it changes
+// the verdict shown in the panel, never the recorded one (a user editing
+// the examples until the rule "passes" would otherwise record a test the
+// rule never passed). Illustrative examples generated on request for a
+// non-executable rule record nothing either (already recorded at mount).
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { authFetchJson } from '../services/apiClient';
+import { sendMessage } from '../api/llmAPI';
+import { fetchSchemaAttribute, fetchSchemaCards, fetchSchemaGraph } from '../api/schemaFacts.js';
+import i18n from '../i18n';
+import { RULE_PROPOSAL_CHECK_TEMPERATURE, RULE_TEST_MAX_TOKENS, RULE_TEST_REVIEW_TEMPERATURE, RULE_TEST_TEMPERATURE } from '../prompts/shared.js';
+import { buildCopyableTestPrompt } from '../prompts/ruleTestExamplesPrompt.js';
+import {
+  buildRuleTestReviewPrompt,
+  mismatchedExamples,
+  parseRuleTestReviewResponse,
+  RULE_TEST_REVIEW_USER_MESSAGE,
+} from '../prompts/ruleTestReviewPrompt.js';
+import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
+import { editExample, editedExamplesRecord, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
+import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
+import { thresholdMismatch } from '../utils/ruleThreshold.js';
+import { passedTestToReplaceAt } from '../utils/ruleTestStatus.js';
+import { withPassedTest } from '../utils/ruleTestSaved.js';
+import { ruleDescriptionText } from '../utils/ruleTestReasons.js';
+import { generationOutcome, notExecutableRecord } from '../utils/ruleTestOutcome.js';
+import { cleanInternalNames } from '../utils/answerCleanup.js';
+
+async function fetchStructure(standard, schema) {
+  return authFetchJson(
+    `/api/schema-cards/structure?standard=${encodeURIComponent(standard)}&schema=${encodeURIComponent(schema)}`
+  );
+}
+
+// `approval` (the saved rule's RuleApprovalOut, only when the viewer can
+// record): when its last test passed and a new result is not "passed", the
+// panel asks before replacing it ("No sobrescribir una prueba aprobada sin
+// preguntar") -- "Register this result" calls onResult, "Keep the previous
+// one" calls onKeepPrevious (History notes the attempt, nothing else
+// changes).
+export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, onResult, approval = null, onKeepPrevious = null }) {
+  // Known before any example: shown at the top from the start (T2b, Part 4).
+  // T4: the standard tells an XPath 2.0 DITA project apart (XPath 3.x
+  // syntax is a warning there).
+  const analysis = useMemo(() => analyzeRule(ruleXml, format, { standard }), [ruleXml, format, standard]);
+  // T3b: what the rule checks, read from its XML -- shown in place of an
+  // explanation by the LLM, and the ground truth the review is given.
+  const description = useMemo(() => describeRule(ruleXml, format, { schemaLocation }), [ruleXml, format, schemaLocation]);
+  // Mejoras B, Part 2: the rule's threshold against the Proposal's numbers.
+  const threshold = useMemo(() => thresholdMismatch(ruleXml, format, brdp?.proposal), [ruleXml, format, brdp?.proposal]);
+  // "Ejemplos bajo demanda en reglas no ejecutables": when the WHOLE rule
+  // cannot be executed, the examples could only illustrate it (and a real
+  // run produced broken ones) -- they are not generated until the user
+  // asks. status: 'idle' (waiting for that click) | 'loading' | 'error' |
+  // 'ready'.
+  const onDemand = analysis.status === 'not_executable';
+  // While loading: step ('preparing' | 'waiting' | 'correcting' |
+  // 'proposal'), count (examples being corrected) and startedAt (ms) --
+  // the panel shows the step and the time elapsed (progreso, Part 1.2).
+  const [state, setState] = useState(() => (onDemand ? { status: 'idle' } : { status: 'loading', step: 'preparing', startedAt: Date.now() }));
+  // "Cancel" during a generation: the state before it comes back, with
+  // "Cancelled" next to it; nothing is recorded and nothing more is sent.
+  const [cancelled, setCancelled] = useState(false);
+  const stateRef = useRef(state);
+  // eslint-disable-next-line react-hooks/refs
+  stateRef.current = state;
+  const beforeGenerationRef = useRef(null);
+  const [copyablePrompt, setCopyablePrompt] = useState(null);
+  // T3b "Review with the assistant": { status: 'loading' | 'ready' |
+  // 'error', cause, explanation, mismatches, error } | null. Indicative
+  // only: it never changes the verdict shown or recorded.
+  const [review, setReview] = useState(null);
+  // Rule test on DM metadata, Part 3: known once the schema structure is
+  // fetched (never from the rule alone) -- the rule looks at nothing the
+  // examples can contain. Shown like analyzeRule's "not executable".
+  const [lateAnalysis, setLateAnalysis] = useState(null);
+  // Only the latest generation may land (Regenerate while one is running).
+  const generationRef = useRef(0);
+  // Closing the panel (or a newer generation) cancels a wait for the AI's
+  // per-minute limit (Protecciones 2a): nothing is sent after it.
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+  const setupRef = useRef(null);
+  // Latest callback, so a generation that lands later reports to it.
+  // Read only when a generation lands, never to render.
+  const onResultRef = useRef(onResult);
+  // eslint-disable-next-line react-hooks/refs
+  onResultRef.current = onResult;
+  const onKeepPreviousRef = useRef(onKeepPrevious);
+  // eslint-disable-next-line react-hooks/refs
+  onKeepPreviousRef.current = onKeepPrevious;
+  const approvalRef = useRef(approval);
+  // eslint-disable-next-line react-hooks/refs
+  approvalRef.current = approval;
+  // The question before replacing a passed test: { record, at } | null;
+  // and what the user answered last: null | { kept: true, at }.
+  const [replaceQuestion, setReplaceQuestion] = useState(null);
+  const [replaceAnswer, setReplaceAnswer] = useState(null);
+  // onResult may return (a promise of) whether the record was saved -- the
+  // draft rule's caller does; a suggestion's keeps it until Accept.
+  const report = (record) => {
+    if (!record || !onResultRef.current) return undefined;
+    const at = passedTestToReplaceAt(approvalRef.current, record);
+    if (at !== null) {
+      setReplaceQuestion({ record, at });
+      return undefined;
+    }
+    return onResultRef.current(record);
+  };
+  const answerReplaceQuestion = async (register) => {
+    const question = replaceQuestion;
+    if (!question) return;
+    setReplaceQuestion(null);
+    if (register) {
+      setReplaceAnswer(null);
+      await onResultRef.current?.(question.record);
+    } else {
+      const kept = await onKeepPreviousRef.current?.(question.record);
+      setReplaceAnswer(kept === false ? null : { kept: true, at: question.at });
+    }
+  };
+  // The test recorded for the current generation (its verdict as the LLM
+  // wrote the examples), and whether a corrected test (hand edits that made
+  // it "Correct") was already recorded for it -- once per generation.
+  const recordedRef = useRef(null);
+  const editsRecordedRef = useRef(false);
+  // The notice about hand-edited examples, next to the verdict:
+  //   null | { kind: 'not_saved' } | { kind: 'recorded', count }
+  const [editNotice, setEditNotice] = useState(null);
+
+  // `previousReview` (T3b): { explanation, mismatches } when the review
+  // found the EXAMPLES at fault -- the new generation is told not to repeat
+  // that mistake. A new generation is a new test: it is recorded as usual.
+  const generate = useCallback(async (previousReview = null) => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    const shouldCancel = () => unmountedRef.current || generationRef.current !== generation;
+    const previous = stateRef.current;
+    beforeGenerationRef.current = previous.status === 'loading' ? beforeGenerationRef.current : previous;
+    setCancelled(false);
+    setState({ status: 'loading', step: 'preparing', startedAt: Date.now() });
+    setReview(null);
+    setReplaceQuestion(null);
+    setReplaceAnswer(null);
+    recordedRef.current = null;
+    editsRecordedRef.current = false;
+    setEditNotice(null);
+    const result = await generateRuleTestExamples({
+      ruleXml,
+      format,
+      standard,
+      schemaLocation,
+      brdp,
+      vocabulary,
+      ask: async (messages, systemPrompt) =>
+        (
+          await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
+            temperature: RULE_TEST_TEMPERATURE,
+            maxTokens: RULE_TEST_MAX_TOKENS,
+            shouldCancel,
+          })
+        ).content,
+      fetchSchemaCards,
+      fetchStructure,
+      fetchSchemaAttribute,
+      fetchSchemaGraph,
+      isCurrent: () => generationRef.current === generation,
+      onPrompt: (systemPrompt) => setCopyablePrompt(buildCopyableTestPrompt(systemPrompt)),
+      onStep: ({ step, count }) => {
+        if (generationRef.current !== generation) return;
+        setState((st) => (st.status === 'loading' ? { ...st, step, count } : st));
+      },
+      previousReview: previousReview?.mismatches ? previousReview : null,
+      // Barrido final 1/2: "does the rule implement the Proposal?" -- its
+      // own short call, in parallel with the examples (one more call per
+      // test), given the rule's deterministic description in English.
+      ruleDescription: ruleDescriptionText(description, i18n.getFixedT('en')),
+      askProposalCheck: async (messages, systemPrompt) =>
+        (
+          await sendMessage(messages, null, aiProvider.model, aiProvider.provider, systemPrompt, {
+            temperature: RULE_PROPOSAL_CHECK_TEMPERATURE,
+            shouldCancel,
+          })
+        ).content,
+    });
+    if (!result) return; // a newer generation started
+    // What this run records: the same function as the script that tests
+    // every rule of a project (utils/ruleTestOutcome.js).
+    const { record } = generationOutcome(result, { analysis, threshold, proposal: brdp?.proposal });
+    if (result.status === 'not_executable') {
+      setLateAnalysis({ status: 'not_executable', reason: result.reason, unreachable: true });
+      setState({ status: 'idle' });
+      if (!onDemand) report(record);
+      return;
+    }
+    if (result.status === 'path_review') {
+      // Mejoras C, Part 1: the path cannot exist -- "review", no LLM call.
+      setState({ status: 'path_review', reason: result.reason });
+      if (!onDemand) {
+        recordedRef.current = record;
+        report(record);
+      }
+      return;
+    }
+    if (result.status !== 'ready') {
+      setState({ status: 'error', error: result.error, badResponse: Boolean(result.badResponse), truncated: Boolean(result.truncated) });
+      return;
+    }
+    setupRef.current = result.setup;
+    const { proposalCheck, examples, runs, correction, predicateSkipped, untested, coverage, several = [], presence = null } = result;
+    setState({ status: 'ready', proposalCheck, examples, runs, correction, predicateSkipped, untested, coverage, several, presence });
+    if (!onDemand) {
+      // A passed test keeps its examples (Guardar la prueba aprobada).
+      recordedRef.current = record;
+      report(record);
+    }
+  }, [ruleXml, format, standard, schemaLocation, brdp, aiProvider, vocabulary, analysis, description, onDemand, threshold]);
+
+  // Generate once when the panel opens (it is remounted for another rule),
+  // unless the rule is not executable at all: then only on request. The ref
+  // keeps it to once per panel: React's StrictMode (development) runs a
+  // mount effect twice, which recorded "not executable" twice in History
+  // and asked the LLM twice (found verifying T3b).
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (openedRef.current) return;
+    openedRef.current = true;
+    if (onDemand) report(notExecutableRecord(analysis));
+    else generate();
+    // Once per panel on purpose (see above); a later Regenerate calls generate() itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // "Run again" on an edited example's content (and, for a rule on the
+  // metadata, its identification and status section): rebuilt on its
+  // skeleton, checked and run -- engine only, no LLM, nothing saved.
+  // Pending of the test rule, Part 3: the example keeps what the generation
+  // wrote (`generated`) and is marked `editedByUser` while its text differs
+  // from it, so the panel says the verdict includes hand-edited examples and
+  // is not recorded. A new generation (Regenerate) starts without marks.
+  // Once per generation, hand edits that turn a recorded test that was not
+  // passed into "Correct" ARE recorded -- as passed, with the edited
+  // examples (editedExamplesRecord). Never for a rule that is not
+  // executable at all (its illustrative examples record nothing).
+  // Dosier, Part 2: `files` ([{ path, content }]), when one file of a
+  // dossier example was edited.
+  const runAgain = async (index, content, metadata, files, rootAttributes) => {
+    if (state.status !== 'ready') return;
+    const example = editExample(state.examples[index], content, metadata, setupRef.current, undefined, files, rootAttributes);
+    const examples = state.examples.map((ex, i) => (i === index ? example : ex));
+    const runs = state.runs.map((r, i) => (i === index ? runExample(ruleXml, format, example, { vocabulary, schemaLocation, graph: setupRef.current?.graph || null }) : r));
+    setState({ ...state, examples, runs });
+    if (!examples.some((ex) => ex.editedByUser)) {
+      setEditNotice(null);
+      return;
+    }
+    const record = onDemand
+      ? null
+      : withPassedTest(
+          editedExamplesRecord({
+            recorded: recordedRef.current,
+            alreadyRecorded: editsRecordedRef.current,
+            examples,
+            verdict: ruleTestVerdict(examples, runs, analysis, state.proposalCheck, threshold, state.coverage),
+          }),
+          examples,
+          runs,
+          brdp?.proposal
+        );
+    if (!record) {
+      setEditNotice({ kind: 'not_saved' });
+      return;
+    }
+    editsRecordedRef.current = true;
+    const generation = generationRef.current;
+    const saved = await report(record);
+    if (generationRef.current !== generation) return;
+    if (saved === false) {
+      // Not recorded (a viewer, or the request failed -- its error is shown
+      // by the caller): the next Correct edit may try again.
+      editsRecordedRef.current = false;
+      setEditNotice({ kind: 'not_saved' });
+      return;
+    }
+    recordedRef.current = record;
+    setEditNotice({ kind: 'recorded', count: record.editedExamples.length });
+  };
+
+  const verdict =
+    state.status === 'ready'
+      ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck, threshold, state.coverage)
+      : state.status === 'path_review'
+        ? { kind: 'review', path: state.reason }
+        : null;
+  const shownAnalysis = lateAnalysis || analysis;
+
+  // T3b "Review with the assistant" (incorrect verdict only): the Proposal,
+  // the rule, its deterministic description (in English, whatever the
+  // interface language) and the examples whose result did not match.
+  const reviewFailure = async () => {
+    if (state.status !== 'ready') return;
+    const mismatches = mismatchedExamples(state.examples, state.runs);
+    if (mismatches.length === 0) return;
+    const generation = generationRef.current;
+    setReview({ status: 'loading', mismatches });
+    const systemPrompt = buildRuleTestReviewPrompt({
+      brdp,
+      standard,
+      format,
+      ruleXml,
+      ruleDescription: ruleDescriptionText(description, i18n.getFixedT('en')),
+      mismatches,
+    });
+    try {
+      const res = await sendMessage([{ role: 'user', content: RULE_TEST_REVIEW_USER_MESSAGE }], null, aiProvider.model, aiProvider.provider, systemPrompt, {
+        temperature: RULE_TEST_REVIEW_TEMPERATURE,
+        shouldCancel: () => unmountedRef.current || generationRef.current !== generation,
+      });
+      if (generationRef.current !== generation) return; // examples replaced meanwhile
+      const parsed = parseRuleTestReviewResponse(res.content);
+      setReview(parsed.ok ? { status: 'ready', cause: parsed.cause, explanation: cleanInternalNames(parsed.explanation), mismatches } : { status: 'error', error: parsed.error, mismatches });
+    } catch (err) {
+      if (generationRef.current === generation) setReview({ status: 'error', error: err.message, mismatches });
+    }
+  };
+
+  // "Cancel" (progreso, Part 1.2): the running generation is abandoned --
+  // its answers are ignored when they land, a wait for the per-minute limit
+  // ends (shouldCancel), no correction round or further call is made, and
+  // nothing is recorded. The panel goes back to what it showed before.
+  const cancel = () => {
+    if (stateRef.current.status !== 'loading') return;
+    generationRef.current += 1;
+    const before = beforeGenerationRef.current;
+    setState(before && before.status !== 'loading' ? before : { status: 'cancelled' });
+    setCancelled(true);
+  };
+
+  // "Regenerate examples" after a review that blamed the examples.
+  const regenerateWithReview = () =>
+    review?.status === 'ready' ? generate({ explanation: review.explanation, mismatches: review.mismatches }) : generate();
+
+  return {
+    state,
+    analysis: shownAnalysis,
+    description,
+    verdict,
+    editNotice,
+    copyablePrompt,
+    generate,
+    regenerate: generate,
+    cancel,
+    cancelled,
+    runAgain,
+    review,
+    reviewFailure,
+    regenerateWithReview,
+    replaceQuestion,
+    replaceAnswer,
+    answerReplaceQuestion,
+  };
+}

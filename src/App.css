@@ -18,5 +18,31 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--bg, #f4f6f9);
+  background: var(--bg);
+}
+
+/* AACF 3: an interface preference (sidebar, panel width) could not be
+   saved on the server. Discreet and non-blocking: shown once per session,
+   the value still applies for this session. */
+.uiPreferenceNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 16px 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.uiPreferenceNotice button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
 }

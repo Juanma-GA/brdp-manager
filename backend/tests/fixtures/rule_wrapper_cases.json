@@ -1,0 +1,364 @@
+{
+  "_comment": "Shared cases for backend/app/services/rule_wrappers.py and src/utils/ruleWrappers.js (pytest: tests/test_rule_wrappers.py; node: scripts/test-rule-wrappers.mjs). Real rows from public/brdp-template-4-2.xlsx as they were before the cleanup.",
+  "cases": [
+    {
+      "name": "real BRDP-S1-00507: <rules> around a structureObjectRule and a nonContextRule",
+      "format": "BREX-4.2",
+      "input": "<rules>\n<structureObjectRule>\n            <objectPath allowedObjectFlag=\"0\">//randomList//randomList</objectPath>\n            <objectUse>BRDP-S1-00507. A &lt;randomList&gt; must not be nested inside another &lt;randomList&gt; -- the default prefix pf02 is always used, without nesting. </objectUse>\n          </structureObjectRule>\n<nonContextRule>\n          <simplePara>BRDP-S1-00507. Decide whether to use a consistent set of prefixes for random list throughout the project. </simplePara>\n          <simplePara>Decision made by Project. Nested randomList should be avoided. The listItemPrefix attribute shall always be the default value, which is pf02.</simplePara>\n        </nonContextRule>\n</rules>",
+      "expected": "<structureObjectRule>\n            <objectPath allowedObjectFlag=\"0\">//randomList//randomList</objectPath>\n            <objectUse>BRDP-S1-00507. A &lt;randomList&gt; must not be nested inside another &lt;randomList&gt; -- the default prefix pf02 is always used, without nesting. </objectUse>\n          </structureObjectRule>\n<nonContextRule>\n          <simplePara>BRDP-S1-00507. Decide whether to use a consistent set of prefixes for random list throughout the project. </simplePara>\n          <simplePara>Decision made by Project. Nested randomList should be avoided. The listItemPrefix attribute shall always be the default value, which is pf02.</simplePara>\n        </nonContextRule>",
+      "changed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule>\n            <objectPath allowedObjectFlag=\"0\">//randomList//randomList</objectPath>\n            <objectUse>BRDP-S1-00507. A &lt;randomList&gt; must not be nested inside another &lt;randomList&gt; -- the default prefix pf02 is always used, without nesting. </objectUse>\n          </structureObjectRule>"
+        },
+        {
+          "kind": "noncontext",
+          "text": "<nonContextRule>\n          <simplePara>BRDP-S1-00507. Decide whether to use a consistent set of prefixes for random list throughout the project. </simplePara>\n          <simplePara>Decision made by Project. Nested randomList should be avoided. The listItemPrefix attribute shall always be the default value, which is pf02.</simplePara>\n        </nonContextRule>"
+        }
+      ]
+    },
+    {
+      "name": "real BRDP-S1-00070: bare <structureObjectRuleGroup> around two structureObjectRule",
+      "format": "BREX-4.2",
+      "input": "<structureObjectRuleGroup>\n<structureObjectRule>\n            <objectPath allowedObjectFlag=\"1\">//responsiblePartnerCompany/@enterpriseCode</objectPath>\n            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseCode must be C1008 (Lufthansa Technik AG's CAGE code). </objectUse>\n            <objectValue valueForm=\"single\" valueAllowed=\"C1008\">CAGE code for LUFTHANSA TECHNIK AG is C1008</objectValue>\n          </structureObjectRule>\n<structureObjectRule>\n            <objectPath allowedObjectFlag=\"1\">//responsiblePartnerCompany/enterpriseName</objectPath>\n            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseName must be 'LUFTHANSA TECHNIK AG'. </objectUse>\n            <objectValue valueForm=\"single\" valueAllowed=\"LUFTHANSA TECHNIK AG\">Enterprise Name is LUFTHANSA TECHNIK AG</objectValue>\n          </structureObjectRule>\n</structureObjectRuleGroup>",
+      "expected": "<structureObjectRule>\n            <objectPath allowedObjectFlag=\"1\">//responsiblePartnerCompany/@enterpriseCode</objectPath>\n            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseCode must be C1008 (Lufthansa Technik AG's CAGE code). </objectUse>\n            <objectValue valueForm=\"single\" valueAllowed=\"C1008\">CAGE code for LUFTHANSA TECHNIK AG is C1008</objectValue>\n          </structureObjectRule>\n<structureObjectRule>\n            <objectPath allowedObjectFlag=\"1\">//responsiblePartnerCompany/enterpriseName</objectPath>\n            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseName must be 'LUFTHANSA TECHNIK AG'. </objectUse>\n            <objectValue valueForm=\"single\" valueAllowed=\"LUFTHANSA TECHNIK AG\">Enterprise Name is LUFTHANSA TECHNIK AG</objectValue>\n          </structureObjectRule>",
+      "changed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule>\n            <objectPath allowedObjectFlag=\"1\">//responsiblePartnerCompany/@enterpriseCode</objectPath>\n            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseCode must be C1008 (Lufthansa Technik AG's CAGE code). </objectUse>\n            <objectValue valueForm=\"single\" valueAllowed=\"C1008\">CAGE code for LUFTHANSA TECHNIK AG is C1008</objectValue>\n          </structureObjectRule>"
+        },
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule>\n            <objectPath allowedObjectFlag=\"1\">//responsiblePartnerCompany/enterpriseName</objectPath>\n            <objectUse>BRDP-S1-00070. The responsible partner company's enterpriseName must be 'LUFTHANSA TECHNIK AG'. </objectUse>\n            <objectValue valueForm=\"single\" valueAllowed=\"LUFTHANSA TECHNIK AG\">Enterprise Name is LUFTHANSA TECHNIK AG</objectValue>\n          </structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "real BRDP-S1-00006: already clean, with context blocks",
+      "format": "BREX-4.2",
+      "input": "<structureObjectRule>\n                  <objectPath allowedObjectFlag=\"2\">//@xsi:noNamespaceSchemaLocation</objectPath>\n                  <objectUse>BRDP-S1-00006. The applicability cross-reference table schema location should be the flat S1000D 4.2 appliccrossreftable.xsd. </objectUse>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/appliccrossreftable.xsd\">Applicability schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/brex.xsd\">BREX schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comrep.xsd\">CIR schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd\">Condition schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ddn.xsd\">DDN schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd\">Descriptive schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/dml.xsd\">DML schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd\">Fault schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd\">IPD schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/pm.xsd\">PM schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/prdcrossreftable.xsd\">Product schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\">Procedural schema flat 4.2</objectValue>\n               </structureObjectRule>\n<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Condition cross-reference table data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>\n<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Fault data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>\n<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/prdcrossreftable.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Product cross-reference table data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>",
+      "expected": "<structureObjectRule>\n                  <objectPath allowedObjectFlag=\"2\">//@xsi:noNamespaceSchemaLocation</objectPath>\n                  <objectUse>BRDP-S1-00006. The applicability cross-reference table schema location should be the flat S1000D 4.2 appliccrossreftable.xsd. </objectUse>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/appliccrossreftable.xsd\">Applicability schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/brex.xsd\">BREX schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comrep.xsd\">CIR schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd\">Condition schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ddn.xsd\">DDN schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd\">Descriptive schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/dml.xsd\">DML schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd\">Fault schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd\">IPD schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/pm.xsd\">PM schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/prdcrossreftable.xsd\">Product schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\">Procedural schema flat 4.2</objectValue>\n               </structureObjectRule>\n<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Condition cross-reference table data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>\n<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Fault data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>\n<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/prdcrossreftable.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Product cross-reference table data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>",
+      "changed": false,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule>\n                  <objectPath allowedObjectFlag=\"2\">//@xsi:noNamespaceSchemaLocation</objectPath>\n                  <objectUse>BRDP-S1-00006. The applicability cross-reference table schema location should be the flat S1000D 4.2 appliccrossreftable.xsd. </objectUse>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/appliccrossreftable.xsd\">Applicability schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/brex.xsd\">BREX schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/comrep.xsd\">CIR schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd\">Condition schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ddn.xsd\">DDN schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd\">Descriptive schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/dml.xsd\">DML schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd\">Fault schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd\">IPD schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/pm.xsd\">PM schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/prdcrossreftable.xsd\">Product schema flat 4.2</objectValue>\n                  <objectValue valueForm=\"single\" valueAllowed=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\">Procedural schema flat 4.2</objectValue>\n               </structureObjectRule>"
+        },
+        {
+          "kind": "block",
+          "text": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/condcrossreftable.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Condition cross-reference table data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>"
+        },
+        {
+          "kind": "block",
+          "text": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/fault.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Fault data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>"
+        },
+        {
+          "kind": "block",
+          "text": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/prdcrossreftable.xsd\">\n        <structureObjectRuleGroup>\n          <structureObjectRule>\n                      <objectPath allowedObjectFlag=\"0\">//dmodule</objectPath>\n                      <objectUse>BRDP-S1-00006. Product cross-reference table data modules must use the Descriptive, Procedural or IPD schema, per the project's schema decision (Writing Style Guide). </objectUse>\n                    </structureObjectRule>\n        </structureObjectRuleGroup>\n      </contextRules>"
+        }
+      ]
+    },
+    {
+      "name": "<rules> around a context block and a loose rule: the block stays whole",
+      "format": "BREX-4.2",
+      "input": "<rules>\n  <structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>\n  <contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>\n</rules>",
+      "expected": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>\n<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "changed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        },
+        {
+          "kind": "block",
+          "text": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>"
+        }
+      ]
+    },
+    {
+      "name": "nested wrappers",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup><nonContextRule><simplePara>Decided by the project.</simplePara></nonContextRule></rules>",
+      "expected": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>\n<nonContextRule><simplePara>Decided by the project.</simplePara></nonContextRule>",
+      "changed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        },
+        {
+          "kind": "noncontext",
+          "text": "<nonContextRule><simplePara>Decided by the project.</simplePara></nonContextRule>"
+        }
+      ]
+    },
+    {
+      "name": "a comment inside the wrapper is kept",
+      "format": "BREX-4.2",
+      "input": "<rules>\n<!-- kept note -->\n<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>\n</rules>",
+      "expected": "<!-- kept note -->\n<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "changed": true,
+      "pieces": [
+        {
+          "kind": "comment",
+          "text": "<!-- kept note -->"
+        },
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "4.1 <nonContextRules> around a nonContextRule",
+      "format": "BREX-4.1",
+      "input": "<nonContextRules><nonContextRule><simplePara>Decided by the project.</simplePara></nonContextRule></nonContextRules>",
+      "expected": "<nonContextRule><simplePara>Decided by the project.</simplePara></nonContextRule>",
+      "changed": true,
+      "pieces": [
+        {
+          "kind": "noncontext",
+          "text": "<nonContextRule><simplePara>Decided by the project.</simplePara></nonContextRule>"
+        }
+      ]
+    },
+    {
+      "name": "<contextRules> without rulesContext is a valid block for the check: unchanged",
+      "format": "BREX-4.2",
+      "input": "<contextRules><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "expected": "<contextRules><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "changed": false,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "text inside the wrapper would be lost: unchanged",
+      "format": "BREX-4.2",
+      "input": "<rules>see note <structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></rules>",
+      "expected": "<rules>see note <structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></rules>",
+      "changed": false,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "an unknown element inside the wrapper would be lost: unchanged",
+      "format": "BREX-4.2",
+      "input": "<rules><foo/><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></rules>",
+      "expected": "<rules><foo/><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></rules>",
+      "changed": false,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "loose text at the top level is another problem: unchanged",
+      "format": "BREX-4.2",
+      "input": "hello <structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "expected": "hello <structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "changed": false,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "3.0.1 <rules> around an objrule and a nonContextRule comment",
+      "format": "BREX-3.0.1",
+      "input": "<rules>\n<objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>\n<!-- nonContextRule id=\"BRDP-X\": decided by the project -->\n</rules>",
+      "expected": "<objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>\n<!-- nonContextRule id=\"BRDP-X\": decided by the project -->",
+      "changed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>"
+        },
+        {
+          "kind": "noncontext",
+          "text": "<!-- nonContextRule id=\"BRDP-X\": decided by the project -->"
+        }
+      ]
+    },
+    {
+      "name": "3.0.1 bare <structrules>",
+      "format": "BREX-3.0.1",
+      "input": "<structrules><objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule></structrules>",
+      "expected": "<objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>",
+      "changed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>"
+        }
+      ]
+    },
+    {
+      "name": "3.0.1 already clean",
+      "format": "BREX-3.0.1",
+      "input": "<objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>\n<!-- nonContextRule id=\"BRDP-X\": decided by the project -->",
+      "expected": "<objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>\n<!-- nonContextRule id=\"BRDP-X\": decided by the project -->",
+      "changed": false,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<objrule><objpath objappl=\"0\">//emphasis</objpath><objuse>No emphasis.</objuse></objrule>"
+        },
+        {
+          "kind": "noncontext",
+          "text": "<!-- nonContextRule id=\"BRDP-X\": decided by the project -->"
+        }
+      ]
+    },
+    {
+      "name": "SCH-DITA is never touched",
+      "format": "SCH-DITA",
+      "input": "<rules><sch:pattern><sch:rule context=\"note\"><sch:assert test=\"@type\">t</sch:assert></sch:rule></sch:pattern></rules>",
+      "expected": "<rules><sch:pattern><sch:rule context=\"note\"><sch:assert test=\"@type\">t</sch:assert></sch:rule></sch:pattern></rules>",
+      "changed": false,
+      "pieces": null
+    },
+    {
+      "name": "rare: a comment with a tag in it, inside the wrapper",
+      "format": "BREX-4.2",
+      "input": "<rules><!-- old: <structureObjectRule> removed, see </rules> --><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></rules>",
+      "changed": true,
+      "expected": "<!-- old: <structureObjectRule> removed, see </rules> -->\n<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "pieces": [
+        {
+          "kind": "comment",
+          "text": "<!-- old: <structureObjectRule> removed, see </rules> -->"
+        },
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "rare: CDATA with markup in objectUse, inside the wrapper",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//para[count(x) &lt; 3]</objectPath><objectUse><![CDATA[a < b and <rules> or </structureObjectRule>]]></objectUse></structureObjectRule></rules>",
+      "changed": true,
+      "expected": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//para[count(x) &lt; 3]</objectPath><objectUse><![CDATA[a < b and <rules> or </structureObjectRule>]]></objectUse></structureObjectRule>",
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//para[count(x) &lt; 3]</objectPath><objectUse><![CDATA[a < b and <rules> or </structureObjectRule>]]></objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "rare: single quotes and \">\" in an attribute value",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule id='R1'><objectPath allowedObjectFlag='2'>//@x</objectPath><objectUse>x</objectUse><objectValue valueForm='single' valueAllowed='a>b'/></structureObjectRule></rules>",
+      "changed": true,
+      "expected": "<structureObjectRule id='R1'><objectPath allowedObjectFlag='2'>//@x</objectPath><objectUse>x</objectUse><objectValue valueForm='single' valueAllowed='a>b'/></structureObjectRule>",
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule id='R1'><objectPath allowedObjectFlag='2'>//@x</objectPath><objectUse>x</objectUse><objectValue valueForm='single' valueAllowed='a>b'/></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "rare: block attributes in another order",
+      "format": "BREX-4.2",
+      "input": "<rules><contextRules id=\"c1\" rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules></rules>",
+      "changed": true,
+      "expected": "<contextRules id=\"c1\" rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "pieces": [
+        {
+          "kind": "block",
+          "text": "<contextRules id=\"c1\" rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>"
+        }
+      ]
+    },
+    {
+      "name": "rare: 3.0.1 comment and CDATA",
+      "format": "BREX-3.0.1",
+      "input": "<rules><!-- keep --><objrule><objpath objappl='0'>//emph</objpath><objuse><![CDATA[no <emph>]]></objuse></objrule></rules>",
+      "changed": true,
+      "expected": "<!-- keep -->\n<objrule><objpath objappl='0'>//emph</objpath><objuse><![CDATA[no <emph>]]></objuse></objrule>",
+      "pieces": [
+        {
+          "kind": "comment",
+          "text": "<!-- keep -->"
+        },
+        {
+          "kind": "rule",
+          "text": "<objrule><objpath objappl='0'>//emph</objpath><objuse><![CDATA[no <emph>]]></objuse></objrule>"
+        }
+      ]
+    },
+    {
+      "name": "malformed: wrapper never closed",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "changed": false,
+      "expected": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>",
+      "malformed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "malformed: closing tag of another element",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></contextRules>",
+      "changed": false,
+      "expected": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule></contextRules>",
+      "malformed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "malformed: a stray \"<\"",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule><</rules>",
+      "changed": false,
+      "expected": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule><</rules>",
+      "malformed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    },
+    {
+      "name": "malformed: a bare \"&\"",
+      "format": "BREX-4.2",
+      "input": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule> & </rules>",
+      "changed": false,
+      "expected": "<rules><structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule> & </rules>",
+      "malformed": true,
+      "pieces": [
+        {
+          "kind": "rule",
+          "text": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>"
+        }
+      ]
+    }
+  ]
+}

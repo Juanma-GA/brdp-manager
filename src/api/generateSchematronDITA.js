@@ -1,11 +1,20 @@
-import { extractXML } from "./generateBREX.js";
+import { pendingApprovalComment } from "./generateBREX.js";
+import { ruleEnters } from "../utils/generatePlan.js";
 import { _isSafePattern } from "./brexToSchematron.js";
-import { getApprovalsForFormat } from "./approvals.js";
 
-// Fixed format id this generator's frozen rule_approvals rows are stored
-// under -- see ProjectConfigSection.jsx's primaryFormat options and
-// CLAUDE.md's rule_approvals design (Phase 1).
-const FORMAT_ID = "SCH-DITA";
+// Both DITA standards (migration 0013_split_dita_xpath_standards.py) share
+// this one FORMAT_ID/generator -- the only thing that genuinely differs is
+// the assembled document's queryBinding attribute, since each real project
+// hand-authors XPath 2.0 vs 3.0 Rule content separately (no shared
+// deterministic conversion step, unlike BREX->Schematron for S1000D).
+// Defaults to "xslt2" for the old, still-valid bare "DITA 1.3" string (a
+// caller that hasn't been updated yet, or a standard value from before
+// this migration) and for anything else unrecognized -- never silently
+// guesses "xslt3", since that's the one flavor that actually changes
+// generated output.
+function queryBindingForStandard(standard) {
+  return standard === "DITA 1.3 Xpath3.0" ? "xslt3" : "xslt2";
+}
 
 let _schemaSummaryCache = null;
 
@@ -24,341 +33,43 @@ function escapeXmlText(s) {
     .replace(/>/g, "&gt;");
 }
 
-// ===== Few-shot rendering =====
-// BRDP-D1-00313 is rendered from the real literal block (schematron-dita-draft.sch)
-// instead of from its JSON fields, because its "test" field is a human-readable
-// description ("two independent reports"), not a single valid XPath expression --
-// interpolating it generically would produce broken XML.
-const BRDP_00313_LITERAL = `<sch:pattern>
-  <sch:rule context="topic | concept | task | map">
-    <sch:report role="warning" id="BRDP-D1-00313-shortdesc" test="not(shortdesc) and not(topicmeta/shortdesc)">Missing &lt;shortdesc&gt; metadata.</sch:report>
-    <sch:report role="warning" id="BRDP-D1-00313-author" test="not(.//author)">Missing &lt;author&gt; metadata.</sch:report>
-  </sch:rule>
-</sch:pattern>`;
-
-// Renders a few-shot's optional "lets" field (array of {name, value}) as
-// <sch:let> lines, one per entry, indented to sit right after <sch:rule
-// context="...">. Returns "" when absent so every existing few-shot without
-// "lets" renders byte-identical to before this field existed.
-function renderSchLets(lets) {
-  if (!lets || lets.length === 0) return "";
-  return lets.map((l) => `    <sch:let name="${l.name}" value="${l.value}"/>\n`).join("");
-}
-
-// Most few-shot "message" values are plain prose that may mention element
-// names in angle brackets for readability (e.g. "The <xref> element...") --
-// escapeXmlText() turns those into proper &lt;xref&gt; text per STRICT RULE
-// 14. But a message that needs a REAL embedded element (STRICT RULE 20's
-// <sch:value-of select="..."/> for dynamic error text) must NOT be escaped,
-// or the element becomes inert literal text instead of a real Schematron
-// node. "messageIsRawXml": true opts a few-shot out of escaping -- the
-// author is then responsible for manually writing &lt;/&gt; for any literal
-// angle bracket that ISN'T a real element. Absent/false (the default for
-// all pre-existing few-shots) keeps today's escaping behavior unchanged.
-function renderMessage(entry) {
-  return entry.messageIsRawXml ? String(entry.message == null ? "" : entry.message) : escapeXmlText(entry.message);
-}
-
-function buildFewShotBlock(schemaSummary) {
-  const examples = schemaSummary.few_shot_examples || [];
-  return examples
-    .map((ex, i) => {
-      const topics = (ex.topicTypes || []).join(", ");
-
-      if (ex.confidence_ai === "DESACTIVADA") {
-        // Teaches restraint: this looked checkable but real DITA verification
-        // proved it wrong (not just uncertain) -- the correct move is a
-        // traceability comment, never a forced/invented rule.
-        return `### Example ${i + 1} — ${ex.id} (topics: ${topics}) — WHEN TO STOP AND NOT GENERATE A RULE
-Tempting but WRONG attempt (context="${ex.context}", test="${ex.test}"):
-this assumed <revised> could contain a <comment> child. Real verification against
-the XSD showed <revised> is EMPTY (attributes only, no child elements or text) --
-the rule was structurally impossible, not just unverified.
-CORRECT output when this happens — a traceability comment, nothing else:
-<!-- ${ex.id}: no se pudo generar una regla Schematron automatable (${escapeXmlText(ex.notes.split(".")[0])}); pendiente de revision manual. -->`;
-      }
-
-      if (ex.id === "BRDP-D1-00313") {
-        return `### Example ${i + 1} — ${ex.id} (topics: ${topics}, confidence: ${ex.confidence_ai}) — MULTIPLE INDEPENDENT CHECKS IN ONE RULE
-${BRDP_00313_LITERAL}
-Note the two sch:report elements share the same sch:rule/@context but each has
-its OWN globally-unique @id, suffixed with a short descriptive slug
-(-shortdesc / -author) — never reuse the bare BRDP id twice.`;
-      }
-
-      return `### Example ${i + 1} — ${ex.id} (topics: ${topics}, confidence: ${ex.confidence_ai})
-<sch:pattern>
-  <sch:rule context="${ex.context}">
-${renderSchLets(ex.lets)}    <sch:assert role="${ex.assert_role}" id="${ex.id}" test="${ex.test}">${renderMessage(ex)}</sch:assert>
-  </sch:rule>
-</sch:pattern>`;
-    })
-    .join("\n\n");
-}
-
-// When a real project BRDP's id happens to exactly match one of the curated
-// few-shot examples, the pattern is copied here DETERMINISTICALLY instead of
-// asking the LLM to regenerate it. A real 100-BRDP run showed the LLM can get
-// confused by seeing its own few-shot example in the prompt and dismiss the
-// actual BRDP as "already exists / duplicate" with a comment instead of
-// producing the real rule -- silently dropping coverage for it. Copying the
-// curated pattern directly is both more reliable (no ambiguity possible) and
-// cheaper (no LLM call needed at all for these ids).
-function buildDeterministicBlockFromFewShot(entry) {
-  // A frozen rule_approvals row (see src/api/approvals.js): rule_xml is
-  // already the exact, previously-approved <sch:pattern>/comment block --
-  // inject it verbatim, never rebuild it from separate fields.
-  if (entry.rule_xml != null) return entry.rule_xml.trim();
-  if (entry.id === "BRDP-D1-00313") return BRDP_00313_LITERAL;
-  if (entry.confidence_ai === "DESACTIVADA") {
-    const why = sanitizeForXmlComment(String(entry.notes || "").split(".")[0]);
-    return `<!-- ${entry.id}: no se pudo generar una regla Schematron automatable (${why}); pendiente de revision manual. -->`;
-  }
-  return `<sch:pattern>
-  <sch:rule context="${entry.context}">
-${renderSchLets(entry.lets)}    <sch:assert role="${entry.assert_role}" id="${entry.id}" test="${entry.test}">${renderMessage(entry)}</sch:assert>
-  </sch:rule>
-</sch:pattern>`;
-}
-
-// ===== STRICT RULES =====
-// Rules 4-12 map 1:1 onto the 9 real patterns identified across the 29 curated
-// few-shots (absolute prohibition, enumeration, regex-on-correct-attribute,
-// conditional/ancestor structure across topicTypes, nesting depth, unique
-// suffixed ids, assert/report polarity, error/warning mapping, when NOT to
-// generate a rule). Rules 1-3 and 13-14 are the supporting scaffolding needed
-// to make those 9 patterns actually produce valid, assemblable Schematron.
-const STRICT_RULES = `STRICT RULES:
-1. Output ONLY raw <sch:pattern>...</sch:pattern> blocks (or, when rule 12 applies, a single XML comment) — no XML declaration, no <sch:schema> wrapper, no markdown fences, no explanation, no preamble.
-2. Each BRDP produces ONE <sch:pattern> containing ONE <sch:rule context="...">. If a single BRDP needs more than one independent check (see rule 9), put all of them inside that SAME sch:rule as separate sch:assert/sch:report elements — do not create multiple patterns for one BRDP.
-3. context MUST be a valid Schematron/XSLT match pattern: an element name, a union of element names with "|", and predicates on that same node (e.g. fig[@id], topicmeta[not(data[@name='x'])]). NEVER start context with a reverse axis (ancestor::, parent::, preceding::, preceding-sibling::) — that is illegal in a match pattern. If the rule logically needs an ancestor/parent check, put that check inside test (where ancestor::/parent:: are always legal), and keep context simple.
-4. Absolute prohibition of an element with no exceptions -> context targets the forbidden element itself, test="false()".
-5. Closed list of permitted values given in the proposal -> test="@attr = ('v1','v2','v3')" (XPath enumeration). Do not use a regex for a short closed list of literal values.
-6. Attribute pattern/format constraint -> matches(@attr, '^...$', 'i') anchored with ^ and $, case-insensitive unless case clearly matters. CRITICAL: apply the regex to the attribute that ACTUALLY carries that data according to vocabulary_by_domain — verify which element/attribute really holds the value before writing the test (e.g. a filename pattern belongs on image/@href, never on fig/@id or table/@id; those are unrelated attributes on unrelated elements).
-7. Structural rule that must hold across more than one topicType (see the BRDP's topicTypes) -> the test must accept EVERY structural alternative used by those topicTypes, combined with "or". Different topicTypes can satisfy the same rule through different real elements (e.g. a generic task's prereq/context is NOT the same structure as machineryTask's formal <safety> element from taskreq-d — if a rule targets both, test must accept ancestor::safety OR the generic task structure, not just one of them). Check vocabulary_by_domain for the topicTypes involved before writing the test.
-8. Nesting-depth limit -> count(ancestor::element-name) compared with a relational operator (see rule 17 for how to escape it). Never simulate depth counting with nested positional predicates.
-9. sch:assert/@id and sch:report/@id MUST be globally unique across the ENTIRE document being assembled. If a BRDP produces more than one independent check, suffix each id with a short descriptive slug: BRDP-id-slug (e.g. BRDP-D1-00313-shortdesc, BRDP-D1-00313-author). NEVER reuse the same id twice, and never reuse a bare BRDP id for more than one assert/report.
-10. sch:assert/@test fires its message when the test evaluates to FALSE — phrase it as what MUST be true. sch:report/@test fires its message when the test evaluates to TRUE — phrase it as what must NOT happen. Pick whichever reads naturally for the rule, but never invert the polarity.
-11. role="error" for absolute prohibitions/mandates ("must", "shall not", "is required") and for closed enumerations from a fixed external standard. role="warning" for recommendations/conditional language ("should", "recommend", "discard if not necessary", "consider", "discard what is not never need").
-12. If the BRDP has no reliable structural hook in real DITA — either it is actually a process/governance decision with no XML footprint, or the element/attribute it describes is not present in vocabulary_by_domain/topic_types for the relevant topicTypes — DO NOT invent a rule. Output ONLY this XML comment instead:
-<!-- BRDP-id: no se pudo generar una regla Schematron automatable (motivo breve); pendiente de revision manual. -->
-13. NEVER use an element or attribute name that is not listed in vocabulary_by_domain or topic_types. If you are not sure an element exists in real DITA, prefer a name that IS confirmed there, or fall back to rule 12 — never guess a plausible-sounding element name (this is exactly the class of error that caused real false positives before: assuming <video>/<audio> attributes existed when only <object> is confirmed).
-14. Inside sch:assert/sch:report message text, escape angle brackets naming elements: write &lt;elementName&gt;, never a literal <elementName>.
-15. Do not add topic-type detection logic (no checking @domains, no checking the root element name) — contexts self-limit by which elements are actually present in the document being validated; this is intentional (Option B).
-16. XML comments (rule 12) must NEVER contain the two-character sequence "--" anywhere in their body, and must not end with "-" right before "-->" — both break XML well-formedness. Use ";" or an em dash "—" for a pause instead of "--".
-17. Inside test, context, and sch:let/@value attribute values — not just message text — a literal < or & must be escaped as &lt; / &amp;. This applies even to numeric comparisons: write count(...) &lt; 2, never count(...) < 2 with a raw <. Attribute values follow the same escaping requirement as element text (rule 14), it is not optional just because the value is XPath.
-18. Before writing a test, sanity-check it is not vacuous. A test comparing two nearly-identical XPath expressions (e.g. count(X[cond < 3]) >= count(X[cond <= 3]), which is true almost by construction) does not actually verify the rule's intent — treat this as a sign the BRDP has no reliable structural hook and use rule 12 instead of forcing a lookalike rule. This applies especially to BRDPs about publishing/rendering configuration (TOC depth, page layout, print pagination, PDF/output formatting) that only affect how the publishing engine (DITA-OT) renders output, not the source document's own structure — even if a real element name (e.g. the bookmap <toc> placeholder) is nearby, using it to approximate a rendering-only decision is a semantic mismatch, not a real structural check. Apply this consistently: if a BRDP is essentially the same kind of decision as one you would otherwise resolve with rule 12, resolve it the same way even if its wording makes it look superficially structural.
-19. Row-by-row cross-column check inside a DITA/CALS table (tgroup/tbody/row/entry) -> resolve the target column by its header TEXT, never by position: add an <sch:let name="colX" value="tgroup/thead/row[1]/entry[normalize-space(.) = 'Header Text']/@colname"/> as a direct child of sch:rule, placed BEFORE the sch:assert/sch:report, then reference it as $colX inside test. CALS/DITA tables identify columns by @colname, not by ordinal position — entry[2]-style positional predicates silently break if columns are reordered. Express the "for every row" condition with the XPath 2.0 quantifier "every $row in tgroup/tbody/row satisfies (...)" — never simulate this with count()/positional indexing, which cannot express a per-row condition that depends on another column's value in that same row.
-20. Cross-file consistency check (a value declared once, e.g. in the .ditamap via keydef/keyword, must match its real usage inside a topic referenced from elsewhere) -> use document($hrefExpr, .) inside an <sch:let> to resolve and read the OTHER file's content; the second argument (a node, typically ".") anchors the relative href to the document currently being validated -- never call document() with only one argument when the href is relative. Resolve which topic to open via its own reference (e.g. //topicref[@navtitle = '...' or topicmeta/navtitle = '...']/@href), never by guessing a filename. When the assert's message should show the actual mismatched values (not just "these don't match"), embed <sch:value-of select="$var"/> directly inside the message content -- this requires setting "messageIsRawXml": true on the few-shot entry (see renderMessage()), since a plain message string is XML-escaped and would turn a real <sch:value-of> into inert text. This category is inherently less portable than rule 19's: it only works when the Schematron engine validates with real file-system access to the referenced topic (e.g. validating the .ditamap, not an isolated topic file) -- note that limitation explicitly in the BRDP's own documentation rather than assuming it always applies.`;
-
-function buildSchematronPrompt(chunkBRDPs, schemaSummary) {
-  const { few_shot_examples, ...schemaSummaryWithoutExamples } = schemaSummary;
-  const schemaJSON = JSON.stringify(schemaSummaryWithoutExamples, null, 2);
-  const fewShotBlock = buildFewShotBlock(schemaSummary);
-
-  const system = `You are a DITA 1.3 Schematron business-rules expert. Generate sch:pattern blocks (ISO Schematron, xslt2 queryBinding) implementing the given BRDPs (Business Rules Decision Points), each already classified as checkable XML structure.
-
-Reference structure (6 topic types + real confirmed element vocabulary per domain):
-${schemaJSON}
-
-${STRICT_RULES}
-
-## Few-shot examples: BRDP → sch:pattern
-Use these real, oXygen-validated examples as reference for context/test/role style and for when to decline (see the "WHEN TO STOP" example).
-
-${fewShotBlock}`;
-
-  const brdpLines = chunkBRDPs
-    .map(
-      (b, i) =>
-        `${i + 1}. ID: ${b.id}\n   Definition: ${b.definition}\n   Proposal: ${b.proposal}`
-    )
-    .join("\n\n");
-
-  const user = `Generate sch:pattern blocks for these ${chunkBRDPs.length} BRDP(s):
-
-${brdpLines}
-
-Output ONLY the sch:pattern blocks (or traceability comments per rule 12), starting directly with <sch:pattern or <!--`;
-
-  return { system, user };
-}
-
-// ===== Response parsing / verification =====
-
-const MAX_RETRIES = 2;
-
-function extractPatternBlocks(text) {
-  return [...text.matchAll(/<sch:pattern\b[\s\S]*?<\/sch:pattern>/g)].map((m) => m[0]);
-}
-
-function extractTraceabilityComments(text) {
-  return [...text.matchAll(/<!--\s*BRDP-[\s\S]*?-->/g)].map((m) => m[0]);
-}
-
-function extractCheckIds(text) {
-  return new Set(
-    [...text.matchAll(/<sch:(?:assert|report)\b[^>]*\bid="([^"]+)"/g)].map((m) => m[1])
-  );
-}
-
-// Only counts a comment as a genuine resolution if it follows our own
-// canonical "no automatable rule" wording (both STRICT RULE 12's template and
-// buildTraceabilityComment() always include "pendiente de revision manual").
-// A real 100-BRDP run found the LLM sometimes dismisses a BRDP with an
-// off-pattern comment instead ("ya existe en few-shot ... no se genera de
-// nuevo (regla duplicada)") when its id happens to match a few-shot example
-// -- that is NOT a valid resolution, it's the model silently dropping a real
-// rule, and the old code counted ANY "BRDP-id:" comment as coverage,
-// masking the loss. Requiring the canonical phrase closes that loophole
-// without breaking the legitimate rule-12 mechanism.
-function extractCommentedIds(text) {
-  const ids = new Set();
-  for (const m of text.matchAll(/<!--\s*(BRDP-[A-Za-z0-9-]+)\s*:([\s\S]*?)-->/g)) {
-    if (/pendiente de revision manual/i.test(m[2])) ids.add(m[1]);
-  }
-  return ids;
-}
-
-// A generated id "covers" a BRDP if it equals the BRDP id, or is that id with a
-// descriptive suffix (BRDP-id-slug), matching STRICT RULE 9's suffixing scheme.
-function idCoversBRDP(id, brdpId) {
-  return id === brdpId || id.startsWith(brdpId + "-");
-}
-
-function sanitizeForXmlComment(text) {
-  // XML comments must never contain "--" or end with "-" before "-->".
-  return String(text == null ? "" : text)
-    .replace(/[\r\n]+/g, " ")
-    .replace(/-{2,}/g, "—")
-    .replace(/-+$/, "")
-    .trim();
-}
-
-function buildTraceabilityComment(brdp, reason) {
-  const desc = String(brdp.definition || brdp.proposal || "Regla sin contexto").slice(0, 300);
-  const why = reason || "sin gancho estructural claro en el vocabulario confirmado";
-  // Sanitize the WHOLE assembled body in one pass (not just the injected
-  // fragments) -- a literal "--" in the surrounding boilerplate text itself
-  // is just as fatal to XML well-formedness as one in `why`/`desc`, and this
-  // was in fact the real bug: the boilerplate wording used a raw "--".
-  const inner = `${brdp.id}: no se pudo generar una regla Schematron automatable (${why}); pendiente de revision manual. Definition: ${desc}`;
-  return `<!-- ${sanitizeForXmlComment(inner)} -->`;
-}
-
-// ===== Deterministic escaping (second layer -- never rely on the LLM alone) =====
-// Same philosophy as forceIssueType() in generateBREX.js: the prompt now tells
-// the model not to do these two things (STRICT RULES 16/17), but a real run
-// against 100 BRDPs showed it still does them often enough that a code-level
-// guarantee is required regardless of prompt compliance.
-
-// Attribute values follow XML's AttValue grammar, which (unlike element text)
-// explicitly forbids a literal "<" and requires "&" to be part of a
-// recognized reference. A raw "count(...) < 2" from the LLM is invalid XML
-// even though the surrounding tags are otherwise fine.
-function escapeAttrLiteral(value) {
-  return value
-    .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, "&amp;")
-    .replace(/</g, "&lt;");
-}
-
-// Also covers sch:let/@value (STRICT RULE 19's column-header lookup is
-// itself an XPath expression stored in an XML attribute, exactly the same
-// escaping hazard as test/context) -- "value" only ever appears as a literal
-// attribute name here on sch:let in the assembled document, so widening the
-// match is safe.
-function escapeSchTestAttributes(xml) {
-  return xml.replace(/\b(test|context|value)="([^"]*)"/g, (full, attrName, value) => (
-    `${attrName}="${escapeAttrLiteral(value)}"`
-  ));
-}
-
-// Re-sanitizes every XML comment's body regardless of whether it came from
-// buildTraceabilityComment() (already sanitized once) or directly from the
-// LLM (rule 12 output, never passed through buildTraceabilityComment at
-// all) -- this is the actual majority case found in a real 100-BRDP run.
-function sanitizeXmlCommentBodies(xml) {
-  return xml.replace(/<!--([\s\S]*?)-->/g, (full, body) => `<!--${sanitizeForXmlComment(body)}-->`);
-}
-
-// Splits raw LLM output into pattern blocks (dropping any whose ids don't map
-// to a real target BRDP -- hallucinated/invented patterns) and traceability
-// comments, and reports which of the expected BRDPs remain uncovered.
-function processChunkResponse(rawText, chunkBRDPs, targetIds) {
-  const patterns = extractPatternBlocks(rawText);
-  const rawComments = extractTraceabilityComments(rawText);
-
-  const keptPatterns = patterns.filter((block) => {
-    const ids = [...extractCheckIds(block)];
-    return ids.some((id) => [...targetIds].some((t) => idCoversBRDP(id, t)));
-  });
-
-  // Discard, not just ignore-for-coverage, any comment that doesn't follow
-  // our own canonical "no automatable rule" wording (extractCommentedIds
-  // already enforces that) -- otherwise an off-pattern dismissal like "ya
-  // existe / duplicada" would still leak into the final document even after
-  // a successful retry produced the real rule for the same BRDP.
-  const keptComments = rawComments.filter((block) => {
-    const ids = [...extractCommentedIds(block)];
-    return ids.some((id) => [...targetIds].some((t) => idCoversBRDP(id, t)));
-  });
-
-  const coveredIds = new Set();
-  for (const block of keptPatterns) {
-    for (const id of extractCheckIds(block)) coveredIds.add(id);
-  }
-  for (const block of keptComments) {
-    for (const id of extractCommentedIds(block)) coveredIds.add(id);
-  }
-
-  const missing = chunkBRDPs.filter(
-    (b) => ![...coveredIds].some((id) => idCoversBRDP(id, b.id))
-  );
-
-  return { patterns: keptPatterns, comments: keptComments, missing };
-}
-
-// Batch-fetches every frozen approval for FORMAT_ID in one request (see
-// GET /api/approvals/format/:format) instead of one call per BRDP. A fetch
-// failure degrades to "no approvals" rather than aborting generation --
-// affected BRDPs simply fall back to the LLM/safety-net path exactly as
-// before this feature existed, so coverage is never at risk, only the
-// deterministic-injection optimization for that one run.
-async function fetchApprovalsMap(format) {
-  try {
-    const rows = await getApprovalsForFormat(format);
-    return new Map(rows.map((r) => [r.brdp_id, r]));
-  } catch (err) {
-    console.error(`Failed to fetch rule approvals for format ${format}:`, err);
-    return new Map();
-  }
-}
-
-export async function generateSingleRule(brdp, schemaSummary, callLLM) {
-  const { system, user } = buildSchematronPrompt([brdp], schemaSummary);
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const raw = await callLLM(system, user);
-    if (!raw) continue;
-    const extracted = extractXML(raw);
-    const { patterns, comments, missing } = processChunkResponse(extracted, [brdp], new Set([brdp.id]));
-    if (missing.length === 0) {
-      if (patterns.length > 0) return { type: "pattern", xml: patterns.join("\n") };
-      if (comments.length > 0) return { type: "comment", xml: comments.join("\n") };
-    }
-  }
-  console.warn(`Could not generate a Schematron rule for ${brdp.id} after ${MAX_RETRIES} attempts`);
-  return null;
+// An approved rule enters the document verbatim: rule_xml is the exact
+// <sch:pattern>/comment block saved in rule_approvals (NOT NULL), never
+// rebuilt from separate fields.
+function approvedRuleBlock(approval) {
+  return approval.rule_xml.trim();
 }
 
 // ===== Deterministic finalization (no BREX-equivalent conversion exists for
 // DITA -- this header assembly is the only deterministic step in the whole
 // pipeline, so it carries more weight than its BREX counterpart) =====
 
-function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
+function finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding = "xslt2", sharedLets = [], namespaces = []) {
   const header = (schemaSummary && schemaSummary.sch_header) || {};
-  const open =
+  // Declares BOTH the sch: prefix AND the same URI as the default namespace
+  // (legal XML -- an element can be in scope for a prefix and the default
+  // binding to the same namespace name at once). Without the default
+  // binding, a verbatim-injected block using unprefixed <pattern>/<rule>/
+  // <assert> (confirmed real-world style: Navantia's own .sch files use no
+  // prefix at all, unlike the sch:-prefixed curated few-shots) would land in
+  // "no namespace" once nested inside this sch:-prefixed wrapper -- still
+  // well-formed XML, but invisible to any real Schematron/XSLT2 processor,
+  // which only recognizes pattern/rule/assert in the Schematron namespace.
+  // Confirmed with lxml against real Navantia content: without this default
+  // binding, `<pattern>` parses as a bare no-namespace element instead of
+  // `{http://purl.oclc.org/dsdl/schematron}pattern`.
+  //
+  // queryBinding is NOT hardcoded here (real bug found and fixed: it used
+  // to always be "xslt2", so a real XPath 3.0 project -- DITA 1.3
+  // Xpath3.0, migration 0013_split_dita_xpath_standards.py -- would get a
+  // wrong header on its own assembled document). {QUERY_BINDING} follows
+  // the exact same placeholder convention title_template already uses for
+  // {PROJECT_TITLE} below, so a custom root_open from the schema summary
+  // JSON stays parametrizable too, not just this JS fallback.
+  const openTemplate =
     header.root_open ||
-    '<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">';
+    '<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" xmlns="http://purl.oclc.org/dsdl/schematron" queryBinding="{QUERY_BINDING}">';
+  const open = openTemplate.replace("{QUERY_BINDING}", queryBinding);
   const close = header.root_close || "</sch:schema>";
   const projectTitle = escapeXmlText(
     (projectConfig && (projectConfig.projectName || projectConfig.modelIdentCode)) || "Project"
@@ -368,20 +79,49 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
     "<sch:title>{PROJECT_TITLE} Business Rules Schematron (BRDP-D1)</sch:title>"
   ).replace("{PROJECT_TITLE}", projectTitle);
 
-  let xml = [
+  // No document-wide "fix what the source got wrong" pass here anymore
+  // (used to run escapeSchTestAttributes/sanitizeXmlCommentBodies over the
+  // whole joined string) -- both block producers already guarantee valid,
+  // final content on their own: approvedRuleBlock's
+  // rule_xml is a verbatim passthrough of a rule_approvals row that
+  // can only ever reach status "approved" after passing the SAME
+  // well-formedness check server-side (propose_approval/import_jobs.py's
+  // _xml_well_formed_error) and client-side (RecordsPage's checkWellFormed
+  // before save), and pendingApprovalComment() (generateBREX.js) already
+  // sanitizes the identifier it writes. Confirmed live with real
+  // Navantia data that a blanket comment-body pass here actively broke the
+  // "verbatim" guarantee: a real approved rule's OWN internal explanatory
+  // comment (e.g. "<!-- La columna de exención ... -->") got silently
+  // re-trimmed (losing its leading/trailing space) by the very sanitizer
+  // meant only for freshly-generated text, even though the source content
+  // was already valid and already approved as-is. That defense belonged to
+  // an earlier architecture where finalizeSchematronDocument() still
+  // assembled raw LLM chunk output directly; the main path is 100%
+  // deterministic now (see generateSchematronDITA()'s own docstring), so
+  // there is nothing left here for it to defend against.
+  // sharedLets (see dedupeSharedLets() below): sch:let pairs repeated
+  // across the approved rules, now declared once, after the sch:ns
+  // declarations (namespaces, collectNamespaces() below) and before the
+  // first pattern. ISO Schematron scopes a schema-level sch:let to the
+  // whole document, so every rule that declared its own copy still
+  // reaches it by the same $name.
+  // Each with its comment right before it, once (a global function's
+  // comment, carried in by AI Extract).
+  const sharedLetsXml = sharedLets.map(
+    (l) => (l.comment ? `  ${l.comment}\n` : "") + `  <sch:let name="${l.name}" value="${l.value}"/>`
+  );
+  // sch:ns before the lets (ISO order: title, ns*, p*, let*, …, pattern*).
+  const namespacesXml = namespaces.map((n) => `  <sch:ns prefix="${n.prefix}" uri="${n.uri}"/>`);
+
+  return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     open,
     title,
+    ...namespacesXml,
+    ...sharedLetsXml,
     ...blocks,
     close,
   ].join("\n");
-
-  // Second layer of defense (rules 16/17 are the prompt-side first layer):
-  // force-correct escaping regardless of whether the LLM actually complied.
-  xml = escapeSchTestAttributes(xml);
-  xml = sanitizeXmlCommentBodies(xml);
-
-  return xml;
 }
 
 // ===== checkWellFormedSchematron() =====
@@ -403,6 +143,18 @@ function finalizeSchematronDocument(blocks, projectConfig, schemaSummary) {
 // time, each bounded by its own matching quote -- so a > or < inside a value
 // can never be mistaken for the tag's closing bracket.
 const ATTR_LIST = String.raw`(?:\s+[A-Za-z_][\w:.-]*\s*=\s*(?:"[^"]*"|'[^']*'))*`;
+
+// Optional "sch:" prefix for pattern/rule/assert/report/let element names in
+// the checks below (everything except checkRootHeader, which only ever
+// matches the deterministic wrapper this file itself emits, always
+// sch:-prefixed). A curated few-shot's verbatim rule_xml uses the sch:
+// prefix, but a real imported/manually-saved Rule can legitimately be
+// unprefixed (confirmed real-world style: Navantia's own .sch files use no
+// prefix at all) -- without this, these regexes silently match zero
+// patterns/rules/checks for that content and report a clean 0
+// errors/warnings not because it's confirmed correct, but because the
+// checks never looked at it at all.
+const SCH = "(?:sch:)?";
 
 function getAttr(attrs, name) {
   const m = attrs.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`));
@@ -436,7 +188,7 @@ function checkTagBalance(xml) {
   return { valid: true, error: null };
 }
 
-function checkRootHeader(xml) {
+function checkRootHeader(xml, queryBinding) {
   const m = xml.match(new RegExp(`<sch:schema\\b${ATTR_LIST}\\s*>`));
   if (!m) return { valid: false, error: "Missing <sch:schema> root element" };
   if (xml.trim().indexOf(m[0]) > 200) {
@@ -445,14 +197,20 @@ function checkRootHeader(xml) {
   if (!/xmlns:sch="http:\/\/purl\.oclc\.org\/dsdl\/schematron"/.test(m[0])) {
     return { valid: false, error: "<sch:schema> is missing the required xmlns:sch namespace declaration" };
   }
-  if (!/queryBinding="xslt2"/.test(m[0])) {
-    return { valid: false, error: '<sch:schema> is missing queryBinding="xslt2"' };
+  // The expected value is the CALLER's queryBinding (project.standard's
+  // XPath flavor -- "xslt3" for DITA 1.3 Xpath3.0, "xslt2" for everything
+  // else, see generateSchematronDITA()'s own queryBindingForStandard()) --
+  // this deterministic wrapper is the only place that ever writes this
+  // attribute, so it must be checked against whichever value THIS document
+  // was actually finalized with, never a bare hardcoded "xslt2".
+  if (!new RegExp(`queryBinding="${queryBinding}"`).test(m[0])) {
+    return { valid: false, error: `<sch:schema> is missing queryBinding="${queryBinding}"` };
   }
   return { valid: true, error: null };
 }
 
 function checkDuplicateIds(xml) {
-  const re = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+  const re = new RegExp(`<${SCH}(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
   const ids = [...xml.matchAll(re)].map((m) => getAttr(m[1], "id")).filter(Boolean);
   const seen = new Set();
   const dupes = new Set();
@@ -469,11 +227,11 @@ const KNOWN_ROLES = new Set(["error", "warning", "info", "fatal"]);
 
 function checkRulesAndChecks(xml) {
   const errors = [];
-  const patternRe = new RegExp(`<sch:pattern\\b${ATTR_LIST}\\s*>([\\s\\S]*?)</sch:pattern>`, "g");
+  const patternRe = new RegExp(`<${SCH}pattern\\b${ATTR_LIST}\\s*>([\\s\\S]*?)</${SCH}pattern>`, "g");
   for (const pm of xml.matchAll(patternRe)) {
     const patternBody = pm[1];
     let ruleCount = 0;
-    const ruleRe = new RegExp(`<sch:rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</sch:rule>`, "g");
+    const ruleRe = new RegExp(`<${SCH}rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}rule>`, "g");
     for (const rm of patternBody.matchAll(ruleRe)) {
       ruleCount++;
       const attrs = rm[1];
@@ -485,7 +243,7 @@ function checkRulesAndChecks(xml) {
         errors.push(`sch:rule context is not a valid Schematron match pattern: "${ctx}"`);
       }
       let checkCount = 0;
-      const checkRe = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+      const checkRe = new RegExp(`<${SCH}(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
       for (const cm of ruleBody.matchAll(checkRe)) {
         checkCount++;
         const cAttrs = cm[1];
@@ -506,8 +264,11 @@ function checkRulesAndChecks(xml) {
 }
 
 function checkPlaceholders(xml) {
+  // Outside comments: a rule's own explanatory comment is free text ("la
+  // regla SUSPENDE TODO", in a real imported Schematron), never a leftover.
   const markers = ["TODO", "FIXME", "{{", "PROJECT_TITLE}}"];
-  return markers.filter((marker) => xml.includes(marker));
+  const code = xml.replace(/<!--[\s\S]*?-->/g, "");
+  return markers.filter((marker) => code.includes(marker));
 }
 
 // Non-blocking lint: flags element/attribute-shaped tokens in context/test
@@ -522,6 +283,36 @@ const XPATH_FUNCTIONS = new Set([
   "ends-with", "substring",
   // document($href, .) -- STRICT RULE 20's cross-file lookup function.
   "document",
+  // Confirmed real usage in the Navantia S80 dataset (native, non-curated
+  // XPath 2.0 Schematron -- see CLAUDE.md): standard XPath 2.0 functions,
+  // not DITA vocabulary, so they belong here rather than in the confirmed
+  // element/attribute set.
+  "string-join", "number", "doc-available",
+  // Confirmed real usage in the Navantia-Xpath3.0 dataset
+  // (nav_dtm_xpath3_import.xlsx, migration 0013_split_dita_xpath_standards.py):
+  // all five are standard XPath 2.0 functions (NOT 3.0-specific -- unlike
+  // fn:head below, these exist in 2.0 too), so added here unconditionally
+  // rather than gated to XPATH3_ONLY_VOCAB, same rationale as the
+  // string-join/number/doc-available entries above.
+  "exists", "empty", "distinct-values", "analyze-string", "local-name",
+  // element() -- a node-kind test, not a function, but "text" above is
+  // already (loosely) categorized here for the same reason: NAME_TOKEN_RE
+  // tokenizes "element(" the same way it tokenizes a function call. Valid
+  // since XPath 1.0, confirmed real usage in the same dataset ("as element()"
+  // inline function parameter typing).
+  "element",
+  // Confirmed real usage in the Navantia-Xpath3.0 project once its Rule
+  // content grew to include the shared helper function definitions
+  // themselves (valor/docFicha/etc., not just their $-prefixed call
+  // sites) -- 45 non-blocking warnings, none of them 3.0-specific: root,
+  // substring-before, substring-after, base-uri, resolve-uri and doc are
+  // XPath 1.0/2.0 functions, document-node() a node-kind test since 2.0
+  // (same category as element()/text() above). Added unconditionally,
+  // same rationale as every entry above this point -- none of these are
+  // gated to XPATH3_ONLY_VOCAB because none are exclusive to 3.0, and an
+  // Xpath2.0 project's Rule can equally well call fn:doc() or fn:root().
+  "document-node", "substring-before", "substring-after", "resolve-uri",
+  "base-uri", "doc", "root",
 ]);
 const XPATH_AXES = new Set([
   "ancestor", "ancestor-or-self", "parent", "child", "descendant",
@@ -535,6 +326,18 @@ const XPATH_AXES = new Set([
 const XPATH_KEYWORDS = new Set([
   "and", "or", "not", "true", "false", "div", "mod",
   "every", "some", "satisfies", "let", "return", "in",
+  // Confirmed real usage in the Navantia S80 dataset: XPath 2.0's
+  // conditional ("if (...) then ... else ...") and "for $x in ... return"
+  // expression keywords -- same rationale as the quantifier keywords above.
+  "if", "then", "else", "for",
+  // Confirmed real usage in the Navantia-Xpath3.0 dataset: "as" (sequence
+  // type declaration, e.g. "$t as element()") is valid XPath since 2.0's
+  // SequenceType matching -- not 3.0-specific -- so added unconditionally.
+  "as",
+  // "ge" -- one of the general comparison operators (eq/ne/lt/le/gt/ge),
+  // XPath 2.0, confirmed real usage alongside the helper-function
+  // definitions above. Not 3.0-specific either.
+  "ge",
 ]);
 
 const EXTRA_KNOWN_NAMES = [
@@ -645,11 +448,60 @@ function findUnknownNames(value, known) {
   return unknown;
 }
 
+// Confirmed real vocabulary of XMetal's "ambito-mapa" ditamap second-pass
+// mechanism (ambito-mapa.sch -- a virtual-dossier construct built on top of
+// DITA, not part of it) -- dosier/ficha/mapa navigation names plus the
+// `exists` check that mechanism uses. These are NOT core DITA vocabulary,
+// so vocabulary_by_domain (built from the real DITA XSDs) has no way to
+// confirm them, but for a project that legitimately uses this mechanism a
+// bare "unconfirmed element/attribute" warning is misleading -- it reads
+// as "might not exist" when this is the mechanism's expected, real
+// vocabulary. Deliberately kept OUT of EXTRA_KNOWN_NAMES/known (that would
+// silence the warning outright) -- it stays visible, just with an expanded
+// message, because there is no way to tell from the rule alone whether a
+// given project actually uses ambito-mapa or these names just happen to
+// coincide with something else; the message says "expected... verify
+// manually", never "this IS ambito-mapa", to stay honest about that.
+const XMETAL_AMBITO_MAPA_VOCAB = new Set(["dosier", "ficha", "mapa", "exists"]);
+
+// Real XPath 3.0-only syntax absent from 2.0, gated to queryBinding ===
+// "xslt3" (DITA 1.3 Xpath3.0 projects only, migration
+// 0013_split_dita_xpath_standards.py) so an Xpath2.0 project's known
+// vocabulary is never widened without reason. Two constructs named in the
+// encargo, "=>" (arrow operator) and "map{...}"/"array{...}" (map/array
+// constructors), turn out NOT to need an entry here at all: "=>" is pure
+// punctuation NAME_TOKEN_RE never tokenizes as a name in the first place
+// (nothing to silence), and "map" is already unconditionally known (it's
+// also the real DITA root <map> element, in EXTRA_KNOWN_NAMES) -- only
+// "array" was a genuine gap (confirmed by the same regex reasoning: a
+// space-separated "array {...}" construct tokenizes as the name "array",
+// which was not previously known). string-join's single-argument XPath 3.0
+// form needs no entry either -- XPATH_FUNCTIONS already recognizes the bare
+// function name regardless of how many arguments it's called with. Extend
+// this set (not EXTRA_KNOWN_NAMES/XPATH_FUNCTIONS directly, so it never
+// leaks into Xpath2.0 projects) with whatever else real Xpath3.0 content
+// actually turns out to use -- do not add speculative entries here without
+// confirming against real content first, the same standard already applied
+// to XPATH_FUNCTIONS/XPATH_KEYWORDS.
+//
+// Two more confirmed by nav_dtm_xpath3_import.xlsx (real Navantia
+// Xpath3.0 data, BRDP-EXT-00004/00007/00008/00009's sch:let values):
+// "head" (fn:head -- introduced in Functions & Operators 3.0, absent from
+// 2.0, unlike distinct-values/exists/empty/analyze-string/local-name above
+// which are 2.0+3.0 and so went into the unconditional XPATH_FUNCTIONS
+// instead) and "function" (the "function($t as element()) as xs:string {
+// ... }" inline function-item expression -- function items/higher-order
+// functions are a 3.0 feature, absent from 2.0's grammar entirely).
+const XPATH3_ONLY_VOCAB = new Set(["array", "head", "function"]);
+
 // One warning per (BRDP id, unconfirmed name) pair, in English to match the
 // rest of the UI -- a global "these names are unconfirmed somewhere" list
 // isn't actionable; the reviewer needs to know exactly which rule to check.
-function lintVocabulary(xml, schemaSummary) {
+function lintVocabulary(xml, schemaSummary, queryBinding = "xslt2") {
   const known = buildKnownVocabulary(schemaSummary);
+  if (queryBinding === "xslt3") {
+    for (const name of XPATH3_ONLY_VOCAB) known.add(name);
+  }
   const warnings = [];
   const seen = new Set();
 
@@ -657,15 +509,19 @@ function lintVocabulary(xml, schemaSummary) {
     const key = `${id}|${name}`;
     if (seen.has(key)) return;
     seen.add(key);
-    warnings.push(`${id}: uses unconfirmed element/attribute '${name}'`);
+    warnings.push(
+      XMETAL_AMBITO_MAPA_VOCAB.has(name)
+        ? `${id}: uses '${name}' — expected in the XMetal ditamap second-pass mechanism (ambito-mapa.sch), not core DITA vocabulary; verify manually if this project doesn't use that mechanism`
+        : `${id}: uses unconfirmed element/attribute '${name}'`
+    );
   };
 
-  const ruleRe = new RegExp(`<sch:rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</sch:rule>`, "g");
+  const ruleRe = new RegExp(`<${SCH}rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}rule>`, "g");
   for (const rm of xml.matchAll(ruleRe)) {
     const ctx = getAttr(rm[1], "context") || "";
     const ruleBody = rm[2];
 
-    const checkRe = new RegExp(`<sch:(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+    const checkRe = new RegExp(`<${SCH}(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
     const checks = [...ruleBody.matchAll(checkRe)]
       .map((cm) => ({ id: getAttr(cm[1], "id"), test: getAttr(cm[1], "test") || "" }))
       .filter((c) => c.id);
@@ -688,7 +544,7 @@ function lintVocabulary(xml, schemaSummary) {
     // most. Same attribution rule as context: a sch:let is scoped to the
     // whole sch:rule, so an unknown name in it applies to every check in
     // that rule.
-    const letRe = new RegExp(`<sch:let\\b(${ATTR_LIST})\\s*/?>`, "g");
+    const letRe = new RegExp(`<${SCH}let\\b(${ATTR_LIST})\\s*/?>`, "g");
     for (const lm of ruleBody.matchAll(letRe)) {
       const letValue = getAttr(lm[1], "value") || "";
       if (!letValue) continue;
@@ -702,10 +558,32 @@ function lintVocabulary(xml, schemaSummary) {
     }
   }
 
+  // Schema-level sch:let -- not inside any sch:pattern/sch:rule. The only
+  // way one of these exists is dedupeSharedLets() below hoisting a shared
+  // helper-function definition out of every rule that used it (DITA 1.3
+  // Xpath3.0 only). Without this pass, hoisting would silently stop
+  // checking vocabulary inside that definition altogether -- before
+  // dedup, the SAME content was scanned once per rule that had its own
+  // copy (via the ruleRe loop above); losing that coverage the moment it
+  // moves to schema level would be exactly the kind of silent degradation
+  // this lint exists to avoid. Warnings are attributed to "shared:<name>"
+  // rather than a BRDP id, since a hoisted let by definition no longer
+  // belongs to one specific rule.
+  const withoutPatterns = xml.replace(new RegExp(`<${SCH}pattern\\b[\\s\\S]*?</${SCH}pattern>`, "g"), "");
+  const schemaLevelLetRe = new RegExp(`<${SCH}let\\b(${ATTR_LIST})\\s*/>`, "g");
+  for (const lm of withoutPatterns.matchAll(schemaLevelLetRe)) {
+    const letName = getAttr(lm[1], "name") || "shared";
+    const letValue = getAttr(lm[1], "value") || "";
+    if (!letValue) continue;
+    for (const name of findUnknownNames(letValue, known)) {
+      addWarning(`shared:${letName}`, name);
+    }
+  }
+
   return warnings;
 }
 
-function checkWellFormedSchematron(xml, schemaSummary) {
+function checkWellFormedSchematron(xml, schemaSummary, queryBinding = "xslt2") {
   const errors = [];
 
   const tagCheck = checkTagBalance(xml);
@@ -714,7 +592,7 @@ function checkWellFormedSchematron(xml, schemaSummary) {
   // Remaining checks assume a document that's at least tag-balanced; still
   // run them defensively (regex-based, won't throw either way) but the caller
   // should treat tagCheck failure as the primary signal.
-  const rootCheck = checkRootHeader(xml);
+  const rootCheck = checkRootHeader(xml, queryBinding);
   if (!rootCheck.valid) errors.push(rootCheck.error);
 
   const dupeCheck = checkDuplicateIds(xml);
@@ -727,9 +605,192 @@ function checkWellFormedSchematron(xml, schemaSummary) {
     errors.push(`Unresolved placeholder(s) found: ${placeholders.join(", ")}`);
   }
 
-  const vocabularyWarnings = lintVocabulary(xml, schemaSummary);
+  const vocabularyWarnings = lintVocabulary(xml, schemaSummary, queryBinding);
 
   return { valid: errors.length === 0, errors, vocabularyWarnings };
+}
+
+// ===== Shared <sch:let> deduplication and namespace declarations =====
+// Each approved Rule is a self-contained <sch:pattern> (one BRDP, one
+// pattern), so a helper shared by several rules ends up declared once per
+// rule: a rule imported from a Schematron file (AI Extract) carries a copy
+// of every global sch:let it uses, as pattern-level lets, and the Navantia
+// Xpath3.0 rules written by hand declared their helper functions (valor,
+// colDe, colPart, docFicha…) inside each sch:rule -- 62 sch:let where a
+// hand-written document has each helper once. Repeated copies are declared
+// once here, at schema level (a rule-level function only when repeated).
+//
+// Only what means the same at schema level is moved:
+//   - a pattern-level sch:let (ISO Schematron evaluates it with the
+//     document as context, exactly like a schema-level one), even when only
+//     one rule has it;
+//   - a rule-level sch:let whose value is an inline function
+//     ("function($x as …) … { … }", XPath 3.0): a function has no context
+//     item, so it is the same wherever it is declared.
+// A rule-level let that reads the context node (cab = ancestor::tgroup[1]/…,
+// part = $valor(., …)) is evaluated once per node of its rule and is never
+// moved: at schema level it would be evaluated against the document root
+// and give another value (fixed bug -- the previous version moved any
+// rule-level let repeated with the same value, cab and part included).
+// A moved let may only reference other moved lets (a schema-level let
+// cannot see a pattern's or a rule's); the moved ones are written in an
+// order where each comes after the ones it uses.
+// Same name with different values: never merged, every copy stays where it
+// is, and a warning names it. Runs for both XPath 2.0 and 3.0 projects.
+const PATTERN_RE_G = new RegExp(`<${SCH}pattern\\b(${ATTR_LIST})\\s*(?:/>|>([\\s\\S]*?)</${SCH}pattern>)`, "g");
+const RULE_START_RE = new RegExp(`<${SCH}rule\\b`);
+// A sch:let with the comment right before it, when there is one (only
+// whitespace in between): AI Extract writes a global function's comment
+// there, and it moves with the function (written once, right before it).
+// The comment body never runs past its own "-->".
+const LET_RE_G = new RegExp(`(\\s*<!--((?:(?!-->)[\\s\\S])*)-->)?\\s*<${SCH}let\\b(${ATTR_LIST})\\s*/>`, "g");
+const VAR_RE_G = /\$([A-Za-z_][\w.-]*)/g;
+const BOUND_RE_G = /\$([A-Za-z_][\w.-]*)\s*(?::=|\b(?:in|as)\b)/g;
+
+function isFunctionValue(value) {
+  return /^\s*function\s*\(/.test(value);
+}
+
+// Variables an expression reads and does not bind itself.
+function freeVariables(value) {
+  const bound = new Set([...value.matchAll(BOUND_RE_G)].map((m) => m[1]));
+  return new Set([...value.matchAll(VAR_RE_G)].map((m) => m[1]).filter((n) => !bound.has(n)));
+}
+
+// The lets of a block, each with whether it is pattern-level.
+function blockLets(block) {
+  const out = [];
+  for (const pm of block.matchAll(PATTERN_RE_G)) {
+    const body = pm[2] || "";
+    const cut = body.search(RULE_START_RE);
+    const head = cut === -1 ? body : body.slice(0, cut);
+    const rest = cut === -1 ? "" : body.slice(cut);
+    for (const lm of head.matchAll(LET_RE_G)) out.push({ attrs: lm[3], comment: lm[1] ? lm[1].trim() : null, patternLevel: true });
+    for (const lm of rest.matchAll(LET_RE_G)) out.push({ attrs: lm[3], comment: lm[1] ? lm[1].trim() : null, patternLevel: false });
+  }
+  return out;
+}
+
+// blocks: the assembled per-BRDP strings (a verbatim approved
+// <sch:pattern>…, or a comment -- no pattern, passes through untouched).
+// → { blocks, sharedLets: [{name, value, comment}], warnings }. comment: the
+// comment that was right before a copy of the let (the first one found), or
+// null; written once, right before the shared declaration.
+function dedupeSharedLets(blocks) {
+  const byName = new Map(); // name -> Map(value -> count), movable copies only
+  const order = [];
+  const patternLevelNames = new Set();
+  const comments = new Map(); // `${name}\u0001${value}` -> comment
+  for (const block of blocks) {
+    for (const { attrs, comment, patternLevel } of blockLets(block)) {
+      const name = getAttr(attrs, "name");
+      const value = getAttr(attrs, "value");
+      if (!name || value == null) continue;
+      if (patternLevel) patternLevelNames.add(name);
+      if (!patternLevel && !isFunctionValue(value)) continue;
+      const key = `${name}\u0001${value}`;
+      if (comment && !comments.has(key)) comments.set(key, comment);
+      if (!byName.has(name)) {
+        byName.set(name, new Map());
+        order.push(name);
+      }
+      const counts = byName.get(name);
+      counts.set(value, (counts.get(value) || 0) + 1);
+    }
+  }
+
+  const warnings = [];
+  const shared = new Map(); // name -> value
+  for (const name of order) {
+    const counts = byName.get(name);
+    if (counts.size > 1) {
+      warnings.push(
+        `Shared sch:let name '${name}' is declared with ${counts.size} different values across approved rules -- none were merged, each kept in its own rule; verify this isn't a real authoring mistake.`
+      );
+      continue;
+    }
+    const [[value, count]] = counts;
+    // A pattern-level let goes up even when only one rule has it (same
+    // meaning at schema level): the document then declares every function
+    // in one place, as a hand-written one does, and imports back the same.
+    if (count > 1 || patternLevelNames.has(name)) shared.set(name, value);
+  }
+  // A moved let may only use other moved lets.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [name, value] of shared) {
+      if ([...freeVariables(value)].some((v) => !shared.has(v))) {
+        shared.delete(name);
+        changed = true;
+      }
+    }
+  }
+  if (shared.size === 0) return { blocks, sharedLets: [], warnings };
+
+  const isShared = (attrs) => {
+    const name = getAttr(attrs, "name");
+    const value = getAttr(attrs, "value");
+    return !!name && shared.get(name) === value;
+  };
+  const newBlocks = blocks.map((block) =>
+    block.replace(PATTERN_RE_G, (full, attrs, body) => {
+      if (body == null) return full;
+      const cut = body.search(RULE_START_RE);
+      const head = cut === -1 ? body : body.slice(0, cut);
+      const rest = cut === -1 ? "" : body.slice(cut);
+      // A moved let takes the comment right before it along (LET_RE_G).
+      const newHead = head.replace(LET_RE_G, (m, _c, _b, a) => (isShared(a) ? "" : m));
+      const newRest = rest.replace(LET_RE_G, (m, _c, _b, a) => (isShared(a) && isFunctionValue(getAttr(a, "value") || "") ? "" : m));
+      // Rebuilt by position, never with String.replace(body, …): XPath is
+      // full of "$" ($valor, $'…) that a replacement string reads as
+      // substitution patterns.
+      const at = full.lastIndexOf(body);
+      return full.slice(0, at) + newHead + newRest + full.slice(at + body.length);
+    })
+  );
+
+  // Each after the ones it uses (first-seen order otherwise).
+  const sharedLets = [];
+  const placed = new Set();
+  const place = (name, path = new Set()) => {
+    if (placed.has(name) || path.has(name)) return;
+    path.add(name);
+    for (const dep of freeVariables(shared.get(name))) if (shared.has(dep)) place(dep, path);
+    placed.add(name);
+    const value = shared.get(name);
+    sharedLets.push({ name, value, comment: comments.get(`${name}\u0001${value}`) ?? null });
+  };
+  for (const name of order) if (shared.has(name)) place(name);
+  return { blocks: newBlocks, sharedLets, warnings };
+}
+
+// Namespace prefixes the rules declare on their <sch:pattern> (xmlns:xs for
+// a function typed "as xs:string", copied from the file's global sch:ns by
+// AI Extract): declared once for the whole document as <sch:ns>, which is
+// what a Schematron processor reads for the prefixes of its XPath.
+// Same prefix with different URIs: the first is declared, and a warning
+// names the conflict.
+const XMLNS_RE_G = /\sxmlns:([A-Za-z_][\w.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+const PATTERN_START_RE_G = new RegExp(`<${SCH}pattern\\b(${ATTR_LIST})\\s*/?>`, "g");
+
+function collectNamespaces(blocks) {
+  const byPrefix = new Map();
+  const warnings = [];
+  for (const block of blocks) {
+    for (const pm of block.matchAll(PATTERN_START_RE_G)) {
+      for (const xm of pm[1].matchAll(XMLNS_RE_G)) {
+        const prefix = xm[1];
+        const uri = xm[2] ?? xm[3];
+        if (prefix === "sch" || prefix === "xml") continue;
+        if (!byPrefix.has(prefix)) byPrefix.set(prefix, uri);
+        else if (byPrefix.get(prefix) !== uri) {
+          warnings.push(`Namespace prefix '${prefix}' is declared with different URIs across approved rules; '${byPrefix.get(prefix)}' is used.`);
+        }
+      }
+    }
+  }
+  return { namespaces: [...byPrefix].map(([prefix, uri]) => ({ prefix, uri })), warnings: [...new Set(warnings)] };
 }
 
 // ===== Main entry point =====
@@ -741,24 +802,19 @@ function checkWellFormedSchematron(xml, schemaSummary) {
 
 // Pure deterministic assembler -- no LLM call, ever. For the active format,
 // takes only the BRDPs with a frozen 'approved' rule_approvals row and
-// injects their rule_xml verbatim (via buildDeterministicBlockFromFewShot,
-// which already special-cases entry.rule_xml as a verbatim passthrough);
-// every other Validated BRDP becomes a traceability comment via
-// buildTraceabilityComment(), the exact same mechanism already used for
-// BRDP-D1-00089 -- untouched here, just called with a different reason.
-// The curated few-shot exact-id-match shortcut (previously also used to
-// bypass the LLM for known examples) is intentionally NOT consulted here
-// anymore: approval is now the only gate for inclusion, so an unapproved
-// BRDP that happens to match a curated id still becomes a comment, not a
-// silently-injected rule. generateSingleRule and the prompt builders above
-// still exist, unchanged, for the BRDP Assistant's "Suggest Rule" mode.
+// injects their rule_xml verbatim (approvedRuleBlock);
+// every other Validated BRDP becomes a pending-approval comment via
+// pendingApprovalComment() (generateBREX.js) -- the same comment the BREX
+// generators write: the BRDP identifier, never its UUID, in English.
 export async function generateSchematronDITA(brdps, projectConfig, options = {}) {
   const {
     onlyValidated = true,
     approvals: approvalsOverride,
-    approvalsFormat = FORMAT_ID,
     schemaSummary: schemaSummaryOverride,
+    standard,
+    includeDrafts = false,
   } = options;
+  const queryBinding = queryBindingForStandard(standard);
 
   const targetBRDPs = onlyValidated
     ? brdps.filter((b) => b.validation?.toLowerCase().trim() === "validated")
@@ -774,24 +830,51 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
 
   const schemaSummary = schemaSummaryOverride || (await loadSchemaSummary());
 
-  const approvalById = approvalsOverride
-    ? (approvalsOverride instanceof Map ? approvalsOverride : new Map(approvalsOverride.map((a) => [a.brdp_id, a])))
-    : await fetchApprovalsMap(approvalsFormat);
+  // The caller passes the project's rule approvals for this format
+  // (GeneratePage.jsx loads them from /api/projects/{id}/approvals/{format}/export).
+  if (!approvalsOverride) throw new Error("The project's rule approvals are required to generate.");
+  const approvalById = approvalsOverride instanceof Map
+    ? approvalsOverride
+    : new Map(approvalsOverride.map((a) => [a.brdp_id, a]));
 
-  const blocks = [];
+  let blocks = [];
+  let ruleCount = 0;
   for (const brdp of targetBRDPs) {
     const approvalEntry = approvalById.get(brdp.id);
-    if (approvalEntry && approvalEntry.status === "approved") {
-      blocks.push(buildDeterministicBlockFromFewShot(approvalEntry));
+    if (ruleEnters(approvalEntry, includeDrafts)) {
+      ruleCount += 1;
+      blocks.push(approvedRuleBlock(approvalEntry));
     } else {
-      blocks.push(buildTraceabilityComment(brdp, "pendiente de aprobación de regla, no incluida en este documento"));
+      // Same comment as the BREX generators (pendingApprovalComment in
+      // generateBREX.js): the BRDP identifier (never its UUID), in English.
+      blocks.push(pendingApprovalComment(brdp));
     }
   }
 
-  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary);
-  const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary);
+  // Repeated sch:let declared once, and the rules' namespace prefixes
+  // declared once (see dedupeSharedLets() / collectNamespaces() above).
+  const deduped = dedupeSharedLets(blocks);
+  blocks = deduped.blocks;
+  const sharedLets = deduped.sharedLets;
+  const { namespaces, warnings: nsWarnings } = collectNamespaces(blocks);
+  const dedupWarnings = [...deduped.warnings, ...nsWarnings];
 
-  return { xml: finalXml, valid, errors, vocabularyWarnings, brdpCount: targetBRDPs.length };
+  const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding, sharedLets, namespaces);
+  const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary, queryBinding);
+
+  return {
+    xml: finalXml,
+    valid,
+    errors,
+    // Same non-blocking, informational surface as vocabularyWarnings
+    // (rendered together in the same UI panel) -- a name-collision warning
+    // is a different KIND of note (an authoring-consistency flag, not an
+    // unconfirmed-vocabulary flag) but shares the exact same "worth a
+    // human look, never blocks generation or download" semantics.
+    vocabularyWarnings: [...vocabularyWarnings, ...dedupWarnings],
+    brdpCount: targetBRDPs.length,
+    ruleCount,
+  };
 }
 
-export { buildSchematronPrompt, buildFewShotBlock, buildDeterministicBlockFromFewShot, loadSchemaSummary, checkWellFormedSchematron, finalizeSchematronDocument };
+export { checkWellFormedSchematron, queryBindingForStandard };
