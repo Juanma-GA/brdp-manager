@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   buildReport,
+  errorGoesToDraft,
   errorKind,
   findProject,
   folderSlug,
@@ -19,7 +20,11 @@ import {
   parseArgs,
   planRules,
   progressLine,
+  removeLeftoverTmp,
+  RENAME_RETRY_DELAYS_MS,
   runDir,
+  savedDirectLine,
+  saveFailedLine,
   shouldRevoke,
   skipReason,
   writeFileAtomic,
@@ -103,14 +108,24 @@ eq('failed → tested again (relaunch)', skipReason({ last_test_result: 'failed'
 eq('never tested → tested', skipReason({ last_test_result: null, last_test_up_to_date: null }), null);
 eq('--all tests a passed one', skipReason({ last_test_result: 'passed', last_test_up_to_date: true }, { all: true }), null);
 
-// ── Draft: only a failed Verified rule ──
-check('Verified that fails → Draft', shouldRevoke({ result: 'failed' }, 'approved'));
-check('Draft that fails → stays', !shouldRevoke({ result: 'failed' }, 'pending_review'));
-check('Verified not executable → stays', !shouldRevoke({ result: 'not_executable' }, 'approved'));
-check('Verified review → stays', !shouldRevoke({ result: 'review' }, 'approved'));
-check('Verified inconclusive → stays', !shouldRevoke({ result: 'inconclusive' }, 'approved'));
-check('Draft that passes → never promoted (nothing to revoke)', !shouldRevoke({ result: 'passed' }, 'pending_review'));
-check('error (no record) → nothing', !shouldRevoke(null, 'approved'));
+// ── Draft: a Verified rule that does not pass ──
+for (const r of ['failed', 'review', 'inconclusive', 'not_executable', 'error']) {
+  check(`Verified ${r} → Draft`, shouldRevoke(r, 'approved'));
+  check(`Draft ${r} → stays Draft`, !shouldRevoke(r, 'pending_review'));
+  check(`To Do ${r} → untouched`, !shouldRevoke(r, null));
+}
+check('Verified passed → stays Verified', !shouldRevoke('passed', 'approved'));
+check('Verified schema_covered → stays Verified', !shouldRevoke('schema_covered', 'approved'));
+check('Draft that passes → never promoted (nothing to revoke)', !shouldRevoke('passed', 'pending_review'));
+check('a record object is read too', shouldRevoke({ result: 'review' }, 'approved') && !shouldRevoke({ result: 'passed' }, 'approved'));
+check('no result → nothing', !shouldRevoke(null, 'approved') && !shouldRevoke('skipped', 'approved'));
+// Which errors count against the rule (Draft, no test recorded).
+check('AI timeout → Draft', errorGoesToDraft('POST /api/llm-proxy -> 504: {"code":"llm_timeout","seconds":2}'));
+check('unusable AI answer → Draft', errorGoesToDraft('The answer is not valid JSON: Unexpected token'));
+check('answer cut by length → Draft', errorGoesToDraft('the AI answer was cut by its length limit'));
+check('Proposal check not made → Draft', errorGoesToDraft('the Proposal check could not be made: timeout'));
+check('another endpoint of the backend → not the rule', !errorGoesToDraft('GET /api/schema-cards/structure?standard=x -> 500: {}'));
+check('backend not reachable → not the rule', !errorGoesToDraft('fetch failed'));
 eq('timeout recognised', errorKind('POST /api/llm-proxy -> 504: {"code":"llm_timeout","seconds":2}'), 'timeout');
 eq('other errors as they are', errorKind('bad JSON'), 'bad JSON');
 
@@ -153,6 +168,12 @@ eq('duration', [formatDuration(12000), formatDuration(72000), formatDuration(372
 eq('progress line of a failed Verified rule', progressLine(37, 461, { identifier: 'BRDP-EXT-00041', result: 'failed', moved_to_draft: true, duration_ms: 72000 }), '[37/461] BRDP-EXT-00041 FALLA → Draft (1 min 12 s)');
 eq('progress line of an error', progressLine(2, 9, { identifier: 'BRDP-X', result: 'error', error_kind: 'timeout', duration_ms: 3000 }), '[2/9] BRDP-X ERROR: TIMEOUT (3 s)');
 eq('progress line of a skipped rule', progressLine(3, 9, { identifier: 'BRDP-X', result: 'skipped' }), '[3/9] BRDP-X SALTADA');
+eq(
+  'progress line of an error moved to Draft',
+  progressLine(4, 9, { identifier: 'BRDP-X', result: 'error', error_kind: 'timeout', moved_to_draft: true, no_test_recorded: true, duration_ms: 3000 }),
+  '[4/9] BRDP-X ERROR: TIMEOUT → Draft (sin prueba registrada) (3 s)'
+);
+eq('progress line of a review moved to Draft', progressLine(5, 9, { identifier: 'BRDP-X', result: 'review', moved_to_draft: true, duration_ms: 1000 }), '[5/9] BRDP-X REVISAR → Draft (1 s)');
 check('revoke that failed is said', /a mano/.test(progressLine(1, 1, { identifier: 'X', result: 'failed', revoke_failed: 'HTTP 503', duration_ms: 1 })));
 
 // ── Folder (Windows-valid name, same project and day → same folder) ──
@@ -162,11 +183,100 @@ const day = new Date(2026, 9, 9, 23, 59);
 check('same day → same folder', runDir('base', 'P', day) === runDir('base', 'P', new Date(2026, 9, 9, 0, 1)));
 check('another day → another folder', runDir('base', 'P', day) !== runDir('base', 'P', new Date(2026, 9, 10)));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'project-rule-tests-'));
-writeFileAtomic(path.join(tmp, 'resultados.json'), JSON.stringify({ entries: [1] }));
+eq('written', writeFileAtomic(path.join(tmp, 'resultados.json'), JSON.stringify({ entries: [1] })), { ok: true });
 eq('written and read back', loadResults(tmp), { entries: [1] });
 check('no temporary file left', !fs.existsSync(path.join(tmp, 'resultados.json.tmp')));
 eq('a folder without results', loadResults(path.join(tmp, 'none')), null);
+fs.writeFileSync(path.join(tmp, 'resultados.json.tmp'), 'half');
+fs.writeFileSync(path.join(tmp, 'informe.md.tmp'), 'half');
+eq('a .tmp left by an earlier pass is removed', removeLeftoverTmp(tmp), ['resultados.json.tmp', 'informe.md.tmp']);
+check('...and is gone', !fs.existsSync(path.join(tmp, 'resultados.json.tmp')) && !fs.existsSync(path.join(tmp, 'informe.md.tmp')));
 fs.rmSync(tmp, { recursive: true, force: true });
+
+// ── Saving with the file locked (Windows), simulated: no real Windows needed ──
+const lockError = (code) => Object.assign(new Error(`${code}: operation not permitted, rename 'resultados.json.tmp' -> 'resultados.json'`), { code });
+// A fake fs: files in a Map; renameSync / writeFileSync to the destination
+// fail as told.
+function fakeFs({ renameFails = 0, renameCode = 'EPERM', directFails = false } = {}) {
+  const files = new Map();
+  let renames = 0;
+  return {
+    files,
+    get renames() {
+      return renames;
+    },
+    existsSync: (f) => files.has(f),
+    unlinkSync: (f) => files.delete(f),
+    writeFileSync: (f, text) => {
+      if (directFails && !f.endsWith('.tmp')) throw lockError('EBUSY');
+      files.set(f, text);
+    },
+    renameSync: (from, to) => {
+      renames += 1;
+      if (renames <= renameFails) throw lockError(renameCode);
+      files.set(to, files.get(from));
+      files.delete(from);
+    },
+  };
+}
+const waits = [];
+const sleep = (ms) => waits.push(ms);
+const F = 'run/resultados.json';
+{
+  const f = fakeFs({ renameFails: 2 });
+  waits.length = 0;
+  eq('rename fails twice, then works → saved, no warning', writeFileAtomic(F, 'ALL', { fsImpl: f, sleep }), { ok: true });
+  eq('...the file is complete', f.files.get(F), 'ALL');
+  eq('...two growing waits', waits, [100, 150]);
+  check('...no .tmp left', !f.files.has(`${F}.tmp`));
+}
+for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+  const f = fakeFs({ renameFails: Infinity, renameCode: code });
+  waits.length = 0;
+  const res = writeFileAtomic(F, 'ALL', { fsImpl: f, sleep });
+  check(`${code}: rename always fails, direct write works → saved directly`, res.ok && res.direct && res.renameError === code, JSON.stringify(res));
+  eq(`${code}: ...10 retries, 100 ms to 2 s`, waits, RENAME_RETRY_DELAYS_MS);
+  eq(`${code}: ...11 attempts in all`, f.renames, 11);
+  eq(`${code}: ...the file is complete`, f.files.get(F), 'ALL');
+  check(`${code}: ...no .tmp left`, !f.files.has(`${F}.tmp`));
+}
+eq('the waits grow from 100 ms to about 2 s', [RENAME_RETRY_DELAYS_MS[0], RENAME_RETRY_DELAYS_MS.at(-1), RENAME_RETRY_DELAYS_MS.length], [100, 2000, 10]);
+{
+  const f = fakeFs({ renameFails: Infinity, directFails: true });
+  waits.length = 0;
+  let res;
+  let threw = false;
+  try {
+    res = writeFileAtomic(F, 'ALL', { fsImpl: f, sleep });
+  } catch {
+    threw = true;
+  }
+  check('everything fails → never thrown', !threw);
+  check('...the failure is returned', res && res.ok === false && res.code === 'EBUSY', JSON.stringify(res));
+  check('...no .tmp left after the failure', !f.files.has(`${F}.tmp`));
+  check('...the destination is not touched', !f.files.has(F));
+}
+{
+  const f = fakeFs({ renameFails: 1, renameCode: 'ENOSPC' });
+  waits.length = 0;
+  const res = writeFileAtomic(F, 'ALL', { fsImpl: f, sleep });
+  check('another error than a lock: no waiting, written directly', res.ok && res.direct && waits.length === 0, JSON.stringify(res));
+}
+{
+  // The lock goes away: the first save fails, the next one fixes the file.
+  const f = fakeFs({ renameFails: Infinity, directFails: true });
+  check('locked: first save fails', !writeFileAtomic(F, 'v1', { fsImpl: f, sleep: () => {} }).ok);
+  const unlocked = { ...f, writeFileSync: (file, text) => f.files.set(file, text), renameSync: (from, to) => (f.files.set(to, f.files.get(from)), f.files.delete(from)) };
+  eq('lock gone: next save works', writeFileAtomic(F, 'v1 v2', { fsImpl: unlocked, sleep: () => {} }), { ok: true });
+  eq('...the file is complete', f.files.get(F), 'v1 v2');
+}
+eq(
+  'the line said when a save fails',
+  saveFailedLine('C:/x/resultados.json', 'EPERM'),
+  'No se pudo guardar resultados.json (EPERM): cierra el fichero si lo tienes abierto; se reintenta tras la siguiente regla.'
+);
+check('...in English too', /^Could not save informe\.md \(EBUSY\): close the file/.test(saveFailedLine('informe.md', 'EBUSY', 'en')));
+check('the line said when saved directly', /resultados\.json guardado directamente: .*\(EPERM\)/.test(savedDirectLine('resultados.json', 'EPERM')));
 
 // ── Report ──
 const entries = [
@@ -185,7 +295,13 @@ entries.push(
   { identifier: 'BRDP-EXT-00007', run: 'r2', result: 'failed', moved_to_draft: true, status_after: 'pending_review', lint: [] },
   { identifier: 'BRDP-EXT-00008', run: 'r1', result: 'failed', moved_to_draft: true, status_after: 'pending_review', lint: [] },
   { identifier: 'BRDP-EXT-00008', run: 'r2', result: 'failed', status_after: 'pending_review', lint: [] },
-  { identifier: 'BRDP-EXT-00009', run: 'r2', result: 'skipped', status_after: 'pending_review' }
+  { identifier: 'BRDP-EXT-00009', run: 'r2', result: 'skipped', status_after: 'pending_review' },
+  // Verified rules that do not pass: all to Draft
+  { identifier: 'BRDP-EXT-00010', run: 'r2', result: 'review', moved_to_draft: true, status_after: 'pending_review', reason_text: 'Revisar: la Propuesta', lint: [] },
+  { identifier: 'BRDP-EXT-00011', run: 'r2', result: 'inconclusive', moved_to_draft: true, status_after: 'pending_review', reason_text: 'nada seleccionado', lint: [] },
+  { identifier: 'BRDP-EXT-00012', run: 'r2', result: 'not_executable', moved_to_draft: true, status_after: 'pending_review', reason_text: 'Usa doc()', lint: [] },
+  { identifier: 'BRDP-EXT-00013', run: 'r2', result: 'error', error: 'POST /api/llm-proxy -> 504', moved_to_draft: true, no_test_recorded: true, status_after: 'pending_review', lint: [] },
+  { identifier: 'BRDP-EXT-00014', run: 'r2', result: 'error', error: 'GET /api/x -> 500', draft_skipped: 'backend_error', status_after: 'approved', lint: [] }
 );
 const latest = latestEntries(entries);
 const of = (id) => latest.find((e) => e.identifier === id);
@@ -193,17 +309,27 @@ check('a failed revoke done by a later pass is no longer to do by hand', of('BRD
 check('moved to Draft by an earlier pass of the folder stays so', of('BRDP-EXT-00008').moved_to_draft === true);
 eq('skipped never hides the earlier real result', latest.find((e) => e.identifier === 'BRDP-EXT-00005').result, 'passed');
 eq('a later real result replaces the earlier one', latest.find((e) => e.identifier === 'BRDP-EXT-00004').result, 'passed');
-eq('one line per rule, by ID', latest.map((e) => e.identifier), ['BRDP-EXT-00001', 'BRDP-EXT-00002', 'BRDP-EXT-00003', 'BRDP-EXT-00004', 'BRDP-EXT-00005', 'BRDP-EXT-00006', 'BRDP-EXT-00007', 'BRDP-EXT-00008', 'BRDP-EXT-00009']);
+eq('one line per rule, by ID', latest.map((e) => e.identifier), ['BRDP-EXT-00001', 'BRDP-EXT-00002', 'BRDP-EXT-00003', 'BRDP-EXT-00004', 'BRDP-EXT-00005', 'BRDP-EXT-00006', 'BRDP-EXT-00007', 'BRDP-EXT-00008', 'BRDP-EXT-00009', 'BRDP-EXT-00010', 'BRDP-EXT-00011', 'BRDP-EXT-00012', 'BRDP-EXT-00013', 'BRDP-EXT-00014']);
 const report = buildReport({ project: { name: 'P', standard: 'S1000D 4.2', format: 'BREX-4.2' }, without_rule: 3, runs: [{ started_at: 'a', finished_at: 'b', user: 'u@x', options: {} }], entries });
 const section = (title) => report.split('## ').find((s) => s.startsWith(title)) || '';
-check('totals: pasa 3', /\| pasa \| 3 \|/.test(report), report);
-check('totals: falla 4', /\| falla \| 4 \|/.test(report));
-check('totals: moved to Draft 3', /\| pasadas a Draft \| 3 \|/.test(report));
+check('totals: pasa 3, never to Draft', /\| pasa \| 3 \| — \|/.test(report), report);
+check('totals: falla 4, 3 to Draft', /\| falla \| 4 \| 3 \|/.test(report));
+check('totals: revisar 1 to Draft', /\| revisar \| 1 \| 1 \|/.test(report));
+check('totals: no concluyente 1 to Draft', /\| no concluyente \| 1 \| 1 \|/.test(report));
+check('totals: no ejecutable 2, 1 to Draft', /\| no ejecutable \| 2 \| 1 \|/.test(report));
+check('totals: error 2, 1 to Draft', /\| error \| 2 \| 1 \|/.test(report));
+check('totals: 7 moved to Draft in all', /\| total pasadas a Draft \| \| 7 \|/.test(report));
+check('the Draft criterion is said', /Una regla Verified pasa a Draft con cualquier resultado que no sea «pasa»/.test(report));
 check('BRDPs without a saved rule', /sin regla guardada \(no se prueban\): 3/.test(report));
 const notPassing = section('Reglas que no pasan');
 check('failing table first', report.indexOf('## Reglas que no pasan') < report.indexOf('## Pasan pero siguen en Draft'));
-check('failed rule with reason and lint', /BRDP-EXT-00001 \| falla \| sí \| La regla aceptó.* \| cannot reject: flag 2 without values \|/.test(notPassing), notPassing);
+check('failed rule with reason and lint', /BRDP-EXT-00001 \| falla \| → Draft \| La regla aceptó.* \| cannot reject: flag 2 without values \|/.test(notPassing), notPassing);
 check('known lint finding marked', /\(conocido\) not executable: collection\(\)/.test(notPassing));
+check('review → Draft in the table', /BRDP-EXT-00010 \| revisar \| → Draft \| Revisar/.test(notPassing));
+check('inconclusive → Draft in the table', /BRDP-EXT-00011 \| no concluyente \| → Draft \|/.test(notPassing));
+check('not executable → Draft in the table', /BRDP-EXT-00012 \| no ejecutable \| → Draft \|/.test(notPassing));
+check('error → Draft without a recorded test, and why', /BRDP-EXT-00013 \| error \| → Draft \(sin prueba registrada\) \| POST \/api\/llm-proxy -> 504 \|/.test(notPassing), notPassing);
+check('backend error → not to Draft, and why', /BRDP-EXT-00014 \| error \| no: error del backend, no de la regla \|/.test(notPassing));
 check('revoke failed: to do by hand', /BRDP-EXT-00006 \| falla \| NO: HTTP 503 \(hazlo a mano\)/.test(notPassing));
 check('passing rules are not in the failing table', !/BRDP-EXT-00002/.test(notPassing) && !/BRDP-EXT-00004/.test(notPassing));
 check('passes but still Draft', /- BRDP-EXT-00002/.test(section('Pasan pero siguen en Draft')) && !/BRDP-EXT-00005/.test(section('Pasan pero siguen en Draft')));

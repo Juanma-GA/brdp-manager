@@ -28,18 +28,26 @@
 //   written to the database directly; History shows the logged-in user.
 //
 // Never: promote a rule to Verified, touch a rule, a Proposal or its
-// validation. Only a FAILED test moves a rule (a Verified one) to Draft.
-// An error (timeout, an answer that cannot be used, the Proposal check that
-// could not be made) records nothing and changes nothing; the next rule goes
-// on. The AI's per-minute limit is waited out; its per-day limit stops the
-// pass cleanly (what is done stays in the app and the report).
+// validation. A Verified rule stays Verified only when it passes ("passes"
+// or "already covered by the schema"); with any other result -- fails,
+// review, inconclusive, not executable, error -- it goes to Draft. An error
+// of the AI part (timeout, an answer that cannot be used, the Proposal check
+// that could not be made) records no test but still moves it to Draft; an
+// error that is not the rule's (the backend, the rule edited meanwhile)
+// changes nothing; a lost session or the AI's per-day limit stops the pass
+// cleanly, blaming no rule. The per-minute limit is waited out. A Draft or
+// To Do rule keeps its status whatever the result.
 //
 // Report: scripts/rule-test-runs/<project>-<date>/informe.md and
 // resultados.json (every example and reason), written after each rule. The
-// same project on the same day goes on in the same folder.
+// same project on the same day goes on in the same folder. A file that
+// cannot be saved (on Windows, open in another program) is retried a few
+// seconds, then written directly; if even that fails the pass goes on, says
+// so in one line and tries again after the next rule.
 //
 // Exit codes: 0 done, 2 cannot start (credentials, backend down, project,
-// role), 3 stopped before the end (AI daily limit, session lost), 130 Ctrl+C.
+// role), 3 stopped before the end (AI daily limit, session lost, an
+// unexpected error) or the last save of the report failed, 130 Ctrl+C.
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -64,13 +72,17 @@ import { createEvalClient, LlmLimitError, LoginError, SessionLostError } from '.
 import { lintRule } from './lib/ruleLint.mjs';
 import {
   buildReport,
+  errorGoesToDraft,
   errorKind,
   findProject,
   loadResults,
   parseArgs,
   planRules,
   progressLine,
+  removeLeftoverTmp,
   runDir,
+  savedDirectLine,
+  saveFailedLine,
   shouldRevoke,
   skipReason,
   writeFileAtomic,
@@ -86,6 +98,13 @@ function fail(message, code = 2) {
   console.error(`ERROR: ${message}`);
   process.exit(code);
 }
+
+// Anything unexpected: one line, never a trace. Before the loop nothing is
+// tested (exit 2); during it, what is done is saved and the pass stops
+// (exit 3) -- see onUnexpected below.
+let onUnexpected = (err) => fail(err?.message || String(err));
+process.on('uncaughtException', (err) => onUnexpected(err));
+process.on('unhandledRejection', (err) => onUnexpected(err));
 
 const opts = parseArgs(process.argv.slice(2));
 if (opts.error) fail(`${opts.error}\nUsage: node scripts/run-project-rule-tests.mjs --project "<exact name>" [--all] [--only ID,ID] [--limit N] [--parallel 2] [--lang en]`);
@@ -148,7 +167,19 @@ if (unmatchedOnly.length) console.log(`WARNING: --only ${unmatchedOnly.join(',')
 // ── The run folder (the same project on the same day goes on in it) ─────
 const dir = runDir(RUNS_DIR, project.name);
 fs.mkdirSync(dir, { recursive: true });
-const results = loadResults(dir) || { project: { id: project.id, name: project.name, standard: project.standard, format }, runs: [], entries: [] };
+const leftover = removeLeftoverTmp(dir);
+if (leftover.length) console.log(`Removed ${leftover.join(', ')} left by an earlier pass.`);
+let previous = null;
+try {
+  previous = loadResults(dir);
+} catch (err) {
+  // A half-written resultados.json (a direct write cut off): kept aside, a
+  // new one is started. informe.md is rebuilt from it.
+  const aside = path.join(dir, `resultados.unreadable-${Date.now()}.json`);
+  fs.renameSync(path.join(dir, 'resultados.json'), aside);
+  console.log(`WARNING: resultados.json could not be read (${err.message}); kept as ${path.basename(aside)} and a new one is started.`);
+}
+const results = previous || { project: { id: project.id, name: project.name, standard: project.standard, format }, runs: [], entries: [] };
 results.without_rule = withoutRule;
 const run = {
   started_at: new Date().toISOString(),
@@ -161,9 +192,23 @@ const run = {
 results.runs.push(run);
 const reportFile = path.join(dir, 'informe.md');
 const jsonFile = path.join(dir, 'resultados.json');
+// → true when both files are saved. A failure is said in one line and the
+// next save (after the next rule) writes them again.
+let lastSaveFailed = null; // the files of the last save that failed
 function save() {
-  writeFileAtomic(jsonFile, `${JSON.stringify(results, null, 2)}\n`);
-  writeFileAtomic(reportFile, `${buildReport(results, { lang: opts.lang })}\n`);
+  const failed = [];
+  for (const [file, text] of [
+    [jsonFile, () => `${JSON.stringify(results, null, 2)}\n`],
+    [reportFile, () => `${buildReport(results, { lang: opts.lang })}\n`],
+  ]) {
+    const res = writeFileAtomic(file, text());
+    if (!res.ok) {
+      failed.push(path.basename(file));
+      console.log(saveFailedLine(file, res.code || res.error, opts.lang));
+    } else if (res.direct) console.log(savedDirectLine(file, res.renameError, opts.lang));
+  }
+  lastSaveFailed = failed.length ? failed : null;
+  return !lastSaveFailed;
 }
 
 console.log(`Project: ${project.name} (${project.standard}, ${format}) -- user ${me.email}, AI ${run.provider}`);
@@ -199,6 +244,39 @@ function examplesOf(result) {
 async function postRevoke(brdpId) {
   const res = await client.rawFetch(`/api/projects/${project.id}/brdps/${brdpId}/approvals/${enc(format)}/revoke`, { method: 'POST' });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+}
+
+// Verified → Draft (the stepper's Revoke). A network failure: once more,
+// then the report says it is to be done by hand. With no test recorded (an
+// error), the saved rule is read again first: one edited during the test is
+// not this rule any more, and is left alone.
+async function toDraft(brdpId, fields, { noTestRecorded = false, ruleHash = null } = {}) {
+  if (noTestRecorded) {
+    const now = await get(`/api/projects/${project.id}/brdps/${brdpId}/approvals/${enc(format)}`);
+    if (!now?.rule_xml || ruleXmlHash(now.rule_xml) !== ruleHash) return { ...fields, draft_skipped: 'rule_changed' };
+    if (now.status !== 'approved') return fields;
+  }
+  const moved = { ...fields, moved_to_draft: true, status_after: 'pending_review', ...(noTestRecorded ? { no_test_recorded: true } : {}) };
+  try {
+    await postRevoke(brdpId);
+    return moved;
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, REVOKE_RETRY_MS));
+    try {
+      await postRevoke(brdpId);
+      return moved;
+    } catch (err) {
+      return { ...fields, moved_to_draft: false, revoke_failed: err.message };
+    }
+  }
+}
+
+// An error of this rule's test: a Verified rule goes to Draft with no test
+// recorded when the error is the AI's; one of the backend changes nothing.
+async function errorEntry(brdpId, approval, ruleHash, fields) {
+  if (!shouldRevoke('error', approval?.status)) return fields;
+  if (!errorGoesToDraft(fields.error)) return { ...fields, draft_skipped: 'backend_error' };
+  return toDraft(brdpId, fields, { noTestRecorded: true, ruleHash });
 }
 
 async function testRule(item) {
@@ -250,14 +328,15 @@ async function testRule(item) {
   };
   if (!record) {
     const message = result?.truncated ? 'the AI answer was cut by its length limit' : result?.error || 'no result';
-    return done({ result: 'error', error: message, error_kind: errorKind(message), ...details });
+    return done(await errorEntry(brdp.id, approval, entry.rule_hash, { result: 'error', error: message, error_kind: errorKind(message), ...details }));
   }
   // The Proposal check could not be made (timeout, an unreadable answer):
   // the panel shows "Review: the Proposal could not be checked"; unattended,
-  // that is an error of the run, not a result of the rule -- nothing recorded.
+  // that is an error of the run -- no test recorded, but a Verified rule
+  // still goes to Draft.
   if (record.reason?.code === 'test_proposal_unchecked') {
     const message = `the Proposal check could not be made: ${record.reason.params?.error || ''}`.trim();
-    return done({ result: 'error', error: message, error_kind: errorKind(message), ...details });
+    return done(await errorEntry(brdp.id, approval, entry.rule_hash, { result: 'error', error: message, error_kind: errorKind(message), ...details }));
   }
   const res = await client.rawFetch(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${enc(format)}/test`, {
     method: 'POST',
@@ -266,26 +345,15 @@ async function testRule(item) {
   });
   if (!res.ok) {
     const body = await res.text();
-    const why = res.status === 409 ? 'the rule changed during the test; nothing recorded' : `recording the test failed (HTTP ${res.status}: ${body})`;
-    return done({ result: 'error', error: why, error_kind: why, ...details });
+    const changed = res.status === 409;
+    const why = changed ? 'the rule changed during the test; nothing recorded' : `recording the test failed (HTTP ${res.status}: ${body})`;
+    const fields = { result: 'error', error: why, error_kind: why, ...details };
+    // Neither is the rule's fault: its status is left as it is.
+    if (shouldRevoke('error', approval.status)) fields.draft_skipped = changed ? 'rule_changed' : 'backend_error';
+    return done(fields);
   }
   const fields = { result: record.result, reason: record.reason, reason_text: record.reason ? formatRuleTestReason(record.reason, t) : '', ...details };
-  if (shouldRevoke(record, approval.status)) {
-    // Network failure between recording and revoking: once more, then the
-    // report says it is to be done by hand.
-    try {
-      await postRevoke(brdp.id);
-      return done({ ...fields, moved_to_draft: true, status_after: 'pending_review' });
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, REVOKE_RETRY_MS));
-      try {
-        await postRevoke(brdp.id);
-        return done({ ...fields, moved_to_draft: true, status_after: 'pending_review' });
-      } catch (err) {
-        return done({ ...fields, moved_to_draft: false, revoke_failed: err.message });
-      }
-    }
-  }
+  if (shouldRevoke(record.result, approval.status)) return done(await toDraft(brdp.id, fields));
   return done(fields);
 }
 
@@ -300,13 +368,22 @@ process.on('SIGINT', () => {
   if (stopping === 'Ctrl+C') {
     run.stopped = 'Ctrl+C';
     results.pending = queue.filter((q) => !processed.has(q.brdp.identifier)).map((q) => q.brdp.identifier);
-    save();
-    console.log('\nStopped now. What is done stays in the app and the report.');
+    const saved = save();
+    console.log(`\nStopped now. What is done stays in the app${saved ? ' and the report' : ` (the report could not be saved: ${lastSaveFailed.join(', ')})`}.`);
     process.exit(130);
   }
   stopping = 'Ctrl+C';
   console.log('\nStopping after the rule(s) in progress... (Ctrl+C again to stop now)');
 });
+
+// An unexpected error in the loop itself: one line with the rule it was
+// on, what is done is saved, and the pass stops (exit 3).
+let unexpected = null;
+function stopUnexpected(err, identifier) {
+  if (unexpected) return;
+  unexpected = `${identifier ? `${identifier}: ` : ''}${err?.message || String(err)}`;
+  if (!stopping) stopping = `unexpected error (${unexpected})`;
+}
 
 async function worker() {
   while (!stopping) {
@@ -315,50 +392,76 @@ async function worker() {
     const index = next + 1;
     const item = queue[next];
     next += 1;
-    let entry;
     try {
-      entry = await testRule(item);
-    } catch (err) {
-      if (err instanceof LlmLimitError || err instanceof SessionLostError) {
-        if (!stopping) stopping = err.message;
-        return;
+      let entry;
+      try {
+        entry = await testRule(item);
+      } catch (err) {
+        if (err instanceof LlmLimitError || err instanceof SessionLostError) {
+          if (!stopping) stopping = err.message;
+          return;
+        }
+        // The backend (fetching the rule, recording): not the rule's fault,
+        // nothing changes.
+        entry = { identifier: item.brdp.identifier, brdp_id: item.brdp.id, run: run.started_at, at: new Date().toISOString(), result: 'error', error: err.message, error_kind: errorKind(err.message) };
       }
-      entry = { identifier: item.brdp.identifier, brdp_id: item.brdp.id, run: run.started_at, at: new Date().toISOString(), result: 'error', error: err.message, error_kind: errorKind(err.message) };
+      if (entry.result !== 'skipped') tested += 1;
+      finished += 1;
+      processed.add(item.brdp.identifier);
+      results.entries.push(entry);
+      save();
+      console.log(progressLine(index, queue.length, entry, opts.lang));
+    } catch (err) {
+      stopUnexpected(err, item.brdp.identifier);
+      return;
     }
-    if (entry.result !== 'skipped') tested += 1;
-    finished += 1;
-    processed.add(item.brdp.identifier);
-    results.entries.push(entry);
-    save();
-    console.log(progressLine(index, queue.length, entry, opts.lang));
   }
 }
 
 const startedAt = Date.now();
+onUnexpected = (err) => {
+  stopUnexpected(err, null);
+  finish();
+};
 await Promise.all(Array.from({ length: Math.min(opts.parallel, Math.max(queue.length, 1)) }, worker));
 
-const remaining = queue.filter((q) => !processed.has(q.brdp.identifier)).map((q) => q.brdp.identifier);
-run.finished_at = new Date().toISOString();
-if (stopping) run.stopped = stopping;
-else if (opts.limit && remaining.length) run.stopped = `--limit ${opts.limit}`;
-results.pending = remaining;
-save();
+finish();
 
-const latestRun = results.entries.filter((e) => e.run === run.started_at);
-const by = (r) => latestRun.filter((e) => e.result === r).length;
-console.log('');
-console.log(
-  `Done in ${Math.round((Date.now() - startedAt) / 1000)} s: ${finished} rule(s) -- passed ${by('passed') + by('schema_covered')}, failed ${by('failed')}, review ${by('review')}, inconclusive ${by('inconclusive')}, not executable ${by('not_executable')}, error ${by('error')}, skipped ${by('skipped')}; moved to Draft ${latestRun.filter((e) => e.moved_to_draft).length}.`
-);
-const manual = latestRun.filter((e) => e.revoke_failed);
-if (manual.length) console.log(`To move to Draft by hand (the request failed twice): ${manual.map((e) => e.identifier).join(', ')}`);
-console.log(`Report: ${reportFile}`);
-if (stopping && stopping !== 'Ctrl+C') {
+function finish() {
+  const remaining = queue.filter((q) => !processed.has(q.brdp.identifier)).map((q) => q.brdp.identifier);
+  run.finished_at = new Date().toISOString();
+  if (stopping) run.stopped = stopping;
+  else if (opts.limit && remaining.length) run.stopped = `--limit ${opts.limit}`;
+  results.pending = remaining;
+  const saved = save();
+
+  const latestRun = results.entries.filter((e) => e.run === run.started_at);
+  const by = (r) => latestRun.filter((e) => e.result === r).length;
+  console.log('');
   console.log(
-    `\nSTOPPED: ${stopping}\n${remaining.length} rule(s) not tested. What is done is recorded in the app and in the report. ` +
-      'To go on, run the same command again when the limit allows it: the rules whose last test passed are skipped.'
+    `Done in ${Math.round((Date.now() - startedAt) / 1000)} s: ${finished} rule(s) -- passed ${by('passed') + by('schema_covered')}, failed ${by('failed')}, review ${by('review')}, inconclusive ${by('inconclusive')}, not executable ${by('not_executable')}, error ${by('error')}, skipped ${by('skipped')}; moved to Draft ${latestRun.filter((e) => e.moved_to_draft).length}.`
   );
-  process.exit(3);
+  const manual = latestRun.filter((e) => e.revoke_failed);
+  if (manual.length) console.log(`To move to Draft by hand (the request failed twice): ${manual.map((e) => e.identifier).join(', ')}`);
+  console.log(`Report: ${reportFile}`);
+  if (unexpected) {
+    console.log(
+      `\nSTOPPED by an unexpected error at ${unexpected}\n${remaining.length} rule(s) not tested. What is done is recorded in the app${saved ? ' and in the report' : ''}. ` +
+        'To go on, run the same command again: the rules whose last test passed are skipped.'
+    );
+  } else if (stopping && stopping !== 'Ctrl+C') {
+    console.log(
+      `\nSTOPPED: ${stopping}\n${remaining.length} rule(s) not tested. What is done is recorded in the app and in the report. ` +
+        'To go on, run the same command again when the limit allows it: the rules whose last test passed are skipped.'
+    );
+  }
+  if (!saved) {
+    console.log(
+      `\nTHE REPORT IS NOT UP TO DATE: the last save of ${lastSaveFailed.join(' and ')} failed (see above). What was tested is recorded in the app; close the file and run the same command again to rebuild the report.`
+    );
+    process.exit(3);
+  }
+  if (unexpected || (stopping && stopping !== 'Ctrl+C')) process.exit(3);
+  if (stopping === 'Ctrl+C') process.exit(130);
+  process.exit(0);
 }
-if (stopping === 'Ctrl+C') process.exit(130);
-process.exit(0);

@@ -122,12 +122,17 @@ export function skipReason(approval, { all = false } = {}) {
   return approval.last_test_result === 'passed' && approval.last_test_up_to_date === true ? 'passed' : null;
 }
 
-// Only a failed test moves a rule, and only a Verified one, to Draft.
-// "Not executable", "review", "inconclusive", "error" and a pass never
-// change the Rule Status (a Draft that passes stays Draft: nothing is ever
-// promoted to Verified).
-export function shouldRevoke(record, ruleStatus) {
-  return Boolean(record && record.result === 'failed' && ruleStatus === 'approved');
+// What a test result does to a VERIFIED rule: only a pass ("passed", or
+// "already covered by the schema") keeps it Verified; any other result --
+// failed, review, inconclusive, not executable, error -- moves it to Draft
+// (POST .../revoke, History "verified → draft"). A Draft or To Do rule is
+// never touched, and nothing is ever promoted to Verified. An error that is
+// not the rule's (session lost, the AI's daily limit, the backend) never
+// gets here: see errorGoesToDraft.
+export const REVOKING_RESULTS = new Set(['failed', 'review', 'inconclusive', 'not_executable', 'error']);
+export function shouldRevoke(result, ruleStatus) {
+  const r = result && typeof result === 'object' ? result.result : result;
+  return Boolean(REVOKING_RESULTS.has(r) && ruleStatus === 'approved');
 }
 
 // What to report for a run that recorded nothing: why it failed, short.
@@ -135,6 +140,18 @@ export function errorKind(message) {
   const m = String(message || '');
   if (/llm_timeout|-> 504\b/.test(m)) return 'timeout';
   return m;
+}
+
+// An error of the AI part of the test (a timeout, an answer that cannot be
+// used, the Proposal check that could not be made) counts against the rule:
+// it goes to Draft, with no test recorded. One of this app's own backend
+// (another /api endpoint, the backend cannot be reached) is not the rule's:
+// nothing changes.
+export function errorGoesToDraft(message) {
+  const m = String(message || '');
+  if (/\b(GET|POST|PUT|PATCH|DELETE) \/api\/(?!llm-proxy)/.test(m)) return false;
+  if (/fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|UND_ERR_SOCKET|other side closed/i.test(m)) return false;
+  return true;
 }
 
 // ── The run folder ───────────────────────────────────────────────────────
@@ -169,11 +186,88 @@ export function loadResults(dir) {
 }
 
 // Written to a temporary file first and then renamed: a Ctrl+C or a crash
-// never leaves half a file.
-export function writeFileAtomic(file, text) {
+// never leaves half a file. On Windows a file open in another program (an
+// editor, Excel, an antivirus scan) makes the rename fail with EPERM, EBUSY
+// or EACCES: retried up to 10 times with growing waits (100 ms to 2 s, about
+// 8 s in all), then the destination is written directly; if that fails too
+// nothing is thrown -- the caller says so and tries again after the next
+// rule. A leftover .tmp is always removed.
+//   → { ok: true } | { ok: true, direct: true, renameError } | { ok: false, error, code }
+export const LOCK_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+export const RENAME_RETRY_DELAYS_MS = [100, 150, 250, 400, 600, 800, 1000, 1300, 1600, 2000];
+
+export function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+export function writeFileAtomic(file, text, { fsImpl = fs, sleep = sleepSync, delays = RENAME_RETRY_DELAYS_MS } = {}) {
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, text, 'utf8');
-  fs.renameSync(tmp, file);
+  const removeTmp = () => {
+    try {
+      if (fsImpl.existsSync(tmp)) fsImpl.unlinkSync(tmp);
+    } catch {
+      // nothing else to do: it is overwritten next time
+    }
+  };
+  let lastError;
+  try {
+    fsImpl.writeFileSync(tmp, text, 'utf8');
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        fsImpl.renameSync(tmp, file);
+        return { ok: true };
+      } catch (err) {
+        lastError = err;
+        if (!LOCK_CODES.has(err?.code) || attempt >= delays.length) break;
+        sleep(delays[attempt]);
+      }
+    }
+  } catch (err) {
+    lastError = err;
+  }
+  removeTmp();
+  try {
+    fsImpl.writeFileSync(file, text, 'utf8');
+    return { ok: true, direct: true, renameError: lastError?.code || lastError?.message || null };
+  } catch (err) {
+    removeTmp();
+    const e = err || lastError;
+    return { ok: false, error: e?.message || String(e), code: e?.code || null };
+  }
+}
+
+// The .tmp files a crashed or killed pass may have left in the folder.
+export function removeLeftoverTmp(dir, { fsImpl = fs } = {}) {
+  const removed = [];
+  for (const name of ['resultados.json.tmp', 'informe.md.tmp']) {
+    const f = path.join(dir, name);
+    try {
+      if (fsImpl.existsSync(f)) {
+        fsImpl.unlinkSync(f);
+        removed.push(name);
+      }
+    } catch {
+      // it is overwritten by the next save
+    }
+  }
+  return removed;
+}
+
+// The line said when the rename kept failing and the file was written
+// directly (saved, but without the safe step).
+export function savedDirectLine(file, reason, lang = 'es') {
+  const name = path.basename(file);
+  return lang === 'es'
+    ? `${name} guardado directamente: no se pudo sustituir el fichero (${reason}); si lo tienes abierto, ciérralo.`
+    : `${name} saved directly: the file could not be replaced (${reason}); if you have it open, close it.`;
+}
+
+// The one line said when a save fails.
+export function saveFailedLine(file, reason, lang = 'es') {
+  const name = path.basename(file);
+  return lang === 'es'
+    ? `No se pudo guardar ${name} (${reason}): cierra el fichero si lo tienes abierto; se reintenta tras la siguiente regla.`
+    : `Could not save ${name} (${reason}): close the file if you have it open; it is tried again after the next rule.`;
 }
 
 // ── The report ───────────────────────────────────────────────────────────
@@ -235,7 +329,7 @@ export function progressLine(index, total, entry, lang = 'es') {
   let label = labels[entry.result] || entry.result;
   if (entry.result === 'error') label = `${label}: ${entry.error_kind || entry.error || ''}`.trim();
   let line = `[${index}/${total}] ${entry.identifier} ${label.toUpperCase()}`;
-  if (entry.moved_to_draft) line += ' → Draft';
+  if (entry.moved_to_draft) line += entry.no_test_recorded ? (lang === 'es' ? ' → Draft (sin prueba registrada)' : ' → Draft (no test recorded)') : ' → Draft';
   if (entry.revoke_failed) line += lang === 'es' ? ' (NO se pudo pasar a Draft: hazlo a mano)' : ' (could NOT be moved to Draft: do it by hand)';
   if (entry.result !== 'skipped') line += ` (${formatDuration(entry.duration_ms || 0)})`;
   return line;
@@ -255,6 +349,29 @@ const statusLabel = (status) => (status === 'approved' ? 'Verified' : status ===
 function lintCell(lint, es) {
   const items = (lint || []).map((f) => `${f.known ? (es ? '(conocido) ' : '(known) ') : ''}${f.kind}: ${f.detail}`);
   return items.length ? items.join('; ') : '—';
+}
+
+// Why a Verified rule with a non-passing result was not moved to Draft.
+const DRAFT_SKIPPED = {
+  es: {
+    backend_error: 'error del backend, no de la regla',
+    rule_changed: 'la regla cambió durante la prueba',
+  },
+  en: {
+    backend_error: 'an error of the backend, not of the rule',
+    rule_changed: 'the rule changed during the test',
+  },
+};
+
+// The "→ Draft" cell of the rules that do not pass.
+function draftCell(e, es) {
+  if (e.moved_to_draft) {
+    if (!e.no_test_recorded) return '→ Draft';
+    return es ? '→ Draft (sin prueba registrada)' : '→ Draft (no test recorded)';
+  }
+  if (e.revoke_failed) return es ? `NO: ${e.revoke_failed} (hazlo a mano)` : `NO: ${e.revoke_failed} (do it by hand)`;
+  if (e.draft_skipped) return `no: ${DRAFT_SKIPPED[es ? 'es' : 'en'][e.draft_skipped] || e.draft_skipped}`;
+  return '—';
 }
 
 // results: the resultados.json object ({ project, runs, entries }).
@@ -285,12 +402,19 @@ export function buildReport(results, { lang = 'es' } = {}) {
   out.push('');
   out.push(es ? '## Totales' : '## Totals');
   out.push('');
-  out.push(es ? '| Resultado | Reglas |' : '| Result | Rules |');
-  out.push('|---|---|');
+  out.push(es ? '| Resultado | Reglas | → Draft |' : '| Result | Rules | → Draft |');
+  out.push('|---|---|---|');
   for (const r of ['passed', 'schema_covered', 'failed', 'review', 'inconclusive', 'not_executable', 'error', 'skipped']) {
-    out.push(`| ${L[r]} | ${count(r)} |`);
+    const moved = latest.filter((e) => e.result === r && e.moved_to_draft).length;
+    out.push(`| ${L[r]} | ${count(r)} | ${REVOKING_RESULTS.has(r) ? moved : '—'} |`);
   }
-  out.push(`| ${es ? 'pasadas a Draft' : 'moved to Draft'} | ${movedToDraft} |`);
+  out.push(`| ${es ? 'total pasadas a Draft' : 'total moved to Draft'} | | ${movedToDraft} |`);
+  out.push('');
+  out.push(
+    es
+      ? 'Una regla Verified pasa a Draft con cualquier resultado que no sea «pasa»: falla, revisar, no concluyente, no ejecutable o error (en un error no se registra prueba). Un error de sesión, del límite diario de la IA o del propio backend no la cambia.'
+      : 'A Verified rule goes to Draft with any result other than a pass: fails, review, inconclusive, not executable or error (an error records no test). An error of the session, of the AI daily limit or of the backend itself does not change it.'
+  );
   out.push('');
 
   const notPassing = latest.filter((e) => !isPassing(e.result) && e.result !== 'skipped');
@@ -298,10 +422,10 @@ export function buildReport(results, { lang = 'es' } = {}) {
   out.push('');
   if (notPassing.length === 0) out.push(es ? 'Ninguna.' : 'None.');
   else {
-    out.push(es ? '| BRDP | Resultado | A Draft | Motivo | Lint de reglas guardadas |' : '| BRDP | Result | To Draft | Reason | Stored-rules lint |');
+    out.push(es ? '| BRDP | Resultado | → Draft | Motivo | Lint de reglas guardadas |' : '| BRDP | Result | → Draft | Reason | Stored-rules lint |');
     out.push('|---|---|---|---|---|');
     for (const e of notPassing) {
-      const draft = e.moved_to_draft ? (es ? 'sí' : 'yes') : e.revoke_failed ? (es ? `NO: ${e.revoke_failed} (hazlo a mano)` : `NO: ${e.revoke_failed} (do it by hand)`) : '—';
+      const draft = draftCell(e, es);
       const reason = e.result === 'error' ? e.error : e.reason_text;
       out.push(`| ${cell(e.identifier)} | ${cell(L[e.result] || e.result)} | ${cell(draft)} | ${cell(reason || '—')} | ${cell(lintCell(e.lint, es))} |`);
     }

@@ -8,13 +8,16 @@
 // A seeded project with:
 //   01 Verified that passes      02 Verified that fails (→ Draft)
 //   03 Draft that fails          04 Draft that passes (stays Draft)
-//   05 not executable (document())   06 for the forced timeout
+//   05 Verified not executable (document(), → Draft)
+//   06 Verified, for the forced timeout (→ Draft with no test recorded)
 //   07 tested from the PANEL first (to compare what is recorded)
 //   08 no saved rule             09/10 Verified that fail, with the revoke
 //                                     request failing twice / once
+//   11 Verified "review" (→ Draft)   12 Verified "inconclusive" (→ Draft)
+//   13 Verified "already covered by the schema" (stays Verified)
 // Checks the runs, then what is recorded (through the API, i.e. Postgres):
 // result, examples, History with the login user, the same as the panel's
-// test of 07; only the failing Verified rules moved to Draft, with
+// test of 07; every Verified rule that does not pass moved to Draft, with
 // "verified → draft" in History and rule_xml intact. The project is deleted
 // at the end.
 //
@@ -151,10 +154,10 @@ async function main() {
   const project = await json('/api/projects', { method: 'POST', body: JSON.stringify({ name: projectName, standard: 'S1000D 4.2' }) });
   const ids = {};
   const rules = {};
-  async function seed(identifier, objectPath, flag, status) {
+  async function seed(identifier, objectPath, flag, status, proposal = 'The element <emphasis> shall not be used.') {
     const brdp = await json(`/api/projects/${project.id}/brdps`, {
       method: 'POST',
-      body: JSON.stringify({ identifier, title: `Emphasis ${identifier}`, definition: 'Decide how emphasis is used.', proposal: 'The element <emphasis> shall not be used.', validation: 'Validated' }),
+      body: JSON.stringify({ identifier, title: `Emphasis ${identifier}`, definition: 'Decide how emphasis is used.', proposal, validation: 'Validated' }),
     });
     ids[identifier] = brdp.id;
     if (!objectPath) return;
@@ -171,6 +174,11 @@ async function main() {
   await seed('BRDP-RB-08', null);
   await seed('BRDP-RB-09', '//emphasis', '2', 'approved');
   await seed('BRDP-RB-10', '//emphasis', '2', 'approved');
+  // The simulator's Proposal check answers "no" with MISMATCH (→ review);
+  // ALLINVALID gives examples that are never valid (→ inconclusive).
+  await seed('BRDP-RB-11', '//emphasis', '0', 'approved', 'MISMATCH The element <emphasis> shall not be used.');
+  await seed('BRDP-RB-12', '//emphasis', '0', 'approved', 'ALLINVALID The element <emphasis> shall not be used.');
+  await seed('BRDP-RB-13', '/dmodule[not(identAndStatusSection)]', '0', 'approved', 'Every data module shall have its <identAndStatusSection>.');
   const approval = (id) => json(`/api/projects/${project.id}/brdps/${ids[id]}/approvals/${FORMAT}`);
   const history = (id) => json(`/api/projects/${project.id}/brdps/${ids[id]}/history`);
   const reportDir = runDir(path.join(SCRIPTS, 'rule-test-runs'), projectName);
@@ -218,13 +226,40 @@ async function main() {
     r = await runScript(['--project', projectName, '--only', 'RB-06,RB-05']);
     await fetch(`${CHAT}/reset`, { method: 'POST' });
     assert(r.code === 0, 'timeout run ends normally', r.out);
-    assert(/\[2\/2\] BRDP-RB-06 ERROR: TIMEOUT/.test(r.out), 'progress: «BRDP-RB-06 ERROR: TIMEOUT»', r.out);
-    assert(/\[1\/2\] BRDP-RB-05 NO EJECUTABLE/.test(r.out), 'not executable (document()) recorded without the AI', r.out);
+    assert(/\[2\/2\] BRDP-RB-06 ERROR: TIMEOUT → Draft \(sin prueba registrada\)/.test(r.out), 'progress: «BRDP-RB-06 ERROR: TIMEOUT → Draft (sin prueba registrada)»', r.out);
+    assert(/\[1\/2\] BRDP-RB-05 NO EJECUTABLE → Draft/.test(r.out), 'not executable (document()) recorded without the AI, → Draft', r.out);
     const a06 = await approval('BRDP-RB-06');
-    assert(a06.last_test_result === null && a06.status === 'approved', 'timeout: nothing recorded, still Verified');
-    assert(!(await history('BRDP-RB-06')).some((h) => h.field_name === 'rule_test'), 'timeout: no History entry');
+    assert(a06.last_test_result === null && a06.status === 'pending_review' && a06.rule_xml === rules['BRDP-RB-06'], 'timeout: no test recorded, Verified → Draft, rule_xml intact');
+    const h06 = await history('BRDP-RB-06');
+    assert(!h06.some((h) => h.field_name === 'rule_test'), 'timeout: no test entry in History');
+    assert(h06.filter((h) => h.field_name === 'rule_status' && h.old_value === 'verified' && h.new_value === 'draft' && h.user_email === me.email).length === 1, 'timeout: History «verified → draft» with the login user');
     const a05 = await approval('BRDP-RB-05');
-    assert(a05.last_test_result === 'not_executable' && a05.status === 'approved', 'not executable: recorded, still Verified');
+    assert(a05.last_test_result === 'not_executable' && a05.status === 'pending_review', 'not executable: recorded, then Verified → Draft');
+    assert((await history('BRDP-RB-05')).some((h) => h.field_name === 'rule_status' && h.old_value === 'verified' && h.new_value === 'draft'), 'not executable: History «verified → draft»');
+    const timeoutReport = fs.readFileSync(path.join(reportDir, 'informe.md'), 'utf8');
+    assert(/\| BRDP-RB-06 \| error \| → Draft \(sin prueba registrada\) \| .*504/.test(timeoutReport), 'report: the timeout went to Draft with no test recorded, and why', timeoutReport);
+
+    // ── Review, inconclusive → Draft; "already covered by the schema" stays ──
+    await restartBackend();
+    token = await login();
+    r = await runScript(['--project', projectName, '--only', 'RB-11,RB-12,RB-13']);
+    assert(r.code === 0, 'review/inconclusive/covered run ends', r.out);
+    assert(/BRDP-RB-11 REVISAR → Draft/.test(r.out) && /BRDP-RB-12 NO CONCLUYENTE → Draft/.test(r.out), 'progress: review and inconclusive → Draft', r.out);
+    assert(/BRDP-RB-13 PASA \(EL ESQUEMA YA LO INCLUYE\) \(/.test(r.out), 'progress: already covered by the schema, no Draft', r.out);
+    for (const [id, result] of [
+      ['BRDP-RB-11', 'review'],
+      ['BRDP-RB-12', 'inconclusive'],
+    ]) {
+      const a = await approval(id);
+      const h = await history(id);
+      assert(a.last_test_result === result && a.status === 'pending_review' && a.rule_xml === rules[id], `${id}: ${result} recorded, Verified → Draft, rule_xml intact`, JSON.stringify({ r: a.last_test_result, s: a.status }));
+      assert(h.filter((e) => e.field_name === 'rule_test').length === 1 && h.filter((e) => e.field_name === 'rule_status' && e.old_value === 'verified' && e.new_value === 'draft' && e.user_email === me.email).length === 1, `${id}: History test + «verified → draft»`);
+    }
+    const a13 = await approval('BRDP-RB-13');
+    assert(a13.last_test_result === 'schema_covered' && a13.status === 'approved', 'already covered by the schema: recorded, stays Verified', JSON.stringify({ r: a13.last_test_result, s: a13.status }));
+    assert(!(await history('BRDP-RB-13')).some((h) => h.field_name === 'rule_status' && h.new_value === 'draft'), 'already covered by the schema: no «verified → draft» in History');
+    const reviewReport = fs.readFileSync(path.join(reportDir, 'informe.md'), 'utf8');
+    assert(/\| revisar \| 1 \| 1 \|/.test(reviewReport) && /\| no concluyente \| 1 \| 1 \|/.test(reviewReport) && /\| no ejecutable \| 1 \| 1 \|/.test(reviewReport) && /\| error \| 1 \| 1 \|/.test(reviewReport), 'report totals: how many went to Draft per result', reviewReport);
 
     // ── Network failure between recording and revoking ──
     await restartBackend();
@@ -295,11 +330,12 @@ async function main() {
     // ── The report: one folder for the day, appended ──
     const report = fs.readFileSync(path.join(reportDir, 'informe.md'), 'utf8');
     const results = JSON.parse(fs.readFileSync(path.join(reportDir, 'resultados.json'), 'utf8'));
-    assert(results.runs.length === 5, 'same project and day: one folder, five passes appended', String(results.runs.length));
-    assert(/\| BRDP-RB-02 \| falla \| sí \|/.test(report) && /\| BRDP-RB-03 \| falla \| — \|/.test(report), 'report: failing table with Draft column', report);
-    assert(/\| BRDP-RB-09 \| falla \| sí \|/.test(report) && /\| BRDP-RB-10 \| falla \| sí \|/.test(report), 'report: moved to Draft by an earlier pass of the folder, or by a later one after a failed revoke', report);
-    assert(/\| BRDP-RB-05 \| no ejecutable \|/.test(report), 'report: not executable listed', report);
-    assert(/## Pasan pero siguen en Draft \(2\)\n\n- BRDP-RB-04\n- BRDP-RB-07 \(saltada: ya había pasado\)/.test(report), 'report: passes but still Draft (04, 07)', report);
+    assert(results.runs.length === 6, 'same project and day: one folder, six passes appended', String(results.runs.length));
+    assert(/\| BRDP-RB-02 \| falla \| → Draft \|/.test(report) && /\| BRDP-RB-03 \| falla \| — \|/.test(report), 'report: failing table with Draft column', report);
+    assert(/\| BRDP-RB-09 \| falla \| → Draft \|/.test(report) && /\| BRDP-RB-10 \| falla \| → Draft \|/.test(report), 'report: moved to Draft by an earlier pass of the folder, or by a later one after a failed revoke', report);
+    assert(/\| BRDP-RB-05 \| no ejecutable \| → Draft \|/.test(report) && /\| BRDP-RB-11 \| revisar \| → Draft \|/.test(report) && /\| BRDP-RB-12 \| no concluyente \| → Draft \|/.test(report), 'report: not executable, review, inconclusive → Draft', report);
+    assert(/## Pasan pero siguen en Draft \(3\)\n\n- BRDP-RB-04\n- BRDP-RB-06\n- BRDP-RB-07 \(saltada: ya había pasado\)/.test(report), 'report: passes but still Draft (04, 06 after its timeout, 07)', report);
+    assert(/- BRDP-RB-13 — Verified \(pasa \(el esquema ya lo incluye\)\)/.test(report), 'report: already covered by the schema stays Verified', report);
     assert(results.entries.some((e) => e.identifier === 'BRDP-RB-04' && e.examples?.length > 0 && e.reason_text === ''), 'resultados.json keeps the examples');
     fs.copyFileSync(path.join(reportDir, 'informe.md'), path.join(os.tmpdir(), 'project-rule-tests-informe.md'));
 
@@ -329,6 +365,25 @@ async function main() {
     assert(afterCtrlC.runs.at(-1).stopped === 'Ctrl+C' && afterCtrlC.pending.length > 0, 'Ctrl+C: the report keeps what is done and lists the rest');
     r = await runScript(['--project', projectName, '--only', 'RB-04']);
     assert(/BRDP-RB-04 PASA/.test(r.out), 'rule edited after it passed: tested again, not skipped', r.out);
+
+    // ── The report cannot be saved (a directory in its place stands for a
+    // file Windows keeps locked): the pass goes on, says so, exits 3; a .tmp
+    // left by an earlier pass is removed; once the lock is gone the next
+    // pass writes the report again, complete. ──
+    const informe = path.join(reportDir, 'informe.md');
+    fs.rmSync(informe, { force: true });
+    fs.mkdirSync(informe);
+    fs.writeFileSync(path.join(reportDir, 'resultados.json.tmp'), 'half a file');
+    r = await runScript(['--project', projectName, '--only', 'RB-01,RB-13']);
+    assert(/Removed resultados\.json\.tmp left by an earlier pass/.test(r.out) && !fs.existsSync(path.join(reportDir, 'resultados.json.tmp')), 'a leftover .tmp is removed at the start', r.out);
+    assert(/No se pudo guardar informe\.md \(EISDIR\): cierra el fichero si lo tienes abierto; se reintenta tras la siguiente regla\./.test(r.out), 'save fails: one line, the pass goes on', r.out);
+    assert(/BRDP-RB-13 PASA/.test(r.out) && !/\n\s+at /.test(r.out), 'save fails: the next rule is tested, no trace', r.out);
+    assert(r.code === 3 && /THE REPORT IS NOT UP TO DATE: the last save of informe\.md failed/.test(r.out), 'last save failed: said clearly, exit 3', r.out);
+    assert(!fs.existsSync(`${informe}.tmp`), 'no informe.md.tmp left after the failure');
+    assert(JSON.parse(fs.readFileSync(path.join(reportDir, 'resultados.json'), 'utf8')).runs.length >= 8, 'resultados.json still saved');
+    fs.rmSync(informe, { recursive: true, force: true });
+    r = await runScript(['--project', projectName, '--only', 'RB-01']);
+    assert(r.code === 0 && fs.statSync(informe).isFile() && /## Totales/.test(fs.readFileSync(informe, 'utf8')) && /BRDP-RB-13/.test(fs.readFileSync(informe, 'utf8')), 'lock gone: the next save writes the report again, complete', r.out);
 
   } finally {
     proxy.server.close();
