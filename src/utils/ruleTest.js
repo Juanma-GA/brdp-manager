@@ -69,10 +69,54 @@ import {
 // (`emptyRowsRemoved`) -- each has one fix that keeps every row reading the
 // same (see fixCalsRowSpans). A row entirely covered by the morerows above
 // has no such fix and goes to the correction round with the exact cells.
+// Test de reglas: referencias…, Part 2.3: S1000D uses no namespace, so a
+// default xmlns="…" the LLM put on a top-level element of its content (a
+// whole <dmodule xmlns="http://www.s1000d.org/S1000D_4-2">) makes every
+// element of it invisible to the rule's paths (//dmodule selects nothing).
+// It is removed before anything else; prefixed declarations (xmlns:xlink,
+// xsi…) are never touched, nor nested elements, nor DITA.
+// → { text, removed: [namespace URIs] }
+const TOP_TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
+const DEFAULT_XMLNS_RE = /\s+xmlns\s*=\s*("[^"]*"|'[^']*')/;
+export function stripDefaultNamespace(text) {
+  const source = String(text ?? '');
+  const removed = [];
+  let depth = 0;
+  let out = '';
+  let last = 0;
+  for (const m of source.matchAll(TOP_TAG_RE)) {
+    if (m[2] === undefined) continue; // comment, CDATA, PI
+    const closing = m[1] === '/';
+    const selfClosing = m[4] === '/';
+    if (closing) {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0) {
+      const ns = DEFAULT_XMLNS_RE.exec(m[3]);
+      if (ns) {
+        removed.push(ns[1].slice(1, -1));
+        const tag = m[0].replace(m[3], m[3].replace(DEFAULT_XMLNS_RE, ''));
+        out += source.slice(last, m.index) + tag;
+        last = m.index + m[0].length;
+      }
+    }
+    if (!selfClosing) depth += 1;
+  }
+  return { text: removed.length ? out + source.slice(last) : source, removed };
+}
+
 export function materializeExample(example, setup, parseXml = parseXmlDocument) {
   const offered = Object.keys(setup.placements || {});
   const schema = example.schema || (offered.length === 1 ? offered[0] : null);
-  const withColspecs = addMissingCalsColspecs(example.content, parseXml);
+  // Part 2.3: S1000D only (DITA never had it; it declares no namespace either,
+  // but its examples are left exactly as written).
+  const s1000d = !String(setup.standard || '').startsWith('DITA');
+  const contentNs = s1000d ? stripDefaultNamespace(example.content) : { text: example.content, removed: [] };
+  const metadataNs = s1000d && example.metadata != null ? stripDefaultNamespace(example.metadata) : { text: example.metadata, removed: [] };
+  const namespacesRemoved = [...new Set([...contentNs.removed, ...metadataNs.removed])];
+  if (metadataNs.removed.length) example = { ...example, metadata: metadataNs.text };
+  const withColspecs = addMissingCalsColspecs(contentNs.text, parseXml);
   const rowSpans = fixCalsRowSpans(withColspecs.content, parseXml);
   const { content, removedRows } = removeSpannedCalsEntries(rowSpans.content, parseXml);
   const adjusted = {
@@ -83,6 +127,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     morerowsLowered: rowSpans.morerowsLowered,
     emptyRowsRemoved: rowSpans.emptyRowsRemoved,
     spannedEntriesRemoved: removedRows,
+    namespacesRemoved,
   };
   const entry = schema ? setup.placements[schema] : null;
   if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
@@ -169,6 +214,8 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   });
   const missingMetadata =
     section?.insertion && entry.placement.path.length > 0 && !String(example.metadata || '').trim() ? section.element : null;
+  // Part 2.4: the LLM gave this example no "content" (and no "metadata").
+  const missingContent = example.noContent === true && !String(adjusted.content || '').trim() && !String(adjusted.metadata || '').trim();
   // Dosier, Part 2: the other files of the example's dossier, each with the
   // same fixes and the structure of its own type.
   const dossier = setup.dossier
@@ -198,6 +245,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     // nothing in it is the LLM's, so nothing can be edited.
     rootOnly: entry.placement.rootOnly === true,
     missingMetadata,
+    missingContent,
     rootAttributeProblems: rootAttributeProblems || [],
     // GMC, Part 1.3: the attributes this example may give for the root
     // (the panel's editor for them).
@@ -213,6 +261,9 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
   const empty = { available: false, notFound: [], wrongType: [] };
   if (options.unknownSchema) {
     return { wellFormed: true, error: null, names: empty, structure: [], cards: [], unknownSchema: options.unknownSchema, runnable: false };
+  }
+  if (options.missingContent) {
+    return { wellFormed: true, error: null, names: empty, structure: [], cards: [], unknownSchema: null, missingContent: true, runnable: false };
   }
   if (options.missingMetadata) {
     return { wellFormed: true, error: null, names: empty, structure: [], cards: [], unknownSchema: null, missingMetadata: options.missingMetadata, runnable: false };
@@ -462,6 +513,7 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
       : line;
   const out = [];
   if (validation.unknownSchema) out.push(`schema "${validation.unknownSchema}" was not offered; use one of the listed schemas`);
+  if (validation.missingContent) out.push('the example has no "content": write it');
   if (validation.missingMetadata) out.push(`"metadata" is missing: write the complete <${validation.missingMetadata}> of this example`);
   if (!validation.wellFormed) out.push(`not well-formed XML: ${validation.error}`);
   for (const name of validation.names?.notFound || []) {
@@ -530,6 +582,7 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
   const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, {
     unknownSchema,
     missingMetadata: example.missingMetadata || null,
+    missingContent: example.missingContent === true,
     rootAttributeProblems: example.rootAttributeProblems || [],
   });
   // Dosier, Part 2: every file of the example's dossier is validated with
@@ -971,6 +1024,10 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
       }
       return { kind: 'schema_covered', items, via: coverage ? 'path' : 'examples' };
     }
+    // Test de reglas: referencias…, Part 2.2: decided by code from the
+    // schema alone (no element the rule forbids exists in its context
+    // schema) -- no example is needed to say so.
+    if (coverage?.byCode) return { kind: 'schema_covered', items: coverage.items, via: 'path' };
   }
   if (ran.length === 0) {
     const bySchema = [];

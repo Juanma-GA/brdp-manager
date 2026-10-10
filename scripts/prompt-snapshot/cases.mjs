@@ -1203,6 +1203,31 @@ ruleTestExamplesCases.push(
     args: [{ brdp: brdpGmc('BRDP-EXT-00107', 'Units of measure in the parts repository', 'Units of measure follow ATA Spec 2000: EA (each) and KG (kilogram).'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc107, placements: appPlacementsFor('S1000D 4.2', ruleGmc107, [['comrep', 'rule']]) }],
   },
 );
+// Test de reglas: referencias, antepasados y reglas de esquema prohibido
+// (pasada «Official Default CMP ATA - 1000BR 4.2 - 009»): the destinations
+// of a reference (Part 1.1), a chain of ancestors (Part 1.2) and a loose
+// attribute in a condition (Part 1.3). The real rules, as they are.
+export const ruleCmp39 =
+  '<structureObjectRule><objectPath allowedObjectFlag="0">//internalRef[not(attribute::internalRefId = //figure/@id or attribute::internalRefId = //figureAlts/@id or attribute::internalRefId = //table/@id or attribute::internalRefId = //multimedia/@id or attribute::internalRefId = //multimediaAlts/@id or attribute::internalRefId = //supplyDescr/@id or attribute::internalRefId = //embeddedSupplyDescr/@id or attribute::internalRefId = //supportEquipDescr/@id or attribute::internalRefId = //embeddedSupportEquipDescr/@id or attribute::internalRefId = //spareDescr/@id or attribute::internalRefId = //embeddedSpareDescr/@id or attribute::internalRefId = //levelledPara/@id or attribute::internalRefId = //levelledParaAlts/@id or attribute::internalRefId = //proceduralStep/@id or attribute::internalRefId = //proceduralStepAlts/@id or attribute::internalRefId = //graphic/@id or attribute::internalRefId = //multimediaObject/@id or attribute::internalRefId = //hotspot/@id)]</objectPath><objectUse>BREX-CMMST-00100: The @internalRef can only target figure, figureAlts, table, multimedia, multimediaAlts, supplyDescr, embeddedSupplyDescr, supportEquipDescr, embeddedSupportEquipDescr, spareDescr, embeddedSpareDescr, levelledPara, levelledParaAlts, proceduralStep, proceduralStepAlts, graphic, multimediaObject, and hotspot elements.</objectUse></structureObjectRule>';
+export const ruleCmp08 =
+  '<structureObjectRule><objectPath allowedObjectFlag="0">//internalRef[ancestor::title and not(ancestor::title/parent::definitionList/parent::legend/parent::figure/@id = @internalRefId)]</objectPath><objectUse>BREX-CMMST-00095/BREX-CMMST-00119: The &lt;internalRef&gt; element cannot be used within the &lt;title&gt; element except within the figure/legend/defnitionList/title element and then only when it points to the parent figure.</objectUse></structureObjectRule>';
+export const ruleCmp181 =
+  `<structureObjectRule><objectPath allowedObjectFlag="0">//dmStatus/@issueType="changed" and (/dmodule/identAndStatusSection/dmStatus/reasonForUpdate[not(@id = /dmodule//@reasonForUpdateRefIds/tokenize(normalize-space(), '\\s'))])</objectPath><objectUse>BREX-CMMST-00007 (DM_identAndStatusSection): In a changed data module, all &lt;reasonForUpdate&gt; elements must be referenced within the data module.</objectUse></structureObjectRule>`;
+const brdpCmp = (identifier, title, proposal) => ({ ...brdpRuleTest, identifier, title, definition: `Decide on ${title.toLowerCase()}.`, proposal });
+ruleTestExamplesCases.push(
+  {
+    name: 'brex-4-2-cmp-reference-destinations-internalref',
+    args: [{ brdp: brdpCmp('BRDP-EXT-00039', 'Targets of internal references', 'An internal reference can only target a figure, a table, a multimedia object, a support equipment, supply or spare description, a levelled paragraph, a procedural step, a graphic or a hotspot.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleCmp39, placements: appPlacementsFor('S1000D 4.2', ruleCmp39, [['descript', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-cmp-ancestor-chain-legend-title',
+    args: [{ brdp: brdpCmp('BRDP-EXT-00008', 'Internal references in titles', 'No internal reference in a title, except in the title of a figure legend definition list, pointing to that figure.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleCmp08, placements: appPlacementsFor('S1000D 4.2', ruleCmp08, [['descript', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-cmp-loose-attribute-reason-for-update',
+    args: [{ brdp: brdpCmp('BRDP-EXT-00181', 'Referenced reasons for update', 'In a changed data module, every reason for update is referenced within the data module.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleCmp181, placements: appPlacementsFor('S1000D 4.2', ruleCmp181, [['descript', 'rule']]) }],
+  },
+);
 ruleProposalCheckCases.push({
   name: 'brex-4-2-gmc-values-with-text-interchangeability',
   args: [{ brdp: brdpGmc('BRDP-EXT-00022', 'Interchangeability codes', 'Interchangeability uses the ATA Spec 2000 codes 1 (one-way) and 2 (two-way).'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc22, ruleDescription: describeText(ruleGmc22, 'BREX-4.2') }],

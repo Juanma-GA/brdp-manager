@@ -404,6 +404,36 @@ export function pathAlternatives(path) {
   return out;
 }
 
+// The two sides of every comparison of a predicate, through its and/or
+// operands, parentheses and not(): "not(@a = //x/@id or @a = //y/@id)" →
+// [['@a', '//x/@id'], ['@a', '//y/@id']]. A comparison with more than two
+// sides (a = b = c) gives nothing.
+export function comparisonPairs(predicate) {
+  const out = [];
+  const visit = (raw) => {
+    let e = String(raw || '').trim();
+    for (;;) {
+      if (e.startsWith('(') && matchingClose(e, 0) === e.length - 1) {
+        e = e.slice(1, -1).trim();
+        continue;
+      }
+      const w = /^(?:not|boolean)\s*\(/.exec(e);
+      if (w && matchingClose(e, w[0].length - 1) === e.length - 1) {
+        e = e.slice(w[0].length, -1).trim();
+        continue;
+      }
+      break;
+    }
+    if (!e) return;
+    const words = splitWhere(e, wordOperator);
+    if (words.length > 1) return words.forEach(visit);
+    const sides = splitWhere(e, comparison).map((s) => s.trim());
+    if (sides.length === 2 && sides[0] && sides[1]) out.push(sides);
+  };
+  visit(predicate);
+  return out;
+}
+
 // [{ sep: null | '/' | '//', main, predicates: [text], kind, name, desc }]
 export function pathSteps(alternative) {
   const text = alternative.trim();

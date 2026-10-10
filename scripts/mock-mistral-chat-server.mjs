@@ -654,6 +654,56 @@ function ruleTestReply(systemPrompt, messages) {
   // notes file an unknown root (<notes>); the correction round, which names
   // that file, gives it a real <topic>.
   if (/each example is a DOSSIER/.test(systemPrompt)) return answer(dossierExamples(rule, correcting, lastUser));
+  // Test de reglas: referencias, antepasados y reglas de esquema prohibido
+  // (CMP 4.2). EXT-00039: like the real run, without the destinations line
+  // the referenced <figure> is written inside the <para> (where it cannot
+  // go); with it, next to the paragraph, where the prompt says the content
+  // goes (<levelledPara>).
+  if (/attribute::internalRefId = \/\/figure\/@id/.test(rule)) {
+    const told = /The rule compares @internalRefId of <internalRef> with the @id of/.test(systemPrompt);
+    const schema = ruleSchema || "descript";
+    const figure = '<figure id="fig-0001"><title>Fuel pump</title><graphic infoEntityIdent="ICN-EXAMPLE-00001"/></figure>';
+    return answer([
+      { label: "Reference to a figure", expected: "accept", schema, content: told ? `${figure}<para>See <internalRef internalRefId="fig-0001"/>.</para>` : `<para>${figure}See <internalRef internalRefId="fig-0001"/>.</para>` },
+      { label: "Reference to a paragraph", expected: "reject", schema, content: told ? '<para id="par-0001">Remove the cover.</para><para>See <internalRef internalRefId="par-0001"/>.</para>' : '<para id="par-0001">Remove the cover. See <internalRef internalRefId="par-0001"/>.</para>' },
+    ]);
+  }
+  // EXT-00008: the chain figure/legend/definitionList/title around the
+  // <internalRef>. With the chain line the reference goes in the title of
+  // the legend's definition list; without it, in the figure's own title.
+  if (/ancestor::title\/parent::definitionList\/parent::legend/.test(rule)) {
+    const told = /The rule's condition looks at figure\/legend\/definitionList\/title around <internalRef>/.test(systemPrompt);
+    const schema = ruleSchema || "descript";
+    const figure = (target, inLegend) => `<figure id="fig-0001"><title>Fuel pump${inLegend ? "" : ` <internalRef internalRefId="${target}"/>`}</title><graphic infoEntityIdent="ICN-EXAMPLE-00001"/><legend><definitionList><title>Key${inLegend ? ` to <internalRef internalRefId="${target}"/>` : ""}</title><definitionListItem><listItemTerm>1</listItemTerm><listItemDefinition><para>Valve</para></listItemDefinition></definitionListItem></definitionList></legend></figure>`;
+    const other = '<figure id="fig-0002"><title>Valve</title><graphic infoEntityIdent="ICN-EXAMPLE-00002"/></figure>';
+    return answer([
+      { label: "Legend title pointing to its own figure", expected: "accept", schema, content: figure("fig-0001", told) },
+      { label: "Legend title pointing to another figure", expected: "reject", schema, content: `${figure("fig-0002", told)}${other}` },
+    ]);
+  }
+  // EXT-00181 / EXT-00224: a changed module whose <reasonForUpdate> is
+  // referenced (or not) from the content by @reasonForUpdateRefIds. With
+  // the carriers line, on a <para>/<dmRef> of the content; without it, on
+  // the status element itself (where it does not exist).
+  if (/reasonForUpdateRefIds\/tokenize/.test(rule)) {
+    const wholeOf = (systemPrompt.match(/your "metadata" is the WHOLE <([\w-]+)>/) || [])[1] || "identAndStatusSection";
+    const lines = systemPrompt.split("\n");
+    const start = lines.findIndex((l) => l.startsWith(`    <${wholeOf}>`));
+    const section = [];
+    for (let i = start; start !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) section.push(lines[i].slice(4));
+    const status = /<pmStatus>/.test(section.join("\n")) ? "pmStatus" : "dmStatus";
+    const told = /@reasonForUpdateRefIds goes on:/.test(systemPrompt);
+    const metadata = section.join("\n")
+      .replace(`<${status}>`, told ? `<${status} issueType="changed">` : `<${status} issueType="changed" reasonForUpdateRefIds="rfu-0001">`)
+      .replace("</qualityAssurance>", '</qualityAssurance><reasonForUpdate id="rfu-0001"><simplePara>Torque value changed.</simplePara></reasonForUpdate>');
+    const schema = ruleSchema || (status === "pmStatus" ? "pm" : "descript");
+    const dmRef = (ref) => `<dmRef${ref ? ' reasonForUpdateRefIds="rfu-0001"' : ""}><dmRefIdent><dmCode assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="040" infoCodeVariant="A" itemLocationCode="A" modelIdentCode="EXAMPLE" subSubSystemCode="0" subSystemCode="0" systemCode="00" systemDiffCode="A"/></dmRefIdent></dmRef>`;
+    const content = (ref) => (status === "pmStatus" ? dmRef(ref && told) : ref && told ? 'Tighten to <quantity reasonForUpdateRefIds="rfu-0001">25 N.m</quantity>.' : "Tighten the bolt.");
+    return answer([
+      { label: "Reason for update referenced from the content", expected: "accept", schema, metadata, content: content(true) },
+      { label: "Reason for update not referenced", expected: "reject", schema, metadata: metadata.replace(' reasonForUpdateRefIds="rfu-0001"', ""), content: content(false) },
+    ]);
+  }
   // GMC (pasada «Official Default GMC ATA - 1000BR 4.2 - 015»), Part 1.
   // EXT-00022: like the real run, without the VALUES block the values are
   // written as the objectValue's text ("One-Way"); with it, as

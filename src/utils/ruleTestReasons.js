@@ -71,7 +71,7 @@ export const ENGINE_REASON_CODES = [
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
-  'example_no_room', 'condition_no_schema', 'context_schema_unknown', 'test_schema_unavailable',
+  'example_no_room', 'condition_no_schema', 'context_schema_unknown', 'test_schema_unavailable', 'minimal_document_unavailable',
 ];
 export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement'];
 

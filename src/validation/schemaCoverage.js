@@ -190,12 +190,48 @@ function coveredAlternative(index, scope, alternative) {
   return null;
 }
 
+// Test de reglas: referencias, antepasados y reglas de esquema prohibido,
+// Part 2.2: a rule limited to some schemas (a context block) that forbids
+// elements none of which exists in those schemas -- //footnote |
+// //footnoteRef in an ipd context block (BRDP-EXT-00272, CMP 4.2): no
+// document of the schema can contain them, so the schema already includes
+// the decision. Every part must be flag 0 (objappl 0) in a context block of
+// a schema the graph knows, and NO element any alternative checks may exist
+// in its schema (one that exists: a normal test). An alternative whose
+// checked element cannot be read (*, a function) concludes nothing. A
+// general rule with an element that does not exist is not this case (as
+// before). → [{ kind: 'absentInContext', schema, names }] | null
+function absentInContext(index, parts) {
+  const bySchema = new Map();
+  for (const part of parts) {
+    if (part.condition || part.flag !== '0' || !part.schema || !index.bySchema.has(part.schema)) return null;
+    const alternatives = pathAlternatives(part.path);
+    if (alternatives.length === 0) return null;
+    for (const alternative of alternatives) {
+      const { steps } = pathSteps(alternative);
+      let i = steps.length - 1;
+      while (i >= 0 && steps[i].kind === 'attribute') i -= 1;
+      const step = steps[i];
+      if (!step || step.kind !== 'element') return null;
+      if (reachableFromRoots(index, part.schema).has(step.name)) return null;
+      if (!bySchema.has(part.schema)) bySchema.set(part.schema, []);
+      const names = bySchema.get(part.schema);
+      if (!names.includes(step.name)) names.push(step.name);
+    }
+  }
+  if (bySchema.size === 0) return null;
+  return [...bySchema].map(([schema, names]) => ({ kind: 'absentInContext', schema, names, element: names.join('|'), other: schema }));
+}
+
 export function schemaCoverage(ruleXml, format, graph, options = {}) {
   if (!BREX_FORMATS.has(format)) return null;
   const index = graphIndex(graph);
   if (!index) return null;
   const parts = rulePathParts(ruleXml, format, options);
   if (parts.length === 0) return null;
+  // Part 2.2: decided without any example -- byCode (no LLM is asked).
+  const absent = absentInContext(index, parts);
+  if (absent) return { items: absent, byCode: true };
   const items = [];
   for (const part of parts) {
     if (part.condition || part.flag !== '0') return null;
@@ -240,6 +276,10 @@ export function coveredRelationAlternatives(ruleXml, format, graph, options = {}
 
 // One item in the language of `t` (records.ruleTest.covered.*).
 export function formatCoverageItem(item, t) {
+  if (item.kind === 'absentInContext') {
+    const names = item.names.map((n) => `<${n}>`);
+    return t('records.ruleTest.covered.absentInContext', { count: names.length, schema: item.schema, name: names[0], names: names.slice(0, -1).join(', '), last: names[names.length - 1] });
+  }
   if (item.kind === 'structure') {
     return t('records.ruleTest.covered.structure', { element: item.element, parent: item.parent, schema: item.schema || '' });
   }
@@ -249,6 +289,7 @@ export function formatCoverageItem(item, t) {
 // The same, in English, for the prompt (the LLM is told why no example
 // meant to be rejected is asked for).
 export function coverageItemEnglish(item) {
+  if (item.kind === 'absentInContext') return `the ${item.schema} schema has no ${item.names.map((n) => `<${n}>`).join(' or ')}`;
   if (item.kind === 'onlyInside') return `<${item.element}> can only go inside <${item.other}>`;
   if (item.kind === 'onlyDirectlyInside') return `<${item.element}> can only go directly inside <${item.other}>`;
   if (item.kind === 'requiredChild') return `<${item.other}> is required in <${item.element}>`;

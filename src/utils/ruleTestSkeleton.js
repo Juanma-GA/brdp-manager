@@ -31,6 +31,7 @@ import { sectionCarrierWay, sectionRoutes } from './schemaPlacement.js';
 import { extractRuleXPaths, extractXPathNames } from '../validation/schemaValidation.js';
 import { stripLiterals } from './ruleTestCommon.js';
 import { fragmentWellFormedProblem } from './ruleWrappers.js';
+import { comparisonPairs, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
 
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
@@ -370,7 +371,146 @@ export function ruleTargets(ruleXml) {
     predicateNames: [...predicateNames],
     rootPredicates: [...rootPredicates],
     wholeDocument,
+    ...predicateTargets(contexts.length ? contexts : extractRuleXPaths(ruleXml || '')),
   };
+}
+
+// ─── What the checked step's condition needs (Test de reglas: referencias,
+// antepasados y reglas de esquema prohibido, Part 1) ──────────────────────────
+//
+// references (1a): the checked node's attribute compared with an absolute
+// path that ends in an attribute -- //internalRef[not(attribute::internalRefId
+// = //figure/@id or … = //table/@id)] (BRDP-EXT-00039, CMP 4.2): the
+// destinations an example meant to be accepted points to.
+//   [{ element, attribute, destinations: [{ name, attribute, path }] }]
+// chains (1b): a chain of ancestors in the condition --
+// ancestor::title/parent::definitionList/parent::legend/parent::figure
+// (BRDP-EXT-00008): the elements around the checked one, innermost first,
+// each with its link to the one inside it ('ancestor' | 'parent').
+//   [{ element, chain: [{ name, link }], path }]  -- two elements or more
+// looseAttributes (1c): an attribute with no element step, //@x or /R//@x,
+// inside a predicate -- /dmodule//@reasonForUpdateRefIds (BRDP-EXT-00181):
+// what carries it decides which part of the document the example writes.
+//   [{ attribute, root, path }]
+const OWN_ATTRIBUTE_RE = /^(?:\.\/)?(?:@|attribute::)([A-Za-z_][\w.-]*)$/;
+const CHAIN_AXES = new Set(['ancestor', 'ancestor-or-self', 'parent']);
+
+function lastElementStep(steps) {
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    const s = steps[i];
+    if (s.kind === 'element') return s;
+    if (s.kind === 'attribute' || s.kind === 'other' && /^(?:node|text|comment)\(\)$/.test(s.main)) continue;
+    return null;
+  }
+  return null;
+}
+
+// An absolute path ending in an element step and an attribute step
+// (//figure/@id, /dmodule//figure/@id) → { name, attribute, path }, or null.
+function destinationOf(side) {
+  const text = side.replace(/\s+/g, ' ').trim();
+  if (!text.startsWith('/')) return null;
+  const { steps } = pathSteps(text);
+  const last = steps[steps.length - 1];
+  const owner = steps[steps.length - 2];
+  if (last?.kind !== 'attribute' || last.predicates.length || owner?.kind !== 'element') return null;
+  return { name: owner.name, attribute: last.name, path: text };
+}
+
+// A relative path made only of ancestor::/parent:: steps (and an attribute
+// at the end): ancestor::title/parent::definitionList/parent::figure/@id →
+// [{ name: 'title', link: 'ancestor' }, { name: 'definitionList', link:
+// 'parent' }, …], or null.
+function ancestorChainOf(operand) {
+  const text = operand.trim();
+  if (text.startsWith('/')) return null;
+  const { steps } = pathSteps(text);
+  const chain = [];
+  for (const [i, s] of steps.entries()) {
+    if (s.kind === 'attribute' && i === steps.length - 1) break;
+    if (s.kind !== 'axis' || !CHAIN_AXES.has(s.axis) || (i > 0 && s.sep !== '/')) return null;
+    chain.push({ name: s.name, link: s.axis === 'parent' ? 'parent' : 'ancestor' });
+  }
+  return chain.length ? chain : null;
+}
+
+// //@x, /R//@x (functions after it allowed: /R//@x/tokenize(…)) →
+// { attribute, root }, or null.
+function looseAttributeOf(operand) {
+  const text = operand.replace(/\s+/g, ' ').trim();
+  if (!text.startsWith('/')) return null;
+  const { steps } = pathSteps(text);
+  let i = 0;
+  let root = null;
+  if (steps[0]?.kind === 'element' && steps[0].sep === '/' && !steps[0].predicates.length) {
+    root = steps[0].name;
+    i = 1;
+  }
+  const attr = steps[i];
+  if (attr?.kind !== 'attribute' || attr.sep !== '//' || attr.predicates.length) return null;
+  if (steps.slice(i + 1).some((s) => s.kind !== 'other')) return null;
+  return { attribute: attr.name, root, path: text };
+}
+
+function predicateTargets(expressions) {
+  const references = [];
+  const chains = [];
+  const looseAttributes = [];
+  const addLoose = (operand) => {
+    const loose = looseAttributeOf(operand);
+    if (loose && !looseAttributes.some((l) => l.attribute === loose.attribute && l.root === loose.root)) looseAttributes.push(loose);
+  };
+  // Every predicate of every step, nested ones included: the loose attributes.
+  const visitPredicates = (path) => {
+    for (const alternative of pathAlternatives(path)) {
+      for (const step of pathSteps(alternative).steps) {
+        for (const predicate of step.predicates) {
+          for (const operand of pathOperands(predicate, { deep: true })) {
+            addLoose(operand);
+            visitPredicates(operand);
+          }
+        }
+      }
+    }
+  };
+  for (const expression of expressions) {
+    for (const operand of pathOperands(expression)) {
+      visitPredicates(operand);
+      for (const alternative of pathAlternatives(operand)) {
+        const checked = lastElementStep(pathSteps(alternative).steps);
+        if (!checked) continue;
+        for (const predicate of checked.predicates) {
+          for (const [a, b] of comparisonPairs(predicate)) {
+            for (const [own, other] of [[a, b], [b, a]]) {
+              const m = OWN_ATTRIBUTE_RE.exec(own.trim());
+              const destination = m ? destinationOf(other) : null;
+              if (!destination) continue;
+              let entry = references.find((r) => r.element === checked.name && r.attribute === m[1]);
+              if (!entry) {
+                entry = { element: checked.name, attribute: m[1], destinations: [] };
+                references.push(entry);
+              }
+              if (!entry.destinations.some((d) => d.name === destination.name && d.attribute === destination.attribute)) entry.destinations.push(destination);
+            }
+          }
+          for (const op of pathOperands(predicate)) {
+            const chain = ancestorChainOf(op);
+            if (chain && chain.length > 1) chains.push({ element: checked.name, chain, path: op.replace(/\s+/g, ' ').trim() });
+          }
+        }
+      }
+    }
+  }
+  // A chain that is the start of a longer one around the same element
+  // (ancestor::title and ancestor::title/parent::definitionList/…) adds
+  // nothing.
+  const key = (c) => c.chain.map((s) => `${s.link}:${s.name}`).join('/');
+  const kept = chains.filter(
+    (c, i) =>
+      chains.findIndex((d) => d.element === c.element && key(d) === key(c)) === i &&
+      !chains.some((d) => d !== c && d.element === c.element && d.chain.length > c.chain.length && key(d).startsWith(`${key(c)}/`))
+  );
+  return { references, chains: kept, looseAttributes };
 }
 
 // ─── Which schemas the examples use ─────────────────────────────────────────
@@ -476,6 +616,9 @@ export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], c
     ...new Set([
       ...required,
       ...(targets?.alternatives || []).filter((a) => !a.opaque).flatMap((a) => a.steps),
+      // Part 1.2: the elements of a chain of ancestors too (legend/figure
+      // around <internalRef>: ddn has <internalRef> but no <legend>).
+      ...(targets?.chains || []).flatMap((c) => c.chain.map((step) => step.name)),
     ]),
   ].filter(known);
   const fittingSteps = fitting.filter((schema) => schemasHavingAll(allSteps, cards, [schema], elementSchemas).length > 0);
@@ -1037,6 +1180,24 @@ function classifyRuleTargets(structure, targets) {
   if (sectionMissing?.all) {
     return { metadata: false, content: false, contentAlternatives: [], metadataAlternatives: [], unreachable: null, sectionMissing, rootMismatch: null };
   }
+  // Part 1.3: a loose attribute in a predicate (/dmodule//@reasonForUpdateRefIds,
+  // BRDP-EXT-00181) whose carriers include content elements -- the example
+  // can write content too (an element that references the reasonForUpdate).
+  // It counts like an attribute-only alternative (//@x, Mejoras A): an
+  // alternative of its own, with no element step. Carried only in the
+  // section: nothing changes.
+  const looseAlternatives = [];
+  for (const loose of targets?.looseAttributes || []) {
+    if (loose.root && loose.root !== root) continue;
+    if (alternatives.some((a) => !a.opaque && a.attribute === loose.attribute && a.steps.length === 0)) continue;
+    const carriers = owners(loose.attribute).filter((o) => o !== root && C.has(o) && !(section && T.has(o)));
+    if (carriers.length === 0) continue;
+    const alt = { steps: [], attribute: loose.attribute, checked: null, absolutePrefix: null, opaque: false, descendantPairs: [], prefixedSteps: [], descendantAttribute: false, loose: true };
+    looseAlternatives.push(alt);
+    contentAlternatives.push(alt);
+    content = true;
+    allUnreachable = false;
+  }
   // A predicate that reads the other part: an element only the section has
   // (dmStatus, updateCode, …) makes the LLM write the section too; an
   // element only the content has (zoneSpec, …), the content.
@@ -1050,7 +1211,7 @@ function classifyRuleTargets(structure, targets) {
   if (!metadata && !content && !unreachable) content = true;
   // rootMismatch: this document's root, when an unreachable alternative
   // starts at another one (only said with the unreachable names).
-  return { metadata, content, contentAlternatives, metadataAlternatives, unreachable, sectionMissing, rootMismatch: unreachable && wrongRoot ? root : null, predicateContent };
+  return { metadata, content, contentAlternatives, metadataAlternatives, unreachable, sectionMissing, rootMismatch: unreachable && wrongRoot ? root : null, predicateContent, looseAlternatives };
 }
 
 // The identification and status section of a document the application does
@@ -1361,7 +1522,7 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     ...new Set(contentAlternatives.map((a) => a.checked).filter((name) => name && elements[name])),
   ];
   const contentPrefixes = contentAlternatives.map((a) => a.absolutePrefix).filter(Boolean);
-  const carrierAlternatives = (targets?.alternatives || []).filter((a) => !rootAlts.has(a));
+  const carrierAlternatives = [...(targets?.alternatives || []), ...(classes.looseAlternatives || [])].filter((a) => !rootAlts.has(a));
   const withAttributes = (placed) => {
     placed.rootAttributes = rootAttributes.map(({ attribute, element }) => ({ attribute, element }));
     placed.attributeCarriers = attributeCarrierInfos(structure, placed, carrierAlternatives);
@@ -1428,23 +1589,54 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // Mejoras F, Part 1.3: //x / not(//x) in the checked step's condition
   // -- the examples must be able to contain <x>.
   const containNames = (targets?.containNames || []).filter((name) => elements[name] && !chain.includes(name));
-  const fitsChecked = (i) =>
+  const fitsBase = (i) =>
     contentChecked.every((name) => reachable(elements, chain[i], name))
     && containNames.every((name) => reachable(elements, chain[i], name))
     && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
     && descendantCarrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name, 16)))
     && relationOk(i);
+  const below = new Map();
+  const under = (name) => {
+    if (!below.has(name)) below.set(name, reachableSet(elements, elements[name]?.children || []));
+    return below.get(name);
+  };
+  // What the example's CONTENT can write below a point: never through the
+  // identification and status section (the application writes it, or the
+  // LLM writes it whole as "metadata").
+  const contentBelow = new Map();
+  const underContent = (name) => {
+    if (!contentBelow.has(name)) {
+      const children = (elements[name]?.children || []).filter((c) => c !== section?.element);
+      contentBelow.set(name, reachableSet(elements, children));
+    }
+    return contentBelow.get(name);
+  };
+  // Part 1.1 (Test de reglas: referencias…): the checked node references one
+  // of a list of destinations (//internalRef[not(@internalRefId = //figure/@id
+  // or …)], BRDP-EXT-00039): the example meant to be accepted contains one,
+  // so the insertion point must also reach at least one destination of each
+  // reference -- <levelledPara> in descript, never <para>, where none fits.
+  // When no point reaches one, the placement is what it was.
+  const references = (targets?.references || [])
+    .filter((r) => contentChecked.includes(r.element))
+    .map((r) => ({ ...r, present: r.destinations.filter((d) => (elements[d.name]?.attributes || []).includes(d.attribute)) }))
+    .filter((r) => r.present.length > 0);
+  const referencesOk = (i) => references.every((r) => r.present.some((d) => underContent(chain[i]).has(d.name)));
+  const useReferences = references.length > 0 && chain.slice(0, limit).some((_n, i) => fitsBase(i) && referencesOk(i));
+  const fitsChecked = (i) => fitsBase(i) && (!useReferences || referencesOk(i));
+  // Part 1.2: a chain of ancestors the condition looks at around the checked
+  // element (figure/legend/definitionList/title around <internalRef>,
+  // BRDP-EXT-00008): the insertion point must be able to write its outermost
+  // element and the whole chain down to the checked one. A chain no point
+  // holds is reported like an outer element (entryMissing: the next schema,
+  // else "not executable", before any LLM call).
+  const ancestorChains = (targets?.chains || []).filter((c) => contentChecked.includes(c.element));
   // Mejoras D, Part 1: the insertion point must also hold the OUTERMOST
   // element each content alternative makes the example write -- its first
   // element step the skeleton does not already place at or above the point.
   // //figure//legend/deflist/def (BRDP-EXT-02816, 3.0.1 descript) checks
   // <def>, which fits in <para> (para/deflist/def), but <figure> does not:
   // every example was "<figure> is not allowed inside <para>". Now <para0>.
-  const below = new Map();
-  const under = (name) => {
-    if (!below.has(name)) below.set(name, reachableSet(elements, elements[name]?.children || []));
-    return below.get(name);
-  };
   const entryAt = (alt, i) => (alt.steps || []).find((n) => elements[n] && !chain.slice(0, i + 1).includes(n)) || null;
   // Held at chain[i]: the entry is below it and the rest of the path can be
   // written from there (a later step that never fits is an impossible path,
@@ -1459,7 +1651,10 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // alternative is like that: a union keeps testing what it can.
   const heldSomewhere = steppedAlternatives.filter((a) => chain.slice(0, limit).some((_n, i) => holds(a, i)));
   const pathAlternatives = heldSomewhere.length ? heldSomewhere : steppedAlternatives;
-  const missingEntries = (i) => pathAlternatives.filter((a) => !holds(a, i)).map((a) => entryAt(a, i));
+  const missingEntries = (i) => [
+    ...pathAlternatives.filter((a) => !holds(a, i)).map((a) => entryAt(a, i)),
+    ...ancestorChains.filter((c) => !chainWay(elements, chain[i], c)).map((c) => c.chain[c.chain.length - 1].name),
+  ];
   let index = limit - 1;
   let oldIndex = null;
   let found = false;
@@ -1483,9 +1678,14 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   if (entryMissing) {
     placed.entryMissing = {
       outer: [...new Set(entryMissing)],
-      checked: [...new Set(pathAlternatives.map((a) => a.checked).filter(Boolean))],
+      checked: [...new Set([...pathAlternatives.map((a) => a.checked), ...ancestorChains.map((c) => c.element)].filter(Boolean))],
     };
   }
+  const chainWays = ancestorChains
+    .map((c) => ({ element: c.element, names: [...c.chain].reverse().map((s) => s.name), way: chainWay(elements, placed.insertion, c) }))
+    .filter((c) => c.way);
+  if (chainWays.length) placed.chainWays = chainWays;
+  if (references.length) placed.references = references.map((r) => referenceInfo(elements, placed.insertion, r));
   // The point moved up for an outer element: the prompt gives each such
   // alternative's whole way from it (para0/figure/legend/deflist/def), so
   // the LLM never takes the shortest way to the checked element alone
@@ -1531,6 +1731,48 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     ? contentRoutes(structure, placed.insertion, [...new Set([...entryNames, ...predicateNames])], useNames, attributeOnlyChecked)
     : null;
   return withAttributes(placed);
+}
+
+// Part 1.2: the way from `from` down to the checked element through a
+// chain of ancestors (innermost first, each with its link to the one inside
+// it): [from, …, outermost, …, innermost, …, element], or null when the
+// chain does not fit from there. A "parent" link is a direct child.
+function chainWay(elements, from, { element, chain }) {
+  const outerFirst = [...chain].reverse();
+  const first = nestingPath(elements, from, outerFirst[0].name);
+  if (!first) return null;
+  const way = [...first];
+  for (let k = 1; k <= outerFirst.length; k += 1) {
+    const parent = outerFirst[k - 1];
+    const child = k < outerFirst.length ? outerFirst[k].name : element;
+    if (parent.link === 'parent') {
+      if (!(elements[parent.name]?.children || []).includes(child)) return null;
+      way.push(child);
+    } else {
+      const nesting = nestingPath(elements, parent.name, child);
+      if (!nesting) return null;
+      way.push(...nesting.slice(1));
+    }
+  }
+  return way;
+}
+
+// Part 1.1: what the prompt says about one reference: the destinations,
+// the ones the example can write from the insertion point first (nearest
+// first), then the rest in the rule's order; the way to the first ones.
+export const REFERENCE_LIST_MAX = 8;
+const REFERENCE_WAYS = 3;
+function referenceInfo(elements, insertion, reference) {
+  const dist = insertion ? distancesFrom(elements, insertion) : new Map();
+  const writable = reference.present.filter((d) => dist.has(d.name)).sort((a, b) => dist.get(a.name) - dist.get(b.name));
+  const rest = reference.destinations.filter((d) => !writable.includes(d));
+  const ordered = [...writable, ...rest];
+  return {
+    element: reference.element,
+    attribute: reference.attribute,
+    destinations: ordered.map((d) => ({ name: d.name, attribute: d.attribute, path: d.path, writable: writable.includes(d) })),
+    ways: writable.slice(0, REFERENCE_WAYS).map((d) => nestingPath(elements, insertion, d.name)).filter(Boolean),
+  };
 }
 
 // Mejoras D, Part 1: the way from `from` through every element step of an

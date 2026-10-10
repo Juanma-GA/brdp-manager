@@ -273,6 +273,13 @@
 // ("rootAttributes", Part 1.3), EXT-00079 (carrier in the identification
 // and status section) and EXT-00107 (X//@a, Part 1.4). Every other prompt
 // is identical.
+//
+// Test de reglas: referencias, antepasados y reglas de esquema prohibido:
+// three new ruleTestExamples cases with the real CMP rules -- EXT-00039
+// (the destinations of a reference and the way to the first ones),
+// EXT-00008 (a chain of ancestors) and EXT-00181 (a loose attribute in a
+// condition: its carriers, content alongside the metadata). Every other
+// prompt is identical.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

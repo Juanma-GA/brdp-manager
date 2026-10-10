@@ -14,7 +14,7 @@
 import { readLlmJson } from './llmJson.js';
 import { buildSchemaFactsBlock, ruleValueLegend } from './shared.js';
 import { placeSentence } from '../utils/schemaPlacement.js';
-import { attributeCarrierLines, metadataXml } from '../utils/ruleTestSkeleton.js';
+import { attributeCarrierLines, metadataXml, REFERENCE_LIST_MAX } from '../utils/ruleTestSkeleton.js';
 
 export const RULE_TEST_USER_MESSAGE = 'Write the test examples for this rule.';
 
@@ -185,6 +185,39 @@ function writePathLines(p) {
     .join('');
 }
 
+// Test de reglas: referencias, antepasados…, Part 1.1: the checked node
+// references one of a list of destinations (BRDP-EXT-00039: @internalRefId
+// against the @id of <figure>, <table>, …). The ones the example can write
+// from the insertion point first; at most REFERENCE_LIST_MAX by name.
+function referenceLines(p) {
+  return (p.references || [])
+    .map((r) => {
+      const attributes = [...new Set(r.destinations.map((d) => d.attribute))];
+      const named = r.destinations.slice(0, REFERENCE_LIST_MAX);
+      const list = attributes.length === 1
+        ? `the @${attributes[0]} of ${named.map((d) => `<${d.name}>`).join(', ')}`
+        : named.map((d) => `<${d.name}>/@${d.attribute}`).join(', ');
+      const more = r.destinations.length > named.length ? ` (${r.destinations.length - named.length} more)` : '';
+      const ways = r.ways.length
+        ? `
+  The valid way to the first of them from <${r.ways[0][0]}>: ${r.ways.map((w) => w.join('/')).join('; ')}.`
+        : '';
+      return `
+  The rule compares @${r.attribute} of <${r.element}> with ${list}${more}: an example meant to be accepted contains one of those elements with that @${attributes[0]}; the reject example points to an element that exists in the example but is not in the list.${ways}`;
+    })
+    .join('');
+}
+
+// Part 1.2: a chain of ancestors the rule's condition looks at around the
+// checked element (BRDP-EXT-00008: figure/legend/definitionList/title around
+// <internalRef>) -- the whole way from the insertion point.
+function chainLines(p) {
+  return (p.chainWays || [])
+    .map((c) => `
+  The rule's condition looks at ${c.names.join('/')} around <${c.element}>: write it by exactly this way: ${c.way.join('/')}.`)
+    .join('');
+}
+
 function routeLines(p) {
   const r = p.routes;
   if (!r) return '';
@@ -273,7 +306,7 @@ ${metadataLine(p)}${carrierLines(p)}${placeLines(p)}`;
     : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
   ${p.path.join('/')}.${titleLine}${relationLine}
-  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
+  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${chainLines(p)}${referenceLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''
   }${carrierLines(p)}${placeLines(p)}`;
@@ -668,7 +701,11 @@ export function parseRuleTestResponse(raw, { contentOptionalSchemas = [], dossie
         rootAttributes[name.trim()] = String(value);
       }
     }
-    if (!content.trim() && !metadata && !contentOptional) return { ok: false, error: `${where} has no "content".` };
+    // Test de reglas: referencias…, Part 2.4: an example with no "content"
+    // no longer breaks the whole test -- it is kept as an invalid example
+    // ("the example has no content") that goes to the correction round. Only
+    // an answer where NO example has content is useless.
+    const noContent = !content.trim() && !metadata && !contentOptional;
     if (ex.schema !== undefined && ex.schema !== null && typeof ex.schema !== 'string') {
       return { ok: false, error: `${where} has a "schema" that is not text or null.` };
     }
@@ -691,7 +728,9 @@ export function parseRuleTestResponse(raw, { contentOptionalSchemas = [], dossie
       ...(metadata ? { metadata } : {}),
       ...(rootAttributes ? { rootAttributes } : {}),
       ...(files ? { files } : {}),
+      ...(noContent ? { noContent: true } : {}),
     });
   }
+  if (examples.every((ex) => ex.noContent)) return { ok: false, error: examples.length === 1 ? 'Example 1 has no "content".' : 'No example has a "content".' };
   return { ok: true, examples };
 }

@@ -19,7 +19,7 @@ import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidat
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { analyzeRule, describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootSelfPath } from './ruleTestEngine.js';
 import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions } from './ruleTestDossier.js';
-import { minimalDocumentRuns } from './ruleMinimalDocuments.js';
+import { minimalDocument, minimalDocumentRuns } from './ruleMinimalDocuments.js';
 import { stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
@@ -170,6 +170,93 @@ export function documentPresenceTest({ ruleXml, format, standard, schemaLocation
   return { status: 'ready', coverage, examples, runs, minimal, rootRule: true, presence };
 }
 
+// ─── Test de reglas: referencias, antepasados y reglas de esquema prohibido,
+// Part 2.1: a schema forbidden by a context block ───────────────────────────
+// <contextRules rulesContext="…/container.xsd"> with //dmodule flag 0
+// (BRDP-EXT-00076/87/88/89/90, CMP 4.2: "The container schema is not
+// allowed"): the rule only asks whether the document IS of that schema. The
+// LLM wrote a whole <dmodule xmlns="…"> (selected nothing: inconclusive) or
+// only a <title>. Now, without the LLM: the minimal document of the context
+// schema (expected rejected) and the minimal document of another schema of
+// the standard (expected accepted, out of the rule's scope), both built by
+// the application. Every part must be flag 0 (objappl 0), in a context
+// block, with a path that is only //R or /R (alternatives of only that),
+// R the root of that context schema. A minimal document the application
+// cannot build valid (its root needs a section it does not write, like
+// <imfIdentAndStatusSection> of <icnMetadataFile>) → not executable, with
+// the reason. Outside a context block, //dmodule flag 0 is as before.
+const ROOT_ONLY_PATH_RE = /^\/\/?([A-Za-z_][\w.-]*)$/;
+
+// The required children of the root that the minimal document lacks, or [].
+function minimalDocumentMissing(graph, schema) {
+  const skeleton = graph?.skeletons?.[schema];
+  if (!skeleton?.path?.length) return null;
+  const root = skeleton.path[0];
+  const present = new Set([skeleton.path[1], skeleton.metadata?.element].filter(Boolean));
+  const required = (graph.required?.[root] || []).find(([schemas]) => schemas.includes(schema))?.[1] || [];
+  return required.filter((name) => typeof name === 'string' && !present.has(name));
+}
+
+export function contextRootTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml }) {
+  if (!graph || !BREX_FORMATS.has(format)) return null;
+  if (/<(?:objectValue|objval)\b/.test(String(ruleXml || ''))) return null;
+  const parts = rulePathParts(ruleXml, format, { parseXml, schemaLocation });
+  if (parts.length === 0) return null;
+  const schemas = [];
+  for (const part of parts) {
+    if (part.condition || part.flag !== '0' || !part.schema) return null;
+    const roots = graph.roots?.[part.schema] || [];
+    if (roots.length !== 1) return null;
+    const alternatives = pathAlternatives(part.path);
+    if (alternatives.length === 0 || !alternatives.every((a) => ROOT_ONLY_PATH_RE.exec(a.trim())?.[1] === roots[0])) return null;
+    if (!schemas.includes(part.schema)) schemas.push(part.schema);
+  }
+  for (const schema of schemas) {
+    const missing = minimalDocumentMissing(graph, schema);
+    if (missing === null || missing.length > 0) {
+      return {
+        status: 'not_executable',
+        reason: {
+          code: 'minimal_document_unavailable',
+          params: { schema, root: graph.roots[schema][0], missing: (missing || []).map((n) => `<${n}>`).join(', ') },
+        },
+      };
+    }
+  }
+  const examples = [];
+  for (const schema of schemas) {
+    const doc = minimalDocument(graph, standard, schema, schemaLocation);
+    if (doc?.xml) examples.push(minimalExample({ schema, xml: doc.xml, skeletonNodePaths: doc.skeletonNodePaths }, 'reject', schemaLocation));
+  }
+  const outside = Object.keys(graph.skeletons || {}).filter((s) => !schemas.includes(s) && (minimalDocumentMissing(graph, s) || ['?']).length === 0);
+  const other = firstByPreference(outside, ROOT_TEST_ACCEPT_PREFERENCE);
+  if (other) {
+    const doc = minimalDocument(graph, standard, other, schemaLocation);
+    if (doc?.xml) examples.push(minimalExample({ schema: other, xml: doc.xml, skeletonNodePaths: doc.skeletonNodePaths }, 'accept', schemaLocation));
+  }
+  if (examples.length === 0) return null;
+  const runs = examples.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml, schemaLocation }));
+  return { status: 'ready', coverage: null, examples, runs, rootRule: true, contextRoot: { schemas } };
+}
+
+// Part 2.2: no element the rule forbids exists in its context schema --
+// "Already covered by the schema", decided by code. The minimal document of
+// each context schema is shown, built by the application, as an example the
+// rule accepts.
+function absentInContextTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml, coverage }) {
+  const examples = [];
+  for (const schema of [...new Set(coverage.items.map((i) => i.schema))]) {
+    const doc = minimalDocument(graph, standard, schema, schemaLocation);
+    if (doc?.xml && (minimalDocumentMissing(graph, schema) || ['?']).length === 0) {
+      const names = [...new Set(coverage.items.filter((i) => i.schema === schema).flatMap((i) => i.names))];
+      // The note says what the rule looks for, not "only the root".
+      examples.push({ ...minimalExample({ schema, xml: doc.xml, skeletonNodePaths: doc.skeletonNodePaths }, 'accept', schemaLocation), absentNames: names });
+    }
+  }
+  const runs = examples.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml, schemaLocation }));
+  return { status: 'ready', coverage, examples, runs, rootRule: true };
+}
+
 // Same cap as the schema facts of Ask / Suggest Rule.
 const MAX_SCHEMA_FACTS = 6;
 
@@ -259,6 +346,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       ...targets.absolutePrefixes.map((p) => p[0]),
       // every element step, so the schema groups know where each part lives
       ...targets.alternatives.flatMap((a) => (a.opaque ? [] : a.steps)),
+      ...(targets.chains || []).flatMap((c) => c.chain.map((step) => step.name)),
       ...conditionRequirements.flat(2),
     ]),
   ];
@@ -380,7 +468,9 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
         const other = await fetchStructure(standard, candidate);
         if (!other.available) continue;
         const otherPlacement = place(other, schemaTargets, relation);
-        if (!otherPlacement.entryMissing) {
+        // A schema where the rule only looks at a section the application
+        // does not build (comment) is not a replacement either.
+        if (!otherPlacement.entryMissing && !otherPlacement.sectionMissing?.all) {
           schema = candidate;
           structure = other;
           placement = otherPlacement;
@@ -475,7 +565,18 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   const views = rulePlacements.map((p) => viewFromStructure(placements[p.schema]?.structure)).filter(Boolean);
   const ruleFormat = format || STANDARD_TO_RULE_FORMAT[standard] || null;
   const limits = ruleFormat ? singleChildPairs(ruleXml, ruleFormat, views, { parseXml, schemaLocation }) : [];
-  const several = ruleFormat && !acceptOnly ? repeatingComparisons(ruleXml, ruleFormat, views, { parseXml, schemaLocation }) : [];
+  // Part 1.1/1.2 (Test de reglas: referencias…): the destinations of a
+  // reference (//figure/@id) and a chain of ancestors are never asked for
+  // "two or more": the accept example needs ONE destination, and an
+  // ancestor chain is what surrounds the checked node.
+  const norm = (p) => p.replace(/\s+/g, ' ').trim();
+  const notRepeated = new Set([
+    ...(targets.references || []).flatMap((r) => r.destinations.map((d) => norm(d.path))),
+    ...(targets.chains || []).map((c) => norm(c.path)),
+  ]);
+  const several = ruleFormat && !acceptOnly
+    ? repeatingComparisons(ruleXml, ruleFormat, views, { parseXml, schemaLocation }).filter((s) => !notRepeated.has(norm(s.path)))
+    : [];
   return {
     contextSchemas,
     schemaFacts,
@@ -968,12 +1069,34 @@ export async function generateRuleTestExamples({
     onStep({ step: 'preparing' });
     const graph = await loadGraph(fetchSchemaGraph, standard);
     if (!isCurrent()) return null;
+    // Test de reglas: referencias…, Part 2.2: nothing the rule forbids
+    // exists in its context schema -- covered, no LLM examples.
+    const earlyCoverage = graph ? schemaCoverage(ruleXml, format, graph, { schemaLocation, parseXml }) : null;
+    if (earlyCoverage?.byCode) {
+      return {
+        ...absentInContextTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml, coverage: earlyCoverage }),
+        proposalCheck: null,
+        correction: null,
+        predicateSkipped: 0,
+        setup: { standard, schemaLocation, placements: {}, keepBrexReference: false },
+        untested: [],
+        systemPrompt: null,
+        responses,
+      };
+    }
     const pathReview = impossiblePathReview({ ruleXml, format, schemaLocation, graph, parseXml });
     if (pathReview) return { status: 'path_review', reason: pathReview, systemPrompt: null, responses };
+    // Part 2.1: a schema forbidden by a context block (//dmodule in a
+    // container context) -- no LLM examples.
+    const contextRoot = contextRootTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml });
+    if (contextRoot?.status === 'not_executable') return { ...contextRoot, setup: { standard, schemaLocation, placements: {}, keepBrexReference: false }, untested: [], systemPrompt: null, responses };
     // Mejoras F, Part 1.2: a rule on the document's root -- no LLM examples.
-    const rootTest = rootRuleTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml });
+    const rootTest = contextRoot || rootRuleTest({ ruleXml, format, standard, schemaLocation, graph, vocabulary, parseXml });
     if (rootTest) {
-      const checkable = !rootTest.coverage && askProposalCheck && ruleDescription != null;
+      // A schema forbidden by its context block: the block alone says what
+      // the rule decides, so no call to the LLM at all -- not even the
+      // Proposal check (a root rule without context keeps it).
+      const checkable = !contextRoot && !rootTest.coverage && askProposalCheck && ruleDescription != null;
       if (checkable) onStep({ step: 'proposal' });
       const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck }) : null;
       if (!isCurrent()) return null;
@@ -1010,7 +1133,7 @@ export async function generateRuleTestExamples({
     // Mejoras E, Part 1.2: the rule forbids what no valid document of the
     // schema can contain -- only examples meant to be accepted are asked
     // for (Part 1.4), to show the rule does not reject what is valid.
-    const coverage = graph ? schemaCoverage(ruleXml, format, graph, { schemaLocation, parseXml }) : null;
+    const coverage = earlyCoverage;
     const prepared = await prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly: Boolean(coverage), format, parseXml });
     if (!isCurrent()) return null;
     if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup, untested: prepared.untested };

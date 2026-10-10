@@ -228,6 +228,7 @@ function HighlightedXml({ lines, xml }) {
 function validationProblemTexts(t, validation, standard, schema) {
   const problems = [];
   if (validation.unknownSchema) problems.push(t('records.ruleTest.unknownSchema', { schema: validation.unknownSchema }));
+  if (validation.missingContent) problems.push(t('records.ruleTest.missingContent'));
   if (validation.missingMetadata) problems.push(t('records.ruleTest.missingMetadata', { element: validation.missingMetadata }));
   if (!validation.wellFormed) problems.push(t('records.ruleTest.malformed', { error: validation.error }));
   for (const issue of [...nameIssues(validation.names, 'example', { standard }), ...structureIssues(validation.structure, { schema })]) {
@@ -512,6 +513,7 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           })}
         </p>
       )}
+      {example.namespacesRemoved?.length > 0 && <TableFixNote testId="rule-test-namespace-removed" text={t('records.ruleTest.namespaceRemoved', { namespace: example.namespacesRemoved.join('", "') })} />}
       {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
       {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}
       {example.colsRaised?.length > 0 && <TableFixNote testId="rule-test-cols-raised" text={t('records.ruleTest.colsRaised', { count: example.colsRaised.length, values: example.colsRaised.map((c) => `${c.from} → ${c.to}`).join(', ') })} />}
@@ -659,11 +661,19 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           )}
           {example.minimalDocument && (
             <p className={styles.ruleTestNote} data-testid="rule-test-minimal-document">
-              {t(example.presenceTarget ? 'records.ruleTest.minimalDocumentPresence' : 'records.ruleTest.minimalDocumentExample', {
-                schema: example.schema,
-                root: example.xml ? rootName(example.xml) : '',
-                target: example.presenceNames ? presencePathText(example.presenceNames, t) : example.presenceTarget,
-              })}
+              {t(
+                example.absentNames?.length
+                  ? 'records.ruleTest.minimalDocumentAbsent'
+                  : example.presenceTarget
+                  ? 'records.ruleTest.minimalDocumentPresence'
+                  : 'records.ruleTest.minimalDocumentExample',
+                {
+                  schema: example.schema,
+                  root: example.xml ? rootName(example.xml) : '',
+                  target: example.presenceNames ? presencePathText(example.presenceNames, t) : example.presenceTarget,
+                  names: (example.absentNames || []).map((n) => `<${n}>`).join(', '),
+                }
+              )}
             </p>
           )}
           <HighlightedXml lines={lines} xml={example.xml || example.content} />
