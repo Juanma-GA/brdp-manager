@@ -207,7 +207,8 @@ function formatCopiedFromValue(value) {
 }
 
 // AI Extract: the "extracted_from" event's value is JSON ({ file,
-// origin_identifier, in_force?, catalog_edition?, catalog_standard? }); it
+// origin_identifier, in_force?, catalog_edition?, catalog_standard?,
+// match_by? }); it
 // reads as "<file> (source ID <id>)",
 // or "validated and verified on import from <file> …" when it was imported
 // as already in force. From a free text ({ source: "text", quote, file: ""
@@ -221,6 +222,12 @@ function formatExtractedFromValue(t, value) {
       return parsed.origin_identifier
         ? t('records.history.extractedFromTextValue', { file, origin: parsed.origin_identifier, quote: parsed.quote })
         : t('records.history.extractedFromTextValueNoId', { file, quote: parsed.quote });
+    }
+    if (parsed.match_by) {
+      // Found in the project by its content (the file had no identifier for
+      // it, or another one): "rule updated from <file> (matched by …)".
+      const how = t(parsed.match_by === 'similarity' ? 'records.history.extractedFromMatchedBySimilarity' : 'records.history.extractedFromMatchedByContent');
+      return t(parsed.in_force ? 'records.history.extractedFromMatchedInForce' : 'records.history.extractedFromMatched', { file: parsed.file, how });
     }
     const key = parsed.in_force ? 'extractedFromValueInForce' : 'extractedFromValue';
     const text = parsed.origin_identifier

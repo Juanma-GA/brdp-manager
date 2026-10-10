@@ -7,7 +7,10 @@ Classification is done by code -- the AI never decides it:
                   normalized as in "Comparar dos BRDP" (whitespace of the
                   formatting never counts; XPath keeps the spaces inside its
                   string literals). "same" also when the candidate has no
-                  rule to import (nothing would change).
+                  rule to import (nothing would change). A would-be new_ext
+                  whose rule is already in the project under another
+                  identifier is also same / changed: matched by content
+                  (match_by_content), never checked by default.
   catalog         an identifier of the project standard's catalog that is not
                   in the project: Title/Definition come from the catalog.
   other_spec      an official identifier of another specification
@@ -444,6 +447,313 @@ def rules_equal(a: str, b: str, rule_format: str) -> bool:
     return na == nb
 
 
+# ── Matching by content (rules already in the project) ───────────────────
+#
+# A file without BRDP identifiers (the ATA CMP BREX: structureObjectRule
+# id="SOR-n" only) imported into a project whose rules came from Excel (no
+# "extracted_from" event) used to give one "Nueva EXT" per rule. Only for the
+# candidates that would otherwise be a new EXT, the stored rules of the
+# project's other BRDPs are compared by content:
+#   1. same normalized pieces as exactly one BRDP          → "same"
+#   2. same context + path, or context + objectUse (Schematron: context +
+#      test, or context + message), with exactly one BRDP, and similar
+#      enough as a whole (CONTENT_MATCH_FLOOR)             → "changed"
+#   3. otherwise the most similar one, when exactly one is at or above
+#      CONTENT_SIMILARITY                                  → "changed"
+# A content match is never checked by default (it may be a correction made in
+# the project) and says how it was found. Two BRDPs with the same rule: no
+# match, a warning naming them. A BRDP takes one candidate only: an exact
+# match wins, then the higher similarity; the others stay "Nueva EXT" with a
+# warning.
+#
+# Normalization (reusing unwrap_rule_xml and norm_space): no wrappers, no
+# comments, formatting whitespace collapsed (XPath string literals keep
+# theirs), the @id of the rule elements ignored, and the identifier in front
+# of an objectUse / nonContextRule text ignored. BREX: each rule is its
+# context, flag (allowedObjectFlag / objappl; absent = "2"), path, objectUse,
+# values (form, value, text) and severity; each nonContextRule its text.
+# Schematron: each pattern (or loose rule), serialized without ids.
+#
+# Similarity: Sørensen–Dice over the character trigrams of "objectUse | path"
+# (Schematron: "message | context test"), lowercased. 0.85, calibrated on the
+# real BREX in tests/fixtures/brex: rewriting one path step and adding a
+# sentence to the objectUse of each of the 533 decisions of the "CA" BREX
+# scores 0.79–1.0 (5th percentile 0.82, median 0.92); changing the path only,
+# ≥ 0.96; rewording the objectUse only, ≥ 0.84. The same decision written
+# independently by two projects (the 46 shared by Lufthansa and CA) scores
+# 0.04–0.29. Different decisions of the same file can be closer (in CA, 193 of
+# 533 have another decision at ≥ 0.85), so a single BRDP above the threshold
+# is required, and only the BRDPs not matched already are compared.
+
+CONTENT_SIMILARITY = 0.85
+# A shared context + path (or objectUse) is the same rule changed only when
+# the rest still resembles it: Lufthansa's BRDP-S1-00151 (//@materialUsage
+# forbidden, "Decision by Company.") and the default BREX's BREX-S1-00211
+# (//@materialUsage with its mu01-mu06 values) share the path but are two
+# different decisions, at 0.35; the ten corrections of the reconstructed ATA
+# fixture score 0.88-1.0.
+CONTENT_MATCH_FLOOR = 0.5
+_LEADING_ID_RE = re.compile(r"^BRDP-[A-Z0-9]+-\d{5}(?:-\d+(?:\.\d+)*)?(?![0-9])[\s.:\-–—]*")
+_STRING = etree.XPath("string(.)")
+_SCH_ID_ELEMENTS = {"pattern", "rule", "assert", "report"}
+
+
+def _strip_leading_id(text: str | None) -> str:
+    return _LEADING_ID_RE.sub("", _collapse(text), count=1)
+
+
+def _trigrams(text: str) -> frozenset:
+    text = text.lower()
+    return frozenset(text[i : i + 3] for i in range(len(text) - 2))
+
+
+def content_similarity(a: frozenset, b: frozenset) -> float:
+    """Sørensen–Dice over two trigram sets."""
+    if not a or not b:
+        return 0.0
+    return 2 * len(a & b) / (len(a) + len(b))
+
+
+class RuleContent:
+    """A stored or extracted rule, normalized for matching by content."""
+
+    __slots__ = ("pieces", "path_keys", "use_keys", "grams")
+
+    def __init__(self, pieces, path_keys, use_keys, sim_parts):
+        self.pieces = tuple(sorted(pieces))
+        self.path_keys = path_keys
+        self.use_keys = use_keys
+        self.grams = _trigrams("\n".join(sorted(sim_parts))) if sim_parts else frozenset()
+
+
+def _sch_serialize(el, out: list[str]) -> None:
+    """_serialize without comments and without the ids of the Schematron
+    rule elements; attributes in name order."""
+    if not isinstance(el.tag, str):
+        return
+    local = etree.QName(el).localname
+    attrs = []
+    for k, v in el.attrib.items():
+        name = etree.QName(k).localname
+        if name == "id" and local in _SCH_ID_ELEMENTS:
+            continue
+        attrs.append((name, norm_space(v) if name in _XPATH_ATTRIBUTES else _collapse(v)))
+    rendered = "".join(' %s="%s"' % (n, v) for n, v in sorted(attrs))
+    out.append(f"<{local}{rendered}>")
+    if (el.text or "").strip():
+        out.append(_collapse(el.text))
+    for child in el:
+        _sch_serialize(child, out)
+        if child.tail and child.tail.strip():
+            out.append(_collapse(child.tail))
+    out.append(f"</{local}>")
+
+
+def rule_content(xml: str | None, rule_format: str | None) -> RuleContent | None:
+    """None when there is nothing to compare (empty, not well-formed, no
+    rule of the format)."""
+    if not xml or not xml.strip() or not rule_format:
+        return None
+    cleaned = unwrap_rule_xml(xml, rule_format)[0]
+    try:
+        root = etree.fromstring(_wrap_rule_xml_fragment(cleaned).encode("utf-8"))
+    except etree.XMLSyntaxError:
+        return None
+    pieces: list[str] = []
+    path_keys: set = set()
+    use_keys: set = set()
+    sim: list[str] = []
+    if rule_format == "SCH-DITA":
+        for top in root:
+            if not isinstance(top.tag, str) or etree.QName(top).localname not in ("pattern", "rule"):
+                continue
+            out: list[str] = []
+            _sch_serialize(top, out)
+            pieces.append("S" + "".join(out))
+            rules = [top] if etree.QName(top).localname == "rule" else [
+                r for r in top.iter() if isinstance(r.tag, str) and etree.QName(r).localname == "rule"
+            ]
+            for rule in rules:
+                context = norm_space(rule.get("context"))
+                for check in rule:
+                    if not isinstance(check.tag, str) or etree.QName(check).localname not in ("assert", "report"):
+                        continue
+                    kind = etree.QName(check).localname
+                    test = norm_space(check.get("test"))
+                    message = _collapse(_STRING(check))
+                    path_keys.add((context, kind, test))
+                    if message:
+                        use_keys.add((context, message))
+                    sim.append(f"{message} | {context} {test}")
+        return RuleContent(pieces, path_keys, use_keys, sim) if pieces else None
+    is301 = rule_format == "BREX-3.0.1"
+    rule_tag = "objrule" if is301 else "structureObjectRule"
+    block_tag, block_attr = ("contextrules", "context") if is301 else ("contextRules", "rulesContext")
+    path_tag, use_tag, value_tag, flag_attr = (
+        ("objpath", "objuse", "objval", "objappl") if is301 else ("objectPath", "objectUse", "objectValue", "allowedObjectFlag")
+    )
+    for el in root.iter():
+        if isinstance(el, etree._Comment):
+            body = _collapse(el.text)
+            if body.startswith("nonContextRule"):
+                body = re.sub(r'^nonContextRule\s*:?\s*(?:id="[^"]*"\s*:?\s*)?', "", body)
+                pieces.append("N" + _strip_leading_id(body))
+            continue
+        if not isinstance(el.tag, str):
+            continue
+        local = etree.QName(el).localname
+        if local == "nonContextRule":
+            paras = [_collapse(_STRING(p)) for p in el.iter() if isinstance(p.tag, str) and etree.QName(p).localname == "simplePara"]
+            text = " ".join(p for p in paras if p) if paras else _collapse(_STRING(el))
+            pieces.append("N" + _strip_leading_id(text))
+            continue
+        if local != rule_tag:
+            continue
+        context = ""
+        for anc in el.iterancestors():
+            if isinstance(anc.tag, str) and etree.QName(anc).localname == block_tag:
+                context = _collapse(anc.get(block_attr))
+                break
+        path, flag, use, severity, values = "", "2", "", "", []
+        for child in el:
+            if not isinstance(child.tag, str):
+                continue
+            name = etree.QName(child).localname
+            if name == path_tag:
+                path = norm_space(child.text)
+                flag = (child.get(flag_attr) or "").strip() or "2"
+            elif name == use_tag:
+                use = _strip_leading_id(_STRING(child))
+            elif name == "brSeverityLevel":
+                severity = _collapse(_STRING(child))
+            elif name == value_tag:
+                if is301:
+                    values.append([child.get("valtype") or "single", child.get("val1") or "", child.get("val2") or "", _collapse(_STRING(child))])
+                else:
+                    values.append([child.get("valueForm") or "single", child.get("valueAllowed") or "", "", _collapse(_STRING(child))])
+        pieces.append("R" + json.dumps([context, flag, path, use, values, severity], ensure_ascii=False))
+        path_keys.add((context, path))
+        if use:
+            use_keys.add((context, use))
+        sim.append(f"{use} | {path}")
+    return RuleContent(pieces, path_keys, use_keys, sim) if pieces else None
+
+
+def match_by_content(candidates: list[dict], pool: list[tuple], rule_format: str) -> dict[str, dict]:
+    """candidates: the ones that would be a new EXT (file order); pool:
+    (brdp, stored rule_xml) of the project's BRDPs not matched by identifier
+    or origin. → {candidate key: {"brdp", "how": "exact"|"content"|"similarity",
+    "similarity"} or {"warning": {...}}}."""
+    stored = [(b, rc) for b, xml in pool if (rc := rule_content(xml, rule_format)) is not None]
+    if not stored or not candidates:
+        return {}
+    by_pieces: dict = {}
+    by_path: dict = {}
+    by_use: dict = {}
+    for b, rc in stored:
+        by_pieces.setdefault(rc.pieces, []).append(b)
+        for k in rc.path_keys:
+            by_path.setdefault(k, {})[b.id] = b
+        for k in rc.use_keys:
+            by_use.setdefault(k, {})[b.id] = b
+    content_of = {b.id: rc for b, rc in stored}
+    results: dict[str, dict] = {}
+    taken: dict = {}  # brdp id → candidate key (exact matches first)
+    contents = {c["key"]: rule_content(c["rule_xml"], rule_format) for c in candidates}
+
+    def taken_warning(b) -> dict:
+        return {
+            "warning": {
+                "code": "brdp_already_matched",
+                "params": {"identifier": b.identifier},
+                "message": f"Its rule resembles {b.identifier}, already matched with another rule of the file.",
+            }
+        }
+
+    # 1. Exact.
+    for c in candidates:
+        rc = contents[c["key"]]
+        if rc is None:
+            continue
+        same = by_pieces.get(rc.pieces, [])
+        if len(same) > 1:
+            names = sorted(b.identifier for b in same)
+            results[c["key"]] = {
+                "warning": {
+                    "code": "rule_in_several_brdps",
+                    "params": {"identifiers": names},
+                    "message": f"The same rule is in several BRDPs: {', '.join(names)}.",
+                }
+            }
+        elif same:
+            b = same[0]
+            if b.id in taken:
+                results[c["key"]] = taken_warning(b)
+            else:
+                taken[b.id] = c["key"]
+                results[c["key"]] = {"brdp": b, "how": "exact", "similarity": 1.0}
+
+    def resolve(proposals: list[tuple]) -> None:
+        # proposals: (candidate key, brdp, score, how); the highest score
+        # takes the BRDP, the others get the warning.
+        best: dict = {}
+        for key, b, score, how in proposals:
+            if b.id in taken:
+                results[key] = taken_warning(b)
+            elif b.id not in best or score > best[b.id][2]:
+                if b.id in best:
+                    results[best[b.id][0]] = taken_warning(b)
+                best[b.id] = (key, b, score, how)
+            else:
+                results[key] = taken_warning(b)
+        for key, b, score, how in best.values():
+            taken[b.id] = key
+            results[key] = {"brdp": b, "how": how, "similarity": round(score, 3)}
+
+    # 2. Same context + path, or context + objectUse, with one BRDP.
+    proposals = []
+    for c in candidates:
+        rc = contents[c["key"]]
+        if rc is None or c["key"] in results:
+            continue
+        found: dict = {}
+        for k in rc.path_keys:
+            found.update(by_path.get(k, {}))
+        if len(found) != 1:
+            found = {}
+            for k in rc.use_keys:
+                found.update(by_use.get(k, {}))
+        if len(found) == 1:
+            b = next(iter(found.values()))
+            score = content_similarity(rc.grams, content_of[b.id].grams)
+            if score >= CONTENT_MATCH_FLOOR:
+                proposals.append((c["key"], b, score, "content"))
+    resolve(proposals)
+
+    # 3. The only one at or above CONTENT_SIMILARITY among the BRDPs left.
+    left = [(b, rc) for b, rc in stored if b.id not in taken]
+    proposals = []
+    for c in candidates:
+        rc = contents[c["key"]]
+        if rc is None or c["key"] in results or not rc.grams:
+            continue
+        size = len(rc.grams)
+        above = []
+        for b, brc in left:
+            other = len(brc.grams)
+            if not other or 2 * min(size, other) / (size + other) < CONTENT_SIMILARITY:
+                continue
+            score = content_similarity(rc.grams, brc.grams)
+            if score >= CONTENT_SIMILARITY:
+                above.append((b, score))
+                if len(above) > 1:
+                    break
+        if len(above) == 1:
+            proposals.append((c["key"], above[0][0], above[0][1], "similarity"))
+    resolve(proposals)
+    return results
+
+
 # ── Classification ────────────────────────────────────────────────────────
 
 
@@ -564,6 +874,42 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
     # A project's own prefix (BRDP-ENV-00001): "Keep ENV" keeps the number.
     prefixes = await catalog_prefixes(db)
     own_spec = "DITA" if project.standard.startswith("DITA") else "S1000D"
+
+    def would_be_new_ext(c: dict) -> bool:
+        origin = c["origin_identifier"]
+        if match(origin) is not None or c.get("no_content") or c.get("source") == "text":
+            return False
+        if not c.get("rule_xml") or c.get("rule_problem"):
+            return False
+        if origin and (
+            origin in catalog
+            or (origin in edition_catalog and closest_edition(project.standard, list(edition_catalog[origin])))
+            or default_rule_specification(origin)
+            or other_specification(origin, project.standard)
+            or own_prefix(origin, prefixes)
+        ):
+            return False
+        return True
+
+    # Rules already in the project under another identifier (matching by
+    # content): only for the would-be new EXTs, against the BRDPs no
+    # candidate matched by identifier or origin.
+    content_matches: dict[str, dict] = {}
+    eligible = [c for c in candidates if would_be_new_ext(c)] if rule_format else []
+    if eligible:
+        matched_ids = {b.id for o in origin_ids if (b := match(o)) is not None}
+        pool_rows = (
+            await db.execute(
+                select(BRDP, RuleApproval)
+                .join(RuleApproval, RuleApproval.brdp_id == BRDP.id)
+                .where(BRDP.project_id == project.id, ACTIVE_BRDP_FILTER, RuleApproval.format == rule_format)
+                .order_by(BRDP.identifier)
+            )
+        ).all()
+        pool = [(b, a.rule_xml) for b, a in pool_rows if b.id not in matched_ids and (a.rule_xml or "").strip()]
+        content_matches = match_by_content(eligible, pool, rule_format)
+        for b, a in pool_rows:
+            approvals.setdefault(b.id, a)
     for c in candidates:
         origin = c["origin_identifier"]
         importable_rule = c["rule_xml"] if c["rule_xml"] and not c.get("rule_problem") else ""
@@ -644,8 +990,41 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             c["identifier"] = origin
             c["option_identifiers"] = {"own_prefix": origin}
             options = ["own_prefix", "new_ext"]
+        elif (found := content_matches.get(c["key"], {})).get("brdp") is not None:
+            # The rule is already in the project under another identifier.
+            brdp = found["brdp"]
+            approval = approvals.get(brdp.id)
+            c["existing_rule_xml"] = approval.rule_xml if approval is not None else ""
+            c["existing_rule_state"] = _rule_state(approval)
+            c["project_texts"] = {"title": brdp.title, "definition": brdp.definition, "proposal": brdp.proposal}
+            c["identifier"] = brdp.identifier
+            base = "same" if found["how"] == "exact" else "changed"
+            c["match_by"] = "similarity" if found["how"] == "similarity" else "content"
+            c["option_identifiers"] = {base: brdp.identifier}
+            if _EXT_RE.match(origin or "") and origin not in existing:
+                c["option_identifiers"]["new_ext"] = origin
+            if found["how"] == "content":
+                c["warnings"].append(
+                    {
+                        "code": "content_match_changed",
+                        "params": {"identifier": brdp.identifier},
+                        "message": f"Matched by content with {brdp.identifier}: the project's rule differs from the file's. "
+                        "It may be a correction made in the project; review it before importing.",
+                    }
+                )
+            elif found["how"] == "similarity":
+                c["warnings"].append(
+                    {
+                        "code": "similarity_match",
+                        "params": {"identifier": brdp.identifier, "similarity": found["similarity"]},
+                        "message": f"Matched by similarity with {brdp.identifier}: check it.",
+                    }
+                )
+            options = [base, "new_ext"]
         else:
             base = "new_ext"
+            if content_matches.get(c["key"], {}).get("warning"):
+                c["warnings"].append(content_matches[c["key"]]["warning"])
             # A free EXT number of the file keeps its number.
             if _EXT_RE.match(origin or ""):
                 c["option_identifiers"] = {"new_ext": origin}
@@ -680,7 +1059,9 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
         c["classification"] = classification
         _renumber_warning(c)
         c["options"] = list(dict.fromkeys(options))
-        c["selected"] = classification in ("new_ext", "own_prefix", "catalog", "other_spec", "changed")
+        # A content match is never checked by default: the project's rule may
+        # be a correction of the file's.
+        c["selected"] = classification in ("new_ext", "own_prefix", "catalog", "other_spec", "changed") and not c.get("match_by")
         c["own_specification"] = own_spec
         set_texts(c)
 
@@ -1316,8 +1697,13 @@ def _history_event(
     catalog_edition: str | None = None,
     standard: str | None = None,
     quote: str | None = None,
+    match_by: str | None = None,
 ) -> str:
     event = {"file": filename, "origin_identifier": origin}
+    if match_by:
+        # "Regla actualizada desde <fichero> (emparejada por contenido / por
+        # parecido)": the rule was found in the project by its content.
+        event["match_by"] = match_by
     if quote is not None:
         # Free text: "extraída de <fichero o Texto pegado>", with the quote
         # (file "" = a pasted text, named by the page in its language).
@@ -1476,7 +1862,10 @@ async def apply_job(job: RuleExtractJob, keys: list[str], user: User, db: AsyncS
             approval.approved_at = now if verified else None
             record_change(db, brdp.id, user, "rule_status", old_state, "verified" if verified else "draft")
             record_change(db, brdp.id, user, "rule", old_xml, rule_xml)
-            record_change(db, brdp.id, user, "extracted_from", "", _history_event(job.filename, origin, verified), always=True)
+            record_change(
+                db, brdp.id, user, "extracted_from", "", _history_event(job.filename, origin, verified, match_by=c.get("match_by")),
+                always=True,
+            )
             result["updated"] += 1
             updated_keys.add(c["key"])
             result["updated_identifiers"].append({"key": c["key"], "identifier": brdp.identifier})

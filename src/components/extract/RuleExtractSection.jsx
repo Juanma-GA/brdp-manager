@@ -119,6 +119,14 @@ function warningText(t, w) {
       return t('config.ruleExtract.warnings.catalog_other_edition', { identifier: p.identifier, standard: p.standard, edition: p.edition });
     case 'similar_to':
       return t('config.ruleExtract.warnings.similar_to', { identifier: p.identifier, similarity: p.similarity });
+    case 'content_match_changed':
+      return t('config.ruleExtract.warnings.content_match_changed', { identifier: p.identifier });
+    case 'similarity_match':
+      return t('config.ruleExtract.warnings.similarity_match', { identifier: p.identifier });
+    case 'rule_in_several_brdps':
+      return t('config.ruleExtract.warnings.rule_in_several_brdps', { identifiers: (p.identifiers || []).join(', ') });
+    case 'brdp_already_matched':
+      return t('config.ruleExtract.warnings.brdp_already_matched', { identifier: p.identifier });
     case 'external_entities':
       return t('config.ruleExtract.warnings.external_entities', { names: (p.names || []).join(', ') || p.dtd });
     case 'query_binding':
