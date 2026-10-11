@@ -213,10 +213,16 @@ for (const [schema, id] of Object.entries(FORBIDDEN)) {
   check(`2a ${id}: verdict correct`, verdict?.kind === 'correct', JSON.stringify(verdict));
 }
 {
-  const { result, asked } = await generate(EXT86, []);
-  check('2a EXT-00086: not executable, no LLM call', result.status === 'not_executable' && result.reason.code === 'minimal_document_unavailable' && asked.length === 0, JSON.stringify(result.reason));
-  check('2a EXT-00086: reason EN', formatRuleTestReason(result.reason, en) === 'the rule only asks whether the document is of the icnmetadata schema (root <icnMetadataFile>), and the application cannot build a valid one: it does not write its <imfIdentAndStatusSection> yet.', formatRuleTestReason(result.reason, en));
-  check('2a EXT-00086: reason ES', formatRuleTestReason(result.reason, es) === 'la regla solo pregunta si el documento es del esquema icnmetadata (raíz <icnMetadataFile>), y la aplicación no puede montar uno válido: todavía no escribe su <imfIdentAndStatusSection>.', formatRuleTestReason(result.reason, es));
+  // EXT-00086: the application now writes the <imfIdentAndStatusSection> of
+  // <icnMetadataFile>, so it is tested like the other forbidden schemas.
+  const { result, asked, verdict, proposalChecks } = await generate(EXT86, [], 'BRDP-EXT-00086');
+  check('2a EXT-00086: no LLM call, not even the Proposal check', asked.length === 0 && proposalChecks.length === 0, `${asked.length} ${proposalChecks.length}`);
+  check('2a EXT-00086: minimal icnmetadata document rejected, another accepted',
+    result.status === 'ready' && result.examples.length === 2 && result.examples[0].schema === 'icnmetadata' && result.runs[0].result.status === 'rejected'
+    && result.examples[1].schema !== 'icnmetadata' && result.runs[1].result.status === 'accepted',
+    JSON.stringify(result.reason || result.examples?.map((e, i) => [e.schema, e.expected, result.runs[i].result?.status])));
+  check('2a EXT-00086: the minimal document has its section', /<icnMetadataFile[^>]*>\s*<imfIdentAndStatusSection>/.test(result.examples?.[0]?.xml || ''), result.examples?.[0]?.xml);
+  check('2a EXT-00086: verdict correct', verdict?.kind === 'correct', JSON.stringify(verdict));
   // //dmodule flag 0 outside a context block: as before (the LLM writes the examples).
   const general = await generate(sor('//dmodule', 'x'), ['{"examples": []}']);
   check('2a //dmodule without a context: the LLM is asked, as before', general.asked.length === 1);

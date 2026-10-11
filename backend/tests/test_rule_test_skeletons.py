@@ -223,10 +223,8 @@ def test_every_data_module_schema_has_a_metadata_section_that_fits_its_cards(sta
     for schema in get_document_schemas(standard):
         skeleton = derive_skeleton(standard, schema)
         metadata = derive_metadata_skeleton(standard, schema)
-        covered_roots = ("dmodule", "dataUpdateFile", "pm") + (("ddn", "dml") if standard != "S1000D 3.0.1" else ())
-        if skeleton["root"] not in covered_roots:
-            # comment, scormContentPackage, icnMetadataFile: not covered yet;
-            # the 3.0.1 ddn and dml have no section at all.
+        if standard == "S1000D 3.0.1" and skeleton["root"] in ("ddn", "dml"):
+            # The 3.0.1 ddn and dml have no section at all.
             assert metadata is None, (standard, schema)
             continue
         assert metadata is not None, (standard, schema)
@@ -247,9 +245,32 @@ def test_every_data_module_schema_has_a_metadata_section_that_fits_its_cards(sta
                     assert value in declared[name]["enum"], (schema, node["name"], name, value)
             for child in node["children"]:
                 assert child["name"] in graph[node["name"]]["children"], (schema, node["name"], child["name"])
-    assert "descript" in covered and "proced" in covered and "pm" in covered
+    assert "descript" in covered and "proced" in covered and "pm" in covered and "comment" in covered
     if standard != "S1000D 3.0.1":
-        assert "ddn" in covered and "dml" in covered
+        assert "ddn" in covered and "dml" in covered and "scormcontentpackage" in covered
+    if standard == "S1000D 4.2":
+        assert "icnmetadata" in covered
+
+
+# scormcontentpackage.xsd imports the IEEE LOM schema (../lom_schema/lom.xsd),
+# which is not in sources/: a stub declaring only <lom:lom> (any content)
+# stands in for it. Nothing of the identification and status section uses
+# LOM, so the section is still checked against the real S1000D XSD.
+_LOM_STUB = b"""<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    targetNamespace="http://ltsc.ieee.org/xsd/LOM"><xs:element name="lom"/></xs:schema>"""
+
+
+class _LomStubResolver(etree.Resolver):
+    def resolve(self, url, pubid, context):
+        if url.replace("\\", "/").endswith("lom_schema/lom.xsd"):
+            return self.resolve_string(_LOM_STUB, context)
+        return None
+
+
+def _load_xsd(path):
+    parser = etree.XMLParser()
+    parser.resolvers.add(_LomStubResolver())
+    return etree.XMLSchema(etree.parse(str(path), parser))
 
 
 @pytest.mark.parametrize("standard", S1000D)
@@ -265,7 +286,7 @@ def test_every_metadata_section_is_valid_against_the_real_xsd(standard):
         root = path[0]
         body = "".join(f"<{n}>" for n in path[1:]) + "".join(f"</{n}>" for n in reversed(path[1:]))
         doc = f"<{root}>{_serialize(metadata['tree'])}{body}</{root}>"
-        xsd = etree.XMLSchema(etree.parse(str(SOURCES / XSD_DIRS[standard] / f"{schema}.xsd")))
+        xsd = _load_xsd(SOURCES / XSD_DIRS[standard] / f"{schema}.xsd")
         xsd.validate(etree.fromstring(doc))
         section = f"/{root}/{metadata['element']}"
         errors = [e.message for e in xsd.error_log if (e.path or "").startswith(section)]
@@ -306,7 +327,31 @@ def test_known_metadata_sections():
         dml = derive_metadata_skeleton(standard, "dml")
         assert [c["name"] for c in dml["tree"]["children"]] == ["dmlAddress", "dmlStatus"]
         assert [c["name"] for c in dml["tree"]["children"][1]["children"]] == ["security", "brexDmRef"]
-        assert derive_metadata_skeleton(standard, "comment") is None
+        comment = derive_metadata_skeleton(standard, "comment")
+        assert comment["element"] == "identAndStatusSection"
+        assert [c["name"] for c in comment["tree"]["children"]] == ["commentAddress", "commentStatus"]
+        assert [c["name"] for c in comment["tree"]["children"][1]["children"]] == [
+            "security", "commentPriority", "commentRefs", "brexDmRef",
+        ]
+        comment_code = comment["tree"]["children"][0]["children"][0]["children"][0]
+        assert comment_code["name"] == "commentCode" and dict(comment_code["attributes"])["commentType"] == "q"
+        scorm = derive_metadata_skeleton(standard, "scormcontentpackage")
+        assert scorm["element"] == "identAndStatusSection"
+        assert [c["name"] for c in scorm["tree"]["children"]] == ["scormContentPackageAddress", "scormContentPackageStatus"]
+        assert [c["name"] for c in scorm["tree"]["children"][1]["children"]] == [
+            "security", "responsiblePartnerCompany", "brexDmRef", "qualityAssurance", "personSkill",
+        ]
+    # 4.2 ICN metadata file: its imfIdentAndStatusSection; the schema does not
+    # exist in 4.1 (no template, no error).
+    icn = derive_metadata_skeleton("S1000D 4.2", "icnmetadata")
+    assert icn["element"] == "imfIdentAndStatusSection"
+    assert [c["name"] for c in icn["tree"]["children"]] == ["imfAddress", "imfStatus"]
+    assert derive_metadata_skeleton("S1000D 4.1", "icnmetadata") is None
+    # 3.0.1 comment: its <cstatus> is the section (no BREX reference).
+    comment301 = derive_metadata_skeleton("S1000D 3.0.1", "comment")
+    assert comment301["element"] == "cstatus"
+    assert [c["name"] for c in comment301["tree"]["children"]] == ["ccode", "issdate", "corig", "security", "priority", "crefs"]
+    assert derive_metadata_skeleton("S1000D 3.0.1", "scormcontentpackage") is None
     pm301 = derive_metadata_skeleton("S1000D 3.0.1", "pm")
     assert pm301["element"] == "idstatus"
     assert [c["name"] for c in pm301["tree"]["children"]] == ["pmaddres", "pmstatus"]

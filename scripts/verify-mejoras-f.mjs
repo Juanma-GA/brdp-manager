@@ -151,7 +151,11 @@ async function main() {
     await testRule();
     await panel().getByTestId("rule-test-verdict").waitFor({ timeout: 20000 });
     const v2b = await panel().getByTestId("rule-test-verdict").textContent();
-    assert(/rejected an example meant to comply with it/.test(v2b), `inverted: verdict incorrect (${v2b})`);
+    // Since 55b39f5 the verdict says only "Test failed." and the cause (what
+    // the rule did) is the VerdictCauseHint line under it.
+    const cause2b = panel().getByTestId("rule-test-cause");
+    const cause2bText = (await cause2b.count()) ? await cause2b.first().textContent() : "";
+    assert(/^Test failed\./.test(v2b.trim()) && (await cause2b.first().getAttribute("data-cause")) === "rule" && /rejected (an example|one) it should have accepted/.test(cause2bText), `inverted: verdict incorrect (${v2b} | ${cause2bText})`);
     await panel().getByTestId("rule-test-review").click();
     await panel().getByTestId("rule-test-review-result").waitFor({ timeout: 15000 });
     assert((await panel().getByTestId("rule-test-review-result").getAttribute("data-cause")) === "rule", "inverted: the review blames the rule");

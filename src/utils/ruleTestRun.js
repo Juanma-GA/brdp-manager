@@ -182,9 +182,9 @@ export function documentPresenceTest({ ruleXml, format, standard, schemaLocation
 // the application. Every part must be flag 0 (objappl 0), in a context
 // block, with a path that is only //R or /R (alternatives of only that),
 // R the root of that context schema. A minimal document the application
-// cannot build valid (its root needs a section it does not write, like
-// <imfIdentAndStatusSection> of <icnMetadataFile>) → not executable, with
-// the reason. Outside a context block, //dmodule flag 0 is as before.
+// cannot build valid (its root needs a section it does not write -- today
+// none: every S1000D root has its section, the icnMetadataFile's
+// <imfIdentAndStatusSection> included) → not executable, with the reason. Outside a context block, //dmodule flag 0 is as before.
 const ROOT_ONLY_PATH_RE = /^\/\/?([A-Za-z_][\w.-]*)$/;
 
 // The required children of the root that the minimal document lacks, or [].

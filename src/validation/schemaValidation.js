@@ -541,21 +541,34 @@ function tokenize(text) {
   let m;
   WORD_RE.lastIndex = 0;
   while ((m = WORD_RE.exec(text))) {
+    const start = m.index;
+    const end = m.index + m[0].length;
     if (m[0] === ',') {
-      out.push({ type: 'comma' });
+      out.push({ type: 'comma', start, end });
       continue;
     }
     if (m[0] === MARKED_NAME) {
-      out.push({ type: 'marked' });
+      out.push({ type: 'marked', start, end });
       continue;
     }
     const before = text[m.index - 1];
     const after = text[m.index + m[0].length];
     const marked = before === '<' || before === '@' || (before === '/' && text[m.index - 2] === '<') || after === '>';
-    out.push({ type: 'word', value: m[0], marked });
+    out.push({ type: 'word', value: m[0], marked, start, end });
   }
   return out;
 }
+
+// Punctuation that opens or closes another part of the sentence. The word
+// after a trigger word only counts when none of it lies in between ("The
+// @footnoteMark attribute (if used) must…" never proposes <if>: the word
+// after "attribute" is inside a parenthesis), and a list never continues
+// past it. Commas are not here: they separate the items of a list.
+const PHRASE_BREAK_RE = /[()[\]:;.!?¿¡"'“”«»‘’]/;
+const brokenBetween = (text, from, to) => PHRASE_BREAK_RE.test(text.slice(from.end, to.start));
+// A word that ends a sentence carries its period ("existir."): the list
+// ends with it.
+const endsSentence = (token) => token.type === 'word' && /\.$/.test(token.value);
 
 // Skips over SKIP_WORDS starting at `idx`; stops (without consuming) at a
 // trigger word, a comma, or anything else.
@@ -580,6 +593,7 @@ function skipSkipWords(tokens, idx) {
 // resolvePhraseCandidates above.
 function extractPhraseCandidates(text) {
   const tokens = tokenize(text);
+  const source = String(text);
   const candidates = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
@@ -594,17 +608,19 @@ function extractPhraseCandidates(text) {
     }
     if (j >= tokens.length || tokens[j].type !== 'word') continue;
     if (TRIGGER_WORDS.has(tokens[j].value.toLowerCase())) continue; // re-anchor: let the outer loop reach this trigger itself
+    if (brokenBetween(source, t, tokens[j])) continue; // another part of the sentence: not the trigger's name
 
     candidates.push({ name: tokens[j].value, type });
     let k = j + 1;
     let previousMarked = tokens[j].marked;
+    let previous = tokens[j];
     // List continuation: comma or a list conjunction, then (skipping
     // SKIP_WORDS again) another word -- repeat until the pattern breaks.
     // "Sugerencias para erratas" round, Part 3: only after an UNMARKED
     // word. A marked name (`<copyright>`, `@x`) is the name the trigger
     // was about, so the list ends there -- "the element <copyright> and
     // source of copyright information" never captures "source".
-    while (!previousMarked) {
+    while (!previousMarked && !endsSentence(previous)) {
       let k2 = k;
       let isContinuator = false;
       if (tokens[k2] && tokens[k2].type === 'comma') {
@@ -617,8 +633,10 @@ function extractPhraseCandidates(text) {
       if (!isContinuator) break;
       k2 = skipSkipWords(tokens, k2);
       if (k2 >= tokens.length || tokens[k2].type !== 'word' || TRIGGER_WORDS.has(tokens[k2].value.toLowerCase())) break;
+      if (brokenBetween(source, previous, tokens[k2])) break; // a list does not continue past a parenthesis, colon…
       candidates.push({ name: tokens[k2].value, type });
       previousMarked = tokens[k2].marked;
+      previous = tokens[k2];
       k = k2 + 1;
     }
     i = k - 1; // avoid rescanning consumed list words as fresh triggers

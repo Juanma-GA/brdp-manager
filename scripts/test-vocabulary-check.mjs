@@ -681,5 +681,31 @@ const emptyCtx = { elements: [], attributes: [], camelCase: [], phraseCandidates
   assert(summary.common === null, "a single-variant entry never produces a common/diff split (common: null)");
 }
 
+// ─── "¿Quisiste decir…?" never jumps over punctuation ─────────────────────
+// Real case CMP EXT-00024: "The @footnoteMark attribute (if used) must be
+// set to \"num\"." proposed <if> (the word after "attribute" is inside a
+// parenthesis). The word after a trigger counts only with no ( ) [ ] : ; . ! ?
+// or quotes in between, and a list never continues past one.
+{
+  const v42 = JSON.parse(readFileSync(join(__dirname, "../public/schema-vocabulary-4-2.json"), "utf8"));
+  const vocab = { elements: new Set(v42.elements), attributes: new Set(v42.attributes) };
+  const suggest = (t) => resolvePhraseCandidates(extractContextCandidates(t).phraseCandidates, vocab);
+  assert(suggest('The @footnoteMark attribute (if used) must be set to "num".').length === 0, "EXT-00024: no proposal for the word inside the parenthesis (<if>)");
+  assert(vocab.elements.has("if"), "<if> does exist in S1000D 4.2 (so only the punctuation stops the proposal)");
+  const appl = suggest("el atributo applicRefId debe indicarse");
+  assert(appl.length === 1 && appl[0].name === "applicRefId" && appl[0].type === "attribute", '"el atributo applicRefId debe indicarse" still proposes @applicRefId');
+  const tbl = suggest("el atributo table debe existir");
+  assert(tbl.length === 1 && tbl[0].name === "table" && tbl[0].type === "element", '"el atributo table debe existir" still proposes <table> (corrected type)');
+  assert(extractContextCandidates("the elements cl, pl and ip").phraseCandidates.map((p) => p.name).join() === "cl,pl,ip", '"the elements cl, pl and ip" still captures the list');
+  for (const t of ["the attribute (see note) emphasisType", "the attribute: emphasisType", "the attribute; emphasisType", "the attribute [emphasisType]", 'the attribute "emphasisType"', "el atributo «emphasisType»", "the attribute. EmphasisType", "the attribute? emphasisType"]) {
+    assert(extractContextCandidates(t).phraseCandidates.length === 0, `no proposal across punctuation: ${t}`);
+  }
+  assert(extractContextCandidates("the elements cl, pl (and ip)").phraseCandidates.map((p) => p.name).join() === "cl,pl", "a list does not continue past a parenthesis");
+  assert(extractContextCandidates("the elements cl, pl. And ip").phraseCandidates.map((p) => p.name).join() === "cl,pl.", "a list ends with the sentence");
+  assert(extractContextCandidates("el atributo de tipo cl").phraseCandidates.map((p) => p.name).join() === "cl", "skip words are still skipped");
+  const marked = extractContextCandidates("The <if> element and the @emphasisType attribute (if used)");
+  assert(marked.elements.includes("if") && marked.attributes.includes("emphasisType") && !marked.phraseCandidates.some((p) => p.name === "if"), "<if> and @x written with markup: unchanged");
+}
+
 console.log(failures === 0 ? "\nALL CHECKS PASSED\n" : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

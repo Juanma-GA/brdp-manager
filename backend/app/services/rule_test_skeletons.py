@@ -487,6 +487,93 @@ _METADATA_TEMPLATE_PM_301 = (
     ],
 )
 
+# 4.x comment (comment.xsd), SCORM content package (scormcontentpackage.xsd)
+# and 4.2 ICN metadata file (icnmetadata.xsd; the schema does not exist in
+# 4.1): their own identification and status section, with the XSD's required
+# elements in the XSD's order. Without it, a rule about a comment's status
+# was never offered the comment schema, and a context rule forbidding the
+# icnmetadata schema (BRDP-EXT-00086 of Official Default CMP ATA 4.2,
+# //icnMetadataFile flag 0) could not build its minimal document.
+_METADATA_TEMPLATE_COMMENT_4X = (
+    "identAndStatusSection", {}, None, [
+        ("commentAddress", {}, None, [
+            ("commentIdent", {}, None, [("commentCode", {}, None, []), ("language", {}, None, [])]),
+            ("commentAddressItems", {}, None, [
+                ("issueDate", {}, None, []),
+                ("commentOriginator", {}, None, [_DISPATCH_ADDRESS_4X]),
+            ]),
+        ]),
+        ("commentStatus", {}, None, [
+            ("security", {}, None, []),
+            ("commentPriority", {}, None, []),
+            ("commentRefs", {}, None, [("noReferences", {}, None, [])]),
+            _BREX_DM_REF_4X,
+        ]),
+    ],
+)
+
+_METADATA_TEMPLATE_SCORM_4X = (
+    "identAndStatusSection", {}, None, [
+        ("scormContentPackageAddress", {}, None, [
+            ("scormContentPackageIdent", {}, None, [
+                ("scormContentPackageCode", {}, None, []),
+                ("language", {}, None, []),
+                ("issueInfo", {}, None, []),
+            ]),
+            ("scormContentPackageAddressItems", {}, None, [
+                ("issueDate", {}, None, []),
+                ("scormContentPackageTitle", {}, "Example SCORM content package", []),
+            ]),
+        ]),
+        ("scormContentPackageStatus", {}, None, [
+            ("security", {}, None, []),
+            ("responsiblePartnerCompany", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            _BREX_DM_REF_4X,
+            ("qualityAssurance", {}, None, [("unverified", {}, None, [])]),
+            ("personSkill", {}, None, []),
+        ]),
+    ],
+)
+
+_METADATA_TEMPLATE_ICN_42 = (
+    "imfIdentAndStatusSection", {}, None, [
+        ("imfAddress", {}, None, [
+            ("imfIdent", {}, None, [("imfCode", {}, None, []), ("issueInfo", {}, None, [])]),
+            ("imfAddressItems", {}, None, [("icnTitle", {}, "Example illustration", [])]),
+        ]),
+        ("imfStatus", {}, None, [
+            ("security", {}, None, []),
+            ("responsiblePartnerCompany", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("originator", {}, None, [("enterpriseName", {}, "Example company", [])]),
+            ("qualityAssurance", {}, None, [("unverified", {}, None, [])]),
+        ]),
+    ],
+)
+
+# 3.0.1 comment: no idstatus, but its <cstatus> is the same thing -- the
+# comment's code (elements with text, like the data module's avee), date,
+# originator, security, priority and references -- so it is its section. It
+# has no reference to the BREX in 3.0.1.
+_METADATA_TEMPLATE_COMMENT_301 = (
+    "cstatus", {}, None, [
+        ("ccode", {}, None, [
+            ("modelic", {}, "EXAMPLE", []),
+            ("sendid", {}, "SENDR", []),
+            ("diyear", {}, "2026", []),
+            ("seqnum", {}, "00001", []),
+            ("ctype", {}, None, []),
+        ]),
+        ("issdate", {}, None, []),
+        ("corig", {}, None, [("dispaddr", {}, None, [
+            ("enterprise", {}, None, [("ent-name", {}, "Example company", [])]),
+            ("address", {}, None, [("city", {}, "Example city", []), ("country", {}, "Example country", [])]),
+        ])]),
+        ("security", {}, None, []),
+        ("priority", {}, None, []),
+        ("crefs", {}, None, [("cnorefs", {}, None, [])]),
+    ],
+)
+
 # Values of the required attributes that have no enum (keyed by attribute
 # name; the XSD patterns they must follow are checked by the tests).
 METADATA_ATTRIBUTE_VALUES = {
@@ -503,21 +590,30 @@ METADATA_ATTRIBUTE_VALUES = {
     # 4.x pmCode, ddnCode, dmlCode ([A-Z0-9]{5}, \d{2}, [0-9]{4}, [0-9]{5})
     "pmIssuer": "12345", "pmNumber": "00001", "pmVolume": "00",
     "senderIdent": "SENDR", "receiverIdent": "RECVR", "yearOfDataIssue": "2026", "seqNumber": "00001",
+    # 4.x scormContentPackageCode ([A-Z0-9]{5}, [A-Z0-9]{5}, \d{2}); 4.2 imfCode
+    # (xs:string: an ICN of the example's model)
+    "scormContentPackageIssuer": "12345", "scormContentPackageNumber": "00001", "scormContentPackageVolume": "00",
+    "imfIdentIcn": "ICN-EXAMPLE-A-000000-0-12345-00001-A-001-01",
 }
 
 # The templates of each document root, tried in order: the first whose
 # section element is a child of the root (4.x identAndStatusSection, 3.0.1
 # idstatus). pm, ddn and dml share the element name identAndStatusSection
 # with the data module, so the templates are keyed by root, not by element.
-# Not covered yet (no section): comment, scormContentPackage,
-# icnMetadataFile -- the Test rule panel does not offer those schemas to a
-# rule that looks at their section (ruleTestSkeleton.js, sectionMissing).
+# Every document root of S1000D 3.0.1, 4.1 and 4.2 has its section here
+# except the 3.0.1 ddn and dml (none: their identification sits in the root).
+# A schema whose section cannot be built valid gets none, and the Test rule
+# panel does not offer it to a rule that looks at its section
+# (ruleTestSkeleton.js, sectionMissing).
 METADATA_TEMPLATES_BY_ROOT = {
     "dmodule": (_METADATA_TEMPLATE_4X, _METADATA_TEMPLATE_301),
     "dataUpdateFile": (_METADATA_TEMPLATE_UPDATE_4X,),
     "pm": (_METADATA_TEMPLATE_PM_4X, _METADATA_TEMPLATE_PM_301),
     "ddn": (_METADATA_TEMPLATE_DDN_4X,),
     "dml": (_METADATA_TEMPLATE_DML_4X,),
+    "comment": (_METADATA_TEMPLATE_COMMENT_4X, _METADATA_TEMPLATE_COMMENT_301),
+    "scormContentPackage": (_METADATA_TEMPLATE_SCORM_4X,),
+    "icnMetadataFile": (_METADATA_TEMPLATE_ICN_42,),
 }
 
 
@@ -564,9 +660,9 @@ def _metadata_tree(cards: dict, graph: dict[str, dict], schema: str, node: tuple
 def derive_metadata_skeleton(standard: str, schema: str) -> dict | None:
     """{"element", "tree"} -- the minimal identification and status section of
     a data module schema, of the 4.x data update file, of a publication
-    module (4.x and 3.0.1) or of a 4.x DDN or DML (see above) -- or None:
-    DITA, another document (comment, …, and the 3.0.1 ddn/dml, which have no
-    section), or cards that do not fit the template."""
+    module or comment (4.x and 3.0.1), of a 4.x DDN, DML or SCORM content
+    package, or of a 4.2 ICN metadata file (see above) -- or None: DITA, the
+    3.0.1 ddn/dml (no section), or cards that do not fit the template."""
     if is_dita_standard(standard):
         return None
     graph = schema_graph(standard, schema)

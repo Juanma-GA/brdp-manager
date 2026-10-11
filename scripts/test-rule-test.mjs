@@ -1136,7 +1136,10 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
 
   check('metadata: every data module skeleton has the minimal section', descript.skeleton.metadata?.element === 'identAndStatusSection' && structureOf(S301, 'descript').skeleton.metadata?.element === 'idstatus');
   check('metadata: pm, ddn and dml have their own section', ['pm', 'ddn', 'dml'].every((s) => structureOf(S42, s).skeleton.metadata?.element === 'identAndStatusSection') && structureOf(S301, 'pm').skeleton.metadata?.element === 'idstatus');
-  check('metadata: not for documents without one (comment, 3.0.1 ddn)', structureOf(S42, 'comment').skeleton.metadata === null && structureOf(S301, 'ddn').skeleton.metadata === null);
+  check('metadata: not for documents without one (3.0.1 ddn)', structureOf(S301, 'ddn').skeleton.metadata === null);
+  check('metadata: comment, SCORM content package and ICN metadata file have their own section',
+    structureOf(S42, 'comment').skeleton.metadata?.element === 'identAndStatusSection' && structureOf(S42, 'scormcontentpackage').skeleton.metadata?.element === 'identAndStatusSection'
+    && structureOf(S42, 'icnmetadata').skeleton.metadata?.element === 'imfIdentAndStatusSection' && structureOf(S301, 'comment').skeleton.metadata?.element === 'cstatus');
   check('metadata: minimal section, in XSD order', /<dmIdent>\s*<dmCode [^>]*\/>\s*<language [^>]*\/>\s*<issueInfo [^>]*\/>/.test(minimal) && /<dmStatus>\s*<security [^>]*\/>\s*<responsiblePartnerCompany>/.test(minimal), minimal);
 
   // A content-only rule: unchanged placement, the minimal section is part of
@@ -2343,20 +2346,44 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('3.0.1 pm: the rule on pmstatus writes its idstatus', p301.metadata?.element === 'idstatus' && p301.metadata.insertion === true && p301.contentInsertion === false);
   check('3.0.1 ddn: no section, content at the root', structureOf(S301, 'ddn').skeleton.metadata === null && structureOf(S301, 'ddn').skeleton.path.join() === 'ddn');
 
-  // A document whose section the app does not build yet (comment): not
-  // offered; the result says which part was not tested and why.
+  // The comment's section (4.x identAndStatusSection/commentStatus): the
+  // comment schema is offered and its section written.
   const commentOnly = '<structureObjectRule id="C1"><objectPath allowedObjectFlag="0">//commentStatus/commentResponse</objectPath><objectUse>u</objectUse></structureObjectRule>';
   const sc = await prepareRuleTestSetup({ ruleXml: commentOnly, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure });
-  check('comment only: not executable, section_unavailable', sc.unreachable?.code === 'section_unavailable' && sc.unreachable.params.schemas === 'comment' && /commentStatus/.test(sc.unreachable.params.names), JSON.stringify(sc.unreachable));
-  const gc = await generateRuleTestExamples({
-    ruleXml: commentOnly, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat', brdp: { identifier: 'C1', title: 't', definition: 'd', proposal: 'p' },
-    vocabulary, parseXml, ask: async () => { throw new Error('the LLM must not be called'); }, fetchSchemaCards: fetchCards42, fetchStructure,
-  });
-  check('comment only: no LLM call, not executable', gc.status === 'not_executable' && gc.reason.code === 'section_unavailable');
-  check('comment only: reason EN/ES', formatRuleTestReason(gc.reason, i18n.getFixedT('en')).includes('looks inside the identification and status section of the comment schema (<commentStatus>') && formatRuleTestReason(gc.reason, es).includes('mira dentro de la sección de identificación y estado del esquema comment (<commentStatus>'), formatRuleTestReason(gc.reason, i18n.getFixedT('en')));
+  const pc = sc.promptPlacements[0];
+  check('comment only: tested on comment, in its section', sc.unreachable === null && sc.promptPlacements.length === 1 && pc.schema === 'comment' && pc.metadata?.insertion === true && pc.contentInsertion === false, JSON.stringify({ u: sc.unreachable, p: sc.promptPlacements.map((x) => x.schema) }));
+  const comment = minimal(S42, 'comment');
+  const withResponse = comment.replace(/(<commentPriority [^>]*\/>)/, '$1<commentResponse responseType="rt01"/>');
+  const rc = testRun(commentOnly, [
+    { label: 'no response', expected: 'accept', schema: 'comment', metadata: comment },
+    { label: 'response', expected: 'reject', schema: 'comment', metadata: withResponse },
+  ], sc.setup);
+  check('comment only: runs on a comment (accepted / rejected)', rc.runs.map(verdictOf).join() === 'accepted,rejected' && rc.runs.every((r) => r.validation.runnable), JSON.stringify(rc.runs.map((r) => [r.result?.status, r.validation.structure])));
+  // The comment's brexDmRef follows its own modelIdentCode.
+  const commentOwnModel = comment.replace(/(<commentCode [^>]*modelIdentCode=")EXAMPLE/, '$1ACME');
+  const followedComment = testRun(commentOnly, [{ label: 'model', expected: 'accept', schema: 'comment', metadata: commentOwnModel }], sc.setup).materialized[0];
+  check('comment: the brexDmRef modelIdentCode follows the commentCode', /<brexDmRef>[\s\S]*<dmCode [^>]*modelIdentCode="ACME"/.test(followedComment.xml) && followedComment.brexModelIdentFollowed === true, followedComment.xml);
   const mixed = '<structureObjectRule id="C2"><objectPath allowedObjectFlag="0">//commentStatus/commentResponse | //dmStatus/applicRef</objectPath><objectUse>u</objectUse></structureObjectRule>';
   const sm = await prepareRuleTestSetup({ ruleXml: mixed, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure });
-  check('comment + dmStatus: descript tested, comment not offered and reported', sm.unreachable === null && sm.promptPlacements.map((p) => p.schema).join() === 'descript' && sm.untested.length === 1 && sm.untested[0].schema === 'comment' && sm.untested[0].element === 'identAndStatusSection', JSON.stringify({ p: sm.promptPlacements.map((p) => p.schema), u: sm.untested }));
+  check('comment + dmStatus: descript and comment both tested, nothing untested', sm.unreachable === null && sm.promptPlacements.map((p) => p.schema).sort().join() === 'comment,descript' && sm.untested.length === 0, JSON.stringify({ p: sm.promptPlacements.map((p) => p.schema), u: sm.untested }));
+
+  // A document whose section the app cannot build (simulated: the comment
+  // structure without its section): not offered; the result says which part
+  // was not tested and why.
+  const noSection = async (std, schema) => {
+    const st = await fetchStructure(std, schema);
+    return schema === 'comment' ? { ...st, skeleton: { ...st.skeleton, metadata: null } } : st;
+  };
+  const su = await prepareRuleTestSetup({ ruleXml: commentOnly, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure: noSection });
+  check('section not built: not executable, section_unavailable', su.unreachable?.code === 'section_unavailable' && su.unreachable.params.schemas === 'comment' && /commentStatus/.test(su.unreachable.params.names), JSON.stringify(su.unreachable));
+  const gc = await generateRuleTestExamples({
+    ruleXml: commentOnly, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat', brdp: { identifier: 'C1', title: 't', definition: 'd', proposal: 'p' },
+    vocabulary, parseXml, ask: async () => { throw new Error('the LLM must not be called'); }, fetchSchemaCards: fetchCards42, fetchStructure: noSection,
+  });
+  check('section not built: no LLM call, not executable', gc.status === 'not_executable' && gc.reason.code === 'section_unavailable');
+  check('section not built: reason EN/ES', formatRuleTestReason(gc.reason, i18n.getFixedT('en')).includes('looks inside the identification and status section of the comment schema (<commentStatus>') && formatRuleTestReason(gc.reason, es).includes('mira dentro de la sección de identificación y estado del esquema comment (<commentStatus>'), formatRuleTestReason(gc.reason, i18n.getFixedT('en')));
+  const smu = await prepareRuleTestSetup({ ruleXml: mixed, standard: S42, schemaLocation: 'flat', fetchSchemaCards: fetchCards42, fetchStructure: noSection });
+  check('section not built + dmStatus: descript tested, comment not offered and reported', smu.unreachable === null && smu.promptPlacements.map((p) => p.schema).join() === 'descript' && smu.untested.length === 1 && smu.untested[0].schema === 'comment' && smu.untested[0].element === 'identAndStatusSection', JSON.stringify({ p: smu.promptPlacements.map((p) => p.schema), u: smu.untested }));
   check('untested note ES', es('records.ruleTest.untestedPart', { names: '<commentStatus>', schema: 'comment', element: 'identAndStatusSection' }) === 'Parte de la regla no probada: <commentStatus> (esquema comment). La aplicación todavía no monta la <identAndStatusSection> de ese documento, así que no se ofrecen ejemplos de él.');
 
   // A content-only rule: unchanged (no rootOnly, no untested).

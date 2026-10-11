@@ -10,10 +10,14 @@
 //     starts at /ddn…".
 //   - a node path whose only root is /pm: runs on a publication module,
 //     with the pm's own identification and status section;
-//   - a rule on the comment's section (not built yet): "Not executable",
-//     with the reason, and no LLM call;
-//   - a rule on the comment's section OR dmStatus: tested on descript, and
-//     the panel says which part was not tested (EN and ES).
+//   - a rule on the comment's section: since the comment's section is
+//     built ("Secciones de icnmetadata/comment/SCORM"), tested on a comment,
+//     "Correct";
+//   - a rule on the comment's section OR dmStatus: tested on descript AND
+//     comment, nothing reported as untested. (The "part not tested" notice
+//     for a document without a section is covered by
+//     scripts/test-rule-test.mjs with a simulated structure: every S1000D
+//     root now has its section.)
 //
 // Preconditions: uvicorn started with MISTRAL_ENDPOINT=http://localhost:8902
 // and MISTRAL_EMBED_ENDPOINT=http://localhost:8901, both mocks running,
@@ -160,29 +164,25 @@ async function main() {
     const mark = (await example(1).locator("mark").allTextContents()).join(" ");
     assert(mark.includes("<applicRef"), `/pm only: the pm's applicRef highlighted (${mark})`);
 
-    // 3. The comment's section (not built yet): not executable, no LLM call.
+    // 3. The comment's section, now built: tested on a comment.
     await fetch(`${MOCK}/reset`, { method: "POST" });
     await select("BRDP-COMMENT");
     await page.getByRole("button", { name: "Test rule" }).click();
-    await page.waitForTimeout(2500);
-    const cText = await panel().textContent();
-    assert(cText.includes("looks inside the identification and status section of the comment schema"), `comment: not executable with the reason (${cText.slice(0, 300)})`);
-    assert((await lastRequest()) === null || (await lastRequest()).messages === undefined, "comment: no LLM call");
-    await panel().screenshot({ path: shot("rule-test-comment-section-unavailable.png") });
+    await verdict().waitFor({ timeout: 20000 });
+    const cVerdict = (await verdict().textContent()).trim();
+    assert(cVerdict.startsWith("Correct"), `comment: verdict correct (${cVerdict})`);
+    assert(/<comment[ >][\s\S]*<commentStatus>/.test(await example(0).locator("pre").textContent()), "comment: the example is a comment with its status");
+    await panel().screenshot({ path: shot("rule-test-comment-section.png") });
 
-    // 4. comment OR dmStatus: tested on descript, the untested part said.
+    // 4. comment OR dmStatus: tested on descript and comment, nothing untested.
+    await fetch(`${MOCK}/reset`, { method: "POST" });
     await select("BRDP-MIXED");
     await page.getByRole("button", { name: "Test rule" }).click();
     await verdict().waitFor({ timeout: 20000 });
-    assert((await verdict().textContent()).startsWith("Correct"), `mixed: verdict correct on descript (${await verdict().textContent()})`);
-    const untested = await page.getByTestId("rule-test-untested").textContent();
-    assert(untested.includes("Part of the rule was not tested: <commentStatus>") && untested.includes("the comment schema"), `mixed: untested part named (${untested})`);
-    await page.locator("header select, nav select").first().selectOption("es");
-    await page.waitForTimeout(500);
-    const untestedEs = await page.getByTestId("rule-test-untested").textContent();
-    assert(untestedEs.includes("Parte de la regla no probada: <commentStatus>, <commentResponse> (esquema comment)"), `mixed: untested part in Spanish (${untestedEs})`);
-    await panel().screenshot({ path: shot("rule-test-untested-part-es.png") });
-    await page.locator("header select, nav select").first().selectOption("en");
+    assert((await verdict().textContent()).startsWith("Correct"), `mixed: verdict correct (${await verdict().textContent()})`);
+    assert((await page.getByTestId("rule-test-untested").count()) === 0, "mixed: no part reported as untested");
+    const schemas = (await panel().textContent());
+    assert(schemas.includes("Schema: comment") && schemas.includes("Schema: descript"), "mixed: examples in comment and descript");
   } finally {
     await browser.close();
     await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" });

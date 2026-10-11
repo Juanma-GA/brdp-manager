@@ -1217,7 +1217,7 @@ function classifyRuleTargets(structure, targets) {
 // The identification and status section of a document the application does
 // not build it for: { element, M: reachable from it, C: reachable from the
 // rest of the document (the root included) }, or null.
-const STATUS_SECTION_NAMES = ['identAndStatusSection', 'idstatus', 'updateIdentAndStatusSection'];
+const STATUS_SECTION_NAMES = ['identAndStatusSection', 'idstatus', 'updateIdentAndStatusSection', 'imfIdentAndStatusSection', 'cstatus'];
 function missingSection(structure) {
   const elements = structure.elements;
   const root = structure.skeleton.path[0];
@@ -1877,8 +1877,9 @@ const BREX_REFERENCE_CODE = {
   idstatus: { own: ['dmaddres', 'dmc'], brex: 'brexref', code: 'avee', overrides: { incode: '022', itemloc: 'D' } },
 };
 const BREX_REFERENCE_NAMES = new Set(['brexDmRef', 'brexref']);
-// A publication module, DDN or DML (4.x) has no data module code of its own
-// -- its pmCode / ddnCode / dmlCode shares only @modelIdentCode with the
+// A publication module, DDN, DML, comment or SCORM content package (4.x) has
+// no data module code of its own -- its pmCode / ddnCode / dmlCode /
+// commentCode / scormContentPackageCode shares only @modelIdentCode with the
 // BREX's dmCode, so only that follows (a rule on //@modelIdentCode sees the
 // same value in both codes; the BREX's other attributes are left as they
 // are).
@@ -1886,6 +1887,8 @@ const OTHER_OWN_CODES = [
   { inside: ['pmIdent'], code: 'pmCode' },
   { inside: ['ddnIdent'], code: 'ddnCode' },
   { inside: ['dmlIdent'], code: 'dmlCode' },
+  { inside: ['commentIdent'], code: 'commentCode' },
+  { inside: ['scormContentPackageIdent'], code: 'scormContentPackageCode' },
 ];
 const SHARED_CODE_ATTRIBUTES = ['modelIdentCode'];
 const SECTION_TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;

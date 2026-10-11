@@ -398,6 +398,35 @@ function metadataReply(systemPrompt, rule, answer, messages = []) {
     const rpc = (code, name) => base.replace(/<responsiblePartnerCompany>\s*<enterpriseName>[^<]*<\/enterpriseName>/, `<responsiblePartnerCompany enterpriseCode="${code}">\n      <enterpriseName>${name}</enterpriseName>`);
     return answer([ex("Lufthansa Technik as partner", "accept", rpc("C1008", "LUFTHANSA TECHNIK AG"), ""), ex("Another partner", "reject", rpc("K0001", "ACME AERO"), "")]);
   }
+  // Secciones de comment/SCORM/icnmetadata: a rule on the comment's status
+  // (//commentStatus/commentResponse) -- the examples start from the
+  // comment's minimal section the prompt quotes.
+  if (/commentResponse/.test(rule) && /applicRef/.test(rule)) {
+    // Also on dmStatus: one pair per schema, each from ITS minimal section.
+    const minimalOf = (sch) => {
+      const at = lines.findIndex((l) => l.startsWith(`- schema "${sch}": the application builds the rest`));
+      if (at === -1) return null;
+      const from = lines.findIndex((l, i) => i > at && l.startsWith(`    <${element}>`));
+      const out = [];
+      for (let i = from; i < lines.length && lines[i].startsWith("    "); i += 1) out.push(lines[i].slice(4));
+      return out.join("\n");
+    };
+    const examples = [];
+    const comment = minimalOf("comment");
+    if (comment) {
+      examples.push({ label: "Comment without a response", expected: "accept", schema: "comment", metadata: comment });
+      examples.push({ label: "Comment with a response", expected: "reject", schema: "comment", metadata: comment.replace(/(<commentPriority [^>]*\/>)/, '$1\n    <commentResponse responseType="rt01"/>') });
+    }
+    const dm = minimalOf("descript");
+    if (dm) {
+      examples.push({ label: "Applicability written in the status", expected: "accept", schema: "descript", metadata: dm });
+      examples.push({ label: "Applicability referenced", expected: "reject", schema: "descript", metadata: dm.replace(/<applic>[\s\S]*?<\/applic>/, '<applicRef applicIdentValue="app-001"/>') });
+    }
+    return answer(examples);
+  }
+  if (/commentResponse/.test(rule)) {
+    return answer([ex("Comment without a response", "accept", base), ex("Comment with a response", "reject", base.replace(/(<commentPriority [^>]*\/>)/, '$1\n    <commentResponse responseType="rt01"/>'))]);
+  }
   if (/applicRef/.test(rule)) {
     return answer([ex("Applicability written in the status", "accept", base), ex("Applicability referenced", "reject", base.replace(/<applic>[\s\S]*?<\/applic>/, '<applicRef applicIdentValue="app-001"/>'))]);
   }

@@ -99,8 +99,16 @@ function minimalSection(p) {
 
 // What each document root is called in the prompt. The data module's text
 // (and the data update file's, which has always said "data module") never
-// changes; pm, ddn and dml got their sections later.
-const DOCUMENT_NOUNS = { pm: 'publication module', ddn: 'data dispatch note', dml: 'data management list' };
+// changes; pm, ddn and dml got their sections later, then comment, the SCORM
+// content package and the ICN metadata file.
+const DOCUMENT_NOUNS = {
+  pm: 'publication module',
+  ddn: 'data dispatch note',
+  dml: 'data management list',
+  comment: 'comment',
+  scormContentPackage: 'SCORM content package',
+  icnMetadataFile: 'ICN metadata file',
+};
 const documentNoun = (root) => DOCUMENT_NOUNS[root] || 'data module';
 
 // Rule test on DM metadata: the rule looks at the data module's

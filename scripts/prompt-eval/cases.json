@@ -4871,6 +4871,42 @@
           "note": "no LLM call"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-cmp-footnotemark-num",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "CMP 4.2 pass, BRDP-EXT-00024: //footnote/@footnoteMark flag 2 with one objectValue valueAllowed=\"num\" whose text is \"numbered\". Against Mistral the Proposal check gave a false 'Review' (\"the rule rejects 'numbered' but the Proposal requires 'num'\"), although the prompt already carries the VALUES line (the value is @valueAllowed, the text only describes it). No prompt changes: this case measures whether it recurs.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-CMP24",
+        "title": "Footnote mark",
+        "definition": "Decide which mark is used for footnotes.",
+        "proposal": "Per ATA's own default CMP BREX: BREX-CMMST-00173/BREX-CMMST-00508: The @footnoteMark attribute (if used) must be set to \"num\".",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule><objectPath allowedObjectFlag=\"2\">//footnote/@footnoteMark</objectPath><objectUse>BREX-CMMST-00173/BREX-CMMST-00508: The @footnoteMark attribute (if used) must be set to \"num\".</objectUse><objectValue valueAllowed=\"num\" valueForm=\"single\">numbered</objectValue></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_accept_and_reject"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "the value of each <objectValue> is its @valueAllowed",
+          "note": "the VALUES line is in the prompt (no prompt change in this round)"
+        },
+        {
+          "type": "rule_proposal_check_level",
+          "expect": [
+            "yes",
+            "partly"
+          ],
+          "note": "the rule implements the Proposal: \"num\" is @valueAllowed, \"numbered\" only describes it; never no"
+        }
+      ]
     }
   ]
 }
