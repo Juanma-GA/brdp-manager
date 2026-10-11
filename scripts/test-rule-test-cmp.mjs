@@ -13,7 +13,7 @@ import i18n from '../src/i18n/index.js';
 import { exampleFailures, generateRuleTestExamples, keepMatchedNodeProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
 import { materializeExample, runExample, ruleTestVerdict, stripDefaultNamespace } from '../src/utils/ruleTest.js';
 import { metadataXml, placeExample, ruleTargets } from '../src/utils/ruleTestSkeleton.js';
-import { formatAcceptCause, formatRuleTestReason, ruleDescriptionText } from '../src/utils/ruleTestReasons.js';
+import { formatAcceptCause, formatRuleDescription, formatRuleTestReason, ruleDescriptionText, verdictToTestRecord } from '../src/utils/ruleTestReasons.js';
 import { describeRule, rulePathParts } from '../src/utils/ruleTestEngine.js';
 import { xsdCheck } from './lib/xsdCheck.mjs';
 import { formatCoverageItem } from '../src/validation/schemaCoverage.js';
@@ -226,9 +226,17 @@ for (const [schema, id] of Object.entries(FORBIDDEN)) {
     JSON.stringify(result.reason || result.examples?.map((e, i) => [e.schema, e.expected, result.runs[i].result?.status])));
   check('2a EXT-00086: the minimal document has its section', /<icnMetadataFile[^>]*>\s*<imfIdentAndStatusSection>/.test(result.examples?.[0]?.xml || ''), result.examples?.[0]?.xml);
   check('2a EXT-00086: verdict correct', verdict?.kind === 'correct', JSON.stringify(verdict));
-  // //dmodule flag 0 outside a context block: as before (the LLM writes the examples).
-  const general = await generate(sor('//dmodule', 'x'), ['{"examples": []}']);
-  check('2a //dmodule without a context: the LLM is asked, as before', general.asked.length === 1);
+  // //dmodule flag 0 outside a context block: since «Reglas que prohíben un
+  // tipo de documento por su raíz», a rule on the root without a context
+  // block -- every data module schema is forbidden, another document type is accepted.
+  const general = await generate(sor('//dmodule', 'x'), []);
+  check('2a //dmodule without a context: no LLM call', general.asked.length === 0 && general.proposalChecks.length === 0, general.asked.length);
+  const generalSchemas = graph.schemas.filter((s) => (graph.roots[s] || []).includes('dmodule'));
+  check('2a //dmodule without a context: every data module schema rejected, one other accepted',
+    general.result.examples.filter((e) => e.expected === 'reject').map((e) => e.schema).sort().join() === generalSchemas.sort().join()
+    && general.result.runs.every((r, i) => r.result.status === (general.result.examples[i].expected === 'reject' ? 'rejected' : 'accepted'))
+    && general.result.examples.filter((e) => e.expected === 'accept').length === 1,
+    JSON.stringify(general.result.examples.map((e, i) => [e.schema, e.expected, general.result.runs[i].result.status])));
 }
 
 // ─── Part 2.2: nothing the rule forbids exists in its context schema ────────
@@ -567,6 +575,73 @@ const ASSERT = (text) => `<referencedApplicGroup><applic id="app-0001"><assert a
   // A), now also when the test is joined to another one by "and".
   const none = await generate(sor('//commonInfo[ancestor::description and not(ancestor::procedure)]', 'x'), []);
   check('NT no schema admits the element inside the ancestor: not executable, no LLM (Mejoras A)', none.result?.status === 'not_executable' && none.result.reason.code === 'example_impossible' && none.asked.length === 0, JSON.stringify({ s: none.result?.status, r: none.result?.reason }));
+}
+
+// ─── Reglas que prohíben un tipo de documento por su raíz, sin bloque de
+// contexto (BRDP-EXT-00154 corregida: /scormContentPackage flag 0) ─────────
+const EXT154_GENERAL = sor('/scormContentPackage', 'BREX-CMMST-00006: The scorm content package schema is not allowed.');
+{
+  for (const [rule, schema, id] of [
+    [EXT154_GENERAL, 'scormcontentpackage', 'BRDP-EXT-00154'],
+    [sor('/comment', 'BREX-CMMST-00006: The comment schema is not allowed.'), 'comment', 'BRDP-EXT-00103'],
+    [sor('/pm', 'x'), 'pm', 'BRDP-X-PM'],
+  ]) {
+    const { result, asked, verdict, proposalChecks } = await generate(rule, [], id);
+    check(`ROOT ${id}: no LLM call, not even the Proposal check`, asked.length === 0 && proposalChecks.length === 0, `${asked.length} ${proposalChecks.length}`);
+    check(`ROOT ${id}: minimal ${schema} rejected, descript accepted`,
+      result.status === 'ready' && result.examples.length === 2
+      && result.examples[0].schema === schema && result.examples[0].expected === 'reject' && result.runs[0].result.status === 'rejected'
+      && result.examples[1].schema === 'descript' && result.examples[1].expected === 'accept' && result.runs[1].result.status === 'accepted',
+      JSON.stringify(result.reason || result.examples?.map((e, i) => [e.schema, e.expected, result.runs[i].result?.status])));
+    check(`ROOT ${id}: built by the application, not editable`, result.examples.every((e) => e.minimalDocument === true));
+    check(`ROOT ${id}: verdict correct`, verdict?.kind === 'correct', JSON.stringify(verdict));
+  }
+  // The description: "No document may be a <scormContentPackage>".
+  const d = describeRule(EXT154_GENERAL, F, { parseXml, graph });
+  check('ROOT describe EN', formatRuleDescription(d, en).lines.join() === 'No document may be a <scormContentPackage> (scormcontentpackage schema).', JSON.stringify(formatRuleDescription(d, en)));
+  check('ROOT describe ES', formatRuleDescription(d, es).lines.join() === 'Ningún documento puede ser un <scormContentPackage> (esquema scormcontentpackage).', JSON.stringify(formatRuleDescription(d, es)));
+  const two = describeRule(sor('/pm | //ddn', 'x'), F, { parseXml, graph });
+  check('ROOT describe two roots ES', formatRuleDescription(two, es).lines.join() === 'Ningún documento puede ser un <pm> o <ddn> (esquemas ddn, pm).', JSON.stringify(formatRuleDescription(two, es)));
+  // Without the graph, nothing is known about R: as before.
+  check('ROOT describe without the graph: as before', describeRule(EXT154_GENERAL, F, { parseXml }).statements[0].statement.code !== 'describe_root_document_forbidden');
+  // In a context block: the description as before.
+  check('ROOT describe in a context block: as before', describeRule(forbiddenRule('container'), F, { parseXml, graph }).statements[0].statement.code !== 'describe_root_document_forbidden');
+  // Edge cases that stay as today: flag 1, a predicate, a condition (EXT-00029).
+  const flag1 = await generate(EXT154_GENERAL.replace('allowedObjectFlag="0"', 'allowedObjectFlag="1"'), ['{"examples": []}']);
+  check('ROOT flag 1: as today (the LLM is asked)', flag1.asked.length === 1, flag1.asked.length);
+  check('ROOT flag 1: description as today', describeRule(EXT154_GENERAL.replace('allowedObjectFlag="0"', 'allowedObjectFlag="1"'), F, { parseXml, graph }).statements[0].statement.code !== 'describe_root_document_forbidden');
+  const predicate = await generate(sor('/pm[pmStatus/applic]', 'x'), ['{"examples": []}']);
+  check('ROOT /pm[pmStatus/applic]: as today (the LLM is asked)', predicate.asked.length === 1, predicate.asked.length);
+  const cond = await generate(sor('/ddn or /dml', 'x'), ['{"examples": []}']);
+  check('ROOT a condition /ddn or /dml: as today (the LLM is asked)', cond.asked.length === 1, cond.asked.length);
+  // A root that is not a root (/para): as today.
+  const notRoot = await generate(sor('/para', 'x'), ['{"examples": []}']);
+  check('ROOT /para (not a document root): as today', notRoot.asked.length === 1 || notRoot.result?.status !== 'ready', JSON.stringify(notRoot.result?.status));
+  // R is the root of every schema: review, "rejects every document type".
+  const onlyDm = { ...graph, roots: Object.fromEntries(graph.schemas.filter((s) => graph.roots[s][0] === 'dmodule').map((s) => [s, ['dmodule']])) };
+  onlyDm.skeletons = Object.fromEntries(Object.entries(graph.skeletons).filter(([s]) => onlyDm.roots[s]));
+  const all = await generateRuleTestExamples({
+    ruleXml: sor('//dmodule', 'x'), format: F, standard: S42, schemaLocation: 'flat', brdp: brdp('X'), vocabulary, parseXml, ...fetchers,
+    fetchSchemaGraph: async () => onlyDm, ruleDescription: 'd', askProposalCheck: async () => { throw new Error('no'); }, ask: async () => { throw new Error('no'); },
+  });
+  const allVerdict = ruleTestVerdict(all.examples, all.runs, null, all.proposalCheck, null, all.coverage);
+  check('ROOT every schema has root R: review, rejects every document type', allVerdict.kind === 'review' && allVerdict.rootAll === true && all.examples.every((e) => e.expected === 'reject'), JSON.stringify(allVerdict));
+  check('ROOT every schema: reason text ES', formatRuleTestReason(verdictToTestRecord(allVerdict).reason, es).includes('rechaza'), formatRuleTestReason(verdictToTestRecord(allVerdict).reason, es));
+}
+{
+  // S1000D 3.0.1: /comment (root comment), objappl 0.
+  const g301 = schemaGraph('S1000D 3.0.1');
+  const asked = [];
+  const r = await generateRuleTestExamples({
+    ruleXml: '<objrule><objpath objappl="0">/comment</objpath><objuse>Comments are not used.</objuse></objrule>', format: 'BREX-3.0.1', standard: 'S1000D 3.0.1', schemaLocation: 'flat',
+    brdp: brdp('X'), vocabulary: null, parseXml, fetchSchemaCards: async () => ({ cards: {}, document_schemas: g301.schemas }),
+    fetchStructure: async () => ({ available: false }), fetchSchemaGraph: async () => g301, ruleDescription: 'd',
+    askProposalCheck: async () => { asked.push('pc'); return '{}'; }, ask: async () => { asked.push('ask'); return '{}'; },
+  });
+  const v = ruleTestVerdict(r.examples, r.runs, null, r.proposalCheck, null, r.coverage);
+  check('ROOT 3.0.1 /comment: no LLM call, comment rejected, descript accepted, correct',
+    asked.length === 0 && r.examples.map((e, i) => `${e.schema}:${e.expected}:${r.runs[i].result.status}`).join() === 'comment:reject:rejected,descript:accept:accepted' && v.kind === 'correct',
+    JSON.stringify({ asked, ex: r.examples?.map((e, i) => [e.schema, e.expected, r.runs[i].result?.status]), v }));
 }
 
 // ─── Rules without these patterns: placement unchanged ──────────────────────

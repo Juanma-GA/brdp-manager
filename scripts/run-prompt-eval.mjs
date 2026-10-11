@@ -1019,7 +1019,10 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
   const ruleXml = schemas.length ? wrapRuleInSchemaContexts(testCase.rule, format, testCase.standard, schemas, location) : testCase.rule;
   const vocabulary = loadSchemaVocabulary(testCase.standard);
   const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse, standard: testCase.standard });
-  const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));
+  // The standard's graph, as in the app's panel (a rule that forbids a
+  // document type by its root is described with it).
+  const schemaGraph = await apiFetch(`/api/schema-cards/graph?standard=${encodeURIComponent(testCase.standard)}`).catch(() => null);
+  const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse, graph: schemaGraph?.available ? schemaGraph : null }), i18n.getFixedT("en"));
   // Mejoras B, Part 2: the rule's threshold against the Proposal's numbers, as in the app.
   const threshold = thresholdMismatch(ruleXml, format, createdBrdp?.proposal ?? testCase.brdp?.proposal ?? "", { parseXml: xmldomParse });
   const result = await generateRuleTestExamples({

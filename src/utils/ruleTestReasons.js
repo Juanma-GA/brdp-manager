@@ -229,6 +229,12 @@ export function formatRuleStatement(statement, schemas, t) {
   if (Array.isArray(params.names)) values.names = params.names.join(', ');
   // Mejoras F, Part 1.2: "<dmodule>", "<pm> or <ddn>".
   if (Array.isArray(params.roots)) values.roots = params.roots.join(t('records.ruleTest.describe.rootsOr'));
+  // Reglas que prohíben un tipo de documento por su raíz: the schemas whose
+  // root it is ("(scormcontentpackage schema)").
+  if (statement.code === 'describe_root_document_forbidden' && Array.isArray(params.schemas)) {
+    values.count = params.schemas.length;
+    values.schemaList = params.schemas.join(', ');
+  }
   // Mejoras A, Part 4: a threshold ("more than 5", "at level 7 or deeper").
   if (params.op) {
     values.amountText = t(`records.ruleTest.describe.amount.${params.op}`, { n: params.amount });

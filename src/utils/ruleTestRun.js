@@ -17,7 +17,7 @@ import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleT
 import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } from '../prompts/ruleProposalCheckPrompt.js';
 import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
-import { analyzeRule, describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootSelfPath } from './ruleTestEngine.js';
+import { analyzeRule, describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootDocumentPath, rootSelfPath } from './ruleTestEngine.js';
 import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions } from './ruleTestDossier.js';
 import { minimalDocument, minimalDocumentRuns } from './ruleMinimalDocuments.js';
 import { stripLiterals, withoutPredicates } from './ruleTestCommon.js';
@@ -203,15 +203,40 @@ export function contextRootTest({ ruleXml, format, standard, schemaLocation, gra
   const parts = rulePathParts(ruleXml, format, { parseXml, schemaLocation });
   if (parts.length === 0) return null;
   const schemas = [];
+  // Reglas que prohíben un tipo de documento por su raíz: a part outside
+  // any context block whose alternatives are all /R or //R (R the root of
+  // some schema, never inside another element: rootDocumentPath) forbids
+  // the schemas whose root is R. Only those whose minimal document the
+  // application can build are tested (generalSchemas).
+  const generalSchemas = new Set();
   for (const part of parts) {
-    if (part.condition || part.flag !== '0' || !part.schema) return null;
+    if (part.condition || part.flag !== '0') return null;
+    if (!part.schema) {
+      const doc = rootDocumentPath(part.path, graph);
+      if (!doc) return null;
+      for (const schema of doc.schemas) {
+        generalSchemas.add(schema);
+        if (!schemas.includes(schema)) schemas.push(schema);
+      }
+      continue;
+    }
     const roots = graph.roots?.[part.schema] || [];
     if (roots.length !== 1) return null;
     const alternatives = pathAlternatives(part.path);
     if (alternatives.length === 0 || !alternatives.every((a) => ROOT_ONLY_PATH_RE.exec(a.trim())?.[1] === roots[0])) return null;
     if (!schemas.includes(part.schema)) schemas.push(part.schema);
   }
-  for (const schema of schemas) {
+  const buildable = (schema) => (minimalDocumentMissing(graph, schema) || ['?']).length === 0;
+  // R is the root of every schema of the standard: the rule rejects every
+  // document type -- review, like a rule on the root that rejects them all
+  // (Mejoras F, test_root_rejects_all).
+  const allSchemas = Object.keys(graph.roots || {});
+  const rejectsAll = generalSchemas.size > 0 && allSchemas.every((s) => schemas.includes(s));
+  for (const schema of [...schemas]) {
+    if (generalSchemas.has(schema) && !buildable(schema)) {
+      schemas.splice(schemas.indexOf(schema), 1);
+      continue;
+    }
     const missing = minimalDocumentMissing(graph, schema);
     if (missing === null || missing.length > 0) {
       return {
@@ -223,12 +248,14 @@ export function contextRootTest({ ruleXml, format, standard, schemaLocation, gra
       };
     }
   }
+  // None of the forbidden document types can be built: as before.
+  if (schemas.length === 0) return null;
   const examples = [];
   for (const schema of schemas) {
     const doc = minimalDocument(graph, standard, schema, schemaLocation);
     if (doc?.xml) examples.push(minimalExample({ schema, xml: doc.xml, skeletonNodePaths: doc.skeletonNodePaths }, 'reject', schemaLocation));
   }
-  const outside = Object.keys(graph.skeletons || {}).filter((s) => !schemas.includes(s) && (minimalDocumentMissing(graph, s) || ['?']).length === 0);
+  const outside = Object.keys(graph.skeletons || {}).filter((s) => !schemas.includes(s) && buildable(s));
   const other = firstByPreference(outside, ROOT_TEST_ACCEPT_PREFERENCE);
   if (other) {
     const doc = minimalDocument(graph, standard, other, schemaLocation);
@@ -236,7 +263,8 @@ export function contextRootTest({ ruleXml, format, standard, schemaLocation, gra
   }
   if (examples.length === 0) return null;
   const runs = examples.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml, schemaLocation }));
-  return { status: 'ready', coverage: null, examples, runs, rootRule: true, contextRoot: { schemas } };
+  const coverage = rejectsAll ? { rootAllRejected: true, schemas: [...schemas] } : null;
+  return { status: 'ready', coverage, examples, runs, rootRule: true, contextRoot: { schemas, general: generalSchemas.size > 0 } };
 }
 
 // Part 2.2: no element the rule forbids exists in its context schema --

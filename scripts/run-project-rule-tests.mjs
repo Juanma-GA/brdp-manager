@@ -401,7 +401,7 @@ async function testRule(item) {
   if (skipReason(approval, { all: opts.all })) return done({ result: 'skipped', duration_ms: 0 });
 
   const analysis = analyzeRule(ruleXml, format, { parseXml: xmldomParse, standard: project.standard });
-  const description = describeRule(ruleXml, format, { parseXml: xmldomParse, schemaLocation });
+  const description = describeRule(ruleXml, format, { parseXml: xmldomParse, schemaLocation, graph: graph?.available ? graph : null });
   const threshold = thresholdMismatch(ruleXml, format, brdp.proposal, { parseXml: xmldomParse });
   // A Verified rule that does not pass is tested once more before it goes
   // to Draft; only the last attempt is recorded (shouldRepeat).

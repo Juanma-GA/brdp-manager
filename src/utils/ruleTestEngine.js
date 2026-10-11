@@ -164,6 +164,9 @@ const WHOLE_DOCUMENT_ROOTS = new Set([
   'dmodule', 'pm', 'dml', 'ddn', 'comment', 'dataUpdateFile', 'scormContentPackage', 'icnMetadataFile',
 ]);
 
+// "/pm": a path that is only the document's root step, without predicate.
+const BARE_ROOT_STEP_RE = /^\/([A-Za-z_][\w.-]*)$/;
+
 const REASON = {
   otherFile: (fn) => reason('external_document', { fn }),
   placeholder: (placeholder) => reason('external_placeholder', { placeholder }),
@@ -370,9 +373,20 @@ function runPart(part, spec, doc, evaluate) {
   // alternative that can is enough: the others simply select nothing
   // (/pm/… | //dmStatus/… on a <dmodule>). A condition is never refused for
   // this: /ddn on a <dmodule> is false, as in s1kd-brexcheck.
+  // Only the question "is the document a <R>?" is judged on a whole
+  // document of another type: every alternative a bare /R, R and the
+  // document's root both document roots -- /scormContentPackage on a
+  // <dmodule> document selects nothing and the document is accepted, as
+  // s1kd-brexcheck would (Reglas que prohíben un tipo de documento por su
+  // raíz). /pm/… on a <dmodule> is as before.
   if (evaluated.condition === undefined) {
     const foreign = foreignRootAlternatives(expression, localName(root));
-    if (foreign) throw new NotExecutable(REASON.absoluteRoot(foreign, root.nodeName));
+    const otherDocument = foreign && WHOLE_DOCUMENT_ROOTS.has(localName(root))
+      && topLevelAlternatives(expression).every((a) => {
+        const m = BARE_ROOT_STEP_RE.exec(a.trim());
+        return m && WHOLE_DOCUMENT_ROOTS.has(m[1]);
+      });
+    if (foreign && !otherDocument) throw new NotExecutable(REASON.absoluteRoot(foreign, root.nodeName));
   }
   if (flag === '1' && !WHOLE_DOCUMENT_ROOTS.has(localName(root))) throw new NotExecutable(REASON.mandatory());
 
@@ -788,7 +802,7 @@ function conditionNames(path) {
   return [...[...elements].map((n) => `<${n}>`), ...[...attributes].map((n) => `@${n}`)];
 }
 
-function describePart(part, spec, parseXml) {
+function describePart(part, spec, parseXml, graph = null) {
   if (part.emptyContext) return { code: 'describe_not_executable', params: { reason: REASON.emptyContext(spec.context, spec.contextAttr) } };
   if (part.kind === 'nonContext') return { code: 'describe_non_context', params: {} };
   let basics;
@@ -817,6 +831,12 @@ function describePart(part, spec, parseXml) {
     const qualifier = target ? checkedStepQualifier(path) : null;
     return qualifier ? { ...statement, params: { ...statement.params, qualifier } } : statement;
   };
+  // Reglas que prohíben un tipo de documento por su raíz: /R or //R, flag 0,
+  // outside a context block -- "No document may be a <R> (R schema)".
+  if (flag === '0' && !withValues && !part.schema && graph) {
+    const doc = rootDocumentPath(path, graph);
+    if (doc) return { code: 'describe_root_document_forbidden', params: { roots: doc.roots.map((n) => `<${n}>`), schemas: doc.schemas, path } };
+  }
   if ((flag === '0' || flag === '1') && !withValues) {
     const content = nodeContentStatement(path, flag);
     if (content) return content;
@@ -1190,6 +1210,32 @@ export function rootSelfPath(path) {
   return { root: bare, predicates };
 }
 
+// Reglas que prohíben un tipo de documento por su raíz (BRDP-EXT-00154,
+// /scormContentPackage): a path whose every top-level alternative is only
+// a root step, /R or //R without predicate, R the root element of some
+// schema of the standard (graph.roots). //R counts only when R is never
+// inside another element of the standard (graph.elements), so it can only
+// be the root. Without the graph → null (nothing is known about R).
+//   rootDocumentPath(path, graph) → { roots: ['scormContentPackage'],
+//     schemas: ['scormcontentpackage'] } | null
+const ROOT_DOCUMENT_STEP_RE = new RegExp(`^(\\/\\/?)(${NAME_RE})$`);
+export function rootDocumentPath(path, graph) {
+  if (!graph?.roots) return null;
+  const alternatives = topLevelAlternatives(String(path || ''));
+  const roots = [];
+  for (const alternative of alternatives) {
+    const m = ROOT_DOCUMENT_STEP_RE.exec(alternative.trim());
+    if (!m) return null;
+    const name = m[2];
+    if (!Object.values(graph.roots).some((r) => (r || []).includes(name))) return null;
+    if (m[1] === '//' && Object.values(graph.elements || {}).some((variants) => (variants || []).some((v) => (v?.[1] || []).includes(name)))) return null;
+    if (!roots.includes(name)) roots.push(name);
+  }
+  if (roots.length === 0) return null;
+  const schemas = Object.keys(graph.roots).filter((s) => (graph.roots[s] || []).some((r) => roots.includes(r))).sort();
+  return { roots, schemas };
+}
+
 // The root elements a single /*[not(self::a or self::b)] (or its positive
 // form /*[self::a or self::b]) names → { negated, names } | null.
 function rootSelfList(path) {
@@ -1345,7 +1391,7 @@ function thresholdStatement(target, path, threshold) {
 
 const CAN_REJECT = new Set([
   'describe_forbidden_in_nesting', 'describe_forbidden_attr', 'describe_document_must_contain', 'describe_document_must_not_contain', 'describe_forbidden_existence',
-  'describe_root_must_be', 'describe_root_must_not_be', 'describe_any_document_must_contain', 'describe_any_document_must_not_contain',
+  'describe_root_must_be', 'describe_root_must_not_be', 'describe_root_document_forbidden', 'describe_any_document_must_contain', 'describe_any_document_must_not_contain',
   'describe_document_must_contain_inside', 'describe_document_must_not_contain_inside', 'describe_any_document_must_contain_inside', 'describe_any_document_must_not_contain_inside',
   'describe_forbidden_nesting', 'describe_forbidden_ancestors', 'describe_forbidden_children', 'describe_forbidden_length',
   'describe_condition_forbidden', 'describe_condition_required', 'describe_content_forbidden', 'describe_content_required',
@@ -1366,7 +1412,7 @@ export function describeRule(ruleXml, format, options = {}) {
   }
   const statements = [];
   for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
-    const statement = describePart(part, spec, parseXml);
+    const statement = describePart(part, spec, parseXml, options.graph || null);
     const key = JSON.stringify(statement);
     const same = statements.find((s) => s.key === key && (s.schemas.length > 0) === Boolean(part.schema));
     if (same) {

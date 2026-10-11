@@ -45,6 +45,9 @@ const inContext = (schema, body) => `<contextRules rulesContext="http://www.s100
 const EXT39 = ruleCmp39.replace("<structureObjectRule>", '<structureObjectRule id="BRDP-EXT-00039">');
 const EXT88 = inContext("sb", '<structureObjectRule id="BRDP-EXT-00088"><objectPath allowedObjectFlag="0">//dmodule</objectPath><objectUse>BREX-CMMST-00006: The sb schema is not allowed.</objectUse></structureObjectRule>');
 const EXT272 = inContext("ipd", '<structureObjectRule id="BRDP-EXT-00272"><objectPath allowedObjectFlag="0">//footnote | //footnoteRef</objectPath><objectUse>BREX-CMMST-00272: Footnotes are not allowed in IPD.</objectUse></structureObjectRule>');
+// «Reglas que prohíben un tipo de documento por su raíz»: EXT-00154
+// corrected to a general rule, no context block.
+const EXT154 = '<structureObjectRule id="BRDP-EXT-00154"><objectPath allowedObjectFlag="0">/scormContentPackage</objectPath><objectUse>BREX-CMMST-00006: The scorm content package schema is not allowed.</objectUse></structureObjectRule>';
 const COVERED_EN = "Already covered by the schema: the ipd schema has no <footnote> or <footnoteRef>.";
 const COVERED_ES = "El esquema ya lo incluye: en el esquema ipd no existen <footnote> ni <footnoteRef>.";
 
@@ -75,6 +78,7 @@ async function main() {
   }
   await makeBrdp({ identifier: "BRDP-EXT-00039", title: "Targets of internal references", definition: "Decide which elements an internal reference can target.", proposal: "An internal reference can only target a figure, a table, a multimedia object, a support equipment, supply or spare description, a levelled paragraph, a procedural step, a graphic or a hotspot." }, EXT39);
   await makeBrdp({ identifier: "BRDP-EXT-00088", title: "Use of the service bulletin schema", definition: "Decide whether the service bulletin schema is used.", proposal: "The sb schema shall not be used." }, EXT88);
+  await makeBrdp({ identifier: "BRDP-EXT-00154", title: "Use of the scorm content package schema", definition: "Decide whether the scorm content package schema is used.", proposal: "The scorm content package schema shall not be used." }, EXT154);
   await makeBrdp({ identifier: "BRDP-EXT-00272", title: "Footnotes in the parts catalog", definition: "Decide whether footnotes are used in the illustrated parts data.", proposal: "Footnotes shall not be used in the illustrated parts data." }, EXT272);
   const job = await api(`/api/projects/${project.id}/embeddings/compute`, { method: "POST" }).then((r) => r.json());
   for (let i = 0; i < 80; i++) {
@@ -168,6 +172,34 @@ async function main() {
     const coveredEs = (await verdict().textContent()).trim();
     assert(coveredEs.startsWith(COVERED_ES), `EXT-00272: the reason in ES (${coveredEs})`);
     await panel().screenshot({ path: shot("rule-test-cmp-absent-in-ipd-es.png") });
+    await language("en");
+    await page.waitForTimeout(300);
+
+    // 4. EXT-00154 corrected: /scormContentPackage flag 0, no context
+    // block -- like a forbidden schema, no LLM call (not even the Proposal check).
+    await openTest("BRDP-EXT-00154");
+    await verdict().waitFor({ timeout: 20000 });
+    assert((await chatCalls()) === 0, "EXT-00154: no LLM call, not even the Proposal check");
+    assert((await verdict().textContent()).startsWith("Correct"), `EXT-00154: verdict correct (${await verdict().textContent()})`);
+    assert((await page.getByTestId("rule-test-description").textContent()).includes("No document may be a <scormContentPackage> (scormcontentpackage schema)."), "EXT-00154: what the rule checks (EN)");
+    assert((await example(0).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "EXT-00154: the minimal scormcontentpackage document rejected");
+    assert((await example(0).getByTestId("rule-test-minimal-document").textContent()).startsWith("Built by the application: the minimal scormcontentpackage document"), "EXT-00154: built by the application");
+    assert((await example(1).getByTestId("rule-test-result").textContent()).includes("accepted ✓"), "EXT-00154: the document of another schema accepted");
+    assert((await example(1).getByTestId("rule-test-minimal-document").textContent()).startsWith("Built by the application: the minimal descript document"), "EXT-00154: the accepted one is a descript document");
+    assert((await panel().getByRole("button", { name: "Edit" }).count()) === 0, "EXT-00154: no Edit");
+    let indicator154 = "";
+    for (let i = 0; i < 40 && !indicator154.includes("Tested"); i++) {
+      indicator154 = (await page.getByTestId("rule-test-indicator").textContent()) || "";
+      if (!indicator154.includes("Tested")) await page.waitForTimeout(250);
+    }
+    assert(indicator154.includes("Tested"), `EXT-00154: recorded as passed (${indicator154})`);
+    await panel().screenshot({ path: shot("rule-test-cmp-root-document-en.png") });
+    await language("es");
+    await page.waitForTimeout(400);
+    assert((await page.getByTestId("rule-test-description").textContent()).includes("Ningún documento puede ser un <scormContentPackage> (esquema scormcontentpackage)."), "EXT-00154: what the rule checks (ES)");
+    assert((await verdict().textContent()).startsWith("Correcto"), "EXT-00154: verdict correct (ES)");
+    assert((await example(0).getByTestId("rule-test-minimal-document").textContent()).startsWith("Montado por la aplicación: el documento mínimo de tipo scormcontentpackage"), "EXT-00154: built by the application (ES)");
+    await panel().screenshot({ path: shot("rule-test-cmp-root-document-es.png") });
     await language("en");
   } finally {
     await browser.close();

@@ -30,6 +30,7 @@ import {
   RULE_TEST_REVIEW_USER_MESSAGE,
 } from '../prompts/ruleTestReviewPrompt.js';
 import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
+import { useSchemaGraph } from './useSchemaGraph.js';
 import { editExample, editedExamplesRecord, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
 import { generateRuleTestExamples } from '../utils/ruleTestRun.js';
 import { thresholdMismatch } from '../utils/ruleThreshold.js';
@@ -58,7 +59,10 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   const analysis = useMemo(() => analyzeRule(ruleXml, format, { standard }), [ruleXml, format, standard]);
   // T3b: what the rule checks, read from its XML -- shown in place of an
   // explanation by the LLM, and the ground truth the review is given.
-  const description = useMemo(() => describeRule(ruleXml, format, { schemaLocation }), [ruleXml, format, schemaLocation]);
+  // The standard's graph tells a rule that forbids a document type by its
+  // root (/scormContentPackage) apart: "No document may be a <…>".
+  const standardGraph = useSchemaGraph(standard);
+  const description = useMemo(() => describeRule(ruleXml, format, { schemaLocation, graph: standardGraph }), [ruleXml, format, schemaLocation, standardGraph]);
   // Mejoras B, Part 2: the rule's threshold against the Proposal's numbers.
   const threshold = useMemo(() => thresholdMismatch(ruleXml, format, brdp?.proposal), [ruleXml, format, brdp?.proposal]);
   // "Ejemplos bajo demanda en reglas no ejecutables": when the WHOLE rule

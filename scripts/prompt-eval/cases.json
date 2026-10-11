@@ -4849,6 +4849,35 @@
       ]
     },
     {
+      "id": "rule-test-4-2-cmp-no-scorm-root",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "CMP 4.2, BRDP-EXT-00154 corrected to a general rule: /scormContentPackage flag 0, no context block (the SCORM content package is not allowed). The application builds a minimal scormcontentpackage document (rejected) and a minimal document of another schema (accepted), with no LLM call, not even the Proposal check.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-CMP154",
+        "title": "Use of the scorm content package schema",
+        "definition": "Decide on use of the scorm content package schema.",
+        "proposal": "The scorm content package schema shall not be used.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">/scormContentPackage</objectPath><objectUse>BREX-CMMST-00006: The scorm content package schema is not allowed.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_examples_by_app",
+          "note": "minimal documents built by the app, no LLM call"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "No document may be a <scormContentPackage> \\(scormcontentpackage schema\\)",
+          "note": "what the rule checks, from the standard's graph"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-cmp-absent-in-context-ipd",
       "type": "rule-test",
       "standard": "S1000D 4.2",
