@@ -182,6 +182,19 @@ async function main() {
   page.on("pageerror", (err) => console.error("PAGE ERROR:", err.message));
   const panel = () => page.getByTestId("rule-test-panel");
   const verdict = () => page.getByTestId("rule-test-verdict");
+  // The test is recorded after its verdict is shown: wait for the POST
+  // …/approvals/{format}/test of this run and for the indicator to say it,
+  // never read the indicator right after the verdict (it flaked).
+  const recordedTest = () =>
+    page.waitForResponse((r) => r.request().method() === "POST" && /\/approvals\/[^/]+\/test$/.test(new URL(r.url()).pathname), { timeout: 30000 });
+  const indicatorSays = async (text) => {
+    await page.waitForFunction(
+      (t) => (document.querySelector('[data-testid="rule-test-indicator"]')?.textContent || "").includes(t),
+      text,
+      { timeout: 15000 }
+    ).catch(() => {});
+    return (await page.getByTestId("rule-test-indicator").textContent()).includes(text);
+  };
   const example = (i) => page.getByTestId(`rule-test-example-${i}`);
   async function openProject(p) {
     await page.goto(`${BASE_URL}/projects/${p.id}/records`);
@@ -209,6 +222,7 @@ async function main() {
 
     // 1. S1-00052: the section is the insertion point.
     await select("BRDP-S1-00052");
+    const recorded52 = recordedTest();
     await page.getByRole("button", { name: "Test rule" }).click();
     await verdict().waitFor({ timeout: 15000 });
     const sys52 = systemOf(await lastRequest());
@@ -226,7 +240,8 @@ async function main() {
     assert((await colorOf(example(0).locator("pre span", { hasText: "<dmStatus" }).first())) !== "rgb(100, 116, 139)", "S1-00052: the written section is shown as content, not skeleton");
     assert((await colorOf(example(0).locator("pre span", { hasText: "<levelledPara" }).first())) === "rgb(100, 116, 139)", "S1-00052: the content chain is dimmed skeleton");
     await panel().screenshot({ path: shot("rule-test-metadata-infocode.png") });
-    assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "S1-00052: recorded as passed");
+    assert((await recorded52).ok(), "S1-00052: the test was recorded (POST …/test)");
+    assert(await indicatorSays("Tested"), "S1-00052: recorded as passed");
 
     // 2. S1-00070 (the former template rule): tested for real.
     await select("BRDP-S1-00070");
@@ -302,6 +317,7 @@ async function main() {
     // 5. Nothing an example can contain: not executable, no LLM call.
     await fetch(`${MOCK}/reset`, { method: "POST" });
     await select("BRDP-MD-PM");
+    const recordedPm = recordedTest();
     await page.getByRole("button", { name: "Test rule" }).click();
     await page.getByTestId("rule-test-analysis").waitFor({ timeout: 15000 });
     await page.waitForTimeout(500);
@@ -310,7 +326,8 @@ async function main() {
     assert((await lastRequest()) === null, "unreachable: the LLM was never called");
     assert((await page.getByRole("button", { name: "Regenerate examples" }).count()) === 0 && (await page.getByTestId("rule-test-show-examples").count()) === 0, "unreachable: no regenerate, no illustrative examples");
     assert(!(await panel().textContent()).includes("Regenerate the examples"), "unreachable: never 'Regenerate the examples'");
-    assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Not executable"), "unreachable: recorded as not executable");
+    assert((await recordedPm).ok(), "unreachable: the test was recorded (POST …/test)");
+    assert(await indicatorSays("Not executable"), "unreachable: recorded as not executable");
     await panel().screenshot({ path: shot("rule-test-metadata-unreachable.png") });
     await page.locator("header select, nav select").first().selectOption("es");
     await page.waitForTimeout(400);

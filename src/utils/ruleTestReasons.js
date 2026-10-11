@@ -123,6 +123,17 @@ export function formatRuleTestReason(reason, t) {
     const roots = params.roots.map((r) => t('records.ruleTest.reasons.rootIs', r)).join('; ');
     return t('records.ruleTest.reasons.unreachable_target_root', { names: params.names, roots });
   }
+  // Remates de AI Extract y del test de reglas, Part 2: one sentence for a
+  // path anchored at another root, whether the test preparation or the
+  // engine finds it (never "fragment": the examples are documents).
+  if (reason.code === 'absolute_root') {
+    const names = `<${params.name}>`;
+    if (params.schema) {
+      const roots = t('records.ruleTest.reasons.rootIs', { schema: params.schema, root: params.root });
+      return t('records.ruleTest.reasons.unreachable_target_root', { names, roots });
+    }
+    return t('records.ruleTest.reasons.absolute_root', { names, root: params.root });
+  }
   if (reason.code === 'example_impossible') {
     const where = `${params.axis === 'parent' ? 'parent' : 'ancestor'}${params.inside ? 'Inside' : 'Outside'}`;
     return t(`records.ruleTest.reasons.example_impossible.${where}`, { ...params, defaultValue: reason.code });

@@ -653,5 +653,24 @@ const EXT154_GENERAL = sor('/scormContentPackage', 'BREX-CMMST-00006: The scorm 
   }
 }
 
+// ─── Remates: one sentence for a path anchored at another root ─────────────
+// EXT-00112 (ddn context, /dmodule/…) when the test is prepared, and a
+// minimal ddn document the engine runs: the same sentence, never "fragment".
+{
+  const prepared = await generate(inContext('comment', sor('/dmodule/content//para', 'x')), []);
+  const engine = await generate(inContext('ddn', sor('/dmodule/identAndStatusSection/dmStatus/applic', 'x')), []);
+  const engineReason = engine.verdict?.reason || engine.result?.runs?.[0]?.result?.notExecutableReason;
+  check('WRONG ROOT prepared: not executable, no LLM', prepared.result?.status === 'not_executable' && prepared.asked.length === 0, JSON.stringify(prepared.result?.reason));
+  check('WRONG ROOT engine: not executable, no LLM', engine.verdict?.kind === 'not_executable' && engine.asked.length === 0, JSON.stringify(engine.verdict));
+  for (const [lang, t, comment, ddn] of [
+    ['EN', en, 'the rule looks at <dmodule>, which the examples cannot contain (in the comment schema the root is <comment>).', 'the rule looks at <dmodule>, which the examples cannot contain (in the ddn schema the root is <ddn>).'],
+    ['ES', es, 'la regla mira <dmodule>, que los ejemplos no pueden contener (en el esquema comment la raíz es <comment>).', 'la regla mira <dmodule>, que los ejemplos no pueden contener (en el esquema ddn la raíz es <ddn>).'],
+  ]) {
+    check(`WRONG ROOT prepared ${lang}`, formatRuleTestReason(prepared.result.reason, t) === comment, formatRuleTestReason(prepared.result.reason, t));
+    check(`WRONG ROOT engine ${lang}`, formatRuleTestReason(engineReason, t) === ddn, formatRuleTestReason(engineReason, t));
+    check(`WRONG ROOT never "fragment" ${lang}`, !/fragment/i.test(formatRuleTestReason(engineReason, t) + formatRuleTestReason({ code: 'absolute_root', params: { name: 'dmodule', root: 'table' } }, t)));
+  }
+}
+
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

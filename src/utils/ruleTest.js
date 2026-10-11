@@ -607,6 +607,14 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
 // schemaLocation: the project's setting (ruleSchemaContext.js), so a context
 // block written with a custom pattern is recognized; the example's own one
 // (materializeExample) wins.
+function withRootSchema(reason, schema) {
+  if (reason?.code === 'absolute_root') return { ...reason, params: { ...reason.params, schema } };
+  if (reason?.code === 'parts' && Array.isArray(reason.params?.parts)) {
+    return { ...reason, params: { ...reason.params, parts: reason.params.parts.map((p) => ({ ...p, reason: withRootSchema(p.reason, schema) })) } };
+  }
+  return reason;
+}
+
 export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument, schemaLocation = null, graph = null } = {}) {
   const unknownSchema = example.unmaterialized ? example.schema || '(none)' : null;
   const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, {
@@ -649,6 +657,12 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     schemaLocation: example.schemaLocation || schemaLocation,
     ...(dossier ? { dossier } : {}),
   });
+  // Remates de AI Extract y del test de reglas, Part 2: a path anchored at
+  // another root says which schema's root this document has, so the
+  // message is the same as when the test is prepared ("the rule looks at
+  // <dmodule>, which the examples cannot contain (in the ddn schema the
+  // root is <ddn>)").
+  if (example.schema && result.notExecutableReason) result.notExecutableReason = withRootSchema(result.notExecutableReason, example.schema);
   const expectedStatus = example.expected === 'reject' ? 'rejected' : 'accepted';
   // Mejoras E, Part 2.3: an engine error on a valid example is the rule
   // failing on it (never "as expected").

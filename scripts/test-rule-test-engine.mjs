@@ -248,9 +248,9 @@ const XSI = (url) => ` xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi
   expect('path returning a number', run(sor('0', 'count(//a)'), 'BREX-4.2', '<x/>'), 'not_executable',
     { reason: "The rule's path does not select nodes (it returns a number), so there is nothing to judge." });
   expect('absolute path on a fragment with another root', run(sor('0', '/dmodule/content//thead'), 'BREX-4.2', '<table><thead/></table>'), 'not_executable',
-    { reason: "The rule's path starts at /dmodule, but this fragment's root element is <table>; it can only be judged on a fragment whose root is <dmodule>." });
+    { reason: 'the rule looks at <dmodule>, which the examples cannot contain (the root of this document is <table>).' });
   expect('path continuing after a predicate is not absolute', run(sor('0', "/dmodule/content[@a] /para"), 'BREX-4.2', DM('<para/>').replace('<content>', '<content a="1">')), 'rejected');
-  expect('absolute path inside a predicate is checked too', run(sor('0', '//qty[/dmodule/content/proced]'), 'BREX-4.2', '<proced><qty/></proced>'), 'not_executable', { reason: /starts at \/dmodule/ });
+  expect('absolute path inside a predicate is checked too', run(sor('0', '//qty[/dmodule/content/proced]'), 'BREX-4.2', '<proced><qty/></proced>'), 'not_executable', { reason: /looks at <dmodule>, which the examples cannot contain/ });
   const partial = expect('mixed rule: runs the executable part',
     run(`<rules>${sor('0', '//x')}<nonContextRule><simplePara>y</simplePara></nonContextRule></rules>`, 'BREX-4.2', '<a><x/></a>'), 'rejected',
     { partial: /rule 2: This rule has no XPath to execute \(nonContextRule\)\./ });
@@ -602,9 +602,9 @@ console.log(`Coherence: ${coherent} engine runs on rules with values replayed th
   const mixed = expect('node path: one alternative with another root still runs', run(pmOrDm, 'BREX-4.2', dmWith('<applicRef applicIdentValue="a1"/>')), 'rejected');
   check('node path: the dmodule alternative selected its node', mixed.selectedNodePaths.length === 1 && mixed.selectedNodePaths[0].endsWith('/applicRef[1]'), JSON.stringify(mixed.selectedNodePaths));
   expect('node path: all alternatives with other roots → not executable', run(sor('0', '/pm//pmEntry | /ddn/ddnContent'), 'BREX-4.2', dmWith('')), 'not_executable',
-    { reason: "The rule's path starts at /pm, but this fragment's root element is <dmodule>; it can only be judged on a fragment whose root is <pm>." });
-  expect('node path: parenthesised alternatives, all foreign', run(sor('0', '(/pm//a | /ddn//b)'), 'BREX-4.2', dmWith('')), 'not_executable', { reason: /starts at \/pm/ });
-  expect('node path: a "|" inside a literal or predicate is not an alternative', run(sor('0', "/pm//a[@x = 'p|q' or b | c]"), 'BREX-4.2', dmWith('')), 'not_executable', { reason: /starts at \/pm/ });
+    { reason: 'the rule looks at <pm>, which the examples cannot contain (the root of this document is <dmodule>).' });
+  expect('node path: parenthesised alternatives, all foreign', run(sor('0', '(/pm//a | /ddn//b)'), 'BREX-4.2', dmWith('')), 'not_executable', { reason: /looks at <pm>, which the examples cannot contain/ });
+  expect('node path: a "|" inside a literal or predicate is not an alternative', run(sor('0', "/pm//a[@x = 'p|q' or b | c]"), 'BREX-4.2', dmWith('')), 'not_executable', { reason: /looks at <pm>, which the examples cannot contain/ });
   expect('node path: /dmodule/content//x on a dmodule unchanged', run(sor('0', '/dmodule/content//para'), 'BREX-4.2', dmWith('')), 'rejected');
   expect('node path: rule rooted only at /pm runs on a pm', run(sor('0', '/pm/content//pmEntry'), 'BREX-4.2', pmWith('')), 'rejected');
   expect('node path: rule rooted only at /pm, pm without the node', run(sor('0', '/pm/content//dmRef'), 'BREX-4.2', pmWith('')), 'accepted');

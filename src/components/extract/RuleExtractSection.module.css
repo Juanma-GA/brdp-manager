@@ -292,3 +292,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* The project's BRDPs that the rules file has no row for. */
+.unmatchedList {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  max-height: 220px;
+  overflow-y: auto;
+}

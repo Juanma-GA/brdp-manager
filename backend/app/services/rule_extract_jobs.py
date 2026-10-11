@@ -493,6 +493,22 @@ CONTENT_SIMILARITY = 0.85
 # different decisions, at 0.35; the ten corrections of the reconstructed ATA
 # fixture score 0.88-1.0.
 CONTENT_MATCH_FLOOR = 0.5
+# A rule the file itself marks as modified (changeType="modify", or
+# changeMark="1" without a changeType; 3.0.1 change="modify" / mark="1") is
+# the next issue of a rule the project already has, so it may have changed
+# more than CONTENT_SIMILARITY allows (the ATA CMP 010 SOR-3, path and
+# objectUse rewritten: embeddings 0.94, trigrams below 0.85). For those only,
+# a BRDP left unmatched is taken at CONTENT_MATCH_FLOOR when it is the best
+# with at least MODIFIED_MATCH_MARGIN over the second. 0.1, calibrated on the
+# real BREX of tests/fixtures/brex: a path that loses a condition and an
+# objectUse that loses a sentence, in pools of 20 unmatched BRDPs (10 of
+# them the originals), 400 draws: CA 93.4 % matched to their original, 0.09 %
+# to another, 6.5 % left as new; Lufthansa 80 % / 0 % / 20 %; the
+# reconstructed ATA 93.9 % / 0 % / 6.1 %. 0.05 matches 2-3 % more but also
+# to the wrong BRDP; 0.15 loses 4 % of the right ones. When the original is
+# not in the project another BRDP still takes it in 6-19 % of the draws: the
+# match is never checked by default and says how it was found.
+MODIFIED_MATCH_MARGIN = 0.1
 _LEADING_ID_RE = re.compile(r"^BRDP-[A-Z0-9]+-\d{5}(?:-\d+(?:\.\d+)*)?(?![0-9])[\s.:\-–—]*")
 _STRING = etree.XPath("string(.)")
 _SCH_ID_ELEMENTS = {"pattern", "rule", "assert", "report"}
@@ -639,11 +655,32 @@ def rule_content(xml: str | None, rule_format: str | None) -> RuleContent | None
     return RuleContent(pieces, path_keys, use_keys, sim) if pieces else None
 
 
+_CHANGE_ATTR_RE = re.compile(r'\s(changeType|changeMark|change|mark)\s*=\s*("[^"]*"|\'[^\']*\')')
+_TAG_RE = re.compile(r"<([A-Za-z_][\w.:-]*)((?:\s+[^\s=<>/]+\s*=\s*(?:\"[^\"]*\"|'[^']*'))*)\s*/?>")
+
+
+def marked_modified(xml: str | None, rule_format: str | None) -> bool:
+    """True when an element of the rule says it was modified: changeType=
+    "modify" (3.0.1: change="modify"), or changeMark="1" (mark="1") without a
+    change type. Added or deleted rules (changeType="add"/"delete") never
+    count. Comments are skipped."""
+    if not xml or rule_format not in ("BREX-4.2", "BREX-4.1", "BREX-3.0.1"):
+        return False
+    type_attr, mark_attr = ("change", "mark") if rule_format == "BREX-3.0.1" else ("changeType", "changeMark")
+    text = re.sub(r"<!--.*?-->", "", xml, flags=re.S)
+    for m in _TAG_RE.finditer(text):
+        attrs = {a: v[1:-1].strip() for a, v in _CHANGE_ATTR_RE.findall(m.group(2))}
+        kind = attrs.get(type_attr)
+        if kind == "modify" or (not kind and attrs.get(mark_attr) == "1"):
+            return True
+    return False
+
+
 def match_by_content(candidates: list[dict], pool: list[tuple], rule_format: str) -> dict[str, dict]:
     """candidates: the ones that would be a new EXT (file order); pool:
     (brdp, stored rule_xml) of the project's BRDPs not matched by identifier
-    or origin. → {candidate key: {"brdp", "how": "exact"|"content"|"similarity",
-    "similarity"} or {"warning": {...}}}."""
+    or origin. → {candidate key: {"brdp", "how": "exact"|"content"|
+    "similarity"|"modified", "similarity"} or {"warning": {...}}}."""
     stored = [(b, rc) for b, xml in pool if (rc := rule_content(xml, rule_format)) is not None]
     if not stored or not candidates:
         return {}
@@ -750,6 +787,22 @@ def match_by_content(candidates: list[dict], pool: list[tuple], rule_format: str
                     break
         if len(above) == 1:
             proposals.append((c["key"], above[0][0], above[0][1], "similarity"))
+    resolve(proposals)
+
+    # 4. Rules marked as modified in the file: the best BRDP left, at
+    # CONTENT_MATCH_FLOOR, with MODIFIED_MATCH_MARGIN over the second.
+    left = [(b, brc) for b, brc in stored if b.id not in taken]
+    proposals = []
+    for c in candidates:
+        rc = contents[c["key"]]
+        if rc is None or c["key"] in results or not rc.grams or not marked_modified(c.get("rule_xml"), rule_format):
+            continue
+        scores = sorted(((content_similarity(rc.grams, brc.grams), b) for b, brc in left), key=lambda x: -x[0])
+        if not scores or scores[0][0] < CONTENT_MATCH_FLOOR:
+            continue
+        second = scores[1][0] if len(scores) > 1 else 0.0
+        if scores[0][0] - second >= MODIFIED_MATCH_MARGIN:
+            proposals.append((c["key"], scores[0][1], scores[0][0], "modified"))
     resolve(proposals)
     return results
 
@@ -999,7 +1052,7 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
             c["project_texts"] = {"title": brdp.title, "definition": brdp.definition, "proposal": brdp.proposal}
             c["identifier"] = brdp.identifier
             base = "same" if found["how"] == "exact" else "changed"
-            c["match_by"] = "similarity" if found["how"] == "similarity" else "content"
+            c["match_by"] = "similarity" if found["how"] in ("similarity", "modified") else "content"
             c["option_identifiers"] = {base: brdp.identifier}
             if _EXT_RE.match(origin or "") and origin not in existing:
                 c["option_identifiers"]["new_ext"] = origin
@@ -1018,6 +1071,14 @@ async def classify_candidates(project: Project, candidates: list[dict], db: Asyn
                         "code": "similarity_match",
                         "params": {"identifier": brdp.identifier, "similarity": found["similarity"]},
                         "message": f"Matched by similarity with {brdp.identifier}: check it.",
+                    }
+                )
+            elif found["how"] == "modified":
+                c["warnings"].append(
+                    {
+                        "code": "modified_match",
+                        "params": {"identifier": brdp.identifier, "similarity": found["similarity"]},
+                        "message": f"Marked as modified in the file; matched by similarity with {brdp.identifier}: check it.",
                     }
                 )
             options = [base, "new_ext"]
@@ -1266,6 +1327,32 @@ def _manifest(candidates: list[dict]) -> list[dict]:
         }
         for c in candidates
     ]
+
+
+async def project_brdps_with_rule(job: RuleExtractJob, project: Project, db: AsyncSession) -> tuple[list[dict], list[dict]]:
+    """For a rules file: the project's active BRDPs with a rule of its
+    format ({identifier, title, rule_state}), and those that no candidate is
+    matched with ("Ya existe (igual / cambia)", by its saved classification):
+    what the file no longer has. The page filters the first list with the
+    classifications it shows, so an unsaved change is counted at once.
+    Nothing for a text job; nothing is ever imported or deleted for them."""
+    rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
+    if job.source_kind != "rules" or job.status != "completed" or not rule_format:
+        return [], []
+    rows = (await db.execute(select(RuleExtractCandidate.data).where(RuleExtractCandidate.job_id == job.id))).scalars().all()
+    matched = {d.get("identifier") for d in rows if d.get("classification") in ("same", "changed") and d.get("identifier")}
+    brdps = (
+        await db.execute(
+            select(BRDP, RuleApproval)
+            .join(RuleApproval, RuleApproval.brdp_id == BRDP.id)
+            .where(BRDP.project_id == project.id, ACTIVE_BRDP_FILTER, RuleApproval.format == rule_format)
+            .order_by(BRDP.identifier)
+        )
+    ).all()
+    with_rule = [
+        {"identifier": b.identifier, "title": b.title, "rule_state": _rule_state(a)} for b, a in brdps if (a.rule_xml or "").strip()
+    ]
+    return with_rule, [b for b in with_rule if b["identifier"] not in matched]
 
 
 def missing_from_manifest(job: RuleExtractJob, keys: set[str]) -> list[dict]:

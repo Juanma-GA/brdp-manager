@@ -53,6 +53,16 @@ class RuleExtractCandidateKeysOut(BaseModel):
     missing: list[dict] = Field(default_factory=list)
 
 
+class RuleExtractUnmatchedOut(BaseModel):
+    """For a rules file: the project's BRDPs with a rule of its format
+    (project_brdps) and those that no row of the file is matched with
+    (brdps), each {identifier, title, rule_state}."""
+
+    job_id: uuid.UUID
+    brdps: list[dict]
+    project_brdps: list[dict]
+
+
 class RuleExtractDraftingRequest(BaseModel):
     stopped: bool
 

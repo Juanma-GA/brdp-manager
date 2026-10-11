@@ -7,6 +7,9 @@
   GET   /jobs/active                viewer  the project's latest extraction
   GET   /jobs/{job_id}              viewer  its status and progress
   GET   /jobs/{job_id}/candidates   viewer  the candidates for the review
+  GET   /jobs/{job_id}/unmatched-project-brdps
+                                    viewer  rules file: the project's BRDPs with a
+                                            rule that no row is matched with
   PATCH /jobs/{job_id}/candidates   editor  save texts written by the AI or by
                                             hand, classification, selection
   GET   /limits                     viewer  free text: the word / character limits
@@ -58,6 +61,7 @@ from app.schemas.rule_extract import (
     RuleExtractDraftingRequest,
     RuleExtractSourceTextOut,
     RuleExtractTextRequest,
+    RuleExtractUnmatchedOut,
 )
 from app.services.jobs_common import get_job_in_project
 from app.services.rule_extract import RuleExtractFileError, read_rules_file
@@ -75,6 +79,7 @@ from app.services.rule_extract_jobs import (
     next_ext_allocator,
     run_extract_job,
     run_text_extract_job,
+    project_brdps_with_rule,
 )
 from app.services.text_extract import count_words
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
@@ -306,6 +311,21 @@ async def get_candidate_keys(
         keys=keys,
         missing=missing_from_manifest(job, {k["key"] for k in keys}),
     )
+
+
+@router.get("/jobs/{job_id}/unmatched-project-brdps", response_model=RuleExtractUnmatchedOut)
+async def get_unmatched_project_brdps(
+    project_id: uuid.UUID,
+    job_id: uuid.UUID,
+    _viewer: User = Depends(require_project_role("viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> RuleExtractUnmatchedOut:
+    """The project's BRDPs with a rule that the rules file has no row for
+    (by the candidates' current classification). Empty for a text job."""
+    job = await _job(project_id, job_id, db)
+    project = await _project(project_id, db)
+    with_rule, unmatched = await project_brdps_with_rule(job, project, db)
+    return RuleExtractUnmatchedOut(job_id=job.id, brdps=unmatched, project_brdps=with_rule)
 
 
 @router.post("/jobs/{job_id}/drafting", response_model=RuleExtractJobOut)

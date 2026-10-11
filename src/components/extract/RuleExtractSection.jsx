@@ -123,6 +123,8 @@ function warningText(t, w) {
       return t('config.ruleExtract.warnings.content_match_changed', { identifier: p.identifier });
     case 'similarity_match':
       return t('config.ruleExtract.warnings.similarity_match', { identifier: p.identifier });
+    case 'modified_match':
+      return t('config.ruleExtract.warnings.modified_match', { identifier: p.identifier });
     case 'rule_in_several_brdps':
       return t('config.ruleExtract.warnings.rule_in_several_brdps', { identifiers: (p.identifiers || []).join(', ') });
     case 'brdp_already_matched':
@@ -320,6 +322,10 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   // Rows the screen lacks, compared with the server's keys (HR7: named,
   // never only counted), and what "Reload" found.
   const [rowCheck, setRowCheck] = useState(null);
+  // A rules file: the project's BRDPs with a rule ({identifier, title,
+  // rule_state}), to say which ones no row of the file is matched with.
+  const [projectRules, setProjectRules] = useState(null);
+  const [showUnmatchedFor, setShowUnmatchedFor] = useState(null);
   const [reloadNote, setReloadNote] = useState(null);
   const findingRef = useRef(false);
   // The job the page shows now: answers for any other job are dropped.
@@ -777,6 +783,31 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
   }, [rowMismatch, job?.id, candidates?.length]);
   useEffect(() => setReloadNote(null), [job?.id]);
 
+  // The project's BRDPs that the rules file has no row for: the project's
+  // BRDPs with a rule, minus the ones a row is matched with ("Ya existe
+  // (igual / cambia)") by the classification shown -- so a row moved to
+  // "Nueva EXT" counts at once, without waiting for its save. Nothing is
+  // imported or deleted for them.
+  const reviewJobId = job?.status === 'completed' && !textJob && candidatesJobId === job?.id ? job.id : null;
+  useEffect(() => {
+    if (!reviewJobId) return undefined;
+    let cancelled = false;
+    authFetchJson(`${base}/jobs/${reviewJobId}/unmatched-project-brdps`)
+      .then((data) => !cancelled && jobIdRef.current === reviewJobId && setProjectRules({ jobId: reviewJobId, brdps: data.project_brdps }))
+      .catch((err) => !cancelled && setProjectRules({ jobId: reviewJobId, error: err.message }));
+    return () => {
+      cancelled = true;
+    };
+  }, [reviewJobId, base]);
+  const unmatchedBrdps = useMemo(() => {
+    if (!projectRules?.brdps || projectRules.jobId !== reviewJobId) return null;
+    const matched = new Set(
+      (candidates || []).filter((c) => (c.classification === 'same' || c.classification === 'changed') && c.identifier).map((c) => c.identifier)
+    );
+    return projectRules.brdps.filter((b) => !matched.has(b.identifier));
+  }, [projectRules, candidates, reviewJobId]);
+  const showUnmatched = !!reviewJobId && showUnmatchedFor === reviewJobId;
+
   // "Reload": the job and its candidates again, and what that gave.
   const reloadRows = async () => {
     const jobId = job.id;
@@ -1035,6 +1066,35 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
               </span>
             )}
           </p>
+          {!textJob && projectRules?.error && projectRules.jobId === reviewJobId && (
+            <p className={styles.blocked} data-testid="rule-extract-unmatched-error">
+              {t('config.ruleExtract.unmatchedFailed', { error: projectRules.error })}
+            </p>
+          )}
+          {!textJob && unmatchedBrdps && unmatchedBrdps.length > 0 && (
+            <div className={pageStyles.hint} data-testid="rule-extract-unmatched">
+              <span data-testid="rule-extract-unmatched-count">{t('config.ruleExtract.unmatchedCount', { count: unmatchedBrdps.length })}</span>{' '}
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => setShowUnmatchedFor(showUnmatched ? null : reviewJobId)}
+                aria-expanded={showUnmatched}
+                data-testid="rule-extract-unmatched-toggle"
+              >
+                {showUnmatched ? t('config.ruleExtract.unmatchedHide') : t('config.ruleExtract.unmatchedShow')}
+              </button>
+              {showUnmatched && (
+                <ul className={styles.unmatchedList} data-testid="rule-extract-unmatched-list">
+                  {unmatchedBrdps.map((b) => (
+                    <li key={b.identifier}>
+                      <span className={styles.mono}>{b.identifier}</span> — {b.title || t('config.ruleExtract.unmatchedNoTitle')} —{' '}
+                      {t(`records.rule.states.${b.rule_state}`)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           {/* Safety net: the table must show every candidate the job read
               (506 and 527 of 533 were seen). The missing rows are named. */}
           {rowMismatch && (

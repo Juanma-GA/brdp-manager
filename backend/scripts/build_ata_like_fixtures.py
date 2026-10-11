@@ -9,8 +9,10 @@ repeating a rule already taken):
   ATA-CMP-like-010-reconstructed.xml   the "issue 010" file: 463
       structureObjectRule with id="SOR-n" and no BRDP identifier
       (brDecisionRef removed, identifiers removed from objectUse), indented.
-      SOR-3 changed by "ATA" (one path step and its objectUse); SOR-97 and
-      SOR-98 "Place holder rule for future use".
+      SOR-3 changed by "ATA" and marked changeType="modify" changeMark="1"
+      (its path loses a condition and its objectUse a sentence: 0.82 against
+      the stored one, under CONTENT_SIMILARITY); SOR-97 and SOR-98 "Place
+      holder rule for future use", marked changeType="add" changeMark="1".
   ATA-CMP-like-009-project-rules.json  the project made from "issue 009" by
       Excel: 461 BRDPs (BRDP-EXT-nnnnn, SOR-3 = BRDP-EXT-00002) with their
       rules stored compact and without id="SOR-n"; ten of them corrected by
@@ -18,7 +20,8 @@ repeating a rule already taken):
       path corrected in five, objectUse in four, the flag in one).
 
 Expected on import: 450 "Ya existe (igual)", 10 "Ya existe (cambia)"
-(content), SOR-3 → BRDP-EXT-00002 (similarity), SOR-97/98 "Nueva EXT".
+(content), SOR-3 → BRDP-EXT-00002 (marked as modified, matched by
+similarity), SOR-97/98 "Nueva EXT".
 
     cd backend && python scripts/build_ata_like_fixtures.py
 """
@@ -121,12 +124,17 @@ def _correct_flag(rule: etree._Element) -> None:
 
 
 def _ata_change(rule: etree._Element) -> None:
-    """What "ATA" changed in SOR-3 for issue 010: the last step of the path
-    and one sentence of the objectUse."""
+    """What "ATA" changed in SOR-3 for issue 010, marked as modified: the
+    path loses a condition (the crew schema) and the objectUse a sentence."""
     path = rule.find("objectPath")
-    path.text = re.sub(r"([A-Za-z]+)(\W*)$", r"\1Group\2", path.text.strip(), count=1)
+    path.text, removed = re.subn(r' or \(@xsi:noNamespaceSchemaLocation = "[^"]*crew\.xsd"\)', "", path.text, count=1)
+    assert removed == 1
     use = rule.find("objectUse")
-    use.text = (use.text or "").strip() + " Revised in issue 010."
+    sentences = re.split(r"(?<=\.)\s+", (use.text or "").strip())
+    assert len(sentences) > 2
+    use.text = " ".join(sentences[:1] + sentences[2:])
+    rule.set("changeType", "modify")
+    rule.set("changeMark", "1")
 
 
 def main() -> None:
@@ -173,7 +181,7 @@ def main() -> None:
         )
     for sor in PLACEHOLDERS:
         rule = etree.fromstring(
-            f'<structureObjectRule id="SOR-{sor}"><objectPath allowedObjectFlag="2">//placeholder</objectPath>'
+            f'<structureObjectRule id="SOR-{sor}" changeType="add" changeMark="1"><objectPath allowedObjectFlag="2">//placeholder</objectPath>'
             "<objectUse>Place holder rule for future use</objectUse></structureObjectRule>"
         )
         file_rules[sor] = ("", rule)

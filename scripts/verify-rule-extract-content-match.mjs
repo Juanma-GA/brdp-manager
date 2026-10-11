@@ -9,7 +9,12 @@
 // the "010" file is read through the page, and:
 //   - the counts: 450 "Already exists (same)", 11 "(changed)", 2 "New EXT";
 //   - BRDP-EXT-00043 (corrected by the project): the content warning in EN
-//     and ES, unchecked; SOR-3: "matched by similarity with BRDP-EXT-00002";
+//     and ES, unchecked; SOR-3, marked changeType="modify" in the file:
+//     "Marked as modified in the file; matched by similarity with
+//     BRDP-EXT-00002", unchecked;
+//   - a BRDP of the project with a rule the file does not have (added to the
+//     seeded project): "1 BRDP of the project is not in the file", named by
+//     "Show them" (EN and ES), and 2 at once when SOR-3 is moved to "New EXT";
 //   - importing what is checked by default (only the two placeholders)
 //     changes no rule of the project.
 // The project is deleted at the end.
@@ -85,8 +90,21 @@ async function main() {
       encoding: "utf-8",
     });
     console.log(`Seeded the "issue 009" project: ${seeded.trim()}`);
+    // A BRDP only the project has (with a rule): not in the file.
+    const extra = await api(`/api/projects/${project.id}/brdps`, {
+      method: "POST",
+      body: JSON.stringify({ identifier: "BRDP-EXT-00999", title: "Only in the project" }),
+    });
+    await api(`/api/projects/${project.id}/brdps/${extra.id}/approvals/BREX-4.2`, {
+      method: "PUT",
+      body: JSON.stringify({
+        rule_xml: '<structureObjectRule><objectPath allowedObjectFlag="0">//projectOnly</objectPath><objectUse>Only this project.</objectUse></structureObjectRule>',
+        status: "pending_review",
+        source: "manual",
+      }),
+    });
     const before = await storedRules(project.id);
-    assert(before.size === 461, `461 rules stored before reading the file (${before.size})`);
+    assert(before.size === 462, `462 rules stored before reading the file (461 + one only in the project) (${before.size})`);
 
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
     await page.goto(BASE_URL);
@@ -131,8 +149,36 @@ async function main() {
     }
     {
       const { row, text } = await warningOf(page, "BRDP-EXT-00002");
-      assert(text.includes("Matched by similarity with BRDP-EXT-00002: check it."), "SOR-3: matched by similarity with BRDP-EXT-00002 (EN)", text);
+      assert(
+        text.includes("Marked as modified in the file; matched by similarity with BRDP-EXT-00002: check it."),
+        "SOR-3 (changeType=\"modify\"): matched by similarity with BRDP-EXT-00002 (EN)",
+        text,
+      );
       assert(!(await row.getByTestId("rule-extract-select").isChecked()), "SOR-3 unchecked");
+    }
+
+    console.log("\nThe project's BRDPs that are not in the file");
+    {
+      const line = page.getByTestId("rule-extract-unmatched-count");
+      await line.waitFor({ timeout: 15000 });
+      assert((await line.innerText()) === "1 BRDP of the project is not in the file.", "1 BRDP of the project is not in the file (EN)", await line.innerText());
+      assert((await page.getByTestId("rule-extract-unmatched-list").count()) === 0, "the list starts folded");
+      await page.getByTestId("rule-extract-unmatched-toggle").click();
+      const list = await page.getByTestId("rule-extract-unmatched-list").innerText();
+      assert(list.includes("BRDP-EXT-00999") && list.includes("Only in the project") && list.includes("Draft"), "Show them: identifier, title, rule status", list);
+      await page.getByTestId("rule-extract-review").screenshot({ path: shot("rule-extract-unmatched-en.png") });
+      // SOR-3 moved to "New EXT": BRDP-EXT-00002 is no longer in the file, at once.
+      await page.getByTestId("rule-extract-search").fill("BRDP-EXT-00002");
+      const s3 = page.locator('[data-testid="rule-extract-row"]').filter({ hasText: "BRDP-EXT-00002" }).first();
+      await s3.getByTestId("rule-extract-class").selectOption("new_ext");
+      await page.waitForFunction(() => document.querySelector('[data-testid="rule-extract-unmatched-count"]')?.textContent.startsWith("2 "), null, { timeout: 15000 });
+      const list2 = await page.getByTestId("rule-extract-unmatched-list").innerText();
+      assert(list2.includes("BRDP-EXT-00002") && list2.includes("Verified") && list2.includes("BRDP-EXT-00999"), "2 once SOR-3 is a new EXT: BRDP-EXT-00002 (Verified) named", list2);
+      const restored = (await api(`/api/projects/${project.id}/ai-extract/jobs/${job.id}/candidates`)).candidates.find((c) => c.key === cands.find((x) => x.identifier === "BRDP-EXT-00002").key);
+      await api(`/api/projects/${project.id}/ai-extract/jobs/${job.id}/candidates`, {
+        method: "PATCH",
+        body: JSON.stringify({ items: [{ key: restored.key, classification: "changed" }] }),
+      });
     }
 
     console.log("\nThe same screen in Spanish");
@@ -147,7 +193,14 @@ async function main() {
         text,
       );
       const s3 = await warningOf(page, "BRDP-EXT-00002");
-      assert(s3.text.includes("Emparejada por parecido con BRDP-EXT-00002: compruébalo."), "SOR-3 (ES)", s3.text);
+      assert(
+        s3.text.includes("Marcada como modificada en el fichero; emparejada por parecido con BRDP-EXT-00002: compruébalo."),
+        "SOR-3 (ES)",
+        s3.text,
+      );
+      const line = await page.getByTestId("rule-extract-unmatched-count").innerText();
+      assert(line === "1 BRDP del proyecto no está en el fichero.", "1 BRDP del proyecto no está en el fichero (ES)", line);
+      assert((await page.getByTestId("rule-extract-unmatched-toggle").innerText()) === "Mostrarlas", "Mostrarlas (ES)");
       await page.getByTestId("rule-extract-review").screenshot({ path: shot("rule-extract-content-match-es.png") });
     }
     await setLanguage("en");
@@ -163,7 +216,7 @@ async function main() {
     const after = await storedRules(project.id);
     const changed = [...before].filter(([id, v]) => after.get(id) !== v);
     assert(changed.length === 0, "no rule of the project changed", JSON.stringify(changed.slice(0, 3)));
-    assert(after.size === 463, `463 rules now (461 + the 2 placeholders) (${after.size})`);
+    assert(after.size === 464, `464 rules now (462 + the 2 placeholders) (${after.size})`);
   } finally {
     await browser.close();
     await setLanguage("en").catch(() => {});

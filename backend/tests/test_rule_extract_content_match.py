@@ -22,7 +22,14 @@ from app.db.base import async_session_factory
 from app.models import BRDP, BRDPHistory, Project, RuleApproval, User, UserProjectRole
 from app.services import rule_formats
 from app.services.rule_extract import build_candidates, read_rules_file
-from app.services.rule_extract_jobs import classify_candidates, match_by_content, rule_content
+from app.services.rule_extract_jobs import (
+    MODIFIED_MATCH_MARGIN,
+    classify_candidates,
+    content_similarity,
+    marked_modified,
+    match_by_content,
+    rule_content,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ATA_010 = FIXTURES / "brex" / "ATA-CMP-like-010-reconstructed.xml"
@@ -105,6 +112,74 @@ def test_changed_by_the_file_found_by_similarity_and_placeholder_not_found():
         _cand("sor97", _sor(97, path="//placeholder", use="Place holder rule for future use", flag="2")),
     ]
     assert _match(cands, pool) == {"sor3": ("similarity", "BRDP-EXT-00002")}
+
+
+def test_marked_modified_attributes():
+    assert marked_modified('<structureObjectRule changeType="modify" changeMark="1"/>', "BREX-4.2")
+    assert marked_modified("<structureObjectRule changeMark='1'><objectPath/></structureObjectRule>", "BREX-4.1")
+    assert marked_modified('<structureObjectRule><objectUse changeType="modify">x</objectUse></structureObjectRule>', "BREX-4.2")
+    assert not marked_modified('<structureObjectRule changeType="add" changeMark="1"/>', "BREX-4.2")
+    assert not marked_modified('<structureObjectRule changeType="delete" changeMark="1"/>', "BREX-4.2")
+    assert not marked_modified('<!-- <x changeType="modify"/> --><structureObjectRule/>', "BREX-4.2")
+    assert not marked_modified('<structureObjectRule changeMark="0"/>', "BREX-4.2")
+    assert marked_modified('<objrule change="modify" mark="1"/>', "BREX-3.0.1")
+    assert not marked_modified('<objrule change="add" mark="1"/>', "BREX-3.0.1")
+    # 3.0.1 has no changeType; DITA has no change attributes.
+    assert not marked_modified('<objrule changeType="modify"/>', "BREX-3.0.1")
+    assert not marked_modified('<pattern changeType="modify"/>', "SCH-DITA")
+
+
+def test_change_attributes_never_count_when_comparing():
+    pool = [(_b("BRDP-EXT-00001"), _stored())]
+    rule = _sor(1).replace('id="SOR-1"', 'id="SOR-1" changeType="modify" changeMark="1" reasonForUpdateRefIds="r1"')
+    rule = rule.replace("<objectUse>", '<objectUse changeType="modify" changeMark="1">')
+    assert _match([_cand("c1", rule)], pool) == {"c1": ("exact", "BRDP-EXT-00001")}
+
+
+_PDHL_USE = (
+    "The schema is not allowed. The Product Definitions High Level of each information set describes the "
+    "different type of schemas permitted for the corresponding information set. (Chap. 2.5.1 Para_2.1.3)."
+)
+_PDHL_PATH = (
+    '/dmodule[not((@xsi:noNamespaceSchemaLocation = "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/descript.xsd") '
+    'or (@xsi:noNamespaceSchemaLocation = "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/proced.xsd") '
+    'or (@xsi:noNamespaceSchemaLocation = "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/crew.xsd"))]'
+)
+_PDHL_MODIFIED_PATH = _PDHL_PATH.replace(' or (@xsi:noNamespaceSchemaLocation = "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/crew.xsd")', "")
+_PDHL_MODIFIED_USE = "The schema is not allowed. (Chap. 2.5.1 Para_2.1.3)."
+
+
+def _modified_sor(change="modify"):
+    return _sor(3, path=_PDHL_MODIFIED_PATH, use=_PDHL_MODIFIED_USE).replace('id="SOR-3"', f'id="SOR-3" changeType="{change}" changeMark="1"')
+
+
+def test_marked_as_modified_with_one_similar_brdp_and_margin():
+    # The path loses a condition and the objectUse a sentence: under
+    # CONTENT_SIMILARITY, matched only because the file marks it modified.
+    pool = [
+        (_b("BRDP-EXT-00002"), _stored(path=_PDHL_PATH, use=_PDHL_USE)),
+        (_b("BRDP-EXT-00005"), _stored(path="//caption", use="Captions are not used.")),
+    ]
+    out = match_by_content([_cand("sor3", _modified_sor())], pool, "BREX-4.2")
+    assert out["sor3"]["how"] == "modified" and out["sor3"]["brdp"].identifier == "BRDP-EXT-00002"
+    assert 0.5 <= out["sor3"]["similarity"] < 0.85
+    # Without the change marks (or marked as added): as before, no match.
+    unmarked = _sor(3, path=_PDHL_MODIFIED_PATH, use=_PDHL_MODIFIED_USE)
+    assert _match([_cand("sor3", unmarked)], pool) == {}
+    assert _match([_cand("sor3", _modified_sor("add"))], pool) == {}
+
+
+def test_marked_as_modified_with_two_similar_brdps_and_no_margin():
+    # Two BRDPs as close to it: no clear best, so "Nueva EXT".
+    other_path = _PDHL_PATH.replace("proced.xsd", "ipd.xsd")
+    pool = [
+        (_b("BRDP-EXT-00002"), _stored(path=_PDHL_PATH, use=_PDHL_USE)),
+        (_b("BRDP-EXT-00003"), _stored(path=other_path, use=_PDHL_USE)),
+    ]
+    rc = rule_content(_modified_sor(), "BREX-4.2")
+    scores = sorted((content_similarity(rc.grams, rule_content(x, "BREX-4.2").grams) for _, x in pool), reverse=True)
+    assert scores[0] - scores[1] < MODIFIED_MATCH_MARGIN
+    assert _match([_cand("sor3", _modified_sor())], pool) == {}
 
 
 def test_same_rule_in_two_brdps_matches_none():
@@ -244,11 +319,13 @@ async def test_ata_issue_010_into_the_issue_009_project(client, ata_project):
     for c in by_content:
         assert c["selected"] is False and c["existing_rule_xml"]
         assert [w["code"] for w in c["warnings"]] == ["content_match_changed"]
-    # SOR-3, changed by ATA: by similarity with BRDP-EXT-00002, unchecked.
+    # SOR-3, changed by ATA and marked changeType="modify" (0.82, under
+    # CONTENT_SIMILARITY): matched with BRDP-EXT-00002, unchecked.
     s3 = sor[3]
     assert (s3["classification"], s3["identifier"], s3["match_by"], s3["selected"]) == ("changed", "BRDP-EXT-00002", "similarity", False)
     [w] = s3["warnings"]
-    assert w["code"] == "similarity_match" and w["params"]["identifier"] == "BRDP-EXT-00002" and w["params"]["similarity"] >= 0.85
+    assert w["code"] == "modified_match" and w["params"]["identifier"] == "BRDP-EXT-00002"
+    assert 0.5 <= w["params"]["similarity"] < 0.85
     # The placeholders: new EXT numbers after the project's.
     assert (sor[97]["classification"], sor[98]["classification"]) == ("new_ext", "new_ext")
     assert {sor[97]["identifier"], sor[98]["identifier"]} == {"BRDP-EXT-00462", "BRDP-EXT-00463"}
@@ -302,7 +379,7 @@ async def test_ata_issue_010_into_the_issue_009_project(client, ata_project):
     event = json.loads(events[-1])
     assert event["match_by"] == "similarity" and event["file"].startswith("DMC-ATABREX")
     stored = await _stored_rules(project.id)
-    assert "Revised in issue 010." in stored["BRDP-EXT-00002"][0] and stored["BRDP-EXT-00002"][1] == "pending_review"
+    assert "<objectUse>The schema is not allowed. (Chap." in stored["BRDP-EXT-00002"][0] and stored["BRDP-EXT-00002"][1] == "pending_review"
     assert {k: v for k, v in stored.items() if k != "BRDP-EXT-00002"} == {k: v for k, v in after.items() if k != "BRDP-EXT-00002"}
 
     # Read again: SOR-3 is now the same rule. The two placeholders imported
@@ -316,6 +393,42 @@ async def test_ata_issue_010_into_the_issue_009_project(client, ata_project):
                 w["code"] == "rule_in_several_brdps" and w["params"]["identifiers"] == ["BRDP-EXT-00462", "BRDP-EXT-00463"]
                 for w in c["warnings"]
             )
+
+
+async def test_project_brdps_not_in_the_file(client, ata_project):
+    """The project's BRDPs with a rule that no row of the file is matched
+    with: named, by the rows' current classification; never for a text job."""
+    project, editor, _rows = ata_project
+    async with async_session_factory() as session:
+        extra = BRDP(project_id=project.id, identifier="BRDP-EXT-00999", title="Only in the project", definition="D", proposal="P", validation="Validated")
+        no_rule = BRDP(project_id=project.id, identifier="BRDP-EXT-00998", title="No rule", definition="D", proposal="P", validation="Pending")
+        session.add_all([extra, no_rule])
+        await session.flush()
+        session.add(RuleApproval(brdp_id=extra.id, format="BREX-4.2", rule_xml=_stored(path="//projectOnly"), status="pending_review", source="manual"))
+        await session.commit()
+    res = await client.post(
+        f"/api/projects/{project.id}/ai-extract/parse", headers=editor,
+        files={"file": ("DMC-ATABREX-F-00-00-0000-01A-022A-D_010-00_EN-US.XML", ATA_010.read_bytes(), "application/xml")},
+    )
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{res.json()['job_id']}"
+    res = await client.get(f"{url}/unmatched-project-brdps", headers=editor)
+    assert res.status_code == 200, res.text
+    assert res.json()["brdps"] == [{"identifier": "BRDP-EXT-00999", "title": "Only in the project", "rule_state": "draft"}]
+    assert len(res.json()["project_brdps"]) == 462
+    # SOR-3 reclassified as a new EXT: BRDP-EXT-00002 is no longer in the file.
+    cands = (await client.get(f"{url}/candidates", headers=editor)).json()["candidates"]
+    s3 = next(c for c in cands if 'id="SOR-3"' in c["rule_preview"][0])
+    await client.patch(f"{url}/candidates", headers=editor, json={"items": [{"key": s3["key"], "classification": "new_ext"}]})
+    brdps = (await client.get(f"{url}/unmatched-project-brdps", headers=editor)).json()["brdps"]
+    assert [b["identifier"] for b in brdps] == ["BRDP-EXT-00002", "BRDP-EXT-00999"] and brdps[0]["rule_state"] == "verified"
+    # A text job: nothing.
+    res = await client.post(
+        f"/api/projects/{project.id}/ai-extract/text", headers=editor, json={"text": "The project decides to use only numbered lists."}
+    )
+    assert res.status_code == 202, res.text
+    text_url = f"/api/projects/{project.id}/ai-extract/jobs/{res.json()['job_id']}"
+    out = (await client.get(f"{text_url}/unmatched-project-brdps", headers=editor)).json()
+    assert out["brdps"] == [] and out["project_brdps"] == []
 
 
 # ── Files with identifiers: as before ─────────────────────────────────────
