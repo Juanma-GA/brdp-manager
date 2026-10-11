@@ -500,7 +500,21 @@ function sectionPlaceHint(problem, places) {
   return `In this section <${problem.element}> goes inside <${path[path.length - 2]}> (${path.join('/')}), as in the minimal section; do not repeat it elsewhere`;
 }
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [] } = {}) {
+// Colocación, Part 1: an element on the way the prompt gave to write the
+// checked element inside an ancestor the rule tests (relationWays of the
+// placement: levelledPara/table/title/footnote for
+// //footnote[not(ancestor::table)]), put where the schema does not allow it
+// (<table> inside <para>) -- the same way again.
+function relationWayHint(problem, relationWays) {
+  if (problem.kind !== 'notAllowed') return null;
+  const ways = relationWays.filter((r) => r.way.slice(1).includes(problem.element));
+  if (ways.length === 0) return null;
+  return ways
+    .map((r) => `<${r.element}> ${r.axis === 'parent' ? 'directly ' : ''}inside <${r.ancestor}> is written by exactly this way: ${r.way.join('/')}.`)
+    .join(' ');
+}
+
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [], relationWays = [] } = {}) {
   const places = sectionTree ? minimalSectionPlaces(sectionTree) : null;
   // GMC, Part 1.3: an attribute given for the root is never "markup of an
   // element the rule does not name": no plain-text hint for it.
@@ -535,6 +549,11 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     const routes = p.kind === 'notAllowed' ? routesThrough(sectionRoutes, p.element) : [];
     if (routes.length) {
       out.push(`${formatStructureProblem(p, schema)}. ${routes.map(sectionRouteSentence).join(' ')}`);
+      continue;
+    }
+    const relationHint = relationWayHint(p, relationWays);
+    if (relationHint) {
+      out.push(`${formatStructureProblem(p, schema)}. ${relationHint}`);
       continue;
     }
     // (before the general nesting hint: these ways follow every step of

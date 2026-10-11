@@ -430,7 +430,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const SHORTDESC = '<sch:pattern><sch:rule context="shortdesc"><sch:assert id="SD" test="string-length(.) le 80">Short description too long.</sch:assert></sch:rule></sch:pattern>';
 
   const stepTargets = ruleTargets(STEP);
-  check('T4 targets: Schematron → contexts only', JSON.stringify({ ...stepTargets, alternatives: undefined }) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], predicateNames: [], rootPredicates: [], wholeDocument: false, references: [], chains: [], looseAttributes: [] }) && stepTargets.alternatives.length === 1, JSON.stringify(stepTargets));
+  check('T4 targets: Schematron → contexts only', JSON.stringify({ ...stepTargets, alternatives: undefined }) === JSON.stringify({ checked: ['step'], absolutePrefixes: [], predicateNames: [], rootPredicates: [], wholeDocument: false, references: [], chains: [], looseAttributes: [], relations: [] }) && stepTargets.alternatives.length === 1, JSON.stringify(stepTargets));
   check('T4 targets: note', ruleTargets(NOTE).checked.join() === 'note');
   check('T4 targets: root context → whole document', ruleTargets(ROOT_LANG).wholeDocument === true);
   check('T4 targets: entities decoded in the context', ruleTargets('<rule context="p[. = &apos;x&apos;]"><assert test="1">x</assert></rule>').checked.join() === 'p');

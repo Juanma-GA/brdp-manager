@@ -4992,6 +4992,88 @@
           "note": "the position said in words"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-cmp-assert-no-text",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "CMP 4.2 pass, BRDP-EXT-00030: //assert/child::text() (flag 0). Before: the last step child::text() made the path opaque, so the examples were written in <para>, where <assert> cannot go (0 of 3 valid). Now it is placed as //assert (in <content>). The simulator writes the examples wherever the prompt says the content goes.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-CMP030",
+        "title": "Empty applicability assertions",
+        "definition": "Decide whether the assert element of an applicability statement can contain text.",
+        "proposal": "The assert element shall be empty: no text, not even spaces.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//assert/child::text()</objectPath><objectUse>BREX-CMMST-00030: The &lt;assert&gt; element must be empty.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example is valid: <assert> goes inside <applic>, not in <para>"
+        },
+        {
+          "type": "rule_test_accept_and_reject"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "your content goes directly inside <content>",
+          "note": "placed as //assert"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "<assert> must not contain any text, not even spaces",
+          "note": "the node test is described"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-cmp-footnote-table-prelim",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "CMP 4.2 pass, BRDP-EXT-00023: //footnote[not(ancestor::table) and not(ancestor::preliminaryRqmts)] (flag 0). Before: the examples were written in <para>, where <table> cannot go, so the footnote in a table could not be written and the correction could not fix it. Now the insertion point admits <table> (<levelledPara> in descript) and the prompt gives the way to write the footnote inside it. The simulator follows that way; without it, it writes the table in the paragraph.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-CMP023",
+        "title": "Footnotes",
+        "definition": "Decide where footnotes can be used.",
+        "proposal": "Footnotes shall only be used in tables and in preliminary requirements.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//footnote[not(ancestor::table) and not(ancestor::preliminaryRqmts)]</objectPath><objectUse>BREX-CMMST-00023: Footnotes are only allowed in tables and preliminary requirements.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "the footnote in a table is valid: the table is not in a <para>"
+        },
+        {
+          "type": "rule_test_accept_and_reject"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "<footnote> inside <table>: ",
+          "note": "the way to write the footnote inside a table"
+        },
+        {
+          "type": "not_contains",
+          "target": "prompt",
+          "pattern": "your content goes directly inside <para>",
+          "note": "never in <para>, where <table> cannot go"
+        }
+      ]
     }
   ]
 }

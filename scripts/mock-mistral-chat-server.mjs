@@ -710,6 +710,34 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Legend title pointing to another figure", expected: "reject", schema, content: `${figure("fig-0002", told)}${other}` },
     ]);
   }
+  // Colocación (CMP 4.2). EXT-00030: //assert/child::text(). The examples
+  // are an applicability group with an empty / non-empty <assert>, written
+  // wherever the prompt says the content goes -- like the real run, in
+  // <para> (the old placement) they are invalid, and the correction cannot
+  // move them out of it.
+  if (/\/\/assert\/child::text\(\)/.test(rule)) {
+    const group = (text) => `<referencedApplicGroup><applic id="app-0001"><assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"${text === null ? "/>" : `>${text}</assert>`}</applic></referencedApplicGroup>`;
+    const schema = ruleSchema || "descript";
+    return answer([
+      { label: "Empty assert", expected: "accept", schema, content: group(null) },
+      { label: "Assert with text", expected: "reject", schema, content: group("Model A") },
+      { label: "Assert with only a space", expected: "reject", schema, content: group(" ") },
+    ]);
+  }
+  // EXT-00023: footnotes only in tables (and preliminary requirements).
+  // With the way line ("<footnote> inside <table>: …") the table goes where
+  // the way starts; without it (the old placement in <para>) the table is
+  // written inside the paragraph, which the schema does not allow.
+  if (/footnote\[not\(ancestor::table\)/.test(rule)) {
+    const way = (systemPrompt.match(/<footnote> inside <table>: ([\w/]+)/) || [])[1];
+    const footnote = "<footnote><para>Dry threads.</para></footnote>";
+    const table = `<table><title>Torque values${footnote}</title><tgroup cols="1"><tbody><row><entry><para>25</para></entry></row></tbody></tgroup></table>`;
+    const schema = ruleSchema || "descript";
+    return answer([
+      { label: "Footnote in a table", expected: "accept", schema, content: way ? table : `Tighten the bolt. ${table}` },
+      { label: "Footnote in a paragraph", expected: "reject", schema, content: way ? `<para>Tighten the bolt${footnote}.</para>` : `Tighten the bolt${footnote}.` },
+    ]);
+  }
   // Caminos de la sección (CMP 4.2). EXT-00188 / EXT-00189: a caption
   // group / caption inside a <para> of the status section. The reject
   // example follows the first way the prompt (or the correction) gives to

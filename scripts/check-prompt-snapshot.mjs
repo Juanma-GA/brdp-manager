@@ -280,6 +280,13 @@
 // EXT-00008 (a chain of ancestors) and EXT-00181 (a loose attribute in a
 // condition: its carriers, content alongside the metadata). Every other
 // prompt is identical.
+//
+// Colocación (text()/node()/child:: and ancestor relations): two new
+// ruleTestExamples cases with the real CMP rules -- EXT-00030
+// (//assert/child::text(): the content goes in <content>, as //assert,
+// never in <para>) and EXT-00023 (the content goes in <levelledPara>, with
+// the way to write <footnote> inside <table>). Every other prompt is
+// identical.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

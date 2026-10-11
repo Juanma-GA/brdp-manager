@@ -128,6 +128,7 @@ import {
   combinedReason,
   localName,
   nodePath,
+  nodeTestKind,
   parseXmlDocument,
   reason,
   stripLiterals,
@@ -688,6 +689,9 @@ function ruleFormatReason(ruleXml, format, parseXml) {
 //   describe_forbidden_length {target, op, amount, path}
 //                                                      flag 0, a threshold on the last
 //                                                      step (pathThreshold, Mejoras A)
+//   describe_content_forbidden / _required {target, kind, path}
+//                                                      a node test (text(), node(),
+//                                                      comment()) under a named element
 //   describe_mandatory {parent, target, path}          flag 1, <parent>/<step>
 //   describe_mandatory_values {parent, target, values, path}
 //   describe_mandatory_somewhere {target, path}        flag 1, not divisible
@@ -814,6 +818,8 @@ function describePart(part, spec, parseXml) {
     return qualifier ? { ...statement, params: { ...statement.params, qualifier } } : statement;
   };
   if ((flag === '0' || flag === '1') && !withValues) {
+    const content = nodeContentStatement(path, flag);
+    if (content) return content;
     const root = rootSelfStatement(path, flag);
     if (root) return root;
   }
@@ -843,6 +849,45 @@ function describePart(part, spec, parseXml) {
   return qualified(withValues
     ? { code: 'describe_restricted_values', params: { target, values, path } }
     : { code: 'describe_allowed', params: { target, path } });
+}
+
+// Colocación, Part 1: a path whose last step is a node test, right under a
+// named element -- //assert/child::text() (BRDP-EXT-00030), //x/node(),
+// //x/comment() -- reads what is inside that element, never an element of
+// its own. Flag 0: "<assert> must not contain any text, not even spaces";
+// flag 1 (each <x> must have one, the <parent>/<step> split of the
+// semantics table): "Each <x> must contain text". kind: 'text' | 'node' |
+// 'comment' | 'pi'. A node test under "//" (any depth) or after anything
+// but a named element is described as before.
+//   describe_content_forbidden {target, kind, path, qualifier?}
+//   describe_content_required {target, kind, path, qualifier?}
+function nodeContentStatement(path, flag) {
+  const text = String(path || '').trim();
+  let depth = 0;
+  let quote = '';
+  let last = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) { if (ch === quote) quote = ''; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    if (ch === '[' || ch === '(') depth += 1;
+    else if (ch === ']' || ch === ')') depth -= 1;
+    else if (ch === '|' && depth === 0) return null;
+    else if (ch === '/' && depth === 0) last = i;
+  }
+  if (last < 1 || text[last - 1] === '/') return null;
+  const kind = nodeTestKind(text.slice(last + 1));
+  if (!kind) return null;
+  const owner = text.slice(0, last);
+  const target = pathTarget(owner);
+  if (!target || !target.startsWith('<')) return null;
+  if (flag === '1') {
+    const split = _splitTopLevel(text);
+    if (!split || !_isContextPattern(split.parent) || !nodeTestKind(split.step)) return null;
+  }
+  const qualifier = checkedStepQualifier(owner);
+  const params = { target, kind, path, ...(qualifier ? { qualifier } : {}) };
+  return { code: flag === '0' ? 'describe_content_forbidden' : 'describe_content_required', params };
 }
 
 // Mejoras D, Part 1.2: what the predicates of the checked step mean, when a
@@ -1303,7 +1348,7 @@ const CAN_REJECT = new Set([
   'describe_root_must_be', 'describe_root_must_not_be', 'describe_any_document_must_contain', 'describe_any_document_must_not_contain',
   'describe_document_must_contain_inside', 'describe_document_must_not_contain_inside', 'describe_any_document_must_contain_inside', 'describe_any_document_must_not_contain_inside',
   'describe_forbidden_nesting', 'describe_forbidden_ancestors', 'describe_forbidden_children', 'describe_forbidden_length',
-  'describe_condition_forbidden', 'describe_condition_required',
+  'describe_condition_forbidden', 'describe_condition_required', 'describe_content_forbidden', 'describe_content_required',
   'describe_forbidden', 'describe_forbidden_values', 'describe_mandatory', 'describe_mandatory_values',
   'describe_mandatory_somewhere', 'describe_mandatory_somewhere_values', 'describe_restricted_values',
 ]);

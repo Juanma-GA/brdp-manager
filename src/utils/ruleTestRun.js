@@ -910,6 +910,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             // prompt leaves those out): the example still put one elsewhere
             places: correctionPlaces(setup?.placements?.[materialized[index].schema], ruleNames.elements),
             carriers: setup?.placements?.[materialized[index].schema]?.placement?.attributeCarriers || [],
+            relationWays: setup?.placements?.[materialized[index].schema]?.placement?.relationWays || [],
             rootAttributes: setup?.placements?.[materialized[index].schema]?.placement?.rootAttributes || [],
           });
       const wraps = (r.validation.structure || []).some((p) => p.kind === 'notAllowed');

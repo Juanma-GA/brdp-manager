@@ -1224,6 +1224,15 @@ const resources = {
           describe: {
             title: 'What the rule checks',
             describe_forbidden: '{{target}} must not appear (path {{path}}).',
+            // Colocación, Part 1: a node test under the checked element.
+            describe_content_forbidden_text: '{{target}} must not contain any text, not even spaces (path {{path}}).',
+            describe_content_forbidden_node: '{{target}} must be empty: no elements, text, spaces or comments (path {{path}}).',
+            describe_content_forbidden_comment: '{{target}} must not contain comments (path {{path}}).',
+            describe_content_forbidden_pi: '{{target}} must not contain processing instructions (path {{path}}).',
+            describe_content_required_text: 'Each {{target}} must contain text (path {{path}}).',
+            describe_content_required_node: 'Each {{target}} must contain something: an element, text or a comment (path {{path}}).',
+            describe_content_required_comment: 'Each {{target}} must contain a comment (path {{path}}).',
+            describe_content_required_pi: 'Each {{target}} must contain a processing instruction (path {{path}}).',
             // Mejoras D, Part 1.2: the checked step's predicate.
             qualifier: {
               outside: '{{target}} outside {{name}}',
@@ -3139,6 +3148,14 @@ const resources = {
           describe: {
             title: 'Qué comprueba la regla',
             describe_forbidden: '{{target}} no puede aparecer (ruta {{path}}).',
+            describe_content_forbidden_text: '{{target}} no puede contener texto, ni siquiera espacios (ruta {{path}}).',
+            describe_content_forbidden_node: '{{target}} debe estar vacío: sin elementos, texto, espacios ni comentarios (ruta {{path}}).',
+            describe_content_forbidden_comment: '{{target}} no puede contener comentarios (ruta {{path}}).',
+            describe_content_forbidden_pi: '{{target}} no puede contener instrucciones de procesamiento (ruta {{path}}).',
+            describe_content_required_text: 'Cada {{target}} debe contener texto (ruta {{path}}).',
+            describe_content_required_node: 'Cada {{target}} debe contener algo: un elemento, texto o un comentario (ruta {{path}}).',
+            describe_content_required_comment: 'Cada {{target}} debe contener un comentario (ruta {{path}}).',
+            describe_content_required_pi: 'Cada {{target}} debe contener una instrucción de procesamiento (ruta {{path}}).',
             qualifier: {
               outside: '{{target}} fuera de {{name}}',
               inside: '{{target}} dentro de {{name}}',

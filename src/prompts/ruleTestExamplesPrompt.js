@@ -193,6 +193,24 @@ function writePathLines(p) {
     .join('');
 }
 
+// Colocación, Part 1: an ancestor test in the checked step's predicate
+// (BRDP-EXT-00023, //footnote[not(ancestor::table) and
+// not(ancestor::preliminaryRqmts)]) and an insertion point that allows the
+// checked element both inside and outside that ancestor: the way to write
+// it inside each one. Neutral, like the relation split of Mejoras A:
+// which example follows the decision is up to the decision.
+function relationWayLines(p) {
+  const ways = p.relationWays || [];
+  if (ways.length === 0) return '';
+  const element = ways[0].element;
+  const names = ways.map((r) => relationPhrase(r, true)).join(', ');
+  const lines = ways.map((r) => `
+    <${r.element}> ${relationPhrase(r, true)}: ${r.way.join('/')}`);
+  return `
+  The rule's path looks at whether <${element}> is ${names}. Write <${element}> inside by exactly one of these ways, never moving it out of that element:${lines.join('')}
+  and <${element}> outside ${ways.length > 1 ? 'them' : 'it'} by any other valid way.`;
+}
+
 // Test de reglas: referencias, antepasados…, Part 1.1: the checked node
 // references one of a list of destinations (BRDP-EXT-00039: @internalRefId
 // against the @id of <figure>, <table>, …). The ones the example can write
@@ -314,7 +332,7 @@ ${metadataLine(p)}${carrierLines(p)}${placeLines(p)}`;
     : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
   ${p.path.join('/')}.${titleLine}${relationLine}
-  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${chainLines(p)}${referenceLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
+  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${relationWayLines(p)}${chainLines(p)}${referenceLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''
   }${carrierLines(p)}${placeLines(p)}`;

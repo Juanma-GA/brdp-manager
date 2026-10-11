@@ -254,7 +254,9 @@ export function formatRuleStatement(statement, schemas, t) {
   // agrees (Mejoras B, Part 4.1 c).
   const nodesKey = !params.target && 'target' in params ? `records.ruleTest.describe.${statement.code}_nodes` : null;
   const nodesText = nodesKey ? t(nodesKey, { ...values, defaultValue: '' }) : '';
-  let text = nodesText || t(`records.ruleTest.describe.${statement.code}`, { ...values, defaultValue: statement.code });
+  // Colocación, Part 1: one sentence per node test (text(), node()…).
+  const key = /^describe_content_(?:forbidden|required)$/.test(statement.code) ? `${statement.code}_${params.kind}` : statement.code;
+  let text = nodesText || t(`records.ruleTest.describe.${key}`, { ...values, defaultValue: statement.code });
   // Schematron: a role="warning"/"info" check never rejects (T4).
   if (params.warning) text = t('records.ruleTest.describe.schWarning', { text });
   else if (params.constant) text = t('records.ruleTest.describe.schConstant', { text });

@@ -29,7 +29,7 @@
 import { schemaContextUrl, supportsSchemaContext } from './ruleSchemaContext.js';
 import { sectionCarrierWay, sectionRoutes } from './schemaPlacement.js';
 import { extractRuleXPaths, extractXPathNames } from '../validation/schemaValidation.js';
-import { stripLiterals } from './ruleTestCommon.js';
+import { nodeTestKind, stripLiterals } from './ruleTestCommon.js';
 import { fragmentWellFormedProblem } from './ruleWrappers.js';
 import { comparisonPairs, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
 
@@ -190,6 +190,29 @@ function conditionOperands(expression) {
   return out;
 }
 
+// Colocación, Part 1: the ancestor/parent tests of a predicate, alone or
+// joined by and/or, each with whether it is negated -- "not(ancestor::table)
+// and not(ancestor::preliminaryRqmts)" (BRDP-EXT-00023) → [{ axis:
+// 'ancestor', ancestor: 'table', negated: true }, { …preliminaryRqmts… }].
+// Other operands of the predicate give nothing; a test with more steps or a
+// predicate of its own (ancestor::x[@a], ancestor::x/y) is not one.
+const RELATION_TERM_RE = /^(ancestor|ancestor-or-self|parent)::([A-Za-z_][\w.-]*)$/;
+function relationTerms(predicate) {
+  const out = [];
+  const visit = (raw, negated) => {
+    let e = String(raw || '').trim();
+    while (e.startsWith('(') && closesAtEnd(e, 0)) e = e.slice(1, -1).trim();
+    const not = /^not\s*\(/.exec(e);
+    if (not && closesAtEnd(e, not[0].length - 1)) return visit(e.slice(not[0].length, -1), !negated);
+    const parts = splitTopLevelOperators(e, true);
+    if (parts.length > 1) return parts.forEach((part) => visit(part, negated));
+    const m = RELATION_TERM_RE.exec(e);
+    if (m) out.push({ axis: m[1] === 'parent' ? 'parent' : 'ancestor', ancestor: m[2], negated });
+  };
+  visit(predicate, false);
+  return out;
+}
+
 const NAME_RE = /^[A-Za-z_][\w.-]*$/;
 const AXIS_RE = /^(?:child|descendant|descendant-or-self|self|following-sibling|preceding-sibling|following|preceding|ancestor|ancestor-or-self|parent)::/;
 
@@ -242,7 +265,7 @@ function analyzeAlternative(alternative, out) {
   let checked = null;
   for (let i = segments.length - 1; i >= 0; i -= 1) {
     const seg = segments[i].trim();
-    if (!seg || seg === '.' || seg === '*' || /^(?:node|text|comment)\(\)$/.test(seg)) continue;
+    if (!seg || seg === '.' || seg === '*' || nodeTestKind(seg)) continue;
     if (seg.startsWith('@') || seg.startsWith('attribute::')) continue; // the owner is the previous step
     if (seg.includes('(') || seg.includes(':') && !AXIS_RE.test(seg)) break; // a function call, a prefixed name
     const name = stepName(seg);
@@ -274,6 +297,7 @@ function analyzeAlternative(alternative, out) {
   let previous = null;
   let descendant = false;
   let wildcard = false;
+  let nodeTest = null;
   segments.forEach((raw, i) => {
     const seg = raw.trim();
     if (!seg) {
@@ -284,7 +308,17 @@ function analyzeAlternative(alternative, out) {
       descendant = true;
       return;
     }
-    if (seg === '.' || /^(?:node|text|comment)\(\)$/.test(seg)) return;
+    if (seg === '.') return;
+    // Colocación, Part 1: a node test (text(), child::text(), node(),
+    // comment(), processing-instruction()) names no element: the checked
+    // element is the previous step, and the rule looks at its content
+    // (//assert/child::text() is placed as //assert). Recorded when it is
+    // the last step.
+    const kind = nodeTestKind(seg);
+    if (kind) {
+      if (i === segments.length - 1) nodeTest = kind;
+      return;
+    }
     if (seg === '*') {
       previous = null;
       wildcard = true;
@@ -324,7 +358,7 @@ function analyzeAlternative(alternative, out) {
     descendant = false;
   });
   if (steps.length === 0 && !attribute) opaque = true;
-  out.alternatives.push({ steps, axes, attribute, checked, absolutePrefix, opaque, descendantPairs, prefixedSteps, descendantAttribute });
+  out.alternatives.push({ steps, axes, attribute, checked, absolutePrefix, opaque, descendantPairs, prefixedSteps, descendantAttribute, nodeTest });
 }
 
 const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
@@ -417,7 +451,7 @@ function lastElementStep(steps) {
   for (let i = steps.length - 1; i >= 0; i -= 1) {
     const s = steps[i];
     if (s.kind === 'element') return s;
-    if (s.kind === 'attribute' || s.kind === 'other' && /^(?:node|text|comment)\(\)$/.test(s.main)) continue;
+    if (s.kind === 'attribute' || s.kind === 'other' && nodeTestKind(s.main)) continue;
     return null;
   }
   return null;
@@ -474,6 +508,7 @@ function predicateTargets(expressions) {
   const references = [];
   const chains = [];
   const looseAttributes = [];
+  const relations = [];
   const addLoose = (operand) => {
     const loose = looseAttributeOf(operand);
     if (loose && !looseAttributes.some((l) => l.attribute === loose.attribute && l.root === loose.root)) looseAttributes.push(loose);
@@ -511,6 +546,14 @@ function predicateTargets(expressions) {
               if (!entry.destinations.some((d) => d.name === destination.name && d.attribute === destination.attribute)) entry.destinations.push(destination);
             }
           }
+          // Colocación, Part 1: [not(ancestor::table) and
+          // not(ancestor::preliminaryRqmts)], also inside the operands of a
+          // true/false condition.
+          for (const term of relationTerms(predicate)) {
+            if (term.ancestor === checked.name) continue;
+            const relation = { element: checked.name, ...term };
+            if (!relations.some((r) => r.element === relation.element && r.axis === relation.axis && r.ancestor === relation.ancestor)) relations.push(relation);
+          }
           for (const op of pathOperands(predicate)) {
             const chain = ancestorChainOf(op);
             if (chain && chain.length > 1) chains.push({ element: checked.name, chain, path: op.replace(/\s+/g, ' ').trim() });
@@ -528,7 +571,11 @@ function predicateTargets(expressions) {
       chains.findIndex((d) => d.element === c.element && key(d) === key(c)) === i &&
       !chains.some((d) => d !== c && d.element === c.element && d.chain.length > c.chain.length && key(d).startsWith(`${key(c)}/`))
   );
-  return { references, chains: kept, looseAttributes };
+  // An ancestor a chain already starts with (ancestor::title and
+  // ancestor::title/parent::definitionList/…, BRDP-EXT-00008): the chain
+  // says the whole way, the relation adds nothing.
+  const uncovered = relations.filter((r) => !kept.some((c) => c.element === r.element && c.chain[0]?.name === r.ancestor));
+  return { references, chains: kept, looseAttributes, relations: uncovered };
 }
 
 // ─── Which schemas the examples use ─────────────────────────────────────────
@@ -939,8 +986,6 @@ function stepPredicates(step) {
   return out;
 }
 
-const NEGATED_RELATION_RE = /^\s*not\s*\(\s*(ancestor|parent)::([A-Za-z_][\w.-]*)\s*\)\s*$/;
-const RELATION_RE = /^\s*(ancestor|parent)::([A-Za-z_][\w.-]*)\s*$/;
 
 // A predicate of the LAST step of an alternative that says whether the
 // checked element is inside another one: //commonInfo[not(ancestor::procedure)]
@@ -961,12 +1006,9 @@ export function ancestorRelations(ruleXml) {
       if (!last) continue;
       const name = stepName(last.replace(/\[[\s\S]*$/, ''));
       if (!name) continue;
-      for (const predicate of stepPredicates(last)) {
-        const negated = NEGATED_RELATION_RE.exec(predicate);
-        const plain = negated ? null : RELATION_RE.exec(predicate);
-        const m = negated || plain;
-        if (!m) continue;
-        const relation = { element: name, axis: m[1], ancestor: m[2], negated: Boolean(negated) };
+      // Colocación, Part 1: also tests joined by and/or in one predicate.
+      for (const term of stepPredicates(last).flatMap((predicate) => relationTerms(predicate))) {
+        const relation = { element: name, axis: term.axis, ancestor: term.ancestor, negated: term.negated };
         const key = JSON.stringify(relation);
         if (!seen.has(key)) {
           seen.add(key);
@@ -1650,6 +1692,28 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
   // insertion point must allow that too.
   const relationOk = (i) =>
     !relation || relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], relation, relation.inside);
+  // Colocación, Part 1: an ancestor test in the checked step's predicate
+  // ([not(ancestor::table)], also joined by and/or, also in the operands of
+  // a true/false condition -- BRDP-EXT-00023) and a schema that allows the
+  // checked element both inside and outside that ancestor: the insertion
+  // point must allow both too. <para> held neither <table> nor
+  // <preliminaryRqmts>, so the example with the <footnote> inside a table
+  // could not be written. An ancestor this schema does not have
+  // (<preliminaryRqmts> in descript) asks for nothing; a schema that allows
+  // only one of the cases is Mejoras A's (splitByRelation, `relation`).
+  const activeRelations = relation
+    ? []
+    : (targets?.relations || []).filter((r) => {
+        if (!contentChecked.includes(r.element) || !elements[r.ancestor] || r.ancestor === r.element) return false;
+        const cases = relationCases(structure, r);
+        return cases.inside && cases.outside;
+      });
+  const relationsOk = (i) =>
+    activeRelations.every(
+      (r) =>
+        relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], r, true) &&
+        relationAllowsAt(elements, chain.slice(0, i + 1), chain[i], r, false)
+    );
   // Mejoras F, Part 1.3: //x / not(//x) in the checked step's condition
   // -- the examples must be able to contain <x>.
   const containNames = (targets?.containNames || []).filter((name) => elements[name] && !chain.includes(name));
@@ -1658,7 +1722,8 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     && containNames.every((name) => reachable(elements, chain[i], name))
     && carrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name)))
     && descendantCarrierSets.every((set) => set.some((name) => reachable(elements, chain[i], name, 16)))
-    && relationOk(i);
+    && relationOk(i)
+    && relationsOk(i);
   const below = new Map();
   const under = (name) => {
     if (!below.has(name)) below.set(name, reachableSet(elements, elements[name]?.children || []));
@@ -1764,6 +1829,13 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     }
     if (writePaths.length) placed.writePaths = writePaths;
   }
+  // Colocación, Part 1: the way to write the checked element inside each
+  // ancestor, from the insertion point (the prompt and the correction
+  // round give it, like Mejoras D's writePaths).
+  const relationWays = activeRelations
+    .map((r) => ({ element: r.element, ancestor: r.ancestor, axis: r.axis, way: relationWay(elements, placed.path, placed.insertion, r, true) }))
+    .filter((r) => r.way);
+  if (relationWays.length) placed.relationWays = relationWays;
   if (relation) {
     const way = relationWay(elements, placed.path, placed.insertion, relation, relation.inside);
     placed.relation = { ...relation, way: way ? [...placed.path, ...way.slice(1)] : null };

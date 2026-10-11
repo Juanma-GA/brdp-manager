@@ -1213,6 +1213,12 @@ export const ruleCmp08 =
   '<structureObjectRule><objectPath allowedObjectFlag="0">//internalRef[ancestor::title and not(ancestor::title/parent::definitionList/parent::legend/parent::figure/@id = @internalRefId)]</objectPath><objectUse>BREX-CMMST-00095/BREX-CMMST-00119: The &lt;internalRef&gt; element cannot be used within the &lt;title&gt; element except within the figure/legend/defnitionList/title element and then only when it points to the parent figure.</objectUse></structureObjectRule>';
 export const ruleCmp181 =
   `<structureObjectRule><objectPath allowedObjectFlag="0">//dmStatus/@issueType="changed" and (/dmodule/identAndStatusSection/dmStatus/reasonForUpdate[not(@id = /dmodule//@reasonForUpdateRefIds/tokenize(normalize-space(), '\\s'))])</objectPath><objectUse>BREX-CMMST-00007 (DM_identAndStatusSection): In a changed data module, all &lt;reasonForUpdate&gt; elements must be referenced within the data module.</objectUse></structureObjectRule>`;
+// Colocación: //assert/child::text() (BRDP-EXT-00030) and the and-joined
+// ancestor tests of BRDP-EXT-00023.
+export const ruleCmp30 =
+  '<structureObjectRule><objectPath allowedObjectFlag="0">//assert/child::text()</objectPath><objectUse>BREX-CMMST-00030: The &lt;assert&gt; element must be empty.</objectUse></structureObjectRule>';
+export const ruleCmp23 =
+  '<structureObjectRule><objectPath allowedObjectFlag="0">//footnote[not(ancestor::table) and not(ancestor::preliminaryRqmts)]</objectPath><objectUse>BREX-CMMST-00023: Footnotes are only allowed in tables and preliminary requirements.</objectUse></structureObjectRule>';
 const brdpCmp = (identifier, title, proposal) => ({ ...brdpRuleTest, identifier, title, definition: `Decide on ${title.toLowerCase()}.`, proposal });
 ruleTestExamplesCases.push(
   {
@@ -1222,6 +1228,14 @@ ruleTestExamplesCases.push(
   {
     name: 'brex-4-2-cmp-ancestor-chain-legend-title',
     args: [{ brdp: brdpCmp('BRDP-EXT-00008', 'Internal references in titles', 'No internal reference in a title, except in the title of a figure legend definition list, pointing to that figure.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleCmp08, placements: appPlacementsFor('S1000D 4.2', ruleCmp08, [['descript', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-cmp-assert-no-text',
+    args: [{ brdp: brdpCmp('BRDP-EXT-00030', 'Empty applicability assertions', 'The assert element must be empty.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleCmp30, placements: appPlacementsFor('S1000D 4.2', ruleCmp30, [['descript', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-cmp-footnote-table-prelim',
+    args: [{ brdp: brdpCmp('BRDP-EXT-00023', 'Footnotes', 'Footnotes are only allowed in tables and in preliminary requirements.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleCmp23, placements: appPlacementsFor('S1000D 4.2', ruleCmp23, [['descript', 'rule']]) }],
   },
   {
     name: 'brex-4-2-cmp-loose-attribute-reason-for-update',

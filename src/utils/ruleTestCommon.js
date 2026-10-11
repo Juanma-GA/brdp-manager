@@ -196,3 +196,15 @@ export function withoutPredicates(expression) {
   }
   return out.replace(/\s+/g, ' ').trim();
 }
+
+// Colocación: a step that is a node test -- text(), node(), comment(),
+// processing-instruction() (with or without a name), optionally after
+// "child::" -- reads what is INSIDE the previous step's element; it never
+// names an element of its own. → 'text' | 'node' | 'comment' | 'pi', or
+// null for any other step.
+const NODE_TEST_RE = /^(?:child::)?(?:(text|node|comment)\(\s*\)|(processing-instruction)\(\s*(?:'[^']*'|"[^"]*"|[A-Za-z_][\w.-]*)?\s*\))$/;
+export function nodeTestKind(step) {
+  const m = NODE_TEST_RE.exec(String(step || '').trim());
+  if (!m) return null;
+  return m[1] || 'pi';
+}
