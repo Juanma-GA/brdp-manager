@@ -710,6 +710,51 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Legend title pointing to another figure", expected: "reject", schema, content: `${figure("fig-0002", told)}${other}` },
     ]);
   }
+  // Caminos de la sección (CMP 4.2). EXT-00188 / EXT-00189: a caption
+  // group / caption inside a <para> of the status section. The reject
+  // example follows the first way the prompt (or the correction) gives to
+  // the element -- like the real run, the old ways (copyrightPara/emphasis/
+  // captionGroup, through no <para>) give a valid example the rule does not
+  // select.
+  if (/dmStatus\/\/para\/caption/.test(rule)) {
+    const leafName = /para\/captionGroup/.test(rule) ? "captionGroup" : "caption";
+    const lines = systemPrompt.split("\n");
+    const start = lines.findIndex((l) => l.startsWith("    <identAndStatusSection>"));
+    const section = [];
+    for (let i = start; start !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) section.push(lines[i].slice(4));
+    const source = correcting ? lastUser : systemPrompt;
+    const after = source.slice(source.indexOf(`<${leafName}> is not directly inside any element of that section.`));
+    const way = ((after.match(/\b(dmStatus\/[\w/]+)/) || [])[1] || `dmStatus/dataRestrictions/restrictionInfo/copyright/copyrightPara/emphasis/${leafName}`).split("/");
+    const leaf = leafName === "captionGroup"
+      ? '<captionGroup cols="1"><captionBody><captionRow><captionEntry><caption><captionLine>CAUTION</captionLine></caption></captionEntry></captionRow></captionBody></captionGroup>'
+      : "<caption><captionLine>CAUTION</captionLine></caption>";
+    const open = (name) => (name === "dataRestrictions" ? "<dataRestrictions><restrictionInstructions><dataDistribution>Unlimited</dataDistribution></restrictionInstructions>" : name === "para" ? "<para>Note" : `<${name}>`);
+    let inner = leaf;
+    for (const name of way.slice(1, -1).reverse()) inner = `${open(name)}${inner}</${name}>`;
+    const metadata = section.join("\n");
+    const reject = metadata.replace(/(<security [^>]*\/>)/, `$1${inner}`);
+    return answer([
+      { label: "No caption in the status section", expected: "accept", schema: ruleSchema || "descript", metadata },
+      { label: `A ${leafName} inside a paragraph of the status section`, expected: "reject", schema: ruleSchema || "descript", metadata: reject },
+    ]);
+  }
+  // EXT-00291 / EXT-00292: at most six part references in an optional part
+  // or a preferred spare part. Like the real run, the <itemSeqNumber> is
+  // written straight in <illustratedPartsCatalog>; it is only wrapped in its
+  // <catalogSeqNumber> when the correction says so without forbidding it
+  // ("goes inside <catalogSeqNumber>" and no "do not change … its nesting").
+  if (/partRefGroup\/(?:optionalPart|preferredSparePart)\/partRef\[7\]/.test(rule)) {
+    const group = /preferredSparePart/.test(rule) ? "preferredSparePart" : "optionalPart";
+    const wrap = correcting && /goes inside <catalogSeqNumber>/.test(lastUser) && !/its nesting/.test(lastUser);
+    const refs = (n) => Array.from({ length: n }, (_, i) => `<partRef manufacturerCodeValue="12345" partNumberValue="PN-${i + 1}"/>`).join("");
+    const isn = (n) => `<itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="PN-0"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${group}>${refs(n)}</${group}></partRefGroup></partSegment></itemSeqNumber>`;
+    const content = (n) => (wrap ? `<catalogSeqNumber figureNumber="01" indenture="1" item="001">${isn(n)}</catalogSeqNumber>` : isn(n));
+    return answer([
+      { label: "Six part references", expected: "accept", schema: ruleSchema || "ipd", content: content(6) },
+      { label: "Seven part references", expected: "reject", schema: ruleSchema || "ipd", content: content(7) },
+      { label: "A procedure", expected: "accept", schema: "proced", content: "Remove the bolt." },
+    ]);
+  }
   // EXT-00181 / EXT-00224: a changed module whose <reasonForUpdate> is
   // referenced (or not) from the content by @reasonForUpdateRefIds. With
   // the carriers line, on a <para>/<dmRef> of the content; without it, on

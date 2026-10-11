@@ -4907,6 +4907,91 @@
           "note": "the rule implements the Proposal: \"num\" is @valueAllowed, \"numbered\" only describes it; never no"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-cmp-captiongroup-dmstatus-para",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "CMP 4.2 pass, BRDP-EXT-00188: //dmodule/identAndStatusSection/dmStatus//para/captionGroup (flag 0). Before: the ways the prompt gave to <captionGroup> went through no <para> (copyrightPara/emphasis/captionGroup) -- the reject example was valid and not selected (test failed), or mixed two ways and was invalid. Now only the ways …/para/captionGroup, with <para> the direct parent. The simulator writes the reject example by the first way the prompt (or the correction) gives.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-CMP188",
+        "title": "Caption groups in the status section",
+        "definition": "Decide whether caption groups can be used in the paragraphs of the identification and status section.",
+        "proposal": "Caption groups shall not be used in the paragraphs of the identification and status section.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule><objectPath allowedObjectFlag=\"0\">//dmodule/identAndStatusSection/dmStatus//para/captionGroup</objectPath><objectUse>BREX-CMMST-00188: Caption groups are not allowed in the paragraphs of the status section.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "/para/captionGroup",
+          "note": "the ways follow the rule's steps"
+        },
+        {
+          "type": "not_contains",
+          "target": "prompt",
+          "pattern": "copyrightPara/emphasis/captionGroup",
+          "note": "no way through no <para>"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<para>(?:(?!</para>)[\\s\\S])*<captionGroup",
+          "note": "the caption group is inside a <para> of the section"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-cmp-partref-max-six",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "CMP 4.2 pass, BRDP-EXT-00291: //itemSeqNumber/partSegment/partRefGroup/optionalPart/partRef[7] (flag 0, ipd context). Before: the LLM wrote <itemSeqNumber> straight in <illustratedPartsCatalog>; <catalogSeqNumber> has required @figureNumber/@item/@indenture without a value, so the application did not build it, and the correction said both \"goes inside <catalogSeqNumber>\" and \"do not change … its nesting\" (0 of 2 corrected). Now the application moves it (values 01/001/1). The simulator writes it loose, and only wraps it when the correction does not contradict itself.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-CMP291",
+        "title": "Part references of an optional part",
+        "definition": "Decide how many part references an optional part can have.",
+        "proposal": "An optional part shall have at most six part references.",
+        "validation": "Validated"
+      },
+      "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//itemSeqNumber/partSegment/partRefGroup/optionalPart/partRef[7]</objectPath><objectUse>BREX-CMMST-00291: An optional part can have at most six part references.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "the loose <itemSeqNumber> moved by the application"
+        },
+        {
+          "type": "rule_test_accept_and_reject"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        },
+        {
+          "type": "rule_test_other_schema_accepted"
+        },
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "number 7 inside <optionalPart> \\(that is, more than 6\\)",
+          "note": "the position said in words"
+        }
+      ]
     }
   ]
 }

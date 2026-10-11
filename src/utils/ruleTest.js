@@ -30,7 +30,7 @@ import {
   removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
 import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
-import { placeSentence, relocateMisplacedElements, relocateToOnlyParent } from './schemaPlacement.js';
+import { placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
 import {
   DOSSIER_MAIN_PATH,
@@ -500,7 +500,7 @@ function sectionPlaceHint(problem, places) {
   return `In this section <${problem.element}> goes inside <${path[path.length - 2]}> (${path.join('/')}), as in the minimal section; do not repeat it elsewhere`;
 }
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, places: rulePlaces = [], carriers = [], rootAttributes = [] } = {}) {
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [] } = {}) {
   const places = sectionTree ? minimalSectionPlaces(sectionTree) : null;
   // GMC, Part 1.3: an attribute given for the root is never "markup of an
   // element the rule does not name": no plain-text hint for it.
@@ -528,6 +528,17 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     );
   }
   for (const p of validation.structure || []) {
+    // Caminos de la sección, Part 1: an element on the way the rule's own
+    // steps take through the section the LLM writes, put where the schema
+    // does not allow it -- the same way(s) as the prompt (EXT-00188:
+    // <para> inside <copyrightPara>, <para> inside <emphasis>).
+    const routes = p.kind === 'notAllowed' ? routesThrough(sectionRoutes, p.element) : [];
+    if (routes.length) {
+      out.push(`${formatStructureProblem(p, schema)}. ${routes.map(sectionRouteSentence).join(' ')}`);
+      continue;
+    }
+    // (before the general nesting hint: these ways follow every step of
+    // the rule, the nesting only the pair it names).
     const hint = expected === 'reject' ? nestingHint(p, nestings) : null;
     if (hint) {
       out.push(`${formatStructureProblem(p, schema)}. ${hint}`);

@@ -264,8 +264,16 @@ function analyzeAlternative(alternative, out) {
   // Descendant steps "A//B" (or descendant::B): the pairs [A, B], so the
   // prompt can give the valid nesting between them (nestingPaths).
   const descendantPairs = [];
+  // The axis that leads to each element step: 'child' ("/x", child::x) or
+  // 'descendant' ("//x", descendant::x, a step after "*", or the first step
+  // of a relative or "//" path) -- the routes in the identification and
+  // status section keep "a/b" as b directly inside a (sectionRoutes).
+  // 'other' for any other axis (ancestor::, following-sibling::…): no
+  // constraint is drawn from it.
+  const axes = [];
   let previous = null;
   let descendant = false;
+  let wildcard = false;
   segments.forEach((raw, i) => {
     const seg = raw.trim();
     if (!seg) {
@@ -279,6 +287,7 @@ function analyzeAlternative(alternative, out) {
     if (seg === '.' || /^(?:node|text|comment)\(\)$/.test(seg)) return;
     if (seg === '*') {
       previous = null;
+      wildcard = true;
       return;
     }
     const attr = /^(?:@|attribute::)([A-Za-z_][\w.-]*)$/.exec(seg);
@@ -295,8 +304,17 @@ function analyzeAlternative(alternative, out) {
     const name = stepName(seg);
     if (name) {
       steps.push(name);
+      const axis = AXIS_RE.exec(seg)?.[0];
+      axes.push(
+        axis && !/^(?:child|descendant|descendant-or-self)::$/.test(axis)
+          ? 'other'
+          : descendant || wildcard || /^descendant/.test(axis || '') || (steps.length === 1 && !text.startsWith('/'))
+            ? 'descendant'
+            : 'child'
+      );
       if (previous && (descendant || /^descendant(?:-or-self)?::/.test(seg))) descendantPairs.push([previous, name]);
       previous = name;
+      wildcard = false;
     } else {
       const prefixed = PREFIXED_STEP_RE.exec(seg.replace(AXIS_RE, ''));
       if (prefixed) prefixedSteps.push(prefixed[0]);
@@ -306,7 +324,7 @@ function analyzeAlternative(alternative, out) {
     descendant = false;
   });
   if (steps.length === 0 && !attribute) opaque = true;
-  out.alternatives.push({ steps, attribute, checked, absolutePrefix, opaque, descendantPairs, prefixedSteps, descendantAttribute });
+  out.alternatives.push({ steps, axes, attribute, checked, absolutePrefix, opaque, descendantPairs, prefixedSteps, descendantAttribute });
 }
 
 const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
@@ -1259,24 +1277,70 @@ function isRootOnly(targets, root) {
 // status section down to the elements the rule looks at there, when they
 // are not directly inside one of its elements (schemaPlacement.js,
 // sectionRoutes) -- BRDP-S1-00065, //copyright: both examples put
-// <copyright> straight in <dmStatus> and the correction fixed none. The
-// names are the element steps of the alternatives about the section (the
-// steps before each one, when the rule names them, keep only the ways
-// through them) and the predicates' names only the section has. [] when
-// every one is already there or directly inside: the prompt does not change.
+// <copyright> straight in <dmStatus> and the correction fixed none.
+// Caminos de la sección, Part 1: the route goes to the LAST element step of
+// each alternative and follows the rule's steps after the last one the
+// minimal section already has (or that sits above it: the document's root),
+// each with its axis ("/" the very next element, "//" anywhere below) --
+// EXT-00188, //dmodule/identAndStatusSection/dmStatus//para/captionGroup:
+// only ways …/para/captionGroup. Its earlier steps get no way of their own
+// (the final one passes through them); they do when the final one needs
+// none (it is in the section, or directly inside one of its elements).
+// The predicates' names only the section has follow. [] when every one is
+// already there or directly inside: the prompt does not change.
+export function sectionRequirements(alt, inTree, above) {
+  const steps = alt.steps || [];
+  let last = -1;
+  steps.forEach((step, i) => {
+    if (inTree.has(step) || above.has(step)) last = i;
+  });
+  const tail = steps.slice(last + 1);
+  if (tail.length === 0) return null;
+  const axes = alt.axes || [];
+  return {
+    after: last >= 0 ? steps[last] : null,
+    segments: tail.map((name, j) => ({ name, axis: axes[last + 1 + j] || 'descendant' })),
+  };
+}
+
 function metadataRoutes(structure, targets, alternatives) {
   const section = structure.skeleton.metadata;
   const elements = structure.elements;
-  const names = [];
-  const requiredSteps = {};
+  const inTree = new Set();
+  const collect = (node) => {
+    if (!node?.name) return;
+    inTree.add(node.name);
+    (node.children || []).forEach(collect);
+  };
+  collect(section.tree);
+  const above = new Set((structure.skeleton.path || []).slice(0, 1));
+  const finals = [];
+  const requirements = {};
+  const earlier = [];
   for (const alt of alternatives || []) {
-    if (alt.opaque) continue;
-    alt.steps.forEach((step, i) => {
-      names.push(step);
-      if (i > 0 && !requiredSteps[step]) requiredSteps[step] = alt.steps.slice(0, i);
+    if (alt.opaque || alt.steps.length === 0) continue;
+    const final = alt.steps[alt.steps.length - 1];
+    finals.push(final);
+    const req = sectionRequirements(alt, inTree, above);
+    if (req && !requirements[final]) requirements[final] = req;
+    alt.steps.slice(0, -1).forEach((step, i) => {
+      earlier.push(step);
+      if (!requirements[step]) {
+        const prefix = sectionRequirements({ steps: alt.steps.slice(0, i + 1), axes: (alt.axes || []).slice(0, i + 1) }, inTree, above);
+        if (prefix) requirements[step] = prefix;
+      }
     });
   }
-  const stepRoutes = sectionRoutes(structure, section, names, requiredSteps);
+  const finalRoutes = sectionRoutes(structure, section, finals, requirements);
+  const routed = new Set(finalRoutes.map((r) => r.target));
+  // An earlier step only when no alternative through it got a way.
+  const pending = [];
+  for (const alt of alternatives || []) {
+    if (alt.opaque || alt.steps.length === 0 || routed.has(alt.steps[alt.steps.length - 1])) continue;
+    pending.push(...alt.steps.slice(0, -1));
+  }
+  const stepRoutes = [...finalRoutes, ...sectionRoutes(structure, section, pending.filter((n) => !finals.includes(n)), requirements)];
+  const names = [...finals, ...earlier];
   // A predicate's name only adds a way when none of the steps' ways already
   // reaches it (//copyright[… copyrightPara …]: the way to <copyright>, whose
   // minimum already has its <copyrightPara>).

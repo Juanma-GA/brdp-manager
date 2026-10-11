@@ -869,6 +869,13 @@ function checkedStepQualifier(path) {
   }
   const preds = stepPredicateTexts(step);
   if (preds.length === 0) return null;
+  // Caminos de la sección, Part 2: a position among the siblings ("[7]",
+  // "[last()]", "[position() > 6]") on the last step, right under a named
+  // parent step ("…/optionalPart/partRef[7]") -- EXT-00291 read "<partRef>
+  // matching the condition [7]". Under "//" the siblings are of any parent:
+  // said literally, as before.
+  const position = !on && preds.length === 1 ? positionQualifier(preds[0], steps, path) : null;
+  if (position) return position;
   if (preds.length === 1) {
     const m = QUALIFIER_RELATION_RE.exec(preds[0].replace(/\s+/g, ' ').trim());
     if (m && Boolean(m[1]) === Boolean(m[4])) {
@@ -878,6 +885,32 @@ function checkedStepQualifier(path) {
     }
   }
   return { kind: 'condition', condition: preds.map((p) => `[${p.trim()}]`).join(''), on };
+}
+
+const POSITION_GT_RE = /^position\(\)\s*(>=|>|\bge\b|\bgt\b)\s*(\d+)$/;
+function positionQualifier(predicate, steps, path) {
+  if (steps.length < 2) return null;
+  const last = steps[steps.length - 1];
+  const parentStep = steps[steps.length - 2].replace(/^(?:child)::/, '');
+  if (!/^[A-Za-z_][\w.-]*$/.test(parentStep)) return null;
+  const text = String(path).trim();
+  const at = text.lastIndexOf(last);
+  if (at < 2 || text[at - 1] !== '/' || text[at - 2] === '/') return null;
+  const parent = `<${parentStep}>`;
+  const pred = predicate.replace(/\s+/g, ' ').trim();
+  if (/^\d+$/.test(pred)) {
+    const n = Number(pred);
+    if (n < 1) return null;
+    return n === 1 ? { kind: 'positionFirst', parent } : { kind: 'position', parent, n, before: n - 1 };
+  }
+  if (/^last\(\)$/.test(pred)) return { kind: 'positionLast', parent };
+  const gt = POSITION_GT_RE.exec(pred);
+  if (gt) {
+    const from = /^(?:>=|ge)$/.test(gt[1]) ? Number(gt[2]) : Number(gt[2]) + 1;
+    if (from < 1) return null;
+    return from === 1 ? { kind: 'positionFirst', parent, any: true } : { kind: 'positionFrom', parent, from, before: from - 1 };
+  }
+  return null;
 }
 
 // Mejoras A, Part 4: a threshold on the LAST step of a single path, alone
@@ -1551,13 +1584,77 @@ export function acceptanceDetails(ruleXml, format, fragmentXml, fragmentSchema =
       } else if (unsafe) {
         out.push({ ...base, case: 'unsafe', cause: null });
       } else {
-        out.push({ ...base, case: 'missing', cause: { code: 'cause_missing', params: { target: pathTarget(stripped) || stripped } } });
+        // Caminos de la sección, Part 1: the checked element IS in the
+        // example, only not where the path wants it (EXT-00188: a
+        // <captionGroup> in copyrightPara/emphasis, not inside a <para>) --
+        // never "does not contain"; the step that is not met is named.
+        const outside = topLevelAlternatives(expression)
+          .map((a) => outsidePathStep(withoutPredicates(a.replace(/\s+/g, ' ').trim()), doc))
+          .find(Boolean);
+        if (outside) out.push({ ...base, case: 'outside_path', cause: { code: 'cause_outside_path', params: outside } });
+        else out.push({ ...base, case: 'missing', cause: { code: 'cause_missing', params: { target: pathTarget(stripped) || stripped } } });
       }
     } catch (err) {
       if (!(err instanceof NotExecutable)) throw err;
     }
   }
   return out;
+}
+
+// A plain element path ("//a/b//c", child:: and descendant:: allowed) whose
+// last element the document has, but none of them where the path wants:
+// { target: '<c>', step: '<b>' } -- the step, counted from the end, that
+// no <c> meets (the one the best-placed <c> fails). null for anything else
+// (an attribute, a wildcard, a function), or when the document has no <c>.
+function outsidePathStep(path, doc) {
+  const text = String(path || '').trim();
+  if (!text) return null;
+  const segments = text.split('/');
+  const steps = [];
+  let descendant = false;
+  for (let i = 0; i < segments.length; i += 1) {
+    const seg = segments[i].trim();
+    if (!seg) {
+      if (i > 0) descendant = true;
+      continue;
+    }
+    const m = /^(child::|descendant::|descendant-or-self::)?([A-Za-z_][\w.-]*)$/.exec(seg);
+    if (!m) return null;
+    steps.push({ name: m[2], axis: descendant || /^descendant/.test(m[1] || '') || (steps.length === 0 && !text.startsWith('/')) ? 'descendant' : 'child' });
+    descendant = false;
+  }
+  if (steps.length < 2) return null;
+  const last = steps[steps.length - 1].name;
+  const all = doc.getElementsByTagName('*');
+  const nodes = [];
+  for (let i = 0; i < all.length; i += 1) if ((all[i].localName || all[i].nodeName) === last) nodes.push(all[i]);
+  if (nodes.length === 0) return null;
+  const nameOf = (n) => (n && n.nodeType === 1 ? n.localName || n.nodeName : null);
+  // The smallest index of a step that cannot be met, going up from `node`
+  // matched as steps[i]; -1 when the whole path is met.
+  const fail = (node, i) => {
+    if (i === 0) return steps[0].axis === 'child' && node.parentNode?.nodeType !== 9 ? 0 : -1;
+    const want = steps[i - 1].name;
+    if (steps[i].axis === 'child') {
+      const parent = node.parentNode;
+      return nameOf(parent) === want ? fail(parent, i - 1) : i - 1;
+    }
+    let best = i - 1;
+    for (let a = node.parentNode; a && a.nodeType === 1; a = a.parentNode) {
+      if (nameOf(a) !== want) continue;
+      const f = fail(a, i - 1);
+      if (f < best) best = f;
+      if (best === -1) break;
+    }
+    return best;
+  };
+  let failed = steps.length;
+  for (const node of nodes) {
+    const f = fail(node, steps.length - 1);
+    if (f === -1) return null;
+    failed = Math.min(failed, f);
+  }
+  return failed < steps.length - 1 ? { target: `<${last}>`, step: `<${steps[failed].name}>` } : null;
 }
 
 // The element and attribute names a condition looks at ('<x>', '@y', in

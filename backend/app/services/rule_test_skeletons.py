@@ -594,6 +594,56 @@ METADATA_ATTRIBUTE_VALUES = {
     # (xs:string: an ICN of the example's model)
     "scormContentPackageIssuer": "12345", "scormContentPackageNumber": "00001", "scormContentPackageVolume": "00",
     "imfIdentIcn": "ICN-EXAMPLE-A-000000-0-12345-00001-A-001-01",
+    # Caminos de la sección, Part 2: the other required attributes the
+    # content models list without a value (4.2, 4.1 and 3.0.1), when their
+    # XSD type has a safe neutral value -- so the client can build their
+    # elements as containers (illustratedPartsCatalog > catalogSeqNumber >
+    # itemSeqNumber). Left without a value on purpose: xs:ID (must be
+    # unique), xs:IDREF and the spanspec column names (must point at
+    # something), xs:ENTITY (must be declared), the applicability property
+    # identifiers and values (must name a declared property), and 3.0.1
+    # media/@type (two types of that name). Checked against every XSD by
+    # tests/test_rule_test_skeletons.py.
+    # ipd catalogSeqNumber / catalogSeqNumberRef: 4.2 [A-Z0-9][0-9], 4.1
+    # \d{2}; \d{3}; nonNegativeInteger; 3.0.1 csn/@ind.
+    "figureNumber": "01", "item": "001", "indenture": "1", "ind": "1",
+    # positiveInteger (totalDigits 2), [01] flags, xs:int
+    "attachmentNumber": "1", "seqatt": "1", "locallySuppliedFlag": "0", "local": "0", "toleranceValue": "0",
+    # CALS tgroup / captionGroup: a minimal one has one column
+    "cols": "1",
+    # patterns and fixed lists of values
+    "reproductionHeight": "10 mm", "reproductionWidth": "10 mm", "zoneSideValue": "lh", "hand": "lh",
+    "catletter": "A", "consupplyreftype": "spec", "brDecisionPointUniqueIdent": "BRDP-S1-00001",
+    # NMTOKEN
+    "authorizationIdent": "EXAMPLE", "authno": "EXAMPLE", "label": "EXAMPLE", "man": "A",
+    # xs:string identifiers and codes of S1000D 4.x
+    "accessPointNumber": "EXAMPLE", "accessPointRefType": "EXAMPLE", "altCode": "EXAMPLE", "altCodeType": "EXAMPLE",
+    "applicIdentValue": "EXAMPLE", "barCodeValue": "EXAMPLE", "brActionOwner": "EXAMPLE",
+    "brDecisionValueAllowed": "EXAMPLE", "brDecisionValueRegistered": "EXAMPLE", "cautionIdentNumber": "EXAMPLE",
+    "circuitBreakerNumber": "EXAMPLE", "closeupDuration": "1", "condRefGroupType": "EXAMPLE", "contactIdent": "EXAMPLE",
+    "controlIndicatorNumber": "EXAMPLE", "extensionCode": "EXAMPLE", "extensionProducer": "EXAMPLE",
+    "faultCode": "EXAMPLE", "fileExtension": "pdf", "functionalItemNumber": "EXAMPLE", "genericPartDataName": "EXAMPLE",
+    "infoEntityRefIdent": "EXAMPLE", "initialProvisioningProjectNumber": "EXAMPLE",
+    "initialProvisioningProjectNumberSubject": "EXAMPLE", "inspectionTypeCategory": "EXAMPLE",
+    "itemSeqNumberValue": "00A", "manufacturerCodeValue": "12345", "markerType": "EXAMPLE",
+    "modelVersionValue": "EXAMPLE", "partNumberValue": "PN-0001", "personCategoryCode": "EXAMPLE",
+    "procedureDuration": "1", "pubMediaCode": "EXAMPLE", "pubMediaType": "EXAMPLE", "replacementCode": "EXAMPLE",
+    "safetyLabel": "EXAMPLE", "sbApprovalIdent": "EXAMPLE", "scormContentPackageMediaCode": "EXAMPLE",
+    "scormContentPackageMediaType": "EXAMPLE", "serialNumberValue": "EXAMPLE", "sourceOfRqmt": "EXAMPLE",
+    "sparePartClassCode": "EXAMPLE", "startupDuration": "1", "supplyNumber": "EXAMPLE", "supplyRqmtNumber": "EXAMPLE",
+    "targetPath": "EXAMPLE", "taskCategoryCode": "EXAMPLE", "taskIdent": "EXAMPLE", "taskName": "EXAMPLE",
+    "taskSeqNumber": "EXAMPLE", "testCode": "EXAMPLE", "testType": "EXAMPLE", "timeLimitIdent": "EXAMPLE",
+    "toolNumber": "EXAMPLE", "toolRefType": "EXAMPLE", "unitOfMeasure": "EXAMPLE", "variableName": "EXAMPLE",
+    "warningIdentNumber": "EXAMPLE", "zoneNumber": "EXAMPLE", "zoneRefType": "EXAMPLE",
+    # xs:string identifiers and codes of S1000D 3.0.1
+    "accpnlnbr": "EXAMPLE", "category": "EXAMPLE", "cbnbr": "EXAMPLE", "closeup": "1", "code": "EXAMPLE",
+    "connbr": "EXAMPLE", "consupplyref": "EXAMPLE", "einnbr": "EXAMPLE", "extend": "pdf", "fcode": "EXAMPLE",
+    "feccode": "EXAMPLE", "from": "1", "ident": "EXAMPLE", "identifier": "EXAMPLE", "inc": "EXAMPLE",
+    "insptype": "EXAMPLE", "ippn": "EXAMPLE", "ips": "EXAMPLE", "isn": "00A", "itemnbr": "EXAMPLE",
+    "mfc": "12345", "mov": "EXAMPLE", "n2did": "EXAMPLE", "name": "EXAMPLE", "nature": "EXAMPLE",
+    "pnr": "PN-0001", "prelreqs": "1", "proced": "1", "refcsn": "EXAMPLE", "refipp": "EXAMPLE", "reqsource": "EXAMPLE",
+    "seqnum": "00001", "spcnbr": "EXAMPLE", "taskid": "EXAMPLE", "taskname": "EXAMPLE", "to": "2",
+    "toolnbr": "EXAMPLE", "uom": "EXAMPLE", "usgnbr": "EXAMPLE", "zonenbr": "EXAMPLE",
 }
 
 # The templates of each document root, tried in order: the first whose

@@ -7,12 +7,15 @@
 // placement, prompt, assembly, engine run and verdict.
 //   node scripts/test-rule-test-cmp.mjs
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../src/i18n/index.js';
-import { generateRuleTestExamples, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
+import { exampleFailures, generateRuleTestExamples, keepMatchedNodeProblem, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
 import { materializeExample, runExample, ruleTestVerdict, stripDefaultNamespace } from '../src/utils/ruleTest.js';
 import { metadataXml, placeExample, ruleTargets } from '../src/utils/ruleTestSkeleton.js';
-import { formatRuleTestReason } from '../src/utils/ruleTestReasons.js';
+import { formatAcceptCause, formatRuleTestReason, ruleDescriptionText } from '../src/utils/ruleTestReasons.js';
+import { describeRule, rulePathParts } from '../src/utils/ruleTestEngine.js';
+import { xsdCheck } from './lib/xsdCheck.mjs';
 import { formatCoverageItem } from '../src/validation/schemaCoverage.js';
 import { parseRuleTestResponse } from '../src/prompts/ruleTestExamplesPrompt.js';
 import { schemaGraph } from './lib/schemaGraph.mjs';
@@ -282,6 +285,135 @@ for (const [schema, id] of Object.entries(FORBIDDEN)) {
   check('2d the test goes on: one correction round', asked.length === 2 && asked[1].messages.at(-1).content.includes('Example 2 ("with emphasis"):\n- the example has no "content": write it'), asked[1]?.messages.at(-1).content);
   check('2d corrected and run', result.status === 'ready' && result.runs[1].result?.status === 'rejected' && verdict?.kind === 'correct', JSON.stringify(verdict));
   check('2d panel text EN/ES', en('records.ruleTest.missingContent') === 'the example has no content' && es('records.ruleTest.missingContent') === 'el ejemplo no tiene contenido');
+}
+
+// ─── Caminos de la sección, Part 1: ways that follow the rule's steps ───────
+// EXT-00188 / EXT-00189 (CMP 4.2, flag 0): //dmodule/identAndStatusSection/
+// dmStatus//para/captionGroup (and …/caption). Before: the ways to any
+// <captionGroup> (copyrightPara/emphasis/captionGroup), none through <para>.
+const EXT188 = sor('//dmodule/identAndStatusSection/dmStatus//para/captionGroup', 'BREX-CMMST-00188: Caption groups are not allowed in the paragraphs of the status section.');
+const EXT189 = sor('//dmodule/identAndStatusSection/dmStatus//para/caption', 'BREX-CMMST-00189: Captions are not allowed in the paragraphs of the status section.');
+const SECTION188 = (restrictions) => `<identAndStatusSection><dmAddress><dmIdent><dmCode assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="040" infoCodeVariant="A" itemLocationCode="A" modelIdentCode="EXAMPLE" subSubSystemCode="0" subSystemCode="0" systemCode="00" systemDiffCode="A"/><language countryIsoCode="US" languageIsoCode="en"/><issueInfo inWork="00" issueNumber="001"/></dmIdent><dmAddressItems><issueDate day="01" month="01" year="2026"/><dmTitle><techName>Example data module</techName></dmTitle></dmAddressItems></dmAddress><dmStatus><security securityClassification="01"/>${restrictions}<responsiblePartnerCompany><enterpriseName>Example company</enterpriseName></responsiblePartnerCompany><originator><enterpriseName>Example company</enterpriseName></originator><applic><displayText><simplePara>All</simplePara></displayText></applic><brexDmRef><dmRef><dmRefIdent><dmCode assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="022" infoCodeVariant="A" itemLocationCode="D" modelIdentCode="EXAMPLE" subSubSystemCode="0" subSystemCode="0" systemCode="00" systemDiffCode="A"/></dmRefIdent></dmRef></brexDmRef><qualityAssurance><unverified/></qualityAssurance></dmStatus></identAndStatusSection>`;
+const RESTRICTIONS = (copyrightPara) => `<dataRestrictions><restrictionInstructions><dataDistribution>Unlimited</dataDistribution></restrictionInstructions><restrictionInfo><copyright><copyrightPara>${copyrightPara}</copyrightPara></copyright></restrictionInfo></dataRestrictions>`;
+const CAPTION_GROUP = '<captionGroup cols="1"><captionBody><captionRow><captionEntry><caption><captionLine>CAUTION</captionLine></caption></captionEntry></captionRow></captionBody></captionGroup>';
+const CAPTION = '<caption><captionLine>CAUTION</captionLine></caption>';
+{
+  for (const [rule, target] of [[EXT188, 'captionGroup'], [EXT189, 'caption']]) {
+    const p = placeExample(structureOf('descript'), ruleTargets(rule));
+    const routes = p.metadata?.routes || [];
+    check(`P1 ${target}: one route, to <${target}> only (no route of its own for <para>)`, routes.length === 1 && routes[0].target === target, JSON.stringify(routes.map((r) => r.target)));
+    check(`P1 ${target}: every way ends …/para/${target} (para the direct parent)`, routes[0].paths.length === 3 && routes[0].paths.every((w) => w[0] === 'dmStatus' && w.at(-1) === target && w.at(-2) === 'para'), JSON.stringify(routes[0].paths));
+  }
+  // the old filter's three problems: steps above the section, a cut before
+  // filtering, and no axis
+  const p188 = placeExample(structureOf('descript'), ruleTargets(EXT188));
+  check('P1 the shortest way that follows the steps comes first', p188.metadata.routes[0].paths[0].join('/') === 'dmStatus/dataRestrictions/restrictionInfo/copyright/copyrightPara/emphasis/footnote/para/captionGroup', p188.metadata.routes[0].paths[0].join('/'));
+  // //copyright (one step) and //dmStatus//externalPubRef: as before
+  const pc = placeExample(structureOf('descript'), ruleTargets(sor('//copyright', 'x')));
+  check('P1 //copyright: its single way, as before', pc.metadata.routes.length === 1 && !pc.metadata.routes[0].several && pc.metadata.routes[0].paths[0].join('/') === 'dmStatus/dataRestrictions/restrictionInfo/copyright');
+  const pe = placeExample(structureOf('descript'), ruleTargets(sor('//dmStatus//externalPubRef', 'x')));
+  check('P1 //dmStatus//externalPubRef: three ways, as before', pe.metadata.routes[0].paths.map((w) => w.join('/')).join(';') === 'dmStatus/functionalItemRef/refs/externalPubRef;dmStatus/reasonForUpdate/simpleRefPara/externalPubRef;dmStatus/dataRestrictions/restrictionInfo/copyright/copyrightPara/emphasis/externalPubRef', JSON.stringify(pe.metadata.routes[0].paths));
+  // no way follows the steps (an element that is not below <para>): every
+  // way, as before -- here none at all
+  const pn = placeExample(structureOf('descript'), ruleTargets(sor('//dmStatus//para/dmRef', 'x')));
+  check('P1 a step that no way can follow falls back to the ways to the element', (pn.metadata?.routes || []).every((r) => r.paths.length > 0), JSON.stringify(pn.metadata?.routes));
+  // pm and 3.0.1: the same with their names
+  const ppm = placeExample(structureOf('pm'), ruleTargets(sor('//pm/identAndStatusSection/pmStatus//para/captionGroup', 'x')));
+  check('P1 pm: ways from <pmStatus> through <para>', ppm.metadata.routes[0].paths.every((w) => w[0] === 'pmStatus' && w.at(-2) === 'para'), JSON.stringify(ppm.metadata.routes));
+  const p301 = placeExample(STRUCTURES['S1000D 3.0.1|descript'], ruleTargets(sor('//dmodule/idstatus/status//para/capgrp', 'x')));
+  check('P1 3.0.1: idstatus/status//para/capgrp → status/…/para/capgrp', p301.metadata.routes[0].paths.every((w) => w[0] === 'status' && w.at(-2) === 'para' && w.at(-1) === 'capgrp'), JSON.stringify(p301.metadata.routes));
+
+  // A reject example written by an offered way is valid and rejected; one
+  // with the <captionGroup> outside <para> is accepted, with the cause.
+  const examples = [
+    { label: 'no caption group', expected: 'accept', schema: 'descript', metadata: SECTION188(RESTRICTIONS('Copyright 2026')) },
+    { label: 'caption group in a list paragraph', expected: 'reject', schema: 'descript', metadata: SECTION188(RESTRICTIONS(`<randomList><listItem><para>Note${CAPTION_GROUP}</para></listItem></randomList>`)) },
+    { label: 'caption group in an emphasis', expected: 'accept', schema: 'descript', metadata: SECTION188(RESTRICTIONS(`<emphasis>Note${CAPTION_GROUP}</emphasis>`)) },
+  ];
+  const { result, asked, verdict } = await generate(EXT188, [{ examples }], 'BRDP-EXT-00188');
+  check('P1 EXT-00188 prompt: only …/para/captionGroup ways', asked[0].systemPrompt.includes('copyrightPara/randomList/listItem/para/captionGroup') && !asked[0].systemPrompt.includes('copyrightPara/emphasis/captionGroup'), asked[0].systemPrompt);
+  check('P1 EXT-00188 all three valid', result.runs.every((r) => r.validation.runnable), JSON.stringify(result.runs.map((r) => r.validation.structure)));
+  check('P1 EXT-00188 reject by an offered way rejected', result.runs[1].result?.status === 'rejected');
+  check('P1 EXT-00188 verdict correct, one LLM call', verdict?.kind === 'correct' && asked.length === 1, JSON.stringify(verdict));
+  const ex189 = examples.map((e) => ({ ...e, metadata: e.metadata.replaceAll(CAPTION_GROUP, CAPTION) }));
+  const r189 = await generate(EXT189, [{ examples: ex189 }], 'BRDP-EXT-00189');
+  check('P1 EXT-00189 verdict correct', r189.verdict?.kind === 'correct', JSON.stringify(r189.result.runs.map((r) => [r.validation.structure, r.result?.status])));
+
+  // the cause: "contains <captionGroup>, but not inside <para>", never "does not contain"
+  const outside = { ...examples[2], expected: 'reject' };
+  const out = await generate(EXT188, [{ examples: [examples[0], outside] }, { examples: [examples[0], outside] }], 'BRDP-EXT-00188');
+  const cause = out.result.runs[1].acceptance?.[0]?.cause;
+  check('P1 cause: outside the path, naming the step', cause?.code === 'cause_outside_path' && cause.params.target === '<captionGroup>' && cause.params.step === '<para>', JSON.stringify(out.result.runs[1].acceptance));
+  check('P1 cause EN', formatAcceptCause(cause, en) === "the example contains <captionGroup>, but not inside <para> as the rule's path requires", formatAcceptCause(cause, en));
+  check('P1 cause ES', formatAcceptCause(cause, es) === 'el ejemplo contiene <captionGroup>, pero no dentro de <para> como exige la ruta de la regla', formatAcceptCause(cause, es));
+  const missing = await generate(EXT188, [{ examples: [examples[0], { ...examples[0], label: 'none', expected: 'reject' }] }, { examples: [examples[0], { ...examples[0], label: 'none', expected: 'reject' }] }], 'BRDP-EXT-00188');
+  check('P1 "does not contain" only when it really is not there', missing.result.runs[1].acceptance?.[0]?.cause?.code === 'cause_missing', JSON.stringify(missing.result.runs[1].acceptance));
+  check('P1 correction of the outside example says which step', out.asked[1].messages.at(-1).content.includes('Its <captionGroup> is not inside <para> as the path requires.'), out.asked[1]?.messages.at(-1).content);
+
+  // correction round: a mixed way (copyrightPara/para) gets the filtered ways
+  const mixed = { label: 'mixed way', expected: 'reject', schema: 'descript', metadata: SECTION188(RESTRICTIONS(`<para>Note${CAPTION_GROUP}</para>`)) };
+  const fixed = { ...mixed, metadata: examples[1].metadata };
+  const mx = await generate(EXT188, [{ examples: [examples[0], mixed] }, { examples: [examples[0], fixed] }], 'BRDP-EXT-00188');
+  const request = mx.asked[1]?.messages.at(-1).content || '';
+  check('P1 correction: "<para> is not allowed inside <copyrightPara>" + the filtered ways', request.includes('<para> is not allowed inside <copyrightPara>. <captionGroup> is not directly inside any element of that section. Valid ways down in this schema (use one of them): dmStatus/dataRestrictions/restrictionInfo/copyright/copyrightPara/emphasis/footnote/para/captionGroup;'), request);
+  check('P1 correction: no general nesting hint instead', !request.includes('the valid nesting is'), request);
+  check('P1 corrected → correct', mx.verdict?.kind === 'correct', JSON.stringify(mx.verdict));
+}
+
+// ─── Caminos de la sección, Part 2: containers with required attributes ─────
+// EXT-00291 / EXT-00292 (ipd context, flag 0): the LLM wrote <itemSeqNumber>
+// straight in <illustratedPartsCatalog>; <catalogSeqNumber> needs
+// @figureNumber, @item and @indenture, which had no value: never built.
+const EXT291 = inContext('ipd', sor('//itemSeqNumber/partSegment/partRefGroup/optionalPart/partRef[7]', 'BREX-CMMST-00291: An optional part can have at most six part references.'));
+const EXT292 = inContext('ipd', sor('//itemSeqNumber/partSegment/partRefGroup/preferredSparePart/partRef[7]', 'BREX-CMMST-00292: A preferred spare part can have at most six part references.'));
+const partRefs = (n) => Array.from({ length: n }, (_, i) => `<partRef manufacturerCodeValue="12345" partNumberValue="PN-${i + 1}"/>`).join('');
+const itemSeq = (group, n) => `<itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="PN-0"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${group}>${partRefs(n)}</${group}></partRefGroup></partSegment></itemSeqNumber>`;
+{
+  const ipd = structureOf('ipd');
+  check('P2 <catalogSeqNumber> has its required attribute values', JSON.stringify(ipd.models.catalogSeqNumber.attributes) === '[["figureNumber","01"],["indenture","1"],["item","001"]]', JSON.stringify(ipd.models.catalogSeqNumber.attributes));
+  for (const [rule, group, id] of [[EXT291, 'optionalPart', 'EXT-00291'], [EXT292, 'preferredSparePart', 'EXT-00292']]) {
+    const examples = [
+      { label: 'six part references', expected: 'accept', schema: 'ipd', content: itemSeq(group, 6) },
+      { label: 'seven part references', expected: 'reject', schema: 'ipd', content: itemSeq(group, 7) },
+      { label: 'a procedure', expected: 'accept', schema: 'proced', content: '<para>Remove the bolt.</para>' },
+    ];
+    const { result, asked, verdict } = await generate(rule, [{ examples }], `BRDP-${id}`);
+    check(`P2 ${id}: loose <itemSeqNumber> moved by the application, no correction round`, asked.length === 1 && result.examples[0].relocated?.[0]?.path?.join('/') === 'illustratedPartsCatalog/catalogSeqNumber/itemSeqNumber', JSON.stringify(result.examples[0].relocated));
+    check(`P2 ${id}: both ipd examples valid`, result.runs[0].validation.runnable && result.runs[1].validation.runnable, JSON.stringify(result.runs.map((r) => r.validation.structure)));
+    check(`P2 ${id}: 6 accepted, 7 rejected, proced does not apply`, result.runs[0].result?.status === 'accepted' && result.runs[1].result?.status === 'rejected' && result.runs[2].result?.status === 'accepted' && result.runs[2].result.outOfScopeSchemas?.includes('ipd'), JSON.stringify(result.runs.map((r) => [r.result?.status, r.result?.outOfScopeSchemas])));
+    check(`P2 ${id}: verdict correct`, verdict?.kind === 'correct', JSON.stringify(verdict));
+    if (id === 'EXT-00291') {
+      check('P2 the relocated example carries the attribute values', /<catalogSeqNumber figureNumber="01" indenture="1" item="001">\s*<itemSeqNumber/.test(result.examples[0].xml), result.examples[0].xml);
+      const xsd = await xsdCheck(fileURLToPath(new URL('../sources/SchemasS1000D/4.2/ipd.xsd', import.meta.url)), result.examples[1].xml);
+      const inCatalog = xsd === 'valid' ? [] : xsd.split('\n').filter((l) => /catalogSeqNumber|itemSeqNumber|partRef|optionalPart|partSegment/.test(l));
+      check('P2 the relocated example is valid against the real ipd XSD (its catalog part)', inCatalog.length === 0, xsd);
+      const broken = await xsdCheck(fileURLToPath(new URL('../sources/SchemasS1000D/4.2/ipd.xsd', import.meta.url)), result.examples[1].xml.replace('figureNumber="01"', 'figureNumber="AA"'));
+      check('P2 (the XSD check does catch a bad value there)', /figureNumber/.test(broken), broken);
+    }
+  }
+  // the correction never says "goes inside <C>" and "do not change … its nesting" together
+  const p = placeExample(ipd, ruleTargets(EXT291));
+  const keepWrap = keepMatchedNodeProblem(EXT291, [], rulePathParts(EXT291, F, { parseXml }), { wrapping: true });
+  const keepPlain = keepMatchedNodeProblem(EXT291, [], rulePathParts(EXT291, F, { parseXml }));
+  check('P2 keep line (plain) as before', keepPlain.includes('its nesting'));
+  check('P2 keep line (wrapping) allows the container, never the nesting ban', !keepWrap.includes('its nesting') && keepWrap.includes('putting them inside the container a problem above names is part of that fix') && keepWrap.includes('Do not remove them'), keepWrap);
+  check('P2 keep line never names the path with its predicates', !keepWrap.includes('[7]'), keepWrap);
+  const ex = [{ label: 'loose', expected: 'reject', schema: 'ipd', content: itemSeq('optionalPart', 7) }];
+  const failures = exampleFailures(ex, [{ schema: 'ipd' }], [{ validation: { runnable: false, wellFormed: true, structure: [{ kind: 'notAllowed', element: 'itemSeqNumber', parent: 'illustratedPartsCatalog' }], names: {} } }], {
+    ruleXml: EXT291, standard: S42, format: F, parseXml, setup: { placements: { ipd: { structure: ipd, placement: p } } },
+  });
+  const text = failures[0].problems.join('\n');
+  check('P2 correction: "goes inside <catalogSeqNumber>"', text.includes('goes inside <catalogSeqNumber>'), text);
+  check('P2 correction: no contradiction ("its nesting" absent)', !(text.includes('goes inside <catalogSeqNumber>') && /do not change[^\n]*its nesting/.test(text)), text);
+
+  // describeRule: the position
+  const d = (rule, t) => ruleDescriptionText(describeRule(rule, F, { parseXml }), t);
+  check('P2 describe [7] EN', d(EXT291, en).includes('the <partRef> number 7 inside <optionalPart> (that is, more than 6) must not appear'), d(EXT291, en));
+  check('P2 describe [7] ES', d(EXT291, es).includes('el <partRef> número 7 dentro de <optionalPart> (es decir, más de 6) no puede aparecer'), d(EXT291, es));
+  check('P2 describe [1]', d(sor('//optionalPart/partRef[1]', 'x'), en).includes('the first <partRef> inside <optionalPart> (that is, any <partRef> there)'), d(sor('//optionalPart/partRef[1]', 'x'), en));
+  check('P2 describe [last()]', d(sor('//optionalPart/partRef[last()]', 'x'), es).includes('el último <partRef> dentro de <optionalPart>'), d(sor('//optionalPart/partRef[last()]', 'x'), es));
+  check('P2 describe [position() > 6]', d(sor('//optionalPart/partRef[position() > 6]', 'x'), en).includes('any <partRef> from number 7 on inside <optionalPart> (that is, more than 6)'));
+  check('P2 describe under "//": literal as before', d(sor('//optionalPart//partRef[7]', 'x'), en).includes('<partRef> matching the condition [7]'));
 }
 
 // ─── Rules without these patterns: placement unchanged ──────────────────────

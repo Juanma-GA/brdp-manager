@@ -724,12 +724,21 @@ export function missesRuleProblem(example, run, ruleXml) {
       nodeLine = `This example must contain a node matched by: ${matched}. Nothing in it matches, so the rule never runs.`;
     }
   } else {
-    const missingParts = nodeDetails.filter((d) => d.case === 'missing' && d.flag !== '1');
+    // Caminos de la sección, Part 1: a node of the checked kind outside the
+    // path (outside_path) is "nothing matches" too, and says which step.
+    const missingParts = nodeDetails.filter((d) => (d.case === 'missing' || d.case === 'outside_path') && d.flag !== '1');
     const missing = [...new Set(missingParts.map((d) => d.stripped))];
     if (missing.length > 0) {
       const matched = missing.map((e) => `\`${e}\``).join(' or ');
       const stripped = missingParts.some((d) => d.stripped !== d.path) ? " (the rule's path without its predicates)" : '';
-      nodeLine = `This example must contain a node matched by: ${matched}${stripped}. Nothing in it matches, so the rule never runs.`;
+      const outside = [
+        ...new Set(
+          missingParts
+            .filter((d) => d.case === 'outside_path')
+            .map((d) => `Its ${d.cause.params.target} is not inside ${d.cause.params.step} as the path requires.`)
+        ),
+      ];
+      nodeLine = `This example must contain a node matched by: ${matched}${stripped}. Nothing in it matches, so the rule never runs.${outside.length ? ` ${outside.join(' ')}` : ''}`;
     }
   }
   return [...new Set([...lines, nodeLine].filter(Boolean))].join(' ') || null;
@@ -821,12 +830,20 @@ function acceptWithoutNodeProblem(ruleXml) {
 //   flag 1 parts: do not change which elements are present or absent;
 //   flag 0 / 2 / Schematron: keep the nodes of the path without its
 //     predicates, and do not change what the example shows.
-export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null) {
+// Caminos de la sección, Part 2: `wrapping` -- the example has a "<X> is
+// not allowed inside <Y>" problem, whose fix ("<X> goes inside <C>") puts
+// its nodes into a container: the line then allows exactly that, and
+// still forbids removing them or changing how many there are, their values
+// or their order (EXT-00291: "goes inside <catalogSeqNumber>" and, below,
+// "do not change … its nesting" -- Mistral corrected none).
+export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null, { wrapping = false } = {}) {
   // Remates B, Part 1, point 2: a condition part (flag 0 / 1) never gets a
   // "keep what makes it true / false" line -- that pushed the example
   // toward the rule. The neutral line instead: keep what the example shows.
-  const conditionLine =
-    'Do not change what this example shows (which elements and attributes it contains, or their values): fix only the markup named above.';
+  const WRAP = 'putting them inside the container a problem above names is part of that fix';
+  const conditionLine = wrapping
+    ? `Do not change what this example shows (which elements and attributes it contains, or their values): fix only the markup named above -- ${WRAP}.`
+    : 'Do not change what this example shows (which elements and attributes it contains, or their values): fix only the markup named above.';
   if (!parts && conditions.length > 0 && conditions.length === ruleMatchExpressions(ruleXml).length) return conditionLine;
   if (!parts) {
     const matched = ruleMatchExpressions(ruleXml).map((e) => `\`${e}\``).join(' or ');
@@ -836,12 +853,19 @@ export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null) {
   const lines = [];
   if (parts.some((p) => p.condition && (p.flag === '0' || p.flag === '1'))) lines.push(conditionLine);
   if (nodeParts.some((p) => p.flag === '1')) {
-    lines.push('Do not change which elements are present or absent in this example: fix only the markup named above.');
+    lines.push(
+      wrapping
+        ? `Do not remove the elements the rule checks and do not add others of their kind: fix only the markup named above -- ${WRAP}.`
+        : 'Do not change which elements are present or absent in this example: fix only the markup named above.'
+    );
   }
   const kept = [...new Set(nodeParts.filter((p) => p.flag !== '1').map((p) => p.stripped))];
   if (kept.length) {
+    const nodes = kept.map((e) => `\`${e}\``).join(' or ');
     lines.push(
-      `Keep the nodes matched by ${kept.map((e) => `\`${e}\``).join(' or ')}: fix only the markup named above, and do not change what the example shows (its nesting, how many elements there are, the values, or which element each attribute is on).`
+      wrapping
+        ? `Keep the nodes matched by ${nodes}: fix only the markup named above -- ${WRAP}. Do not remove them, and do not change how many there are, their values, their order, or which element each attribute is on.`
+        : `Keep the nodes matched by ${nodes}: fix only the markup named above, and do not change what the example shows (its nesting, how many elements there are, the values, or which element each attribute is on).`
     );
   }
   return lines.join(' ') || null;
@@ -856,11 +880,13 @@ function correctionPlaces(entry, names) {
 export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, setup = null, parseXml = parseXmlDocument }) {
   const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
   const ruleNames = extractRuleNames(ruleXml);
-  const keep = keepMatchedNodeProblem(
+  const keepArgs = [
     ruleXml,
     format ? ruleConditions(ruleXml, format, { parseXml }) : [],
-    format ? rulePathParts(ruleXml, format, { parseXml }) : null
-  );
+    format ? rulePathParts(ruleXml, format, { parseXml }) : null,
+  ];
+  const keep = keepMatchedNodeProblem(...keepArgs);
+  const keepWrapping = keepMatchedNodeProblem(...keepArgs, { wrapping: true });
   return runs
     .map((r, index) => {
       // Mejoras E, Part 1.3: an example the schema already rules out is
@@ -877,13 +903,18 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             expected: examples[index].expected,
             tableModel: Boolean(setup?.tableModel),
             sectionTree: setup?.placements?.[materialized[index].schema]?.placement?.metadata?.tree || null,
+            sectionRoutes: setup?.placements?.[materialized[index].schema]?.placement?.metadata?.insertion
+              ? setup.placements[materialized[index].schema].placement.metadata.routes || []
+              : [],
             // every element of the rule, also those its own path places (the
             // prompt leaves those out): the example still put one elsewhere
             places: correctionPlaces(setup?.placements?.[materialized[index].schema], ruleNames.elements),
             carriers: setup?.placements?.[materialized[index].schema]?.placement?.attributeCarriers || [],
             rootAttributes: setup?.placements?.[materialized[index].schema]?.placement?.rootAttributes || [],
           });
-      if (problems.length > 0 && !missing && keep && examples[index].expected === 'reject') problems.push(keep);
+      const wraps = (r.validation.structure || []).some((p) => p.kind === 'notAllowed');
+      const keepLine = wraps ? keepWrapping : keep;
+      if (problems.length > 0 && !missing && keepLine && examples[index].expected === 'reject') problems.push(keepLine);
       return { index, label: examples[index].label, problems };
     })
     .filter((f) => f.problems.length > 0);

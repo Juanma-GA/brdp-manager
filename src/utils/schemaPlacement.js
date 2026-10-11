@@ -26,22 +26,8 @@
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
-// The simple chains [source, …, target] (at least one step, no element
-// twice, a source never an intermediate step) from any of `sources` down to
-// `target` over the schema's graph, shortest first, at most `limit` of them.
-// "Only one way" means one simple chain of ANY length: the shortest alone is
-// not enough -- <para> inside <para> has a single shortest way
-// (para/footnote/para) and many longer ones (randomList/listItem/para, …),
-// and moving it into a footnote would change what the example says.
-// Depth-first, pruned by each element's distance to the target (only
-// elements that can still reach it are entered), within a budget of steps;
-// → { paths, complete } -- complete: false when the budget ran out, so a
-// caller never takes one found way for the only one.
-const PATH_SEARCH_BUDGET = 50000;
-export function simplePaths(elements, sources, target, limit = 4) {
-  const starts = [...new Set(sources)].filter((s) => elements[s]).sort();
-  if (!elements[target] || starts.length === 0) return { paths: [], complete: true };
-  // distance of every element to the target, over the parent links
+// The distance of every element down to `target`, over the parent links.
+function distancesTo(elements, target) {
   const parents = new Map();
   for (const [name, el] of Object.entries(elements)) {
     for (const child of el.children || []) {
@@ -63,6 +49,25 @@ export function simplePaths(elements, sources, target, limit = 4) {
     }
     frontier = next;
   }
+  return distTo;
+}
+
+// The simple chains [source, …, target] (at least one step, no element
+// twice, a source never an intermediate step) from any of `sources` down to
+// `target` over the schema's graph, shortest first, at most `limit` of them.
+// "Only one way" means one simple chain of ANY length: the shortest alone is
+// not enough -- <para> inside <para> has a single shortest way
+// (para/footnote/para) and many longer ones (randomList/listItem/para, …),
+// and moving it into a footnote would change what the example says.
+// Depth-first, pruned by each element's distance to the target (only
+// elements that can still reach it are entered), within a budget of steps;
+// → { paths, complete } -- complete: false when the budget ran out, so a
+// caller never takes one found way for the only one.
+const PATH_SEARCH_BUDGET = 50000;
+export function simplePaths(elements, sources, target, limit = 4) {
+  const starts = [...new Set(sources)].filter((s) => elements[s]).sort();
+  if (!elements[target] || starts.length === 0) return { paths: [], complete: true };
+  const distTo = distancesTo(elements, target);
   const startSet = new Set(starts);
   const found = [];
   let budget = PATH_SEARCH_BUDGET;
@@ -97,6 +102,75 @@ export function simplePaths(elements, sources, target, limit = 4) {
   }
   found.sort((a, b) => a.length - b.length || (a.join('/') < b.join('/') ? -1 : 1));
   return { paths: found, complete: complete || found.length >= limit };
+}
+
+// The simple chains from any of `sources` that follow the rule's own steps
+// (`segments`, [{ name, axis }] in order, the last one the target): a
+// 'child' segment is the very next element of the chain, a 'descendant' one
+// (or 'other') is anywhere further down. "dmStatus//para/captionGroup" from
+// <dmStatus> → only chains through a <para> whose next element is the
+// <captionGroup>. Same rules as simplePaths (no element twice, a source
+// never an intermediate step). Iterative deepening on the chain's length,
+// so the chains come shortest first and the first `limit` found are the
+// shortest ones; within a budget of steps (complete: false when it ran out).
+const STEP_PATH_MAX_LENGTH = 24;
+export function stepPaths(elements, sources, segments, limit = 4) {
+  const target = segments[segments.length - 1]?.name;
+  const starts = [...new Set(sources)].filter((s) => elements[s]).sort();
+  if (!target || !elements[target] || starts.length === 0) return { paths: [], complete: true };
+  const distTo = distancesTo(elements, target);
+  const startSet = new Set(starts);
+  const found = [];
+  const seen = new Set();
+  let budget = PATH_SEARCH_BUDGET;
+  let complete = true;
+  let maxLength = 0;
+  const walk = (path, onPath, at) => {
+    if (budget-- <= 0) {
+      complete = false;
+      return;
+    }
+    const seg = segments[at];
+    const node = path[path.length - 1];
+    const children = [...new Set(elements[node]?.children || [])]
+      .filter((c) => elements[c] && distTo.has(c) && path.length + 1 + distTo.get(c) <= maxLength)
+      .sort((a, b) => distTo.get(a) - distTo.get(b) || (a < b ? -1 : a > b ? 1 : 0));
+    for (const child of children) {
+      if (!complete) return;
+      if (onPath.has(child)) continue;
+      if (child === seg.name) {
+        if (at === segments.length - 1) {
+          const key = [...path, child].join('/');
+          if (!seen.has(key) && path.length + 1 === maxLength) {
+            seen.add(key);
+            found.push([...path, child]);
+          }
+        } else if (!startSet.has(child)) {
+          onPath.add(child);
+          path.push(child);
+          walk(path, onPath, at + 1);
+          path.pop();
+          onPath.delete(child);
+        }
+      }
+      if (seg.axis === 'child' || child === target || startSet.has(child)) continue;
+      onPath.add(child);
+      path.push(child);
+      walk(path, onPath, at);
+      path.pop();
+      onPath.delete(child);
+    }
+  };
+  const reachable = starts.filter((s) => distTo.has(s));
+  const shortest = Math.min(...reachable.map((s) => distTo.get(s) + 1));
+  for (maxLength = shortest; maxLength <= STEP_PATH_MAX_LENGTH && found.length < limit && complete; maxLength += 1) {
+    for (const start of reachable) {
+      if (!complete) break;
+      walk([start], new Set([start]), 0);
+    }
+  }
+  found.sort((a, b) => a.length - b.length || (a.join('/') < b.join('/') ? -1 : 1));
+  return { paths: found.slice(0, limit), complete: complete || found.length >= limit };
 }
 
 // ─── Minimal valid instances ────────────────────────────────────────────────
@@ -207,17 +281,22 @@ function treeNodes(node, out = []) {
 // [{ target, paths, position, minimal }] -- for each element the rule looks
 // at in the section (`names`, in order) that is neither in the minimal
 // section nor directly inside one of its elements: the ways (simple chains,
-// shortest first) from
-// the section to it (at most SECTION_ROUTE_MAX_PATHS; `names` of the rule's
-// own path before it, `requiredSteps[target]`, keep only the ways through
-// them when some are). With exactly one way: `position` -- where its first
+// shortest first) from the section to it, at most SECTION_ROUTE_MAX_PATHS.
+// `requirements[target]` = { segments, after }: the rule's own steps after
+// the last one the minimal section already has (`after`, or null), each
+// with its axis -- only the ways that follow them (stepPaths), searched
+// before cutting (EXT-00188, //dmodule/identAndStatusSection/dmStatus//para/
+// captionGroup: 21 ways reach a <captionGroup> right inside a <para>; the
+// first four ways to any <captionGroup> went through none). Starting at
+// `after` (or below it, for a "//" step) when it is a section element. When
+// no way follows them, every way as before. With exactly one way: `position` -- where its first
 // new container goes in the existing element ({ parent, container, after }
 // or { parent, container, before } or { parent, container, first: true }) --
 // and `minimal`, the chain from that container down to the element with
 // every required child, as indented XML with "…" for text. A route whose
 // way is part of another's is left out. [] when nothing is needed: the
 // prompt does not change.
-export function sectionRoutes(structure, section, names, requiredSteps = {}) {
+export function sectionRoutes(structure, section, names, requirements = {}) {
   const elements = structure?.elements || {};
   const models = structure?.models || {};
   if (!section?.tree) return [];
@@ -227,18 +306,19 @@ export function sectionRoutes(structure, section, names, requiredSteps = {}) {
   const routes = [];
   for (const target of [...new Set(names)]) {
     if (!elements[target] || inSection.has(target) || direct.has(target)) continue;
-    const search = simplePaths(elements, [...inSection], target, SECTION_ROUTE_MAX_PATHS + 1);
-    let paths = search.paths;
-    if (paths.length === 0) continue;
-    const through = (requiredSteps[target] || []).filter((s) => !inSection.has(s));
-    if (through.length) {
-      const consistent = paths.filter((p) => {
-        let at = 0;
-        for (const step of p) if (step === through[at]) at += 1;
-        return at === through.length;
-      });
-      if (consistent.length) paths = consistent;
+    let search = null;
+    const req = requirements[target];
+    if (req?.segments?.length) {
+      const from = req.after ? nodes.filter((n) => n.name === req.after) : [];
+      const starts = from.length
+        ? [...new Set(from.flatMap((n) => (req.segments[0].axis === 'child' ? [n] : treeNodes(n))).map((n) => n.name))]
+        : [...inSection];
+      const followed = stepPaths(elements, starts, req.segments, SECTION_ROUTE_MAX_PATHS + 1);
+      if (followed.paths.length) search = followed;
     }
+    if (!search) search = simplePaths(elements, [...inSection], target, SECTION_ROUTE_MAX_PATHS + 1);
+    const paths = search.paths;
+    if (paths.length === 0) continue;
     const single = paths.length === 1 && search.complete;
     const route = { target, paths: paths.slice(0, SECTION_ROUTE_MAX_PATHS), several: !single, position: null, minimal: null };
     if (single) {
@@ -268,6 +348,25 @@ export function sectionRoutes(structure, section, names, requiredSteps = {}) {
   return routes.filter(
     (r) => !routes.some((o) => o !== r && r.paths.every((p) => o.paths.some((q) => key(q).startsWith(key(p)) && q.length > p.length)))
   );
+}
+
+// Caminos de la sección, Part 1: the same words as the prompt's lines
+// (ruleTestExamplesPrompt.js, sectionRouteLines) on one line, for the
+// correction round -- "<X> is not allowed inside <Y>" with X on one of the
+// ways the rule's steps allow.
+export function sectionRouteSentence(route) {
+  const ways = route.paths.map((p) => p.join('/')).join('; ');
+  if (route.several || !route.position) {
+    return `<${route.target}> is not directly inside any element of that section. Valid ways down in this schema (use one of them): ${ways}.`;
+  }
+  const pos = route.position;
+  const where = pos.after ? `right after <${pos.after}>` : pos.before ? `right before <${pos.before}>` : 'as its first child';
+  return `<${route.target}> is not directly inside any element of that section. The valid way down in this schema: ${ways}. <${pos.container}> goes inside <${pos.parent}>, ${where}.`;
+}
+
+// The section's ways that pass through `element` (after their first step).
+export function routesThrough(routes, element) {
+  return (routes || []).filter((r) => r.paths.some((p) => p.indexOf(element) > 0));
 }
 
 // GMC, Part 1.2: the way from the identification and status section to an

@@ -293,6 +293,50 @@ def test_every_metadata_section_is_valid_against_the_real_xsd(standard):
         assert errors == [], (standard, schema, errors)
 
 
+# Caminos de la sección, Part 2: every value the content models give a
+# required attribute (METADATA_ATTRIBUTE_VALUES, or an enum's first value)
+# is valid for that attribute's XSD type, in every element of every
+# document schema that has it -- checked on <element attr="value"/> alone:
+# only the errors about the attribute's value count (its missing children
+# do not). The flat S1000D schemas declare every element globally.
+_ATTRIBUTE_VALUE_ERROR = ("is not a valid value", "is not accepted by the pattern", "is not an element of the set", "is not facet-valid")
+
+
+@pytest.mark.parametrize("standard", S1000D)
+def test_every_required_attribute_value_is_valid_against_the_real_xsd(standard):
+    checked = 0
+    for schema in get_document_schemas(standard):
+        models = schema_content_models(standard, schema)
+        xsd = _load_xsd(SOURCES / XSD_DIRS[standard] / f"{schema}.xsd")
+        for name, model in models.items():
+            valued = [(a, v) for a, v in model["attributes"] if v is not None]
+            if not valued:
+                continue
+            attrs = "".join(f" {a}={quoteattr(v)}" for a, v in valued)
+            xsd.validate(etree.fromstring(f"<{name}{attrs}/>"))
+            errors = [
+                e.message for e in xsd.error_log
+                if "attribute '" in e.message and any(m in e.message for m in _ATTRIBUTE_VALUE_ERROR)
+            ]
+            assert errors == [], (standard, schema, name, valued, errors)
+            checked += 1
+    assert checked > 100
+
+
+def test_ipd_catalog_seq_number_can_be_built_with_its_required_attributes():
+    for standard, expected in [("S1000D 4.2", "01"), ("S1000D 4.1", "01")]:
+        models = schema_content_models(standard, "ipd")
+        attrs = dict(models["catalogSeqNumber"]["attributes"])
+        assert attrs == {"figureNumber": expected, "indenture": "1", "item": "001"}
+        assert dict(models["itemSeqNumber"]["attributes"]) == {"itemSeqNumberValue": "00A"}
+    # left without a value on purpose: an ID must be unique, an IDREF must
+    # point at something, an ENTITY must be declared
+    models = schema_content_models("S1000D 4.2", "descript")
+    assert dict(models["graphic"]["attributes"])["infoEntityIdent"] is None
+    proced = schema_content_models("S1000D 4.2", "proced")
+    assert dict(proced["condRef"]["attributes"])["condRefId"] is None if "condRef" in proced else True
+
+
 def test_known_metadata_sections():
     tree = derive_metadata_skeleton("S1000D 4.2", "descript")["tree"]
     assert [c["name"] for c in tree["children"]] == ["dmAddress", "dmStatus"]

@@ -222,7 +222,7 @@ export function formatRuleStatement(statement, schemas, t) {
   if (params.qualifier && params.target) {
     const q = params.qualifier;
     const subject = q.on ? t('records.ruleTest.describe.qualifier.attrOf', { target: params.target, on: q.on }) : params.target;
-    values.target = t(`records.ruleTest.describe.qualifier.${q.kind}`, { target: subject, name: q.name, condition: q.condition });
+    values.target = t(`records.ruleTest.describe.qualifier.${q.kind}`, { target: subject, name: q.name, condition: q.condition, parent: q.parent, n: q.n, before: q.before, from: q.from });
   }
   if (params.values) values.values = formatValues(params.values, t);
   // Plantillas, Part 4: the names a condition looks at.
@@ -298,6 +298,7 @@ export function ruleDescriptionText(description, t) {
 // text: records.ruleTest.acceptCause.*). Never changes the verdict.
 //   cause_mandatory_present {parent, child}, cause_mandatory_present_values,
 //   cause_mandatory_somewhere {target}, cause_missing {target},
+//   cause_outside_path {target, step} (Caminos de la sección, Part 1),
 //   cause_predicate {amount, target, predicate},
 //   cause_predicate_nesting {…, deepest, mode, level},
 //   cause_predicate_path {amount, target, path},
@@ -325,6 +326,8 @@ export function formatAcceptCause(cause, t) {
       return k('mandatorySomewhere', p);
     case 'cause_missing':
       return k('missing', p);
+    case 'cause_outside_path':
+      return k('outsidePath', p);
     case 'cause_predicate':
       return k('predicate', p);
     case 'cause_predicate_nesting': {
