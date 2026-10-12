@@ -512,16 +512,20 @@ function sectionPlaceHint(problem, places) {
 // placement: levelledPara/table/title/footnote for
 // //footnote[not(ancestor::table)]), put where the schema does not allow it
 // (<table> inside <para>) -- the same way again.
-function relationWayHint(problem, relationWays) {
+function relationWayHint(problem, relationWays, innerWays = []) {
   if (problem.kind !== 'notAllowed') return null;
   const ways = relationWays.filter((r) => r.way.slice(1).includes(problem.element));
-  if (ways.length === 0) return null;
-  return ways
-    .map((r) => `<${r.element}> ${r.axis === 'parent' ? 'directly ' : ''}inside <${r.ancestor}> is written by exactly this way: ${r.way.join('/')}.`)
-    .join(' ');
+  // Default BREX pass, Part 2.3: the way to what the condition looks for
+  // inside the checked element (<pmRef> inside <frontMatter>).
+  const inner = innerWays.filter((x) => x.way.slice(1).includes(problem.element));
+  if (ways.length === 0 && inner.length === 0) return null;
+  return [
+    ...ways.map((r) => `<${r.element}> ${r.axis === 'parent' ? 'directly ' : ''}inside <${r.ancestor}> is written by exactly this way: ${r.way.join('/')}.`),
+    ...inner.map((x) => `<${x.names[x.names.length - 1]}> inside <${x.element}> is written by exactly this way: ${x.way.join('/')}.`),
+  ].join(' ');
 }
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [], relationWays = [] } = {}) {
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [], relationWays = [], innerWays = [] } = {}) {
   const places = sectionTree ? minimalSectionPlaces(sectionTree) : null;
   // GMC, Part 1.3: an attribute given for the root is never "markup of an
   // element the rule does not name": no plain-text hint for it.
@@ -558,7 +562,7 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
       out.push(`${formatStructureProblem(p, schema)}. ${routes.map(sectionRouteSentence).join(' ')}`);
       continue;
     }
-    const relationHint = relationWayHint(p, relationWays);
+    const relationHint = relationWayHint(p, relationWays, innerWays);
     if (relationHint) {
       out.push(`${formatStructureProblem(p, schema)}. ${relationHint}`);
       continue;

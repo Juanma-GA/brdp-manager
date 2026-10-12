@@ -14,13 +14,16 @@ Every rule is in exactly ONE category:
   - otherwise the recorded result: passed (also "passed with examples
     edited by hand"), schema_covered (Mejoras E: the rule forbids what no
     valid document of the schema can contain, and an example meant to be
-    accepted passed), review, failed, inconclusive, not_executable.
+    accepted passed), informative (an informative rule: flag 2 / 3.0.1
+    without objappl, without values -- it rejects nothing by design, it
+    documents what is allowed; decided by code, no LLM), review, failed,
+    inconclusive, not_executable.
 """
 import hashlib
 
-RECORDED_RESULTS = ("passed", "schema_covered", "review", "failed", "inconclusive", "not_executable")
+RECORDED_RESULTS = ("passed", "schema_covered", "informative", "review", "failed", "inconclusive", "not_executable")
 # The order the header lists them in (passed first, always shown).
-TEST_CATEGORIES = ("passed", "schema_covered", "not_tested", "review", "failed", "inconclusive", "not_executable", "outdated")
+TEST_CATEGORIES = ("passed", "schema_covered", "informative", "not_tested", "review", "failed", "inconclusive", "not_executable", "outdated")
 
 
 def rule_xml_hash(rule_xml: str) -> str:

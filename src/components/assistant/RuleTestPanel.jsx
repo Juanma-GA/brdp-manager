@@ -46,6 +46,9 @@ export function verdictView(t, verdict, standard) {
     // Mejoras E, Part 1: not a defect, not a failure.
     case 'schema_covered':
       return { tone: 'ok', text: t('records.ruleTest.verdicts.schemaCovered', { detail: coverageDetail(verdict.items, t) }) };
+    // Default BREX pass, Part 1.1: rejects nothing by design.
+    case 'informative':
+      return { tone: 'neutral', text: t('records.ruleTest.verdicts.informative') };
     case 'review':
       if (verdict.path) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewPath', { detail: formatRuleTestReason(verdict.path, t) }) };
       if (verdict.rootAll) return { tone: 'warn', text: t('records.ruleTest.verdicts.reviewRootAll') };
@@ -158,7 +161,7 @@ function TestProgress({ state, onCancel }) {
   );
 }
 
-export const TONE_CLASS = { ok: 'ruleTestToneOk', bad: 'ruleTestToneBad', warn: 'ruleTestToneWarn' };
+export const TONE_CLASS = { ok: 'ruleTestToneOk', bad: 'ruleTestToneBad', warn: 'ruleTestToneWarn', neutral: 'ruleTestToneNeutral' };
 
 export function formatTestDate(value, language) {
   if (!value) return '';
@@ -831,7 +834,7 @@ function CorrectionNote({ correction }) {
 // where the element can never exist -- the rule always rejects them.
 // Mejoras G, Part 2.1: `reach` (starReach) -- the elements a "*[@a]" step
 // reaches, up to REACH_LISTED by name, more as a number.
-function RuleDescription({ description, presence = null, reach = [] }) {
+function RuleDescription({ description, presence = null, reach = [], informative = false }) {
   const { t, i18n } = useTranslation();
   const formatted = formatRuleDescription(description, t);
   if (!formatted) return null;
@@ -861,7 +864,7 @@ function RuleDescription({ description, presence = null, reach = [] }) {
         ))}
         {neverThere && <li data-testid="rule-test-presence-never">{neverThere}</li>}
       </ul>
-      {formatted.cannotReject && (
+      {formatted.cannotReject && !informative && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-cannot-reject">
           ⚠ {t('records.ruleTest.describe.cannotReject')}
         </p>
@@ -1045,7 +1048,7 @@ export default function RuleTestPanel({
 
       {state.status !== 'ready' && <ReplacePassedQuestion question={replaceQuestion} answer={replaceAnswer} onAnswer={answerReplaceQuestion} />}
 
-      <RuleDescription description={description} presence={state.presence || null} reach={reach} />
+      <RuleDescription description={description} presence={state.presence || null} reach={reach} informative={state.status === 'informative'} />
       <MinimalDocumentsLine ruleXml={ruleXml} format={format} standard={standard} schemaLocation={schemaLocation} testId="rule-test-minimal-documents" />
       {!notARule && <RuleLintWarnings ruleXml={ruleXml} format={format} place="panel" standard={standard} />}
       {/* Mejoras C, Part 1: once the test says "review" for it, the verdict
@@ -1075,6 +1078,18 @@ export default function RuleTestPanel({
           <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneWarn}`} data-testid="rule-test-verdict" data-kind="review" data-reason="test_impossible_path">
             {view.text}
           </p>
+        </>
+      )}
+      {state.status === 'informative' && (
+        <>
+          <p className={`${styles.ruleTestVerdict} ${styles.ruleTestToneNeutral}`} data-testid="rule-test-verdict" data-kind="informative">
+            {view.text}
+          </p>
+          {state.mustNot && (
+            <p className={`${styles.ruleTestNote} ${styles.muted}`} data-testid="rule-test-informative-must-not">
+              {t('records.ruleTest.informativeMustNot')}
+            </p>
+          )}
         </>
       )}
       {state.status === 'error' && (

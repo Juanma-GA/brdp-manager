@@ -244,6 +244,15 @@ function chainLines(p) {
     .join('');
 }
 
+// Default BREX pass, Part 2.3: what the checked element's condition looks
+// for inside it (<pmRef> inside <frontMatter>) -- the whole way.
+function innerLines(p) {
+  return (p.innerWays || [])
+    .map((x) => `
+  The rule's condition looks at <${x.names[x.names.length - 1]}> inside <${x.element}>: write it by exactly this way: ${x.way.join('/')}.`)
+    .join('');
+}
+
 function routeLines(p) {
   const r = p.routes;
   if (!r) return '';
@@ -332,7 +341,7 @@ ${metadataLine(p)}${carrierLines(p)}${placeLines(p)}`;
     : '';
   return `- ${kind} "${p.schema}": your content goes directly inside <${p.insertion}>, at
   ${p.path.join('/')}.${titleLine}${relationLine}
-  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${relationWayLines(p)}${chainLines(p)}${referenceLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
+  Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${relationWayLines(p)}${chainLines(p)}${innerLines(p)}${referenceLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
 ${metadataLine(p, true)}` : ''
   }${carrierLines(p)}${placeLines(p)}`;

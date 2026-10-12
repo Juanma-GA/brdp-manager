@@ -7,7 +7,7 @@
 import { analyzeRule, RULE_TEST_FORMATS } from './ruleTestEngine.js';
 
 // The indicator state of a saved rule:
-//   { kind: 'not_tested' | 'outdated' | 'passed' | 'schema_covered' | 'review' | 'failed' | 'inconclusive' | 'not_executable',
+//   { kind: 'not_tested' | 'outdated' | 'passed' | 'schema_covered' | 'informative' | 'review' | 'failed' | 'inconclusive' | 'not_executable',
 //     reason, at }
 // The kind is the server's test_category (AACF 2, Part 2): one function,
 // backend services/rule_test_category.py, decides it for this indicator and
@@ -81,6 +81,9 @@ export function verifyWarning(approval, format, options = {}) {
   // Mejoras E: "already covered by the schema" is neither a defect nor a
   // failed test -- nothing to warn about before Verify.
   if (status.kind === 'schema_covered') return null;
+  // Default BREX pass, Part 1.1: an informative rule rejects nothing by
+  // design -- not a failure, nothing to warn about either.
+  if (status.kind === 'informative') return null;
   if (status.kind === 'passed') {
     return status.editedCount > 0 ? { kind: 'passed_edited', reason: null, editedCount: status.editedCount, canTestNow: true } : null;
   }

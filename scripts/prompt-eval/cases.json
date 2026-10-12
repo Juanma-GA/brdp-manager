@@ -1986,7 +1986,7 @@
       "id": "rule-test-4-2-wrong-rule-flag2",
       "type": "rule-test",
       "standard": "S1000D 4.2",
-      "description": "Test rule on a known WRONG rule (T3b): the Proposal forbids <emphasis>, but the rule is allowedObjectFlag 2 on //emphasis without values, so it can reject nothing. Examples written from the decision must expose it: the verdict must be incorrect, and the deterministic description must carry the 'cannot reject' warning.",
+      "description": "Test rule on a rule that can reject nothing: the Proposal forbids <emphasis>, but the rule is allowedObjectFlag 2 on //emphasis without values. Before the default S1000D 4.2 BREX pass the LLM wrote examples from the decision and the verdict was incorrect; now such a rule (flag 2 without values, the same detection as the lint's 'informative rule (flag 2)') is 'Informative' without any LLM call, with the note that its objectUse says 'must not'. The description keeps the 'cannot reject' warning.",
       "brdp": {
         "identifier": "BRDP-EVAL-RT-WRONG",
         "title": "Use of emphasis",
@@ -1997,20 +1997,9 @@
       "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-WRONG\"><objectPath allowedObjectFlag=\"2\">//emphasis</objectPath><objectUse>The element &lt;emphasis&gt; shall not be used.</objectUse></structureObjectRule>",
       "checks": [
         {
-          "type": "rule_test_json_valid",
-          "note": "the LLM's answer is valid JSON with examples"
-        },
-        {
-          "type": "rule_test_examples_valid",
-          "note": "every example passes the XML, vocabulary and structure checks after the one correction round"
-        },
-        {
-          "type": "rule_test_accept_and_reject",
-          "note": "at least one example meant to be accepted and one meant to be rejected"
-        },
-        {
-          "type": "rule_test_verdict_incorrect",
-          "note": "examples follow the decision, not the rule: the engine accepts the reject example, so the verdict is incorrect"
+          "type": "rule_test_informative",
+          "mustNot": true,
+          "note": "informative, no LLM call, with the 'must not' note (its objectUse says 'shall not')"
         },
         {
           "type": "contains",
@@ -5141,6 +5130,141 @@
           "target": "prompt",
           "pattern": "your content goes directly inside <para>",
           "note": "never in <para>, where <table> cannot go"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-default-informative-dmlentry",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Default S1000D 4.2 BREX pass, Part 1.1 (BRDP-EXT-00002, BREX-S1-00002): //dmlEntry, allowedObjectFlag 2, no objectValue, in a dml context block -- it documents what is allowed and rejects nothing. Before: the LLM was asked for examples and the test failed or was inconclusive. Now: 'Informative', no LLM call, no 'must not' note.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DFLT02",
+        "title": "Contents of the DMRL",
+        "definition": "Decide on the contents of the data module requirement list.",
+        "proposal": "The DMRL must contain the titles and details of the responsible partner company for each of the data modules and publication modules.",
+        "validation": "Validated"
+      },
+      "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/dml.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00002\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//dmlEntry</objectPath>\n\t\t\t\t\t\t<objectUse>The DMRL must contain the titles and details of the responsible partner company for each of the data modules and publication modules - with some exceptions (Chap 4.5, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+      "checks": [
+        {
+          "type": "rule_test_informative",
+          "mustNot": false,
+          "note": "informative, no LLM call"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-default-closed-list-tool-cir",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Default S1000D 4.2 BREX pass, Part 1.2 (BRDP-EXT-00014, BREX-S1-00022): 'Only toolSpec, toolIdent, … can be used in the data update file representing the tool CIR', implemented by forbidding every other CIR element. The real run judged it 'no'. Now the Proposal check is told that forbidding what is not in the list implements 'only these' and that an incomplete forbidden list is 'partly', never 'no'.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DFLT14",
+        "title": "Elements of the tool CIR in a data update file",
+        "definition": "Decide which elements can be used in the data update file representing the tool CIR.",
+        "proposal": "Only toolSpec, toolIdent, toolAlts, reasonForUpdate, procurementData and taskRef elements can be used in the data update file representing the tool CIR.",
+        "validation": "Validated"
+      },
+      "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00022\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"0A1\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::circuitBreakerSpec or descendant::functionalItemSpec or descendant::accessPointSpec or descendant::enterpriseSpec or descendant::toolSpec or descendant::supplySpec or descendant::controlIndicatorSpec or descendant::supplyRqmtSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::partIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only functionalPhysicalAreaSpec, functionalPhysicalAreaIdent, applicIdent, applicRefIdent, applic, applicRef, figure, figureIdent, multimedia, multimediaIdent elements can be used in the Data update file representing the functional physical area CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "proposal_check_prompt",
+          "pattern": "incomplete[^\\n]*\\n[^\\n]*\"partly\", never \"no\"|\"partly\", never \"no\"",
+          "note": "the closed-list line is in the Proposal check"
+        },
+        {
+          "type": "rule_proposal_check_level",
+          "expect": [
+            "yes",
+            "partly"
+          ],
+          "note": "never 'no'"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-default-reference-supplydescr",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Default S1000D 4.2 BREX pass, Part 2.1 (BRDP-EXT-00046): //internalRef[@internalRefTargetType='irtt04' and not(@internalRefId = //supplyDescr/@id) and not(…//embeddedSupplyDescr/@id)]. Before: tested in descript, where no <supplyDescr> exists; the accept example could only point to nothing. Now in proced, at <procedure>, with the way to <supplyDescr>; an accept example pointing to an id no destination has goes to the correction round.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DFLT46",
+        "title": "References to supplies",
+        "definition": "Decide what an internal reference of type irtt04 can point to.",
+        "proposal": "An internal reference of type irtt04 points to a supply description of the data module.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00048\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//internalRef[attribute::internalRefTargetType=\"irtt04\" and not(attribute::internalRefId = //supplyDescr/@id) and not(attribute::internalRefId = //embeddedSupplyDescr/@id)]</objectPath>\n\t\t\t\t\t\t<objectUse>Only when the reference target is a supply  can the value of attribute internalRefTargetType be irtt04 (Chap 3.9.5.2.1.2, Para 2.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "schema \"proced\": your content goes directly inside <procedure>",
+          "note": "tested in proced, at <procedure>"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-default-brex-schema-by-predicate",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Default S1000D 4.2 BREX pass, Part 2.2 (BRDP-EXT-00152): /dmodule[content/brex]/identAndStatusSection/dmAddress/dmIdent/dmCode[@infoCode!=\"022\" or @itemLocationCode!=\"D\"]. Before: tested in descript, where /dmodule[content/brex] is never true (nothing selected, inconclusive). Now the predicate picks the brex schema.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DFLT152",
+        "title": "Information code of a BREX",
+        "definition": "Decide on the information code of a BREX data module.",
+        "proposal": "A BREX data module has information code 022 and item location code D.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule reasonForUpdateRefIds=\"EPWG81.04\" changeType=\"add\" changeMark=\"1\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00268\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">/dmodule[content/brex]/identAndStatusSection/dmAddress/dmIdent/dmCode[@infoCode!=\"022\" or @itemLocationCode!=\"D\"]</objectPath>\n\t\t\t\t\t\t<objectUse>The information code for a BREX data module is 022, and the item location code is set to D. (Chap 4.10.2.4, Para 2).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "schema \"brex\":",
+          "note": "tested in the brex schema"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-default-frontmatter-pmref",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Default S1000D 4.2 BREX pass, Part 2.3 (BRDP-EXT-00127): //frontMatter[descendant-or-self::pmRef[attribute::id or attribute::authorityName or attribute::authorityDocument]]. Before: no way to <pmRef> inside <frontMatter> in the prompt. Now: 'write it by exactly this way: content/frontMatter/frontMatterList/frontMatterSubList/frontMatterPmEntry/pmRef'; the example with @id is rejected.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-DFLT127",
+        "title": "Attributes of references in front matter",
+        "definition": "Decide on the attributes of references to publication modules in a front matter data module.",
+        "proposal": "Attributes @id, @authorityName and @authorityDocument must not be used for references to publication modules in a front matter data module.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00126\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//frontMatter[descendant-or-self::pmRef[attribute::id or attribute::authorityName or attribute::authorityDocument]]</objectPath>\n\t\t\t\t\t\t<objectUse>Attributes @id, @authorityName and @authorityDocument must not be used for  references to publication modules in a front matter data module  (Chap 3.9.5.2.16, Para 2.3.2.3.4)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "write it by exactly this way: content/frontMatter/frontMatterList/frontMatterSubList/frontMatterPmEntry/pmRef",
+          "note": "the exact way through the front matter list"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_verdict_correct"
         }
       ]
     }

@@ -127,7 +127,9 @@ export function skipReason(approval, { all = false } = {}) {
 // "already covered by the schema") keeps it Verified; any other result --
 // failed, review, inconclusive, not executable, error -- moves it to Draft
 // (POST .../revoke, History "verified → draft"). A Draft or To Do rule is
-// never touched, and nothing is ever promoted to Verified. An error that is
+// never touched, and nothing is ever promoted to Verified. "informative"
+// (Default BREX pass, Part 1.1: flag 2 without values, rejects nothing by
+// design) never moves a rule either: it is counted apart. An error that is
 // not the rule's (session lost, the AI's daily limit, the backend) never
 // gets here: see errorGoesToDraft.
 export const REVOKING_RESULTS = new Set(['failed', 'review', 'inconclusive', 'not_executable', 'error']);
@@ -145,7 +147,7 @@ export function shouldRevoke(result, ruleStatus) {
 //   attempt: { result, error?, deterministic? }
 export function shouldRepeat(attempt, ruleStatus, { noRetry = false } = {}) {
   if (noRetry || ruleStatus !== 'approved' || !attempt) return false;
-  if (isPassing(attempt.result) || attempt.deterministic) return false;
+  if (isPassing(attempt.result) || attempt.result === 'informative' || attempt.deterministic) return false;
   if (attempt.result === 'error' && !errorGoesToDraft(attempt.error)) return false;
   return true;
 }
@@ -334,6 +336,7 @@ export const RESULT_LABELS = {
   es: {
     passed: 'pasa',
     schema_covered: 'pasa (el esquema ya lo incluye)',
+    informative: 'informativa',
     failed: 'falla',
     review: 'revisar',
     inconclusive: 'no concluyente',
@@ -344,6 +347,7 @@ export const RESULT_LABELS = {
   en: {
     passed: 'passes',
     schema_covered: 'passes (already covered by the schema)',
+    informative: 'informative',
     failed: 'fails',
     review: 'review',
     inconclusive: 'inconclusive',
@@ -460,7 +464,7 @@ export function buildReport(results, { lang = 'es' } = {}) {
   out.push('');
   out.push(es ? '| Resultado | Reglas | → Draft |' : '| Result | Rules | → Draft |');
   out.push('|---|---|---|');
-  for (const r of ['passed', 'schema_covered', 'failed', 'review', 'inconclusive', 'not_executable', 'error', 'skipped']) {
+  for (const r of ['passed', 'schema_covered', 'informative', 'failed', 'review', 'inconclusive', 'not_executable', 'error', 'skipped']) {
     const moved = latest.filter((e) => e.result === r && e.moved_to_draft).length;
     out.push(`| ${L[r]} | ${count(r)} | ${REVOKING_RESULTS.has(r) ? moved : '—'} |`);
   }
@@ -483,7 +487,7 @@ export function buildReport(results, { lang = 'es' } = {}) {
   );
   out.push('');
 
-  const notPassing = latest.filter((e) => !isPassing(e.result) && e.result !== 'skipped');
+  const notPassing = latest.filter((e) => !isPassing(e.result) && e.result !== 'skipped' && e.result !== 'informative');
   out.push(es ? `## Reglas que no pasan (${notPassing.length})` : `## Rules that do not pass (${notPassing.length})`);
   out.push('');
   if (notPassing.length === 0) out.push(es ? 'Ninguna.' : 'None.');
@@ -517,6 +521,18 @@ export function buildReport(results, { lang = 'es' } = {}) {
     }
   out.push('');
 
+  // Default BREX pass, Part 1.1: informative rules, apart -- not a pass,
+  // not a failure, never moved to Draft.
+  const informative = latest.filter((e) => e.result === 'informative');
+  if (informative.length) {
+    out.push(es ? `## Informativas (${informative.length}): no rechazan nada; documentan lo permitido` : `## Informative (${informative.length}): they reject nothing; they document what is allowed`);
+    out.push('');
+    for (const e of informative) {
+      const mustNot = e.reason?.params?.mustNot ? (es ? ' (su objectUse dice «must not»: la decisión no se comprueba con XPath)' : ' (its objectUse says "must not": the decision is not checked with XPath)') : '';
+      out.push(`- ${e.identifier} — ${statusLabel(e.status_after)}${mustNot}`);
+    }
+    out.push('');
+  }
   const skipped = latest.filter((e) => e.result === 'skipped');
   if (skipped.length) {
     out.push(es ? `## Saltadas (${skipped.length}): su última prueba pasó con la misma regla` : `## Skipped (${skipped.length}): their last test passed on the same rule`);

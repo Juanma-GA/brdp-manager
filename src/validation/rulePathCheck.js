@@ -979,6 +979,62 @@ export function absoluteConditionRequirements(ruleXml, format, options = {}) {
   return out;
 }
 
+// Default BREX pass, Part 2.2: what the predicates of a rule's steps --
+// any step, not only the last -- require to EXIST, as relative (or
+// absolute) paths of element steps: /dmodule[content/brex]/… (BRDP-EXT-
+// 00152) → [[content, brex]]; //expression[ancestor::dmodule[descendant::
+// commonRepository and …]] (BRDP-EXT-00134) → [[dmodule], [commonRepository]];
+// dmCode[… and ancestor::dmodule[descendant::referencedApplicGroupRef]]
+// (BRDP-EXT-00133). Nested predicates are followed; an "or" of paths gives
+// one requirement with its alternatives ([[a], [b], …]: at least one). A
+// negated operand (not(…)), a comparison, a function call or an attribute
+// asks for nothing. Same shape as absoluteConditionRequirements; used as a
+// preference for the test schema (chooseTestSchemas).
+function existenceNames(text) {
+  const { steps } = pathSteps(text);
+  const names = [];
+  for (const [i, s] of steps.entries()) {
+    if (s.kind === 'element' || s.kind === 'axis') names.push(s.name);
+    else if (s.kind === 'self' || (s.kind === 'attribute' && i === steps.length - 1)) continue;
+    else return null;
+  }
+  return names.length ? names : null;
+}
+export function predicateRequirements(ruleXml, format, options = {}) {
+  const out = [];
+  const add = (sets) => {
+    if (sets.length && !out.some((r) => JSON.stringify(r) === JSON.stringify(sets))) out.push(sets);
+  };
+  const visit = (predicate, depth) => {
+    if (depth > 6) return;
+    for (const operand of andOperands(predicate) || [String(predicate || '').trim()]) {
+      const text = unwrapParens(operand.trim());
+      if (!text || /^not\s*\(/.test(text)) continue;
+      const ors = orOperands(text);
+      const sets = [];
+      for (const raw of ors) {
+        const names = existenceNames(unwrapParens(raw.trim()));
+        if (!names) {
+          sets.length = 0;
+          break;
+        }
+        sets.push([...new Set(names)]);
+      }
+      if (sets.length === ors.length) add(sets);
+      if (ors.length === 1) {
+        for (const step of pathSteps(unwrapParens(ors[0].trim())).steps) for (const p of step.predicates) visit(p, depth + 1);
+      }
+    }
+  };
+  for (const part of rulePathParts(ruleXml, format, options)) {
+    if (part.condition) continue;
+    for (const alternative of pathAlternatives(part.path)) {
+      for (const step of pathSteps(alternative).steps) for (const p of step.predicates) visit(p, 0);
+    }
+  }
+  return out;
+}
+
 // The elements an "and" operand of the checked step asks about anywhere in
 // the document -- //x or not(//x) (BRDP-EXT-02651: not(//reqconds)): the
 // examples must be able to contain them, so the insertion point must reach

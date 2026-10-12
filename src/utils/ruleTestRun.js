@@ -20,16 +20,17 @@ import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { analyzeRule, describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootDocumentPath, rootSelfPath } from './ruleTestEngine.js';
 import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions } from './ruleTestDossier.js';
 import { minimalDocument, minimalDocumentRuns } from './ruleMinimalDocuments.js';
-import { stripLiterals, withoutPredicates } from './ruleTestCommon.js';
+import { nodePath, stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
 import { exampleProblems, materializeExample, runExample } from './ruleTest.js';
 import { elementPlaces } from './schemaPlacement.js';
 import { LLM_TRUNCATED } from '../api/llmTruncation.js';
 import { cleanInternalNames } from './answerCleanup.js';
-import { absoluteConditionRequirements, checkRulePaths, documentExistenceNames, pathAlternatives, pathOperands, pathSteps } from '../validation/rulePathCheck.js';
+import { absoluteConditionRequirements, checkRulePaths, documentExistenceNames, pathAlternatives, pathOperands, pathSteps, predicateRequirements } from '../validation/rulePathCheck.js';
 import { coverageItemEnglish, documentPresence, schemaCoverage } from '../validation/schemaCoverage.js';
 import { repeatingComparisons, singleChildPairs, viewFromStructure } from '../validation/ruleRepetition.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats.js';
+import { informativeRule } from './ruleLint.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
 // "review" result (the panel shows them all, from the rule itself).
@@ -361,10 +362,22 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   // Mejoras F, Part 1.3: absolute paths the checked step's condition needs
   // (BREX only; Schematron DITA unchanged).
   const conditionRequirements = format && format.startsWith('BREX') ? absoluteConditionRequirements(ruleXml, format, { parseXml, schemaLocation }) : [];
+  // Default BREX pass, Part 2.2: what the predicates of every step require
+  // to exist -- a preference for the test schema.
+  const stepRequirements = format && format.startsWith('BREX') ? predicateRequirements(ruleXml, format, { parseXml, schemaLocation }) : [];
   const targets = {
     ...ruleTargets(ruleXml),
     containNames: format && format.startsWith('BREX') ? documentExistenceNames(ruleXml, format, { parseXml, schemaLocation }) : [],
   };
+  // Part 2.2 (BRDP-EXT-00133): what a predicate requires to exist -- with a
+  // single way to meet it -- must also be writable from the insertion point
+  // (ancestor::dmodule[descendant::referencedApplicGroupRef]: inside
+  // <content>, never inside <para>). The deepest element of the path.
+  for (const sets of stepRequirements) {
+    if (sets.length !== 1) continue;
+    const name = sets[0][sets[0].length - 1];
+    targets.requireNames = [...new Set([...(targets.requireNames || []), name])];
+  }
   const useNames = ruleUseNames(ruleXml);
   const factNames = extractRuleNames(ruleXml).elements.slice(0, MAX_SCHEMA_FACTS);
   const lookup = [
@@ -376,6 +389,9 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       ...targets.alternatives.flatMap((a) => (a.opaque ? [] : a.steps)),
       ...(targets.chains || []).flatMap((c) => c.chain.map((step) => step.name)),
       ...conditionRequirements.flat(2),
+      ...stepRequirements.flat(2),
+      // Part 2.1: the destinations of a reference (//supplyDescr/@id).
+      ...(targets.references || []).flatMap((r) => r.destinations.map((d) => d.name)),
     ]),
   ];
   // Schema facts improve the examples but are never required; the schema
@@ -417,7 +433,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   }
   const unknownContextNotes = unknownContexts.map((reason) => ({ schema: reason.params.schema, kind: 'context_unknown', reason }));
   const attributeSchemas = await attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, elementSchemas);
-  const { testSchema, otherSchema, groups, candidates, noConditionSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets, conditionRequirements });
+  const { testSchema, otherSchema, groups, candidates, noConditionSchema, noReferenceSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets, conditionRequirements, predicateRequirements: stepRequirements });
   if (noConditionSchema) {
     return {
       contextSchemas,
@@ -427,6 +443,29 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       unreachable: {
         code: 'condition_no_schema',
         params: { paths: noConditionSchema.map((names) => `/${names.join('/')}`).join(' | '), standard },
+      },
+      setup: { standard, schemaLocation, placements: {}, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
+    };
+  }
+  // Default BREX pass, Part 2.1: the schemas that have every element the
+  // rule checks have no destination of the reference it compares with
+  // (//internalRef[not(@internalRefId = //supplyDescr/@id)]) -- an example
+  // meant to be accepted could only point to nothing. Said before any LLM
+  // call.
+  if (noReferenceSchema) {
+    return {
+      contextSchemas,
+      schemaFacts,
+      promptPlacements: [],
+      untested: [],
+      unreachable: {
+        code: 'reference_no_schema',
+        params: {
+          element: noReferenceSchema.element,
+          attribute: noReferenceSchema.attribute,
+          destinations: noReferenceSchema.destinations.map((n) => `<${n}>`).join(', '),
+          standard,
+        },
       },
       setup: { standard, schemaLocation, placements: {}, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
     };
@@ -905,7 +944,54 @@ function correctionPlaces(entry, names) {
 }
 
 // The examples the correction round must fix: [{ index, label, problems }].
+// Default BREX pass, Part 2.1b: an example meant to be accepted that the
+// rule rejected because a node it checks points to an id no destination of
+// the document has (@internalRefId="SE123" and no <supportEquipDescr
+// id="SE123">, BRDP-EXT-00047) is a wrong example, not a wrong rule: one
+// English line per dangling value, for the correction round. Only nodes the
+// rule rejected, only the compared attribute; never examples meant to be
+// rejected (a dangling id is exactly how they break the decision).
+export function danglingReferenceProblems(example, xml, run, references, parseXml = parseXmlDocument) {
+  if (example.expected !== 'accept' || !run?.validation?.runnable || run.result?.status !== 'rejected' || !references?.length) return [];
+  const rejected = new Set((run.result.violations || []).flatMap((v) => v.nodePaths || []));
+  if (!rejected.size) return [];
+  let doc;
+  try {
+    doc = parseXml(xml);
+  } catch {
+    return [];
+  }
+  if (!doc?.documentElement) return [];
+  const list = doc.getElementsByTagName('*');
+  const all = [];
+  for (let i = 0; i < list.length; i += 1) all.push(list[i]);
+  const nameOf = (el) => el.localName || el.nodeName;
+  const lines = [];
+  for (const r of references) {
+    const values = new Set();
+    for (const d of r.destinations) {
+      for (const el of all) if (nameOf(el) === d.name && el.hasAttribute(d.attribute)) values.add(el.getAttribute(d.attribute));
+    }
+    const seen = new Set();
+    for (const el of all) {
+      if (nameOf(el) !== r.element || !el.hasAttribute(r.attribute)) continue;
+      if (!rejected.has(nodePath(el)) && !rejected.has(nodePath(el.getAttributeNode(r.attribute)))) continue;
+      const value = el.getAttribute(r.attribute);
+      if (values.has(value) || seen.has(value)) continue;
+      seen.add(value);
+      const names = [...new Set(r.destinations.map((d) => `<${d.name}>`))];
+      const attrs = [...new Set(r.destinations.map((d) => d.attribute))];
+      const shown = names.length > 3 ? `${names.slice(0, 3).join(', ')} or another destination` : names.join(' or ');
+      lines.push(
+        `The example points to ${value} (@${r.attribute} of <${r.element}>), but no ${shown} has ${attrs.length === 1 ? `${attrs[0]}="${value}"` : `that id`} in this document: add the destination with that ${attrs.length === 1 ? attrs[0] : 'id'}, or point to one that exists.`
+      );
+    }
+  }
+  return lines;
+}
+
 export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, setup = null, parseXml = parseXmlDocument }) {
+  const references = ruleTargets(ruleXml).references || [];
   const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
   const ruleNames = extractRuleNames(ruleXml);
   const keepArgs = [
@@ -922,7 +1008,11 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
       if (r.schemaCovered) return { index, label: examples[index].label, problems: [] };
       const missing = r.validation.runnable ? missesRuleProblem(examples[index], r, ruleXml) : null;
       const problems = r.validation.runnable
-        ? [missing, withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null].filter(Boolean)
+        ? [
+            missing,
+            withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null,
+            ...danglingReferenceProblems(examples[index], materialized[index]?.xml, r, references, parseXml),
+          ].filter(Boolean)
         : exampleProblems(r.validation, {
             standard,
             schema: materialized[index].schema,
@@ -939,6 +1029,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             places: correctionPlaces(setup?.placements?.[materialized[index].schema], ruleNames.elements),
             carriers: setup?.placements?.[materialized[index].schema]?.placement?.attributeCarriers || [],
             relationWays: setup?.placements?.[materialized[index].schema]?.placement?.relationWays || [],
+            innerWays: setup?.placements?.[materialized[index].schema]?.placement?.innerWays || [],
             rootAttributes: setup?.placements?.[materialized[index].schema]?.placement?.rootAttributes || [],
           });
       const wraps = (r.validation.structure || []).some((p) => p.kind === 'notAllowed');
@@ -1153,6 +1244,22 @@ export async function generateRuleTestExamples({
   const responses = [];
   try {
     onStep({ step: 'preparing' });
+    // Default BREX pass, Part 1.1: an informative rule (flag 2 / no
+    // objappl, without values) rejects nothing by design -- no example can
+    // fail it, so none is asked for: no LLM call at all, not even the
+    // Proposal check. A rule with another part that rejects is tested as
+    // always (informativeRule is null then).
+    const informative = informativeRule(ruleXml, format, { parseXml });
+    if (informative) {
+      return {
+        status: 'informative',
+        informative: { mustNot: informative.mustNot, ruleIds: informative.mustNotIds },
+        setup: { standard, schemaLocation, placements: {}, keepBrexReference: false },
+        untested: [],
+        systemPrompt: null,
+        responses,
+      };
+    }
     const graph = await loadGraph(fetchSchemaGraph, standard);
     if (!isCurrent()) return null;
     // Test de reglas: referencias…, Part 2.2: nothing the rule forbids
@@ -1170,7 +1277,10 @@ export async function generateRuleTestExamples({
         responses,
       };
     }
-    const pathReview = impossiblePathReview({ ruleXml, format, schemaLocation, graph, parseXml });
+    // Default BREX pass, Part 2.3: an attribute the element never has is
+    // both an "impossible path" and what makes the schema cover the rule
+    // (BRDP-EXT-00115): the coverage is the answer, never "Review".
+    const pathReview = earlyCoverage ? null : impossiblePathReview({ ruleXml, format, schemaLocation, graph, parseXml });
     if (pathReview) return { status: 'path_review', reason: pathReview, systemPrompt: null, responses };
     // Part 2.1: a schema forbidden by a context block (//dmodule in a
     // container context) -- no LLM examples.

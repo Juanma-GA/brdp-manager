@@ -432,6 +432,18 @@ async function runCheck(check, answer, ctx = {}) {
       const matches = !check.pattern || new RegExp(check.pattern, check.flags || "").test(text);
       return { status: matches && calls === 0 ? "pass" : "fail", detail: `${calls} LLM call(s); reason: ${text}` };
     }
+    case "rule_test_informative": {
+      // Default BREX pass, Part 1.1: an informative rule (flag 2 without
+      // values) is "informative" before any LLM call; `mustNot` pins the
+      // note when its objectUse says "must not".
+      const r = ctx.ruleTest;
+      if (!r) return { status: "fail", detail: "no test" };
+      const calls = (r.responses || []).length;
+      if (r.status !== "informative") return { status: "fail", detail: `status ${r.status}, expected informative; ${calls} LLM call(s)` };
+      const mustNot = Boolean(r.informative?.mustNot);
+      const ok = calls === 0 && (check.mustNot === undefined || check.mustNot === mustNot);
+      return { status: ok ? "pass" : "fail", detail: `${calls} LLM call(s); mustNot ${mustNot}` };
+    }
     case "rule_test_not_executable": {
       // GMC, Part 2: a rule the examples cannot test is "not executable"
       // before any LLM call -- the reason (English text) must match
@@ -1062,7 +1074,9 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
       ? ruleTestVerdict(result.examples, result.runs, analysis, result.proposalCheck, threshold, result.coverage)
       : result.status === "path_review"
         ? { kind: "review", path: result.reason }
-        : null;
+        : result.status === "informative"
+          ? { kind: "informative", mustNot: Boolean(result.informative?.mustNot) }
+          : null;
   return {
     systemPrompt: result.systemPrompt,
     userMessage: "Write the test examples for this rule.",

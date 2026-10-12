@@ -21,6 +21,11 @@ export function notExecutableRecord(analysis) {
 export function generationOutcome(result, { analysis, threshold, proposal }) {
   if (!result) return { record: null, verdict: null };
   if (result.status === 'not_executable') return { record: { result: 'not_executable', reason: result.reason }, verdict: null };
+  if (result.status === 'informative') {
+    // Default BREX pass, Part 1.1: rejects nothing by design -- no LLM.
+    const verdict = { kind: 'informative', mustNot: Boolean(result.informative?.mustNot) };
+    return { record: verdictToTestRecord(verdict), verdict };
+  }
   if (result.status === 'path_review') {
     // Mejoras C, Part 1: the path cannot exist -- "review", no LLM call.
     const verdict = { kind: 'review', path: result.reason };

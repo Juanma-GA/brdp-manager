@@ -81,7 +81,11 @@ class RuleCorrectionDismiss(BaseModel):
 #   schema_covered -- Mejoras E: the rule forbids what no valid document of
 #                     the schema can contain; an example meant to be
 #                     accepted ran and passed. Not a defect, not a failure.
-RuleTestResult = Literal["passed", "schema_covered", "review", "failed", "inconclusive", "not_executable"]
+#   informative    -- an informative rule (allowedObjectFlag="2" / 3.0.1 with
+#                     no objappl, without values): it rejects nothing by
+#                     design, it documents what is allowed. Decided by code,
+#                     no LLM; never a failure.
+RuleTestResult = Literal["passed", "schema_covered", "informative", "review", "failed", "inconclusive", "not_executable"]
 
 # A reason's serialized size cap: a code plus a few short params (an XPath
 # error message, a rule id per part). Generous, only there so the column

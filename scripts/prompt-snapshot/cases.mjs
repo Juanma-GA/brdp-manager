@@ -1267,3 +1267,41 @@ ruleProposalCheckCases.push({
     },
   ],
 });
+
+// Test de reglas: pasada S1000D 4.2 por defecto -- the rules of the default
+// S1000D 4.2 BREX, verbatim (scripts/rule-test-fixtures/default-brex-4-2.json).
+// ruleProposalCheck: EXT-00014 (BREX-S1-00022, "only these CIR elements",
+// implemented by forbidding the others). ruleTestExamples: EXT-00046 (a
+// reference to //supplyDescr/@id: tested in proced, at <procedure>, with
+// the way to the destination), EXT-00152 (/dmodule[content/brex]: the brex
+// schema) and EXT-00127 (//frontMatter[descendant-or-self::pmRef[…]]: the
+// exact way to <pmRef> through the front matter list).
+const DEFAULT_BREX_42 = JSON.parse(readFileSync(new URL('../rule-test-fixtures/default-brex-4-2.json', import.meta.url), 'utf-8')).rules;
+const defaultRule = (n) => DEFAULT_BREX_42[`BRDP-EXT-${String(n).padStart(5, '0')}`].rule_xml;
+const brdpDefault = (identifier, title, proposal) => ({ ...brdpRuleTest, identifier, title, definition: `Decide on ${title.toLowerCase()}.`, proposal });
+ruleProposalCheckCases.push({
+  name: 'brex-4-2-default-closed-list-tool-cir',
+  args: [
+    {
+      brdp: brdpDefault('BRDP-EXT-00014', 'Elements of the tool CIR in a data update file', 'Only toolSpec, toolIdent, toolAlts, reasonForUpdate, procurementData and taskRef elements can be used in the data update file representing the tool CIR.'),
+      standard: 'S1000D 4.2',
+      format: 'BREX-4.2',
+      ruleXml: defaultRule(14),
+      ruleDescription: describeText(defaultRule(14), 'BREX-4.2'),
+    },
+  ],
+});
+ruleTestExamplesCases.push(
+  {
+    name: 'brex-4-2-default-reference-supplydescr',
+    args: [{ brdp: brdpDefault('BRDP-EXT-00046', 'References to supplies', 'An internal reference of type irtt04 points to a supply description of the data module.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: defaultRule(46), placements: appPlacementsFor('S1000D 4.2', defaultRule(46), [['proced', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-default-brex-schema-by-predicate',
+    args: [{ brdp: brdpDefault('BRDP-EXT-00152', 'Information code of a BREX', 'A BREX data module has information code 022 and item location code D.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: defaultRule(152), placements: appPlacementsFor('S1000D 4.2', defaultRule(152), [['brex', 'rule']]) }],
+  },
+  {
+    name: 'brex-4-2-default-frontmatter-pmref-way',
+    args: [{ brdp: brdpDefault('BRDP-EXT-00127', 'Attributes of references in front matter', 'Attributes @id, @authorityName and @authorityDocument must not be used for references to publication modules in a front matter data module.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: defaultRule(127), placements: appPlacementsFor('S1000D 4.2', defaultRule(127), [['frontmatter', 'rule']]) }],
+  },
+);

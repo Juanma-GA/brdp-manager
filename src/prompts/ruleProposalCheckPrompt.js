@@ -19,7 +19,12 @@ export const RULE_PROPOSAL_CHECK_USER_MESSAGE = 'Check whether the rule implemen
 // no XML rule can check (marking torque values up with <quantity>), "only
 // toolSpec, … can be used" implemented as a prohibition of the other
 // elements (read backwards), and "use <applic>" implemented as a prohibition
-// of <applicRef>. "partly" keeps the examples' verdict with an informative
+// of <applicRef>. Default BREX pass, Part 1.2: the default S1000D 4.2 BREX
+// rules on the data update file (BRDP-EXT-00014 … 00025: "Only X, Y, Z
+// elements can be used …", implemented by forbidding every other CIR
+// element) were still judged "no": the "only these" bullet now says that
+// forbidding what is not in the list implements it, and an incomplete
+// forbidden list is "partly". "partly" keeps the examples' verdict with an informative
 // note; only "no" gives "Review" (ruleTest.js's ruleTestVerdict).
 const PROPOSAL_CHECK_LEVELS = ['yes', 'partly', 'no'];
 
@@ -79,7 +84,10 @@ These are NOT reasons for "no":
   it mandatory.
 - The Proposal says "only A, B and C are allowed" and the rule rejects the
   other elements by name: "yes". A, B and C are the allowed ones: the rule
-  must NOT reject them.
+  must NOT reject them. Forbidding every element that is not in the
+  Proposal's list implements "only these". If the list of forbidden
+  elements looks incomplete (an element that is neither allowed by the
+  Proposal nor forbidden by the rule), the answer is "partly", never "no".
 - The Proposal requires an attribute that the schema makes required on an
   element (see REQUIRED ATTRIBUTES, when given): requiring that element
   implements the Proposal, because the element cannot appear without the

@@ -374,7 +374,7 @@ async function attemptTest(ruleXml, brdp, analysis, description, threshold) {
     const message = `the Proposal check could not be made: ${record.reason.params?.error || ''}`.trim();
     return { kind: 'error', fields: { result: 'error', error: message, error_kind: errorKind(message), ...details } };
   }
-  const deterministic = result?.status === 'not_executable' || result?.status === 'path_review';
+  const deterministic = result?.status === 'not_executable' || result?.status === 'path_review' || result?.status === 'informative';
   return { kind: 'record', record, details, deterministic };
 }
 
@@ -528,7 +528,7 @@ function finish() {
   const by = (r) => latestRun.filter((e) => e.result === r).length;
   console.log('');
   console.log(
-    `Done in ${Math.round((Date.now() - startedAt) / 1000)} s: ${finished} rule(s) -- passed ${by('passed') + by('schema_covered')}, failed ${by('failed')}, review ${by('review')}, inconclusive ${by('inconclusive')}, not executable ${by('not_executable')}, error ${by('error')}, skipped ${by('skipped')}; moved to Draft ${latestRun.filter((e) => e.moved_to_draft).length}.`
+    `Done in ${Math.round((Date.now() - startedAt) / 1000)} s: ${finished} rule(s) -- passed ${by('passed') + by('schema_covered')}, informative ${by('informative')}, failed ${by('failed')}, review ${by('review')}, inconclusive ${by('inconclusive')}, not executable ${by('not_executable')}, error ${by('error')}, skipped ${by('skipped')}; moved to Draft ${latestRun.filter((e) => e.moved_to_draft).length}.`
   );
   const manual = latestRun.filter((e) => e.revoke_failed);
   if (manual.length) console.log(`To move to Draft by hand (the request failed twice): ${manual.map((e) => e.identifier).join(', ')}`);

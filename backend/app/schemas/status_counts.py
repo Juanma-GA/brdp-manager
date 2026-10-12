@@ -32,12 +32,13 @@ class RuleStatusCounts(BaseModel):
 
 class VerifiedTestCounts(BaseModel):
     """AACF 2, Part 2: the verified rules (rule_status_counts.verified) by
-    what their test means now -- one category per rule, so the eight add
+    what their test means now -- one category per rule, so the nine add
     up to the verified count. Decided by services/rule_test_category.py,
     the same function as each rule's indicator."""
 
     passed: int = 0
     schema_covered: int = 0
+    informative: int = 0
     not_tested: int = 0
     review: int = 0
     failed: int = 0

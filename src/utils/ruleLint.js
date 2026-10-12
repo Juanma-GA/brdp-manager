@@ -258,6 +258,35 @@ const pathNotNodes = (reason) =>
 
 const statementOf = (s) => ({ statement: s.statement, schemas: s.schemas });
 
+// Default BREX pass (Part 1.1): an informative rule -- every part is
+// allowedObjectFlag="2" (3.0.1: no objappl) without values (or a flag 2
+// condition), so it rejects nothing by design: it documents what is
+// allowed, as the default S1000D BREX does (//dmlEntry, //@issueType). The
+// one detection both the lint ("informative rule (flag 2)") and "Test
+// rule" (result "informative", no LLM) use.
+//   → null, or { mustNot, ruleIds, statements } -- mustNot: the objectUse
+//   of an informative part says "must not"/"shall not"… (BRDP-EXT-00037
+//   //reasonForUpdate): the decision is not checked with XPath.
+// A rule with any other part that can reject (flag 0, flag 1, values) is
+// never informative: cannotReject is false.
+const INFORMATIVE_CODES = new Set(['describe_allowed', 'describe_condition_informative']);
+export function informativeRule(ruleXml, format, { parseXml = parseXmlDocument, description = null } = {}) {
+  if (!format || !format.startsWith('BREX')) return null;
+  const described = description || describeRule(ruleXml, format, { parseXml });
+  if (!described.available || !described.cannotReject) return null;
+  const statements = described.statements.filter((s) => INFORMATIVE_CODES.has(s.statement.code));
+  if (statements.length === 0) return null;
+  const texts = {};
+  for (const r of brexRules(ruleDocument(ruleXml, parseXml))) texts[r.id] = texts[r.id] ? `${texts[r.id]} ${r.use}` : r.use;
+  const mustNotStatements = statements.filter((s) => MUST_NOT_RE.test(s.ruleIds.map((id) => texts[id] || '').join(' ')));
+  return {
+    mustNot: mustNotStatements.length > 0,
+    mustNotIds: [...new Set(mustNotStatements.flatMap((s) => s.ruleIds))],
+    ruleIds: [...new Set(statements.flatMap((s) => s.ruleIds))],
+    statements,
+  };
+}
+
 // Every occurrence, before grouping: [{ code, known, params }].
 function occurrences(ruleXml, format, parseXml, graph = null) {
   const out = [];
@@ -279,16 +308,10 @@ function occurrences(ruleXml, format, parseXml, graph = null) {
   const texts = {};
   for (const r of rules) texts[r.id] = texts[r.id] ? `${texts[r.id]} ${r.use}` : r.use;
   const description = describeRule(ruleXml, format, { parseXml });
-  const informativeCodes = new Set(['describe_allowed', 'describe_condition_informative']);
-  const saysMustNot = (s) => MUST_NOT_RE.test(s.ruleIds.map((id) => texts[id] || '').join(' '));
-  const informative =
-    description.available &&
-    description.cannotReject &&
-    !isSchematron &&
-    description.statements.some((s) => informativeCodes.has(s.statement.code)) &&
-    !description.statements.some((s) => informativeCodes.has(s.statement.code) && saysMustNot(s));
-  if (informative) {
-    for (const s of description.statements.filter((x) => informativeCodes.has(x.statement.code))) add('informative', statementOf(s), true);
+  const informativeCodes = INFORMATIVE_CODES;
+  const info = informativeRule(ruleXml, format, { parseXml, description });
+  if (info && !info.mustNot) {
+    for (const s of info.statements) add('informative', statementOf(s), true);
   } else if (description.available && description.cannotReject) {
     const allowed = description.statements.filter((s) =>
       ['describe_allowed', 'describe_condition_informative', 'describe_sch_assert', 'describe_sch_report'].includes(s.statement.code),

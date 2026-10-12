@@ -504,7 +504,35 @@ function looseAttributeOf(operand) {
   return { attribute: attr.name, root, path: text };
 }
 
+// Default BREX pass, Part 2.3: what the checked step's condition looks for
+// INSIDE the checked element, as a chain of element steps (descendant or
+// child), following the predicate of each step: //frontMatter[descendant-
+// or-self::pmRef[@id …]] → [{ name: 'pmRef', desc: true }];
+// //frontMatter[child::frontMatterTitlePage[child::publisherLogo[@id …]]] →
+// frontMatterTitlePage, publisherLogo. null for anything else (an
+// attribute, an ancestor axis, an absolute path).
+function innerChainOf(operand) {
+  const text = operand.trim();
+  if (!text || text.startsWith('/')) return null;
+  const { steps } = pathSteps(text);
+  const out = [];
+  for (const [i, s] of steps.entries()) {
+    if (s.kind !== 'element') break;
+    out.push({ name: s.name, desc: Boolean(s.desc) || s.sep === '//' });
+    if (i === steps.length - 1) {
+      for (const predicate of s.predicates) {
+        for (const op of pathOperands(predicate)) {
+          const more = innerChainOf(op);
+          if (more) return [...out, ...more];
+        }
+      }
+    }
+  }
+  return out.length ? out : null;
+}
+
 function predicateTargets(expressions) {
+  const inner = [];
   const references = [];
   const chains = [];
   const looseAttributes = [];
@@ -557,6 +585,13 @@ function predicateTargets(expressions) {
           for (const op of pathOperands(predicate)) {
             const chain = ancestorChainOf(op);
             if (chain && chain.length > 1) chains.push({ element: checked.name, chain, path: op.replace(/\s+/g, ' ').trim() });
+            // Part 2.3: only a chain the LLM can get wrong -- more than one
+            // step, or a descendant step (a direct child needs no way).
+            const steps = innerChainOf(op);
+            if (steps && (steps.length > 1 || steps[0].desc)) {
+              const key = `${checked.name}/${steps.map((s) => `${s.desc ? '/' : ''}${s.name}`).join('/')}`;
+              if (!inner.some((x) => x.key === key)) inner.push({ key, element: checked.name, steps });
+            }
           }
         }
       }
@@ -575,7 +610,7 @@ function predicateTargets(expressions) {
   // ancestor::title/parent::definitionList/…, BRDP-EXT-00008): the chain
   // says the whole way, the relation adds nothing.
   const uncovered = relations.filter((r) => !kept.some((c) => c.element === r.element && c.chain[0]?.name === r.ancestor));
-  return { references, chains: kept, looseAttributes, relations: uncovered };
+  return { references, chains: kept, looseAttributes, relations: uncovered, inner: inner.map(({ element, steps }) => ({ element, steps })) };
 }
 
 // ─── Which schemas the examples use ─────────────────────────────────────────
@@ -641,22 +676,53 @@ function byPreference(schemas, documentSchemas = []) {
 // (rulePathCheck.js's absoluteConditionRequirements). The chosen schema
 // must have every element of at least one of each; none does →
 // { noConditionSchema: requirement }. No new groups are made for it.
-export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, attributeSchemas = null, targets, conditionRequirements = [] }) {
+//
+// Default BREX pass, Part 2.1: a reference (//internalRef[@internalRefTargetType
+// = "irtt04" and not(@internalRefId = //supplyDescr/@id) …], BRDP-EXT-00046)
+// needs a schema that has at least one of its destinations -- the example
+// meant to be accepted points to one. descript has <internalRef> but no
+// <supplyDescr>, so the accept example could only point to nothing and the
+// rule rightly rejected it. Only destinations the cards know count; none
+// known → no requirement. No schema with one → { noReferenceSchema }.
+// Part 2.2: `predicateRequirements` -- what the predicates of the rule's
+// steps require to exist (/dmodule[content/brex]/…, ancestor::dmodule[
+// descendant::commonRepository …]): the same shape as conditionRequirements
+// and the same use, but a preference: when no schema meets them, the choice
+// is what it was (never "not executable" for a relative path).
+export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], cards = {}, elementSchemas = null, attributeSchemas = null, targets, conditionRequirements = [], predicateRequirements = [] }) {
   const known = (name) => Boolean(cards[name]) || Boolean(elementSchemas?.[name]?.length);
-  const meetsConditions = (schema) =>
-    conditionRequirements.every((sets) =>
+  const meetsSets = (requirements, schema) =>
+    requirements.every((sets) =>
       sets.some((names) => schemasHavingAll(names, cards, [schema], elementSchemas).length > 0)
     );
+  const meetsConditions = (schema) => meetsSets(conditionRequirements, schema);
+  const referenceSets = (targets?.references || [])
+    .map((r) => ({ reference: r, names: [...new Set(r.destinations.map((d) => d.name))].filter(known) }))
+    .filter((r) => r.names.length > 0);
+  const meetsReferences = (schema) => referenceSets.every((r) => r.names.some((n) => schemasHavingAll([n], cards, [schema], elementSchemas).length > 0));
+  const knownPredicateRequirements = predicateRequirements
+    .map((sets) => sets.filter((names) => names.every(known)))
+    .filter((sets) => sets.length > 0);
+  const meetsPredicates = (schema) => meetsSets(knownPredicateRequirements, schema);
   const required = [...new Set([...(targets?.checked || []), ...(targets?.absolutePrefixes || []).map((p) => p[0])])]
     .filter(known);
   const order = (list) => byPreference(list, documentSchemas);
   const carriersOf = attributeOnlySchemas(attributeSchemas, documentSchemas);
   const attributeOnly = (targets?.alternatives || []).map(carriersOf).filter(Boolean);
-  const fitting = order(
+  const fittingAll = order(
     schemasHavingAll(required, cards, documentSchemas, elementSchemas).filter(
       (schema) => attributeOnly.every((schemas) => schemas.includes(schema)) && meetsConditions(schema)
     )
   );
+  const withReferences = contextSchemas.length === 0 && referenceSets.length > 0 ? fittingAll.filter(meetsReferences) : fittingAll;
+  if (contextSchemas.length === 0 && referenceSets.length > 0 && fittingAll.length > 0 && withReferences.length === 0) {
+    const r = referenceSets.find((x) => !fittingAll.some((s) => x.names.some((n) => schemasHavingAll([n], cards, [s], elementSchemas).length > 0))) || referenceSets[0];
+    return { testSchema: null, otherSchema: null, groups: null, candidates: [], noReferenceSchema: { element: r.reference.element, attribute: r.reference.attribute, destinations: r.names } };
+  }
+  // Part 2.2: the schemas that also have what the steps' predicates
+  // require come first; none → as before.
+  const withPredicates = contextSchemas.length === 0 && knownPredicateRequirements.length > 0 ? withReferences.filter(meetsPredicates) : [];
+  const fitting = withPredicates.length > 0 ? withPredicates : withReferences;
   if (contextSchemas.length === 0 && conditionRequirements.length > 0 && fitting.length === 0) {
     const unmet = conditionRequirements.find((sets) => !documentSchemas.some((s) => sets.some((names) => schemasHavingAll(names, cards, [s], elementSchemas).length > 0)));
     return { testSchema: null, otherSchema: null, groups: null, candidates: [], noConditionSchema: unmet || conditionRequirements[0] };
@@ -741,7 +807,7 @@ export function targetsForGroup(targets, group) {
 // The shortest chain of elements that puts `to` inside `from` in this
 // schema's graph -- [from, …, to] -- or null when there is none. At least
 // one step: "randomList//randomList" → randomList/listItem/para/randomList.
-export function nestingPath(elements, from, to) {
+export function nestingPath(elements, from, to, avoid = null) {
   if (!elements[from] || !elements[to]) return null;
   const previous = new Map();
   let frontier = [from];
@@ -760,7 +826,7 @@ export function nestingPath(elements, from, to) {
           }
           return path.reverse();
         }
-        if (!seen.has(child) && elements[child]) {
+        if (!seen.has(child) && elements[child] && !avoid?.has(child)) {
           seen.add(child);
           previous.set(child, name);
           next.push(child);
@@ -1752,7 +1818,17 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     .filter((r) => r.present.length > 0);
   const referencesOk = (i) => references.every((r) => r.present.some((d) => underContent(chain[i]).has(d.name)));
   const useReferences = references.length > 0 && chain.slice(0, limit).some((_n, i) => fitsBase(i) && referencesOk(i));
-  const fitsChecked = (i) => fitsBase(i) && (!useReferences || referencesOk(i));
+  // Default BREX pass, Part 2.2 (BRDP-EXT-00133): an element a predicate
+  // requires to exist (ancestor::dmodule[descendant::referencedApplicGroupRef])
+  // that the content can write: the insertion point must reach it -- <content>,
+  // not <para>. Names only the identification section holds (dmIdent, dmCode)
+  // never count; when no point reaches one, the placement is what it was.
+  const requireNames = (targets?.requireNames || []).filter(
+    (n) => elements[n] && !chain.includes(n) && underContent(chain[0]).has(n)
+  );
+  const requiresOk = (i) => requireNames.every((n) => underContent(chain[i]).has(n));
+  const useRequires = requireNames.length > 0 && chain.slice(0, limit).some((_n, i) => fitsBase(i) && requiresOk(i));
+  const fitsChecked = (i) => fitsBase(i) && (!useReferences || referencesOk(i)) && (!useRequires || requiresOk(i));
   // Part 1.2: a chain of ancestors the condition looks at around the checked
   // element (figure/legend/definitionList/title around <internalRef>,
   // BRDP-EXT-00008): the insertion point must be able to write its outermost
@@ -1814,6 +1890,14 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     .map((c) => ({ element: c.element, names: [...c.chain].reverse().map((s) => s.name), way: chainWay(elements, placed.insertion, c) }))
     .filter((c) => c.way);
   if (chainWays.length) placed.chainWays = chainWays;
+  // Part 2.3: the way to what the checked step's condition looks for
+  // inside the checked element (<pmRef> inside <frontMatter>), from the
+  // insertion point -- never the shortest way to it alone (content/refs/
+  // pmRef, outside <frontMatter>, which the rule never looks at).
+  const innerWays = (targets?.inner || [])
+    .map((x) => ({ element: x.element, names: x.steps.map((s) => s.name), way: innerWay(elements, placed.insertion, x) }))
+    .filter((x) => x.way);
+  if (innerWays.length) placed.innerWays = innerWays;
   if (references.length) placed.references = references.map((r) => referenceInfo(elements, placed.insertion, r));
   // The point moved up for an outer element: the prompt gives each such
   // alternative's whole way from it (para0/figure/legend/deflist/def), so
@@ -1840,7 +1924,9 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     const way = relationWay(elements, placed.path, placed.insertion, relation, relation.inside);
     placed.relation = { ...relation, way: way ? [...placed.path, ...way.slice(1)] : null };
   }
-  const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n]);
+  // Part 2.3: a name with its own inner way gets no shortest-way route.
+  const innerNames = new Set((placed.innerWays || []).flatMap((x) => x.names));
+  const predicateNames = (targets?.predicateNames || []).filter((n) => elements[n] && !innerNames.has(n));
   // The way down goes to where each content alternative ENTERS the example:
   // its first named step below the insertion point (//title/internalRef
   // checks <internalRef>, directly inside <para>, but the example needs it
@@ -1867,6 +1953,35 @@ export function placeExample(structure, targets, { useNames = [], withRoutes = f
     ? contentRoutes(structure, placed.insertion, [...new Set([...entryNames, ...predicateNames])], useNames, attributeOnlyChecked)
     : null;
   return withAttributes(placed);
+}
+
+// Part 2.3: [from, …, element, …, inner names] -- each descendant step by
+// the shortest nesting, each child step direct -- or null when it does not
+// fit from there.
+// Default BREX pass, Part 2.3: a way that only exists through an aside
+// (a footnote or a note, //frontMatter//pmRef by frontMatterList/footnote/
+// para) is a valid but odd example; the way through the document's own
+// structure (frontMatterSubList/frontMatterPmEntry) is tried first.
+const ASIDE_ELEMENTS = new Set(['footnote', 'footnoteRemarks', 'note', 'warning', 'caution']);
+function asideFreeNesting(elements, from, to) {
+  return nestingPath(elements, from, to, ASIDE_ELEMENTS) || nestingPath(elements, from, to);
+}
+function innerWay(elements, from, { element, steps }) {
+  const way = from === element ? [from] : asideFreeNesting(elements, from, element);
+  if (!way) return null;
+  let prev = element;
+  for (const s of steps) {
+    if (s.desc) {
+      const nesting = prev === s.name ? null : asideFreeNesting(elements, prev, s.name);
+      if (!nesting) return null;
+      way.push(...nesting.slice(1));
+    } else {
+      if (!(elements[prev]?.children || []).includes(s.name)) return null;
+      way.push(s.name);
+    }
+    prev = s.name;
+  }
+  return way;
 }
 
 // Part 1.2: the way from `from` down to the checked element through a

@@ -6,6 +6,7 @@ import { ruleTestStatus } from '../../utils/ruleTestStatus.js';
 const INDICATOR_TONE = {
   passed: 'ruleTestToneOk',
   schema_covered: 'ruleTestToneOk',
+  informative: 'ruleTestToneNeutral',
   review: 'ruleTestToneWarn',
   failed: 'ruleTestToneBad',
   not_executable: 'ruleTestToneWarn',
@@ -35,6 +36,8 @@ export function RuleTestIndicator({ approval }) {
         : t('records.ruleTest.indicator.passed', { date }),
     // Mejoras E: the schema already guarantees what the rule forbids.
     schema_covered: t('records.ruleTest.indicator.schemaCovered'),
+    // Default BREX pass: flag 2 without values, rejects nothing by design.
+    informative: t('records.ruleTest.indicator.informative'),
     review: t('records.ruleTest.indicator.review'),
     failed: t('records.ruleTest.indicator.failed'),
     inconclusive: t('records.ruleTest.indicator.inconclusive'),
@@ -49,6 +52,7 @@ export function RuleTestIndicator({ approval }) {
         ? t('records.ruleTest.indicator.passedEditedTitle', { date, count: status.editedCount })
         : t('records.ruleTest.indicator.passedTitle', { date }),
     schema_covered: t('records.ruleTest.indicator.schemaCoveredTitle', { date, reason }),
+    informative: t('records.ruleTest.indicator.informativeTitle', { date, reason }),
     review: t('records.ruleTest.indicator.reviewTitle', { date, reason }),
     failed: t('records.ruleTest.indicator.failedTitle', { date, reason }),
     inconclusive: t('records.ruleTest.indicator.inconclusiveTitle', { date, reason }),

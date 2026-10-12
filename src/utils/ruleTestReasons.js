@@ -35,6 +35,9 @@
 //     one, and no schema of the standard allows one of the two examples;
 //     condition_no_schema {paths, standard} (Mejoras F, Part 1.3) -- no
 //       schema has the absolute paths the rule's condition needs
+//     reference_no_schema {element, attribute, destinations, standard}
+//       (default BREX pass, Part 2.1) -- the schemas with the rule's
+//       elements have none of the destinations it compares @attribute with
 //     example_no_room {outer, checked, standard} (Mejoras D, Part 1) -- no
 //     insertion point of any candidate schema holds the outermost element
 //     of the rule's path (<figure>) with the checked one (<def>) inside;
@@ -71,9 +74,9 @@ export const ENGINE_REASON_CODES = [
   'invalid_flag', 'path_not_nodes', 'absolute_root', 'schema_unknown', 'missing_value', 'bad_range', 'mixed_range',
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
-  'example_no_room', 'condition_no_schema', 'context_schema_unknown', 'test_schema_unavailable', 'minimal_document_unavailable',
+  'example_no_room', 'condition_no_schema', 'reference_no_schema', 'context_schema_unknown', 'test_schema_unavailable', 'minimal_document_unavailable',
 ];
-export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement'];
+export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -95,6 +98,11 @@ export function formatRuleTestReason(reason, t) {
   // Mejoras E, Part 1: what the schema already guarantees.
   if (reason.code === 'test_schema_covered') {
     return t('records.ruleTest.reasons.test_schema_covered', { detail: coverageDetail(params.items, t) });
+  }
+  // Default BREX pass, Part 1.1: an informative rule, with the note when
+  // its objectUse says "must not".
+  if (reason.code === 'test_informative') {
+    return params.mustNot ? `${t('records.ruleTest.reasons.test_informative')} ${t('records.ruleTest.informativeMustNot')}` : t('records.ruleTest.reasons.test_informative');
   }
   // Mejoras E, Part 2.3: the engine's error on an example, in plain words
   // and with its own message.
@@ -162,7 +170,7 @@ export function engineErrorText(error, t) {
 }
 
 // The result to record for a panel verdict (ruleTest.js's ruleTestVerdict):
-//   { result: 'passed' | 'schema_covered' | 'review' | 'failed' | 'inconclusive' | 'not_executable', reason }
+//   { result: 'passed' | 'schema_covered' | 'informative' | 'review' | 'failed' | 'inconclusive' | 'not_executable', reason }
 // "review": the examples passed but the rule does not seem to implement the
 // Proposal (test_proposal_mismatch {mismatch} -- the check's sentence, as
 // the LLM wrote it), or the Proposal could not be checked
@@ -186,6 +194,9 @@ export function verdictToTestRecord(verdict) {
         return { result: 'failed', reason: { code: 'test_engine_error', params: { code: e.code, message: e.message, plain: e.plain } } };
       }
       return { result: 'failed', reason: { code: 'test_incorrect', params: { permissive: Boolean(verdict.permissive), strict: Boolean(verdict.strict) } } };
+    case 'informative':
+      // Default BREX pass, Part 1.1: flag 2 without values, never a failure.
+      return { result: 'informative', reason: { code: 'test_informative', params: { mustNot: Boolean(verdict.mustNot) } } };
     case 'schema_covered':
       return { result: 'schema_covered', reason: { code: 'test_schema_covered', params: { items: verdict.items, via: verdict.via } } };
     case 'inconclusive':

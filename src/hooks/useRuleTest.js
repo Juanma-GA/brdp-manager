@@ -224,6 +224,15 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       }
       return;
     }
+    if (result.status === 'informative') {
+      // Default BREX pass, Part 1.1: rejects nothing by design -- no LLM.
+      setState({ status: 'informative', mustNot: Boolean(result.informative?.mustNot) });
+      if (!onDemand) {
+        recordedRef.current = record;
+        report(record);
+      }
+      return;
+    }
     if (result.status !== 'ready') {
       setState({ status: 'error', error: result.error, badResponse: Boolean(result.badResponse), truncated: Boolean(result.truncated) });
       return;
@@ -313,7 +322,9 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
       ? ruleTestVerdict(state.examples, state.runs, analysis, state.proposalCheck, threshold, state.coverage)
       : state.status === 'path_review'
         ? { kind: 'review', path: state.reason }
-        : null;
+        : state.status === 'informative'
+          ? { kind: 'informative', mustNot: Boolean(state.mustNot) }
+          : null;
   const shownAnalysis = lateAnalysis || analysis;
 
   // T3b "Review with the assistant" (incorrect verdict only): the Proposal,

@@ -110,10 +110,55 @@ function selfList(operand) {
   return names.length ? names : null;
 }
 
+// (e) Default BREX pass, Part 2.3: a predicate on <E> -- at any step, also
+// nested in the predicate of another step -- that requires attributes <E>
+// never has: [attribute::id or attribute::authorityName or
+// attribute::authorityDocument] on <publisherLogo> (BRDP-EXT-00115, S1000D
+// 4.2: <publisherLogo> has no attributes at all). The condition can never
+// hold, so the rule can never select anything. Only non-negated operands;
+// an "or" counts when none of its attributes exists on <E> in any schema of
+// the scope where <E> appears.
+const ATTR_TEST_RE = new RegExp(`^(?:@|attribute::)(${NAME})$`);
+const ELEMENT_STEP_KINDS = new Set(['element', 'axis']);
+
+function attributesNeverThere(index, scope, element, attributes) {
+  const where = schemasWith(index, scope, element);
+  if (where.length === 0) return false;
+  return where.every((s) => {
+    const n = graphNode(index, s, element);
+    return n && attributes.every((a) => !n.attrs.has(a));
+  });
+}
+
+function absentAttributesIn(index, scope, steps, depth = 0) {
+  if (depth > 6) return null;
+  for (const step of steps) {
+    if (!ELEMENT_STEP_KINDS.has(step.kind) || !step.name) continue;
+    for (const predicate of step.predicates || []) {
+      for (const raw of andOperands(predicate) || [predicate]) {
+        const operand = raw.trim();
+        if (NOT_RE.test(operand)) continue;
+        const ors = orOperands(operand).map((o) => o.trim());
+        const attrs = ors.map((o) => ATTR_TEST_RE.exec(o)?.[1]);
+        if (attrs.length && attrs.every(Boolean)) {
+          if (attributesNeverThere(index, scope, step.name, attrs)) return { kind: 'attributesAbsent', element: step.name, other: attrs.join('|'), attributes: attrs };
+          continue;
+        }
+        if (ors.length !== 1) continue;
+        const inner = absentAttributesIn(index, scope, pathSteps(operand).steps, depth + 1);
+        if (inner) return inner;
+      }
+    }
+  }
+  return null;
+}
+
 function coveredAlternative(index, scope, alternative) {
   const { steps } = pathSteps(alternative);
   const last = steps[steps.length - 1];
   if (!last) return null;
+  const absent = absentAttributesIn(index, scope, steps);
+  if (absent) return absent;
   const operands = last.predicates.flatMap((p) => andOperands(p) || []);
   // (a) X[not(ancestor::Y)] / X[not(parent::Y)]
   if (last.kind === 'element') {
@@ -280,6 +325,10 @@ export function formatCoverageItem(item, t) {
     const names = item.names.map((n) => `<${n}>`);
     return t('records.ruleTest.covered.absentInContext', { count: names.length, schema: item.schema, name: names[0], names: names.slice(0, -1).join(', '), last: names[names.length - 1] });
   }
+  if (item.kind === 'attributesAbsent') {
+    const attrs = item.attributes.map((a) => `@${a}`);
+    return t('records.ruleTest.covered.attributesAbsent', { count: attrs.length, element: item.element, attribute: attrs[0], attributes: attrs.slice(0, -1).join(', '), last: attrs[attrs.length - 1] });
+  }
   if (item.kind === 'structure') {
     return t('records.ruleTest.covered.structure', { element: item.element, parent: item.parent, schema: item.schema || '' });
   }
@@ -290,6 +339,7 @@ export function formatCoverageItem(item, t) {
 // meant to be rejected is asked for).
 export function coverageItemEnglish(item) {
   if (item.kind === 'absentInContext') return `the ${item.schema} schema has no ${item.names.map((n) => `<${n}>`).join(' or ')}`;
+  if (item.kind === 'attributesAbsent') return `<${item.element}> never has ${item.attributes.map((a) => `@${a}`).join(' or ')}`;
   if (item.kind === 'onlyInside') return `<${item.element}> can only go inside <${item.other}>`;
   if (item.kind === 'onlyDirectlyInside') return `<${item.element}> can only go directly inside <${item.other}>`;
   if (item.kind === 'requiredChild') return `<${item.other}> is required in <${item.element}>`;

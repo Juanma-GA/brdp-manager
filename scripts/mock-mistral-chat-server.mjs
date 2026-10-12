@@ -826,6 +826,46 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Reason for update not referenced", expected: "reject", schema, metadata: metadata.replace(' reasonForUpdateRefIds="rfu-0001"', ""), content: content(false) },
     ]);
   }
+  // Default S1000D 4.2 BREX pass, Part 2.1 (BRDP-EXT-00046): a reference
+  // of type irtt04 to a supply. Like the real run, the first answer's accept
+  // example points to an id no <supplyDescr> has; the correction round that
+  // names it ("points to SE123 … no <supplyDescr>") points to the supply.
+  if (/attribute::internalRefId = \/\/supplyDescr\/@id/.test(rule)) {
+    const fixed = correcting && /points to SE123/.test(lastUser);
+    const procedure = (refId) => `<preliminaryRqmts><reqCondGroup><noConds/></reqCondGroup><reqSupportEquips><noSupportEquips/></reqSupportEquips><reqSupplies><supplyDescrGroup><supplyDescr id="SUP-0001"><name>Sealant</name><identNumber><manufacturerCode>12345</manufacturerCode><partAndSerialNumber><partNumber>PN-0001</partNumber></partAndSerialNumber></identNumber><reqQuantity>1</reqQuantity></supplyDescr></supplyDescrGroup></reqSupplies><reqSpares><noSpares/></reqSpares><reqSafety><noSafety/></reqSafety></preliminaryRqmts><mainProcedure><proceduralStep><para>Apply the sealant <internalRef internalRefId="${refId}" internalRefTargetType="irtt04"/>.</para></proceduralStep></mainProcedure><closeRqmts><reqCondGroup><noConds/></reqCondGroup></closeRqmts>`;
+    return answer([
+      { label: "Reference to the supply of the procedure", expected: "accept", schema: ruleSchema || "proced", content: procedure(fixed ? "SUP-0001" : "SE123") },
+      { label: "Reference to a supply that does not exist", expected: "reject", schema: ruleSchema || "proced", content: procedure("SE123") },
+    ]);
+  }
+  // Part 2.2 (BRDP-EXT-00152): the information code of a BREX data module,
+  // in its own identification section (the brex schema, chosen by the
+  // rule's predicate /dmodule[content/brex]).
+  if (/\/dmodule\[content\/brex\]/.test(rule)) {
+    const lines = systemPrompt.split("\n");
+    const start = lines.findIndex((l) => l.startsWith("    <identAndStatusSection>"));
+    const section = [];
+    for (let i = start; start !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) section.push(lines[i].slice(4));
+    const base = section.join("\n");
+    const own = (code) =>
+      base.replace(/(<dmIdent>\s*<dmCode\b[^>]*>)/, (tag) => tag.replace(/infoCode="[^"]*"/, `infoCode="${code}"`).replace(/itemLocationCode="[^"]*"/, 'itemLocationCode="D"'));
+    return answer([
+      { label: "BREX with information code 022", expected: "accept", schema: ruleSchema || "brex", metadata: own("022"), content: "The rules of the project." },
+      { label: "BREX with information code 040", expected: "reject", schema: ruleSchema || "brex", metadata: own("040"), content: "The rules of the project." },
+    ]);
+  }
+  // Part 2.3 (BRDP-EXT-00127): with the exact way, the <pmRef> goes in the
+  // front matter list; without it, nowhere valid (a bare <pmRef> in
+  // <frontMatter>).
+  if (/descendant-or-self::pmRef\[attribute::id/.test(rule)) {
+    const told = /write it by exactly this way: content\/frontMatter\/frontMatterList\/frontMatterSubList\/frontMatterPmEntry\/pmRef/.test(systemPrompt);
+    const pmRef = (attr) => `<pmRef${attr}><pmRefIdent><pmCode modelIdentCode="EXAMPLE" pmIssuer="12345" pmNumber="00001" pmVolume="00"/></pmRefIdent></pmRef>`;
+    const fm = (attr) => (told ? `<frontMatter><frontMatterList frontMatterType="fm01"><frontMatterSubList><frontMatterPmEntry>${pmRef(attr)}</frontMatterPmEntry></frontMatterSubList></frontMatterList></frontMatter>` : `<frontMatter>${pmRef(attr)}</frontMatter>`);
+    return answer([
+      { label: "Reference to a publication module without the attributes", expected: "accept", schema: ruleSchema || "frontmatter", content: fm("") },
+      { label: "Reference to a publication module with @id", expected: "reject", schema: ruleSchema || "frontmatter", content: fm(' id="pm-0001"') },
+    ]);
+  }
   // GMC (pasada «Official Default GMC ATA - 1000BR 4.2 - 015»), Part 1.
   // EXT-00022: like the real run, without the VALUES block the values are
   // written as the objectValue's text ("One-Way"); with it, as

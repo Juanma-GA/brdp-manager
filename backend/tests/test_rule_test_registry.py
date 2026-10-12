@@ -154,6 +154,26 @@ async def test_register_schema_covered_is_its_own_result(client, editor_viewer_a
     assert bad.status_code == 422
 
 
+async def test_register_informative_is_its_own_result(client, editor_viewer_and_project):
+    """Default BREX pass: an informative rule (flag 2 without values) is
+    recorded as its own result -- never failed, never passed -- with its
+    History entry and its own category."""
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    reason = {"code": "test_informative", "params": {"mustNot": True}}
+    res = await client.post(url + "/test", json={"result": "informative", "reason": reason, "rule_hash": _hash(RULE)}, headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["last_test_result"] == "informative"
+    assert body["last_test_reason"] == reason
+    assert body["test_category"] == "informative"
+    assert body["last_passed_test"] is None
+    history = (await client.get(f"/api/projects/{project.id}/brdps/{brdp['id']}/history", headers=headers)).json()
+    assert any(h["field_name"] == "rule_test" and "informative" in (h["new_value"] or "") for h in history)
+    bad = await client.post(url + "/test", json={"result": "informative", "reason": None, "rule_hash": _hash(RULE)}, headers=headers)
+    assert bad.status_code == 422
+
+
 async def test_multi_part_reason_is_stored_as_given(client, editor_viewer_and_project):
     project, headers, _ = editor_viewer_and_project
     _, url = await _brdp_with_rule(client, project, headers)

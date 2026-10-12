@@ -287,6 +287,16 @@
 // never in <para>) and EXT-00023 (the content goes in <levelledPara>, with
 // the way to write <footnote> inside <table>). Every other prompt is
 // identical.
+//
+// Test de reglas: pasada S1000D 4.2 por defecto: the "only A, B and C"
+// bullet of ruleProposalCheck gains two sentences (forbidding every element
+// not in the list implements "only these"; an incomplete forbidden list is
+// "partly", never "no"); changed on purpose: the 5 existing
+// ruleProposalCheck cases. New cases with the default S1000D 4.2 BREX rules:
+// ruleProposalCheck/brex-4-2-default-closed-list-tool-cir (EXT-00014) and
+// ruleTestExamples/brex-4-2-default-reference-supplydescr (EXT-00046),
+// -brex-schema-by-predicate (EXT-00152), -frontmatter-pmref-way (EXT-00127).
+// Every other prompt is identical.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
