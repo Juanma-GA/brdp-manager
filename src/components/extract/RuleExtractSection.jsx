@@ -129,6 +129,18 @@ function warningText(t, w) {
       return t('config.ruleExtract.warnings.rule_in_several_brdps', { identifiers: (p.identifiers || []).join(', ') });
     case 'brdp_already_matched':
       return t('config.ruleExtract.warnings.brdp_already_matched', { identifier: p.identifier });
+    case 'content_match_identified':
+      return t('config.ruleExtract.warnings.content_match_identified', { identifier: p.identifier, origin: p.origin });
+    case 'rules_split_in_project':
+      return t('config.ruleExtract.warnings.rules_split_in_project', { count: p.count, identifiers: (p.identifiers || []).join(', ') });
+    case 'rules_partly_in_project':
+      return t('config.ruleExtract.warnings.rules_partly_in_project', {
+        count: p.count,
+        total: p.total,
+        parts: (p.parts || []).map((x) => t('config.ruleExtract.warnings.rulePartIn', { rule: x.rule, identifier: x.identifier })).join(', '),
+      });
+    case 'rule_resembles_brdp':
+      return t('config.ruleExtract.warnings.rule_resembles_brdp', { identifier: p.identifier, similarity: p.similarity });
     case 'external_entities':
       return t('config.ruleExtract.warnings.external_entities', { names: (p.names || []).join(', ') || p.dtd });
     case 'query_binding':
@@ -804,6 +816,9 @@ export default function RuleExtractSection({ projectId, standard, ruleFormat, ca
     const matched = new Set(
       (candidates || []).filter((c) => (c.classification === 'same' || c.classification === 'changed') && c.identifier).map((c) => c.identifier)
     );
+    // A row whose several rules are each the whole rule of a project BRDP
+    // covers those BRDPs, whatever its classification.
+    for (const c of candidates || []) for (const id of c.split_brdps || []) matched.add(id);
     return projectRules.brdps.filter((b) => !matched.has(b.identifier));
   }, [projectRules, candidates, reviewJobId]);
   const showUnmatched = !!reviewJobId && showUnmatchedFor === reviewJobId;

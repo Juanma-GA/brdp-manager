@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from app.core.security import create_access_token, hash_password
 from app.db.base import async_session_factory
-from app.models import BRDP, BRDPHistory, Project, RuleApproval, User, UserProjectRole
+from app.models import BRDP, BRDPCatalog, BRDPHistory, Project, RuleApproval, User, UserProjectRole
 from app.services import rule_formats
 from app.services.rule_extract import build_candidates, read_rules_file
 from app.services.rule_extract_jobs import (
@@ -34,6 +34,8 @@ from app.services.rule_extract_jobs import (
 FIXTURES = Path(__file__).parent / "fixtures"
 ATA_010 = FIXTURES / "brex" / "ATA-CMP-like-010-reconstructed.xml"
 ATA_009 = FIXTURES / "brex" / "ATA-CMP-like-009-project-rules.json"
+GMC_018 = FIXTURES / "brex" / "GMC-like-018-reconstructed.xml"
+GMC_PROJECT = FIXTURES / "brex" / "GMC-like-project-rules.json"
 LUFTHANSA = FIXTURES / "brex" / "DMC-LHTSTD-A-00-00-00-000A-022A-D_001-00_SX-US.xml"
 CA = FIXTURES / "brex" / "DMC-CAAA00000000AAA022AD-001-00-SX-ZZ.xml"
 NAV2 = FIXTURES / "schematron" / "BRDP-D1_schematron-xpath2.sch"
@@ -59,9 +61,16 @@ def _stored(path="//randomList", use="Random lists are not used.", flag="0", ext
     return f'<structureObjectRule><objectPath allowedObjectFlag="{flag}">{path}</objectPath><objectUse>{use}</objectUse>{extra}</structureObjectRule>'
 
 
-def _match(cands, pool, fmt="BREX-4.2"):
-    out = match_by_content(cands, pool, fmt)
-    return {k: (v["how"], v["brdp"].identifier) if "brdp" in v else ("warning", v["warning"]["code"], v["warning"]["params"]) for k, v in out.items()}
+def _match(cands, pool, fmt="BREX-4.2", identified=frozenset()):
+    out = match_by_content(cands, pool, fmt, identified)
+    return {
+        k: (v["how"], v["brdp"].identifier)
+        if "brdp" in v
+        else ("split", [b.identifier for b in v["split"]])
+        if "split" in v
+        else ("warning", v["warning"]["code"], v["warning"]["params"])
+        for k, v in out.items()
+    }
 
 
 # ── Normalization and matching (no database) ──────────────────────────────
@@ -250,6 +259,95 @@ def test_schematron_pattern_without_ids_and_changed_test():
     assert _match([_cand("c1", changed)], pool, "SCH-DITA") == {"c1": ("content", "BRDP-EXT-00004")}
 
 
+# ── Identified candidates (catalog, other edition, other specification,
+#    default rule, own prefix) whose identifier the project does not have ──
+
+
+def _rules(*rules):
+    return "\n".join(rules)
+
+
+_FIVE = [("//preferredSparePart", "Preferred spare parts are not used."), ("//alteredFromPart", "Altered parts are not used."),
+         ("//sourceMaintRecoverability", "Recoverability is not used."), ("//modelVersion", "Model versions are not used."),
+         ("//effectivity", "Effectivity is not used.")]
+
+
+def test_identified_equal_to_one_brdp_is_exact():
+    pool = [(_b("BRDP-EXT-00086"), _stored(use="Random lists are not used."))]
+    cand = _cand("gen", _sor(262, use="BRDP-GEN-00077: Random lists are not used."))
+    assert _match([cand], pool, identified={"gen"}) == {"gen": ("exact", "BRDP-EXT-00086")}
+
+
+def test_identified_that_only_resembles_is_a_warning_and_takes_nothing():
+    pool = [(_b("BRDP-EXT-00043"), _stored(path="//description//levelledPara/levelledParaAlts", use="Alternatives of levelled paragraphs are not used."))]
+    gen = _cand("gen", _sor(1, path="//levelledParaAlts", use="BRDP-GEN-00077: Alternatives of levelled paragraphs are not used."))
+    out = _match([gen], pool, identified={"gen"})
+    assert out["gen"][:2] == ("warning", "rule_resembles_brdp")
+    assert out["gen"][2]["identifier"] == "BRDP-EXT-00043" and 0.5 <= out["gen"][2]["similarity"] < 1
+    # The same rule as a would-be new EXT is still matched (by content):
+    # the identified one never takes the BRDP.
+    ext = _cand("ext", _sor(2, path="//levelledParaAlts", use="Alternatives of levelled paragraphs are not used."))
+    both = _match([gen, ext], pool, identified={"gen"})
+    assert both["ext"] == ("content", "BRDP-EXT-00043") and "gen" not in both
+    # Only a single one above CONTENT_SIMILARITY counts.
+    similar = _cand("sim", _sor(3, path="//levelledParaAlts", use="BRDP-GEN-00078: Alternatives of levelled paragraphs are not used. Revised."))
+    pool2 = [(_b("BRDP-EXT-00050"), _stored(path="//levelledParaAltsX", use="Alternatives of levelled paragraphs are not used. Revise."))]
+    assert _match([similar], pool2, identified={"sim"})["sim"][1] == "rule_resembles_brdp"
+
+
+def test_identified_with_several_rules_spread_over_several_brdps():
+    pool = [(_b(f"BRDP-EXT-{n:05d}"), _stored(path=p, use=u)) for n, (p, u) in zip((84, 85, 90, 91, 92), _FIVE)]
+    cand = _cand("s1", _rules(*(_sor(260 + i, path=p, use=f"BRDP-S1-00007: {u}") for i, (p, u) in enumerate(_FIVE))))
+    assert _match([cand], pool, identified={"s1"}) == {
+        "s1": ("split", ["BRDP-EXT-00084", "BRDP-EXT-00085", "BRDP-EXT-00090", "BRDP-EXT-00091", "BRDP-EXT-00092"])
+    }
+    # An exact match of a whole candidate comes first: a candidate whose
+    # only rule is one of the five takes that BRDP, and the five-rule one is
+    # left with the four others (a warning, nothing taken).
+    other = _cand("ext", _sor(300, path=_FIVE[0][0], use=_FIVE[0][1]))
+    out = _match([cand, other], pool, identified={"s1"})
+    assert out["ext"] == ("exact", "BRDP-EXT-00084")
+    assert out["s1"][:2] == ("warning", "rules_partly_in_project") and out["s1"][2]["count"] == 4
+    # Never for a would-be new EXT.
+    assert _match([cand], pool) == {}
+
+
+def test_identified_with_only_some_rules_in_the_project():
+    pool = [(_b(f"BRDP-EXT-{n:05d}"), _stored(path=p, use=u)) for n, (p, u) in zip((84, 85, 90), _FIVE[:3])]
+    cand = _cand("s1", _rules(*(_sor(260 + i, path=p, use=f"BRDP-S1-00007: {u}") for i, (p, u) in enumerate(_FIVE))))
+    out = _match([cand], pool, identified={"s1"})
+    assert out["s1"] == (
+        "warning",
+        "rules_partly_in_project",
+        {
+            "count": 3,
+            "total": 5,
+            "parts": [
+                {"rule": "SOR-260", "identifier": "BRDP-EXT-00084"},
+                {"rule": "SOR-261", "identifier": "BRDP-EXT-00085"},
+                {"rule": "SOR-262", "identifier": "BRDP-EXT-00090"},
+            ],
+        },
+    )
+    # Not taken: a new EXT with one of those rules still matches it.
+    ext = _cand("ext", _sor(300, path=_FIVE[0][0], use=_FIVE[0][1]))
+    assert _match([cand, ext], pool, identified={"s1"})["ext"] == ("exact", "BRDP-EXT-00084")
+
+
+def test_identified_rule_in_two_brdps_and_brdp_already_taken():
+    pool = [(_b("BRDP-EXT-00001"), _stored()), (_b("BRDP-EXT-00002"), _stored())]
+    gen = _cand("gen", _sor(1, use="BRDP-GEN-00001: Random lists are not used."))
+    assert _match([gen], pool, identified={"gen"}) == {
+        "gen": ("warning", "rule_in_several_brdps", {"identifiers": ["BRDP-EXT-00001", "BRDP-EXT-00002"]})
+    }
+    pool = [(_b("BRDP-EXT-00001"), _stored())]
+    first = _cand("ext", _sor(1))
+    assert _match([first, gen], pool, identified={"gen"}) == {
+        "ext": ("exact", "BRDP-EXT-00001"),
+        "gen": ("warning", "brdp_already_matched", {"identifier": "BRDP-EXT-00001"}),
+    }
+
+
 # ── Through the endpoints ─────────────────────────────────────────────────
 
 
@@ -429,6 +527,164 @@ async def test_project_brdps_not_in_the_file(client, ata_project):
     text_url = f"/api/projects/{project.id}/ai-extract/jobs/{res.json()['job_id']}"
     out = (await client.get(f"{text_url}/unmatched-project-brdps", headers=editor)).json()
     assert out["brdps"] == [] and out["project_brdps"] == []
+
+
+# ── GMC ATA issue 018: identified candidates matched by content ───────────
+
+
+@pytest.fixture
+async def gmc_project(synthetic_standard):
+    """The GMC project made by Excel: 159 EXT BRDPs, no extracted_from
+    history; S1-00226 and S1-00007 in the standard's catalog."""
+    rows = json.loads(GMC_PROJECT.read_text(encoding="utf-8"))
+    async with async_session_factory() as session:
+        project = Project(name=f"GMC ATA {uuid.uuid4()}", standard=synthetic_standard)
+        editor = User(email=f"cm-gmc-{uuid.uuid4()}@example.com", password_hash=hash_password("x"), display_name="Ed", global_role="user")
+        session.add_all([project, editor])
+        session.add_all(
+            [
+                BRDPCatalog(standard=synthetic_standard, identifier="BRDP-S1-00226", title="Catalog 226", definition="Def 226"),
+                BRDPCatalog(standard=synthetic_standard, identifier="BRDP-S1-00007", title="Catalog 7", definition="Def 7"),
+            ]
+        )
+        await session.flush()
+        session.add(UserProjectRole(user_id=editor.id, project_id=project.id, role="editor"))
+        for r in rows:
+            b = BRDP(project_id=project.id, identifier=r["identifier"], title=r["title"], definition="D", proposal="P", validation="Validated")
+            session.add(b)
+            await session.flush()
+            session.add(RuleApproval(brdp_id=b.id, format="BREX-4.2", rule_xml=r["rule_xml"], status="approved", source="manual"))
+        await session.commit()
+        await session.refresh(project)
+        await session.refresh(editor)
+    yield project, {"Authorization": f"Bearer {create_access_token(editor.id)}"}, rows
+    async with async_session_factory() as session:
+        await session.delete(await session.get(Project, project.id))
+        await session.delete(await session.get(User, editor.id))
+        for c in (await session.execute(select(BRDPCatalog).where(BRDPCatalog.standard == synthetic_standard))).scalars():
+            await session.delete(c)
+        await session.commit()
+
+
+async def test_gmc_issue_018_identified_candidates_matched_by_content(client, gmc_project):
+    project, editor, rows = gmc_project
+    res = await client.post(
+        f"/api/projects/{project.id}/ai-extract/parse", headers=editor,
+        files={"file": ("DMC-ATABREX-F-00-00-0000-00A-022A-D_018-00_EN-US.XML", GMC_018.read_bytes(), "application/xml")},
+    )
+    assert res.status_code == 202, res.text
+    url = f"/api/projects/{project.id}/ai-extract/jobs/{res.json()['job_id']}"
+    assert (await client.get(url, headers=editor)).json()["status"] == "completed"
+    cands = (await client.get(f"{url}/candidates", headers=editor)).json()["candidates"]
+    by_origin = {c["origin_identifier"]: c for c in cands if c["origin_identifier"]}
+    assert Counter(c["classification"] for c in cands) == {"same": 147, "catalog": 1, "changed": 7, "new_ext": 2}
+
+    # S1-00226 = BRDP-EXT-00083: "Ya existe (igual)", unchecked, the file's
+    # identifier in the warning, "De catálogo" still an option.
+    s226 = by_origin["BRDP-S1-00226"]
+    assert (s226["classification"], s226["identifier"], s226["selected"]) == ("same", "BRDP-EXT-00083", False)
+    assert s226["options"] == ["same", "catalog", "new_ext"]
+    assert {"code": "content_match_identified", "params": {"identifier": "BRDP-EXT-00083", "origin": "BRDP-S1-00226"}}.items() <= next(
+        w for w in s226["warnings"] if w["code"] == "content_match_identified"
+    ).items()
+    # The five GEN: equal to their EXT, the comrep one too.
+    gen = {o: by_origin[o] for o in by_origin if o.startswith("BRDP-GEN-")}
+    assert {o: (c["classification"], c["identifier"], c["selected"]) for o, c in gen.items()} == {
+        "BRDP-GEN-00077": ("same", "BRDP-EXT-00086", False),
+        "BRDP-GEN-00078": ("same", "BRDP-EXT-00087", False),
+        "BRDP-GEN-00079": ("same", "BRDP-EXT-00088", False),
+        "BRDP-GEN-00080": ("same", "BRDP-EXT-00089", False),
+        "BRDP-GEN-00081": ("same", "BRDP-EXT-00105", False),
+    }
+    assert all(c["options"] == ["same", "own_prefix", "new_ext"] for c in gen.values())
+    # S1-00007: five rules in five BRDPs: not reclassified, unchecked, the
+    # warning naming them.
+    s7 = by_origin["BRDP-S1-00007"]
+    assert (s7["classification"], s7["identifier"], s7["selected"], s7["rule_count"]) == ("catalog", "BRDP-S1-00007", False, 5)
+    split = next(w for w in s7["warnings"] if w["code"] == "rules_split_in_project")
+    assert split["params"] == {"count": 5, "identifiers": ["BRDP-EXT-00084", "BRDP-EXT-00085", "BRDP-EXT-00090", "BRDP-EXT-00091", "BRDP-EXT-00092"]}
+    # Every BRDP of the project is matched.
+    res = await client.get(f"{url}/unmatched-project-brdps", headers=editor)
+    assert res.json()["brdps"] == [] and len(res.json()["project_brdps"]) == 159
+
+    # There and back: the file's classification and the match.
+    patch = f"{url}/candidates"
+    for key, target, identifier, back in (
+        (s226["key"], "catalog", "BRDP-S1-00226", "BRDP-EXT-00083"),
+        (gen["BRDP-GEN-00077"]["key"], "own_prefix", "BRDP-GEN-00077", "BRDP-EXT-00086"),
+    ):
+        [moved] = (await client.patch(patch, headers=editor, json={"items": [{"key": key, "classification": target}]})).json()["candidates"]
+        assert (moved["classification"], moved["identifier"]) == (target, identifier)
+        if target == "catalog":
+            assert (moved["title"], moved["text_sources"]["title"]) == ("Catalog 226", "catalog")
+        unmatched = (await client.get(f"{url}/unmatched-project-brdps", headers=editor)).json()["brdps"]
+        assert [b["identifier"] for b in unmatched] == [back]
+        [again] = (await client.patch(patch, headers=editor, json={"items": [{"key": key, "classification": "same"}]})).json()["candidates"]
+        assert (again["classification"], again["identifier"]) == ("same", back)
+        assert again["text_sources"]["title"] == "project"
+    # Moving S1-00007 to a new EXT keeps its five BRDPs covered.
+    await client.patch(patch, headers=editor, json={"items": [{"key": s7["key"], "classification": "new_ext"}]})
+    assert (await client.get(f"{url}/unmatched-project-brdps", headers=editor)).json()["brdps"] == []
+    await client.patch(patch, headers=editor, json={"items": [{"key": s7["key"], "classification": "catalog"}]})
+
+    # Importing what is checked by default creates none of these seven rows
+    # and changes no rule of the project.
+    before = await _stored_rules(project.id)
+    checked = [c for c in (await client.get(patch, headers=editor)).json()["candidates"] if c["selected"]]
+    assert sorted(c["identifier"] for c in checked) == ["BRDP-EXT-00160", "BRDP-EXT-00161"]
+    items = [{"key": c["key"], "draft_status": "drafted", **{f: f"AI {f}" for f in c["ai_fields"]}} for c in checked]
+    assert (await client.patch(patch, headers=editor, json={"items": items})).status_code == 200
+    res = await client.post(f"{url}/apply", headers=editor, json={"keys": [c["key"] for c in checked]})
+    assert res.status_code == 200, res.text
+    assert (res.json()["created"], res.json()["updated"]) == (2, 0)
+    after = await _stored_rules(project.id)
+    assert {k: v for k, v in after.items() if k in before} == before
+    assert not ({"BRDP-S1-00226", "BRDP-S1-00007"} | set(gen)) & set(after)
+
+
+async def test_identified_candidates_against_the_project(client, synthetic_standard):
+    """Catalog identifier already in the project (by identifier, as before);
+    catalog identifier without an equal rule (as before); GEN that only
+    resembles a BRDP (Keep GEN, checked, the warning)."""
+    async with async_session_factory() as session:
+        project = Project(name=f"Identified {uuid.uuid4()}", standard=synthetic_standard)
+        session.add(project)
+        session.add_all(
+            [
+                BRDPCatalog(standard=synthetic_standard, identifier="BRDP-S1-00010", title="Cat 10", definition="D10"),
+                BRDPCatalog(standard=synthetic_standard, identifier="BRDP-S1-00011", title="Cat 11", definition="D11"),
+            ]
+        )
+        await session.flush()
+        for identifier, xml in (
+            ("BRDP-S1-00010", _stored(path="//caption", use="Captions are not used.")),
+            ("BRDP-EXT-00001", _stored(path="//description//levelledPara/levelledParaAlts", use="Alternatives of levelled paragraphs are not used.")),
+        ):
+            b = BRDP(project_id=project.id, identifier=identifier, title="t", definition="d", proposal="p", validation="Validated")
+            session.add(b)
+            await session.flush()
+            session.add(RuleApproval(brdp_id=b.id, format="BREX-4.2", rule_xml=xml, status="approved", source="manual"))
+        await session.commit()
+        await session.refresh(project)
+    cands = [
+        {"key": "c1", "origin_identifier": "BRDP-S1-00010", "rule_xml": _stored(path="//caption", use="Captions are not used."), "warnings": []},
+        {"key": "c2", "origin_identifier": "BRDP-S1-00011", "rule_xml": _sor(2, path="//footnote", use="BRDP-S1-00011: Footnotes are not used."), "warnings": []},
+        {"key": "c3", "origin_identifier": "BRDP-GEN-00001", "rule_xml": _sor(3, path="//levelledParaAlts", use="BRDP-GEN-00001: Alternatives of levelled paragraphs are not used."), "warnings": []},
+    ]
+    try:
+        async with async_session_factory() as db:
+            await classify_candidates(project, cands, db)
+        got = {c["key"]: (c["classification"], c["identifier"], c["selected"], [w["code"] for w in c["warnings"]]) for c in cands}
+        assert got["c1"] == ("same", "BRDP-S1-00010", False, [])
+        assert got["c2"] == ("catalog", "BRDP-S1-00011", True, [])
+        assert got["c3"] == ("own_prefix", "BRDP-GEN-00001", True, ["rule_resembles_brdp"])
+        assert cands[2]["warnings"][0]["params"]["identifier"] == "BRDP-EXT-00001"
+    finally:
+        async with async_session_factory() as db:
+            await db.delete(await db.get(Project, project.id))
+            for c in (await db.execute(select(BRDPCatalog).where(BRDPCatalog.standard == synthetic_standard))).scalars():
+                await db.delete(c)
+            await db.commit()
 
 
 # ── Files with identifiers: as before ─────────────────────────────────────
