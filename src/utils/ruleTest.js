@@ -25,6 +25,7 @@ import {
   checkCalsTableSpans,
   checkExampleStructure,
   extractDocumentNames,
+  extractRuleNames,
   fixCalsRowSpans,
   formatStructureProblem,
   removeSpannedCalsEntries,
@@ -282,7 +283,9 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
   const reported = new Set(names.notFound.map((n) => n.replace(/^[<@]|>$/g, '')));
   const structureProblems = [
     ...(structure
-      ? checkExampleStructure(doc, structure).filter((p) => !(p.kind === 'unknownElement' && reported.has(p.element)))
+      ? checkExampleStructure(doc, structure, { skipPaths: options.skeletonNodePaths || [] }).filter(
+          (p) => !(p.kind === 'unknownElement' && reported.has(p.element))
+        )
       : []),
     ...checkCalsColspecs(doc),
     ...checkCalsTableSpans(doc),
@@ -332,7 +335,7 @@ function elementCards(doc, names, problems, structure) {
     else if (p.kind === 'tooMany') {
       want(p.parent);
       want(p.element);
-    } else if (p.kind === 'unknownAttribute') want(p.element);
+    } else if (p.kind === 'unknownAttribute' || p.kind === 'missingRequiredAttribute') want(p.element);
     else if (p.kind === 'unknownElement') {
       for (const el of elementsNamed(doc, (e) => e.nodeName === p.element)) want(el.parentNode?.nodeName);
     }
@@ -354,6 +357,7 @@ function elementCards(doc, names, problems, structure) {
     children: [...structure.elements[element].children],
     attributes: [...structure.elements[element].attributes],
     max: { ...(structure.models?.[element]?.max || {}) },
+    required: (structure.models?.[element]?.attributes || []).map(([name]) => name),
   }));
 }
 
@@ -378,7 +382,10 @@ function formatElementCard(card, schema) {
     .sort((a, b) => a[0] - b[0])
     .map(([max, names]) => `; at most ${max} of each: ${cardNameList(names.map((n) => `<${n}>`))}`)
     .join('');
-  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}${limits}; attributes: ${cardNameList(card.attributes, '@')}`;
+  // Test de reglas: atributos obligatorios -- the ones it cannot go
+  // without.
+  const required = card.required?.length ? `; required attributes: ${cardNameList(card.required, '@')}` : '';
+  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}${limits}; attributes: ${cardNameList(card.attributes, '@')}${required}`;
 }
 
 // C3b: an example often fails on the markup of an element the rule does
@@ -615,13 +622,14 @@ function withRootSchema(reason, schema) {
   return reason;
 }
 
-export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument, schemaLocation = null, graph = null } = {}) {
+export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument, schemaLocation = null, graph = null, proposal = '' } = {}) {
   const unknownSchema = example.unmaterialized ? example.schema || '(none)' : null;
   const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, {
     unknownSchema,
     missingMetadata: example.missingMetadata || null,
     missingContent: example.missingContent === true,
     rootAttributeProblems: example.rootAttributeProblems || [],
+    skeletonNodePaths: example.skeletonNodePaths || [],
   });
   // Dosier, Part 2: every file of the example's dossier is validated with
   // the structure of its own type; a problem in any of them (or in the
@@ -648,7 +656,8 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     // the rule that the schema covers by that very relation.
     const schemaCovered =
       example.expected === 'reject'
-        ? schemaCoveredExample(ruleXml, format, example, validation, { parseXml, schemaLocation, graph })
+        ? requiredAttributeCoveredExample(ruleXml, example, validation, proposal) ||
+          schemaCoveredExample(ruleXml, format, example, validation, { parseXml, schemaLocation, graph })
         : null;
     return schemaCovered ? { validation, result: null, matches: null, schemaCovered } : { validation, result: null, matches: null };
   }
@@ -929,6 +938,36 @@ function breaksCoveredRelation(o, item) {
   if (item.kind === 'onlyDirectlyInside') return o.element === item.element && o.parent !== item.other;
   if (item.kind === 'childrenListed') return o.parent === item.element && !(item.children || []).includes(o.element);
   return false;
+}
+
+// Test de reglas: atributos obligatorios. An example meant to be rejected
+// whose only problem is a required attribute it leaves out
+// (missingRequiredAttribute), and every such attribute is one the rule or
+// the Proposal names: the decision it breaks ("@verificationType shall be
+// stated") cannot be broken in a valid document -- the schema already
+// requires it (GMC 4.2 BRDP-EXT-00160: <firstVerification/> without
+// @verificationType). Never corrected and never counted, as the other
+// schemaCovered examples; with no example meant to be rejected left to
+// run, the verdict is "already covered by the schema" with
+// "@verificationType is required in <firstVerification>". An attribute
+// neither names is only an example written wrong: correction round.
+// → { items: [{ kind: 'requiredAttribute', element, other }] } | null
+function requiredAttributeCoveredExample(ruleXml, example, validation, proposal) {
+  if (!validation.wellFormed || validation.unknownSchema || validation.missingMetadata || validation.missingContent) return null;
+  if (validation.names?.available && (validation.names.notFound.length > 0 || validation.names.wrongType.length > 0)) return null;
+  if ((validation.dossierProblems || []).length > 0) return null;
+  const problems = [...(validation.structure || []), ...(validation.files || []).flatMap((f) => f.validation.structure || [])];
+  if (!problems.length || !problems.every((p) => p.kind === 'missingRequiredAttribute')) return null;
+  if ((validation.files || []).some((f) => !f.validation.wellFormed)) return null;
+  const named = new Set(extractRuleNames(ruleXml).attributes || []);
+  const text = String(proposal || '');
+  const inProposal = (name) => new RegExp(`(^|[^\\w@.-])@?${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`).test(text);
+  if (!problems.every((p) => named.has(p.attribute) || inProposal(p.attribute))) return null;
+  const items = [];
+  for (const p of problems) {
+    if (!items.some((i) => i.element === p.element && i.other === p.attribute)) items.push({ kind: 'requiredAttribute', element: p.element, other: p.attribute });
+  }
+  return { items, nodePaths: [] };
 }
 
 // { items: [{ kind: 'structure', element, parent, schema }], nodePaths } when

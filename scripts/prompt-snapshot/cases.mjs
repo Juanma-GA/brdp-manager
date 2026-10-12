@@ -25,7 +25,7 @@ import { readFileSync } from 'node:fs';
 import { readTextFile } from '../lib/textFile.mjs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { placementPlaces } from '../../src/utils/ruleTestRun.js';
+import { placementPlaces, ruleRequiredAttributes } from '../../src/utils/ruleTestRun.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { extractRuleNames } from '../../src/validation/schemaValidation.js';
 import { dossierLookExpressions } from '../../src/utils/ruleTestDossier.js';
@@ -1245,4 +1245,25 @@ ruleTestExamplesCases.push(
 ruleProposalCheckCases.push({
   name: 'brex-4-2-gmc-values-with-text-interchangeability',
   args: [{ brdp: brdpGmc('BRDP-EXT-00022', 'Interchangeability codes', 'Interchangeability uses the ATA Spec 2000 codes 1 (one-way) and 2 (two-way).'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: ruleGmc22, ruleDescription: describeText(ruleGmc22, 'BREX-4.2') }],
+});
+
+// Test de reglas: atributos obligatorios -- GMC 4.2 BRDP-EXT-00160 (the
+// real rule; the Proposal is reconstructed): the Proposal asks for
+// @verificationType and the rule requires <firstVerification>, which the
+// schema cannot have without it. The required attributes come from the
+// real structures (models[x].attributes), never typed here.
+export const ruleGmc160 =
+  '<structureObjectRule id="BRDP-EXT-00160"><objectPath allowedObjectFlag="0">(not(//qualityAssurance/firstVerification)) and not(/ddn or /dml or /comment)</objectPath><objectUse>BRDP-EXT-00160 The first verification and its type shall be stated.</objectUse></structureObjectRule>';
+ruleProposalCheckCases.push({
+  name: 'brex-4-2-gmc-verificationtype-required-attribute',
+  args: [
+    {
+      brdp: brdpGmc('BRDP-EXT-00160', 'First verification type', 'The type of the first verification (@verificationType: tabtop, onobject or ttandoo) shall be stated in every data module.'),
+      standard: 'S1000D 4.2',
+      format: 'BREX-4.2',
+      ruleXml: ruleGmc160,
+      ruleDescription: describeText(ruleGmc160, 'BREX-4.2'),
+      requiredAttributes: ruleRequiredAttributes(ruleGmc160, { structures: [realStructures['S1000D 4.2|descript']] }),
+    },
+  ],
 });

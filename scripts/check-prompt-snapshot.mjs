@@ -474,6 +474,14 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // (or one rule per independent requirement, see format rule 1)". Only the 7
 // BREX suggestRule cases change; the SCH-DITA ones and every other group are
 // unchanged.
+//
+// Test de reglas: atributos obligatorios: the Proposal check gains a
+// generic "NOT a reason for no" line (the Proposal requires an attribute
+// the schema makes required on an element: requiring the element is
+// "yes"), and a REQUIRED ATTRIBUTES block when the rule's elements have
+// any (from the schema structure). Only the 4 ruleProposalCheck cases
+// change; new case ruleProposalCheck/brex-4-2-gmc-verificationtype-
+// required-attribute (GMC 4.2 BRDP-EXT-00160).
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

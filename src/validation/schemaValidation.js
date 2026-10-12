@@ -1291,8 +1291,14 @@ export function extractDocumentNames(doc) {
 //  | { kind: 'unknownAttribute', attribute, element } | { kind: 'wrongRoot', element, expected }]
 // against one schema's structure. Prefixed attributes other than xlink:* and
 // namespace declarations are not schema vocabulary and are left out.
-export function checkExampleStructure(doc, structure) {
+// options.skipPaths: node paths (ruleTestCommon.js's nodePath) of the
+// elements the application wrote itself -- the skeleton and a minimal
+// identification section (assembleExample's skeletonNodePaths). A required
+// attribute they lack is never reported (the application's own text is not
+// the example's problem); every other check is unchanged.
+export function checkExampleStructure(doc, structure, options = {}) {
   const elements = structure.elements;
+  const skipPaths = options.skipPaths instanceof Set ? options.skipPaths : new Set(options.skipPaths || []);
   const problems = [];
   const seen = new Set();
   const add = (problem) => {
@@ -1306,7 +1312,7 @@ export function checkExampleStructure(doc, structure) {
   if (structure.skeleton && root.nodeName !== structure.skeleton.root) {
     add({ kind: 'wrongRoot', element: root.nodeName, expected: structure.skeleton.root });
   }
-  const walk = (el, parentName) => {
+  const walk = (el, parentName, path) => {
     const name = el.nodeName;
     const known = Boolean(elements[name]);
     if (!known) add({ kind: 'unknownElement', element: name });
@@ -1320,6 +1326,18 @@ export function checkExampleStructure(doc, structure) {
         const local = a.name.replace(/^xlink:/, '');
         if (!elements[name].attributes.includes(local)) add({ kind: 'unknownAttribute', attribute: a.name, element: name });
       }
+      // Test de reglas: atributos obligatorios. An attribute the schema
+      // makes required on the element (use="required": models[name].
+      // attributes) and that the element written by the LLM lacks: the
+      // document is not valid (<firstVerification/> without
+      // @verificationType in 4.2). Never for the application's elements.
+      const required = structure.models?.[name]?.attributes || [];
+      if (required.length > 0 && !skipPaths.has(path)) {
+        const present = new Set(Array.from(el.attributes || []).map((a) => a.name.replace(/^xlink:/, '')));
+        for (const [attribute] of required) {
+          if (!present.has(String(attribute).replace(/^xlink:/, ''))) add({ kind: 'missingRequiredAttribute', element: name, attribute });
+        }
+      }
     }
     // Mejoras G, Part 1.2: more children of a kind than the element allows
     // (structure.models[name].max, a child left out is unbounded).
@@ -1332,9 +1350,15 @@ export function checkExampleStructure(doc, structure) {
         if (Number.isInteger(max) && count > max) add({ kind: 'tooMany', element: child, parent: name, max, count });
       }
     }
-    for (let n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) walk(n, name);
+    const index = new Map();
+    for (let n = el.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType !== 1) continue;
+      const i = (index.get(n.nodeName) || 0) + 1;
+      index.set(n.nodeName, i);
+      walk(n, name, `${path}/${n.nodeName}[${i}]`);
+    }
   };
-  walk(root, null);
+  walk(root, null, `/${root.nodeName}[1]`);
   return problems;
 }
 
@@ -1819,6 +1843,8 @@ export function formatStructureProblem(problem, schema) {
       return `<${problem.parent}> allows at most ${problem.max} <${problem.element}>; the example has ${problem.count}`;
     case 'unknownAttribute':
       return `@${problem.attribute} does not exist on <${problem.element}>`;
+    case 'missingRequiredAttribute':
+      return `<${problem.element}> requires @${problem.attribute} in the ${schema} schema`;
     case 'wrongRoot':
       return `the root element is <${problem.element}>, not <${problem.expected}>`;
     case 'reservedRootAttribute':
@@ -2080,6 +2106,7 @@ export const SCHEMA_ISSUE_KEYS = {
     notAllowed: 'records.ruleTest.structure.notAllowed',
     tooMany: 'records.ruleTest.structure.tooMany',
     unknownAttribute: 'records.ruleTest.structure.unknownAttribute',
+    missingRequiredAttribute: 'records.ruleTest.structure.missingRequiredAttribute',
     wrongRoot: 'records.ruleTest.structure.wrongRoot',
     reservedRootAttribute: 'records.ruleTest.structure.reservedRootAttribute',
     spannedEntry: 'records.ruleTest.structure.spannedEntry',

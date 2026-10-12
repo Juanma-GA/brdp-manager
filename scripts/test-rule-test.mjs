@@ -464,7 +464,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   check('T4 structure: <cmd> is not in a topic', problems('<topic><body><cmd>x</cmd></body></topic>').includes('<cmd> does not exist in the topic schema'), problems('<topic><body><cmd>x</cmd></body></topic>').join());
   check('T4 structure: <title> not inside <p>', problems('<topic><body><p><title>x</title></p></body></topic>').includes('<title> is not allowed inside <p>'));
   check('T4 structure: @frame not on <note>', problems('<topic><body><note frame="all">x</note></body></topic>').includes('@frame does not exist on <note>'));
-  check('T4 structure: xml:lang never flagged', problems('<topic xml:lang="en"><body/></topic>').length === 0);
+  check('T4 structure: xml:lang never flagged', problems('<topic id="t" xml:lang="en"><body/></topic>').length === 0);
 
   const setupNote = setupFor(DITA, NOTE, ['topic']);
   const examples = [
@@ -556,7 +556,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const shortdescPlacement = placeExample(topic, ruleTargets('<sch:pattern><sch:rule context="shortdesc"><sch:assert id="SD" test="1">x</sch:assert></sch:rule></sch:pattern>'));
   const inline = assembleExample({ standard: DITA, schema: 'topic', placement: shortdescPlacement, content: '<shortdesc>Short.</shortdesc>' });
   check('T4b assembly: title inline before the content at the insertion point', inline.xml === `<topic><title>${SKELETON_TITLE_TEXT}</title><shortdesc>Short.</shortdesc></topic>`, inline.xml);
-  check('T4b assembly: the assembled topic passes the structural check', checkExampleStructure(parseXml(assembled.xml), topic).length === 0);
+  check('T4b assembly: the assembled topic passes the structural check', checkExampleStructure(parseXml(assembled.xml), topic, { skipPaths: new Set(assembled.skeletonNodePaths) }).length === 0);
   const lines = xmlDisplayLines(assembled.xml, [], parseXml, assembled.skeletonNodePaths);
   const titleLine = lines.find((l) => l.segments.some((sg) => sg.text === SKELETON_TITLE_TEXT));
   check('T4b display: skeleton title text dimmed', titleLine && titleLine.segments.every((sg) => sg.skeleton), JSON.stringify(titleLine));
@@ -1516,7 +1516,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     check(`${id}: reachable, placed in ipd`, prep.unreachable === null && pl.schema === 'ipd', JSON.stringify([prep.unreachable, pl.schema]));
     const way = (pl.routes?.steps || []).map((st) => st.parent).join('/');
     check(`${id}: the way down goes to <${first}> through itemSeqNumber/partSegment/partRefGroup`, /itemSeqNumber\/partSegment\/partRefGroup$/.test(way) && pl.routes.steps.at(-1).children.includes(first), way);
-    const content = `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="P1"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${first}>__X__<partRef manufacturerCodeValue="12345" partNumberValue="P2"/></${first}></partRefGroup></partSegment><applicabilitySegment><usableOnCodeAssy>A</usableOnCodeAssy></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
+    const content = `<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="P1"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${first}>__X__<partRef manufacturerCodeValue="12345" partNumberValue="P2"/></${first}></partRefGroup></partSegment><applicabilitySegment><usableOnCodeAssy>A</usableOnCodeAssy></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
     const ex = [
       { label: 'no reference', expected: 'accept', content: content.replace('__X__', '') },
       { label: 'with reference', expected: 'reject', content: content.replace('__X__', '<catalogSeqNumberRef figureNumber="02" item="003"/>') },
@@ -1857,7 +1857,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   };
   const ok = (res) => res.runs.every((x) => x.validation.runnable) && res.runs.map((x) => x.result.status).join() === 'accepted,rejected' && res.verdict.kind === 'correct';
   const why = (res) => JSON.stringify(res.runs.map((x) => [x.validation.structure, x.result?.status]));
-  const media = (param) => `<para>The animation shows the pump.</para><multimedia><title>Pump</title><multimediaObject infoEntityIdent="ICN-EXAMPLE-00001-A-00001-01">${param}</multimediaObject></multimedia>`;
+  const media = (param) => `<para>The animation shows the pump.</para><multimedia><title>Pump</title><multimediaObject infoEntityIdent="ICN-EXAMPLE-00001-A-00001-01" multimediaType="3D">${param}</multimediaObject></multimedia>`;
   const r133run = runRow('BRDP-S1-00133', 'descript', media(''), media('<parameter id="par-0001" parameterName="speed" parameterValue="slow"/>'));
   check(`${S42} templates S1-00133: <parameter> rejected`, ok(r133run), why(r133run));
   const list = (title) => `See the list.<definitionList><title>${title}</title><definitionListItem><listItemTerm>M6</listItemTerm><listItemDefinition><para>10 N.m</para></listItemDefinition></definitionListItem></definitionList>`;
@@ -1866,7 +1866,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const rq = (attr) => `<preliminaryRqmts><reqSupportEquips><supportEquipDescrGroup><supportEquipDescr${attr}><name>Jack</name></supportEquipDescr></supportEquipDescrGroup></reqSupportEquips></preliminaryRqmts><mainProcedure><proceduralStep><para>Lift.</para></proceduralStep></mainProcedure>`;
   const r150run = runRow('BRDP-S1-00150', 'proced', rq(' id="seq-0001"'), rq(''));
   check(`${S42} templates S1-00150: <supportEquipDescr> without id rejected`, ok(r150run), why(r150run));
-  const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+  const csn = (inner) => `<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
   const r219run = runRow('BRDP-S1-00219', 'ipd', csn('<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>'), csn('<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"/>'));
   check(`${S42} templates S1-00219: <itemSeqNumber> without <partSegment> rejected in ipd`, ok(r219run), why(r219run));
 }
@@ -2971,7 +2971,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const IPD = 'http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd';
   // The real Lufthansa BRDP-S1-00219 (flag 1, limited to ipd).
   const S219 = `<contextRules rulesContext="${IPD}"><structureObjectRuleGroup><structureObjectRule id="BRDP-S1-00219"><objectPath allowedObjectFlag="1">//itemSeqNumber/partSegment</objectPath><objectUse>BRDP-S1-00219. partSegment shall be used.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
-  const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+  const csn = (inner) => `<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
   const segment = '<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>';
   const partRef = (extra = '') => `<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"${extra}/>`;
   const ex219 = [
@@ -3116,7 +3116,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const es = i18n.getFixedT('es');
   const IPD = 'http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd';
   const S219 = `<contextRules rulesContext="${IPD}"><structureObjectRuleGroup><structureObjectRule id="BRDP-S1-00219"><objectPath allowedObjectFlag="1">//itemSeqNumber/partSegment</objectPath><objectUse>x</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>`;
-  const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+  const csn = (inner) => `<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
   const seg = '<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>';
   // The fixed bad example (a <partSegment/> in the reject example).
   const bad = testRun(S219, [{ label: 'r', expected: 'reject', schema: 'ipd', content: csn(seg) }], setupFor('S1000D 4.2', S219, ['ipd']));
@@ -3271,8 +3271,8 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   const checkPrompt = buildRuleProposalCheckPrompt({ brdp: brdpOf('BRDP-EXT-00022', 'codes 1 and 2'), standard: S42, format: 'BREX-4.2', ruleXml: EXT22, ruleDescription: '- x' });
   check('GMC 1.1: the Proposal check gets the same legend', checkPrompt.includes(legend.trim()));
   const ext22 = await run(EXT22, [{ examples: [
-    { label: 'one-way', expected: 'accept', schema: 'ipd', content: '<catalogSeqNumber><itemSeqNumber><applicabilitySegment><interchangeability>1</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>' },
-    { label: 'other code', expected: 'reject', schema: 'ipd', content: '<catalogSeqNumber><itemSeqNumber><applicabilitySegment><interchangeability>3</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>' },
+    { label: 'one-way', expected: 'accept', schema: 'ipd', content: '<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A"><applicabilitySegment><interchangeability>1</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>' },
+    { label: 'other code', expected: 'reject', schema: 'ipd', content: '<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A"><applicabilitySegment><interchangeability>3</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>' },
   ] }]);
   check('GMC 1.1: EXT-00022 prompt has the VALUES block', ext22.prompt?.includes('"1" (One-Way), "2" (Two-Way)'));
   check('GMC 1.1: EXT-00022 examples 1 / 3 -> correct', ext22.verdict?.kind === 'correct', JSON.stringify(ext22.verdict));
@@ -3489,6 +3489,109 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('skeleton: saved examples re-run -> same diagnosis', rerun.verdict.why === 'skeleton_placement' && Boolean(rerun.runs[0].skeletonPlacement), JSON.stringify(rerun.verdict));
   const oldSaved = savedPassedTest({ rule_xml: EXT43, last_passed_test: { ...payload, examples: payload.examples.map(({ skeleton_lift: _drop, ...rest }) => rest), rule_hash: 'x' } });
   check('skeleton: a test saved before (no skeleton_lift) -> as today', runSavedTest(oldSaved, EXT43, 'BREX-4.2', { parseXml }).verdict.kind === 'incorrect');
+}
+
+// ---- Test de reglas: atributos obligatorios (GMC 4.2 BRDP-EXT-00160).
+// The real structures; the reject example <firstVerification/> without its
+// required @verificationType.
+{
+  const { ruleTestVerdict, validateExample, runExample, exampleProblems } = await import('../src/utils/ruleTest.js');
+  const { ruleRequiredAttributes } = await import('../src/utils/ruleTestRun.js');
+  const { buildRuleProposalCheckPrompt } = await import('../src/prompts/ruleProposalCheckPrompt.js');
+  const { formatCoverageItem } = await import('../src/validation/schemaCoverage.js');
+  const S42 = 'S1000D 4.2';
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const descript = structureOf(S42, 'descript');
+  const EXT160 = '<structureObjectRule id="BRDP-EXT-00160"><objectPath allowedObjectFlag="0">(not(//qualityAssurance/firstVerification)) and not(/ddn or /dml or /comment)</objectPath><objectUse>BRDP-EXT-00160 The first verification and its type shall be stated.</objectUse></structureObjectRule>';
+  const PROPOSAL = 'The type of the first verification (@verificationType: tabtop, onobject or ttandoo) shall be stated in every data module.';
+  const section = metadataXml(descript.skeleton.metadata.tree).xml;
+  check('RA: the minimal section has <unverified/>', section.includes('<unverified/>'));
+  const verified = section.replace('<unverified/>', '<firstVerification verificationType="tabtop"/>');
+  const bare = section.replace('<unverified/>', '<firstVerification/>');
+
+  // The structural check.
+  const probs = (xml, opts) => checkExampleStructure(parseXml(xml), descript, opts);
+  const doc = (sec, body = '<para>Text.</para>') => `<dmodule>${sec}<content><description><levelledPara>${body}</levelledPara></description></content></dmodule>`;
+  check('RA: missing @verificationType reported', JSON.stringify(probs(doc(bare))) === JSON.stringify([{ kind: 'missingRequiredAttribute', element: 'firstVerification', attribute: 'verificationType' }]), JSON.stringify(probs(doc(bare))));
+  check('RA: with @verificationType -> no problem', probs(doc(verified)).length === 0, JSON.stringify(probs(doc(verified))));
+  check('RA: the minimal section passes', probs(doc(section)).length === 0, JSON.stringify(probs(doc(section))));
+  check('RA: optional attribute absent -> no problem', probs(doc(section, '<para><emphasis>x</emphasis></para>')).length === 0);
+  check('RA: skeleton paths never warned', probs(doc(bare), { skipPaths: new Set(['/dmodule[1]/identAndStatusSection[1]/dmStatus[1]/qualityAssurance[1]/firstVerification[1]']) }).length === 0);
+  check('RA: text for the LLM', formatStructureProblem(probs(doc(bare))[0], 'descript') === '<firstVerification> requires @verificationType in the descript schema', formatStructureProblem(probs(doc(bare))[0], 'descript'));
+  const issue = structureIssues(probs(doc(bare)), { schema: 'descript' })[0];
+  check('RA: panel text EN', formatSchemaIssue(issue, en) === '<firstVerification> requires @verificationType in the descript schema', formatSchemaIssue(issue, en));
+  check('RA: panel text ES', formatSchemaIssue(issue, es) === '<firstVerification> requiere @verificationType en el esquema descript', formatSchemaIssue(issue, es));
+  const dita = structureOf('DITA 1.3 Xpath2.0', 'topic');
+  check('RA: DITA <topic> without @id reported', checkExampleStructure(parseXml('<topic><title>x</title><body/></topic>'), dita).some((p) => p.kind === 'missingRequiredAttribute' && p.element === 'topic' && p.attribute === 'id'));
+  const noModels = { ...dita, models: undefined };
+  check('RA: without models -> no change', checkExampleStructure(parseXml('<topic><title>x</title><body/></topic>'), noModels).length === 0);
+
+  // Through the pipeline: reject <firstVerification/> -> already covered by
+  // the schema, no correction round.
+  const cards42 = JSON.parse(fs.readFileSync(new URL('../backend/schema_cards/schema-cards-4-2.json', import.meta.url))).cards;
+  const docs42 = [...new Set(Object.values(cards42).flatMap((vs) => vs.flatMap((v) => v.schemas)))].filter((sc) => !['dc', 'rdf', 'xlink', 'xcf'].includes(sc)).sort();
+  const io = {
+    fetchSchemaCards: async (_s, names) => ({ cards: Object.fromEntries(names.filter((n) => cards42[n]).map((n) => [n, { variants: cards42[n] }])), document_schemas: docs42 }),
+    fetchStructure: async (std, schema) => { const st = structureOf(std, schema); return st ? { available: true, ...st } : { available: false }; },
+  };
+  const brdp160 = { identifier: 'BRDP-EXT-00160', title: 'First verification', definition: 'Decide whether the first verification is stated.', proposal: PROPOSAL };
+  const run160 = async (answers) => {
+    const asked = [];
+    const g = await generateRuleTestExamples({
+      ruleXml: EXT160, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat', brdp: brdp160, vocabulary, parseXml,
+      ask: async (messages) => { asked.push(messages); return JSON.stringify(answers[Math.min(asked.length - 1, answers.length - 1)]); }, ...io,
+    });
+    return { g, asked, verdict: g.runs ? ruleTestVerdict(g.examples, g.runs, analyzeRule(EXT160, 'BREX-4.2', { parseXml })) : null };
+  };
+  const covered = await run160([{ examples: [
+    { label: 'stated', expected: 'accept', schema: 'descript', metadata: verified },
+    { label: 'no type', expected: 'reject', schema: 'descript', metadata: bare },
+  ] }]);
+  check('RA EXT-00160: reject <firstVerification/> -> one call, not corrected', covered.asked.length === 1 && covered.g.runs[1].result === null && Boolean(covered.g.runs[1].schemaCovered), JSON.stringify(covered.g.runs?.map((r) => [r.result?.status, r.schemaCovered])));
+  check('RA EXT-00160: verdict "already covered by the schema"', covered.verdict?.kind === 'schema_covered' && JSON.stringify(covered.verdict.items) === JSON.stringify([{ kind: 'requiredAttribute', element: 'firstVerification', other: 'verificationType' }]), JSON.stringify(covered.verdict));
+  check('RA EXT-00160: item EN/ES', formatCoverageItem(covered.verdict.items[0], en) === '@verificationType is required in <firstVerification>' && formatCoverageItem(covered.verdict.items[0], es) === '@verificationType es obligatorio en <firstVerification>');
+  // With a valid reject example as well: a normal verdict.
+  const mixed = await run160([{ examples: [
+    { label: 'stated', expected: 'accept', schema: 'descript', metadata: verified },
+    { label: 'no type', expected: 'reject', schema: 'descript', metadata: bare },
+    { label: 'unverified', expected: 'reject', schema: 'descript', metadata: section },
+  ] }]);
+  check('RA EXT-00160: with a runnable reject example -> correct', mixed.verdict?.kind === 'correct', JSON.stringify(mixed.verdict));
+  // Accept <firstVerification/>: invalid, correction round with the card.
+  const accept = await run160([
+    { examples: [
+      { label: 'stated', expected: 'accept', schema: 'descript', metadata: bare },
+      { label: 'unverified', expected: 'reject', schema: 'descript', metadata: section },
+    ] },
+    { examples: [
+      { label: 'stated', expected: 'accept', schema: 'descript', metadata: verified },
+      { label: 'unverified', expected: 'reject', schema: 'descript', metadata: section },
+    ] },
+  ]);
+  const correction = accept.asked[1]?.at(-1)?.content || '';
+  check('RA EXT-00160: accept <firstVerification/> -> correction round', accept.asked.length === 2 && /<firstVerification> requires @verificationType in the descript schema/.test(correction), correction);
+  check('RA EXT-00160: the correction carries the card with its required attribute', /card of <firstVerification> in the descript schema: .*required attributes: @verificationType/.test(correction), correction);
+  check('RA EXT-00160: after the correction -> correct', accept.verdict?.kind === 'correct', JSON.stringify(accept.verdict));
+  // An attribute neither the rule nor the Proposal names: correction.
+  const other = setupFor(S42, EXT160, ['descript']);
+  const rejectEx = { label: 'no type', expected: 'reject', schema: 'descript', xml: doc(bare), structure: descript };
+  const otherBrdp = runExample(EXT160, 'BREX-4.2', rejectEx, { vocabulary, parseXml, proposal: 'The first verification shall be stated.' });
+  check('RA: attribute named by neither -> not covered (correction)', !otherBrdp.schemaCovered && otherBrdp.result === null && otherBrdp.validation.structure.some((p) => p.kind === 'missingRequiredAttribute'), JSON.stringify(otherBrdp.schemaCovered));
+  const namedBrdp = runExample(EXT160, 'BREX-4.2', rejectEx, { vocabulary, parseXml, proposal: PROPOSAL });
+  check('RA: attribute named by the Proposal -> covered', Boolean(namedBrdp.schemaCovered), JSON.stringify(namedBrdp));
+  const acceptBare = runExample(EXT160, 'BREX-4.2', { ...rejectEx, expected: 'accept' }, { vocabulary, parseXml, proposal: PROPOSAL });
+  check('RA: accept <firstVerification/> -> invalid, never covered', !acceptBare.schemaCovered && acceptBare.result === null && acceptBare.validation.cards.some((c) => c.element === 'firstVerification' && c.required.includes('verificationType')), JSON.stringify(acceptBare.validation.cards));
+  check('RA: setup ok', Boolean(other));
+
+  // The Proposal check: the required attributes of the rule's elements.
+  const required = ruleRequiredAttributes(EXT160, { structures: [descript] });
+  check('RA: ruleRequiredAttributes from the structure', JSON.stringify(required) === JSON.stringify([{ element: 'firstVerification', attributes: ['verificationType'] }]), JSON.stringify(required));
+  check('RA: no element of the rule with a required attribute -> []', ruleRequiredAttributes(EMPH, { structures: [descript] }).length === 0);
+  const prompt = buildRuleProposalCheckPrompt({ brdp: brdp160, standard: S42, format: 'BREX-4.2', ruleXml: EXT160, ruleDescription: '- x', requiredAttributes: required });
+  check('RA: Proposal check prompt lists the required attributes', /REQUIRED ATTRIBUTES[^\n]*\n- <firstVerification>: @verificationType/.test(prompt) && /requiring that element\s+implements the Proposal/.test(prompt), prompt.slice(-1500));
+  check('RA: without required attributes no block', !/REQUIRED ATTRIBUTES \(/.test(buildRuleProposalCheckPrompt({ brdp: brdp160, standard: S42, format: 'BREX-4.2', ruleXml: EMPH, ruleDescription: '- x' })));
+  check('RA: exampleProblems used', typeof exampleProblems === 'function' && typeof validateExample === 'function');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

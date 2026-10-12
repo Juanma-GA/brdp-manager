@@ -538,7 +538,10 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
       {/* Mejoras E, Part 1.3: the schema already rules this example out. */}
       {run.schemaCovered ? (
         <p className={styles.ruleTestNote} data-testid="rule-test-schema-covered-example">
-          {t('records.ruleTest.schemaCoveredExample', { detail: coverageDetail(run.schemaCovered.items, t) })}
+          {/* Test de reglas: atributos obligatorios -- a required attribute the example leaves out. */}
+          {t(run.schemaCovered.items.every((i) => i.kind === 'requiredAttribute') ? 'records.ruleTest.requiredAttributeExample' : 'records.ruleTest.schemaCoveredExample', {
+            detail: coverageDetail(run.schemaCovered.items, t),
+          })}
         </p>
       ) : (
         !run.validation.runnable && <ValidationProblems validation={run.validation} standard={standard} schema={example.schema} />

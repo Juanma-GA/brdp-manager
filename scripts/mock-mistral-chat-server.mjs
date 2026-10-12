@@ -310,6 +310,26 @@ function metadataReply(systemPrompt, rule, answer, messages = []) {
   // always passes. The examples of each schema start from ITS minimal
   // section (descript's identAndStatusSection with dmStatus, pm's with
   // pmStatus); ddn and dml ("ONE example only") come with no content.
+  // Test de reglas: atributos obligatorios (GMC 4.2 BRDP-EXT-00160): like
+  // the real run, the example meant to be rejected writes
+  // <firstVerification/> without its required @verificationType; the one
+  // meant to be accepted, with it.
+  if (/qualityAssurance\/firstVerification/.test(rule)) {
+    const lines = systemPrompt.split("\n");
+    const at = lines.findIndex((l) => l.startsWith('- schema "descript": the application builds the rest'));
+    const start = lines.findIndex((l, i) => i > at && l.startsWith(`    <${element}>`));
+    const base = [];
+    for (let i = start; at !== -1 && start !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) base.push(lines[i].slice(4));
+    const section = base.join("\n");
+    const examples = [
+      { label: "First verification stated with its type", expected: "accept", schema: "descript", metadata: section.replace("<unverified/>", '<firstVerification verificationType="tabtop"/>') },
+      { label: "First verification without its type", expected: "reject", schema: "descript", metadata: section.replace("<unverified/>", "<firstVerification/>") },
+    ];
+    for (const schema of ["ddn", "dml", "comment"]) {
+      if (systemPrompt.includes(`- "${schema}": for <${schema}> — ONE example only`)) examples.push({ label: `Any ${schema.toUpperCase()}`, expected: "accept", schema });
+    }
+    return answer(examples);
+  }
   if (/\/ddn or \/dml/.test(rule)) {
     const minimalOf = (schema) => {
       const lines = systemPrompt.split("\n");
@@ -812,7 +832,7 @@ function ruleTestReply(systemPrompt, messages) {
   // @valueAllowed ("1").
   if (/\/\/interchangeability</.test(rule)) {
     const legend = /VALUES: in this rule, the value of each <objectValue> is its @valueAllowed/.test(systemPrompt);
-    const csn = (value) => `<catalogSeqNumber><itemSeqNumber><applicabilitySegment><interchangeability>${value}</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
+    const csn = (value) => `<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A"><applicabilitySegment><interchangeability>${value}</interchangeability></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
     return answer([
       { label: "One-way interchangeable part", expected: "accept", schema: ruleSchema, content: csn(legend ? "1" : "One-Way") },
       { label: "Code not allowed by ATA Spec 2000", expected: "reject", schema: ruleSchema, content: csn(legend ? "3" : "Three-Way") },
@@ -988,7 +1008,7 @@ function ruleTestReply(systemPrompt, messages) {
   // Plantillas 4.1/4.2: the rows of the rebuilt templates, written along
   // the valid way down the prompt gives.
   if (/\/\/parameter</.test(rule)) {
-    const media = (param) => `<para>The animation shows the pump in operation.</para><multimedia><title>Pump operation</title><multimediaObject infoEntityIdent="ICN-EXAMPLE-00001-A-00001-01">${param}</multimediaObject></multimedia>`;
+    const media = (param) => `<para>The animation shows the pump in operation.</para><multimedia><title>Pump operation</title><multimediaObject infoEntityIdent="ICN-EXAMPLE-00001-A-00001-01" multimediaType="3D">${param}</multimediaObject></multimedia>`;
     return answer([
       { label: "Animation without parameters", expected: "accept", schema: ruleSchema, content: media("") },
       { label: "Animation with a parameter", expected: "reject", schema: ruleSchema, content: media('<parameter id="par-0001" parameterName="speed" parameterValue="slow"/>') },
@@ -1019,7 +1039,7 @@ function ruleTestReply(systemPrompt, messages) {
   // example: the rule accepts it, and the panel says why).
   if (/\/\/itemSeqNumber\/partSegment/.test(rule)) {
     const title = (systemPrompt.match(/\nTitle: (.*)\n/) || [])[1] || "";
-    const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+    const csn = (inner) => `<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
     const segment = "<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>";
     const pushed = correcting && /matched by: `\/\/itemSeqNumber\/partSegment`/.test(lastUser);
     const reject = /BADEXAMPLE/.test(title) ? csn('<partRef manufacturerCodeValue="K0001" partNumberValue="P-100"/><partSegment/>')
@@ -1046,7 +1066,7 @@ function ruleTestReply(systemPrompt, messages) {
     ]);
   }
   if (/itemSeqNumber\[not\(partSegment\)\]/.test(rule)) {
-    const csn = (inner) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
+    const csn = (inner) => `<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A">${inner}</itemSeqNumber></catalogSeqNumber>`;
     const segment = "<partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment>";
     const examples = [
       { label: "Item with its part data", expected: "accept", schema: ruleSchema, content: csn(segment) },
@@ -1068,7 +1088,7 @@ function ruleTestReply(systemPrompt, messages) {
   const csn = /\/\/(optionalPart|preferredSparePart)\/catalogSeqNumberRef/.exec(rule);
   if (csn) {
     const first = csn[1];
-    const content = (x) => `<catalogSeqNumber figureNumber="01" item="001"><itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="P1"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${first}>${x}<partRef manufacturerCodeValue="12345" partNumberValue="P2"/></${first}></partRefGroup></partSegment><applicabilitySegment><usableOnCodeAssy>A</usableOnCodeAssy></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
+    const content = (x) => `<catalogSeqNumber figureNumber="01" indenture="1" item="001"><itemSeqNumber itemSeqNumberValue="00A"><quantityPerNextHigherAssy>1</quantityPerNextHigherAssy><partRef manufacturerCodeValue="12345" partNumberValue="P1"/><partSegment><itemIdentData><descrForPart>Bolt</descrForPart></itemIdentData><partRefGroup><${first}>${x}<partRef manufacturerCodeValue="12345" partNumberValue="P2"/></${first}></partRefGroup></partSegment><applicabilitySegment><usableOnCodeAssy>A</usableOnCodeAssy></applicabilitySegment></itemSeqNumber></catalogSeqNumber>`;
     return answer([
       { label: `${first} without a CSN reference`, expected: "accept", schema: ruleSchema, content: content("") },
       { label: `${first} with a CSN reference`, expected: "reject", schema: ruleSchema, content: content('<catalogSeqNumberRef figureNumber="02" item="003"/>') },

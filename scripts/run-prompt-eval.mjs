@@ -219,6 +219,8 @@ async function runCheck(check, answer, ctx = {}) {
   // T4b: "reject_examples" = the final content of the rule-test examples
   // meant to be rejected (after the correction round), one per line.
   // "prompt" = the system prompt the case sent (rule test on DM metadata).
+  // "proposal_check_prompt" = the system prompt of the separate Proposal
+  // check (rule test).
   // AI Extract: "title" / "definition" = the texts written for the
   // candidate (the answer is its proposal).
   const target =
@@ -232,6 +234,8 @@ async function runCheck(check, answer, ctx = {}) {
       ? ctx.extract?.definition ?? ""
       : check.target === "prompt"
       ? ctx.systemPrompt ?? ""
+      : check.target === "proposal_check_prompt"
+      ? ctx.ruleTest?.proposalCheck?.systemPrompt ?? ""
       : check.target === "description"
       ? ctx.description ?? ""
       : check.target === "explanation"

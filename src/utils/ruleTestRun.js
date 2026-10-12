@@ -1051,8 +1051,34 @@ export function keepSchemaLimitedExamples(examples, runs, failures, next, aligne
 // Materialize, validate and run every example.
 function runRuleTestExamples(examples, { ruleXml, format, setup, vocabulary, parseXml = parseXmlDocument }) {
   const materialized = examples.map((ex) => materializeExample(ex, setup, parseXml));
-  const runs = materialized.map((ex) => runExample(ruleXml, format, ex, { vocabulary, parseXml, graph: setup.graph || null }));
+  const runs = materialized.map((ex) =>
+    runExample(ruleXml, format, ex, { vocabulary, parseXml, graph: setup.graph || null, proposal: setup.rule?.proposal || '' })
+  );
   return { materialized, runs };
+}
+
+// Test de reglas: atributos obligatorios -- for the Proposal check, the
+// attributes the schema makes required on the elements the rule names:
+// from the standard's graph (required in every schema the element is in),
+// else from the test schemas' structures (models[x].attributes). Never
+// typed by hand. → [{ element, attributes }]
+export function ruleRequiredAttributes(ruleXml, { graph = null, structures = [] } = {}) {
+  const names = extractRuleNames(ruleXml).elements || [];
+  const out = [];
+  for (const name of names) {
+    let attributes;
+    if (graph?.elements?.[name]) {
+      const schemas = graph.elements[name].flatMap(([s]) => s);
+      const bySchema = new Map();
+      for (const [ss, , attrs] of graph.required?.[name] || []) for (const s of ss) bySchema.set(s, new Set(attrs));
+      attributes = schemas.length ? [...(bySchema.get(schemas[0]) || [])].filter((a) => schemas.every((s) => bySchema.get(s)?.has(a))) : [];
+    } else {
+      const sets = structures.filter((st) => st?.models?.[name]).map((st) => new Set(st.models[name].attributes.map(([a]) => a)));
+      attributes = sets.length ? [...sets[0]].filter((a) => sets.every((set) => set.has(a))) : [];
+    }
+    if (attributes.length) out.push({ element: name, attributes: attributes.sort() });
+  }
+  return out;
 }
 
 // Barrido final 1/2, Part 2: does the rule implement the Proposal? Its own
@@ -1067,8 +1093,8 @@ function runRuleTestExamples(examples, { ruleXml, format, setup, vocabulary, par
 //     not answer valid JSON: never read as "implements" (the verdict says
 //     the Proposal could not be checked).
 // Never throws.
-export async function checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask }) {
-  const systemPrompt = buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription });
+export async function checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask, requiredAttributes = [] }) {
+  const systemPrompt = buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes });
   try {
     const answer = await ask([{ role: 'user', content: RULE_PROPOSAL_CHECK_USER_MESSAGE }], systemPrompt);
     const parsed = parseRuleProposalCheckResponse(answer);
@@ -1158,7 +1184,7 @@ export async function generateRuleTestExamples({
       // Proposal check (a root rule without context keeps it).
       const checkable = !contextRoot && !rootTest.coverage && askProposalCheck && ruleDescription != null;
       if (checkable) onStep({ step: 'proposal' });
-      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck }) : null;
+      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph }) }) : null;
       if (!isCurrent()) return null;
       return {
         ...rootTest,
@@ -1177,7 +1203,7 @@ export async function generateRuleTestExamples({
     if (presenceTest) {
       const checkable = !presenceTest.coverage && askProposalCheck && ruleDescription != null;
       if (checkable) onStep({ step: 'proposal' });
-      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck }) : null;
+      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph }) }) : null;
       if (!isCurrent()) return null;
       return {
         ...presenceTest,
@@ -1199,7 +1225,7 @@ export async function generateRuleTestExamples({
     if (prepared.unreachable) return { status: 'not_executable', reason: prepared.unreachable, setup: prepared.setup, untested: prepared.untested };
     // Mejoras C, Part 2: the rule, so materializeExample can move an element
     // of it to its only parent without changing what the rule decides.
-    prepared.setup.rule = { ruleXml, format, names: extractRuleNames(ruleXml).elements };
+    prepared.setup.rule = { ruleXml, format, names: extractRuleNames(ruleXml).elements, proposal: brdp?.proposal || '' };
     // Remates de Mejoras G, Part 1.1: the standard's graph, so an example
     // the schema rules out is recognized only by a relation the rule names
     // (runExample's schemaCovered; "Run again" reads it from here too).
@@ -1226,7 +1252,7 @@ export async function generateRuleTestExamples({
     let checkSettled = false;
     const checkPromise = (
       askProposalCheck && ruleDescription != null && !coverage
-        ? checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck })
+        ? checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph, structures: Object.values(prepared.setup.placements || {}).map((pl) => pl.structure) }) })
         : Promise.resolve(null)
     ).finally(() => {
       checkSettled = true;

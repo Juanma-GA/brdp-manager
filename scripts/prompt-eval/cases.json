@@ -3508,13 +3508,13 @@
           "label": "Item with its part data",
           "expected": "accept",
           "schema": "ipd",
-          "content": "<catalogSeqNumber figureNumber=\"01\" item=\"001\"><itemSeqNumber itemSeqNumberValue=\"00A\"><partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment></itemSeqNumber></catalogSeqNumber>"
+          "content": "<catalogSeqNumber figureNumber=\"01\" indenture=\"1\" item=\"001\"><itemSeqNumber itemSeqNumberValue=\"00A\"><partSegment><itemIdentData><descrForPart>O-ring</descrForPart></itemIdentData></partSegment></itemSeqNumber></catalogSeqNumber>"
         },
         {
           "label": "Item without part data (bad example)",
           "expected": "reject",
           "schema": "ipd",
-          "content": "<catalogSeqNumber figureNumber=\"01\" item=\"001\"><itemSeqNumber itemSeqNumberValue=\"00A\"><partRef manufacturerCodeValue=\"K0001\" partNumberValue=\"P-100\"/><partSegment/></itemSeqNumber></catalogSeqNumber>"
+          "content": "<catalogSeqNumber figureNumber=\"01\" indenture=\"1\" item=\"001\"><itemSeqNumber itemSeqNumberValue=\"00A\"><partRef manufacturerCodeValue=\"K0001\" partNumberValue=\"P-100\"/><partSegment/></itemSeqNumber></catalogSeqNumber>"
         }
       ],
       "checks": [
@@ -4563,6 +4563,46 @@
           "type": "rule_test_not_executable",
           "pattern": "points to scormContentPackage\\.xsd, which is not one of the S1000D 4\\.2 schemas \\(scormcontentpackage\\.xsd is, written in lower case\\)",
           "note": "not executable with the reason, no LLM call"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-gmc-verificationtype",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Test de reglas: atributos obligatorios (real case GMC 4.2 BRDP-EXT-00160, (not(//qualityAssurance/firstVerification)) and not(/ddn or /dml or /comment), flag 0). Before: the reject example <firstVerification/> (without its required @verificationType) was run, accepted, and the test failed; the Proposal check also said 'partly'. Now the structural check reports the missing required attribute, that example is not corrected (the Proposal names @verificationType: the schema already requires it) and the verdict is 'already covered by the schema' -- or correct, if the model writes a valid reject example (without <firstVerification>).",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-GMC160",
+        "title": "First verification",
+        "definition": "Decide whether the first verification of a data module and its type are stated.",
+        "proposal": "The type of the first verification (@verificationType: tabtop, onobject or ttandoo) shall be stated in every data module.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule id=\"BRDP-EVAL-RT-GMC160\"><objectPath allowedObjectFlag=\"0\">(not(//qualityAssurance/firstVerification)) and not(/ddn or /dml or /comment)</objectPath><objectUse>The first verification and its type shall be stated.</objectUse></structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_verdict_in",
+          "expect": [
+            "schema_covered",
+            "correct"
+          ],
+          "note": "never 'test failed': a <firstVerification/> without @verificationType is not a valid example"
+        },
+        {
+          "type": "contains",
+          "target": "proposal_check_prompt",
+          "pattern": "REQUIRED ATTRIBUTES[^\\n]*\\n- <firstVerification>: @verificationType",
+          "note": "the Proposal check is told @verificationType is required on <firstVerification>"
+        },
+        {
+          "type": "rule_proposal_check_level",
+          "expect": [
+            "yes"
+          ],
+          "note": "requiring <firstVerification> implements the Proposal (its type cannot be missing): yes, never 'partly'"
         }
       ]
     },

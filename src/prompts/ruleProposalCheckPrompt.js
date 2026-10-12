@@ -24,8 +24,22 @@ export const RULE_PROPOSAL_CHECK_USER_MESSAGE = 'Check whether the rule implemen
 const PROPOSAL_CHECK_LEVELS = ['yes', 'partly', 'no'];
 
 // `input`: { brdp, standard, format, ruleXml, ruleDescription (English
-// text, one "- " line per statement) }.
-export function buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription }) {
+// text, one "- " line per statement), requiredAttributes }.
+// requiredAttributes (Test de reglas: atributos obligatorios): [{ element,
+// attributes }] -- the attributes the schema makes required on the
+// elements the rule names, taken from the schema structure (never typed
+// here). GMC 4.2 BRDP-EXT-00160: the Proposal asks for @verificationType,
+// the rule requires <firstVerification>, which cannot exist without it.
+function requiredAttributesBlock(requiredAttributes) {
+  const lines = (requiredAttributes || [])
+    .filter((r) => r.attributes?.length)
+    .map((r) => `- <${r.element}>: ${r.attributes.map((a) => `@${a}`).join(', ')}`);
+  return lines.length
+    ? `\n\nREQUIRED ATTRIBUTES (from the schema: every valid document has them on these elements of the rule):\n${lines.join('\n')}`
+    : '';
+}
+
+export function buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes = [] }) {
   return `You check whether one ${standard} business rule implements the decision of
 its BRDP. You never write or fix anything.
 
@@ -38,7 +52,7 @@ What the rule checks (computed by the application from its XML — exact):
 ${ruleDescription}
 
 The rule (${format}):
-${ruleXml}${ruleValueLegend(ruleXml)}
+${ruleXml}${ruleValueLegend(ruleXml)}${requiredAttributesBlock(requiredAttributes)}
 
 HOW TO DECIDE — answer one of three levels:
 - "yes": what the rule rejects is what the Proposal decides: what the
@@ -66,6 +80,10 @@ These are NOT reasons for "no":
 - The Proposal says "only A, B and C are allowed" and the rule rejects the
   other elements by name: "yes". A, B and C are the allowed ones: the rule
   must NOT reject them.
+- The Proposal requires an attribute that the schema makes required on an
+  element (see REQUIRED ATTRIBUTES, when given): requiring that element
+  implements the Proposal, because the element cannot appear without the
+  attribute: "yes".
 
 Examples:
 - Proposal "A step shall have at most three substeps."; the rule rejects a
