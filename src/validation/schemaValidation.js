@@ -1287,9 +1287,55 @@ export function extractDocumentNames(doc) {
 
 // ─── Structural check ───────────────────────────────────────────────────────
 
+// Test de reglas: lo que la app puede arreglar sola, Part 3. The closed list
+// of values (enumeration) of `attribute` on `element` in one schema's
+// structure (models[element].enums → structure.enum_lists), or null.
+export function attributeEnum(structure, element, attribute) {
+  const index = structure?.models?.[element]?.enums?.[attribute];
+  if (!Number.isInteger(index)) return null;
+  const list = structure.enum_lists?.[index];
+  return Array.isArray(list) && list.length ? list : null;
+}
+
+// A closed list as the cards show it: up to 20 values as they are; a longer
+// one as ranges when it is one clean numbered sequence ("fm01–fm99",
+// "cv01–cv20, cv51–cv99" -- the backend's _collapse_enum_to_ranges), or the
+// first 20 and "+N more". → { text, more } (`more` = values left out, so
+// each language writes its own "+N more").
+const LIST_MAX_VALUES = 20;
+const ENUM_TOKEN_RE = /^([A-Za-z_]*)(\d+)$/;
+export function compactValueList(values) {
+  const list = [...(values || [])];
+  if (list.length <= LIST_MAX_VALUES) return { text: list.join(', '), more: 0 };
+  const parsed = list.map((v) => ENUM_TOKEN_RE.exec(v));
+  const prefixes = new Set(parsed.map((m) => m?.[1]));
+  const widths = new Set(parsed.map((m) => m?.[2].length));
+  if (parsed.every(Boolean) && prefixes.size === 1 && widths.size === 1) {
+    const prefix = parsed[0][1];
+    const width = parsed[0][2].length;
+    const fmt = (n) => `${prefix}${String(n).padStart(width, '0')}`;
+    const numbers = [...new Set(parsed.map((m) => Number.parseInt(m[2], 10)))].sort((a, b) => a - b);
+    const tokens = [];
+    let start = numbers[0];
+    let prev = numbers[0];
+    for (const n of numbers.slice(1)) {
+      if (n === prev + 1) {
+        prev = n;
+        continue;
+      }
+      tokens.push(start === prev ? fmt(start) : `${fmt(start)}–${fmt(prev)}`);
+      start = prev = n;
+    }
+    tokens.push(start === prev ? fmt(start) : `${fmt(start)}–${fmt(prev)}`);
+    return { text: tokens.join(', '), more: 0 };
+  }
+  return { text: list.slice(0, LIST_MAX_VALUES).join(', '), more: list.length - LIST_MAX_VALUES };
+}
+
 // [{ kind: 'unknownElement', element } | { kind: 'notAllowed', element, parent }
 //  | { kind: 'unknownAttribute', attribute, element } | { kind: 'wrongRoot', element, expected }
 //  | { kind: 'missingRequiredAttribute', element, attribute } | { kind: 'textNotAllowed', element }
+//  | { kind: 'valueNotAllowed', element, attribute, value, allowed }
 //  | { kind: 'tooMany', element, parent, max, count }]
 // against one schema's structure. Prefixed attributes other than xlink:* and
 // namespace declarations are not schema vocabulary and are left out.
@@ -1326,7 +1372,22 @@ export function checkExampleStructure(doc, structure, options = {}) {
         if (a.name === 'xmlns' || a.name.startsWith('xmlns:') || a.name.startsWith('xsi:')) continue;
         if (a.name.includes(':') && !a.name.startsWith('xlink:')) continue;
         const local = a.name.replace(/^xlink:/, '');
-        if (!elements[name].attributes.includes(local)) add({ kind: 'unknownAttribute', attribute: a.name, element: name });
+        if (!elements[name].attributes.includes(local)) {
+          add({ kind: 'unknownAttribute', attribute: a.name, element: name });
+          continue;
+        }
+        // Test de reglas: lo que la app puede arreglar sola, Part 3. A value
+        // outside the attribute's closed list in this schema
+        // (frontMatterType="general" where 4.2 allows fm01…fm99). Never for
+        // the application's own elements, nor for an attribute the rule or
+        // the Proposal names (options.ignoreValueOf): there the value may be
+        // exactly what the example is about.
+        if (a.name.includes(':') || skipPaths.has(path) || options.ignoreValueOf?.(a.name)) continue;
+        const allowed = attributeEnum(structure, name, a.name);
+        if (allowed && !allowed.includes(a.value)) {
+          const compact = compactValueList(allowed);
+          add({ kind: 'valueNotAllowed', element: name, attribute: a.name, value: a.value, allowed: compact.text, more: compact.more });
+        }
       }
       // Test de reglas: atributos obligatorios. An attribute the schema
       // makes required on the element (use="required": models[name].
@@ -1868,6 +1929,8 @@ export function formatStructureProblem(problem, schema) {
       return `<${problem.element}> requires @${problem.attribute} in the ${schema} schema`;
     case 'textNotAllowed':
       return `<${problem.element}> does not allow text in the ${schema} schema`;
+    case 'valueNotAllowed':
+      return `@${problem.attribute} of <${problem.element}> has value "${problem.value}"; allowed: ${problem.allowed}${problem.more ? `, +${problem.more} more` : ''}`;
     case 'wrongRoot':
       return `the root element is <${problem.element}>, not <${problem.expected}>`;
     case 'reservedRootAttribute':
@@ -2131,6 +2194,7 @@ export const SCHEMA_ISSUE_KEYS = {
     unknownAttribute: 'records.ruleTest.structure.unknownAttribute',
     missingRequiredAttribute: 'records.ruleTest.structure.missingRequiredAttribute',
     textNotAllowed: 'records.ruleTest.structure.textNotAllowed',
+    valueNotAllowed: 'records.ruleTest.structure.valueNotAllowed',
     wrongRoot: 'records.ruleTest.structure.wrongRoot',
     reservedRootAttribute: 'records.ruleTest.structure.reservedRootAttribute',
     spannedEntry: 'records.ruleTest.structure.spannedEntry',
@@ -2215,6 +2279,9 @@ export function formatSchemaIssue(issue, t) {
   // Mejoras F, Part 2.3: the unbalanced ( [ or quote first.
   if (issue.code === 'invalid_xpath' && params.balance) {
     return `${t(`records.xpathBalance.${params.balance}`)} ${t(key, params)}`;
+  }
+  if (issue.code === 'valueNotAllowed' && params.more) {
+    params.allowed = `${params.allowed}, ${t('records.ruleTest.structure.moreValues', { count: params.more })}`;
   }
   if (issue.code === 'rowFullyCovered') {
     // " (column c2, by the morerows of row 1)" -- same text as

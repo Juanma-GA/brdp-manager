@@ -65,6 +65,10 @@ async function main() {
   await makeBrdp({ identifier: "BRDP-EXT-00002", title: "Contents of the DMRL", definition: "Decide on the contents of the data module requirement list.", proposal: "The DMRL must contain the titles and details of the responsible partner company for each data module and publication module." }, rule(2));
   await makeBrdp({ identifier: "BRDP-EXT-00037", title: "Use of an element", definition: "Decide whether the element is used.", proposal: "The element must not be used." }, rule(37));
   await makeBrdp({ identifier: "BRDP-EXT-00046", title: "References to supplies", definition: "Decide what an internal reference of type irtt04 can point to.", proposal: "An internal reference of type irtt04 points to a supply description of the data module." }, rule(46));
+  // Lo que la app arregla sola: EXT-00127 with the simulator's real failure
+  // (<pmCode>PM-001</pmCode>, frontMatterType="general"); the identifier is
+  // the simulator's marker.
+  await makeBrdp({ identifier: "BRDP-EVAL-RT-PMCODE", title: "Attributes of references in front matter", definition: "Decide on the attributes of references to publication modules in a front matter data module.", proposal: "Attributes @id, @authorityName and @authorityDocument must not be used for references to publication modules in a front matter data module." }, rule(127));
   await makeBrdp({ identifier: "BRDP-EXT-00152", title: "Information code of a BREX", definition: "Decide on the information code of a BREX data module.", proposal: "A BREX data module has information code 022 and item location code D." }, rule(152));
   const job = await api(`/api/projects/${project.id}/embeddings/compute`, { method: "POST" }).then((r) => r.json());
   for (let i = 0; i < 80; i++) {
@@ -174,6 +178,35 @@ async function main() {
     assert(v152.startsWith("Correct"), `EXT-00152: verdict correct (${v152})`);
     assert(/<brex>/.test((await example(0).locator("pre").textContent()) || ""), "EXT-00152: the example is a BREX data module");
     await page.screenshot({ path: shot("rule-test-default-ext152.png"), fullPage: true });
+
+    // 6. EXT-00127: the app fixes the LLM's markup on its own -- required
+    // attributes of <pmCode>, its text, frontMatterType -- no correction
+    // round, verdict correct.
+    await openTest("BRDP-EVAL-RT-PMCODE");
+    await verdict().waitFor({ timeout: 30000 });
+    const v127 = (await verdict().textContent()) || "";
+    assert(v127.startsWith("Correct"), `EXT-00127: verdict correct (${v127})`);
+    const req127 = await fetch(`${MOCK}/last-request`).then((r) => r.json());
+    assert(!req127.messages.some((m) => m.role === "user" && /Some examples are not valid/.test(m.content)), "EXT-00127: no correction round");
+    const notes = async (i, id) => ((await example(i).getByTestId(id).textContent().catch(() => "")) || "");
+    const attrs0 = await notes(0, "rule-test-required-attributes-added");
+    assert(attrs0.includes("Adjusted by the app: added the required attributes @modelIdentCode, @pmIssuer, @pmNumber, @pmVolume on <pmCode>"), `EXT-00127: required attributes note (${attrs0})`);
+    const text0 = await notes(0, "rule-test-text-removed");
+    assert(text0.includes("removed the text of <pmCode>"), `EXT-00127: text note (${text0})`);
+    const val0 = await notes(0, "rule-test-values-replaced");
+    assert(val0.includes('@frontMatterType="general" to "fm01"'), `EXT-00127: value note (${val0})`);
+    const shown = (await example(0).locator("pre").textContent()) || "";
+    assert(/<pmCode modelIdentCode="[^"]+" pmIssuer="[^"]+" pmNumber="[^"]+" pmVolume="[^"]+"\s*>\s*<\/pmCode>|<pmCode modelIdentCode="[^"]+" pmIssuer="[^"]+" pmNumber="[^"]+" pmVolume="[^"]+"\s*\/>/.test(shown) && !shown.includes("PM-001"), "EXT-00127: the example shows the fixed <pmCode>");
+    assert(((await example(1).getByTestId("rule-test-result").textContent()) || "").includes("rejected ✓"), "EXT-00127: @id example rejected");
+    await page.screenshot({ path: shot("rule-test-app-fixes-pmcode-en.png"), fullPage: true });
+    await language("es");
+    await page.waitForTimeout(400);
+    const attrsEs = await notes(0, "rule-test-required-attributes-added");
+    assert(attrsEs.includes("Ajustado por la app: se añadieron los atributos obligatorios @modelIdentCode, @pmIssuer, @pmNumber, @pmVolume en <pmCode>"), `EXT-00127 ES: nota de atributos (${attrsEs})`);
+    assert((await notes(1, "rule-test-values-replaced")).includes('@frontMatterType="tableOfContents" por "fm01"'), "EXT-00127 ES: nota de valores");
+    assert((await notes(0, "rule-test-text-removed")).includes("se quitó el texto de <pmCode>"), "EXT-00127 ES: nota de texto");
+    await page.screenshot({ path: shot("rule-test-app-fixes-pmcode-es.png"), fullPage: true });
+    await language("en");
   } finally {
     await browser.close();
     await api(`/api/projects/${project.id}?permanent=true`, { method: "DELETE" });

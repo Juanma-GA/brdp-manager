@@ -440,6 +440,11 @@ function SchemaFixNotes({ doc }) {
   const { t } = useTranslation();
   const added = doc.requiredAttributesAdded || [];
   const count = added.reduce((n, g) => n + g.attributes.length, 0);
+  // The same change on several elements is said once.
+  const values = [];
+  for (const v of doc.valuesReplaced || []) {
+    if (!values.some((w) => w.attribute === v.attribute && w.from === v.from && w.to === v.to)) values.push(v);
+  }
   return (
     <>
       {count > 0 && (
@@ -453,6 +458,15 @@ function SchemaFixNotes({ doc }) {
       )}
       {doc.textRemoved?.length > 0 && (
         <TableFixNote testId="rule-test-text-removed" text={t('records.ruleTest.textRemoved', { elements: doc.textRemoved.map((e) => `<${e}>`).join(', ') })} />
+      )}
+      {values.length > 0 && (
+        <TableFixNote
+          testId="rule-test-values-replaced"
+          text={t('records.ruleTest.valuesReplaced', {
+            count: values.length,
+            items: values.map((v) => t('records.ruleTest.valueReplacedItem', v)).join('; '),
+          })}
+        />
       )}
     </>
   );

@@ -816,28 +816,53 @@ def schema_content_models(standard: str, schema: str) -> dict[str, dict]:
             # Mejoras G, Part 1.1: the most each child can appear (a number);
             # a child left out is unbounded.
             "max": {n: m for n, m in variant.get("max", {}).items() if n in known and m != "unbounded"},
+            # Valores de lista cerrada: {attribute: [values]} of its
+            # attributes with a closed list (enumeration) in this schema --
+            # get_schema_structure turns the lists into indexes.
+            "enums": {a["name"]: list(a["enum"]) for a in (card or {}).get("attributes", []) if a.get("enum")},
         }
     return out
 
 
+def _indexed_enum_lists(models: dict[str, dict]) -> tuple[dict[str, dict], list[list[str]]]:
+    """The models with each enum replaced by an index into one list of the
+    distinct closed lists (fm01…fm99 is shared by every element that has it:
+    about a third of the size of repeating it)."""
+    lists: list[list[str]] = []
+    index: dict[tuple, int] = {}
+    out: dict[str, dict] = {}
+    for name, model in models.items():
+        enums = {}
+        for attribute, values in model.get("enums", {}).items():
+            key = tuple(values)
+            if key not in index:
+                index[key] = len(lists)
+                lists.append(list(values))
+            enums[attribute] = index[key]
+        out[name] = {**model, "enums": enums}
+    return out, lists
+
+
 def get_schema_structure(standard: str, schema: str) -> dict:
     """The compact structure the Test rule panel needs for one schema: the
-    derived skeleton plus every element's children and attribute names
-    (names only -- no enums, no truncation: the structural check needs the
-    complete lists), and each element's content model (models: see
-    schema_content_models)."""
+    derived skeleton plus every element's children and attribute names (no
+    truncation: the structural check needs the complete lists), and each
+    element's content model (models: see schema_content_models), whose
+    closed lists of attribute values are indexes into enum_lists."""
     graph = schema_graph(standard, schema)
     skeleton = derive_skeleton(standard, schema)
     if graph is None or skeleton is None:
         return {"standard": standard, "schema": schema, "available": False, "skeleton": None, "elements": {}, "models": {}}
     skeleton = {**skeleton, "metadata": derive_metadata_skeleton(standard, schema)}
+    models, enum_lists = _indexed_enum_lists(schema_content_models(standard, schema))
     return {
         "standard": standard,
         "schema": schema,
         "available": True,
         "skeleton": skeleton,
         "elements": graph,
-        "models": schema_content_models(standard, schema),
+        "models": models,
+        "enum_lists": enum_lists,
     }
 
 

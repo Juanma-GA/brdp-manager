@@ -529,6 +529,30 @@ async function runCheck(check, answer, ctx = {}) {
       const ok = expect.includes(verdict.kind) && (!check.why || verdict.why === check.why);
       return { status: ok ? "pass" : "fail", detail: `engine verdict ${verdict.kind}${verdict.why ? ` (${verdict.why})` : ""}, expected ${expect.join(" or ")}${check.why ? ` (${check.why})` : ""}: ${JSON.stringify(verdict)}` };
     }
+    case "rule_test_app_fixes": {
+      // Test de reglas, lo que la app arregla sola: the application fixed
+      // the LLM's markup on its own (required attributes, text where the
+      // schema admits none, values outside a closed list) -- each element
+      // and attribute in `requiredAttributes` / `textRemoved` / `values`
+      // fixed in at least one example, and with `noCorrection` no
+      // correction round was needed.
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      const added = new Set(r.examples.flatMap((ex) => (ex.requiredAttributesAdded || []).map((g) => g.element)));
+      const removed = new Set(r.examples.flatMap((ex) => ex.textRemoved || []));
+      const values = new Set(r.examples.flatMap((ex) => (ex.valuesReplaced || []).map((v) => v.attribute)));
+      const missing = [
+        ...(check.requiredAttributes || []).filter((n) => !added.has(n)).map((n) => `required attributes of <${n}>`),
+        ...(check.textRemoved || []).filter((n) => !removed.has(n)).map((n) => `text of <${n}>`),
+        ...(check.values || []).filter((n) => !values.has(n)).map((n) => `value of @${n}`),
+      ];
+      const corrected = check.noCorrection && r.correction ? [`a correction round (${r.correction.fixed}/${r.correction.attempted} fixed)`] : [];
+      const bad = [...missing.map((m) => `not fixed: ${m}`), ...corrected];
+      return {
+        status: bad.length ? "fail" : "pass",
+        detail: bad.length ? bad.join("; ") : `fixed by the app: attributes on ${[...added].join(", ") || "-"}; text of ${[...removed].join(", ") || "-"}; values of ${[...values].map((v) => `@${v}`).join(", ") || "-"}${r.correction ? "" : "; no correction round"}`,
+      };
+    }
     case "rule_test_examples_by_app": {
       // Mejoras F, Part 1.2: a rule on the document root alone -- the
       // examples are the minimal documents the application builds, and no
@@ -1101,6 +1125,13 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
         runnable: result.runs[i].validation.runnable,
         problems: result.runs[i].validation.runnable ? [] : exampleProblems(result.runs[i].validation, { standard: testCase.standard, schema: ex.schema }),
         result: result.runs[i].result?.status ?? null,
+        // What the application fixed on its own in the LLM's markup
+        // (exampleSchemaFixes.js), for the report and the counts.
+        appFixes: {
+          requiredAttributesAdded: ex.requiredAttributesAdded || [],
+          textRemoved: ex.textRemoved || [],
+          valuesReplaced: ex.valuesReplaced || [],
+        },
       })),
     },
     checkContext: { ruleTest: result, analysis, threshold, description, ruleSchemas: schemas, standard: testCase.standard, systemPrompt: result.systemPrompt },

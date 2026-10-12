@@ -21,8 +21,15 @@
 //     not name loses the text written inside it. One that admits children
 //     goes to the correction round instead (the text may be meant for a
 //     child). Whitespace alone is never touched.
+//   - Part 3, values outside a closed list: an attribute whose value is not
+//     in its element's enumeration in this schema (frontMatterType="general"
+//     where 4.2 allows fm01…fm99) and that neither the rule nor the Proposal
+//     names gets the first allowed value. One they name is NEVER changed: a
+//     value outside the list may be exactly the example to be rejected.
 // The application's own elements (skeleton, minimal section, examples the
 // application assembles) are never in this text, so never touched.
+
+import { attributeEnum } from '../validation/schemaValidation.js';
 
 // Comments, CDATA (its text counts as text), processing instructions, a
 // doctype, and start/end tags.
@@ -177,6 +184,31 @@ export function removeDisallowedText(text, structure, { named = () => false } = 
   return { text: applyEdits(source, edits), removed };
 }
 
+// Part 3. → { text, replaced: [{ element, attribute, from, to }] }
+// `named(attribute)`: the rule or the Proposal names it.
+export function replaceDisallowedValues(text, structure, { named = () => false } = {}) {
+  const source = String(text ?? '');
+  const unchanged = { text: source, replaced: [] };
+  if (!structure?.models || !structure?.elements) return unchanged;
+  const elements = scanElements(source);
+  if (!elements) return unchanged;
+  const edits = [];
+  const replaced = [];
+  for (const el of elements) {
+    if (el.name.includes(':') || !structure.elements[el.name]) continue;
+    for (const a of el.attributes) {
+      if (a.name.includes(':') || !structure.elements[el.name].attributes.includes(a.name) || named(a.name)) continue;
+      const allowed = attributeEnum(structure, el.name, a.name);
+      if (!allowed || allowed.includes(a.value)) continue;
+      const to = allowed[0];
+      edits.push({ at: a.start, del: a.end - a.start, text: `${a.name}="${escapeAttribute(to)}"` });
+      replaced.push({ element: el.name, attribute: a.name, from: a.value, to });
+    }
+  }
+  if (!edits.length) return unchanged;
+  return { text: applyEdits(source, edits), replaced };
+}
+
 // The rule names it (its XPath: extractRuleNames) or the Proposal mentions
 // it as a word (with or without @) -- then it may be what is tested, and the
 // application leaves it to the LLM. Same reading as the "the schema already
@@ -196,10 +228,11 @@ export function namedByRuleOrProposal(ruleNames, proposal) {
 }
 
 // All the fixes of this module on one text, in order.
-// → { text, requiredAttributesAdded, textRemoved }
+// → { text, requiredAttributesAdded, textRemoved, valuesReplaced }
 export function applyExampleSchemaFixes(text, structure, named) {
-  if (text == null || !named || !structure?.models) return { text, requiredAttributesAdded: [], textRemoved: [] };
+  if (text == null || !named || !structure?.models) return { text, requiredAttributesAdded: [], textRemoved: [], valuesReplaced: [] };
   const attrs = addMissingRequiredAttributes(text, structure, { named: named.attribute });
   const bare = removeDisallowedText(attrs.text, structure, { named: named.ruleElement || named.element });
-  return { text: bare.text, requiredAttributesAdded: attrs.added, textRemoved: bare.removed };
+  const values = replaceDisallowedValues(bare.text, structure, { named: named.attribute });
+  return { text: values.text, requiredAttributesAdded: attrs.added, textRemoved: bare.removed, valuesReplaced: values.replaced };
 }

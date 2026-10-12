@@ -93,6 +93,7 @@ async def read_schema_structure(
         skeleton=data["skeleton"],
         elements=data["elements"],
         models=data["models"],
+        enum_lists=data.get("enum_lists", []),
     )
 
 

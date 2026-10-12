@@ -5267,6 +5267,42 @@
           "type": "rule_test_verdict_correct"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-default-pmcode-required-attributes",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Lo que la app arregla sola (BRDP-EXT-00127 of «Official Default S1000D 4.2 - 001»): three generations in a row the LLM wrote <pmCode>PM-001</pmCode> (text and no @modelIdentCode/@pmIssuer/@pmNumber/@pmVolume) and frontMatterType=\"general\"/\"tableOfContents\"/\"toc\" (allowed: fm01-fm99); no example could run. Now the application adds the required attributes, removes the text and puts fm01, with no correction round, and the verdict is correct.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-PMCODE",
+        "title": "Attributes of references in front matter",
+        "definition": "Decide on the attributes of references to publication modules in a front matter data module.",
+        "proposal": "Attributes @id, @authorityName and @authorityDocument must not be used for references to publication modules in a front matter data module.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00126\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//frontMatter[descendant-or-self::pmRef[attribute::id or attribute::authorityName or attribute::authorityDocument]]</objectPath>\n\t\t\t\t\t\t<objectUse>Attributes @id, @authorityName and @authorityDocument must not be used for  references to publication modules in a front matter data module  (Chap 3.9.5.2.16, Para 2.3.2.3.4)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_app_fixes",
+          "requiredAttributes": [
+            "pmCode"
+          ],
+          "textRemoved": [
+            "pmCode"
+          ],
+          "values": [
+            "frontMatterType"
+          ],
+          "noCorrection": true,
+          "note": "the app fixes the markup itself, no correction round"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
     }
   ]
 }

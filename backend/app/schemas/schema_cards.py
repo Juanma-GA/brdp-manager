@@ -89,6 +89,10 @@ class ContentModelOut(BaseModel):
     # Mejoras G, Part 1.1: {child: most occurrences} -- a child left out is
     # unbounded.
     max: dict[str, int] = {}
+    # Valores de lista cerrada: {attribute: index into
+    # SchemaStructureOut.enum_lists} for its attributes with a closed list of
+    # values (enumeration) in this schema.
+    enums: dict[str, int] = {}
 
 
 class MetadataNodeOut(BaseModel):
@@ -138,6 +142,9 @@ class SchemaStructureOut(BaseModel):
     # Each element's content model (order, required children, text, required
     # attributes) -- see rule_test_skeletons.schema_content_models.
     models: dict[str, ContentModelOut] = {}
+    # The closed lists of values the models' `enums` point to, each once
+    # (frontMatterType's fm01…fm99 is shared by every element that has it).
+    enum_lists: list[list[str]] = []
 
 
 class SchemaRelationSchemaOut(BaseModel):

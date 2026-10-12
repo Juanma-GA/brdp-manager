@@ -1787,8 +1787,8 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   });
   check('prepareRuleTestSetup: a para-derived schema gets no routes', prepStep.promptPlacements.every((pl) => pl.routes === null));
   const r19ok = run41(R19, [
-    { label: 'tools', expected: 'accept', schema: 'update', content: '<insertObjectGroup><insertObject insertionOrder="1" targetPath="/"><toolSpec><toolIdent manufacturerCodeValue="K0001" toolNumber="T-100"/></toolSpec></insertObject></insertObjectGroup>', metadata: tool('00N') },
-    { label: 'part', expected: 'reject', schema: 'update', content: '<insertObjectGroup><insertObject insertionOrder="1" targetPath="/"><partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/></partSpec></insertObject></insertObjectGroup>', metadata: tool('00N') },
+    { label: 'tools', expected: 'accept', schema: 'update', content: '<insertObjectGroup><insertObject insertionOrder="after" targetPath="/"><toolSpec><toolIdent manufacturerCodeValue="K0001" toolNumber="T-100"/></toolSpec></insertObject></insertObjectGroup>', metadata: tool('00N') },
+    { label: 'part', expected: 'reject', schema: 'update', content: '<insertObjectGroup><insertObject insertionOrder="after" targetPath="/"><partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/></partSpec></insertObject></insertObjectGroup>', metadata: tool('00N') },
   ], ['update']);
   const r19bad = run41(R19, [
     { label: 'straight in update', expected: 'reject', schema: 'update', content: '<insertObject><partSpec/></insertObject>', metadata: tool('00N') },
@@ -2055,7 +2055,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('boolean EXT-00019: section and content in the LLM\'s hands', p19.metadata.insertion === true && p19.contentInsertion === true, JSON.stringify({ m: p19.metadata.insertion, c: p19.contentInsertion }));
   const minU = metadataXml(u41.skeleton.metadata.tree).xml;
   const cir = (code) => minU.replace(/(<updateCode [^>]*)infoCode="040"/, `$1infoCode="${code}"`);
-  const insert = (el) => `<insertObjectGroup><insertObject insertionOrder="1" targetPath="/">${el}</insertObject></insertObjectGroup>`;
+  const insert = (el) => `<insertObjectGroup><insertObject insertionOrder="after" targetPath="/">${el}</insertObject></insertObjectGroup>`;
   const tool = insert('<toolSpec><toolIdent manufacturerCodeValue="K0001" toolNumber="T-100"/></toolSpec>');
   const part = insert('<partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/></partSpec>');
   const set19 = setupFor(S41, R19B, ['update']);
@@ -3734,6 +3734,72 @@ const AF = {};
   check('AF2 EXT-00127: one call, 4 runnable, correct', p2.asked.length === 1 && p2.g.runs.every((r) => r.validation.runnable) && p2.verdict?.kind === 'correct', JSON.stringify([p2.asked.length, p2.verdict, p2.g.runs?.map((r) => r.validation.structure)]));
   check('AF2 EXT-00127: text removed and said', p2.g.examples.every((e) => JSON.stringify(e.textRemoved) === '["pmCode"]' && /<pmCode modelIdentCode="EXAMPLE"[^>]*><\/pmCode>/.test(e.content)), p2.g.examples[0].content);
   check('AF2: unused fm helper', typeof fm === 'function');
+}
+
+// Part 3: values outside a closed list.
+{
+  const { replaceDisallowedValues, namedByRuleOrProposal } = await import('../src/utils/exampleSchemaFixes.js');
+  const { attributeEnum, compactValueList } = await import('../src/validation/schemaValidation.js');
+  const { runExample, materializeExample, validateExample } = await import('../src/utils/ruleTest.js');
+  const { frontmatter, descript, en, es, nobody, fm } = AF;
+  check('AF3: structure carries the closed list', JSON.stringify(attributeEnum(frontmatter, 'frontMatterList', 'frontMatterType')?.slice(0, 2)) === '["fm01","fm02"]' && attributeEnum(frontmatter, 'frontMatterList', 'frontMatterType').length === 99);
+  check('AF3: attribute without a closed list -> null', attributeEnum(frontmatter, 'pmCode', 'pmIssuer') === null);
+  check('AF3: long numbered list as a range', compactValueList(attributeEnum(frontmatter, 'frontMatterList', 'frontMatterType')).text === 'fm01–fm99');
+  check('AF3: short list as it is', JSON.stringify(compactValueList(['add', 'delete', 'modify'])) === '{"text":"add, delete, modify","more":0}');
+  const long = Array.from({ length: 25 }, (_, i) => `v${String.fromCharCode(97 + i)}`);
+  check('AF3: long list that is no sequence -> 20 and +N', JSON.stringify(compactValueList(long)) === JSON.stringify({ text: long.slice(0, 20).join(', '), more: 5 }));
+  const probs = (xml, opts) => checkExampleStructure(parseXml(xml), frontmatter, opts);
+  const general = '<frontMatter><frontMatterList frontMatterType="general"/></frontMatter>';
+  const p = probs(general).find((x) => x.kind === 'valueNotAllowed');
+  check('AF3: "general" reported', p && p.attribute === 'frontMatterType' && p.element === 'frontMatterList' && p.value === 'general', JSON.stringify(probs(general)));
+  check('AF3: text for the LLM', formatStructureProblem(p, 'frontmatter') === '@frontMatterType of <frontMatterList> has value "general"; allowed: fm01–fm99', formatStructureProblem(p, 'frontmatter'));
+  const issue = structureIssues([p], { schema: 'frontmatter' })[0];
+  check('AF3: panel EN', formatSchemaIssue(issue, en) === '@frontMatterType of <frontMatterList> has value "general"; allowed: fm01–fm99', formatSchemaIssue(issue, en));
+  check('AF3: panel ES', formatSchemaIssue(issue, es) === '@frontMatterType de <frontMatterList> vale "general"; valores permitidos: fm01–fm99', formatSchemaIssue(issue, es));
+  const cut = { kind: 'valueNotAllowed', element: 'x', attribute: 'y', value: 'z', allowed: 'a, b', more: 5 };
+  check('AF3: "+N more" EN/LLM', formatStructureProblem(cut, 's') === '@y of <x> has value "z"; allowed: a, b, +5 more' && formatSchemaIssue(structureIssues([cut], { schema: 's' })[0], en).endsWith('allowed: a, b, +5 more'));
+  check('AF3: "+N más" ES', formatSchemaIssue(structureIssues([cut], { schema: 's' })[0], es).endsWith('valores permitidos: a, b, +5 más'));
+  check('AF3: allowed value -> no warning', !probs('<frontMatter><frontMatterList frontMatterType="fm07"/></frontMatter>').some((x) => x.kind === 'valueNotAllowed'));
+  check('AF3: named attribute -> never warned', !probs(general, { ignoreValueOf: (a) => a === 'frontMatterType' }).some((x) => x.kind === 'valueNotAllowed'));
+  check('AF3: application element -> never warned', !probs(general, { skipPaths: ['/frontMatter[1]/frontMatterList[1]'] }).some((x) => x.kind === 'valueNotAllowed'));
+  check('AF3: free-text attribute -> never warned', !probs('<pmCode modelIdentCode="anything at all" pmIssuer="x" pmNumber="y" pmVolume="z"/>').some((x) => x.kind === 'valueNotAllowed'));
+  check('AF3: without models -> no warning', !checkExampleStructure(parseXml(general), { ...frontmatter, models: undefined }).some((x) => x.kind === 'valueNotAllowed'));
+
+  // The fix.
+  const fixed = replaceDisallowedValues(general, frontmatter, { named: nobody.attribute });
+  check('AF3: "general" replaced by the first allowed value', fixed.text === '<frontMatter><frontMatterList frontMatterType="fm01"/></frontMatter>' && JSON.stringify(fixed.replaced) === JSON.stringify([{ element: 'frontMatterList', attribute: 'frontMatterType', from: 'general', to: 'fm01' }]), JSON.stringify(fixed));
+  const keptNamed = replaceDisallowedValues(general, frontmatter, { named: namedByRuleOrProposal({}, 'The @frontMatterType shall be fm01.').attribute });
+  check('AF3: attribute named by the Proposal -> never changed', keptNamed.text === general);
+  // A value-list rule with an example to reject that uses a value outside
+  // the closed list: never changed, never reported, rejected by the rule.
+  const EMPH = '<structureObjectRule><objectPath allowedObjectFlag="2">//@emphasisType</objectPath><objectUse>Only em01 and em02.</objectUse><objectValue valueForm="single" valueAllowed="em01"/><objectValue valueForm="single" valueAllowed="em02"/></structureObjectRule>';
+  const emphSetup = setupFor('S1000D 4.2', EMPH, ['descript']);
+  for (const value of ['em05', 'bold']) {
+    const content = `Text <emphasis emphasisType="${value}">x</emphasis>.`;
+    const ex = materializeExample({ label: 'other value', expected: 'reject', schema: 'descript', content }, { ...emphSetup, rule: { ruleXml: EMPH, format: 'BREX-4.2', names: extractRuleNames(EMPH).elements, proposal: 'Only em01 and em02.' } }, parseXml);
+    check(`AF3: rule's own attribute value ${value} never changed`, ex.content === content && ex.valuesReplaced.length === 0, ex.content);
+    const run = runExample(EMPH, 'BREX-4.2', ex, { vocabulary, parseXml, proposal: 'Only em01 and em02.' });
+    check(`AF3: ${value} not reported, run and rejected`, run.validation.runnable && run.result?.status === 'rejected', JSON.stringify([run.validation.structure, run.result?.status]));
+  }
+  check('AF3: note EN', en('records.ruleTest.valuesReplaced', { count: 1, items: en('records.ruleTest.valueReplacedItem', { attribute: 'frontMatterType', from: 'general', to: 'fm01' }) }) === 'Adjusted by the app: changed @frontMatterType="general" to "fm01", which is an allowed value.');
+  check('AF3: note ES', es('records.ruleTest.valuesReplaced', { count: 1, items: es('records.ruleTest.valueReplacedItem', { attribute: 'frontMatterType', from: 'general', to: 'fm01' }) }) === 'Ajustado por la app: se cambió @frontMatterType="general" por "fm01", que es un valor permitido.');
+  // DITA, with its own models and closed lists.
+  const dita = structureOf('DITA 1.3 Xpath2.0', 'task');
+  const noteType = attributeEnum(dita, 'note', 'type');
+  check('AF3: DITA <note>/@type closed list', Array.isArray(noteType) && noteType.includes('caution'), JSON.stringify(noteType));
+  const ditaFix = replaceDisallowedValues('<note type="important-ish">x</note>', dita, { named: nobody.attribute });
+  check('AF3: DITA value replaced', ditaFix.text === `<note type="${noteType[0]}">x</note>`, ditaFix.text);
+  check('AF3: DITA value reported', checkExampleStructure(parseXml('<note type="important-ish">x</note>'), dita).some((x) => x.kind === 'valueNotAllowed'));
+
+  // EXT-00127 exactly as the LLM wrote it (three generations alike): every
+  // fix, the 4 examples valid, correct with no correction round.
+  const p3 = await AF.generate127([AF.ex127('<pmCode>PM-001</pmCode>', ['general', 'tableOfContents', 'toc', 'general'])]);
+  check('AF3 EXT-00127: one call, 4 runnable, correct', p3.asked.length === 1 && p3.g.runs.every((r) => r.validation.runnable) && p3.verdict?.kind === 'correct', JSON.stringify([p3.asked.length, p3.verdict, p3.g.runs?.map((r) => r.validation.structure)]));
+  check('AF3 EXT-00127: each example says what was fixed', p3.g.examples.every((e) => e.requiredAttributesAdded.length === 1 && e.textRemoved.length === 1 && e.valuesReplaced[0]?.to === 'fm01'), JSON.stringify(p3.g.examples.map((e) => e.valuesReplaced)));
+  // The same without the fixes (no rule in the setup): nothing could run.
+  const before = AF.ex127('<pmCode>PM-001</pmCode>', ['general', 'tableOfContents', 'toc', 'general']).examples.map((e) => materializeExample(e, { ...AF.setup127, rule: undefined }, parseXml));
+  check('AF3 EXT-00127 without the fixes: none valid', before.every((e) => !validateExample(e.xml, vocabulary, parseXml, e.structure, { skeletonNodePaths: e.skeletonNodePaths }).runnable));
+  check('AF3: unused helpers', typeof fm === 'function' && Boolean(descript));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

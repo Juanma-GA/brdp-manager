@@ -162,6 +162,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     namespacesRemoved,
     requiredAttributesAdded: mergeElementGroups([...contentFix.requiredAttributesAdded, ...metadataFix.requiredAttributesAdded]),
     textRemoved: [...new Set([...contentFix.textRemoved, ...metadataFix.textRemoved])],
+    valuesReplaced: [...contentFix.valuesReplaced, ...metadataFix.valuesReplaced],
   };
   const entry = schema ? setup.placements[schema] : null;
   if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
@@ -316,7 +317,7 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
   const reported = new Set(names.notFound.map((n) => n.replace(/^[<@]|>$/g, '')));
   const structureProblems = [
     ...(structure
-      ? checkExampleStructure(doc, structure, { skipPaths: options.skeletonNodePaths || [] }).filter(
+      ? checkExampleStructure(doc, structure, { skipPaths: options.skeletonNodePaths || [], ignoreValueOf: options.ignoreValueOf }).filter(
           (p) => !(p.kind === 'unknownElement' && reported.has(p.element))
         )
       : []),
@@ -665,7 +666,12 @@ function withRootSchema(reason, schema) {
 
 export function runExample(ruleXml, format, example, { vocabulary = null, parseXml = parseXmlDocument, schemaLocation = null, graph = null, proposal = '' } = {}) {
   const unknownSchema = example.unmaterialized ? example.schema || '(none)' : null;
+  // Part 3 (lo que la app puede arreglar sola): a value of an attribute the
+  // rule or the Proposal names is never checked against its closed list --
+  // a value outside it may be exactly the example meant to be rejected.
+  const ignoreValueOf = namedByRuleOrProposal(extractRuleNames(ruleXml), proposal).attribute;
   const validation = validateExample(example.xml, vocabulary, parseXml, example.structure || null, {
+    ignoreValueOf,
     unknownSchema,
     missingMetadata: example.missingMetadata || null,
     missingContent: example.missingContent === true,
@@ -681,7 +687,7 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     validation.files = example.files.map((f) => ({
       path: f.path,
       schema: f.schema || null,
-      validation: validateExample(f.xml ?? f.content, vocabulary, parseXml, f.structure || null),
+      validation: validateExample(f.xml ?? f.content, vocabulary, parseXml, f.structure || null, { ignoreValueOf }),
     }));
     validation.dossierProblems = dossierProblems(example.files, dossier.mainPath);
     validation.referenceWarnings = dossierReferenceWarnings(example.xml, example.files, parseXml, dossier.mainPath);

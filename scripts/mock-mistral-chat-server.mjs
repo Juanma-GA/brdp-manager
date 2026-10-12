@@ -857,6 +857,19 @@ function ruleTestReply(systemPrompt, messages) {
   // Part 2.3 (BRDP-EXT-00127): with the exact way, the <pmRef> goes in the
   // front matter list; without it, nowhere valid (a bare <pmRef> in
   // <frontMatter>).
+  // Lo que la app arregla sola (real case EXT-00127 of «Official Default
+  // S1000D 4.2 - 001", three generations in a row): <pmCode>PM-001</pmCode>
+  // (text, no required attributes) and frontMatterType values outside
+  // fm01-fm99. The application fixes all of it on its own; without that,
+  // no example could run.
+  if (/descendant-or-self::pmRef\[attribute::id/.test(rule) && /BRDP-EVAL-RT-PMCODE/.test(systemPrompt)) {
+    const fm = (attr, type) => `<frontMatter><frontMatterList frontMatterType="${type}"><frontMatterSubList><frontMatterPmEntry><pmRef${attr}><pmRefIdent><pmCode>PM-001</pmCode></pmRefIdent></pmRef></frontMatterPmEntry></frontMatterSubList></frontMatterList></frontMatter>`;
+    return answer([
+      { label: "Reference to a publication module without the attributes", expected: "accept", schema: ruleSchema || "frontmatter", content: fm("", "general") },
+      { label: "Reference to a publication module with @id", expected: "reject", schema: ruleSchema || "frontmatter", content: fm(' id="pm-0001"', "tableOfContents") },
+      { label: "Reference to a publication module with @authorityName", expected: "reject", schema: ruleSchema || "frontmatter", content: fm(' authorityName="Example authority"', "toc") },
+    ]);
+  }
   if (/descendant-or-self::pmRef\[attribute::id/.test(rule)) {
     const told = /write it by exactly this way: content\/frontMatter\/frontMatterList\/frontMatterSubList\/frontMatterPmEntry\/pmRef/.test(systemPrompt);
     const pmRef = (attr) => `<pmRef${attr}><pmRefIdent><pmCode modelIdentCode="EXAMPLE" pmIssuer="12345" pmNumber="00001" pmVolume="00"/></pmRefIdent></pmRef>`;

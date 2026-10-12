@@ -507,6 +507,7 @@ async def test_structure_endpoint_serves_the_content_models(client):
         "/api/schema-cards/structure", params={"standard": "S1000D 4.2", "schema": "descript"}, headers=_headers(user)
     )
     models = res.json()["models"]
+    enums = models["dataRestrictions"].pop("enums")
     assert models["dataRestrictions"] == {
         "order": ["restrictionInstructions", "restrictionInfo"],
         "required": ["restrictionInstructions"],
@@ -514,11 +515,38 @@ async def test_structure_endpoint_serves_the_content_models(client):
         "attributes": [],
         "max": {"restrictionInstructions": 1, "restrictionInfo": 1},
     }
+    # Its attributes with a closed list of values (indexes into enum_lists).
+    assert sorted(enums) == ["caveat", "changeType", "commercialClassification", "securityClassification"]
     assert models["dmStatus"]["required"][3] == ["applic", "applicRef"]
     res = await client.get(
         "/api/schema-cards/structure", params={"standard": "S1000D 5.0", "schema": "descript"}, headers=_headers(user)
     )
     assert res.json()["models"] == {}
+
+
+@pytest.mark.asyncio
+async def test_structure_endpoint_serves_the_closed_lists_of_values(client):
+    """Test de reglas: lo que la app puede arreglar sola, Part 3: each closed
+    list once in enum_lists, each model pointing at it by index."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "S1000D 4.2", "schema": "frontmatter"}, headers=_headers(user)
+    )
+    data = res.json()
+    lists = data["enum_lists"]
+    index = data["models"]["frontMatterList"]["enums"]["frontMatterType"]
+    assert lists[index] == [f"fm{n:02d}" for n in range(1, 100)]
+    assert "pmIssuer" not in data["models"]["pmCode"]["enums"]  # free text: no list
+    assert len({tuple(v) for v in lists}) == len(lists)  # each list once
+    # Every index points at a real list.
+    for model in data["models"].values():
+        for i in model["enums"].values():
+            assert 0 <= i < len(lists)
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "DITA 1.3 Xpath2.0", "schema": "task"}, headers=_headers(user)
+    )
+    data = res.json()
+    assert "caution" in data["enum_lists"][data["models"]["note"]["enums"]["type"]]
 
 
 # ─── Mejoras C, Part 1: the whole standard's graph (paths that cannot exist) ──
