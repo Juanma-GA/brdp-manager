@@ -3594,5 +3594,100 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('RA: exampleProblems used', typeof exampleProblems === 'function' && typeof validateExample === 'function');
 }
 
+// ---- Test de reglas: lo que la app puede arreglar sola en los ejemplos.
+// Real case BRDP-EXT-00127 («Official Default S1000D 4.2 - 001»): the LLM
+// wrote <pmCode>PM-001</pmCode> (no required attributes, text in an empty
+// element) and frontMatterType="general" (4.2 only allows fm01…fm99). The
+// real structures and the rule verbatim from the default BREX.
+const AF = {};
+{
+  const { ruleTestVerdict, materializeExample } = await import('../src/utils/ruleTest.js');
+  const { addMissingRequiredAttributes, namedByRuleOrProposal, scanElements } = await import('../src/utils/exampleSchemaFixes.js');
+  const { materializeDossierFiles } = await import('../src/utils/ruleTestDossier.js');
+  const S42 = 'S1000D 4.2';
+  const en = i18n.getFixedT('en');
+  const es = i18n.getFixedT('es');
+  const frontmatter = structureOf(S42, 'frontmatter');
+  const descript = structureOf(S42, 'descript');
+  const DEFAULT42 = JSON.parse(fs.readFileSync(new URL('./rule-test-fixtures/default-brex-4-2.json', import.meta.url))).rules;
+  const EXT127 = DEFAULT42['BRDP-EXT-00127'].rule_xml;
+  const P127 = 'Attributes @id, @authorityName and @authorityDocument must not be used for references to publication modules in a front matter data module.';
+  const nobody = namedByRuleOrProposal({ attributes: [], elements: [] }, '');
+  Object.assign(AF, { S42, en, es, frontmatter, descript, EXT127, P127, nobody, ruleTestVerdict, materializeExample, scanElements });
+
+  // Part 1, unit: required attributes added with their neutral values.
+  const one = addMissingRequiredAttributes('<pmRefIdent><pmCode/></pmRefIdent>', frontmatter, { named: nobody.attribute });
+  check('AF1: <pmCode/> gets its 4 required attributes', one.text === '<pmRefIdent><pmCode modelIdentCode="EXAMPLE" pmIssuer="12345" pmNumber="00001" pmVolume="00"/></pmRefIdent>', one.text);
+  check('AF1: reported per element', JSON.stringify(one.added) === JSON.stringify([{ element: 'pmCode', attributes: ['modelIdentCode', 'pmIssuer', 'pmNumber', 'pmVolume'] }]), JSON.stringify(one.added));
+  const partial = addMissingRequiredAttributes('<pmCode  pmIssuer="ABCDE" >x</pmCode>', frontmatter, { named: nobody.attribute });
+  check('AF1: present attribute kept, only the missing ones added, spacing kept', partial.text === '<pmCode  pmIssuer="ABCDE" modelIdentCode="EXAMPLE" pmNumber="00001" pmVolume="00" >x</pmCode>', partial.text);
+  const complete = '<pmCode modelIdentCode="A" pmIssuer="B" pmNumber="C" pmVolume="D"/>';
+  check('AF1: nothing missing -> text byte for byte', addMissingRequiredAttributes(complete, frontmatter, { named: nobody.attribute }).text === complete);
+  const named = namedByRuleOrProposal(extractRuleNames('<structureObjectRule><objectPath allowedObjectFlag="0">//pmCode[@pmIssuer = "X"]</objectPath></structureObjectRule>'), '');
+  const byRule = addMissingRequiredAttributes('<pmCode/>', frontmatter, { named: named.attribute });
+  check('AF1: attribute named by the rule never added', byRule.text === '<pmCode modelIdentCode="EXAMPLE" pmNumber="00001" pmVolume="00"/>', byRule.text);
+  const byProposal = addMissingRequiredAttributes('<pmCode/>', frontmatter, { named: namedByRuleOrProposal({}, 'The @pmVolume shall be 00.').attribute });
+  check('AF1: attribute named by the Proposal never added', !/pmVolume/.test(byProposal.text) && /pmNumber/.test(byProposal.text), byProposal.text);
+  const noValue = addMissingRequiredAttributes('<para><parameter/></para>', descript, { named: nobody.attribute });
+  check('AF1: required attribute without a neutral value (xs:ID) -> untouched', noValue.text === '<para><parameter/></para>' && noValue.added.length === 0, JSON.stringify(noValue));
+  check('AF1: malformed text -> untouched', addMissingRequiredAttributes('<pmCode>', frontmatter, { named: nobody.attribute }).text === '<pmCode>');
+  check('AF1: prefixed element -> untouched', addMissingRequiredAttributes('<x:pmCode/>', frontmatter, { named: nobody.attribute }).text === '<x:pmCode/>');
+  check('AF1: scanElements text spans (CDATA counts)', scanElements('<a>t<![CDATA[u]]><b/></a>')[0].textSpans.map((t) => t.value).join('') === 'tu');
+  const dita = structureOf('DITA 1.3 Xpath2.0', 'task');
+  const ditaFix = addMissingRequiredAttributes('<p><tm>X</tm></p>', dita, { named: nobody.attribute });
+  check('AF1: DITA <tm> gets @tmtype', ditaFix.text === '<p><tm tmtype="reg">X</tm></p>', ditaFix.text);
+
+  // Part 1 through materializeExample: only the LLM's text.
+  const fm = (pmCode, type = 'fm01', attr = '') => `<frontMatter><frontMatterList frontMatterType="${type}"><frontMatterSubList><frontMatterPmEntry><pmRef${attr}><pmRefIdent>${pmCode}</pmRefIdent></pmRef></frontMatterPmEntry></frontMatterSubList></frontMatterList></frontMatter>`;
+  const setup127 = await prepareRuleTestSetup({ ruleXml: EXT127, standard: S42, schemaLocation: 'flat', format: 'BREX-4.2', parseXml,
+    fetchSchemaCards: async () => ({ cards: {}, document_schemas: ['frontmatter'] }),
+    fetchStructure: async (std, sc) => { const st = structureOf(std, sc); return st ? { available: true, ...st } : { available: false }; } });
+  const setup = { ...setup127.setup, rule: { ruleXml: EXT127, format: 'BREX-4.2', names: extractRuleNames(EXT127).elements, proposal: P127 } };
+  AF.setup127 = setup;
+  AF.fm = fm;
+  const m = materializeExample({ label: 'a', expected: 'accept', schema: 'frontmatter', content: fm('<pmCode/>') }, setup, parseXml);
+  check('AF1: materialize adds the attributes and says so', /<pmCode modelIdentCode="EXAMPLE" pmIssuer="12345" pmNumber="00001" pmVolume="00"\/>/.test(m.content) && m.requiredAttributesAdded.length === 1, JSON.stringify(m.requiredAttributesAdded));
+  const skeletonUntouched = m.xml.includes('<dmodule') && !/<dmodule[^>]*modelIdentCode/.test(m.xml);
+  check('AF1: the skeleton is never touched', skeletonUntouched);
+  const noRule = materializeExample({ label: 'a', expected: 'accept', schema: 'frontmatter', content: fm('<pmCode/>') }, { ...setup, rule: undefined }, parseXml);
+  check('AF1: without the rule nothing is fixed', /<pmCode\/>/.test(noRule.content) && noRule.requiredAttributesAdded.length === 0);
+  const n1 = en('records.ruleTest.requiredAttributesAdded', { count: 4, items: en('records.ruleTest.schemaFixItem', { attributes: '@modelIdentCode, @pmIssuer, @pmNumber, @pmVolume', element: 'pmCode' }) });
+  check('AF1: note EN', n1 === 'Adjusted by the app: added the required attributes @modelIdentCode, @pmIssuer, @pmNumber, @pmVolume on <pmCode>.', n1);
+  const n2 = es('records.ruleTest.requiredAttributesAdded', { count: 4, items: es('records.ruleTest.schemaFixItem', { attributes: '@modelIdentCode, @pmIssuer, @pmNumber, @pmVolume', element: 'pmCode' }) });
+  check('AF1: note ES', n2 === 'Ajustado por la app: se añadieron los atributos obligatorios @modelIdentCode, @pmIssuer, @pmNumber, @pmVolume en <pmCode>.', n2);
+  check('AF1: note ES singular', es('records.ruleTest.requiredAttributesAdded', { count: 1, items: '@x en <y>' }) === 'Ajustado por la app: se añadió el atributo obligatorio @x en <y>.');
+  // DITA dossier files get the same fix; a @cols added is then raised.
+  const ditaStructures = { task: dita, topic: structureOf('DITA 1.3 Xpath2.0', 'topic') };
+  const files = materializeDossierFiles([{ path: 'a.dita', content: '<topic id="t"><title>T</title><body><p><tm>X</tm></p><table><tgroup><tbody><row><entry>1</entry><entry>2</entry></row></tbody></tgroup></table></body></topic>' }], ditaStructures, parseXml, { named: nobody });
+  check('AF1: dossier file fixed, @cols raised to the real columns', /<tm tmtype="reg">/.test(files[0].content) && /<tgroup cols="2">/.test(files[0].content) && files[0].requiredAttributesAdded.length === 2, files[0].content);
+
+  // EXT-00127 through the generation, <pmCode/> without its attributes: one
+  // call, every example run, correct.
+  const cards42 = JSON.parse(fs.readFileSync(new URL('../backend/schema_cards/schema-cards-4-2.json', import.meta.url))).cards;
+  AF.io = {
+    fetchSchemaCards: async (_s, names) => ({ cards: Object.fromEntries(names.filter((n) => cards42[n]).map((n) => [n, { variants: cards42[n] }])), document_schemas: ['frontmatter', 'descript', 'proced'] }),
+    fetchStructure: async (std, sc) => { const st = structureOf(std, sc); return st ? { available: true, ...st } : { available: false }; },
+  };
+  AF.generate127 = async (answers, proposal = P127) => {
+    const asked = [];
+    const g = await generateRuleTestExamples({
+      ruleXml: EXT127, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat', vocabulary, parseXml,
+      brdp: { identifier: 'BRDP-EXT-00127', title: 't', definition: 'd', proposal },
+      ask: async (messages) => { asked.push(messages); return JSON.stringify(answers[Math.min(asked.length - 1, answers.length - 1)]); }, ...AF.io,
+    });
+    return { g, asked, verdict: g.runs ? ruleTestVerdict(g.examples, g.runs, analyzeRule(EXT127, 'BREX-4.2', { parseXml })) : null };
+  };
+  const ex127 = (pmCode, types) => ({ examples: [
+    { label: 'plain reference', expected: 'accept', schema: 'frontmatter', content: fm(pmCode, types[0]) },
+    { label: 'with @id', expected: 'reject', schema: 'frontmatter', content: fm(pmCode, types[1], ' id="pm-1"') },
+    { label: 'with @authorityName', expected: 'reject', schema: 'frontmatter', content: fm(pmCode, types[2], ' authorityName="X"') },
+    { label: 'another plain reference', expected: 'accept', schema: 'frontmatter', content: fm(pmCode, types[3]) },
+  ] });
+  AF.ex127 = ex127;
+  const p1 = await AF.generate127([ex127('<pmCode/>', ['fm01', 'fm02', 'fm03', 'fm04'])]);
+  check('AF1 EXT-00127: one call, 4 runnable, correct', p1.asked.length === 1 && p1.g.runs.every((r) => r.validation.runnable) && p1.verdict?.kind === 'correct', JSON.stringify([p1.asked.length, p1.verdict, p1.g.runs?.map((r) => r.validation.structure)]));
+  check('AF1 EXT-00127: every example says what was added', p1.g.examples.every((e) => e.requiredAttributesAdded?.[0]?.element === 'pmCode'));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

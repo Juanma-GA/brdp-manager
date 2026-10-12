@@ -1673,8 +1673,13 @@ function calsColspecPlans(doc) {
     }
     const declared = new Set(existing.map((c) => c.name).filter(Boolean));
     const used = [];
+    // Each entry of a row takes at least one column, so no row has more
+    // entries than the table has columns (a lower bound that holds with or
+    // without colnames and spans).
+    let widestRow = 0;
     for (const section of ['thead', 'tbody', 'tfoot'].flatMap((n) => childrenNamed(tgroup, n))) {
       for (const row of childrenNamed(section, 'row')) {
+        widestRow = Math.max(widestRow, childrenNamed(row, 'entry').length);
         for (const entry of childrenNamed(row, 'entry')) {
           for (const attr of ['colname', 'namest', 'nameend']) {
             const name = entry.getAttribute(attr);
@@ -1704,7 +1709,7 @@ function calsColspecPlans(doc) {
     const cols = Number.parseInt(tgroup.getAttribute('cols') || '', 10);
     if (Number.isFinite(cols) && cols > 0) {
       const distinct = new Set([...existing.map((c) => c.name || `#${c.position}`), ...used]).size;
-      const columns = Math.max(distinct, ...existing.map((c) => c.position), ...missing.map((c) => c.position), 0);
+      const columns = Math.max(distinct, widestRow, ...existing.map((c) => c.position), ...missing.map((c) => c.position), 0);
       if (columns > cols) problems.push({ kind: 'tooManyColumns', columns, cols });
     }
     missing.sort((a, b) => a.position - b.position);

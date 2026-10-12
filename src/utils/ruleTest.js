@@ -33,6 +33,7 @@ import {
 import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
+import { applyExampleSchemaFixes, namedByRuleOrProposal } from './exampleSchemaFixes.js';
 import {
   DOSSIER_MAIN_PATH,
   dossierForEngine,
@@ -107,6 +108,27 @@ export function stripDefaultNamespace(text) {
   return { text: removed.length ? out + source.slice(last) : source, removed };
 }
 
+// What the rule and its Proposal name (exampleSchemaFixes.js), or null when
+// the setup carries no rule.
+function exampleNamed(setup) {
+  if (!setup?.rule?.ruleXml) return null;
+  return namedByRuleOrProposal(extractRuleNames(setup.rule.ruleXml), setup.rule.proposal);
+}
+
+// [{ element, attributes }] groups merged by element (content + section).
+export function mergeElementGroups(groups) {
+  const out = [];
+  for (const g of groups || []) {
+    const found = out.find((o) => o.element === g.element);
+    if (!found) {
+      out.push({ element: g.element, attributes: [...g.attributes] });
+      continue;
+    }
+    for (const a of g.attributes) if (!found.attributes.includes(a)) found.attributes.push(a);
+  }
+  return out;
+}
+
 export function materializeExample(example, setup, parseXml = parseXmlDocument) {
   const offered = Object.keys(setup.placements || {});
   const schema = example.schema || (offered.length === 1 ? offered[0] : null);
@@ -116,8 +138,17 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   const contentNs = s1000d ? stripDefaultNamespace(example.content) : { text: example.content, removed: [] };
   const metadataNs = s1000d && example.metadata != null ? stripDefaultNamespace(example.metadata) : { text: example.metadata, removed: [] };
   const namespacesRemoved = [...new Set([...contentNs.removed, ...metadataNs.removed])];
-  if (metadataNs.removed.length) example = { ...example, metadata: metadataNs.text };
-  const withColspecs = addMissingCalsColspecs(contentNs.text, parseXml);
+  // Test de reglas: lo que la app puede arreglar sola (exampleSchemaFixes.js)
+  // -- in the LLM's text only (content and section), never the skeleton --
+  // before the table fixes, so a @cols the application adds is then raised
+  // to the columns the table really uses. Without the rule (and its
+  // Proposal) the application cannot tell what is tested: nothing is fixed.
+  const named = exampleNamed(setup);
+  const fixStructure = schema ? setup.placements?.[schema]?.structure : null;
+  const contentFix = applyExampleSchemaFixes(contentNs.text, fixStructure, named);
+  const metadataFix = applyExampleSchemaFixes(metadataNs.text, fixStructure, named);
+  if (metadataNs.removed.length || metadataFix.text !== metadataNs.text) example = { ...example, metadata: metadataFix.text };
+  const withColspecs = addMissingCalsColspecs(contentFix.text, parseXml);
   const rowSpans = fixCalsRowSpans(withColspecs.content, parseXml);
   const { content, removedRows } = removeSpannedCalsEntries(rowSpans.content, parseXml);
   const adjusted = {
@@ -129,6 +160,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     emptyRowsRemoved: rowSpans.emptyRowsRemoved,
     spannedEntriesRemoved: removedRows,
     namespacesRemoved,
+    requiredAttributesAdded: mergeElementGroups([...contentFix.requiredAttributesAdded, ...metadataFix.requiredAttributesAdded]),
   };
   const entry = schema ? setup.placements[schema] : null;
   if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
@@ -220,7 +252,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   // Dosier, Part 2: the other files of the example's dossier, each with the
   // same fixes and the structure of its own type.
   const dossier = setup.dossier
-    ? { mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: materializeDossierFiles(example.files || [], setup.dossier.structures, parseXml) }
+    ? { mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: materializeDossierFiles(example.files || [], setup.dossier.structures, parseXml, { named }) }
     : null;
   // Remates: the levels above the insertion point where the content could
   // be written instead (skeletonLiftLevels) -- only for the diagnosis of an

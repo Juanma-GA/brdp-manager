@@ -339,6 +339,7 @@ function DocumentFixNotes({ doc }) {
         </p>
       )}
       {doc.colspecsAdded > 0 && <ColspecsAddedNote count={doc.colspecsAdded} />}
+      <SchemaFixNotes doc={doc} />
       {doc.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={doc.spannedEntriesRemoved} />}
       {doc.colsRaised?.length > 0 && <TableFixNote testId="rule-test-cols-raised" text={t('records.ruleTest.colsRaised', { count: doc.colsRaised.length, values: doc.colsRaised.map((c) => `${c.from} → ${c.to}`).join(', ') })} />}
       {doc.morerowsLowered?.length > 0 && <TableFixNote testId="rule-test-morerows-lowered" text={t('records.ruleTest.morerowsLowered', { count: doc.morerowsLowered.length, rows: [...new Set(doc.morerowsLowered)].join(', ') })} />}
@@ -433,6 +434,27 @@ function TableFixNote({ text, testId }) {
   );
 }
 
+// Test de reglas: lo que la app puede arreglar sola (exampleSchemaFixes.js)
+// -- what the application fixed in the markup the LLM wrote.
+function SchemaFixNotes({ doc }) {
+  const { t } = useTranslation();
+  const added = doc.requiredAttributesAdded || [];
+  const count = added.reduce((n, g) => n + g.attributes.length, 0);
+  return (
+    <>
+      {count > 0 && (
+        <TableFixNote
+          testId="rule-test-required-attributes-added"
+          text={t('records.ruleTest.requiredAttributesAdded', {
+            count,
+            items: added.map((g) => t('records.ruleTest.schemaFixItem', { attributes: g.attributes.map((a) => `@${a}`).join(', '), element: g.element })).join('; '),
+          })}
+        />
+      )}
+    </>
+  );
+}
+
 // readOnly (Guardar la prueba aprobada): a kept example -- no Edit, only
 // Copy XML.
 // previousResult ("Probar con los ejemplos guardados"): the result this
@@ -518,6 +540,7 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
       )}
       {example.namespacesRemoved?.length > 0 && <TableFixNote testId="rule-test-namespace-removed" text={t('records.ruleTest.namespaceRemoved', { namespace: example.namespacesRemoved.join('", "') })} />}
       {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
+      <SchemaFixNotes doc={example} />
       {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}
       {example.colsRaised?.length > 0 && <TableFixNote testId="rule-test-cols-raised" text={t('records.ruleTest.colsRaised', { count: example.colsRaised.length, values: example.colsRaised.map((c) => `${c.from} → ${c.to}`).join(', ') })} />}
       {example.morerowsLowered?.length > 0 && <TableFixNote testId="rule-test-morerows-lowered" text={t('records.ruleTest.morerowsLowered', { count: example.morerowsLowered.length, rows: [...new Set(example.morerowsLowered)].join(', ') })} />}

@@ -20,6 +20,7 @@
 import { DOSSIER_BASE_URI, DOSSIER_MAX_FILES, dossierUri } from './ruleTestSchematron.js';
 import { addMissingCalsColspecs, fixCalsRowSpans, removeSpannedCalsEntries } from '../validation/schemaValidation.js';
 import { relocateMisplacedElements } from './schemaPlacement.js';
+import { applyExampleSchemaFixes } from './exampleSchemaFixes.js';
 
 export { DOSSIER_MAX_FILES };
 // The ditamap's path inside the dossier folder (the main document).
@@ -62,9 +63,15 @@ export async function loadDossierStructures(standard, fetchStructure) {
 // files: [{ path, content }] as the LLM wrote them →
 // [{ path, content, xml, schema, root, structure, colspecsAdded, colsRaised,
 //    morerowsLowered, emptyRowsRemoved, spannedEntriesRemoved, relocated }]
-export function materializeDossierFiles(files, structures, parseXml) {
+export function materializeDossierFiles(files, structures, parseXml, { named = null } = {}) {
   return (files || []).map((file) => {
-    const withColspecs = addMissingCalsColspecs(file.content, parseXml);
+    // Test de reglas: lo que la app puede arreglar sola (exampleSchemaFixes.js),
+    // before the table fixes (as in a document example); the file's type comes
+    // from its root as written.
+    const firstRoot = rootName(file.content, parseXml);
+    const firstStructure = firstRoot && DOSSIER_FILE_TYPES.includes(firstRoot) ? structures?.[firstRoot] || null : null;
+    const fixes = applyExampleSchemaFixes(file.content, firstStructure, named);
+    const withColspecs = addMissingCalsColspecs(fixes.text, parseXml);
     const rowSpans = fixCalsRowSpans(withColspecs.content, parseXml);
     const { content: fixed, removedRows } = removeSpannedCalsEntries(rowSpans.content, parseXml);
     const root = rootName(fixed, parseXml);
@@ -80,6 +87,7 @@ export function materializeDossierFiles(files, structures, parseXml) {
       }
     }
     return {
+      requiredAttributesAdded: fixes.requiredAttributesAdded,
       path: normalizeDossierPath(file.path),
       content,
       xml: content,
