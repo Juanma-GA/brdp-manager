@@ -70,6 +70,7 @@ from app.db.base import async_session_factory
 from app.models import BRDP, BRDPCatalog, BRDPHistory, ImportJob, Project, RuleApproval, User
 from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER
 from app.schemas.brdp_import import ImportRowIn, ImportRowResult
+from app.services.excel_io import OMITTED_CELL_MARKER
 from app.services.history import record_change
 from app.services.rule_extract_jobs import _edition_version, load_other_edition_catalogs, other_edition_entry
 from app.services.rule_formats import STANDARD_TO_RULE_FORMAT
@@ -187,6 +188,7 @@ def _classify_row(
     catalog_entry: BRDPCatalog | None,
     catalog_edition: str | None = None,
     project_standard: str | None = None,
+    omitted: dict | None = None,
 ) -> ImportRowResult:
     """Pure function, no DB access -- every business rule from the docs
     request lives here, in the exact priority order confirmed with the
@@ -205,14 +207,23 @@ def _classify_row(
     the file has nothing perceptible to warn about.
     """
     identifier = row.identifier.strip()
+    # The omitted-cell marker (resolve_omitted_cells): fields kept as stored
+    # and fields ignored, reported on every outcome of the row.
+    omitted = omitted or {"kept": [], "ignored": []}
+    omitted_fields = {"omitted_kept": omitted["kept"], "omitted_ignored": omitted["ignored"]}
+    # The Rule cell held the marker and the stored rule stands in for it:
+    # it is the rule already in the app, kept exactly as it is -- never
+    # re-checked as if it came from the file, never written.
+    rule_from_store = "Rule" in omitted["kept"]
     if not identifier:
-        return ImportRowResult(row_number=row.row_number, identifier="", outcome="rejected", reason="Missing identifier", reason_code="missing_identifier")
+        return ImportRowResult(row_number=row.row_number, identifier="", outcome="rejected", reason="Missing identifier", reason_code="missing_identifier", **omitted_fields)
 
     rule_status = row.rule_status
     rule_xml = row.rule.strip()
 
     if rule_status not in _VALID_RULE_STATUSES:
         return ImportRowResult(
+            **omitted_fields,
             row_number=row.row_number,
             identifier=identifier,
             outcome="rejected",
@@ -229,6 +240,7 @@ def _classify_row(
     # silently ignored.
     if rule_format is None and (rule_xml or rule_status != "To Do"):
         return ImportRowResult(
+            **omitted_fields,
             row_number=row.row_number,
             identifier=identifier,
             outcome="rejected",
@@ -236,10 +248,11 @@ def _classify_row(
             reason_code="no_rule_format",
         )
 
-    if rule_xml:
+    if rule_xml and not rule_from_store:
         xml_error = _xml_well_formed_error(rule_xml)
         if xml_error is not None:
             return ImportRowResult(
+                **omitted_fields,
                 row_number=row.row_number,
                 identifier=identifier,
                 outcome="rejected",
@@ -247,8 +260,10 @@ def _classify_row(
                 reason_code="rule_not_well_formed",
                 reason_params={"error": xml_error},
             )
+    if rule_xml:
         if rule_status == "To Do":
             return ImportRowResult(
+                **omitted_fields,
                 row_number=row.row_number,
                 identifier=identifier,
                 outcome="rejected",
@@ -257,6 +272,7 @@ def _classify_row(
             )
     elif rule_status in ("Draft", "Verified"):
         return ImportRowResult(
+            **omitted_fields,
             row_number=row.row_number,
             identifier=identifier,
             outcome="rejected",
@@ -315,6 +331,7 @@ def _classify_row(
         # _rule_state can only return "draft"/"verified" here -- "todo" is
         # exactly the absence of a row, and existing_approval is not None.
         return ImportRowResult(
+            **omitted_fields,
             row_number=row.row_number,
             identifier=identifier,
             outcome="conflict",
@@ -342,11 +359,12 @@ def _classify_row(
         action == "update"
         and existing_approval is not None
         and bool(rule_xml)
-        and same_rule(existing_approval.rule_xml, rule_xml, rule_format)
+        and (rule_from_store or same_rule(existing_approval.rule_xml, rule_xml, rule_format))
     )
     rule_override = action == "update" and existing_approval is not None and bool(rule_xml) and not rule_kept
 
     return ImportRowResult(
+        **omitted_fields,
         row_number=row.row_number,
         identifier=identifier,
         outcome="ok",
@@ -395,6 +413,60 @@ async def _load_existing(
     return existing_brdps, existing_approvals
 
 
+# Columns whose text can be over Excel's cell limit, so the export may have
+# written the omitted-cell marker in their place (header -> ImportRowIn
+# field). Proposal Status / Rule Status / ID are short by definition.
+_OMITTABLE_COLUMNS = (("Title", "title"), ("Definition", "definition"), ("Proposal", "proposal"), ("Rule", "rule"))
+
+
+def resolve_omitted_cells(
+    rows: list[ImportRowIn],
+    existing_brdps: dict[str, BRDP],
+    existing_approvals: dict[uuid.UUID, RuleApproval],
+) -> tuple[list[ImportRowIn], dict[int, dict]]:
+    """A cell holding exactly excel_io.OMITTED_CELL_MARKER (the export wrote
+    it because the text was over Excel's limit) means "this field is not in
+    the file; keep the app's". Each such field is replaced by what is
+    stored, so the rest of the import sees the app's value -- never a
+    change, never written (Title/Definition/Proposal equal to the stored
+    ones; the Rule kept as it is). With nothing stored (a new row, or a
+    Rule for a BRDP that has no rule yet for the format) the field is
+    imported empty, and an ignored Rule also drops the row's Rule Status to
+    "To Do" -- there is no rule to claim. A cell that is not exactly the
+    marker (edited) is an ordinary value: no guessing.
+
+    Returns the rows to classify and apply, and row_number -> {"kept":
+    [headers], "ignored": [headers]} for the rows that held the marker."""
+    resolved: list[ImportRowIn] = []
+    info: dict[int, dict] = {}
+    for row in rows:
+        marked = [(header, field) for header, field in _OMITTABLE_COLUMNS if getattr(row, field) == OMITTED_CELL_MARKER]
+        if not marked:
+            resolved.append(row)
+            continue
+        brdp = existing_brdps.get(row.identifier.strip())
+        approval = existing_approvals.get(brdp.id) if brdp is not None else None
+        updates: dict = {}
+        kept: list[str] = []
+        ignored: list[str] = []
+        for header, field in marked:
+            if field == "rule":
+                stored = approval.rule_xml if approval is not None else None
+            else:
+                stored = getattr(brdp, field) if brdp is not None else None
+            if stored is not None:
+                updates[field] = stored
+                kept.append(header)
+            else:
+                updates[field] = ""
+                ignored.append(header)
+                if field == "rule" and row.rule_status in ("Draft", "Verified"):
+                    updates["rule_status"] = "To Do"
+        resolved.append(row.model_copy(update=updates))
+        info[row.row_number] = {"kept": kept, "ignored": ignored}
+    return resolved, info
+
+
 async def _load_catalog(
     rows: list[ImportRowIn], catalog_standard: str, db: AsyncSession
 ) -> dict[str, BRDPCatalog]:
@@ -415,16 +487,20 @@ async def _load_catalog(
 async def analyze_rows(
     project_id: uuid.UUID, rows: list[ImportRowIn], db: AsyncSession
 ) -> tuple[
-    Project, str | None, list[ImportRowResult], dict[str, BRDP], dict[uuid.UUID, RuleApproval], dict[str, BRDPCatalog], dict[str, str]
+    Project, str | None, list[ImportRowResult], dict[str, BRDP], dict[uuid.UUID, RuleApproval], dict[str, BRDPCatalog],
+    dict[str, str], list[ImportRowIn],
 ]:
-    """The last two values: identifier → catalog row whose Title/Definition
-    the import writes (the project's own catalog, or, for an official
+    """Catalog values: identifier → catalog row whose Title/Definition the
+    import writes (the project's own catalog, or, for an official
     identifier it does not have, the closest other S1000D edition's -- as
     AI Extract's "From catalog (S1000D 4.1)"), and identifier → that other
-    edition, only for the latter."""
+    edition, only for the latter. The last value: the rows as classified,
+    an omitted-cell marker already replaced by the stored value
+    (resolve_omitted_cells) -- what the apply must write."""
     project = await _get_owned_project(project_id, db)
     rule_format = STANDARD_TO_RULE_FORMAT.get(project.standard)
     existing_brdps, existing_approvals = await _load_existing(project_id, rows, rule_format, db)
+    rows, omitted_by_row = resolve_omitted_cells(rows, existing_brdps, existing_approvals)
     catalog_by_identifier = await _load_catalog(rows, project.standard, db)
     # One more batch query, for every row together: the other editions'
     # catalogs (S1000D projects only; never EXT or another specification).
@@ -448,9 +524,13 @@ async def analyze_rows(
             _classify_row(
                 row, rule_format, existing_brdp, existing_approval, catalog_entry,
                 edition_by_identifier.get(identifier), project.standard,
+                omitted_by_row.get(row.row_number),
             )
         )
-    return project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier, edition_by_identifier
+    return (
+        project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier,
+        edition_by_identifier, rows,
+    )
 
 
 async def _brdps_with_edition_event(brdp_ids: list[uuid.UUID], db: AsyncSession) -> set[tuple[uuid.UUID, str]]:
@@ -585,7 +665,10 @@ async def run_import_job(
     work_session = async_session_factory()
     try:
         editor = await work_session.get(User, started_by)
-        project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier, edition_by_identifier = (
+        # `rows` as classified: an omitted-cell marker already replaced by the
+        # stored value (resolve_omitted_cells), so the writes below never
+        # see the marker.
+        project, rule_format, results, existing_brdps, existing_approvals, catalog_by_identifier, edition_by_identifier, rows = (
             await analyze_rows(project_id, rows, work_session)
         )
         rows_by_number = {r.row_number: r for r in rows}

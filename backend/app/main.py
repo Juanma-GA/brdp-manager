@@ -44,6 +44,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Export to Excel names the cells it wrote as the omitted-cell marker
+    # in this header (routes/excel.py); a cross-origin page must be allowed
+    # to read it.
+    expose_headers=["X-Export-Omitted-Cells"],
 )
 
 app.include_router(auth_router)

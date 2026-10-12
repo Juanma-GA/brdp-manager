@@ -10,7 +10,9 @@ on reimport). openpyxl was already the backend's Excel library
 
 Three operations, all keeping the shape the frontend used before:
   parse_import_file(data, filename)  -> the rows/errors importFromExcel gave
-  build_export_workbook(rows)        -> the file exportToExcel wrote
+  build_export(rows)                 -> the file exportToExcel wrote, plus
+                                        the cells written as the omitted-
+                                        cell marker (text over Excel's limit)
   build_generic_template()           -> the file generateTemplate wrote
 
 Cell text is exact both ways: XML entities inside a rule (&lt;, &#237;...)
@@ -70,9 +72,15 @@ EXPORT_COLUMNS = [
 ]
 SHEET_NAME = "BRDPs"
 
-# Excel's hard limit on the text of one cell (app/core/config.py). Over it
-# Excel refuses (or truncates) the cell -- the export is refused instead,
-# naming the BRDP and the field, never cut (HR6/HR7).
+# Excel's hard limit on the text of one cell (app/core/config.py). A cell
+# over it is never cut (HR6: a cut Rule read back by the import would
+# overwrite the good one with a fragment): the export writes this fixed
+# marker in its place and names the BRDP and column, and the import reads a
+# cell that is exactly this marker as "unchanged" (import_jobs.py
+# resolve_omitted_cells). Defined once, here, for both.
+OMITTED_CELL_MARKER = (
+    "[[BRDP-MANAGER: NO EXPORTADO — supera 32.767 caracteres; se conserva el de la app]]"
+)
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -96,15 +104,6 @@ class ExcelFileError(ValueError):
         super().__init__(message)
         self.code = code
         self.params = params
-
-
-class ExportCellTooLarge(ValueError):
-    """At least one export cell is over EXCEL_CELL_CHAR_LIMIT. `cells` names
-    each one: {"id", "field", "length"}."""
-
-    def __init__(self, cells: list[dict]):
-        super().__init__(f"{len(cells)} cell(s) over Excel's {EXCEL_CELL_CHAR_LIMIT}-character limit")
-        self.cells = cells
 
 
 # ─── Reading ──────────────────────────────────────────────────────────────
@@ -269,14 +268,28 @@ def oversized_export_cells(rows: list[dict]) -> list[dict]:
     return cells
 
 
-def build_export_workbook(rows: list[dict]) -> bytes:
+def build_export(rows: list[dict]) -> tuple[bytes, list[dict]]:
     """The export file: sheet "BRDPs", the 7 columns in order, one row per
     BRDP exactly as the frontend built it (the server never recomputes rule
-    states). Raises ExportCellTooLarge -- nothing is cut."""
+    states). A cell over Excel's limit holds OMITTED_CELL_MARKER instead of
+    its text -- never a cut text -- and is returned in the list
+    ({"id", "field", "length"}, row order) for the page to name. Every
+    other cell, and a file with no such cell, is written exactly as
+    before."""
     oversized = oversized_export_cells(rows)
-    if oversized:
-        raise ExportCellTooLarge(oversized)
-    return _workbook_bytes(rows)
+    if not oversized:
+        return _workbook_bytes(rows), []
+    written = [
+        {key: OMITTED_CELL_MARKER if len(str(value or "")) > EXCEL_CELL_CHAR_LIMIT else value for key, value in row.items()}
+        for row in rows
+    ]
+    return _workbook_bytes(written), oversized
+
+
+def build_export_workbook(rows: list[dict]) -> bytes:
+    """build_export without the list of omitted cells (scripts and tests
+    that only need the file)."""
+    return build_export(rows)[0]
 
 
 def generic_template_rows() -> list[dict]:

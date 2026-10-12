@@ -65,7 +65,7 @@ async def analyze_import(
     even though this call itself never mutates anything, since its only
     purpose is to prepare an /apply call.
     """
-    _project, _rule_format, results, _existing_brdps, _existing_approvals, _catalog, _editions = await analyze_rows(
+    _project, _rule_format, results, _existing_brdps, _existing_approvals, _catalog, _editions, _rows = await analyze_rows(
         project_id, body.rows, db
     )
     return ImportAnalyzeResponse(results=results)

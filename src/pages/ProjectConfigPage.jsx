@@ -92,9 +92,24 @@ function saveBlob(blob, filename) {
   window.URL.revokeObjectURL(url);
 }
 
-// A failed backend response: its status and `detail` (a string, or the
-// object the export sends for cells over Excel's limit; the status text when
-// the body is not JSON).
+// The export's X-Export-Omitted-Cells header (routes/excel.py): the cells it
+// wrote as the "not exported" marker, {total, cells: [{id, field}]} -- the
+// list can be shorter than `total` when it did not fit in a header. No
+// header: none. A header that cannot be read still warns (HR7), without
+// names.
+function readOmittedCellsHeader(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    const cells = Array.isArray(parsed.cells) ? parsed.cells : [];
+    return { total: Number.isInteger(parsed.total) ? parsed.total : cells.length, cells, unreadable: false };
+  } catch {
+    return { total: 0, cells: [], unreadable: true };
+  }
+}
+
+// A failed backend response: its status and `detail` (a string or a coded
+// object; the status text when the body is not JSON).
 async function responseDetail(res) {
   try {
     const body = await res.json();
@@ -126,6 +141,10 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const [showCatalogEdition, setShowCatalogEdition] = useState(false);
   const [importErrors, setImportErrors] = useState([]);
   const [exportError, setExportError] = useState(null);
+  // Cells the export wrote as the "not exported" marker (over Excel's
+  // 32,767-character limit): a warning after a successful download, never
+  // an error -- {total, cells: [{id, field}]}.
+  const [exportOmitted, setExportOmitted] = useState(null);
   const [templateError, setTemplateError] = useState(null);
   // Only for the parse + analyze calls and the Export request -- Apply
   // itself is a background job now (docs request), tracked via the job
@@ -317,11 +336,18 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // Title/Definition, never rejected (same as AI Extract's "From catalog
   // (S1000D 4.1)").
   const catalogEditionRows = analysis?.results.filter((r) => r.catalog_edition) ?? [];
+  // Cells that hold the export's "not exported" marker (text over Excel's
+  // limit): kept as the app has them (never written, never a change), or,
+  // with nothing stored to keep (a new row, or no rule yet), imported empty
+  // -- the latter shown as a warning.
+  const omittedKeptCount = analysis?.results.reduce((n, r) => n + (r.omitted_kept?.length ?? 0), 0) ?? 0;
+  const omittedIgnoredRows = analysis?.results.filter((r) => r.omitted_ignored?.length) ?? [];
   const standardVersion = standard?.replace(/^S1000D\s+/, '');
 
   const handleExport = async () => {
     setBusy(true);
     setExportError(null);
+    setExportOmitted(null);
     try {
       const brdps = await authFetchJson(`/api/projects/${projectId}/brdps`);
       // S1000D 5.0/6.0 have no rule format at all (no generation engine
@@ -340,26 +366,20 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
       const reportRows = brdps.map((b) => brdpToExportRow(b, approvalsByBrdpId[b.id] ?? null));
 
       // The server writes the file (POST .../export.xlsx, excel_io.py). A
-      // cell over Excel's 32,767-character limit refuses the whole export
-      // with a 422 naming each BRDP and field -- shown here, nothing cut,
-      // never a partial file.
+      // cell over Excel's 32,767-character limit is never cut: the file
+      // holds a fixed "not exported" marker there (the import reads it back
+      // as "unchanged") and the response names those cells in a header,
+      // shown below as a warning once the file is downloaded.
       const res = await authFetch(`/api/projects/${projectId}/export.xlsx`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows: reportRows }),
       });
       if (!res.ok) {
-        const failure = await responseDetail(res);
-        const { detail } = failure;
-        if (detail?.code === 'cell_too_large') {
-          const ids = [...new Set(detail.cells.map((c) => c.id))];
-          const listed = detail.cells.map((c) => t('config.dataManagement.exportCellColumn', { id: c.id, field: c.field })).join(', ');
-          setExportError(t('config.dataManagement.exportCellTooLarge', { count: ids.length, ids: listed }));
-        } else {
-          setExportError(t('config.dataManagement.exportFailed', { message: detailText(failure) }));
-        }
+        setExportError(t('config.dataManagement.exportFailed', { message: detailText(await responseDetail(res)) }));
         return;
       }
+      setExportOmitted(readOmittedCellsHeader(res.headers.get('X-Export-Omitted-Cells')));
       saveBlob(await res.blob(), 'brdps-export.xlsx');
     } catch (err) {
       setExportError(t('config.dataManagement.exportFailed', { message: err.message }));
@@ -404,6 +424,20 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
         {exportError && (
           <ul className={styles.errorList}>
             <li>{exportError}</li>
+          </ul>
+        )}
+        {exportOmitted && (
+          <ul className={styles.warningList} data-testid="export-omitted-cells">
+            <li>
+              {exportOmitted.unreadable ? t('config.dataManagement.exportCellsOmittedUnknown') : t('config.dataManagement.exportCellsOmitted', {
+                count: exportOmitted.total,
+                cells: exportOmitted.cells
+                  .map((c) => t('config.dataManagement.exportCellColumn', { id: c.id, field: c.field }))
+                  .join(', '),
+              })}
+              {!exportOmitted.unreadable && exportOmitted.total > exportOmitted.cells.length &&
+                ` ${t('config.dataManagement.exportCellsOmittedMore', { count: exportOmitted.total - exportOmitted.cells.length })}`}
+            </li>
           </ul>
         )}
       </div>
@@ -538,6 +572,33 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                         </>
                       )}
                     </p>
+                  )}
+
+                  {omittedKeptCount > 0 && (
+                    <p className={styles.hint} data-testid="import-omitted-kept">
+                      {t('config.dataManagement.omittedKept', { count: omittedKeptCount })}
+                    </p>
+                  )}
+                  {omittedIgnoredRows.length > 0 && (
+                    <div data-testid="import-omitted-ignored">
+                      <h4 className={styles.subsectionHeading}>
+                        {t('config.dataManagement.omittedIgnoredTitle', { count: omittedIgnoredRows.length })}
+                      </h4>
+                      <ul className={styles.warningList}>
+                        {omittedIgnoredRows.map((r) => (
+                          <li key={r.row_number}>
+                            {t('config.dataManagement.omittedIgnoredRow', {
+                              row: r.row_number,
+                              identifier: r.identifier || '—',
+                              columns: r.omitted_ignored
+                                .map((field) => t('config.dataManagement.omittedColumn', { field }))
+                                .join(', '),
+                            })}
+                            {r.omitted_ignored.includes('Rule') && ` ${t('config.dataManagement.omittedIgnoredRule')}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
 
                   {rejectedRows.length > 0 && (

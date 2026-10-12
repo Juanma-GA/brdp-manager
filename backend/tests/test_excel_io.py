@@ -3,8 +3,9 @@
 The edge-case table of the task: a rule with &lt;parameter&gt; identical
 after export and reimport; line breaks kept without _x000D_ or \\r added; a
 file that is not .xlsx, is corrupt or too large -> 422 and nothing imported;
-a cell over 32,767 characters in the export -> 422 naming the BRDP and the
-field, nothing cut; a workbook with formulas -> the value is read, nothing
+a cell over 32,767 characters in the export -> the omitted-cell marker in
+its place, named in the response, nothing cut (test_excel_omitted_cells.py
+covers the import side); a workbook with formulas -> the value is read, nothing
 is evaluated. Plus the five curated templates of public/ read -> exported ->
 read again cell for cell, and the generic template.
 """
@@ -29,7 +30,8 @@ from app.services.excel_io import (
     EXCEL_CELL_CHAR_LIMIT,
     EXPORT_COLUMNS,
     ExcelFileError,
-    ExportCellTooLarge,
+    OMITTED_CELL_MARKER,
+    build_export,
     build_export_workbook,
     build_generic_template,
     cell_text,
@@ -281,17 +283,24 @@ def test_export_layout():
     assert [sheet.column_dimensions[letter].width for letter in "ABCDEFG"] == [20, 30, 40, 40, 16, 14, 60]
 
 
-def test_export_cell_over_the_limit_is_refused_and_never_cut():
+def test_export_cell_over_the_limit_is_written_as_the_marker_and_never_cut():
     at_limit = _export_row("BRDP-XL-OK", rule="x" * EXCEL_CELL_CHAR_LIMIT)
-    parsed = parse_import_file(build_export_workbook([at_limit]), "x.xlsx")
-    assert len(parsed["rows"][0]["rule"]) == EXCEL_CELL_CHAR_LIMIT
+    data, omitted = build_export([at_limit])
+    assert omitted == []
+    assert len(parse_import_file(data, "x.xlsx")["rows"][0]["rule"]) == EXCEL_CELL_CHAR_LIMIT
     rows = [at_limit, _export_row("BRDP-XL-BIG", rule="x" * (EXCEL_CELL_CHAR_LIMIT + 1), title="t" * 40000)]
-    with pytest.raises(ExportCellTooLarge) as caught:
-        build_export_workbook(rows)
-    assert caught.value.cells == [
+    data, omitted = build_export(rows)
+    assert omitted == [
         {"id": "BRDP-XL-BIG", "field": "Title", "length": 40000},
         {"id": "BRDP-XL-BIG", "field": "Rule", "length": EXCEL_CELL_CHAR_LIMIT + 1},
     ]
+    ok, big = parse_import_file(data, "x.xlsx")["rows"]
+    # The cell at the limit is complete; the big ones hold the marker, the
+    # rest of that row is written as always.
+    assert ok["rule"] == "x" * EXCEL_CELL_CHAR_LIMIT
+    assert big["title"] == OMITTED_CELL_MARKER and big["rule"] == OMITTED_CELL_MARKER
+    assert big["definition"] == rows[1]["definition"] and big["proposal"] == rows[1]["proposal"]
+    assert big["rule_status"] == "Verified"
 
 
 def test_generic_template():
@@ -429,15 +438,17 @@ async def test_parse_is_editor_only_export_is_viewer(client, project_and_users):
     assert outsider.status_code == 403
 
 
-async def test_export_endpoint_names_the_brdp_and_field_over_the_limit(client, project_and_users):
+async def test_export_endpoint_names_the_cells_written_as_the_marker(client, project_and_users):
     project_id, _editor, viewer = project_and_users
     rows = [_export_row(), _export_row("BRDP-XL-BIG", rule="x" * (EXCEL_CELL_CHAR_LIMIT + 5))]
     resp = await client.post(f"/api/projects/{project_id}/export.xlsx", json={"rows": rows}, headers=viewer)
-    assert resp.status_code == 422
-    detail = resp.json()["detail"]
-    assert detail["code"] == "cell_too_large" and detail["limit"] == EXCEL_CELL_CHAR_LIMIT
-    assert detail["cells"] == [{"id": "BRDP-XL-BIG", "field": "Rule", "length": EXCEL_CELL_CHAR_LIMIT + 5}]
-    assert "BRDP-XL-BIG (Rule)" in detail["message"]
+    assert resp.status_code == 200
+    assert json.loads(resp.headers["x-export-omitted-cells"]) == {"total": 1, "cells": [{"id": "BRDP-XL-BIG", "field": "Rule"}]}
+    parsed = parse_import_file(resp.content, "brdps-export.xlsx")["rows"]
+    assert parsed[0]["rule"] == ENTITY_RULE and parsed[1]["rule"] == OMITTED_CELL_MARKER
+    # Nothing long: no header, the file as always.
+    plain = await client.post(f"/api/projects/{project_id}/export.xlsx", json={"rows": [_export_row()]}, headers=viewer)
+    assert plain.status_code == 200 and "x-export-omitted-cells" not in plain.headers
 
 
 async def test_generic_template_endpoint(client, project_and_users):

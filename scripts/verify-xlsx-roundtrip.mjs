@@ -152,6 +152,10 @@ async function main() {
     await page.goto(`${BASE_URL}/projects/${project.id}/config`);
     await page.waitForSelector("text=Import BRDPs from Excel", { timeout: 10000 });
   };
+  const openConfigEs = async (project) => {
+    await page.goto(`${BASE_URL}/projects/${project.id}/config`);
+    await page.waitForSelector("text=Importar BRDPs desde Excel", { timeout: 10000 });
+  };
   const download = async (buttonText, target) => {
     const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 20000 }), page.click(`button:has-text("${buttonText}")`)]);
     await dl.saveAs(target);
@@ -218,8 +222,10 @@ async function main() {
       assert(!/rows? rejected/.test(again) || /\b0 rows rejected/.test(again), "re-import: the rule with &lt; is not rejected");
       assert(!/replace an existing Rule|will replace the Rule/i.test(again), "re-import: no rule override");
 
-      // A cell over Excel's 32,767-character limit: the export is refused
-      // with the BRDP and the field, nothing downloaded, nothing cut.
+      // A cell over Excel's 32,767-character limit: the export downloads,
+      // the cell holds the fixed "not exported" marker (never a cut text),
+      // a warning names the BRDP and the column, and re-importing that file
+      // keeps the stored rule ("0 change").
       const big = await api(`/api/projects/${project.id}/brdps`, {
         method: "POST",
         body: JSON.stringify({ identifier: "BRDP-XL-BIG", title: "Big", definition: "d", proposal: "p", validation: "Validated" }),
@@ -228,15 +234,52 @@ async function main() {
       const put = await api(`/api/projects/${project.id}/brdps/${big.id}/approvals/BREX-4.2`, { method: "PUT", body: JSON.stringify({ rule_xml: longRule, source: "manual" }) });
       assert(put.ok, `a ${longRule.length}-character rule is stored (HTTP ${put.status})`);
       await openConfig(project);
-      let downloaded = false;
-      page.once("download", () => { downloaded = true; });
-      await page.click('button:has-text("Export to Excel")');
-      await page.waitForSelector("text=cannot be exported", { timeout: 20000 });
-      const refusedText = await page.locator("body").innerText();
-      assert(refusedText.includes("BRDP-XL-BIG (Rule column)"), "export refused naming the BRDP and the field: BRDP-XL-BIG (Rule column)");
-      await page.waitForTimeout(500);
-      assert(!downloaded, "no file downloaded");
-      await page.screenshot({ path: path.join(os.tmpdir(), "xlsx-export-cell-too-large.png") });
+      const bigExport = path.join(tmp, "big-export.xlsx");
+      await download("Export to Excel", bigExport);
+      await page.waitForSelector('[data-testid="export-omitted-cells"]', { timeout: 20000 });
+      const notice = await page.locator('[data-testid="export-omitted-cells"]').innerText();
+      assert(notice.includes("BRDP-XL-BIG (Rule column)") && /not exported/.test(notice), "export downloads with a warning naming BRDP-XL-BIG (Rule column)", notice);
+      const bigRows = readSheet(bigExport).rows;
+      const bigRow = bigRows.find((r) => r.ID === "BRDP-XL-BIG");
+      assert(bigRow?.Rule?.startsWith("[[BRDP-MANAGER: NO EXPORTADO") && bigRow.Rule.length < 200, "the Rule cell holds the marker, not a cut text", JSON.stringify(bigRow?.Rule?.slice(0, 80)));
+      assert(bigRow?.["Rule Status"] === "Draft", "its Rule Status is exported as always");
+      assert(bigRows.find((r) => r.ID === ENTITY_ROW.id)?.Rule === ENTITY_ROW.rule, "the other row's Rule is complete");
+      await page.screenshot({ path: path.join(os.tmpdir(), "xlsx-export-cell-omitted.png") });
+      await openConfig(project);
+      const reimport = await analyse(bigExport);
+      assert(reimport.includes("2 rows unchanged"), "re-import of that file: every row unchanged", reimport.match(/\d+ rows? [a-z ()]+/g)?.join(" | "));
+      assert(/Rules:\s*0 change\b/.test(reimport), "re-import: Rules: 0 change", reimport.match(/Rules:[^\n]*/)?.[0]);
+      assert((await page.locator('[data-testid="import-omitted-kept"]').innerText()).includes('1 cell says "not exported"'), "preview: the marker cell is kept as the app has it");
+      await apply();
+      const afterApproval = await api(`/api/projects/${project.id}/brdps/${big.id}/approvals/BREX-4.2`).then((r) => r.json());
+      assert(afterApproval.rule_xml === longRule && afterApproval.status === "pending_review", "after applying: the long rule and its status unchanged");
+      // Spanish notice.
+      await page.locator("header select, nav select").first().selectOption("es");
+      await openConfigEs(project);
+      await download("Exportar a Excel", path.join(tmp, "big-export-es.xlsx"));
+      const noticeEs = await page.locator('[data-testid="export-omitted-cells"]').innerText();
+      assert(noticeEs.includes("BRDP-XL-BIG (columna Rule)") && noticeEs.includes("no se ha exportado"), "Spanish warning", noticeEs);
+      await page.locator("header select, nav select").first().selectOption("en");
+
+      // The marker in a row whose BRDP does not exist: the field is
+      // ignored (a rule: Rule Status To Do) and the preview warns.
+      const fresh = await newProject("S1000D 4.2");
+      const newRowFile = path.join(tmp, "marker-new-row.xlsx");
+      const written = await api(`/api/projects/${fresh.id}/export.xlsx`, {
+        method: "POST",
+        body: JSON.stringify({ rows: [{ id: "BRDP-XL-NEW", title: "New", definition: "d", proposal: "p", proposalStatus: "Pending", ruleStatus: "Draft", rule: longRule, catalogEdition: "" }] }),
+      });
+      fs.writeFileSync(newRowFile, Buffer.from(await written.arrayBuffer()));
+      await openConfig(fresh);
+      const newRowAnalysis = await analyse(newRowFile);
+      const ignored = await page.locator('[data-testid="import-omitted-ignored"]').innerText();
+      assert(ignored.includes("Row 2 (BRDP-XL-NEW): the Rule column") && ignored.includes("Rule Status is imported as To Do"), "new row: the marker is ignored with a warning", ignored);
+      assert(newRowAnalysis.includes("1 row ready to import"), "new row: still imported");
+      await page.screenshot({ path: path.join(os.tmpdir(), "xlsx-import-marker-new-row.png") });
+      await apply();
+      const [created] = await api(`/api/projects/${fresh.id}/brdps`).then((r) => r.json());
+      const noRule = await api(`/api/projects/${fresh.id}/brdps/${created.id}/approvals/BREX-4.2`).then((r) => r.json());
+      assert(created.identifier === "BRDP-XL-NEW" && noRule === null, "new row: created without a rule", JSON.stringify(noRule)?.slice(0, 80));
     }
 
     // 0b. Text that looks like a formula: stays text end to end.

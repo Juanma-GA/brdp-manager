@@ -91,6 +91,16 @@ class ImportRowResult(BaseModel):
     # write entirely for this row -- an honest "this reimport touched
     # nothing" rather than a no-op update recorded as if something changed.
     unchanged: bool = False
+    # Cells of this row that hold exactly the export's omitted-cell marker
+    # (excel_io.OMITTED_CELL_MARKER: the text was over Excel's limit, so
+    # the export never wrote it), by column header ("Rule", "Proposal"...).
+    # omitted_kept: the BRDP has that field stored, which the import keeps
+    # as it is (never written, never counted as a change). omitted_ignored:
+    # nothing stored to keep (a new row, or no rule yet for the format), so
+    # the field is imported empty -- and, for the Rule, with Rule Status
+    # "To Do" -- shown as a warning in the preview.
+    omitted_kept: list[str] = []
+    omitted_ignored: list[str] = []
 
 
 class ImportAnalyzeRequest(BaseModel):

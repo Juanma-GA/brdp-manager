@@ -564,10 +564,14 @@ const resources = {
           exporting: 'Exporting…',
           countAvailable_one: '{{count}} BRDP record available for export in this project',
           countAvailable_other: '{{count}} BRDP records available for export in this project',
-          exportCellTooLarge_one:
-            '{{count}} BRDP has content over Excel\'s 32,767-character cell limit and cannot be exported: {{ids}}. Shorten that field and try again.',
-          exportCellTooLarge_other:
-            '{{count}} BRDPs have content over Excel\'s 32,767-character cell limit and cannot be exported: {{ids}}. Shorten those fields and try again.',
+          exportCellsOmitted_one:
+            'Exported. {{count}} cell is over Excel\'s 32,767-character limit and was not exported: {{cells}}. The file says "not exported" there; importing the file keeps what the app has.',
+          exportCellsOmitted_other:
+            'Exported. {{count}} cells are over Excel\'s 32,767-character limit and were not exported: {{cells}}. The file says "not exported" there; importing the file keeps what the app has.',
+          exportCellsOmittedMore_one: 'And {{count}} more.',
+          exportCellsOmittedMore_other: 'And {{count}} more.',
+          exportCellsOmittedUnknown:
+            'Exported. Some cells are over Excel\'s 32,767-character limit and were not exported, but the list of them could not be read. The file says "not exported" in those cells; importing the file keeps what the app has.',
           parseErrors: {
             emptyFile: 'The Excel file is empty',
             noDataRows: 'No data rows found in the Excel file',
@@ -582,6 +586,15 @@ const resources = {
             status_without_rule: "the Rule Status column says '{{status}}' but the Rule column is empty",
           },
           exportCellColumn: '{{id}} ({{field}} column)',
+          omittedKept_one:
+            '{{count}} cell says "not exported" (its text was over Excel\'s limit): what the app has is kept, not changed.',
+          omittedKept_other:
+            '{{count}} cells say "not exported" (their text was over Excel\'s limit): what the app has is kept, not changed.',
+          omittedIgnoredTitle_one: '{{count}} row has a "not exported" cell with nothing in the app to keep',
+          omittedIgnoredTitle_other: '{{count}} rows have a "not exported" cell with nothing in the app to keep',
+          omittedIgnoredRow: 'Row {{row}} ({{identifier}}): {{columns}} says "not exported" and the app has nothing to keep there; imported empty.',
+          omittedIgnoredRule: 'Without a rule, its Rule Status is imported as To Do.',
+          omittedColumn: 'the {{field}} column',
           exportFailed: 'Export failed: {{message}}',
           templateFailed: 'Could not download the template: {{message}}',
         },
@@ -2532,10 +2545,14 @@ const resources = {
           exporting: 'Exportando…',
           countAvailable_one: '{{count}} BRDP disponible para exportar en este proyecto',
           countAvailable_other: '{{count}} BRDPs disponibles para exportar en este proyecto',
-          exportCellTooLarge_one:
-            '{{count}} BRDP tiene contenido que supera el límite de 32.767 caracteres por celda de Excel y no se puede exportar: {{ids}}. Acorta ese campo e inténtalo de nuevo.',
-          exportCellTooLarge_other:
-            '{{count}} BRDPs tienen contenido que supera el límite de 32.767 caracteres por celda de Excel y no se pueden exportar: {{ids}}. Acorta esos campos e inténtalo de nuevo.',
+          exportCellsOmitted_one:
+            'Exportado. {{count}} celda supera el límite de 32.767 caracteres de Excel y no se ha exportado: {{cells}}. En el fichero pone «no exportado»; al importar el fichero se conserva lo que tiene la app.',
+          exportCellsOmitted_other:
+            'Exportado. {{count}} celdas superan el límite de 32.767 caracteres de Excel y no se han exportado: {{cells}}. En el fichero pone «no exportado»; al importar el fichero se conserva lo que tiene la app.',
+          exportCellsOmittedMore_one: 'Y {{count}} más.',
+          exportCellsOmittedMore_other: 'Y {{count}} más.',
+          exportCellsOmittedUnknown:
+            'Exportado. Algunas celdas superan el límite de 32.767 caracteres de Excel y no se han exportado, pero no se ha podido leer cuáles. En el fichero pone «no exportado» en esas celdas; al importar el fichero se conserva lo que tiene la app.',
           parseErrors: {
             emptyFile: 'El fichero Excel está vacío',
             noDataRows: 'El fichero Excel no tiene filas de datos',
@@ -2550,6 +2567,15 @@ const resources = {
             status_without_rule: "la columna Rule Status dice '{{status}}' pero la columna Rule está vacía",
           },
           exportCellColumn: '{{id}} (columna {{field}})',
+          omittedKept_one:
+            '{{count}} celda pone «no exportado» (su texto superaba el límite de Excel): se conserva lo que tiene la app, sin cambios.',
+          omittedKept_other:
+            '{{count}} celdas ponen «no exportado» (su texto superaba el límite de Excel): se conserva lo que tiene la app, sin cambios.',
+          omittedIgnoredTitle_one: '{{count}} fila tiene una celda «no exportado» sin nada en la app que conservar',
+          omittedIgnoredTitle_other: '{{count}} filas tienen una celda «no exportado» sin nada en la app que conservar',
+          omittedIgnoredRow: 'Fila {{row}} ({{identifier}}): {{columns}} pone «no exportado» y la app no tiene nada ahí que conservar; se importa vacío.',
+          omittedIgnoredRule: 'Sin regla, su Rule Status se importa como To Do.',
+          omittedColumn: 'la columna {{field}}',
           exportFailed: 'Error al exportar: {{message}}',
           templateFailed: 'No se pudo descargar la plantilla: {{message}}',
         },
