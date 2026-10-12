@@ -1288,7 +1288,9 @@ export function extractDocumentNames(doc) {
 // ─── Structural check ───────────────────────────────────────────────────────
 
 // [{ kind: 'unknownElement', element } | { kind: 'notAllowed', element, parent }
-//  | { kind: 'unknownAttribute', attribute, element } | { kind: 'wrongRoot', element, expected }]
+//  | { kind: 'unknownAttribute', attribute, element } | { kind: 'wrongRoot', element, expected }
+//  | { kind: 'missingRequiredAttribute', element, attribute } | { kind: 'textNotAllowed', element }
+//  | { kind: 'tooMany', element, parent, max, count }]
 // against one schema's structure. Prefixed attributes other than xlink:* and
 // namespace declarations are not schema vocabulary and are left out.
 // options.skipPaths: node paths (ruleTestCommon.js's nodePath) of the
@@ -1336,6 +1338,20 @@ export function checkExampleStructure(doc, structure, options = {}) {
         const present = new Set(Array.from(el.attributes || []).map((a) => a.name.replace(/^xlink:/, '')));
         for (const [attribute] of required) {
           if (!present.has(String(attribute).replace(/^xlink:/, ''))) add({ kind: 'missingRequiredAttribute', element: name, attribute });
+        }
+      }
+    }
+    // Test de reglas: lo que la app puede arreglar sola, Part 2. Text (not
+    // only whitespace) right inside an element whose model admits none
+    // (models[name].text false): <pmCode>PM-001</pmCode>. Checked for every
+    // element: the application's own skeleton and minimal section put text
+    // only where the schema admits it, so this always points at the LLM's.
+    const model = known ? structure.models?.[name] : null;
+    if (model && model.text === false) {
+      for (let n = el.firstChild; n; n = n.nextSibling) {
+        if ((n.nodeType === 3 || n.nodeType === 4) && String(n.nodeValue || '').trim()) {
+          add({ kind: 'textNotAllowed', element: name });
+          break;
         }
       }
     }
@@ -1850,6 +1866,8 @@ export function formatStructureProblem(problem, schema) {
       return `@${problem.attribute} does not exist on <${problem.element}>`;
     case 'missingRequiredAttribute':
       return `<${problem.element}> requires @${problem.attribute} in the ${schema} schema`;
+    case 'textNotAllowed':
+      return `<${problem.element}> does not allow text in the ${schema} schema`;
     case 'wrongRoot':
       return `the root element is <${problem.element}>, not <${problem.expected}>`;
     case 'reservedRootAttribute':
@@ -2112,6 +2130,7 @@ export const SCHEMA_ISSUE_KEYS = {
     tooMany: 'records.ruleTest.structure.tooMany',
     unknownAttribute: 'records.ruleTest.structure.unknownAttribute',
     missingRequiredAttribute: 'records.ruleTest.structure.missingRequiredAttribute',
+    textNotAllowed: 'records.ruleTest.structure.textNotAllowed',
     wrongRoot: 'records.ruleTest.structure.wrongRoot',
     reservedRootAttribute: 'records.ruleTest.structure.reservedRootAttribute',
     spannedEntry: 'records.ruleTest.structure.spannedEntry',

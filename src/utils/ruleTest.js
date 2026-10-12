@@ -161,6 +161,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     spannedEntriesRemoved: removedRows,
     namespacesRemoved,
     requiredAttributesAdded: mergeElementGroups([...contentFix.requiredAttributesAdded, ...metadataFix.requiredAttributesAdded]),
+    textRemoved: [...new Set([...contentFix.textRemoved, ...metadataFix.textRemoved])],
   };
   const entry = schema ? setup.placements[schema] : null;
   if (!entry) return { ...adjusted, schema, xml: null, skeletonNodePaths: [], structure: null, unmaterialized: true };
@@ -367,7 +368,7 @@ function elementCards(doc, names, problems, structure) {
     else if (p.kind === 'tooMany') {
       want(p.parent);
       want(p.element);
-    } else if (p.kind === 'unknownAttribute' || p.kind === 'missingRequiredAttribute') want(p.element);
+    } else if (p.kind === 'unknownAttribute' || p.kind === 'missingRequiredAttribute' || p.kind === 'textNotAllowed') want(p.element);
     else if (p.kind === 'unknownElement') {
       for (const el of elementsNamed(doc, (e) => e.nodeName === p.element)) want(el.parentNode?.nodeName);
     }
@@ -390,6 +391,9 @@ function elementCards(doc, names, problems, structure) {
     attributes: [...structure.elements[element].attributes],
     max: { ...(structure.models?.[element]?.max || {}) },
     required: (structure.models?.[element]?.attributes || []).map(([name]) => name),
+    // Part 2 (lo que la app puede arreglar sola): said only for an element
+    // whose text is the problem.
+    noText: problems.some((p) => p.kind === 'textNotAllowed' && p.element === element),
   }));
 }
 
@@ -417,7 +421,8 @@ function formatElementCard(card, schema) {
   // Test de reglas: atributos obligatorios -- the ones it cannot go
   // without.
   const required = card.required?.length ? `; required attributes: ${cardNameList(card.required, '@')}` : '';
-  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}${limits}; attributes: ${cardNameList(card.attributes, '@')}${required}`;
+  const noText = card.noText ? '; no text inside' : '';
+  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}${limits}; attributes: ${cardNameList(card.attributes, '@')}${required}${noText}`;
 }
 
 // C3b: an example often fails on the markup of an element the rule does

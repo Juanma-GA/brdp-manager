@@ -451,6 +451,9 @@ function SchemaFixNotes({ doc }) {
           })}
         />
       )}
+      {doc.textRemoved?.length > 0 && (
+        <TableFixNote testId="rule-test-text-removed" text={t('records.ruleTest.textRemoved', { elements: doc.textRemoved.map((e) => `<${e}>`).join(', ') })} />
+      )}
     </>
   );
 }

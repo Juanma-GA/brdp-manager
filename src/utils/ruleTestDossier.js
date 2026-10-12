@@ -88,6 +88,7 @@ export function materializeDossierFiles(files, structures, parseXml, { named = n
     }
     return {
       requiredAttributesAdded: fixes.requiredAttributesAdded,
+      textRemoved: fixes.textRemoved,
       path: normalizeDossierPath(file.path),
       content,
       xml: content,

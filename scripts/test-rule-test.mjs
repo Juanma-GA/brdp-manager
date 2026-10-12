@@ -90,6 +90,9 @@ const vocabulary = vocabOf('schema-vocabulary-4-2.json');
 const vocabulary301 = vocabOf('schema-vocabulary-3-0-1.json');
 const STRUCTURES = JSON.parse(fs.readFileSync(new URL('./rule-test-fixtures/structures.json', import.meta.url)));
 const structureOf = (standard, schema) => STRUCTURES[`${standard}|${schema}`];
+// S1000D <entry> admits no text (only para, warning, caution, note,
+// legend): a table meant to be valid puts each cell's text in a <para>.
+const paraCells = (xml) => xml.replace(/<entry([^>]*)>([^<]+)<\/entry>/g, '<entry$1><para>$2</para></entry>');
 
 // A setup as useRuleTest builds it, from the real structures.
 function setupFor(standard, ruleXml, schemas, schemaLocation = 'flat') {
@@ -736,13 +739,13 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   const pByPos = exampleProblems(byPosition, { standard: S42, schema: 'descript' });
   check('C3 1b: table without colname → overlap detected by position', pByPos.includes('row 2: column c1 is already spanned by the entry above (morerows); remove this entry'), pByPos.join('\n'));
   const middle = validateExample(
-    tbl('<row><entry>A</entry><entry morerows="2">B</entry><entry>C</entry></row><row><entry>D</entry><entry>E</entry></row><row><entry>F</entry><entry>G</entry><entry>H</entry></row>', { cols: 3 }),
+    paraCells(tbl('<row><entry>A</entry><entry morerows="2">B</entry><entry>C</entry></row><row><entry>D</entry><entry>E</entry></row><row><entry>F</entry><entry>G</entry><entry>H</entry></row>', { cols: 3 })),
     vocabulary, parseXml, descript
   );
   const pMid = exampleProblems(middle, { standard: S42, schema: 'descript' });
   check('C3 1b: a correct row below the span is fine; the extra entry of row 3 is caught', pMid.length === 1 && pMid[0] === 'row 3: column c2 is already spanned by the entry above (morerows); remove this entry', pMid.join('\n'));
   const correct = validateExample(
-    tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row><entry colname="c2">D</entry><entry colname="c3">E</entry></row>', { colspecs: specs }),
+    paraCells(tbl('<row><entry colname="c1" morerows="1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row><entry colname="c2">D</entry><entry colname="c3">E</entry></row>', { colspecs: specs })),
     vocabulary, parseXml, descript
   );
   check('C3 1b: a correct morerows table has no problem', correct.runnable && correct.structure.length === 0, JSON.stringify(correct.structure));
@@ -851,7 +854,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
   // Through materializeExample: the example carries the fix and the rows.
   const TBL = '<structureObjectRule><objectPath allowedObjectFlag="0">//thead</objectPath><objectUse>No table headings.</objectUse></structureObjectRule>';
   const setup = setupFor(S42, TBL, ['descript']);
-  const run = testRun(TBL, [{ label: 'table', expected: 'accept', schema: 'descript', content: `<para>Values:</para>${byName}` }], setup);
+  const run = testRun(TBL, [{ label: 'table', expected: 'accept', schema: 'descript', content: paraCells(`<para>Values:</para>${byName}`) }], setup);
   check('C3b: materialized example is fixed and says so', JSON.stringify(run.materialized[0].spannedEntriesRemoved) === '[2]' && !run.materialized[0].content.includes('>X<'), JSON.stringify(run.materialized[0].spannedEntriesRemoved));
   check('C3b: fixed example is valid (no spannedEntry problem)', run.runs[0].validation.runnable && run.runs[0].validation.structure.length === 0, JSON.stringify(run.runs[0].validation.structure));
   check('C3b: fixed example rejects nothing (no thead)', run.runs[0].result?.status === 'accepted', JSON.stringify(run.runs[0].result?.status));
@@ -935,7 +938,7 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
     const emptyFailures = exampleFailures(emptyExamples, emptyRun.materialized, emptyRun.runs, { ruleXml: TBL, standard: S42, format: 'BREX-4.2', parseXml });
     check('C3b empty row: goes to the correction round with its message', emptyFailures.length === 1 && emptyFailures[0].problems.includes('row 2 has no entry'), JSON.stringify(emptyFailures));
     // With nothing reaching it, the example runs, with the app's note.
-    const freeEmpty = testRun(TBL, [{ label: 'empty row', expected: 'accept', schema: 'descript', content: `<para>Values:</para>${tbl('<row><entry colname="c1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row/>')}` }], setup);
+    const freeEmpty = testRun(TBL, [{ label: 'empty row', expected: 'accept', schema: 'descript', content: paraCells(`<para>Values:</para>${tbl('<row><entry colname="c1">A</entry><entry colname="c2">B</entry><entry colname="c3">C</entry></row><row/>')}`) }], setup);
     check('final 1/2: empty row removed, example runs', freeEmpty.runs[0].validation.runnable && JSON.stringify(freeEmpty.materialized[0].emptyRowsRemoved) === '[2]', JSON.stringify(freeEmpty.runs[0].validation.structure));
   }
   // Partial overlap still auto-fixed (regression).
@@ -2141,8 +2144,8 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
     const VAL = '<structureObjectRule><objectPath allowedObjectFlag="2">//emphasis[ancestor::para]/@emphasisType</objectPath><objectUse>Only em01.</objectUse><objectValue valueForm="single" valueAllowed="em01">em01</objectValue></structureObjectRule>';
     const setV = setupFor(S42, VAL, ['descript']);
     const vRun = testRun(VAL, [
-      { label: 'no emphasis', expected: 'accept', schema: 'descript', content: 'Plain.' },
-      { label: 'em02', expected: 'reject', schema: 'descript', content: '<emphasis emphasisType="em02">x</emphasis>' },
+      { label: 'no emphasis', expected: 'accept', schema: 'descript', content: '<para>Plain.</para>' },
+      { label: 'em02', expected: 'reject', schema: 'descript', content: '<para><emphasis emphasisType="em02">x</emphasis></para>' },
     ], setV);
     const vFail = exampleFailures([{ label: 'no emphasis', expected: 'accept' }, { label: 'em02', expected: 'reject' }], vRun.materialized, vRun.runs, { ruleXml: VAL, standard: S42, format: 'BREX-4.2', setup: setV, parseXml });
     const vMsg = vFail.find((f) => f.index === 0)?.problems.join(' ') || '';
@@ -3687,6 +3690,50 @@ const AF = {};
   const p1 = await AF.generate127([ex127('<pmCode/>', ['fm01', 'fm02', 'fm03', 'fm04'])]);
   check('AF1 EXT-00127: one call, 4 runnable, correct', p1.asked.length === 1 && p1.g.runs.every((r) => r.validation.runnable) && p1.verdict?.kind === 'correct', JSON.stringify([p1.asked.length, p1.verdict, p1.g.runs?.map((r) => r.validation.structure)]));
   check('AF1 EXT-00127: every example says what was added', p1.g.examples.every((e) => e.requiredAttributesAdded?.[0]?.element === 'pmCode'));
+}
+
+// Part 2: text where the schema admits none.
+{
+  const { removeDisallowedText, namedByRuleOrProposal } = await import('../src/utils/exampleSchemaFixes.js');
+  const { validateExample, exampleProblems } = await import('../src/utils/ruleTest.js');
+  const { frontmatter, descript, en, es, nobody, fm } = AF;
+  const probs = (xml, st = frontmatter) => checkExampleStructure(parseXml(xml), st);
+  const pm = (inner) => `<pmRef><pmRefIdent>${inner}</pmRefIdent></pmRef>`;
+  check('AF2: text in <pmCode> reported', probs(pm('<pmCode modelIdentCode="A" pmIssuer="B" pmNumber="C" pmVolume="D">PM-001</pmCode>')).some((p) => p.kind === 'textNotAllowed' && p.element === 'pmCode'));
+  check('AF2: whitespace only -> no warning', !probs(pm('<pmCode modelIdentCode="A" pmIssuer="B" pmNumber="C" pmVolume="D">  \n </pmCode>')).some((p) => p.kind === 'textNotAllowed'));
+  check('AF2: element that admits text -> no warning', !probs('<para>Text <emphasis>x</emphasis></para>', descript).some((p) => p.kind === 'textNotAllowed'));
+  check('AF2: text in <pmRefIdent> (children, no text) reported', probs(pm('PM <pmCode modelIdentCode="A" pmIssuer="B" pmNumber="C" pmVolume="D"/>')).some((p) => p.kind === 'textNotAllowed' && p.element === 'pmRefIdent'));
+  check('AF2: without models -> no warning', !checkExampleStructure(parseXml(pm('<pmCode>x</pmCode>')), { ...frontmatter, models: undefined }).some((p) => p.kind === 'textNotAllowed'));
+  const tp = { kind: 'textNotAllowed', element: 'pmCode' };
+  check('AF2: text for the LLM', formatStructureProblem(tp, 'frontmatter') === '<pmCode> does not allow text in the frontmatter schema', formatStructureProblem(tp, 'frontmatter'));
+  const issue = structureIssues([tp], { schema: 'frontmatter' })[0];
+  check('AF2: panel EN', formatSchemaIssue(issue, en) === '<pmCode> does not allow text in the frontmatter schema', formatSchemaIssue(issue, en));
+  check('AF2: panel ES', formatSchemaIssue(issue, es) === '<pmCode> no admite texto en el esquema frontmatter', formatSchemaIssue(issue, es));
+  const v = validateExample(`<dmodule>${pm('PM <pmCode modelIdentCode="A" pmIssuer="B" pmNumber="C" pmVolume="D"/>')}</dmodule>`, vocabulary, parseXml, frontmatter);
+  const lines = exampleProblems(v, { schema: 'frontmatter' }).join('\n');
+  check('AF2: the correction carries the card with "no text inside"', /card of <pmRefIdent> in the frontmatter schema: allowed children: [^;]*pmCode[^\n]*; no text inside/.test(lines), lines);
+
+  // The fix.
+  const fixed = removeDisallowedText(pm('<pmCode modelIdentCode="A" pmIssuer="B" pmNumber="C" pmVolume="D">PM-001</pmCode>'), frontmatter, { named: nobody.ruleElement });
+  check('AF2: text of <pmCode> removed, tags kept', fixed.text === pm('<pmCode modelIdentCode="A" pmIssuer="B" pmNumber="C" pmVolume="D"></pmCode>') && JSON.stringify(fixed.removed) === '["pmCode"]', fixed.text);
+  const kept = removeDisallowedText(pm('<pmCode>PM-001</pmCode>'), frontmatter, { named: namedByRuleOrProposal({ elements: ['pmCode'] }, '').ruleElement });
+  check('AF2: element named by the rule -> text kept', kept.text === pm('<pmCode>PM-001</pmCode>'));
+  const withChildren = removeDisallowedText(pm('PM <pmCode/>'), frontmatter, { named: nobody.ruleElement });
+  check('AF2: element that admits children -> text kept (correction round)', withChildren.text === pm('PM <pmCode/>') && withChildren.removed.length === 0);
+  const entities = removeDisallowedText('<pmCode>A &amp; <![CDATA[B]]></pmCode>', frontmatter, { named: nobody.ruleElement });
+  check('AF2: entities and CDATA removed too', entities.text === '<pmCode></pmCode>', entities.text);
+  check('AF2: note EN', en('records.ruleTest.textRemoved', { elements: '<pmCode>' }) === 'Adjusted by the app: removed the text of <pmCode> (the schema allows no text there).');
+  check('AF2: note ES', es('records.ruleTest.textRemoved', { elements: '<pmCode>' }) === 'Ajustado por la app: se quitó el texto de <pmCode> (el esquema no admite texto ahí).');
+  const dita = structureOf('DITA 1.3 Xpath2.0', 'task');
+  const ditaText = removeDisallowedText('<p><boolean state="no">yes</boolean></p>', dita, { named: nobody.ruleElement });
+  check('AF2: DITA, same with its models', ditaText.text === '<p><boolean state="no"></boolean></p>', ditaText.text);
+
+  // EXT-00127 with <pmCode>PM-001</pmCode>: attributes added, text removed,
+  // one call, correct.
+  const p2 = await AF.generate127([AF.ex127('<pmCode>PM-001</pmCode>', ['fm01', 'fm02', 'fm03', 'fm04'])]);
+  check('AF2 EXT-00127: one call, 4 runnable, correct', p2.asked.length === 1 && p2.g.runs.every((r) => r.validation.runnable) && p2.verdict?.kind === 'correct', JSON.stringify([p2.asked.length, p2.verdict, p2.g.runs?.map((r) => r.validation.structure)]));
+  check('AF2 EXT-00127: text removed and said', p2.g.examples.every((e) => JSON.stringify(e.textRemoved) === '["pmCode"]' && /<pmCode modelIdentCode="EXAMPLE"[^>]*><\/pmCode>/.test(e.content)), p2.g.examples[0].content);
+  check('AF2: unused fm helper', typeof fm === 'function');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

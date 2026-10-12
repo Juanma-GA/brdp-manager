@@ -15,6 +15,12 @@
 //     Proposal names that attribute (then it may be what is tested, and the
 //     example goes to the correction round as before) and a neutral value is
 //     known (an xs:ID or IDREF has none).
+//   - Part 2, text where the schema admits none: an element whose model
+//     admits neither text nor children (models[x].text false and no child in
+//     the graph -- <pmCode>, <issueInfo>, <dmCode>…) and that the rule does
+//     not name loses the text written inside it. One that admits children
+//     goes to the correction round instead (the text may be meant for a
+//     child). Whitespace alone is never touched.
 // The application's own elements (skeleton, minimal section, examples the
 // application assembles) are never in this text, so never touched.
 
@@ -147,6 +153,30 @@ export function addMissingRequiredAttributes(text, structure, { named = () => fa
   return { text: applyEdits(source, edits), added: groupByElement(added) };
 }
 
+// Part 2. → { text, removed: [element names] }
+// `named(element)`: the rule names it.
+export function removeDisallowedText(text, structure, { named = () => false } = {}) {
+  const source = String(text ?? '');
+  const unchanged = { text: source, removed: [] };
+  if (!structure?.models || !structure?.elements) return unchanged;
+  const elements = scanElements(source);
+  if (!elements) return unchanged;
+  const edits = [];
+  const removed = [];
+  for (const el of elements) {
+    if (el.selfClosing || el.childElements > 0 || el.name.includes(':')) continue;
+    const graph = structure.elements[el.name];
+    const model = structure.models[el.name];
+    if (!graph || !model || model.text !== false || graph.children.length > 0) continue;
+    if (!el.textSpans.some((t) => t.value.trim())) continue;
+    if (named(el.name)) continue;
+    edits.push({ at: el.tagEnd, del: el.closeStart - el.tagEnd, text: '' });
+    if (!removed.includes(el.name)) removed.push(el.name);
+  }
+  if (!edits.length) return unchanged;
+  return { text: applyEdits(source, edits), removed };
+}
+
 // The rule names it (its XPath: extractRuleNames) or the Proposal mentions
 // it as a word (with or without @) -- then it may be what is tested, and the
 // application leaves it to the LLM. Same reading as the "the schema already
@@ -159,12 +189,17 @@ export function namedByRuleOrProposal(ruleNames, proposal) {
   return {
     attribute: (name) => attributes.has(name) || inProposal(name),
     element: (name) => elements.has(name) || inProposal(name),
+    // Part 2 is about the rule alone: the Proposal's words are not what the
+    // rule tests on an element's text.
+    ruleElement: (name) => elements.has(name),
   };
 }
 
-// All the fixes of this module on one text, in order. → { text, requiredAttributesAdded }
+// All the fixes of this module on one text, in order.
+// → { text, requiredAttributesAdded, textRemoved }
 export function applyExampleSchemaFixes(text, structure, named) {
-  if (text == null || !named || !structure?.models) return { text, requiredAttributesAdded: [] };
+  if (text == null || !named || !structure?.models) return { text, requiredAttributesAdded: [], textRemoved: [] };
   const attrs = addMissingRequiredAttributes(text, structure, { named: named.attribute });
-  return { text: attrs.text, requiredAttributesAdded: attrs.added };
+  const bare = removeDisallowedText(attrs.text, structure, { named: named.ruleElement || named.element });
+  return { text: bare.text, requiredAttributesAdded: attrs.added, textRemoved: bare.removed };
 }
