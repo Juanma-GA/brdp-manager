@@ -248,7 +248,10 @@ function duplicateValueItems(rules, xpaths) {
 const clip = (s, n = 140) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 const KNOWN_REASON_CODES = new Set(['external_document', 'external_placeholder', 'non_context_rule']);
-function isKnownReason(reason) {
+// Also scripts/lib/projectRuleTests.mjs: a Verified rule whose test is "not
+// executable" for one of these reasons (only nonContextRule, doc() /
+// doc-available() / document() on the map, @@…@@) stays Verified there.
+export function isKnownReason(reason) {
   if (!reason) return false;
   if (reason.code === 'parts') return (reason.params?.parts || []).every((p) => isKnownReason(p.reason));
   return KNOWN_REASON_CODES.has(reason.code);

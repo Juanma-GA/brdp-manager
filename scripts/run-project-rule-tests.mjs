@@ -102,6 +102,7 @@ import {
   saveFailedLine,
   shouldRepeat,
   shouldRevoke,
+  knownNotExecutable,
   skipReason,
   writeFileAtomic,
 } from './lib/projectRuleTests.mjs';
@@ -431,7 +432,10 @@ async function testRule(item) {
     return done(fields);
   }
   const fields = withAttempts({ result: record.result, reason: record.reason, reason_text: record.reason ? formatRuleTestReason(record.reason, t) : '', ...details }, true);
-  if (shouldRevoke(record.result, approval.status)) return done(await toDraft(brdp.id, fields));
+  // Part 2 (rangos de valores): a "not executable" for a known reason (only
+  // a nonContextRule, doc() on the map, @@…@@) keeps the rule Verified.
+  if (knownNotExecutable(record)) fields.known_not_executable = true;
+  if (shouldRevoke(record, approval.status)) return done(await toDraft(brdp.id, fields));
   return done(fields);
 }
 

@@ -5,6 +5,7 @@
 // backend.
 import fs from 'node:fs';
 import path from 'node:path';
+import { isKnownReason } from '../../src/utils/ruleLint.js';
 
 export const MAX_PARALLEL = 2;
 
@@ -132,9 +133,21 @@ export function skipReason(approval, { all = false } = {}) {
 // design) never moves a rule either: it is counted apart. An error that is
 // not the rule's (session lost, the AI's daily limit, the backend) never
 // gets here: see errorGoesToDraft.
+// Rangos de valores en los ejemplos, Part 2: "not executable" for a reason
+// known and accepted -- the same ones the stored-rules lint lists apart
+// (only a nonContextRule, doc() / doc-available() / document() on the map,
+// @@…@@) -- has no XPath the test could run: the rule stays Verified and
+// the report lists it apart ("Sin XPath que probar"). Any other "not
+// executable" (an invalid XPath such as EXT-00200's "(\ )+", an impossible
+// root…) goes to Draft as before. `result` is { result, reason } (or the
+// bare result, which never counts as known).
 export const REVOKING_RESULTS = new Set(['failed', 'review', 'inconclusive', 'not_executable', 'error']);
+export function knownNotExecutable(result) {
+  return Boolean(result && typeof result === 'object' && result.result === 'not_executable' && isKnownReason(result.reason));
+}
 export function shouldRevoke(result, ruleStatus) {
   const r = result && typeof result === 'object' ? result.result : result;
+  if (knownNotExecutable(result)) return false;
   return Boolean(REVOKING_RESULTS.has(r) && ruleStatus === 'approved');
 }
 
@@ -390,6 +403,7 @@ export function attemptsLabel(entry, lang = 'es', { upper = false, detail = true
 export function progressLine(index, total, entry, lang = 'es') {
   let line = `[${index}/${total}] ${entry.identifier} ${attemptsLabel(entry, lang, { upper: true })}`;
   if (entry.moved_to_draft) line += entry.no_test_recorded ? (lang === 'es' ? ' → Draft (sin prueba registrada)' : ' → Draft (no test recorded)') : ' → Draft';
+  if (entry.known_not_executable) line += lang === 'es' ? ' (sin XPath que probar: sigue como estaba)' : ' (no XPath to test: left as it was)';
   if (entry.revoke_failed) line += lang === 'es' ? ' (NO se pudo pasar a Draft: hazlo a mano)' : ' (could NOT be moved to Draft: do it by hand)';
   if (entry.result !== 'skipped') line += ` (${formatDuration(entry.duration_ms || 0)})`;
   return line;
@@ -467,6 +481,9 @@ export function buildReport(results, { lang = 'es' } = {}) {
   for (const r of ['passed', 'schema_covered', 'informative', 'failed', 'review', 'inconclusive', 'not_executable', 'error', 'skipped']) {
     const moved = latest.filter((e) => e.result === r && e.moved_to_draft).length;
     out.push(`| ${L[r]} | ${count(r)} | ${REVOKING_RESULTS.has(r) ? moved : '—'} |`);
+    if (r !== 'not_executable') continue;
+    const knownCount = latest.filter((e) => e.result === 'not_executable' && knownNotExecutable(e)).length;
+    if (knownCount) out.push(`| ${es ? '  de ellas, sin XPath que probar (siguen como estaban)' : '  of which, no XPath to test (left as they were)'} | ${knownCount} | 0 |`);
   }
   out.push(`| ${es ? 'total pasadas a Draft' : 'total moved to Draft'} | | ${movedToDraft} |`);
   out.push('');
@@ -482,12 +499,14 @@ export function buildReport(results, { lang = 'es' } = {}) {
   }
   out.push(
     es
-      ? 'Una regla Verified que no pasa se prueba una vez más, con ejemplos nuevos (salvo con --no-retry, o si el resultado se sabe sin IA: no ejecutable); queda registrado el segundo intento. Pasa a Draft si tampoco entonces da «pasa»: falla, revisar, no concluyente, no ejecutable o error (en un error no se registra prueba). Un error de sesión, del límite diario de la IA o del propio backend no la cambia. Los totales cuentan el resultado final.'
-      : 'A Verified rule that does not pass is tested once more, with new examples (not with --no-retry, nor when the result is known without the AI: not executable); the second attempt is the one recorded. It goes to Draft when that does not pass either: fails, review, inconclusive, not executable or error (an error records no test). An error of the session, of the AI daily limit or of the backend itself does not change it. The totals count the final result.'
+      ? 'Una regla Verified que no pasa se prueba una vez más, con ejemplos nuevos (salvo con --no-retry, o si el resultado se sabe sin IA: no ejecutable); queda registrado el segundo intento. Pasa a Draft si tampoco entonces da «pasa»: falla, revisar, no concluyente, no ejecutable o error (en un error no se registra prueba); una no ejecutable por un motivo conocido (solo nonContextRule, doc() sobre el mapa, @@…@@) no tiene XPath que probar y sigue como estaba. Un error de sesión, del límite diario de la IA o del propio backend no la cambia. Los totales cuentan el resultado final.'
+      : 'A Verified rule that does not pass is tested once more, with new examples (not with --no-retry, nor when the result is known without the AI: not executable); the second attempt is the one recorded. It goes to Draft when that does not pass either: fails, review, inconclusive, not executable or error (an error records no test); one not executable for a known reason (only a nonContextRule, doc() on the map, @@…@@) has no XPath to test and is left as it was. An error of the session, of the AI daily limit or of the backend itself does not change it. The totals count the final result.'
   );
   out.push('');
 
-  const notPassing = latest.filter((e) => !isPassing(e.result) && e.result !== 'skipped' && e.result !== 'informative');
+  // Part 2 (rangos de valores): "not executable" for a known reason, apart.
+  const noXPath = latest.filter((e) => e.result === 'not_executable' && knownNotExecutable(e));
+  const notPassing = latest.filter((e) => !isPassing(e.result) && e.result !== 'skipped' && e.result !== 'informative' && !noXPath.includes(e));
   out.push(es ? `## Reglas que no pasan (${notPassing.length})` : `## Rules that do not pass (${notPassing.length})`);
   out.push('');
   if (notPassing.length === 0) out.push(es ? 'Ninguna.' : 'None.');
@@ -531,6 +550,12 @@ export function buildReport(results, { lang = 'es' } = {}) {
       const mustNot = e.reason?.params?.mustNot ? (es ? ' (su objectUse dice «must not»: la decisión no se comprueba con XPath)' : ' (its objectUse says "must not": the decision is not checked with XPath)') : '';
       out.push(`- ${e.identifier} — ${statusLabel(e.status_after)}${mustNot}`);
     }
+    out.push('');
+  }
+  if (noXPath.length) {
+    out.push(es ? `## Sin XPath que probar (${noXPath.length}): siguen como estaban` : `## No XPath to test (${noXPath.length}): left as they were`);
+    out.push('');
+    for (const e of noXPath) out.push(`- ${e.identifier} — ${statusLabel(e.status_after)}: ${e.reason_text || e.reason?.code || ''}`);
     out.push('');
   }
   const skipped = latest.filter((e) => e.result === 'skipped');

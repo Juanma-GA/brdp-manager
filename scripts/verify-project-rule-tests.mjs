@@ -8,7 +8,10 @@
 // A seeded project with:
 //   01 Verified that passes      02 Verified that fails (→ Draft)
 //   03 Draft that fails          04 Draft that passes (stays Draft)
-//   05 Verified not executable (document(), → Draft)
+//   05 Verified not executable for a known reason (document(): no XPath to
+//      test, stays Verified -- rangos de valores, Part 2)
+//   15 Verified not executable for another reason (an XPath that does not
+//      compile, → Draft as before)
 //   06 Verified, for the forced timeout (→ Draft with no test recorded)
 //   07 tested from the PANEL first (to compare what is recorded)
 //   08 no saved rule             09/10 Verified that fail, with the revoke
@@ -179,21 +182,24 @@ async function main() {
     await json(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${FORMAT}`, { method: 'PUT', body: JSON.stringify({ rule_xml: rules[identifier], source: 'manual', status }) });
   }
   await seed('BRDP-RB-01', '//emphasis', '0', 'approved');
-  await seed('BRDP-RB-02', '//emphasis', '2', 'approved');
-  await seed('BRDP-RB-03', '//emphasis', '2', 'pending_review');
+  // Rules that fail: the reject example (a bare <emphasis>) is accepted.
+  // (Flag 2 without values is "informative" since 7929fbf, not a failure.)
+  await seed('BRDP-RB-02', '//emphasis[@emphasisType]', '0', 'approved');
+  await seed('BRDP-RB-03', '//emphasis[@emphasisType]', '0', 'pending_review');
   await seed('BRDP-RB-04', '//emphasis', '0', 'pending_review');
   await seed('BRDP-RB-05', "document('common.xml')//emphasis", '0', 'approved');
   await seed('BRDP-RB-06', '//emphasis', '0', 'approved');
   await seed('BRDP-RB-07', '//emphasis', '0', 'pending_review');
   await seed('BRDP-RB-08', null);
-  await seed('BRDP-RB-09', '//emphasis', '2', 'approved');
-  await seed('BRDP-RB-10', '//emphasis', '2', 'approved');
+  await seed('BRDP-RB-09', '//emphasis[@emphasisType]', '0', 'approved');
+  await seed('BRDP-RB-10', '//emphasis[@emphasisType]', '0', 'approved');
   // The simulator's Proposal check answers "no" with MISMATCH (→ review);
   // ALLINVALID gives examples that are never valid (→ inconclusive).
   await seed('BRDP-RB-11', '//emphasis', '0', 'approved', 'MISMATCH The element <emphasis> shall not be used.');
   await seed('BRDP-RB-12', '//emphasis', '0', 'approved', 'ALLINVALID The element <emphasis> shall not be used.');
   await seed('BRDP-RB-13', '/dmodule[not(identAndStatusSection)]', '0', 'approved', 'Every data module shall have its <identAndStatusSection>.');
   await seed('BRDP-RB-14', '//emphasis', '0', 'approved');
+  await seed('BRDP-RB-15', '//emphasis[', '0', 'approved');
   const approval = (id) => json(`/api/projects/${project.id}/brdps/${ids[id]}/approvals/${FORMAT}`);
   const history = (id) => json(`/api/projects/${project.id}/brdps/${ids[id]}/history`);
   const reportDir = runDir(path.join(SCRIPTS, 'rule-test-runs'), projectName);
@@ -225,7 +231,7 @@ async function main() {
     await page.waitForSelector('table', { timeout: 10000 });
     await page.goto(`${BASE_URL}/projects/${project.id}/records`);
     await page.waitForSelector('tbody tr', { timeout: 20000 });
-    await page.fill('input[placeholder="Search by ID or Title…"], input[placeholder="Buscar por ID o título…"]', 'BRDP-RB-07');
+    await page.getByPlaceholder(/^(Search by ID or Title|Buscar por ID o Título)…$/).first().fill('BRDP-RB-07');
     await page.locator('tbody tr', { hasText: 'BRDP-RB-07' }).first().click();
     await page.getByRole('button', { name: /^(Test rule|Probar regla)$/ }).click();
     await page.getByTestId('rule-test-verdict').waitFor({ timeout: 30000 });
@@ -238,20 +244,23 @@ async function main() {
     await restartBackend({ LLM_REQUEST_TIMEOUT_SECONDS: '2' });
     token = await login();
     await fetch(`${CHAT}/slow-next?ms=5000&count=20`, { method: 'POST' });
-    r = await runScript(['--project', projectName, '--only', 'RB-06,RB-05']);
+    r = await runScript(['--project', projectName, '--only', 'RB-06,RB-05,RB-15']);
     await fetch(`${CHAT}/reset`, { method: 'POST' });
     assert(r.code === 0, 'timeout run ends normally', r.out);
-    assert(/\[2\/2\] BRDP-RB-06 ERROR: TIMEOUT, ERROR: TIMEOUT al repetir → Draft \(sin prueba registrada\)/.test(r.out), 'progress: timeout twice → «… al repetir → Draft (sin prueba registrada)»', r.out);
-    assert(/\[1\/2\] BRDP-RB-05 NO EJECUTABLE → Draft/.test(r.out) && !/BRDP-RB-05 NO EJECUTABLE,/.test(r.out), 'not executable: no repeat', r.out);
-    assert(/\[1\/2\] BRDP-RB-05 NO EJECUTABLE → Draft/.test(r.out), 'not executable (document()) recorded without the AI, → Draft', r.out);
+    assert(/\[2\/3\] BRDP-RB-06 ERROR: TIMEOUT, ERROR: TIMEOUT al repetir → Draft \(sin prueba registrada\)/.test(r.out), 'progress: timeout twice → «… al repetir → Draft (sin prueba registrada)»', r.out);
+    assert(/\[1\/3\] BRDP-RB-05 NO EJECUTABLE \(sin XPath que probar: sigue como estaba\)/.test(r.out) && !/BRDP-RB-05 NO EJECUTABLE,/.test(r.out) && !/BRDP-RB-05 NO EJECUTABLE → Draft/.test(r.out), 'not executable for a known reason (document()): no repeat, stays as it was', r.out);
+    assert(/\[3\/3\] BRDP-RB-15 NO EJECUTABLE → Draft/.test(r.out) && !/BRDP-RB-15 NO EJECUTABLE,/.test(r.out), 'not executable for another reason (invalid XPath): no repeat, → Draft', r.out);
     const a06 = await approval('BRDP-RB-06');
     assert(a06.last_test_result === null && a06.status === 'pending_review' && a06.rule_xml === rules['BRDP-RB-06'], 'timeout: no test recorded, Verified → Draft, rule_xml intact');
     const h06 = await history('BRDP-RB-06');
     assert(!h06.some((h) => h.field_name === 'rule_test'), 'timeout: no test entry in History');
     assert(h06.filter((h) => h.field_name === 'rule_status' && h.old_value === 'verified' && h.new_value === 'draft' && h.user_email === me.email).length === 1, 'timeout: History «verified → draft» with the login user');
     const a05 = await approval('BRDP-RB-05');
-    assert(a05.last_test_result === 'not_executable' && a05.status === 'pending_review', 'not executable: recorded, then Verified → Draft');
-    assert((await history('BRDP-RB-05')).some((h) => h.field_name === 'rule_status' && h.old_value === 'verified' && h.new_value === 'draft'), 'not executable: History «verified → draft»');
+    assert(a05.last_test_result === 'not_executable' && a05.status === 'approved', 'known not executable: recorded, stays Verified');
+    assert(!(await history('BRDP-RB-05')).some((h) => h.field_name === 'rule_status' && h.new_value === 'draft'), 'known not executable: no «verified → draft» in History');
+    const a15 = await approval('BRDP-RB-15');
+    assert(a15.last_test_result === 'not_executable' && a15.status === 'pending_review' && a15.rule_xml === rules['BRDP-RB-15'], 'invalid XPath: recorded, then Verified → Draft, rule_xml intact');
+    assert((await history('BRDP-RB-15')).some((h) => h.field_name === 'rule_status' && h.old_value === 'verified' && h.new_value === 'draft'), 'invalid XPath: History «verified → draft»');
     const timeoutReport = fs.readFileSync(path.join(reportDir, 'informe.md'), 'utf8');
     assert(/\| BRDP-RB-06 \| error, error al repetir \| → Draft \(sin prueba registrada\) \| .*504/.test(timeoutReport), 'report: the timeout went to Draft with no test recorded, and why', timeoutReport);
 
@@ -275,7 +284,7 @@ async function main() {
     assert(a13.last_test_result === 'schema_covered' && a13.status === 'approved', 'already covered by the schema: recorded, stays Verified', JSON.stringify({ r: a13.last_test_result, s: a13.status }));
     assert(!(await history('BRDP-RB-13')).some((h) => h.field_name === 'rule_status' && h.new_value === 'draft'), 'already covered by the schema: no «verified → draft» in History');
     const reviewReport = fs.readFileSync(path.join(reportDir, 'informe.md'), 'utf8');
-    assert(/\| revisar \| 1 \| 1 \|/.test(reviewReport) && /\| no concluyente \| 1 \| 1 \|/.test(reviewReport) && /\| no ejecutable \| 1 \| 1 \|/.test(reviewReport) && /\| error \| 1 \| 1 \|/.test(reviewReport), 'report totals: how many went to Draft per result', reviewReport);
+    assert(/\| revisar \| 1 \| 1 \|/.test(reviewReport) && /\| no concluyente \| 1 \| 1 \|/.test(reviewReport) && /\| no ejecutable \| 2 \| 1 \|\n\| {3}de ellas, sin XPath que probar \(siguen como estaban\) \| 1 \| 0 \|/.test(reviewReport) && /\| error \| 1 \| 1 \|/.test(reviewReport), 'report totals: how many went to Draft per result', reviewReport);
 
     // ── Network failure between recording and revoking ──
     await restartBackend();
@@ -386,7 +395,8 @@ async function main() {
     assert(results.runs.length === 9, 'same project and day: one folder, nine passes appended', String(results.runs.length));
     assert(/\| BRDP-RB-02 \| falla, falla al repetir \| → Draft \|/.test(report) && /\| BRDP-RB-03 \| falla \| — \|/.test(report), 'report: failing table with Draft column', report);
     assert(/\| BRDP-RB-09 \| falla, falla al repetir \| → Draft \|/.test(report) && /\| BRDP-RB-10 \| falla \| → Draft \|/.test(report), 'report: moved to Draft by an earlier pass of the folder, or by a later one after a failed revoke', report);
-    assert(/\| BRDP-RB-05 \| no ejecutable \| → Draft \|/.test(report) && /\| BRDP-RB-11 \| revisar \| → Draft \|/.test(report) && /\| BRDP-RB-12 \| no concluyente \| → Draft \|/.test(report), 'report: not executable, review, inconclusive → Draft', report);
+    assert(/## Sin XPath que probar \(1\): siguen como estaban\n\n- BRDP-RB-05 — Verified: /.test(report) && !/\| BRDP-RB-05 \|/.test(report), 'report: known not executable listed apart, still Verified', report);
+    assert(/\| BRDP-RB-15 \| no ejecutable \| → Draft \|/.test(report) && /\| BRDP-RB-11 \| revisar \| → Draft \|/.test(report) && /\| BRDP-RB-12 \| no concluyente \| → Draft \|/.test(report), 'report: not executable, review, inconclusive → Draft', report);
     assert(/## Pasan pero siguen en Draft \(3\)\n\n- BRDP-RB-04\n- BRDP-RB-06\n- BRDP-RB-07 \(saltada: ya había pasado\)/.test(report), 'report: passes but still Draft (04, 06 after its timeout, 07)', report);
     assert(/- BRDP-RB-13 — Verified \(pasa \(el esquema ya lo incluye\)\)/.test(report), 'report: already covered by the schema stays Verified', report);
     assert(results.entries.some((e) => e.identifier === 'BRDP-RB-04' && e.examples?.length > 0 && e.reason_text === ''), 'resultados.json keeps the examples');

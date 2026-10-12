@@ -29,6 +29,7 @@ import {
   saveFailedLine,
   shouldRepeat,
   shouldRevoke,
+  knownNotExecutable,
   skipReason,
   SKIPPED_SAVE_EVERY,
   writeFileAtomic,
@@ -555,6 +556,43 @@ check('--no-retry → one attempt', !shouldRepeat({ result: 'failed' }, 'approve
   const down = await runScript(['--project', 'x']);
   check('exit: backend down -> exit 2, no process.exit, no trace', down.code === 2 && /Cannot reach the backend/.test(down.out) && !/PROCESS_EXIT_CALLED/.test(down.out) && noTrace(down.out), down.out);
   fs.rmSync(trapDir, { recursive: true, force: true });
+}
+
+// ── Rangos de valores, Part 2: known "not executable" keeps Verified ─────
+{
+  const { analyzeRule } = await import('../src/utils/ruleTestEngine.js');
+  const { DOMParser } = await import('@xmldom/xmldom');
+  const parseXml = (text) => new DOMParser().parseFromString(text, 'text/xml');
+  const DEFAULT = JSON.parse(fs.readFileSync(new URL('./rule-test-fixtures/default-brex-4-2.json', import.meta.url))).rules;
+  const recordOf = (n) => notExecutableRecord(analyzeRule(DEFAULT[`BRDP-EXT-${n}`].rule_xml, 'BREX-4.2', { parseXml }));
+  const r261 = recordOf('00261');
+  check('EXT-00261 (only nonContextRule): not executable, non_context_rule', r261?.result === 'not_executable' && r261.reason?.code === 'non_context_rule', JSON.stringify(r261));
+  check('EXT-00261 Verified: known reason → stays Verified', knownNotExecutable(r261) && !shouldRevoke(r261, 'approved'));
+  // EXT-00200: the "(\\ )+" pattern fails when the rule runs on an example
+  // (xpath_error, FORX0002) -- the result "not executable" the real run gave.
+  const { runRuleOnFragment } = await import('../src/utils/ruleTestEngine.js');
+  const run200 = runRuleOnFragment(DEFAULT['BRDP-EXT-00200'].rule_xml, 'BREX-4.2', '<dmodule><content><x crewStepCondition="csc01"/></content></dmodule>', null, { parseXml });
+  const r200 = { result: 'not_executable', reason: run200.notExecutableReason };
+  check('EXT-00200 (pattern "(\\ )+"): not executable (xpath_error), not a known reason', run200.status === 'not_executable' && r200.reason?.code === 'xpath_error' && !knownNotExecutable(r200), JSON.stringify(run200).slice(0, 300));
+  check('EXT-00200 Verified → Draft as before', shouldRevoke(r200, 'approved'));
+  for (const reason of [{ code: 'external_document', params: { fn: 'doc-available()' } }, { code: 'external_placeholder', params: { placeholder: '@@URI@@' } }]) {
+    check(`known ${reason.code} → stays Verified`, !shouldRevoke({ result: 'not_executable', reason }, 'approved'));
+  }
+  check('parts all known → stays Verified', !shouldRevoke({ result: 'not_executable', reason: { code: 'parts', params: { parts: [{ ruleId: 'a', reason: { code: 'non_context_rule' } }, { ruleId: 'b', reason: { code: 'external_document', params: { fn: 'doc()' } } }] } } }, 'approved'));
+  check('parts with one unknown → Draft', shouldRevoke({ result: 'not_executable', reason: { code: 'parts', params: { parts: [{ ruleId: 'a', reason: { code: 'non_context_rule' } }, { ruleId: 'b', reason: { code: 'xpath_error', params: { message: 'x' } } }] } } }, 'approved'));
+  check('absolute root (impossible root) → Draft', shouldRevoke({ result: 'not_executable', reason: { code: 'unreachable_target', params: { names: '<pmStatus>' } } }, 'approved'));
+  check('a bare "not_executable" (no reason) → Draft', shouldRevoke('not_executable', 'approved'));
+  check('known reason never repeated (deterministic)', shouldRepeat({ ...r261, deterministic: true }, 'approved') === false);
+  const known = { identifier: 'BRDP-EXT-00261', result: 'not_executable', reason: r261.reason, reason_text: 'This rule part is a nonContextRule: there is no XPath to run.', known_not_executable: true, status_before: 'approved', status_after: 'approved' };
+  const invalid = { identifier: 'BRDP-EXT-00200', result: 'not_executable', reason: r200.reason, reason_text: 'XPath error', moved_to_draft: true, status_before: 'approved', status_after: 'pending_review' };
+  const rep = buildReport({ project: { name: 'Official Default S1000D 4.2 - 001', standard: 'S1000D 4.2', format: 'BREX-4.2' }, runs: [{ started_at: 'a', user: 'u', options: {} }], entries: [known, invalid] });
+  check('report: "Sin XPath que probar" lists EXT-00261, Verified', /## Sin XPath que probar \(1\): siguen como estaban\n\n- BRDP-EXT-00261 — Verified: /.test(rep), rep);
+  const notPassing = rep.split('## Reglas que no pasan')[1].split('## ')[0];
+  check('report: EXT-00261 not among the rules that do not pass', !notPassing.includes('BRDP-EXT-00261') && notPassing.includes('BRDP-EXT-00200'), notPassing);
+  check('report: totals say how many have no XPath to test', /de ellas, sin XPath que probar \(siguen como estaban\) \| 1 \| 0 \|/.test(rep), rep);
+  check('report EN: "No XPath to test"', /## No XPath to test \(1\): left as they were/.test(buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [], entries: [known] }, { lang: 'en' })));
+  check('progress: EXT-00261 says it stays as it was', progressLine(1, 2, known) === '[1/2] BRDP-EXT-00261 NO EJECUTABLE (sin XPath que probar: sigue como estaba) (0 s)', progressLine(1, 2, known));
+  check('progress: EXT-00200 → Draft', progressLine(2, 2, invalid) === '[2/2] BRDP-EXT-00200 NO EJECUTABLE → Draft (0 s)', progressLine(2, 2, invalid));
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);

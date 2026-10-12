@@ -206,9 +206,19 @@
    "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"EPWG81.04\" changeType=\"add\" changeMark=\"1\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00268\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">/dmodule[content/brex]/identAndStatusSection/dmAddress/dmIdent/dmCode[@infoCode!=\"022\" or @itemLocationCode!=\"D\"]</objectPath>\n\t\t\t\t\t\t<objectUse>The information code for a BREX data module is 022, and the item location code is set to D. (Chap 4.10.2.4, Para 2).</objectUse>\n\t\t\t\t\t</structureObjectRule>",
    "proposal": ""
   },
+  "BRDP-EXT-00200": {
+   "source_identifier": "BREX-S1-00193",
+   "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00193\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//@crewStepCondition</objectPath>\n\t\t\t\t\t\t<objectUse>Attribute crewStepCondition - Crew step condition (Chap 3.9.6.1, Table 18)</objectUse>\n\t\t\t\t\t\t<!-- \"csc01\" - Equipment is installed or available -->\n\t\t\t\t\t\t<!-- \"csc02\" - A detailed procedure for the step is located in the performance section of the condensed checklist -->\n\t\t\t\t\t\t<!-- \"csc03\" - Performance of the step is mandatory for all through-flights used for combat/tactical operations -->\n\t\t\t\t\t\t<!-- \"csc04\" - A step that is mandatory for night flights -->\n\t\t\t\t\t\t<!-- \"csc05\" - A task or step required by the operator manual -->\n\t\t\t\t\t\t<!-- Values within range csc51~csc99 can be allocated and defined by projects or organizations -->\n\t\t\t\t\t\t<objectValue valueForm=\"pattern\" valueAllowed=\"((csc0[1-5])|(csc5[1-9])|(csc[6-9][0-9]))((\\ )+((csc0[1-5])|(csc5[1-9])|(csc[6-9][0-9])))*\"/>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
   "BRDP-EXT-00260": {
    "source_identifier": "BREX-S1-00244",
    "rule_xml": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00244\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"2\">//@quantityUnitOfMeasure</objectPath>\n\t\t\t\t\t\t<objectUse>Attribute quantityUnitOfMeasure - Quantity data unit of measure. Apart from the pre-defined fixed values, values within range um51~um99 can be allocated and defined by projects or organizations (Chap 3.9.6.2, Table 2)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+   "proposal": ""
+  },
+  "BRDP-EXT-00261": {
+   "source_identifier": null,
+   "rule_xml": "<nonContextRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00245\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t<simplePara>Deletion of data modules is treated as a special case of update. The data module itself is not physically deleted from the CSDB but [only] marked as deleted. (Chap 3.9.5.1, Para 2.2)</simplePara>\n\t\t\t\t</nonContextRule>",
    "proposal": ""
   }
  }
