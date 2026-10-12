@@ -72,6 +72,7 @@ export const KNOWN_CODES = new Set([
   'rule_not_found',
   'rule_test_outdated',
   'rule_correction_outdated',
+  'rule_defect_outdated',
   'rule_test_nothing_to_keep',
   'rule_not_draft',
   'rule_not_verified',

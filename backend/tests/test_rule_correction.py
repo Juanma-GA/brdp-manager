@@ -132,7 +132,7 @@ async def test_a_save_without_correction_writes_no_event(client, editor_viewer_a
 async def test_correction_payload_is_validated(client, editor_viewer_and_project):
     project, headers, _ = editor_viewer_and_project
     _, url = await _brdp_with_rule(client, project, headers)
-    for bad in ({"fixes": []}, {"fixes": [{"code": "Not A Code"}]}, {"fixes": [{"code": "path", "params": {"x": "y" * 30000}}]}):
+    for bad in ({"fixes": []}, {"fixes": [{"code": "Not A Code"}]}, {"fixes": [{"code": "path", "params": {"x": "y" * 300000}}]}):
         res = await client.put(url, json={"rule_xml": FIXED, "source": "manual", "correction": bad}, headers=headers)
         assert res.status_code == 422, bad
 
@@ -180,3 +180,84 @@ async def test_dismissal_without_rule_is_404(client, editor_viewer_and_project):
     url = f"/api/projects/{project.id}/brdps/{brdp['id']}/approvals/BREX-3.0.1"
     res = await client.post(url + "/correction-dismissal", json={"rule_hash": _hash(RULE)}, headers=headers)
     assert res.status_code == 404
+
+
+# "Defecto detectado", "Marcar como revisado": same endpoint and column, plus
+# the reviewed defects for History. A rule like BRDP-EXT-00108
+# (identNumber[child::refs or child::remarks]: <remarks> does not exist there).
+REVIEWED = [{"code": "path", "params": {"problem": {"kind": "child", "element": "remarks", "parent": "identNumber"}}}]
+
+
+async def test_defect_marked_as_reviewed_is_remembered_with_a_history_event(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    body = {"rule_hash": _hash(RULE), "reviewed_defects": REVIEWED}
+    res = await client.post(url + "/correction-dismissal", json=body, headers=headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["correction_dismissed_hash"] == _hash(RULE)
+    assert res.json()["rule_xml"] == RULE
+    history = await _history(client, project, brdp, headers)
+    events = [h for h in history if h["field_name"] == "rule_defect_reviewed"]
+    assert len(events) == 1
+    assert json.loads(events[0]["new_value"]) == {"defects": REVIEWED}
+    assert events[0]["user_email"].startswith("cp-editor-")
+    # Marking the same text again adds nothing.
+    res = await client.post(url + "/correction-dismissal", json=body, headers=headers)
+    assert res.status_code == 200
+    history = await _history(client, project, brdp, headers)
+    assert len([h for h in history if h["field_name"] == "rule_defect_reviewed"]) == 1
+    # Editing the rule afterwards: the stored hash no longer matches it.
+    await client.put(url, json={"rule_xml": FIXED, "source": "manual"}, headers=headers)
+    assert (await client.get(url, headers=headers)).json()["correction_dismissed_hash"] != _hash(FIXED)
+
+
+async def test_a_discarded_correction_still_writes_no_history(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    res = await client.post(url + "/correction-dismissal", json={"rule_hash": _hash(RULE)}, headers=headers)
+    assert res.status_code == 200
+    history = await _history(client, project, brdp, headers)
+    assert not [h for h in history if h["field_name"] == "rule_defect_reviewed"]
+
+
+async def test_reviewing_a_changed_rule_is_refused_and_saves_nothing(client, editor_viewer_and_project):
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    res = await client.post(
+        url + "/correction-dismissal", json={"rule_hash": _hash(FIXED), "reviewed_defects": REVIEWED}, headers=headers
+    )
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "rule_defect_outdated"
+    assert (await client.get(url, headers=headers)).json()["correction_dismissed_hash"] is None
+    history = await _history(client, project, brdp, headers)
+    assert not [h for h in history if h["field_name"] == "rule_defect_reviewed"]
+
+
+async def test_review_payload_is_validated_and_viewer_cannot_review(client, editor_viewer_and_project):
+    project, headers, viewer = editor_viewer_and_project
+    _, url = await _brdp_with_rule(client, project, headers)
+    for bad in ([], [{"code": "Not A Code"}], [{"code": "path", "params": {"x": "y" * 300000}}]):
+        res = await client.post(url + "/correction-dismissal", json={"rule_hash": _hash(RULE), "reviewed_defects": bad}, headers=headers)
+        assert res.status_code == 422, bad
+    res = await client.post(
+        url + "/correction-dismissal", json={"rule_hash": _hash(RULE), "reviewed_defects": REVIEWED}, headers=viewer
+    )
+    assert res.status_code == 403
+
+
+async def test_review_of_long_defects_is_accepted(client, editor_viewer_and_project):
+    # BRDP-EXT-00115-like: three defects, each listing 600+ owners of an
+    # attribute -- about 23 000 characters, over the old 20 000 limit.
+    project, headers, _ = editor_viewer_and_project
+    brdp, url = await _brdp_with_rule(client, project, headers)
+    owners = [f"element{i:04d}" for i in range(640)]
+    defects = [
+        {"code": "path", "params": {"problem": {"kind": "attribute", "element": "publisherLogo", "attribute": a, "owners": owners}}}
+        for a in ("id", "authorityName", "authorityDocument")
+    ]
+    assert len(json.dumps(defects)) > 20000
+    res = await client.post(url + "/correction-dismissal", json={"rule_hash": _hash(RULE), "reviewed_defects": defects}, headers=headers)
+    assert res.status_code == 200, res.text
+    history = await _history(client, project, brdp, headers)
+    event = next(h for h in history if h["field_name"] == "rule_defect_reviewed")
+    assert json.loads(event["new_value"]) == {"defects": defects}

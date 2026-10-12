@@ -110,7 +110,7 @@ function BlockedFixes({ blocked, format }) {
   );
 }
 
-export default function RuleCorrectionBlock({ entry, ruleXml, format, canEdit, busy, error, onAccept, onDismiss, onSuggestRule, suggestRuleBlockedReason }) {
+export default function RuleCorrectionBlock({ entry, ruleXml, format, canEdit, busy, error, onAccept, onDismiss, onReview, onSuggestRule, suggestRuleBlockedReason }) {
   const { t } = useTranslation();
   const [showDismissed, setShowDismissed] = useState(false);
   if (!entry) return null;
@@ -172,6 +172,17 @@ export default function RuleCorrectionBlock({ entry, ruleXml, format, canEdit, b
     );
   }
 
+  if (entry.dismissed && !showDismissed) {
+    return (
+      <div className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-defect-reviewed">
+        {t('records.ruleCorrection.reviewed')} {defects.map((d) => formatRuleDefect(d, t, { format })).join(' ')}{' '}
+        <button type="button" className={styles.linkButton} onClick={() => setShowDismissed(true)} data-testid="rule-defect-show">
+          {t('records.ruleCorrection.showDefect')}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.ruleCorrectionBox} data-testid="rule-defect">
       <strong>{t('records.ruleCorrection.defectTitle')}</strong>
@@ -189,6 +200,18 @@ export default function RuleCorrectionBlock({ entry, ruleXml, format, canEdit, b
         >
           {t('records.ruleCorrection.suggestRule')}
         </button>
+      )}
+      {error && (
+        <p className={styles.ruleErrorText} role="alert" data-testid="rule-defect-error">
+          {error}
+        </p>
+      )}
+      {canEdit && onReview && !entry.dismissed && (
+        <div className={styles.suggestionActions}>
+          <button type="button" onClick={onReview} disabled={busy} title={t('records.ruleCorrection.markReviewedTitle')} data-testid="rule-defect-review">
+            {t('records.ruleCorrection.markReviewed')}
+          </button>
+        </div>
       )}
     </div>
   );

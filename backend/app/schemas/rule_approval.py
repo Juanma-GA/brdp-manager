@@ -41,7 +41,11 @@ class RuleApprovalPropose(BaseModel):
 # fixes ({code, params, fix}) and what is still wrong after it -- codes
 # from src/validation/ruleCorrection.js, translated by the interface.
 _MAX_CORRECTION_ITEMS = 50
-_MAX_CORRECTION_JSON = 20000
+# A defect's params can list every element that has an attribute (a real
+# case: BRDP-EXT-00115 of the S1000D 4.2 default BREX, @id on 600+ elements,
+# about 23 000 characters for three defects); the interface shows five and
+# "or N more", but the record keeps them whole. 20 000 rejected that case.
+_MAX_CORRECTION_JSON = 200000
 
 
 class RuleCorrectionItem(BaseModel):
@@ -65,6 +69,17 @@ class RuleCorrectionDismiss(BaseModel):
     # SHA-256 hex of the rule_xml the discarded correction was proposed
     # for; must be the saved rule's (409 otherwise).
     rule_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # "Defecto detectado", "Marcar como revisado": the same hash, kept in the
+    # same column (a rule text has either a correction or a defect without a
+    # fix, never both), plus the defects reviewed -- they go to History as
+    # codes, translated when shown. Absent for a discarded correction.
+    reviewed_defects: list[RuleCorrectionItem] | None = Field(default=None, min_length=1, max_length=_MAX_CORRECTION_ITEMS)
+
+    @model_validator(mode="after")
+    def _size(self) -> "RuleCorrectionDismiss":
+        if self.reviewed_defects is not None and len(json.dumps([d.model_dump() for d in self.reviewed_defects])) > _MAX_CORRECTION_JSON:
+            raise ValueError("reviewed_defects is too large")
+        return self
 
 
 # Test de reglas T3: the recorded result of the last "Test rule" run.

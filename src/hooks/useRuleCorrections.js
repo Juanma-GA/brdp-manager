@@ -47,12 +47,14 @@ export function cachedRuleCorrection(ruleXml, format, ctx) {
 
 // What a rule's result means for the lists: 'proposed' (a correction not
 // discarded), 'unfixable' (defects, none with a fix), 'dismissed' (its
-// correction was discarded for this text), or null (nothing to say).
+// correction was discarded for this text), 'reviewed' (its defect without
+// a fix was marked as reviewed for this text -- same stored hash), or null
+// (nothing to say). Only 'proposed' and 'unfixable' are counted.
 export function correctionStatus(result, clashes, dismissed) {
   const hasDefects = (result?.defects?.length || 0) + (clashes?.length || 0) > 0;
   if (!hasDefects) return null;
   if (result?.proposal) return dismissed ? 'dismissed' : 'proposed';
-  return 'unfixable';
+  return dismissed ? 'reviewed' : 'unfixable';
 }
 
 // The context every check needs: the project's vocabulary, the other

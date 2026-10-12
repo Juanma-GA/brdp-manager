@@ -447,6 +447,10 @@ async def dismiss_rule_correction(
     saved rule text does not come back for that text (it is remembered by
     the text's SHA-256). The rule itself never changes here. 409 when the
     hash is not the saved rule's -- the correction was of another text.
+
+    "Defecto detectado", "Marcar como revisado": the same, with the
+    reviewed defects in the body (`reviewed_defects`), which also leaves a
+    "rule_defect_reviewed" entry in History.
     """
     await _get_owned_brdp(project_id, brdp_id, db)
     approval = await db.get(RuleApproval, (brdp_id, format))
@@ -458,11 +462,28 @@ async def dismiss_rule_correction(
     if body.rule_hash != rule_xml_hash(approval.rule_xml):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=error_detail(
-                "rule_correction_outdated", message="The rule changed since the correction was proposed; open it again"
+            detail=(
+                error_detail("rule_defect_outdated", message="The rule changed since the defect was shown; open it again")
+                if body.reviewed_defects is not None
+                else error_detail(
+                    "rule_correction_outdated", message="The rule changed since the correction was proposed; open it again"
+                )
             ),
         )
+    already = approval.correction_dismissed_hash == body.rule_hash
     approval.correction_dismissed_hash = body.rule_hash
+    if body.reviewed_defects is not None and not already:
+        # "Marcar como revisado": an event in History (the defects, as codes);
+        # marking the same text twice adds nothing.
+        record_change(
+            db,
+            brdp_id,
+            editor,
+            "rule_defect_reviewed",
+            "",
+            json.dumps({"defects": [d.model_dump(exclude={"fix"}) for d in body.reviewed_defects]}, sort_keys=True, ensure_ascii=False),
+            always=True,
+        )
     await db.commit()
     await db.refresh(approval)
     return approval

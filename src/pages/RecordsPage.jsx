@@ -277,6 +277,17 @@ function extractedQuoteLength(value) {
   }
 }
 
+// "Marcar como revisado": the "rule_defect_reviewed" event's value is JSON
+// ({ defects: [{ code, params }] }) -- the defects reviewed, translated.
+function formatRuleDefectReviewedValue(t, value) {
+  if (!value) return '—';
+  try {
+    return (JSON.parse(value).defects || []).map((d) => formatRuleDefect(d, t)).join(' ') || '—';
+  } catch {
+    return value;
+  }
+}
+
 // The full value on hover: the raw text, except a rule test (its codes
 // would read as JSON), which shows its translated text.
 function historyValueTitle(t, fieldName, value) {
@@ -284,6 +295,7 @@ function historyValueTitle(t, fieldName, value) {
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
   if (fieldName === 'copied_from') return formatCopiedFromValue(value);
   if (fieldName === 'rule_corrected') return formatRuleCorrectedValue(t, value);
+  if (fieldName === 'rule_defect_reviewed') return formatRuleDefectReviewedValue(t, value);
   if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   if (fieldName === 'catalog_edition') return formatCatalogEditionValue(t, value);
   // AACF 3, Part 3: a status value reads in the interface language in its
@@ -318,6 +330,7 @@ function isLongHistoryEntry(entry) {
   // An extraction from free text carries its quote: long when the quote is.
   if (entry.field_name === 'extracted_from') return extractedQuoteLength(entry.new_value) > HISTORY_MAX_CHARS - 60;
   if (entry.field_name === 'rule_corrected') return formatRuleCorrectedValue(i18n.t.bind(i18n), entry.new_value).length > HISTORY_MAX_CHARS;
+  if (entry.field_name === 'rule_defect_reviewed') return formatRuleDefectReviewedValue(i18n.t.bind(i18n), entry.new_value).length > HISTORY_MAX_CHARS;
   if (HISTORY_TRANSLATED_FIELDS[entry.field_name] || entry.field_name === 'rule_copied' || entry.field_name === 'copied_from' || entry.field_name === 'catalog_edition') return false;
   return [entry.old_value, entry.new_value].some((v) => historyText(entry.field_name, v).length > HISTORY_MAX_CHARS);
 }
@@ -332,6 +345,7 @@ function historyText(fieldName, value) {
 function fullHistoryValue(t, fieldName, value) {
   if (fieldName === 'extracted_from') return formatExtractedFromValue(t, value);
   if (fieldName === 'rule_corrected') return formatRuleCorrectedValue(t, value);
+  if (fieldName === 'rule_defect_reviewed') return formatRuleDefectReviewedValue(t, value);
   if (fieldName === 'rule_test' || fieldName === 'rule_copied' || fieldName === 'copied_from' || fieldName === 'extracted_from' || fieldName === 'catalog_edition' || HISTORY_TRANSLATED_FIELDS[fieldName]) return formatHistoryValue(t, fieldName, value);
   return value || '—';
 }
@@ -347,6 +361,10 @@ function formatHistoryValue(t, fieldName, value) {
   if (fieldName === 'rule_test') return formatRuleTestHistoryValue(t, value);
   if (fieldName === 'rule_corrected') {
     const text = formatRuleCorrectedValue(t, value);
+    return text.length > HISTORY_MAX_CHARS ? `${text.slice(0, HISTORY_MAX_CHARS)}…` : text;
+  }
+  if (fieldName === 'rule_defect_reviewed') {
+    const text = formatRuleDefectReviewedValue(t, value);
     return text.length > HISTORY_MAX_CHARS ? `${text.slice(0, HISTORY_MAX_CHARS)}…` : text;
   }
   if (fieldName === 'rule_copied') return formatRuleCopiedValue(value);
@@ -1404,6 +1422,35 @@ export default function RecordsPage() {
     }
   };
 
+  // "Defecto detectado", "Marcar como revisado": the same stored hash as a
+  // discarded correction, plus the defects for History. Optimistic (HR20):
+  // the block turns into the discreet line at once; a refusal (409: the rule
+  // changed in another tab) brings it back with the reason.
+  const reviewRuleDefect = async () => {
+    if (!canEdit || !ruleFormat || !ruleApproval || !selectedCorrection) return;
+    const defects = [...(selectedCorrection.result?.defects || []), ...(selectedCorrection.clashes || [])];
+    if (defects.length === 0) return;
+    const brdpId = selected.id;
+    const previous = ruleApproval;
+    const hash = ruleXmlHash(previous.rule_xml);
+    setCorrectionError(null);
+    setRuleApproval((a) => (a ? { ...a, correction_dismissed_hash: hash } : a));
+    try {
+      await authFetchJson(`/api/projects/${projectId}/brdps/${brdpId}/approvals/${ruleFormat}/correction-dismissal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule_hash: hash, reviewed_defects: defects.map((d) => ({ code: d.code, params: d.params || {} })) }),
+      });
+      setApprovalsRefreshToken((n) => n + 1);
+      setHistoryRefreshToken((n) => n + 1);
+    } catch (err) {
+      if (selectedIdRef.current === brdpId) {
+        setRuleApproval(previous);
+        setCorrectionError(t('records.ruleCorrection.reviewFailed', { reason: errorMessage(err, t) }));
+      }
+    }
+  };
+
   // "Defecto detectado": the person asks for a new rule with the very
   // Suggest Rule button (its own availability and reasons); never on the
   // application's initiative.
@@ -2334,6 +2381,7 @@ export default function RecordsPage() {
                     error={correctionError}
                     onAccept={acceptRuleCorrection}
                     onDismiss={dismissRuleCorrection}
+                    onReview={reviewRuleDefect}
                     onSuggestRule={goToSuggestRule}
                   />
                   <div className={styles.suggestionActions}>
