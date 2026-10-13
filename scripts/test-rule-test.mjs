@@ -3297,7 +3297,14 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   check('GMC 1.2: EXT-00037 prompt lists the carriers, cut at 20', /@commercialClassification goes on: (<\w+>, ){20}\+64 more \(84\)\./.test(ext37.prompt || ''), (ext37.prompt || '').match(/@commercialClassification goes on:.*/)?.[0]);
   check('GMC 1.2: EXT-00037 prompt gives the way to the nearest', /The valid way to the nearest, <\w+>, from <para>: para\/\w+\./.test(ext37.prompt || ''));
   const correction37 = ext37.asked[1]?.at(-1)?.content || '';
-  check('GMC 1.2: on <language> -> the correction brings the list and the way', /@commercialClassification does not exist on <language>\. @commercialClassification goes on: .*\(84\)\. The valid way to the nearest/.test(correction37), correction37);
+  // Atributo, desde donde la IA lo puso: the carriers near <language> (going
+  // up: <techName> in the example, by its real path), not the 84 from the content.
+  check(
+    'GMC 1.2: on <language> -> the correction brings the carriers near it',
+    /@commercialClassification is not allowed on <language>, nor on anything inside it\. Going up from <language>, the nearest that can carry it, from <dmAddress>: <techName>, <infoName> \(paths: dmAddress\/dmAddressItems\/dmTitle\/techName, dmAddress\/dmAddressItems\/dmTitle\/infoName\)\. <techName> is already in this example\./.test(correction37) &&
+      !/goes on: .*\(84\)/.test(correction37),
+    correction37
+  );
   check("GMC 1.2: EXT-00037 after the correction -> correct", ext37.verdict?.kind === "correct", JSON.stringify(ext37.verdict) + JSON.stringify(ext37.result.runs.map((r) => [r.result?.status, r.validation.runnable, r.validation.structure])));
   const setup79 = await prepareRuleTestSetup({ ruleXml: EXT79, standard: S42, schemaLocation: 'flat', format: 'BREX-4.2', parseXml, ...io });
   const prompt79 = buildRuleTestExamplesPrompt({ brdp: brdpOf('BRDP-EXT-00079', 'urt01 or urt02'), standard: S42, format: 'BREX-4.2', ruleXml: EXT79, placements: setup79.promptPlacements });
@@ -3800,6 +3807,106 @@ const AF = {};
   const before = AF.ex127('<pmCode>PM-001</pmCode>', ['general', 'tableOfContents', 'toc', 'general']).examples.map((e) => materializeExample(e, { ...AF.setup127, rule: undefined }, parseXml));
   check('AF3 EXT-00127 without the fixes: none valid', before.every((e) => !validateExample(e.xml, vocabulary, parseXml, e.structure, { skeletonNodePaths: e.skeletonNodePaths }).runnable));
   check('AF3: unused helpers', typeof fm === 'function' && Boolean(descript));
+}
+
+// ---- Atributo, desde donde la IA lo puso (BRDP-EXT-00033 of the default
+// S1000D 4.2 BREX, verbatim): the correction round names the carriers near
+// the element the LLM put the attribute on, on the real 4.2 structures.
+{
+  const { nearbyAttributeCarriers, runExample, materializeExample, ruleTestVerdict } = await import('../src/utils/ruleTest.js');
+  const S42 = 'S1000D 4.2';
+  const RULES = JSON.parse(fs.readFileSync(new URL('./rule-test-fixtures/default-brex-4-2.json', import.meta.url))).rules;
+  const EXT33 = RULES['BRDP-EXT-00033'].rule_xml;
+  const cards42 = JSON.parse(fs.readFileSync(new URL('../backend/schema_cards/schema-cards-4-2.json', import.meta.url))).cards;
+  const docs42 = [...new Set(Object.values(cards42).flatMap((vs) => vs.flatMap((v) => v.schemas)))].filter((s) => !['dc', 'rdf', 'xlink', 'xcf'].includes(s)).sort();
+  const io = {
+    fetchSchemaCards: async (_s, names) => ({ cards: Object.fromEntries(names.filter((n) => cards42[n]).map((n) => [n, { variants: cards42[n] }])), document_schemas: docs42 }),
+    fetchStructure: async (std, schema) => {
+      const st = structureOf(std, schema);
+      return st ? { available: true, ...st } : { available: false };
+    },
+  };
+  const run = async (ruleXml, answers, proposal = 'p') => {
+    const asked = [];
+    const result = await generateRuleTestExamples({
+      ruleXml, format: 'BREX-4.2', standard: S42, schemaLocation: 'flat', brdp: { identifier: 'BRDP-EXT-00033', title: 't', definition: 'd', proposal }, vocabulary,
+      ask: async (messages) => { asked.push(messages); return JSON.stringify(answers[Math.min(asked.length - 1, answers.length - 1)]); },
+      ...io, parseXml,
+    });
+    const verdict = result?.examples ? ruleTestVerdict(result.examples, result.runs, analyzeRule(ruleXml, 'BREX-4.2', { parseXml })) : null;
+    return { result, asked, verdict };
+  };
+  const correctionOf = (asked) => asked[1]?.[asked[1].length - 1]?.content || '';
+  const descript = structureOf(S42, 'descript');
+  const minimal = metadataXml(descript.skeleton.metadata.tree).xml;
+  // The whole document of the example (the rule checks the root): the
+  // minimal section with the issue type and the attributes given.
+  const doc = (statusAttrs, applicAttrs = '') => {
+    const section = minimal
+      .replace(/<dmStatus\b([^>]*)>/, (m, a) => `<dmStatus${a.replace(/\s*issueType="[^"]*"/, '')} issueType="changed"${statusAttrs}>`)
+      .replace('<applic>', `<applic${applicAttrs}>`);
+    return `<dmodule>${section}<content><description><levelledPara><title>T</title><para>Text.</para></levelledPara></description></content></dmodule>`;
+  };
+  const accept = { label: 'status issue', expected: 'accept', schema: 'descript', content: doc('').replace('issueType="changed"', 'issueType="status"') };
+  const first = { examples: [
+    { label: 'change mark on dmStatus', expected: 'reject', schema: 'descript', content: doc(' changeMark="1"') },
+    accept,
+  ] };
+  const fixed = { examples: [
+    { label: 'change mark on dmStatus', expected: 'reject', schema: 'descript', content: doc('', ' changeMark="1"') },
+    accept,
+  ] };
+  const ext33 = await run(EXT33, [first, fixed]);
+  const correction = correctionOf(ext33.asked);
+  check('AC1 EXT-00033: one correction round', ext33.asked.length === 2, String(ext33.asked.length));
+  check(
+    'AC1 EXT-00033: the correction names <applic>, already in the example, inside <dmStatus>',
+    /@changeMark is not allowed on <dmStatus>\. Inside <dmStatus> it can go on: <applic>, /.test(correction) && /\(paths: dmStatus\/applic, /.test(correction) && /<applic>(, <\w+>)* (is|are) already in this example\./.test(correction),
+    correction
+  );
+  check('AC1 EXT-00033: at most 6 carriers and "+N more"', /it can go on: (<\w+>, ){5}<\w+>, \+\d+ more \(paths: /.test(correction), correction);
+  check('AC1 EXT-00033: not the carrier list from the content', !/goes on: .*\(\d+\)\./.test(correction) && !/from <para>/.test(correction), correction);
+  check('AC1 EXT-00033: the keep line lets the attribute move', /moving an attribute to the element a problem above names, is part of that fix/.test(correction) && !/which element each attribute is on/.test(correction), correction);
+  check('AC1 EXT-00033: examples valid after the round', ext33.result.runs.every((r) => r.validation.runnable), JSON.stringify(ext33.result.runs.map((r) => r.validation.structure)));
+  check('AC1 EXT-00033: correct', ext33.verdict?.kind === 'correct', JSON.stringify(ext33.verdict));
+  // A present carrier keeps the path it has in the example (brexDmRef/dmRef),
+  // not the schema's shortest way.
+  check('AC1 EXT-00033: present carriers by their real path', /dmStatus\/brexDmRef\/dmRef/.test(correction) && !/applicCrossRefTableRef\/dmRef/.test(correction), correction);
+
+  // Directly on the function: the order (present, then shallower, then name).
+  const setup = (await prepareRuleTestSetup({ ruleXml: EXT33, standard: S42, schemaLocation: 'flat', format: 'BREX-4.2', parseXml, ...io })).setup;
+  const ex = materializeExample(first.examples[0], setup, parseXml);
+  const ctx = runExample(EXT33, 'BREX-4.2', ex, { vocabulary, parseXml }).validation.attributeContexts.find((c) => c.attribute === 'changeMark');
+  const near = nearbyAttributeCarriers(descript, ctx);
+  check('AC1 nearby: inside <dmStatus>, present first', near?.scope === 'inside' && near.carriers[0].name === 'applic' && near.carriers[0].present && near.carriers.length === 6 && near.total > 6, JSON.stringify(near));
+  const depths = near.carriers.filter((c) => !c.present).map((c) => c.path.length);
+  check('AC1 nearby: the others by depth', depths.every((d, i) => i === 0 || d >= depths[i - 1]), JSON.stringify(depths));
+
+  // Going up: @changeMark on <language> (a leaf, nothing inside it).
+  const onLanguage = await run(EXT33, [{ examples: [
+    { label: 'change mark on language', expected: 'reject', schema: 'descript', content: doc('').replace('<language ', '<language changeMark="1" ') },
+    accept,
+  ] }, fixed]);
+  const up = correctionOf(onLanguage.asked);
+  check('AC1 going up: carriers next to <language>', /@changeMark is not allowed on <language>, nor on anything inside it\. Going up from <language>, the nearest that can carry it, from <\w+>: /.test(up), up);
+
+  // An attribute the rule does not look at (nor the Proposal): as before.
+  const EMPH = '<structureObjectRule><objectPath allowedObjectFlag="0">//emphasis</objectPath><objectUse>No emphasis.</objectUse></structureObjectRule>';
+  const emphFirst = (proposal) => run(EMPH, [{ examples: [
+    { label: 'emphasis', expected: 'reject', schema: 'descript', content: 'Text <emphasis changeMark="1">x</emphasis>.' },
+    { label: 'none', expected: 'accept', schema: 'descript', content: 'Text.' },
+  ] }, { examples: [
+    { label: 'emphasis', expected: 'reject', schema: 'descript', content: 'Text <emphasis>x</emphasis>.' },
+    { label: 'none', expected: 'accept', schema: 'descript', content: 'Text.' },
+  ] }], proposal);
+  const emphCorrection = correctionOf((await emphFirst('No emphasis.')).asked);
+  check('AC1 attribute the rule does not look at: unchanged', /@changeMark does not exist on <emphasis>/.test(emphCorrection) && !/is not allowed on/.test(emphCorrection) && !/moving an attribute/.test(emphCorrection), emphCorrection);
+  // The Proposal names it: the carriers near the element.
+  const namedCorrection = correctionOf((await emphFirst('No emphasis; change marks with @changeMark only.')).asked);
+  check('AC1 the Proposal names the attribute: carriers inside <emphasis>', /@changeMark is not allowed on <emphasis>\. Inside <emphasis> it can go on: /.test(namedCorrection), namedCorrection);
+  // No carrier anywhere near: null (as today).
+  const tiny = { elements: { a: { children: ['b'], attributes: [] }, b: { children: [], attributes: [] } } };
+  check('AC1 no carrier near: null', nearbyAttributeCarriers(tiny, { attribute: 'x', element: 'b', under: [{ element: 'b', paths: {} }, { element: 'a', paths: { b: ['a', 'b'] } }] }) === null);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

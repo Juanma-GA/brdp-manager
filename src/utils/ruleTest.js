@@ -369,9 +369,52 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
     names,
     structure: structureProblems,
     cards: structure ? elementCards(doc, names, structureProblems, structure) : [],
+    attributeContexts: structure ? attributeContexts(doc, structureProblems, options.skeletonNodePaths || []) : [],
     unknownSchema: null,
     runnable: namesOk && structureProblems.length === 0,
   };
+}
+
+// ─── Where an attribute can go, from where the LLM put it ──────────────────
+// EXT-00033 (default S1000D 4.2 BREX): the LLM wrote <dmStatus
+// changeMark="1">, and the correction round only had the 672 carriers of
+// @changeMark and the way to the nearest from the content -- 0 of 4 fixed.
+// For each "@x does not exist on <e>" problem, the example's own context of
+// the first such <e> (one the LLM wrote, never the skeleton): its ancestors
+// and, for <e> and each ancestor, the elements already under it with the
+// path to the shallowest of each.
+// → [{ attribute, element, under: [{ element, paths: { name: [path] } }] }]
+// (under[0] is <e>, then its parent, … up to the root).
+function attributeContexts(doc, problems, skeletonPaths) {
+  const skip = new Set(skeletonPaths);
+  const out = [];
+  for (const p of problems) {
+    if (p.kind !== 'unknownAttribute' || out.some((c) => c.attribute === p.attribute && c.element === p.element)) continue;
+    const found = elementsNamed(doc, (el) => el.nodeName === p.element && el.hasAttribute?.(p.attribute) && !skip.has(nodePath(el)));
+    const el = found[0] || elementsNamed(doc, (e) => e.nodeName === p.element && e.hasAttribute?.(p.attribute))[0];
+    if (!el) continue;
+    const under = [];
+    for (let at = el; at && at.nodeType === 1; at = at.parentNode) {
+      // The shallowest place of each name under <at>, as a path from <at>.
+      const paths = {};
+      let level = [[at, [at.nodeName]]];
+      while (level.length) {
+        const next = [];
+        for (const [node, path] of level) {
+          for (let n = node.firstChild; n; n = n.nextSibling) {
+            if (n.nodeType !== 1) continue;
+            const here = [...path, n.nodeName];
+            if (!(n.nodeName in paths)) paths[n.nodeName] = here;
+            next.push([n, here]);
+          }
+        }
+        level = next;
+      }
+      under.push({ element: at.nodeName, paths });
+    }
+    out.push({ attribute: p.attribute, element: p.element, under });
+  }
+  return out;
 }
 
 // ─── Element cards for the correction round (C3, Part 1a) ──────────────────
@@ -600,7 +643,88 @@ function relationWayHint(problem, relationWays, innerWays = []) {
   ].join(' ');
 }
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [], relationWays = [], innerWays = [] } = {}) {
+// The carriers of @x near where the LLM put it (attributeContexts):
+// first the elements inside <e> that may carry it (schema graph, shortest
+// way from <e>); if none, going up the example's ancestors of <e>: the
+// ancestor itself, the siblings of the path and their descendants, at the
+// nearest ancestor that has any. Those already in the example (or in the minimal section under
+// <e>) come first, then the shallower, then by name. → { scope: 'inside' |
+// 'up', anchor, carriers: [{ name, path, present }], total } | null.
+export const NEARBY_CARRIERS_MAX = 6;
+export function nearbyAttributeCarriers(structure, context, places = null) {
+  const elements = structure?.elements;
+  if (!elements || !context?.under?.length) return null;
+  const local = String(context.attribute).replace(/^xlink:/, '');
+  const carries = (name) => (elements[name]?.attributes || []).includes(local);
+  const reach = (start, exclude) => {
+    // BFS over the schema's children, shortest way first.
+    const way = new Map();
+    const queue = [];
+    for (const child of elements[start]?.children || []) {
+      if (child === exclude || way.has(child)) continue;
+      way.set(child, [start, child]);
+      queue.push(child);
+    }
+    while (queue.length) {
+      const name = queue.shift();
+      for (const child of elements[name]?.children || []) {
+        if (child === exclude || way.has(child) || child === start) continue;
+        way.set(child, [...way.get(name), child]);
+        queue.push(child);
+      }
+    }
+    return way;
+  };
+  const inMinimal = (name, anchorName) =>
+    Boolean(places?.get(name)?.some((path) => path.slice(0, -1).includes(anchorName)));
+  const pick = (start, exclude, presentPaths) => {
+    const present = (name) => Boolean(presentPaths[name]) && (exclude == null || presentPaths[name][1] !== exclude);
+    const found = [...reach(start, exclude)]
+      .filter(([name]) => carries(name))
+      .map(([name, path]) =>
+        present(name)
+          ? { name, path: presentPaths[name], present: true, minimal: false }
+          : { name, path, present: false, minimal: inMinimal(name, start) }
+      );
+    found.sort(
+      (a, b) =>
+        Number(b.present) - Number(a.present) ||
+        Number(b.minimal) - Number(a.minimal) ||
+        a.path.length - b.path.length ||
+        a.name.localeCompare(b.name)
+    );
+    return found;
+  };
+  const inside = pick(context.element, null, context.under[0].paths);
+  if (inside.length) return { scope: 'inside', anchor: context.element, carriers: inside.slice(0, NEARBY_CARRIERS_MAX), total: inside.length };
+  for (let i = 1; i < context.under.length; i += 1) {
+    const level = context.under[i];
+    const below = context.under[i - 1].element;
+    // The ancestor itself first (it is already in the example), then its
+    // other children and their descendants.
+    const self = carries(level.element) ? [{ name: level.element, path: [level.element], present: true, minimal: false }] : [];
+    const up = [...self, ...pick(level.element, below, level.paths)];
+    if (up.length) return { scope: 'up', anchor: level.element, carriers: up.slice(0, NEARBY_CARRIERS_MAX), total: up.length };
+  }
+  return null;
+}
+
+// The English correction line for nearbyAttributeCarriers.
+export function nearbyCarriersLine(problem, nearby) {
+  const shown = nearby.carriers.map((c) => `<${c.name}>`).join(', ');
+  const paths = nearby.carriers.map((c) => c.path.join('/')).join(', ');
+  const more = nearby.total > nearby.carriers.length ? `, +${nearby.total - nearby.carriers.length} more` : '';
+  const head =
+    nearby.scope === 'inside'
+      ? `@${problem.attribute} is not allowed on <${problem.element}>. Inside <${problem.element}> it can go on: ${shown}${more} (paths: ${paths}).`
+      : `@${problem.attribute} is not allowed on <${problem.element}>, nor on anything inside it. Going up from <${problem.element}>, the nearest that can carry it, from <${nearby.anchor}>: ${shown}${more} (paths: ${paths}).`;
+  const lines = [head];
+  const already = nearby.carriers.filter((c) => c.present).map((c) => `<${c.name}>`);
+  if (already.length) lines.push(`${already.join(', ')} ${already.length === 1 ? 'is' : 'are'} already in this example.`);
+  return lines.join(' ');
+}
+
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [], relationWays = [], innerWays = [], namedAttribute = null, structure = null } = {}) {
   const places = sectionTree ? minimalSectionPlaces(sectionTree) : null;
   // GMC, Part 1.3: an attribute given for the root is never "markup of an
   // element the rule does not name": no plain-text hint for it.
@@ -659,6 +783,18 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     const rulePlace = p.kind === 'notAllowed' ? rulePlaces.find((x) => x.element === p.element) : null;
     // GMC, Part 1.2: an attribute the rule checks, put on an element that
     // does not carry it -- the elements that do, and the way to the nearest.
+    // Atributo, desde donde la IA lo puso: an attribute the rule looks at (or
+    // the Proposal names), on an element that does not carry it -- the
+    // carriers near that element, and its allowed values.
+    if (p.kind === 'unknownAttribute' && namedAttribute?.(String(p.attribute).replace(/^xlink:/, ''))) {
+      const context = (validation.attributeContexts || []).find((c) => c.attribute === p.attribute && c.element === p.element);
+      const nearby = context ? nearbyAttributeCarriers(structure, context, places) : null;
+      if (nearby) {
+        out.push(nearbyCarriersLine(p, nearby));
+        out.movesAttribute = true;
+        continue;
+      }
+    }
     const carrier = p.kind === 'unknownAttribute' ? carriers.find((c) => c.attribute === p.attribute) : null;
     if (carrier) {
       out.push(`${formatStructureProblem(p, schema)}. ${attributeCarrierLines(carrier).join(' ')}`);
@@ -682,7 +818,9 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
   for (const p of validation.dossierProblems || []) out.push(dossierProblemText(p));
   for (const f of validation.files || []) {
     if (f.validation.runnable) continue;
-    for (const line of exampleProblems(f.validation, { standard, schema: f.schema, ruleNames, tableModel })) out.push(`file "${f.path}": ${line}`);
+    const lines = exampleProblems(f.validation, { standard, schema: f.schema, ruleNames, tableModel, namedAttribute, structure: f.structure || null });
+    for (const line of lines) out.push(`file "${f.path}": ${line}`);
+    if (lines.movesAttribute) out.movesAttribute = true;
   }
   return out;
 }
@@ -721,11 +859,16 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
   // not in the dossier is only a warning.
   const dossier = dossierForEngine(example);
   if (dossier) {
-    validation.files = example.files.map((f) => ({
-      path: f.path,
-      schema: f.schema || null,
-      validation: validateExample(f.xml ?? f.content, vocabulary, parseXml, f.structure || null, { ignoreValueOf }),
-    }));
+    validation.files = example.files.map((f) => {
+      const entry = {
+        path: f.path,
+        schema: f.schema || null,
+        validation: validateExample(f.xml ?? f.content, vocabulary, parseXml, f.structure || null, { ignoreValueOf }),
+      };
+      // (not enumerable: the structure is only for the correction round)
+      Object.defineProperty(entry, 'structure', { value: f.structure || null, enumerable: false });
+      return entry;
+    });
     validation.dossierProblems = dossierProblems(example.files, dossier.mainPath);
     validation.referenceWarnings = dossierReferenceWarnings(example.xml, example.files, parseXml, dossier.mainPath);
     validation.runnable = validation.runnable && validation.dossierProblems.length === 0 && validation.files.every((f) => f.validation.runnable);

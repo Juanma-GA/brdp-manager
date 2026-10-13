@@ -31,6 +31,7 @@ import { coverageItemEnglish, documentPresence, schemaCoverage } from '../valida
 import { repeatingComparisons, singleChildPairs, viewFromStructure } from '../validation/ruleRepetition.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats.js';
 import { informativeRule } from './ruleLint.js';
+import { namedByRuleOrProposal } from './exampleSchemaFixes.js';
 import { ownSectionConditions, sectionConditionText, withOwnSectionValues } from './ownSectionValues.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
@@ -925,11 +926,16 @@ function acceptWithoutNodeProblem(ruleXml) {
 // still forbids removing them or changing how many there are, their values
 // or their order (EXT-00291: "goes inside <catalogSeqNumber>" and, below,
 // "do not change … its nesting" -- Mistral corrected none).
-export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null, { wrapping = false } = {}) {
+export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null, { wrapping = false, moving = false } = {}) {
   // Remates B, Part 1, point 2: a condition part (flag 0 / 1) never gets a
   // "keep what makes it true / false" line -- that pushed the example
   // toward the rule. The neutral line instead: keep what the example shows.
-  const WRAP = 'putting them inside the container a problem above names is part of that fix';
+  // moving (atributo, desde donde la IA lo puso): a problem above moves an
+  // attribute to another element -- that move is part of the fix, never
+  // "changing which element each attribute is on".
+  const WRAP = moving
+    ? 'putting an element inside the container a problem above names, or moving an attribute to the element a problem above names, is part of that fix'
+    : 'putting them inside the container a problem above names is part of that fix';
   const conditionLine = wrapping
     ? `Do not change what this example shows (which elements and attributes it contains, or their values): fix only the markup named above -- ${WRAP}.`
     : 'Do not change what this example shows (which elements and attributes it contains, or their values): fix only the markup named above.';
@@ -953,7 +959,7 @@ export function keepMatchedNodeProblem(ruleXml, conditions = [], parts = null, {
     const nodes = kept.map((e) => `\`${e}\``).join(' or ');
     lines.push(
       wrapping
-        ? `Keep the nodes matched by ${nodes}: fix only the markup named above -- ${WRAP}. Do not remove them, and do not change how many there are, their values, their order, or which element each attribute is on.`
+        ? `Keep the nodes matched by ${nodes}: fix only the markup named above -- ${WRAP}. Do not remove them, and do not change how many there are, their values, their order${moving ? '' : ', or which element each attribute is on'}.`
         : `Keep the nodes matched by ${nodes}: fix only the markup named above, and do not change what the example shows (its nesting, how many elements there are, the values, or which element each attribute is on).`
     );
   }
@@ -1023,6 +1029,8 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
   ];
   const keep = keepMatchedNodeProblem(...keepArgs);
   const keepWrapping = keepMatchedNodeProblem(...keepArgs, { wrapping: true });
+  const keepMoving = keepMatchedNodeProblem(...keepArgs, { wrapping: true, moving: true });
+  const named = namedByRuleOrProposal(ruleNames, setup?.rule?.proposal || '');
   return runs
     .map((r, index) => {
       // Mejoras E, Part 1.3: an example the schema already rules out is
@@ -1053,9 +1061,11 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             relationWays: setup?.placements?.[materialized[index].schema]?.placement?.relationWays || [],
             innerWays: setup?.placements?.[materialized[index].schema]?.placement?.innerWays || [],
             rootAttributes: setup?.placements?.[materialized[index].schema]?.placement?.rootAttributes || [],
+            namedAttribute: named.attribute,
+            structure: materialized[index].structure || null,
           });
       const wraps = (r.validation.structure || []).some((p) => p.kind === 'notAllowed');
-      const keepLine = wraps ? keepWrapping : keep;
+      const keepLine = problems.movesAttribute ? keepMoving : wraps ? keepWrapping : keep;
       if (problems.length > 0 && !missing && keepLine && examples[index].expected === 'reject') problems.push(keepLine);
       return { index, label: examples[index].label, problems };
     })
