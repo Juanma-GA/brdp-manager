@@ -1315,6 +1315,10 @@ const resources = {
             describe_root_document_forbidden_other: 'No document may be a {{roots}} ({{schemaList}} schemas).',
             describe_root_must_be: "The document's root element must be {{roots}} (path {{path}}).",
             describe_root_must_not_be: "The document's root element must not be {{roots}} (path {{path}}).",
+            // El juez de la Propuesta, Part 1.
+            describe_forbidden_in_ancestor_list: 'In a {{ancestor}} whose {{target}} has {{conditionText}}, none of these may appear{{within}}: {{forbidden}} ({{count}}).',
+            describe_forbidden_in_ancestor_list_plain: 'In a {{ancestor}} with a {{target}}, none of these may appear{{within}}: {{forbidden}} ({{count}}).',
+            ancestorList: { within: ' inside {{name}}', hasValue: '{{attr}} "{{value}}"', hasAttr: '{{attr}}', more: '+{{count}} more', less: 'Show less' },
             describe_forbidden_existence: '{{target}} {{condition}} must not appear (path {{path}}).',
             rootsOr: ' or ',
             existence: {
@@ -3294,6 +3298,10 @@ const resources = {
             describe_root_document_forbidden_other: 'Ningún documento puede ser un {{roots}} (esquemas {{schemaList}}).',
             describe_root_must_be: 'El elemento raíz del documento debe ser {{roots}} (ruta {{path}}).',
             describe_root_must_not_be: 'El elemento raíz del documento no puede ser {{roots}} (ruta {{path}}).',
+            // El juez de la Propuesta, Part 1.
+            describe_forbidden_in_ancestor_list: 'En un {{ancestor}} cuyo {{target}} tiene {{conditionText}}, no puede aparecer{{within}} ninguno de estos: {{forbidden}} ({{count}}).',
+            describe_forbidden_in_ancestor_list_plain: 'En un {{ancestor}} con un {{target}}, no puede aparecer{{within}} ninguno de estos: {{forbidden}} ({{count}}).',
+            ancestorList: { within: ' dentro de {{name}}', hasValue: '{{attr}} "{{value}}"', hasAttr: '{{attr}}', more: '+{{count}} más', less: 'Mostrar menos' },
             describe_forbidden_existence: '{{target}} {{condition}} no puede aparecer (ruta {{path}}).',
             rootsOr: ' o ',
             existence: {

@@ -13,9 +13,9 @@ import i18n from '../src/i18n/index.js';
 import { danglingReferenceProblems, exampleFailures, generateRuleTestExamples, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
 import { ruleTestVerdict } from '../src/utils/ruleTest.js';
 import { generationOutcome } from '../src/utils/ruleTestOutcome.js';
-import { formatRuleTestReason, verdictToTestRecord } from '../src/utils/ruleTestReasons.js';
+import { formatRuleStatement, formatRuleTestReason, ruleDescriptionText, verdictToTestRecord } from '../src/utils/ruleTestReasons.js';
 import { informativeRule, lintRuleFindings } from '../src/utils/ruleLint.js';
-import { describeRule } from '../src/utils/ruleTestEngine.js';
+import { describeRule, ruleElementLists } from '../src/utils/ruleTestEngine.js';
 import { predicateRequirements } from '../src/validation/rulePathCheck.js';
 import { formatCoverageItem, schemaCoverage } from '../src/validation/schemaCoverage.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
@@ -124,6 +124,54 @@ for (const n of [...INFORMATIVE, ...MUST_NOT]) {
   check('1.1 informative part + flag 0 part: not informative', informativeRule(mixed, F, { parseXml }) === null);
   const desc = describeRule(rule(2), F, { parseXml });
   check('1.1 describeRule still says it cannot reject', desc.cannotReject === true);
+}
+
+// ─── El juez de la Propuesta, Part 1: the CIR rules' element list ──────────
+{
+  const CIR = { 14: '0A1', 17: '00F', 19: '00H', 20: '00J', 22: '00L', 23: '00M', 25: '00X' };
+  for (const [n, code] of Object.entries(CIR)) {
+    const d = describeRule(rule(Number(n)), F, { parseXml });
+    const s = d.statements[0]?.statement;
+    check(`JL1 EXT-000${n}: ancestor list`, s?.code === 'describe_forbidden_in_ancestor_list' && s.params.ancestor === '<dataUpdateFile>' && s.params.within === '<update>'
+      && s.params.target === '<updateCode>' && JSON.stringify(s.params.conditions) === JSON.stringify([{ attr: '@infoCode', value: code }]) && s.params.count === 26, JSON.stringify(s));
+    check(`JL1 EXT-000${n}: can reject`, !d.cannotReject);
+  }
+  const d19 = describeRule(rule(19), F, { parseXml });
+  const s19 = d19.statements[0];
+  const full = formatRuleStatement(s19.statement, s19.schemas, en);
+  check('JL1 EXT-00019 EN text, whole list', full.startsWith('In a <dataUpdateFile> whose <updateCode> has @infoCode "00H", none of these may appear inside <update>: <partSpec>, <functionalItemSpec>,')
+    && full.includes('<cautionIdent> (26).') && full.endsWith('Only in the schemas: update.'), full);
+  const esText = formatRuleStatement(s19.statement, s19.schemas, es);
+  check('JL1 EXT-00019 ES text', esText.startsWith('En un <dataUpdateFile> cuyo <updateCode> tiene @infoCode "00H", no puede aparecer dentro de <update> ninguno de estos: <partSpec>,') && esText.includes('(26)'), esText);
+  check('JL1 EXT-00019 judge text has the 26 names', s19.statement.params.forbidden.every((x) => ruleDescriptionText(d19, en).includes(x)) && !ruleDescriptionText(d19, en).includes('…'), ruleDescriptionText(d19, en));
+  const cut = formatRuleStatement(s19.statement, s19.schemas, en, { listMax: 8 });
+  check('JL1 panel cut: 8 names and "…"', (cut.match(/<[A-Za-z]+Spec>|<[A-Za-z]+Ident>/g) || []).length === 8 && cut.includes(', … (26)'), cut);
+  // EXT-00014: 13 Spec + 13 Ident, uncut.
+  const s14 = describeRule(rule(14), F, { parseXml }).statements[0].statement;
+  check('JL1 EXT-00014: 13 Spec + 13 Ident', s14.params.forbidden.filter((x) => /Spec>$/.test(x)).length === 13 && s14.params.forbidden.filter((x) => /Ident>$/.test(x)).length === 13, JSON.stringify(s14.params.forbidden));
+  check('JL1 EXT-00014 in the judge prompt, uncut', (() => {
+    const p = buildRuleProposalCheckPrompt({ brdp: brdp('BRDP-EXT-00014', 'Only x'), ruleXml: rule(14), ruleDescription: ruleDescriptionText(describeRule(rule(14), F, { parseXml }), en), format: F, standard: S42 });
+    return s14.params.forbidden.every((x) => p.includes(x));
+  })());
+  // Outside the pattern: literal as before.
+  const wrap = (path) => `<structureObjectRule id="R1"><objectPath allowedObjectFlag="0">${path}</objectPath><objectUse>u</objectUse></structureObjectRule>`;
+  const literal = describeRule(wrap('//updateCode[attribute::infoCode="00H" and contains(., \'x\') and ancestor::dataUpdateFile[descendant::a or descendant::b]]'), F, { parseXml }).statements[0].statement;
+  check('JL1 unknown extra condition → literal', literal.code === 'describe_forbidden' && literal.params.qualifier?.kind === 'condition', JSON.stringify(literal));
+  const neg = describeRule(wrap('//updateCode[ancestor::dataUpdateFile[descendant::a or not(descendant::b)]]'), F, { parseXml }).statements[0].statement;
+  check('JL1 negated list term → literal', neg.code === 'describe_forbidden', JSON.stringify(neg));
+  const one = describeRule(wrap('//updateCode[ancestor::dataUpdateFile[descendant::a]]'), F, { parseXml }).statements[0].statement;
+  check('JL1 one-name "list" → as before', one.code !== 'describe_forbidden_in_ancestor_list', JSON.stringify(one));
+  const plain = describeRule(wrap('//x[ancestor-or-self::r[.//a or b]]'), F, { parseXml }).statements[0].statement;
+  check('JL1 no conditions on X, no intermediate', plain.code === 'describe_forbidden_in_ancestor_list' && plain.params.within === null && plain.params.conditions.length === 0, JSON.stringify(plain));
+  check('JL1 plain text EN', formatRuleStatement(plain, [], en) === 'In a <r> with a <x>, none of these may appear: <a>, <b> (2).', formatRuleStatement(plain, [], en));
+  const emph = describeRule(wrap('//emphasis'), F, { parseXml }).statements[0].statement;
+  check('JL1 //emphasis unchanged', emph.code === 'describe_forbidden', JSON.stringify(emph));
+  const flag2 = describeRule(wrap('//updateCode[ancestor::r[a or b]]').replace('"0"', '"2"'), F, { parseXml }).statements[0].statement;
+  check('JL1 flag 2 unchanged', flag2.code === 'describe_allowed', JSON.stringify(flag2));
+  // ruleElementLists.
+  check('JL1 ruleElementLists EXT-00019', JSON.stringify(ruleElementLists(rule(19), F, { parseXml }).forbidden) === JSON.stringify(s19.statement.params.forbidden.map((x) => x.slice(1, -1))));
+  check('JL1 ruleElementLists not(self::)', JSON.stringify(ruleElementLists(wrap('//avee/*[not(self::modelic or self::sdc)]'), 'BREX-4.2', { parseXml })) === JSON.stringify({ forbidden: [], allowedOnly: ['modelic', 'sdc'] }));
+  check('JL1 ruleElementLists no list', JSON.stringify(ruleElementLists(wrap('//emphasis'), F, { parseXml })) === JSON.stringify({ forbidden: [], allowedOnly: [] }));
 }
 
 // ─── Part 1.2: closed lists in the Proposal judgement ──────────────────────

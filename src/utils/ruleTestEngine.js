@@ -697,6 +697,12 @@ function ruleFormatReason(ruleXml, format, parseXml) {
 //   describe_forbidden_existence {target, path, joiner, conditions}  flag 0, a
 //                                                      predicate of existence tests
 //                                                      joined by and/or (Mejoras C)
+//   describe_forbidden_in_ancestor_list {target, ancestor, within, conditions,
+//                                                      forbidden, count, path}  flag 0,
+//                                                      X[@a="v" and ancestor::R[descendant::M[
+//                                                      descendant::A or descendant::B …]]]:
+//                                                      "in a <R> whose <X> has @a "v", none of
+//                                                      these may appear (inside <M>): <A>, <B>…"
 //   describe_forbidden_values {target, values, path}   flag 0 with values
 //   describe_forbidden_nesting {target, name, op, amount, mode, level, path}
 //   describe_forbidden_ancestors / _children {target, name, op, amount, path}
@@ -846,6 +852,7 @@ function describePart(part, spec, parseXml, graph = null) {
   if (flag === '0') {
     if (withValues) return qualified({ code: 'describe_forbidden_values', params: { target, values, path } });
     return (
+      ancestorListStatement(target, path) ||
       thresholdStatement(target, path, pathThreshold(path)) ||
       intermediateNestingStatement(target, path) ||
       documentMustContainStatement(path) ||
@@ -1380,6 +1387,162 @@ function existencePredicateStatement(target, path) {
   };
 }
 
+// El juez de la Propuesta y las listas cerradas, Part 1: the CIR rules of
+// the S1000D default BREX (BRDP-EXT-00014…00025) --
+// //updateCode[attribute::infoCode="00H" and ancestor::dataUpdateFile[
+// descendant::update[descendant::partSpec or descendant::toolSpec …]]]
+// -- were described with their literal condition, and the Proposal check
+// had to work out alone which list was which. The last step X, whose
+// predicates are "and"-joined attribute conditions on X plus exactly one
+// ancestor::R / ancestor-or-self::R test; R's single predicate is an "or"
+// of two or more existence tests (A, child::A, .//A, descendant::A),
+// optionally inside one intermediate step M[…] (descendant::M, .//M, M).
+// Anything else (another condition, a negated term, a path in a term) →
+// null: the literal condition, as before.
+//   → { code: 'describe_forbidden_in_ancestor_list', params: { target,
+//       ancestor: '<R>', within: '<M>' | null, conditions: [{ attr: '@a',
+//       value: 'v' | null }], forbidden: ['<A>', …], count, path } }
+const ANCESTOR_TERM_RE = new RegExp(`^(?:ancestor|ancestor-or-self)::(${NAME_RE})\\s*\\[([\\s\\S]*)\\]$`);
+const INTERMEDIATE_STEP_RE = new RegExp(`^(?:descendant::|descendant-or-self::|child::|\\.//)?(${NAME_RE})\\s*\\[([\\s\\S]*)\\]$`);
+const ATTRIBUTE_CONDITION_RE = new RegExp(`^(?:@|attribute::)(${NAME_RE})(?:\\s*=\\s*(?:"([^"]*)"|'([^']*)'))?$`);
+
+// The single predicate of a "name[…]" term → its text, or null when the
+// brackets do not enclose the rest of the term (two predicates, a step after).
+function singleBracketBody(term, re) {
+  const m = re.exec(term);
+  if (!m) return null;
+  const preds = stepPredicateTexts(term.slice(term.indexOf('[')));
+  if (preds.length !== 1) return null;
+  // The whole rest must be that one predicate: "[x]" and nothing after it.
+  const rest = term.slice(term.indexOf('[')).trim();
+  if (rest !== `[${m[2]}]` || preds[0] !== m[2].trim()) return null;
+  return { name: m[1], body: m[2].trim() };
+}
+
+function existenceList(body) {
+  const split = splitTopLevelLogic(body);
+  if (!split || split.joiner !== 'or' || split.terms.length < 2) return null;
+  const names = [];
+  for (const term of split.terms) {
+    const x = existenceTerm(term);
+    if (!x || x.negated || x.container || (x.kind !== 'child' && x.kind !== 'inside')) return null;
+    const name = `<${x.name}>`;
+    if (!names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+function ancestorListStatement(target, path) {
+  if (!target || !target.startsWith('<')) return null;
+  const step = lastTopLevelStep(String(path || '').trim());
+  if (!step) return null;
+  const preds = stepPredicateTexts(step);
+  if (preds.length === 0) return null;
+  const terms = [];
+  for (const pred of preds) {
+    const split = splitTopLevelLogic(pred);
+    if (!split || (split.terms.length > 1 && split.joiner !== 'and')) return null;
+    terms.push(...split.terms.map((x) => x.replace(/\s+/g, ' ').trim()));
+  }
+  let ancestor = null;
+  const conditions = [];
+  for (const term of terms) {
+    const outer = singleBracketBody(term, ANCESTOR_TERM_RE);
+    if (outer) {
+      if (ancestor) return null;
+      let within = null;
+      let forbidden = existenceList(outer.body);
+      if (!forbidden) {
+        const inner = singleBracketBody(outer.body, INTERMEDIATE_STEP_RE);
+        if (!inner) return null;
+        forbidden = existenceList(inner.body);
+        within = `<${inner.name}>`;
+      }
+      if (!forbidden) return null;
+      ancestor = { name: `<${outer.name}>`, within, forbidden };
+      continue;
+    }
+    const attr = ATTRIBUTE_CONDITION_RE.exec(term);
+    if (!attr) return null;
+    const value = attr[2] ?? attr[3];
+    conditions.push({ attr: `@${attr[1]}`, value: value === undefined ? null : value });
+  }
+  if (!ancestor) return null;
+  return {
+    code: 'describe_forbidden_in_ancestor_list',
+    params: { target, ancestor: ancestor.name, within: ancestor.within, conditions, forbidden: ancestor.forbidden, count: ancestor.forbidden.length, path },
+  };
+}
+
+// The elements a rule forbids as a closed list ("only these" decisions),
+// for the Proposal check (El juez de la Propuesta, Part 2): the ancestor
+// list above, or a "*"/X step whose predicate is not(self::a or self::b …)
+// -- then the forbidden elements are "every element but these", so only
+// the names it lets through are known.
+//   ruleElementLists(ruleXml, format, options) →
+//     { forbidden: ['partSpec', …], allowedOnly: ['a', …] } (names without
+//     brackets; empty arrays when the rule has no such list) | null
+export function ruleElementLists(ruleXml, format, options = {}) {
+  const spec = FORMATS[format];
+  if (!spec) return null;
+  const parseXml = options.parseXml || parseXmlDocument;
+  let ruleDoc;
+  try {
+    ruleDoc = parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
+  } catch {
+    return null;
+  }
+  const forbidden = [];
+  const allowedOnly = [];
+  for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
+    if (part.kind !== 'rule' || part.emptyContext) continue;
+    let basics;
+    try {
+      basics = partBasics(part, spec);
+    } catch (err) {
+      if (!(err instanceof NotExecutable)) throw err;
+      continue;
+    }
+    if (basics.flag !== '0' || describeValues(part, spec).length > 0) continue;
+    const path = basics.expression;
+    const list = ancestorListStatement(pathTarget(path), path);
+    if (list) {
+      for (const n of list.params.forbidden) if (!forbidden.includes(n.slice(1, -1))) forbidden.push(n.slice(1, -1));
+      continue;
+    }
+    const others = notSelfList(path);
+    if (others) for (const n of others) if (!allowedOnly.includes(n)) allowedOnly.push(n);
+  }
+  return { forbidden, allowedOnly };
+}
+
+// X/*[not(self::a or self::b …)] (or *[not(self::…)] alone), flag 0: every
+// element but a, b… is forbidden → ['a', 'b', …] | null.
+function notSelfList(path) {
+  const step = lastTopLevelStep(String(path || '').trim());
+  if (!step) return null;
+  const bare = step.replace(/\[[\s\S]*$/, '').trim().replace(/^(?:child|descendant|descendant-or-self)::/, '');
+  if (bare !== '*') return null;
+  // Alone, or as one "and" operand of a predicate (as schemaCoverage (b)).
+  for (const pred of stepPredicateTexts(step)) {
+    const split = splitTopLevelLogic(pred);
+    if (!split || (split.terms.length > 1 && split.joiner !== 'and')) continue;
+    for (const operand of split.terms) {
+      const m = /^not\s*\(([\s\S]*)\)$/.exec(operand.trim());
+      if (!m) continue;
+      const names = [];
+      let ok = true;
+      for (const term of m[1].split(/\s+or\s+/)) {
+        const t = new RegExp(`^\\(?\\s*self::(${NAME_RE})\\s*\\)?$`).exec(term.trim());
+        if (!t) { ok = false; break; }
+        names.push(t[1]);
+      }
+      if (ok && names.length) return names;
+    }
+  }
+  return null;
+}
+
 function thresholdStatement(target, path, threshold) {
   if (!threshold || !target) return null;
   const base = { target, path, op: threshold.op, amount: threshold.n };
@@ -1390,7 +1553,7 @@ function thresholdStatement(target, path, threshold) {
 }
 
 const CAN_REJECT = new Set([
-  'describe_forbidden_in_nesting', 'describe_forbidden_attr', 'describe_document_must_contain', 'describe_document_must_not_contain', 'describe_forbidden_existence',
+  'describe_forbidden_in_nesting', 'describe_forbidden_in_ancestor_list', 'describe_forbidden_attr', 'describe_document_must_contain', 'describe_document_must_not_contain', 'describe_forbidden_existence',
   'describe_root_must_be', 'describe_root_must_not_be', 'describe_root_document_forbidden', 'describe_any_document_must_contain', 'describe_any_document_must_not_contain',
   'describe_document_must_contain_inside', 'describe_document_must_not_contain_inside', 'describe_any_document_must_contain_inside', 'describe_any_document_must_not_contain_inside',
   'describe_forbidden_nesting', 'describe_forbidden_ancestors', 'describe_forbidden_children', 'describe_forbidden_length',

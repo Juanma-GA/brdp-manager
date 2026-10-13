@@ -232,7 +232,12 @@ function formatValues(values, t) {
     .join(', ');
 }
 
-export function formatRuleStatement(statement, schemas, t) {
+// El juez de la Propuesta, Part 1: the list of a "none of these" statement,
+// whole for a prompt; cut to `listMax` names (with "…") in the panel, which
+// adds its own "+N more" button.
+export const ANCESTOR_LIST_SHOWN = 8;
+
+export function formatRuleStatement(statement, schemas, t, options = {}) {
   const params = statement.params || {};
   if (statement.code === 'describe_not_executable') {
     return t('records.ruleTest.describe.describe_not_executable', { reason: formatRuleTestReason(params.reason, t) });
@@ -271,6 +276,20 @@ export function formatRuleStatement(statement, schemas, t) {
   if (statement.code === 'describe_forbidden_attr') {
     values.subject = params.childOf ? t(`records.ruleTest.describe.${params.anyLevel ? 'anyInsideOf' : 'anyChildOf'}`, { parent: params.childOf }) : params.target;
     values.condition = t(`records.ruleTest.describe.attrCondition.${params.kind}`, { attr: params.attr, value: params.value });
+  }
+  if (statement.code === 'describe_forbidden_in_ancestor_list') {
+    const list = params.forbidden || [];
+    const cut = options.listMax && list.length > options.listMax;
+    values.forbidden = (cut ? list.slice(0, options.listMax) : list).join(', ') + (cut ? ', …' : '');
+    values.within = params.within ? t('records.ruleTest.describe.ancestorList.within', { name: params.within }) : '';
+    values.conditionText = (params.conditions || [])
+      .map((c) => (c.value === null || c.value === undefined
+        ? t('records.ruleTest.describe.ancestorList.hasAttr', { attr: c.attr })
+        : t('records.ruleTest.describe.ancestorList.hasValue', { attr: c.attr, value: c.value })))
+      .join(t('records.ruleTest.describe.existence.joiner.and'));
+    const key = (params.conditions || []).length ? 'describe_forbidden_in_ancestor_list' : 'describe_forbidden_in_ancestor_list_plain';
+    const text = t(`records.ruleTest.describe.${key}`, values);
+    return schemas && schemas.length ? t('records.ruleTest.describe.onlyInSchemas', { text, schemas: schemas.join(', ') }) : text;
   }
   // Mejoras C, Part 3: "<techstd> without <authex> or without <notes>".
   if (statement.code === 'describe_forbidden_existence') {

@@ -492,6 +492,13 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // any (from the schema structure). Only the 4 ruleProposalCheck cases
 // change; new case ruleProposalCheck/brex-4-2-gmc-verificationtype-
 // required-attribute (GMC 4.2 BRDP-EXT-00160).
+//
+// El juez de la Propuesta y las listas cerradas, Part 1: describeRule says
+// the element list of X[@a="v" and ancestor::R[descendant::M[A or B …]]]
+// ("In a <dataUpdateFile> whose <updateCode> has @infoCode "0A1", none of
+// these may appear inside <update>: … (26)") instead of the literal
+// condition. Only ruleProposalCheck/brex-4-2-default-closed-list-tool-cir
+// changes (its rule is BRDP-EXT-00014).
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

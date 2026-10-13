@@ -6,7 +6,7 @@ import MinimalDocumentsLine from './MinimalDocumentsLine.jsx';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
-import { acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleTestReason, formatThresholdMismatch, presencePathText } from '../../utils/ruleTestReasons.js';
+import { ANCESTOR_LIST_SHOWN, acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleStatement, formatRuleTestReason, formatThresholdMismatch, presencePathText } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 import RuleLintWarnings from './RuleLintWarnings';
@@ -894,9 +894,16 @@ function RuleDescription({ description, presence = null, reach = [], informative
     <div className={styles.ruleTestDescription} data-testid="rule-test-description">
       <strong>{t('records.ruleTest.describe.title')}</strong>
       <ul className={styles.ruleTestProblems}>
-        {formatted.lines.map((line, i) => (
-          <li key={i}>{line}</li>
-        ))}
+        {formatted.lines.map((line, i) => {
+          const s = description.statements[i];
+          return s?.statement.code === 'describe_forbidden_in_ancestor_list' && (s.statement.params.forbidden || []).length > ANCESTOR_LIST_SHOWN ? (
+            <li key={i}>
+              <AncestorListLine statement={s.statement} schemas={s.schemas} />
+            </li>
+          ) : (
+            <li key={i}>{line}</li>
+          );
+        })}
         {reachLines.map((line, i) => (
           <li key={`reach-${i}`} data-testid="rule-test-reach">
             {line}
@@ -910,6 +917,22 @@ function RuleDescription({ description, presence = null, reach = [], informative
         </p>
       )}
     </div>
+  );
+}
+
+// El juez de la Propuesta, Part 1: a "none of these may appear" list shows
+// its first names and a "+N more" button; the whole list is in the prompt.
+function AncestorListLine({ statement, schemas }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const hidden = (statement.params.forbidden || []).length - ANCESTOR_LIST_SHOWN;
+  return (
+    <span data-testid="rule-test-ancestor-list">
+      {formatRuleStatement(statement, schemas, t, { listMax: open ? null : ANCESTOR_LIST_SHOWN })}{' '}
+      <button type="button" className={styles.linkButton} onClick={() => setOpen((v) => !v)} data-testid="rule-test-ancestor-list-more">
+        {open ? t('records.ruleTest.describe.ancestorList.less') : t('records.ruleTest.describe.ancestorList.more', { count: hidden })}
+      </button>
+    </span>
   );
 }
 
