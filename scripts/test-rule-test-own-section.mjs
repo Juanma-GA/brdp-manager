@@ -314,8 +314,43 @@ check('7 note ES', es('records.ruleTest.sectionValuesSet', { values: '<dmCode in
 check('7 built EN', en('records.ruleTest.sectionBuilt', { values: '<dmCode infoCode="0A2">' }).startsWith('Written by the app: the example had no identification and status section'));
 check('7 built ES', es('records.ruleTest.sectionBuilt', { values: '<dmCode infoCode="0A2">' }).startsWith('Escrita por la app: el ejemplo no traía la sección de identificación'));
 
-// PART2-TESTS
-void formatRuleTestReason;
+// ─── 8. Part 2: a value no example can carry ─────────────────────────────────
+{
+  // The minimal dmStatus has <applic>, never <applicRef>: no node to set.
+  const ruleXml = sor(`//para[ancestor::dmodule/identAndStatusSection/dmStatus/applicRef/@applicRefId = 'app-01']`);
+  const { result, asked } = await generate(ruleXml, []);
+  check('8 applicRef: not executable', result.status === 'not_executable', JSON.stringify(result.reason));
+  check('8 applicRef: reason code', result.reason?.code === 'section_value_unavailable' && result.reason.params.condition === '@applicRefId="app-01"', JSON.stringify(result.reason));
+  check('8 applicRef: no LLM call', asked.length === 0, String(asked.length));
+  check('8 text EN', formatRuleTestReason(result.reason, en) === 'the rule depends on @applicRefId="app-01" in the identification section, and the examples cannot have it.', formatRuleTestReason(result.reason, en));
+  check('8 text ES', formatRuleTestReason(result.reason, es) === 'la regla depende de @applicRefId="app-01" en la sección de identificación, y los ejemplos no pueden tenerla.', formatRuleTestReason(result.reason, es));
+}
+{
+  // A schema whose identification section the application does not build:
+  // the rule cannot be tested there either.
+  const noSection = { ...DESCRIPT42, skeleton: { ...DESCRIPT42.skeleton, metadata: null } };
+  const r = resolveOwnSectionValues(ownSectionConditions(EXT134), noSection, null);
+  check('8 unbuilt section: unavailable', r.values.length === 0 && r.unavailable.length === 1 && r.unavailable[0].attribute === 'infoCode', JSON.stringify(r));
+}
+{
+  // 3.0.1 text condition with no node: <incode> of an <avee> under <refdm>
+  // of <status> other than the brexref one does not exist in the minimal.
+  const ruleXml = objrule(`//para[ancestor::dmodule/idstatus/status/applic/refdm/avee/incode = "0A2"]`);
+  const { result, asked } = await generate(ruleXml, [], S301);
+  check('8 3.0.1 text: not executable', result.status === 'not_executable' && result.reason?.code === 'section_value_unavailable', JSON.stringify(result.reason));
+  check('8 3.0.1 text: condition as element text', result.reason?.params?.condition === '<incode>0A2</incode>', JSON.stringify(result.reason));
+  check('8 3.0.1 text: no LLM call', asked.length === 0);
+}
+{
+  // A negated value is never set, so it never makes the rule not executable.
+  const { result } = await generate(sor(`//para[ancestor::dmodule/identAndStatusSection/dmStatus[not(applicRef/@applicRefId = 'app-01')]]`), [{ examples: [] }]);
+  check('8 negated: never section_value_unavailable', result.reason?.code !== 'section_value_unavailable', JSON.stringify(result.reason));
+}
+{
+  // EXT-00134 itself stays testable.
+  const setup = await setupFor(EXT134);
+  check('8 EXT-00134: still executable', !setup.unreachable, JSON.stringify(setup.unreachable));
+}
 
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -366,6 +366,12 @@ export function sectionValueText(v) {
   return v.attribute ? `@${v.attribute}="${v.value}" on <${v.element}>` : `<${v.element}>${v.value}</${v.element}>`;
 }
 
+// A condition that cannot be set, as the not-executable reason names it
+// (language-neutral): @infoCode="0A2", or <incode>0A2</incode> for text.
+export function sectionConditionText(u) {
+  return u.attribute ? `@${u.attribute}="${u.value}"` : `<${u.element}>${u.value}</${u.element}>`;
+}
+
 // ─── Setting the values in a written section ────────────────────────────────
 
 const TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;

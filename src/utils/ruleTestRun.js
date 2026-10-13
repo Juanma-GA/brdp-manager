@@ -31,7 +31,7 @@ import { coverageItemEnglish, documentPresence, schemaCoverage } from '../valida
 import { repeatingComparisons, singleChildPairs, viewFromStructure } from '../validation/ruleRepetition.js';
 import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats.js';
 import { informativeRule } from './ruleLint.js';
-import { ownSectionConditions, withOwnSectionValues } from './ownSectionValues.js';
+import { ownSectionConditions, sectionConditionText, withOwnSectionValues } from './ownSectionValues.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
 // "review" result (the panel shows them all, from the rule itself).
@@ -530,6 +530,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   // the minimal section, or no section built for that schema) make the
   // rule not executable (Part 2) -- before any LLM call.
   const ownConditions = format && format.startsWith('BREX') ? ownSectionConditions(ruleXml) : null;
+  const sectionValueUnavailable = [];
   for (const item of wanted) {
     let { schema } = item;
     const { role, targets: schemaTargets, group, relation } = item;
@@ -565,9 +566,21 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       untested.push({ schema, element: placement.sectionMissing.element, names: placement.sectionMissing.names });
     }
     if (placement.sectionMissing?.all) continue;
-    if (ownConditions) ({ placement } = withOwnSectionValues(placement, structure, ownConditions));
+    if (ownConditions) {
+      const own = withOwnSectionValues(placement, structure, ownConditions);
+      placement = own.placement;
+      if (role === 'rule' && own.unavailable.length) sectionValueUnavailable.push(...own.unavailable);
+    }
     placements[schema] = { structure, placement };
     promptPlacements.push({ schema, role, ...placement, ...(group ? { group } : {}) });
+  }
+  // Part 2: a value the rule asks of the document's own section that no
+  // example can carry (no node of the minimal section, or no section built
+  // for that schema): no example can meet the rule's condition, so the
+  // test says so before any LLM call.
+  if (sectionValueUnavailable.length) {
+    const condition = [...new Set(sectionValueUnavailable.map(sectionConditionText))].join(', ');
+    return notExecutable({ code: 'section_value_unavailable', params: { condition } }, untested);
   }
   if (!promptPlacements.some((p) => p.role === 'rule') && untested.length > 0) {
     return {

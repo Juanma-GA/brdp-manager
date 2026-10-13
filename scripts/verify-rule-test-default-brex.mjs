@@ -71,6 +71,11 @@ async function main() {
   await makeBrdp({ identifier: "BRDP-EVAL-RT-PMCODE", title: "Attributes of references in front matter", definition: "Decide on the attributes of references to publication modules in a front matter data module.", proposal: "Attributes @id, @authorityName and @authorityDocument must not be used for references to publication modules in a front matter data module." }, rule(127));
   await makeBrdp({ identifier: "BRDP-EXT-00019", title: "Elements of the zone CIR in a data update file", definition: "Decide which elements can be used in the data update file representing the zone CIR.", proposal: "Only zoneSpec, zoneIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the zone CIR." }, rule(19));
   await makeBrdp({ identifier: "BRDP-EXT-00152", title: "Information code of a BREX", definition: "Decide on the information code of a BREX data module.", proposal: "A BREX data module has information code 022 and item location code D." }, rule(152));
+  // Condiciones sobre la sección de identificación del propio documento:
+  // EXT-00134 (comrep, own dmCode infoCode="0A2"), and a value the minimal
+  // section has no node for (applicRef in dmStatus).
+  await makeBrdp({ identifier: "BRDP-EXT-00134", title: "Expressions in a common repository", definition: "Decide where expressions can be used in the applicability common repository.", proposal: "In the applicability CIR, expressions are only used inside referenced applicability groups." }, rule(134));
+  await makeBrdp({ identifier: "BRDP-OS-APPLICREF", title: "Paragraphs of an applicability", definition: "Decide on paragraphs of data modules with a given applicability reference.", proposal: "Data modules with applicability reference app-01 must not have paragraphs." }, `<structureObjectRule><objectPath allowedObjectFlag="0">//para[ancestor::dmodule/identAndStatusSection/dmStatus/applicRef/@applicRefId = 'app-01']</objectPath><objectUse>x</objectUse></structureObjectRule>`);
   const job = await api(`/api/projects/${project.id}/embeddings/compute`, { method: "POST" }).then((r) => r.json());
   for (let i = 0; i < 80; i++) {
     const s = await api(`/api/projects/${project.id}/embeddings/status/${job.job_id}`).then((r) => r.json());
@@ -239,6 +244,38 @@ async function main() {
     await page.getByTestId("rule-test-ancestor-list-more").click();
     assert(((await line.textContent()) || "").includes("+18 más"), "EXT-00019 ES: +18 más");
     await page.screenshot({ path: shot("rule-test-zone-cir-list-es.png"), fullPage: true });
+    await language("en");
+
+    // 8. Condiciones sobre la sección de identificación del propio
+    // documento: EXT-00134. The simulator writes own infoCode="040" (the real
+    // failure); the app sets 0A2 in the section of every example.
+    await openTest("BRDP-EXT-00134");
+    await verdict().waitFor({ timeout: 30000 });
+    assert(((await verdict().textContent()) || "").startsWith("Correct"), `EXT-00134: verdict correct (${await verdict().textContent()})`);
+    const own = (await example(1).getByTestId("rule-test-section-values").textContent().catch(() => "")) || "";
+    assert(own.includes('Adjusted by the app: the identification and status section has <dmCode infoCode="0A2">'), `EXT-00134: section values note (${own})`);
+    assert(((await example(1).getByTestId("rule-test-result").textContent()) || "").includes("rejected ✓"), "EXT-00134: expression outside referencedApplicGroup rejected");
+    assert(((await example(0).getByTestId("rule-test-result").textContent()) || "").includes("accepted ✓"), "EXT-00134: expression inside referencedApplicGroup accepted");
+    assert(((await example(1).textContent()) || "").includes('infoCode="0A2"'), "EXT-00134: 0A2 shown in the example");
+    await page.screenshot({ path: shot("rule-test-own-section-0a2-en.png"), fullPage: true });
+    await language("es");
+    await page.waitForTimeout(400);
+    const ownEs = (await example(1).getByTestId("rule-test-section-values").textContent().catch(() => "")) || "";
+    assert(ownEs.includes('Ajustado por la app: la sección de identificación lleva <dmCode infoCode="0A2">'), `EXT-00134 ES: nota (${ownEs})`);
+    await language("en");
+
+    // A value the examples cannot carry: not executable, no LLM call.
+    await openTest("BRDP-OS-APPLICREF");
+    await page.getByTestId("rule-test-analysis").waitFor({ timeout: 15000 });
+    const reasonEn = ((await page.getByTestId("rule-test-analysis").textContent()) || "").trim();
+    assert(reasonEn.includes('the rule depends on @applicRefId="app-01" in the identification section, and the examples cannot have it.'), `not executable reason EN (${reasonEn})`);
+    await page.waitForTimeout(800);
+    assert((await chatCalls()) === 0, "not executable: no LLM call");
+    await page.screenshot({ path: shot("rule-test-own-section-unavailable-en.png"), fullPage: true });
+    await language("es");
+    await page.waitForTimeout(400);
+    const reasonEs = ((await page.getByTestId("rule-test-analysis").textContent()) || "").trim();
+    assert(reasonEs.includes('la regla depende de @applicRefId="app-01" en la sección de identificación, y los ejemplos no pueden tenerla.'), `no ejecutable ES (${reasonEs})`);
     await language("en");
   } finally {
     await browser.close();

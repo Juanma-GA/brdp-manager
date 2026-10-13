@@ -44,6 +44,9 @@
 //     context_schema_unknown {schema, file, standard, similar} (GMC, Part
 //     2.1) -- a context block whose schema is not one of the standard's
 //     document schemas (exact, as validators compare the URL);
+//     section_value_unavailable {condition} -- the rule's condition asks a
+//     value of the document's own identification section (@infoCode="0A2")
+//     that no example can carry;
 //     test_schema_unavailable {schemas, standard} -- no structure for the
 //     schema the rule is tested on; unreachable_target may carry roots
 //     [{schema, root}] (GMC, Part 2.3) when an absolute path starts at
@@ -75,6 +78,7 @@ export const ENGINE_REASON_CODES = [
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
   'example_no_room', 'condition_no_schema', 'reference_no_schema', 'context_schema_unknown', 'test_schema_unavailable', 'minimal_document_unavailable',
+  'section_value_unavailable',
 ];
 export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement'];
 
