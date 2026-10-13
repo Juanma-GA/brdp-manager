@@ -297,6 +297,12 @@
 // ruleTestExamples/brex-4-2-default-reference-supplydescr (EXT-00046),
 // -brex-schema-by-predicate (EXT-00152), -frontmatter-pmref-way (EXT-00127).
 // Every other prompt is identical.
+//
+// Test de reglas: condiciones sobre la sección de identificación del propio
+// documento: new case ruleTestExamples/brex-4-2-default-applic-repository-0a2
+// (EXT-00134, the minimal section with infoCode 0A2 and the line on the
+// values the rule asks of it). No existing case has this pattern: every
+// other prompt is identical.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

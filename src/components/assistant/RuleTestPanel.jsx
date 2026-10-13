@@ -16,6 +16,7 @@ import RuleReachWarning from './RuleReachWarning.jsx';
 import { useRuleReach } from '../../hooks/useRuleReach.js';
 import { listElementNames, REACH_LISTED } from '../../validation/ruleRepetition.js';
 import { severalUncovered } from '../../validation/ruleRepetition.js';
+import { sectionValuesLabel } from '../../utils/ownSectionValues.js';
 
 // Test rule (T2 of 4): which rule formats can be tested (S1000D BREX since
 // T1, DITA Schematron since T4). Used by both places that show the button.
@@ -562,6 +563,17 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
       {example.colsRaised?.length > 0 && <TableFixNote testId="rule-test-cols-raised" text={t('records.ruleTest.colsRaised', { count: example.colsRaised.length, values: example.colsRaised.map((c) => `${c.from} → ${c.to}`).join(', ') })} />}
       {example.morerowsLowered?.length > 0 && <TableFixNote testId="rule-test-morerows-lowered" text={t('records.ruleTest.morerowsLowered', { count: example.morerowsLowered.length, rows: [...new Set(example.morerowsLowered)].join(', ') })} />}
       {example.emptyRowsRemoved?.length > 0 && <TableFixNote testId="rule-test-empty-rows-removed" text={t('records.ruleTest.emptyRowsRemoved', { count: example.emptyRowsRemoved.length, rows: example.emptyRowsRemoved.join(', ') })} />}
+      {/* Test de reglas: condiciones sobre la sección de identificación del propio documento. */}
+      {example.sectionBuilt?.length > 0 && (
+        <p className={styles.ruleTestNote} data-testid="rule-test-section-built">
+          {t('records.ruleTest.sectionBuilt', { values: sectionValuesLabel(example.sectionBuilt) })}
+        </p>
+      )}
+      {example.sectionValuesSet?.length > 0 && (
+        <p className={styles.ruleTestNote} data-testid="rule-test-section-values">
+          {t('records.ruleTest.sectionValuesSet', { values: sectionValuesLabel(example.sectionValuesSet) })}
+        </p>
+      )}
       {example.brexReferenceNormalized && (
         <p className={styles.ruleTestNote} data-testid="rule-test-brex-normalized">
           {t('records.ruleTest.brexReferenceNormalized')}

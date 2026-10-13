@@ -30,7 +30,8 @@ import {
   formatStructureProblem,
   removeSpannedCalsEntries,
 } from '../validation/schemaValidation.js';
-import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
+import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, metadataXml, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
+import { setSectionValuesInDocument, setSectionValuesInText } from './ownSectionValues.js';
 import { placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
 import { applyExampleSchemaFixes, namedByRuleOrProposal } from './exampleSchemaFixes.js';
@@ -229,6 +230,42 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   // looks at the brexDmRef itself.
   const section = entry.placement.metadata;
   let metadata = adjusted.metadata;
+  // Test de reglas: condiciones sobre la sección de identificación del
+  // propio documento (BRDP-EXT-00134). The values the rule's condition asks
+  // of the document's own section (section.values, prepareRuleTestSetup):
+  // the application writes the section with them (metadata.insertion
+  // false, the skeleton's tree already has them); in a section the LLM
+  // wrote -- or in its whole document -- they are set in every example
+  // meant to be rejected (without them the rule cannot apply) and, in one
+  // meant to be accepted, only where the attribute is missing or still has
+  // the minimal section's value: another value there is a document the rule
+  // does not apply to. A section the LLM
+  // did not write is the minimal one with the values. Each example says
+  // what was set.
+  const sectionValues = section?.values || [];
+  delete adjusted.sectionValuesSet;
+  delete adjusted.sectionBuilt;
+  if (sectionValues.length) {
+    const force = adjusted.expected !== 'accept';
+    if (entry.placement.path.length === 0) {
+      const r = setSectionValuesInDocument(adjusted.content, entry.placement.root, metadataXml(section.tree, 1).xml, sectionValues, { force });
+      adjusted.content = r.text;
+      if (r.built) adjusted.sectionBuilt = sectionValues;
+      else if (r.set.length) adjusted.sectionValuesSet = r.set;
+    } else if (section.insertion) {
+      if (!String(metadata ?? '').trim()) {
+        metadata = metadataXml(section.tree, 1).xml.trimStart();
+        adjusted.sectionBuilt = sectionValues;
+      } else {
+        const r = setSectionValuesInText(metadata, sectionValues, { force });
+        metadata = r.text;
+        if (r.set.length) adjusted.sectionValuesSet = r.set;
+      }
+      adjusted.metadata = metadata;
+    } else {
+      adjusted.sectionValuesSet = sectionValues;
+    }
+  }
   if (section?.insertion && !setup.keepBrexReference && metadata != null) {
     const normalized = normalizeBrexReferenceCode(metadata, section.element);
     metadata = normalized.text;
@@ -248,7 +285,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     rootAttributes: adjusted.rootAttributes || null,
   });
   const missingMetadata =
-    section?.insertion && entry.placement.path.length > 0 && !String(example.metadata || '').trim() ? section.element : null;
+    section?.insertion && entry.placement.path.length > 0 && !String(metadata || '').trim() ? section.element : null;
   // Part 2.4: the LLM gave this example no "content" (and no "metadata").
   const missingContent = example.noContent === true && !String(adjusted.content || '').trim() && !String(adjusted.metadata || '').trim();
   // Dosier, Part 2: the other files of the example's dossier, each with the

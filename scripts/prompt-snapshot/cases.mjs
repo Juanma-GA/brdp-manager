@@ -35,6 +35,7 @@ import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
 import { describeRule, proposalVsRuleLists, ruleConditions } from '../../src/utils/ruleTestEngine.js';
 import { ruleDescriptionText } from '../../src/utils/ruleTestReasons.js';
+import { ownSectionConditions, withOwnSectionValues } from '../../src/utils/ownSectionValues.js';
 
 const xmldomParse = (text) => new DOMParser().parseFromString(text, 'text/xml');
 
@@ -1327,5 +1328,21 @@ ruleTestExamplesCases.push(
   {
     name: 'brex-4-2-default-frontmatter-pmref-way',
     args: [{ brdp: brdpDefault('BRDP-EXT-00127', 'Attributes of references in front matter', 'Attributes @id, @authorityName and @authorityDocument must not be used for references to publication modules in a front matter data module.'), standard: 'S1000D 4.2', format: 'BREX-4.2', ruleXml: defaultRule(127), placements: appPlacementsFor('S1000D 4.2', defaultRule(127), [['frontmatter', 'rule']]) }],
+  },
+  // Test de reglas: condiciones sobre la sección de identificación del propio
+  // documento -- BRDP-EXT-00134: the minimal section shows infoCode 0A2 and
+  // the prompt says the rule applies only to such a data module.
+  {
+    name: 'brex-4-2-default-applic-repository-0a2',
+    args: [{
+      brdp: brdpDefault('BRDP-EXT-00134', 'Expression in an applicability repository', 'In an applicability repository, the element expression is used only in the referencedApplicGroup element.'),
+      standard: 'S1000D 4.2',
+      format: 'BREX-4.2',
+      ruleXml: defaultRule(134),
+      placements: appPlacementsFor('S1000D 4.2', defaultRule(134), [['comrep', 'rule']]).map((p) => {
+        const structure = realStructures['S1000D 4.2|comrep'];
+        return withOwnSectionValues(p, structure, ownSectionConditions(defaultRule(134))).placement;
+      }),
+    }],
   },
 );

@@ -844,6 +844,28 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Reference to a supply that does not exist", expected: "reject", schema: ruleSchema || "proced", content: procedure("SE123") },
     ]);
   }
+  // Test de reglas: condiciones sobre la sección de identificación del
+  // propio documento (BRDP-EXT-00134). Like the real run, the section is
+  // written with the minimal one's old infoCode 040 -- never the 0A2 the
+  // rule's condition asks for -- so the rule can only apply if the
+  // application sets it (and keeps the section at all: the insertion point
+  // is the root). The reject example has an <expression> in dmStatus/applic,
+  // the only place outside <referencedApplicGroup> in comrep.
+  if (/attribute::infoCode="0A2"/.test(rule) && /referencedApplicGroup/.test(rule)) {
+    const lines = systemPrompt.split("\n");
+    const start = lines.findIndex((l) => l === "    <identAndStatusSection>");
+    const section = [];
+    for (let i = start; start !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) section.push(lines[i].slice(4));
+    const base = section.join("\n").replace(/(<dmIdent>\s*<dmCode\b[^>]*)infoCode="[^"]*"/, '$1infoCode="040"');
+    const expression = '<expression><assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"/></expression>';
+    const inStatus = base.replace(/(<simplePara>All<\/simplePara>\s*<\/displayText>)/, `$1${expression}`);
+    const repo = '<commonRepository><warningRepository><warningSpec><warningIdent warningIdentNumber="W-001"/><warningAndCautionPara>Do not touch the hot surface.</warningAndCautionPara></warningSpec></warningRepository></commonRepository>';
+    const group = (withExpression) => `<content>${repo}<referencedApplicGroup><applic id="app-0001"><displayText><simplePara>Model A</simplePara></displayText>${withExpression ? expression : '<assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"/>'}</applic></referencedApplicGroup></content>`;
+    return answer([
+      { label: "Expression in the referenced applicability group", expected: "accept", schema: ruleSchema || "comrep", metadata: base, content: group(true) },
+      { label: "Expression in the applicability of the status section", expected: "reject", schema: ruleSchema || "comrep", metadata: inStatus, content: group(false) },
+    ]);
+  }
   // Part 2.2 (BRDP-EXT-00152): the information code of a BREX data module,
   // in its own identification section (the brex schema, chosen by the
   // rule's predicate /dmodule[content/brex]).

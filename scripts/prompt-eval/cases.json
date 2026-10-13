@@ -5368,6 +5368,40 @@
           "type": "rule_test_verdict_correct"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-default-applic-repository-0a2",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Condiciones sobre la sección de identificación del propio documento (BRDP-EXT-00134 of the default S1000D 4.2 BREX): the rule applies only to a data module whose own dmCode has infoCode 0A2. The examples came out with no <identAndStatusSection> (the insertion point is the root and the section was dropped) and no infoCode 0A2: always inconclusive. Now the section is always there and the application sets infoCode 0A2: <expression> in referencedApplicGroup accepted, in dmStatus/applic rejected, correct verdict.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-APPLICREPO",
+        "title": "Expression in an applicability repository",
+        "definition": "Decide where the element <expression> may be used in an applicability repository.",
+        "proposal": "In an applicability repository, the element <expression> is used only in the <referencedApplicGroup> element.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00134\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//expression[ancestor::dmodule[descendant::commonRepository and descendant::identAndStatusSection[child::dmAddress[child::dmIdent[child::dmCode[attribute::infoCode=\"0A2\"]]]]] and not(ancestor::referencedApplicGroup)]</objectPath>\n\t\t\t\t\t\t<objectUse reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">In an applicability repository, the element expression (child of element applic) is used only in the referencedApplicGroup element (Chap 3.9.5.3, Para 2.4)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<dmIdent>\\s*<dmCode\\b[^>]*infoCode=[\"']0A2[\"']",
+          "note": "the section of every reject example has the own dmCode with infoCode 0A2"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<dmStatus>[\\s\\S]*<expression[\\s>]",
+          "note": "the reject example's <expression> is outside <referencedApplicGroup> (dmStatus/applic)"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
     }
   ]
 }

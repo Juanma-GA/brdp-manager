@@ -15,6 +15,7 @@ import { readLlmJson } from './llmJson.js';
 import { buildSchemaFactsBlock, ruleValueLegend } from './shared.js';
 import { placeSentence } from '../utils/schemaPlacement.js';
 import { attributeCarrierLines, metadataXml, REFERENCE_LIST_MAX } from '../utils/ruleTestSkeleton.js';
+import { sectionValueText } from '../utils/ownSectionValues.js';
 
 export const RULE_TEST_USER_MESSAGE = 'Write the test examples for this rule.';
 
@@ -127,7 +128,33 @@ function metadataLine(p, alsoContent = false) {
   your "metadata" is the WHOLE <${element}> of the example, written
   directly inside <${p.root}>. Start from this minimal, valid one and change
   only what the decision is about${where}
-${minimalSection(p)}${sectionRouteLines(p)}`;
+${minimalSection(p)}${sectionValueLines(p)}${sectionRouteLines(p)}`;
+}
+
+// Test de reglas: condiciones sobre la sección de identificación del propio
+// documento (BRDP-EXT-00134). The values the rule's condition asks of the
+// document's own identification section (placement.metadata.values, already
+// in the minimal section shown): the LLM keeps them, or -- when the
+// application writes the section -- does not write it. Nothing when the
+// rule asks for none: the prompt does not change.
+function sectionValueLines(p, { appWrites = false } = {}) {
+  const values = p.metadata?.values || [];
+  if (!values.length) return '';
+  const noun = documentNoun(p.root);
+  const list = values.map((v) => `${sectionValueText(v)} (${v.path.map((s) => s.name).join('/')})`).join(', and ');
+  if (appWrites) {
+    return `
+  The rule applies only to a ${noun} whose identification and status section
+  has ${list}. The application writes that section with these values: do not
+  write it.`;
+  }
+  return `
+  The rule applies only to a ${noun} whose identification and status section
+  has ${list}; the minimal section above already has it. Keep it in every
+  example meant to be rejected and in every example meant to be accepted
+  where the rule applies (the application sets it in every example meant to
+  be rejected); only an example meant to be accepted because the rule does
+  not apply to that ${noun} may change it.`;
 }
 
 // Ruta del esquema, Part 1: the elements the rule looks at in the section
@@ -315,7 +342,7 @@ function placementLine(p, dita) {
       p.metadata ? `
   <${p.root}> starts with its identification and status section; start from
   this minimal, valid one:
-${minimalSection(p)}` : ''
+${minimalSection(p)}${sectionValueLines(p)}` : ''
     }
   Allowed directly inside <${p.root}>: ${allowed}.${nestingLines(p)}${placeLines(p)}`;
   }
@@ -327,7 +354,7 @@ ${metadataLine(p)}${carrierLines(p)}${placeLines(p)}`;
   // GMC, Part 1.3: the rule only checks attributes the root carries.
   if (p.contentInsertion === false && (p.rootAttributes || []).length > 0) {
     return `- ${kind} "${p.schema}": the application builds the whole document
-  (${p.path.join('/')}${p.metadata ? ', with its minimal identification and status section' : ''}); write no "content".${carrierLines(p)}${placeLines(p)}`;
+  (${p.path.join('/')}${p.metadata ? ', with its minimal identification and status section' : ''}); write no "content".${sectionValueLines(p, { appWrites: true })}${carrierLines(p)}${placeLines(p)}`;
   }
   // T4b: the skeleton's own <title> (a DITA topic's, mandatory).
   const titleLine =
@@ -343,7 +370,7 @@ ${metadataLine(p)}${carrierLines(p)}${placeLines(p)}`;
   ${p.path.join('/')}.${titleLine}${relationLine}
   Allowed directly inside <${p.insertion}> in this ${kind}: ${allowed}.${writePathLines(p)}${relationWayLines(p)}${chainLines(p)}${innerLines(p)}${referenceLines(p)}${nestingLines(p)}${routeLines({ ...p, kindLabel: kind })}${
     p.metadata?.insertion ? `
-${metadataLine(p, true)}` : ''
+${metadataLine(p, true)}` : sectionValueLines(p, { appWrites: true })
   }${carrierLines(p)}${placeLines(p)}`;
 }
 

@@ -2303,17 +2303,32 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
   const title = `<title>${SKELETON_TITLE_TEXT}</title>`;
   const lines = [];
   const sectionPaths = [];
+  const pushSection = (name) => {
+    if (section.insertion) {
+      if (sectionText) lines.push(`${indentOf(1)}${sectionText}`);
+    } else {
+      const rendered = metadataXml(section.tree, 1, `/${name}[1]`);
+      lines.push(rendered.xml);
+      sectionPaths.push(...rendered.paths);
+    }
+  };
   path.forEach((name, i) => {
     const open = `${indentOf(i)}<${name}${i === 0 && rootAttrs.length ? ` ${rootAttrs.join(' ')}` : ''}>`;
     if (i === 0 && section && last > 0) {
       lines.push(open);
-      if (section.insertion) {
-        if (sectionText) lines.push(`${indentOf(1)}${sectionText}`);
-      } else {
-        const rendered = metadataXml(section.tree, 1, `/${name}[1]`);
-        lines.push(rendered.xml);
-        sectionPaths.push(...rendered.paths);
-      }
+      pushSection(name);
+      return;
+    }
+    // Test de reglas: condiciones sobre la sección de identificación del
+    // propio documento -- the insertion point is the root itself
+    // (BRDP-EXT-00134 in comrep: <expression> outside <referencedApplicGroup>
+    // only exists in dmStatus/applic): the section goes first, then the
+    // content. It used to be dropped, so every example had no section.
+    if (i === 0 && section && last === 0) {
+      lines.push(open);
+      pushSection(name);
+      if (body) lines.push(`${indentOf(1)}${body}`);
+      lines.push(`</${name}>`);
       return;
     }
     if (i === last) {
