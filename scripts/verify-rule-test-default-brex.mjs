@@ -76,6 +76,10 @@ async function main() {
   // section has no node for (applicRef in dmStatus).
   await makeBrdp({ identifier: "BRDP-EXT-00134", title: "Expressions in a common repository", definition: "Decide where expressions can be used in the applicability common repository.", proposal: "In the applicability CIR, expressions are only used inside referenced applicability groups." }, rule(134));
   await makeBrdp({ identifier: "BRDP-OS-APPLICREF", title: "Paragraphs of an applicability", definition: "Decide on paragraphs of data modules with a given applicability reference.", proposal: "Data modules with applicability reference app-01 must not have paragraphs." }, `<structureObjectRule><objectPath allowedObjectFlag="0">//para[ancestor::dmodule/identAndStatusSection/dmStatus/applicRef/@applicRefId = 'app-01']</objectPath><objectUse>x</objectUse></structureObjectRule>`);
+  // Atributo, desde donde la IA lo puso: EXT-00033 (the simulator puts
+  // @changeMark and @changeType="reinstate" on <dmStatus>, and moves them
+  // only when the correction names <applic> and the allowed values).
+  await makeBrdp({ identifier: "BRDP-EXT-00033", title: "Issue type of a data module with updated status", definition: "Decide the issue type of a data module whose identification and status information was updated.", proposal: "Data modules that have had their identification and status information updated must have the attribute issueType set to status, or to rinstate-status if the data module is reinstated." }, rule(33));
   const job = await api(`/api/projects/${project.id}/embeddings/compute`, { method: "POST" }).then((r) => r.json());
   for (let i = 0; i < 80; i++) {
     const s = await api(`/api/projects/${project.id}/embeddings/status/${job.job_id}`).then((r) => r.json());
@@ -263,6 +267,22 @@ async function main() {
     const ownEs = (await example(1).getByTestId("rule-test-section-values").textContent().catch(() => "")) || "";
     assert(ownEs.includes('Ajustado por la app: la sección de identificación lleva <dmCode infoCode="0A2">'), `EXT-00134 ES: nota (${ownEs})`);
     await language("en");
+
+    // 9. Atributo, desde donde la IA lo puso: EXT-00033. One correction
+    // round, which names <applic> inside <dmStatus> and the values of
+    // @changeType; after it, the examples are valid and the verdict correct.
+    await openTest("BRDP-EXT-00033");
+    await verdict().waitFor({ timeout: 30000 });
+    assert(((await verdict().textContent()) || "").startsWith("Correct"), `EXT-00033: verdict correct (${await verdict().textContent()})`);
+    const corrections = (await fetch(`${MOCK}/chat-requests`).then((r) => (r.ok ? r.json() : { requests: [] })).catch(() => ({ requests: [] }))).requests || [];
+    const asked = corrections.map((m) => m.lastUser || "").find((t) => t.startsWith("Some examples are not valid.")) || "";
+    assert(/@changeMark is not allowed on <dmStatus>\. Inside <dmStatus> it can go on: <applic>/.test(asked), `EXT-00033: the correction names <applic> inside <dmStatus> (${asked.slice(0, 300)})`);
+    assert(asked.includes("@changeType allowed values: add, delete, modify."), "EXT-00033: the correction gives the values of @changeType");
+    const reject33 = (await example(1).textContent()) || "";
+    assert(/<applic changeMark="1" changeType="modify">/.test(reject33), `EXT-00033: the marks are on <applic> (${reject33.slice(0, 200)})`);
+    assert(((await example(1).getByTestId("rule-test-result").textContent()) || "").includes("rejected ✓"), "EXT-00033: issue type changed rejected");
+    assert(((await example(0).getByTestId("rule-test-result").textContent()) || "").includes("accepted ✓"), "EXT-00033: issue type status accepted");
+    await page.screenshot({ path: shot("rule-test-attribute-carriers-near.png"), fullPage: true });
 
     // A value the examples cannot carry: not executable, no LLM call.
     await openTest("BRDP-OS-APPLICREF");

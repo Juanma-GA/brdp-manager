@@ -3301,7 +3301,7 @@ for (const [S42, file] of [['S1000D 4.2', 'brdp-template-4-2.xlsx'], ['S1000D 4.
   // up: <techName> in the example, by its real path), not the 84 from the content.
   check(
     'GMC 1.2: on <language> -> the correction brings the carriers near it',
-    /@commercialClassification is not allowed on <language>, nor on anything inside it\. Going up from <language>, the nearest that can carry it, from <dmAddress>: <techName>, <infoName> \(paths: dmAddress\/dmAddressItems\/dmTitle\/techName, dmAddress\/dmAddressItems\/dmTitle\/infoName\)\. <techName> is already in this example\./.test(correction37) &&
+    /@commercialClassification is not allowed on <language>, nor on anything inside it\. Going up from <language>, the nearest that can carry it, from <dmAddress>: <techName>, <infoName> \(paths: dmAddress\/dmAddressItems\/dmTitle\/techName, dmAddress\/dmAddressItems\/dmTitle\/infoName\)\. <techName> is already in this example\. @commercialClassification allowed values: cc01–cc99\./.test(correction37) &&
       !/goes on: .*\(84\)/.test(correction37),
     correction37
   );
@@ -3872,6 +3872,24 @@ const AF = {};
   // A present carrier keeps the path it has in the example (brexDmRef/dmRef),
   // not the schema's shortest way.
   check('AC1 EXT-00033: present carriers by their real path', /dmStatus\/brexDmRef\/dmRef/.test(correction) && !/applicCrossRefTableRef\/dmRef/.test(correction), correction);
+
+  // Part 2: the closed list of the attribute on the proposed carrier, in the
+  // same message (the LLM wrote changeType="reinstate").
+  const typed = await run(EXT33, [{ examples: [
+    { label: 'reinstate on dmStatus', expected: 'reject', schema: 'descript', content: doc(' changeMark="1" changeType="reinstate"') },
+    accept,
+  ] }, { examples: [
+    { label: 'reinstate on dmStatus', expected: 'reject', schema: 'descript', content: doc('', ' changeMark="1" changeType="modify"') },
+    accept,
+  ] }]);
+  const typedCorrection = correctionOf(typed.asked);
+  check(
+    'AC2 @changeType: carriers and allowed values in the same line',
+    /- @changeType is not allowed on <dmStatus>\. Inside <dmStatus> it can go on: <applic>, [^\n]*\. @changeType allowed values: add, delete, modify\./.test(typedCorrection),
+    typedCorrection
+  );
+  check('AC2 @changeMark: no closed list, no values line', /- @changeMark is not allowed on <dmStatus>[^\n]*/.test(typedCorrection) && !/@changeMark allowed values/.test(typedCorrection), typedCorrection);
+  check('AC2 EXT-00033 with changeType: correct after the round', typed.verdict?.kind === 'correct' && typed.result.runs.every((r) => r.validation.runnable), JSON.stringify([typed.verdict, typed.result.runs.map((r) => r.validation.structure)]));
 
   // Directly on the function: the order (present, then shallower, then name).
   const setup = (await prepareRuleTestSetup({ ruleXml: EXT33, standard: S42, schemaLocation: 'flat', format: 'BREX-4.2', parseXml, ...io })).setup;

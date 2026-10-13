@@ -5402,6 +5402,40 @@
           "type": "rule_test_verdict_correct"
         }
       ]
+    },
+    {
+      "id": "rule-test-4-2-default-issuetype-status",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Ronda de corrección: dónde puede ir el atributo, desde donde la IA lo puso (BRDP-EXT-00033 of the default S1000D 4.2 BREX). The LLM wrote <dmStatus changeMark=\"1\" changeType=\"reinstate\">; in 4.2 <dmStatus> carries neither, and the correction round only gave the 672 carriers of @changeMark from the content: 0 of 4 fixed. Now the correction names the carriers inside <dmStatus> (<applic>, already in the example, first) and the allowed values of @changeType, and the examples are valid.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-ISSUETYPE",
+        "title": "Issue type of a data module with updated status",
+        "definition": "Decide the issue type of a data module whose identification and status information was updated.",
+        "proposal": "Data modules that have had their identification and status information updated must have the attribute issueType set to status, or to rinstate-status if the data module is reinstated.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00034\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//dmodule[not(descendant-or-self::identAndStatusSection[descendant-or-self::reasonForUpdate]) and not(child::content[descendant-or-self::*[attribute::changeType or attribute::changeMark]]) and (child::identAndStatusSection[descendant-or-self::*[attribute::changeType or attribute::changeMark]]) and descendant-or-self::dmStatus[not(attribute::issueType=\"status\" or attribute::issueType=\"rinstate-status\")]]</objectPath>\n\t\t\t\t\t\t<objectUse>Data modules that have had their identification and status information updated must have the attribute issueType set to the value /status/ or, if the data module is reinstated, set to /rinstate-status/. (Chap 3.9.5.1, Para 2.2)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "all",
+          "pattern": "<applic\\b[^>]*changeMark=[\"']1[\"']",
+          "note": "the change mark moved to <applic>, inside <dmStatus>"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "all",
+          "pattern": "changeType=[\"'](?:add|delete|modify)[\"']",
+          "note": "@changeType with a value of its closed list"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
     }
   ]
 }

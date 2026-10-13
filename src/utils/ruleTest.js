@@ -23,7 +23,9 @@ import {
   checkAgainstVocabulary,
   checkCalsColspecs,
   checkCalsTableSpans,
+  attributeEnum,
   checkExampleStructure,
+  compactValueList,
   extractDocumentNames,
   extractRuleNames,
   fixCalsRowSpans,
@@ -709,8 +711,9 @@ export function nearbyAttributeCarriers(structure, context, places = null) {
   return null;
 }
 
-// The English correction line for nearbyAttributeCarriers.
-export function nearbyCarriersLine(problem, nearby) {
+// The English correction line for nearbyAttributeCarriers, with (Part 2)
+// the closed list of values of the attribute on the first carrier named.
+export function nearbyCarriersLine(problem, nearby, structure) {
   const shown = nearby.carriers.map((c) => `<${c.name}>`).join(', ');
   const paths = nearby.carriers.map((c) => c.path.join('/')).join(', ');
   const more = nearby.total > nearby.carriers.length ? `, +${nearby.total - nearby.carriers.length} more` : '';
@@ -721,6 +724,15 @@ export function nearbyCarriersLine(problem, nearby) {
   const lines = [head];
   const already = nearby.carriers.filter((c) => c.present).map((c) => `<${c.name}>`);
   if (already.length) lines.push(`${already.join(', ')} ${already.length === 1 ? 'is' : 'are'} already in this example.`);
+  const values = attributeEnum(structure, nearby.carriers[0].name, problem.attribute);
+  if (values) {
+    const differs = nearby.carriers.some((c) => {
+      const other = attributeEnum(structure, c.name, problem.attribute);
+      return other && other.join('|') !== values.join('|');
+    });
+    const compact = compactValueList(values);
+    lines.push(`@${problem.attribute} allowed values${differs ? ` on <${nearby.carriers[0].name}>` : ''}: ${compact.text}${compact.more ? `, +${compact.more} more` : ''}.`);
+  }
   return lines.join(' ');
 }
 
@@ -790,7 +802,7 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
       const context = (validation.attributeContexts || []).find((c) => c.attribute === p.attribute && c.element === p.element);
       const nearby = context ? nearbyAttributeCarriers(structure, context, places) : null;
       if (nearby) {
-        out.push(nearbyCarriersLine(p, nearby));
+        out.push(nearbyCarriersLine(p, nearby, structure));
         out.movesAttribute = true;
         continue;
       }

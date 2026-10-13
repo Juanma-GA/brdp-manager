@@ -490,13 +490,19 @@ function metadataReply(systemPrompt, rule, answer, messages = []) {
     // GMC EXT-00037: the first answer puts cc99 on <language>, which has no
     // such attribute (the real run); the correction round -- which now
     // carries where @commercialClassification goes -- moves it to a
-    // <changeInline> in the content.
-    const fixed = /@commercialClassification goes on:/.test(lastUserOf(messages));
+    // <changeInline> in the content. Since the correction names the carriers
+    // near <language> instead (atributo, desde donde la IA lo puso), it moves
+    // it to the one it names there, <techName>, in the same section.
+    const last = lastUserOf(messages);
+    const fixed = /@commercialClassification goes on:/.test(last);
+    const near = /@commercialClassification is not allowed on <language>[^\n]*<techName>/.test(last);
     const inline = (cc) => `Torque the bolts to <changeInline commercialClassification="${cc}">10 N.m</changeInline>.`;
-    return answer([
-      ex("COC-marked torque value", "accept", base, inline("cc51")),
-      fixed ? ex("Other commercial classification", "reject", base, inline("cc99")) : ex("Other commercial classification", "reject", base.replace("<language ", '<language commercialClassification="cc99" '), "Torque the bolts to 10 N.m."),
-    ]);
+    const reject = fixed
+      ? ex("Other commercial classification", "reject", base, inline("cc99"))
+      : near
+        ? ex("Other commercial classification", "reject", base.replace("<techName>", '<techName commercialClassification="cc99">'), "Torque the bolts to 10 N.m.")
+        : ex("Other commercial classification", "reject", base.replace("<language ", '<language commercialClassification="cc99" '), "Torque the bolts to 10 N.m.");
+    return answer([ex("COC-marked torque value", "accept", base, inline("cc51")), reject]);
   }
   return null;
 }
@@ -842,6 +848,29 @@ function ruleTestReply(systemPrompt, messages) {
     return answer([
       { label: "Reference to the supply of the procedure", expected: "accept", schema: ruleSchema || "proced", content: procedure(fixed ? "SUP-0001" : "SE123") },
       { label: "Reference to a supply that does not exist", expected: "reject", schema: ruleSchema || "proced", content: procedure("SE123") },
+    ]);
+  }
+  // Atributo, desde donde la IA lo puso (BRDP-EXT-00033): like the real
+  // run, @changeMark (and @changeType="reinstate") on <dmStatus>, where 4.2
+  // does not allow them. The correction round moves them to <applic> only
+  // when it names <applic> inside <dmStatus>, and gives @changeType a value
+  // of its list only when the list is in the same message.
+  if (/attribute::issueType="rinstate-status"/.test(rule)) {
+    const lines = systemPrompt.split("\n");
+    const start = lines.findIndex((l) => l === "    <identAndStatusSection>");
+    const section = [];
+    for (let i = start; start !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) section.push(lines[i].slice(4));
+    const moved = correcting && /Inside <dmStatus> it can go on: <applic>/.test(lastUser);
+    const value = moved && /@changeType allowed values: add, delete, modify/.test(lastUser) ? "modify" : "reinstate";
+    const marks = ` changeMark="1" changeType="${value}"`;
+    const doc = (issueType) => {
+      const base = section.join("\n").replace(/<dmStatus\b([^>]*)>/, (_m, a) => `<dmStatus${a.replace(/\s*issueType="[^"]*"/, "")} issueType="${issueType}"${moved ? "" : marks}>`);
+      const marked = moved ? base.replace("<applic>", `<applic${marks}>`) : base;
+      return `<dmodule>${marked}<content><description><levelledPara><title>Pump</title><para>The pump supplies fuel.</para></levelledPara></description></content></dmodule>`;
+    };
+    return answer([
+      { label: "Status updated, issue type status", expected: "accept", schema: ruleSchema || "descript", content: doc("status") },
+      { label: "Status updated, issue type changed", expected: "reject", schema: ruleSchema || "descript", content: doc("changed") },
     ]);
   }
   // Test de reglas: condiciones sobre la sección de identificación del
@@ -1332,6 +1361,9 @@ function ruleTestReviewReply(systemPrompt) {
 const SLOW_RESPONSE_DELAY_MS = 2500;
 let slowNextArmed = 0;
 let chatCalls = 0;
+// The last user message of every chat call since /reset (GET /chat-requests),
+// so a browser script can read the real correction request.
+let chatRequests = [];
 let slowNextDelayMs = SLOW_RESPONSE_DELAY_MS;
 // "Aviso ligado al texto" round: content-independent trigger, armed via
 // POST /step-next (one-shot, same convention as /slow-next/-error-next
@@ -1453,6 +1485,11 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ calls: chatCalls }));
     return;
   }
+  if (req.method === "GET" && req.url === "/chat-requests") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ requests: chatRequests }));
+    return;
+  }
   if (req.method === "GET" && req.url === "/last-request") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(lastRequest));
@@ -1465,6 +1502,7 @@ const server = http.createServer((req, res) => {
     proposalCheckFailNext = false;
     slowNextArmed = 0;
     chatCalls = 0;
+    chatRequests = [];
     extractDelayMs = 0;
     extractBroken = false;
     extractCalls = 0;
@@ -1524,6 +1562,7 @@ const server = http.createServer((req, res) => {
     // Every chat call, counted (GET /chat-calls; progreso y límite de
     // tiempo: "Cancel" sends nothing more).
     chatCalls += 1;
+    chatRequests.push({ lastUser: [...(parsed.messages || [])].reverse().find((m) => m.role === "user")?.content || "" });
     // Barrido final 1/2: the Proposal check runs in parallel with the
     // examples of every rule test. It is answered here, apart: it never
     // becomes the /last-request and never consumes a one-shot flag armed

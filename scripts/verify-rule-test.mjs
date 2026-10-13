@@ -294,7 +294,7 @@ async function main() {
     const nonSystem = req3.messages.filter((m) => m.role !== "system");
     assert(nonSystem.length === 3 && nonSystem[1].role === "assistant", "correction round: first answer sent back + the problems");
     const correction = nonSystem[2].content;
-    assert(correction.includes('Example 2 ("Hot surface warning with em03"):') && correction.includes("- <content> is not allowed inside <warning>") && correction.includes("- <warning> is not allowed inside <para>") && correction.includes("- @emphasisType does not exist on <warning>"), `correction lists the exact problems (${correction})`);
+    assert(correction.includes('Example 2 ("Hot surface warning with em03"):') && correction.includes("- <content> is not allowed inside <warning>") && correction.includes("- <warning> is not allowed inside <para>") && correction.includes("- @emphasisType is not allowed on <warning>. Inside <warning> it can go on: <emphasis> (paths: warning/warningAndCautionPara/emphasis)."), `correction lists the exact problems (${correction})`);
     assert((await page.getByTestId("rule-test-correction").textContent()) === "1 example was corrected automatically.", "correction note shown");
     assert((await verdict().textContent()).startsWith("Correct"), "after the correction the verdict is correct");
 
