@@ -424,6 +424,37 @@ export function sectionCarrierWay(structure, section, target) {
 
 // ─── Part 2: moving a misplaced element down the only valid way ─────────────
 
+// The required children the relocation itself builds around the next link
+// (chainNode: a new <content> needs its <commonRepository>) carry this
+// attribute while the relocation runs, and lose it before it returns.
+const FILLER_ATTR = 'data-brdp-relocation-filler';
+const FILLER_MARK_RE = new RegExp(`\\s${FILLER_ATTR}\\s*=\\s*"1"`);
+const FILLER_STRIP_RE = new RegExp(`\\s${FILLER_ATTR}="1"`, 'g');
+
+// Marks every node of the chain the relocation builds that is not on the
+// way to the leaf (the required children chainNode adds around it). The
+// way is the one child at each level that holds the leaf -- the LLM's raw
+// text, never marked.
+function holdsRaw(node) {
+  return node.raw != null || node.children.some(holdsRaw);
+}
+
+function markFillers(node) {
+  if (node.raw != null) return node;
+  return { ...node, children: node.children.map((c) => (holdsRaw(c) ? markFillers(c) : markAll(c))) };
+}
+
+function markAll(node) {
+  if (node.raw != null) return node;
+  return { ...node, attributes: [...node.attributes, [FILLER_ATTR, '1']], children: node.children.map(markAll) };
+}
+
+// A filler the LLM's text has not gone into: it and everything in it was
+// built by the relocation.
+function pureFiller(node) {
+  return node.filler && node.children.every(pureFiller);
+}
+
 const TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
 
 // The element tree of a fragment's text with the spans of each element
@@ -441,7 +472,16 @@ function parseSpans(text) {
       parent.end = m.index + m[0].length;
       stack.pop();
     } else {
-      const node = { name: m[2], start: m.index, openEnd: m.index + m[0].length, closeStart: null, end: null, children: [], selfClosing: Boolean(m[4]) };
+      const node = {
+        name: m[2],
+        start: m.index,
+        openEnd: m.index + m[0].length,
+        closeStart: null,
+        end: null,
+        children: [],
+        selfClosing: Boolean(m[4]),
+        filler: FILLER_MARK_RE.test(m[3] || ''),
+      };
       parent.children.push(node);
       if (m[4]) {
         node.closeStart = node.start;
@@ -519,22 +559,41 @@ export function relocateMisplacedElements(text, structure, parentName) {
       skip.add(`${pName}>${node.name}@${node.start}`);
       continue;
     }
-    const insertText = renderNode(chain);
+    const insertText = renderNode(markFillers(chain));
     const firstName = path[i];
     const siblings = into.children.filter((c) => c !== node);
-    const at = orderIndex(models, intoName, firstName, siblings.map((c) => c.name));
-    const insertAt = at < siblings.length ? siblings[at].start : at > 0 ? siblings[at - 1].end : into.openEnd;
-    // Remove first when it comes after the insertion point, else insert first.
-    const removeStart = node.start;
-    const removeEnd = node.end;
-    if (insertAt <= removeStart) {
-      current = current.slice(0, insertAt) + insertText + current.slice(insertAt, removeStart) + current.slice(removeEnd);
+    // La recolocación no debe duplicar un elemento que la app ya creó: when
+    // an earlier move built this container with a required <firstName>
+    // (chainNode's minimal one -- BRDP-EXT-00134 in comrep: moving
+    // <referencedApplicGroup> built <content> with a <commonRepository>)
+    // and the schema allows at most one there, what is moved now takes its
+    // place. Never an element the LLM wrote, nor one the LLM's text has
+    // gone into since (pureFiller); with a higher maximum both stay.
+    const filler =
+      models[intoName]?.max?.[firstName] === 1
+        ? siblings.find((c) => c.name === firstName && pureFiller(c))
+        : null;
+    let edits;
+    if (filler) {
+      edits = [
+        { start: filler.start, end: filler.end, text: insertText },
+        { start: node.start, end: node.end, text: '' },
+      ];
     } else {
-      current = current.slice(0, removeStart) + current.slice(removeEnd, insertAt) + insertText + current.slice(insertAt);
+      const at = orderIndex(models, intoName, firstName, siblings.map((c) => c.name));
+      const insertAt = at < siblings.length ? siblings[at].start : at > 0 ? siblings[at - 1].end : into.openEnd;
+      edits = [
+        { start: insertAt, end: insertAt, text: insertText },
+        { start: node.start, end: node.end, text: '' },
+      ];
     }
+    // The later edit first, so the earlier one's offsets still hold (the
+    // insertion first when both are at the same place: it goes before).
+    edits.sort((a, b) => b.start - a.start || b.end - a.end);
+    for (const e of edits) current = current.slice(0, e.start) + e.text + current.slice(e.end);
     moved.push({ element: node.name, parent: pName, path });
   }
-  return { text: current, moved };
+  return { text: current.replace(FILLER_STRIP_RE, ''), moved };
 }
 
 // ─── Mejoras C, Part 2: where an element of the rule goes ───────────────────

@@ -5404,6 +5404,34 @@
       ]
     },
     {
+      "id": "rule-test-4-2-default-applic-repository-relocated",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "La recolocación no debe duplicar un elemento que la app ya creó (BRDP-EXT-00134 of the default S1000D 4.2 BREX, comrep). The LLM wrote <referencedApplicGroup> and <commonRepository> straight inside <dmodule>, with no <content>; moving the group built <content> with a minimal <commonRepository>, and the LLM's own one was then put next to it: \"<content> allows at most 1 <commonRepository>\", the correction removed it, and no example could run. Now the LLM's <commonRepository> takes the place of the one the app built: one <commonRepository>, valid examples, correct verdict.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-RELOCREPO",
+        "title": "Expression in an applicability repository",
+        "definition": "Decide where the element <expression> may be used in a common information repository data module that also holds supplies.",
+        "proposal": "In a common information repository data module (with its <commonRepository> of supplies), the element <expression> is used only in the <referencedApplicGroup> element.",
+        "validation": "Validated"
+      },
+      "rule": "<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00134\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//expression[ancestor::dmodule[descendant::commonRepository and descendant::identAndStatusSection[child::dmAddress[child::dmIdent[child::dmCode[attribute::infoCode=\"0A2\"]]]]] and not(ancestor::referencedApplicGroup)]</objectPath>\n\t\t\t\t\t\t<objectUse reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"modify\">In an applicability repository, the element expression (child of element applic) is used only in the referencedApplicGroup element (Chap 3.9.5.3, Para 2.4)</objectUse>\n\t\t\t\t\t</structureObjectRule>",
+      "checks": [
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_accept_examples_contain",
+          "target": "all",
+          "pattern": "^(?![\\s\\S]*<commonRepository[\\s>][\\s\\S]*<commonRepository[\\s>])[\\s\\S]*<commonRepository[\\s>]",
+          "note": "every accept example has exactly one <commonRepository>"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
+    },
+    {
       "id": "rule-test-4-2-default-issuetype-status",
       "type": "rule-test",
       "standard": "S1000D 4.2",

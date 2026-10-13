@@ -889,6 +889,19 @@ function ruleTestReply(systemPrompt, messages) {
     const expression = '<expression><assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"/></expression>';
     const inStatus = base.replace(/(<simplePara>All<\/simplePara>\s*<\/displayText>)/, `$1${expression}`);
     const repo = '<commonRepository><warningRepository><warningSpec><warningIdent warningIdentNumber="W-001"/><warningAndCautionPara>Do not touch the hot surface.</warningAndCautionPara></warningSpec></warningRepository></commonRepository>';
+    // La recolocación no debe duplicar un elemento que la app ya creó
+    // (BRDP-EVAL-RT-RELOCREPO): like the real run, the repository and the
+    // group straight inside <dmodule>, with no <content> -- the group
+    // first, so moving it builds <content> with a minimal
+    // <commonRepository> before the LLM's own one is moved.
+    if (/BRDP-EVAL-RT-RELOCREPO/.test(systemPrompt)) {
+      const supply = '<commonRepository><supplyRepository><supplySpec><supplyIdent supplyNumber="S-001" supplyNumberType="sp01"/><name>Grease</name></supplySpec></supplyRepository></commonRepository>';
+      const bare = (withExpression) => `<referencedApplicGroup><applic id="app-0001"><displayText><simplePara>Model A</simplePara></displayText>${withExpression ? expression : '<assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"/>'}</applic></referencedApplicGroup>\n${supply}`;
+      return answer([
+        { label: "Expression in the referenced applicability group", expected: "accept", schema: ruleSchema || "comrep", metadata: base, content: bare(true) },
+        { label: "Expression in the applicability of the status section", expected: "reject", schema: ruleSchema || "comrep", metadata: inStatus, content: bare(false) },
+      ]);
+    }
     const group = (withExpression) => `<content>${repo}<referencedApplicGroup><applic id="app-0001"><displayText><simplePara>Model A</simplePara></displayText>${withExpression ? expression : '<assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="A"/>'}</applic></referencedApplicGroup></content>`;
     return answer([
       { label: "Expression in the referenced applicability group", expected: "accept", schema: ruleSchema || "comrep", metadata: base, content: group(true) },
