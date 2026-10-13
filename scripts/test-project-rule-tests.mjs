@@ -15,6 +15,10 @@ import {
   errorKind,
   findProject,
   folderSlug,
+  fromStartLine,
+  relaunchCommand,
+  resolveFrom,
+  similarIdentifiers,
   formatDuration,
   latestEntries,
   loadResults,
@@ -52,7 +56,7 @@ function check(name, ok, detail = '') {
 const eq = (name, got, want) => check(name, JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 
 // ── Options ──
-eq('only project', parseArgs(['--project', 'P']), { project: 'P', all: false, only: [], limit: null, parallel: 1, lang: 'es', noRetry: false });
+eq('only project', parseArgs(['--project', 'P']), { project: 'P', all: false, only: [], limit: null, parallel: 1, lang: 'es', noRetry: false, from: null });
 eq('all options', parseArgs(['--project', 'P', '--all', '--only', 'EXT-00041, EXT-00107', '--limit', '5', '--parallel', '2', '--lang', 'en']), {
   project: 'P',
   all: true,
@@ -61,6 +65,7 @@ eq('all options', parseArgs(['--project', 'P', '--all', '--only', 'EXT-00041, EX
   parallel: 2,
   lang: 'en',
   noRetry: false,
+  from: null,
 });
 check('--no-retry', parseArgs(['--project', 'P', '--no-retry']).noRetry === true);
 check('project required', /--project/.test(parseArgs(['--all']).error || ''));
@@ -593,6 +598,75 @@ check('--no-retry → one attempt', !shouldRepeat({ result: 'failed' }, 'approve
   check('report EN: "No XPath to test"', /## No XPath to test \(1\): left as they were/.test(buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [], entries: [known] }, { lang: 'en' })));
   check('progress: EXT-00261 says it stays as it was', progressLine(1, 2, known) === '[1/2] BRDP-EXT-00261 NO EJECUTABLE (sin XPath que probar: sigue como estaba) (0 s)', progressLine(1, 2, known));
   check('progress: EXT-00200 → Draft', progressLine(2, 2, invalid) === '[2/2] BRDP-EXT-00200 NO EJECUTABLE → Draft (0 s)', progressLine(2, 2, invalid));
+}
+
+// ── --from: start at a rule (identifier) or at a position of [n/N] ──
+{
+  eq('--from with BRDP- → identifier', parseArgs(['--project', 'P', '--from', 'BRDP-EXT-02219']).from, { identifier: 'BRDP-EXT-02219' });
+  eq('--from bare number → position', parseArgs(['--project', 'P', '--from', '2219']).from, { position: 2219 });
+  eq('--from EXT-02219 (no BRDP-) → identifier', parseArgs(['--project', 'P', '--from', 'EXT-02219']).from, { identifier: 'EXT-02219' });
+  check('--from 0 → error', /--from 0/.test(parseArgs(['--project', 'P', '--from', '0']).error || ''));
+  eq('--from with --only → clear error (es)', parseArgs(['--project', 'P', '--from', '5', '--only', 'EXT-00041']).error, '--from y --only no se pueden usar juntas');
+  eq('--from with --only → clear error (en, either order)', parseArgs(['--only', 'EXT-00041', '--project', 'P', '--lang', 'en', '--from', '5']).error, '--from and --only cannot be used together');
+  const combo = parseArgs(['--project', 'P', '--from', 'BRDP-EXT-00010', '--all', '--limit', '50', '--parallel', '2', '--lang', 'en', '--no-retry']);
+  check('--from combines with --all, --limit, --parallel, --lang, --no-retry', !combo.error && combo.all && combo.limit === 50 && combo.parallel === 2 && combo.lang === 'en' && combo.noRetry && combo.from.identifier === 'BRDP-EXT-00010', JSON.stringify(combo));
+
+  const ids = Array.from({ length: 30 }, (_, i) => `BRDP-EXT-${String(i + 1).padStart(5, '0')}`);
+  const many = planRules(
+    ids.map((identifier, i) => ({ id: `id${i}`, identifier })),
+    ids.map((_, i) => ({ brdp_id: `id${i}`, status: 'approved', rule_xml: '<r/>' }))
+  ).queue;
+  const byId = resolveFrom(many, { identifier: 'BRDP-EXT-00012' });
+  eq('identifier → start, position, omitted', [byId.start, byId.identifier, byId.position, byId.omitted, byId.total], [11, 'BRDP-EXT-00012', 12, 11, 30]);
+  eq('identifier, any case', resolveFrom(many, { identifier: 'brdp-ext-00012' }).position, 12);
+  eq('identifier without BRDP-', resolveFrom(many, { identifier: 'EXT-00012' }).position, 12);
+  const byPos = resolveFrom(many, { position: 12 });
+  eq('position 12 = the 12th rule', [byPos.start, byPos.identifier, byPos.omitted], [11, 'BRDP-EXT-00012', 11]);
+  eq('first rule / position 1: nothing left out (as without --from)', [resolveFrom(many, { position: 1 }).omitted, resolveFrom(many, { identifier: 'BRDP-EXT-00001' }).start], [0, 0]);
+  const last = resolveFrom(many, { identifier: 'BRDP-EXT-00030' });
+  eq('last rule: only that one is left to test', many.slice(last.start).map((q) => q.brdp.identifier), ['BRDP-EXT-00030']);
+  const out = resolveFrom(many, { position: 31 });
+  check('position greater than N → error, nothing to test', !out.start && /posición fuera de rango.*\(1–30\)/.test(out.error || ''), out.error);
+  check('position 0 → error', /fuera de rango/.test(resolveFrom(many, { position: 0 }).error || ''));
+  const missing = resolveFrom(many, { identifier: 'BRDP-EXT-00031' }, { lang: 'en' });
+  check('unknown identifier → error (en)', /no saved rule of the project has that identifier\. Nothing was tested\./.test(missing.error || ''), missing.error);
+  check('unknown identifier → the similar ones (closest numbers)', missing.similar.includes('BRDP-EXT-00030') && missing.similar.includes('BRDP-EXT-00029') && missing.similar.length <= 8, JSON.stringify(missing.similar));
+  const typo = resolveFrom(many, { identifier: 'BRDP-EXR-00012' });
+  check('typo in the prefix → the same number is similar', typo.error && typo.similar.includes('BRDP-EXT-00012'), JSON.stringify(typo.similar));
+  const noRule = resolveFrom(many, { identifier: 'BRDP-S1-00001' }, { allIdentifiers: ['BRDP-S1-00001'] });
+  check('identifier of a BRDP without a saved rule → said so', /BRDP-S1-00001 no tiene regla guardada/.test(noRule.error || ''), noRule.error);
+  eq('similarIdentifiers: contained', similarIdentifiers(['BRDP-EXT-02219', 'BRDP-EXT-12219', 'BRDP-S1-00001'], '2219').slice(0, 2), ['BRDP-EXT-02219', 'BRDP-EXT-12219']);
+
+  // --from + --limit 50: the slice from --from, 50 of them.
+  const big = planRules(
+    Array.from({ length: 200 }, (_, i) => ({ id: `b${i}`, identifier: `BRDP-EXT-${String(i + 1).padStart(5, '0')}` })),
+    Array.from({ length: 200 }, (_, i) => ({ brdp_id: `b${i}`, status: 'approved', rule_xml: '<r/>' }))
+  ).queue;
+  const from100 = resolveFrom(big, { position: 100 });
+  eq('--from 100 --limit 50 → BRDP-EXT-00100 … BRDP-EXT-00149', [big.slice(from100.start).slice(0, 50)[0].brdp.identifier, big.slice(from100.start).slice(0, 50)[49].brdp.identifier], ['BRDP-EXT-00100', 'BRDP-EXT-00149']);
+
+  // Start line (ES/EN).
+  eq('start line ES', fromStartLine({ identifier: 'BRDP-EXT-02219', position: 2219, total: 2818, omitted: 2218 }), 'Empezando en BRDP-EXT-02219 (posición 2219 de 2818); se omiten las 2218 anteriores.');
+  eq('start line EN', fromStartLine({ identifier: 'BRDP-EXT-02219', position: 2219, total: 2818, omitted: 2218 }, 'en'), 'Starting at BRDP-EXT-02219 (position 2219 of 2818); the 2218 before it are left out.');
+  eq('start line, first rule', fromStartLine({ identifier: 'BRDP-EXT-00001', position: 1, total: 3, omitted: 0 }), 'Empezando en BRDP-EXT-00001 (posición 1 de 3); no se omite ninguna.');
+  eq('start line, one left out', fromStartLine({ identifier: 'BRDP-EXT-00002', position: 2, total: 3, omitted: 1 }), 'Empezando en BRDP-EXT-00002 (posición 2 de 3); se omite la anterior.');
+
+  // Report: the run line, the totals row, and how to go on.
+  const fromOpts = { from: { value: 'BRDP-EXT-02219', identifier: 'BRDP-EXT-02219', position: 2219, omitted: 2218, total: 2818 }, limit: 50, lang: 'es' };
+  const rep = buildReport({
+    project: { name: '8x8 MALE', standard: 'S1000D 3.0.1', format: 'BREX-3.0.1' },
+    runs: [{ started_at: 'a', user: 'u', options: fromOpts, stopped: '--limit 50' }],
+    entries: [{ identifier: 'BRDP-EXT-02219', run: 'a', result: 'passed', status_after: 'approved' }],
+    pending: ['BRDP-EXT-02269', 'BRDP-EXT-02270'],
+  });
+  check('report: run line names --from', /--from BRDP-EXT-02219/.test(rep), rep);
+  check('report: totals row «omitidas por --from: N»', /\| omitidas por --from \| 2218 \| — \|/.test(rep), rep);
+  check('report: earlier rules neither tested nor skipped', !/BRDP-EXT-02218/.test(rep) && /\| saltada \| 0 \|/.test(rep), rep);
+  check('report: how to go on, with --from at the first rule not tested', rep.includes('Cómo relanzar: `node scripts/run-project-rule-tests.mjs --project "8x8 MALE" --from BRDP-EXT-02269 --limit 50`'), rep);
+  const repNoFrom = buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [{ started_at: 'a', user: 'u', options: {} }], entries: [], pending: ['BRDP-EXT-00002'] }, { lang: 'en' });
+  check('report without --from: no totals row, relaunch without --from', !/left out by --from/.test(repNoFrom) && repNoFrom.includes('How to go on: `node scripts/run-project-rule-tests.mjs --project "P"`'), repNoFrom);
+  check('report EN totals row', /\| left out by --from \| 2218 \|/.test(buildReport({ project: { name: 'P', standard: 's', format: 'f' }, runs: [{ started_at: 'a', user: 'u', options: fromOpts }], entries: [] }, { lang: 'en' })));
+  eq('relaunch: --from given as a position, finished → the same position kept as its rule', relaunchCommand('P', { from: { value: 5, identifier: 'BRDP-EXT-00005' } }, []), 'node scripts/run-project-rule-tests.mjs --project "P" --from BRDP-EXT-00005');
 }
 
 console.log(`${checks - failures}/${checks} checks passed`);

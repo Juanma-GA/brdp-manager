@@ -11,6 +11,10 @@
 //   --all                     test every rule, also the ones whose last test
 //                             passed on the same saved rule (skipped by default)
 //   --only EXT-00041,EXT-00107  only these identifiers (BRDP- prefix optional)
+//   --from BRDP-EXT-02219     start at that rule (the order of the [n/N] counter);
+//   --from 2219               a bare number is a position: the 2219th rule. The
+//                             rules before it are neither tested nor touched.
+//                             Not together with --only
 //   --limit N                 stop after testing N rules (skipped ones do not count)
 //   --parallel 2              two rules at a time (1 by default, 2 at most)
 //   --lang en                 the report and the reasons in English (Spanish by default)
@@ -92,6 +96,9 @@ import {
   errorGoesToDraft,
   errorKind,
   findProject,
+  fromStartLine,
+  relaunchCommand,
+  resolveFrom,
   loadResults,
   parseArgs,
   planRules,
@@ -144,7 +151,7 @@ process.on('uncaughtException', onUncaught);
 process.on('unhandledRejection', onUncaught);
 
 const opts = parseArgs(process.argv.slice(2));
-if (opts.error) fail(`${opts.error}\nUsage: node scripts/run-project-rule-tests.mjs --project "<exact name>" [--all] [--only ID,ID] [--limit N] [--parallel 2] [--lang en] [--no-retry]`);
+if (opts.error) fail(`${opts.error}\nUsage: node scripts/run-project-rule-tests.mjs --project "<exact name>" [--all] [--only ID,ID | --from ID|N] [--limit N] [--parallel 2] [--lang en] [--no-retry]`);
 const t = i18n.getFixedT(opts.lang);
 const tEn = i18n.getFixedT('en');
 
@@ -198,8 +205,23 @@ const vocabulary = loadVocabulary(project.standard);
 const brdps = await get(`/api/projects/${project.id}/brdps`);
 const approvals = await get(`/api/projects/${project.id}/approvals/${enc(format)}/export`);
 const graph = await get(`/api/schema-cards/graph?standard=${enc(project.standard)}`);
-const { queue, withoutRule, unmatchedOnly } = planRules(brdps, approvals, { only: opts.only });
+const plan = planRules(brdps, approvals, { only: opts.only });
+const { withoutRule, unmatchedOnly } = plan;
 if (unmatchedOnly.length) console.log(`WARNING: --only ${unmatchedOnly.join(',')}: no BRDP with a saved rule has that identifier.`);
+// --from: the rules before it are left out of this pass altogether (not
+// tested, not skipped, not in the report's lists); the counter keeps the
+// positions of the whole list.
+let fromStart = null;
+if (opts.from) {
+  fromStart = resolveFrom(plan.queue, opts.from, { lang: opts.lang, allIdentifiers: brdps.map((b) => b.identifier) });
+  if (fromStart.error) {
+    const list = fromStart.similar.length ? `\n${opts.lang === 'es' ? 'Parecidos' : 'Similar'}:\n${fromStart.similar.map((id) => `  - ${id}`).join('\n')}` : '';
+    fail(`${fromStart.error}${list}`);
+  }
+}
+const offset = fromStart ? fromStart.start : 0;
+const queue = plan.queue.slice(offset);
+const totalRules = plan.queue.length;
 
 // ── The run folder (the same project on the same day goes on in it) ─────
 const dir = runDir(RUNS_DIR, project.name);
@@ -223,7 +245,15 @@ const run = {
   finished_at: null,
   user: me.email,
   provider: `${aiProvider.provider} / ${aiProvider.model}`,
-  options: { all: opts.all, only: opts.only, limit: opts.limit, parallel: opts.parallel, no_retry: opts.noRetry },
+  options: {
+    all: opts.all,
+    only: opts.only,
+    limit: opts.limit,
+    parallel: opts.parallel,
+    no_retry: opts.noRetry,
+    lang: opts.lang,
+    ...(fromStart ? { from: { value: opts.from.position ?? opts.from.identifier, identifier: fromStart.identifier, position: fromStart.position, omitted: fromStart.omitted, total: fromStart.total } } : {}),
+  },
   stopped: null,
 };
 results.runs.push(run);
@@ -251,6 +281,7 @@ function save() {
 }
 
 console.log(`Project: ${project.name} (${project.standard}, ${format}) -- user ${me.email}, AI ${run.provider}`);
+if (fromStart) console.log(fromStartLine(fromStart, opts.lang));
 console.log(`${queue.length} rule(s) to go through${opts.all ? '' : ' (the ones whose last test passed on the same rule are skipped)'}; ${withoutRule} BRDP(s) without a saved rule.`);
 console.log(`Report: ${reportFile}`);
 save();
@@ -478,7 +509,7 @@ async function worker() {
   while (!stopping) {
     if (opts.limit && tested >= opts.limit) return;
     if (next >= queue.length) return;
-    const index = next + 1;
+    const index = offset + next + 1;
     const item = queue[next];
     next += 1;
     try {
@@ -501,7 +532,7 @@ async function worker() {
       results.entries.push(entry);
       // Every tested rule; skipped ones only now and then (createSaveSchedule).
       if (saveSchedule.after(entry, { isLast: next >= queue.length })) save();
-      console.log(progressLine(index, queue.length, entry, opts.lang));
+      console.log(progressLine(index, totalRules, entry, opts.lang));
     } catch (err) {
       stopUnexpected(err, item.brdp.identifier);
       return;
@@ -540,12 +571,12 @@ function finish() {
   if (unexpected) {
     console.log(
       `\nSTOPPED by an unexpected error at ${unexpected}\n${remaining.length} rule(s) not tested. What is done is recorded in the app${saved ? ' and in the report' : ''}. ` +
-        'To go on, run the same command again: the rules whose last test passed are skipped.'
+        `To go on: ${relaunchCommand(project.name, run.options, remaining)}\n(the rules whose last test passed are skipped).`
     );
   } else if (stopping && stopping !== 'Ctrl+C') {
     console.log(
       `\nSTOPPED: ${stopping}\n${remaining.length} rule(s) not tested. What is done is recorded in the app and in the report. ` +
-        'To go on, run the same command again when the limit allows it: the rules whose last test passed are skipped.'
+        `To go on when the limit allows it: ${relaunchCommand(project.name, run.options, remaining)}\n(the rules whose last test passed are skipped).`
     );
   }
   if (!saved) {

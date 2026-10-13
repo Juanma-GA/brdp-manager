@@ -335,7 +335,7 @@ async function main() {
     await restartBackend({ LLM_CALLS_PER_DAY: String(counted + 4) });
     token = await login();
     r = await runScript(['--project', projectName, '--only', 'RB-01,RB-02,RB-03,RB-04']);
-    assert(r.code === 3 && /STOPPED/.test(r.out) && /not tested/.test(r.out) && /run the same command again/.test(r.out), 'daily limit: stops cleanly, says how many remain and how to go on', r.out);
+    assert(r.code === 3 && /STOPPED/.test(r.out) && /not tested/.test(r.out) && /To go on when the limit allows it: node scripts\/run-project-rule-tests\.mjs --project /.test(r.out), 'daily limit: stops cleanly, says how many remain and how to go on', r.out);
     assert((await approval('BRDP-RB-01')).last_test_result === 'passed', 'daily limit: what was done stays recorded (01 passed)');
     const stoppedJson = JSON.parse(fs.readFileSync(path.join(reportDir, 'resultados.json'), 'utf8'));
     assert(stoppedJson.pending.length >= 2 && stoppedJson.runs.at(-1).stopped, 'daily limit: report lists the rules not tested and the stop', JSON.stringify(stoppedJson.pending));
@@ -428,6 +428,40 @@ async function main() {
     assert(afterCtrlC.runs.at(-1).stopped === 'Ctrl+C' && afterCtrlC.pending.length > 0, 'Ctrl+C: the report keeps what is done and lists the rest');
     r = await runScript(['--project', projectName, '--only', 'RB-04']);
     assert(/BRDP-RB-04 PASA/.test(r.out), 'rule edited after it passed: tested again, not skipped', r.out);
+
+    // ── --from: start midway; the rules before it are not touched ──
+    // Order of the queue: RB-01…07, 09…15 (RB-08 has no rule): RB-12 is 11 of 14.
+    const beforeFrom = {};
+    for (const id of ['BRDP-RB-01', 'BRDP-RB-06', 'BRDP-RB-09', 'BRDP-RB-11']) beforeFrom[id] = await approval(id);
+    const runsBeforeFrom = JSON.parse(fs.readFileSync(path.join(reportDir, 'resultados.json'), 'utf8')).runs.length;
+    r = await runScript(['--project', projectName, '--from', 'BRDP-RB-12', '--all', '--limit', '2']);
+    assert(r.code === 0 && /Empezando en BRDP-RB-12 \(posición 11 de 14\); se omiten las 10 anteriores\./.test(r.out), '--from: start line', r.out);
+    assert(/\[11\/14\] BRDP-RB-12 /.test(r.out) && /\[12\/14\] BRDP-RB-13 /.test(r.out) && !/BRDP-RB-(0\d|1[01]|14|15) /.test(r.out.split('Empezando')[1] || ''), '--from + --limit 2: RB-12 and RB-13 only, counter with the whole list', r.out);
+    let untouched = true;
+    for (const [id, a] of Object.entries(beforeFrom)) {
+      const now = await approval(id);
+      if (now.status !== a.status || now.last_test_at !== a.last_test_at || now.rule_xml !== a.rule_xml) untouched = false;
+    }
+    assert(untouched, '--from: the rules before it are not tested nor touched');
+    const fromJson = JSON.parse(fs.readFileSync(path.join(reportDir, 'resultados.json'), 'utf8'));
+    const fromRun = fromJson.runs.at(-1);
+    assert(fromJson.runs.length === runsBeforeFrom + 1 && fromRun.options.from?.omitted === 10 && fromJson.entries.filter((e) => e.run === fromRun.started_at).map((e) => e.identifier).join(',') === 'BRDP-RB-12,BRDP-RB-13', '--from: appended to the folder; only RB-12, RB-13 in this pass', JSON.stringify(fromRun.options));
+    const fromReport = fs.readFileSync(path.join(reportDir, 'informe.md'), 'utf8');
+    assert(/\| omitidas por --from \| 10 \| — \|/.test(fromReport) && /--from BRDP-RB-12/.test(fromReport) && /Cómo relanzar: `node scripts\/run-project-rule-tests\.mjs --project "[^"]+" --all --from BRDP-RB-14 --limit 2`/.test(fromReport), 'report: «omitidas por --from: 10», the option, and how to go on from RB-14', fromReport);
+    r = await runScript(['--project', projectName, '--from', '14', '--lang', 'en']);
+    assert(r.code === 0 && /Starting at BRDP-RB-15 \(position 14 of 14\); the 13 before it are left out\./.test(r.out) && /\[14\/14\] BRDP-RB-15 /.test(r.out), '--from 14 (last position): only RB-15, EN line', r.out);
+    for (const [args, re, what] of [
+      [['--from', 'BRDP-RB-99'], /--from BRDP-RB-99: ninguna regla guardada.*\n.*Parecidos:\n( {2}- BRDP-RB-\d+\n?)+/s, 'unknown identifier: similar ones listed'],
+      [['--from', 'BRDP-RB-08'], /BRDP-RB-08 no tiene regla guardada/, 'identifier without a saved rule'],
+      [['--from', '15'], /--from 15: posición fuera de rango; el proyecto tiene 14 regla\(s\) guardada\(s\) \(1–14\)/, 'position greater than N'],
+      [['--from', '0'], /--from 0/, 'position 0'],
+      [['--from', 'BRDP-RB-12', '--only', 'RB-01'], /--from y --only no se pueden usar juntas/, '--from with --only'],
+    ]) {
+      const runs = JSON.parse(fs.readFileSync(path.join(reportDir, 'resultados.json'), 'utf8')).runs.length;
+      r = await runScript(['--project', projectName, ...args]);
+      const after = JSON.parse(fs.readFileSync(path.join(reportDir, 'resultados.json'), 'utf8')).runs.length;
+      assert(r.code === 2 && re.test(r.out) && !/\[\d+\/\d+\]/.test(r.out) && after === runs, `--from error, exit 2, nothing tested: ${what}`, r.out);
+    }
 
     // ── The report cannot be saved (a directory in its place stands for a
     // file Windows keeps locked): the pass goes on, says so, exits 3; a .tmp

@@ -10,9 +10,11 @@ import { isKnownReason } from '../../src/utils/ruleLint.js';
 export const MAX_PARALLEL = 2;
 
 // ── Options ──────────────────────────────────────────────────────────────
-// → { project, all, only, limit, parallel, lang, noRetry } or { error }
+// → { project, all, only, limit, parallel, lang, noRetry, from } or { error }
+// from: null, { position: n } (a bare number: the n of the [n/N] counter) or
+// { identifier } (anything else; "BRDP-" optional, as in --only).
 export function parseArgs(argv) {
-  const opts = { project: null, all: false, only: [], limit: null, parallel: 1, lang: 'es', noRetry: false };
+  const opts = { project: null, all: false, only: [], limit: null, parallel: 1, lang: 'es', noRetry: false, from: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const value = () => {
@@ -30,7 +32,14 @@ export function parseArgs(argv) {
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean);
-      else if (arg === '--limit') {
+      else if (arg === '--from') {
+        const v = value().trim();
+        if (/^\d+$/.test(v)) {
+          const n = Number(v);
+          if (n < 1) return { error: '--from 0: positions start at 1 (the n of [n/N])' };
+          opts.from = { position: n };
+        } else opts.from = { identifier: v };
+      } else if (arg === '--limit') {
         const n = Number(value());
         if (!Number.isInteger(n) || n < 1) return { error: '--limit must be a whole number of 1 or more' };
         opts.limit = n;
@@ -47,6 +56,7 @@ export function parseArgs(argv) {
       return { error: err.message };
     }
   }
+  if (opts.from && opts.only.length) return { error: opts.lang === 'es' ? '--from y --only no se pueden usar juntas' : '--from and --only cannot be used together' };
   if (!opts.project) return { error: '--project "<exact project name>" is required' };
   return opts;
 }
@@ -114,6 +124,104 @@ export function planRules(brdps, approvals, { only = [] } = {}) {
   queue.sort((x, y) => compareIdentifiers(x.brdp.identifier, y.brdp.identifier));
   const unmatchedOnly = (only || []).filter((t) => !queue.some((q) => matchesOnly(q.brdp.identifier, [t])));
   return { queue, withoutRule, unmatchedOnly };
+}
+
+// --from: where in the queue (planRules' order, the one of the [n/N]
+// counter) the pass starts. The rules before it are neither tested nor
+// touched. allIdentifiers: every active BRDP of the project, to tell an
+// identifier without a saved rule from one that does not exist.
+//   → { start, identifier, position, omitted, total }
+//   | { error, similar: [identifiers] }
+export function resolveFrom(queue, from, { lang = 'es', allIdentifiers = [] } = {}) {
+  const es = lang === 'es';
+  const total = queue.length;
+  if (from.position != null) {
+    if (from.position < 1 || from.position > total)
+      return {
+        error: es
+          ? `--from ${from.position}: posición fuera de rango; el proyecto tiene ${total} regla(s) guardada(s) (1–${total}). No se ha probado nada.`
+          : `--from ${from.position}: position out of range; the project has ${total} saved rule(s) (1–${total}). Nothing was tested.`,
+        similar: [],
+      };
+    const start = from.position - 1;
+    return { start, identifier: queue[start].brdp.identifier, position: from.position, omitted: start, total };
+  }
+  const token = String(from.identifier).trim();
+  const tok = token.toUpperCase();
+  const matches = queue.map((q, i) => ({ id: q.brdp.identifier, i })).filter(({ id }) => (/^BRDP-/.test(tok) ? String(id).toUpperCase() === tok : matchesOnly(id, [tok])));
+  if (matches.length === 1) {
+    const { i, id } = matches[0];
+    return { start: i, identifier: id, position: i + 1, omitted: i, total };
+  }
+  if (matches.length > 1)
+    return {
+      error: es ? `--from ${token}: coincide con varias reglas; escribe el identificador completo. No se ha probado nada.` : `--from ${token}: matches several rules; write the full identifier. Nothing was tested.`,
+      similar: matches.map((m) => m.id),
+    };
+  const withoutRule = (allIdentifiers || []).find((id) => (/^BRDP-/.test(tok) ? String(id).toUpperCase() === tok : matchesOnly(id, [tok])));
+  if (withoutRule)
+    return {
+      error: es ? `--from ${token}: ${withoutRule} no tiene regla guardada, así que no está en la lista. No se ha probado nada.` : `--from ${token}: ${withoutRule} has no saved rule, so it is not in the list. Nothing was tested.`,
+      similar: similarIdentifiers(queue.map((q) => q.brdp.identifier), token),
+    };
+  return {
+    error: es ? `--from ${token}: ninguna regla guardada del proyecto tiene ese identificador. No se ha probado nada.` : `--from ${token}: no saved rule of the project has that identifier. Nothing was tested.`,
+    similar: similarIdentifiers(queue.map((q) => q.brdp.identifier), token),
+  };
+}
+
+// The identifiers that look like a mistyped one: the ones that contain it,
+// the same number with another prefix, and the closest numbers with the
+// same prefix (a typo in the number). At most 8, in the queue's order.
+export function similarIdentifiers(identifiers, token, max = 8) {
+  const core = String(token).toUpperCase().replace(/^BRDP-/, '');
+  const m = core.match(/^(.*?)(\d+)$/);
+  const found = new Set();
+  for (const id of identifiers) if (core && String(id).toUpperCase().includes(core)) found.add(id);
+  if (m) {
+    const [, prefix, digits] = m;
+    const n = Number(digits);
+    const parse = (id) => String(id).toUpperCase().replace(/^BRDP-/, '').match(/^(.*?)(\d+)$/);
+    for (const id of identifiers) {
+      const p = parse(id);
+      if (p && Number(p[2]) === n) found.add(id);
+    }
+    const samePrefix = identifiers
+      .map((id) => ({ id, p: parse(id) }))
+      .filter(({ p }) => p && p[1] === prefix)
+      .sort((a, b) => Math.abs(Number(a.p[2]) - n) - Math.abs(Number(b.p[2]) - n) || compareIdentifiers(a.id, b.id));
+    for (const { id } of samePrefix) {
+      if (found.size >= max) break;
+      found.add(id);
+    }
+  }
+  return [...found].sort(compareIdentifiers).slice(0, max);
+}
+
+// The line said when the pass starts with --from.
+export function fromStartLine(resolved, lang = 'es') {
+  const { identifier, position, total, omitted } = resolved;
+  if (lang === 'es') {
+    const skip = omitted === 0 ? 'no se omite ninguna' : omitted === 1 ? 'se omite la anterior' : `se omiten las ${omitted} anteriores`;
+    return `Empezando en ${identifier} (posición ${position} de ${total}); ${skip}.`;
+  }
+  const skip = omitted === 0 ? 'none is left out' : omitted === 1 ? 'the one before it is left out' : `the ${omitted} before it are left out`;
+  return `Starting at ${identifier} (position ${position} of ${total}); ${skip}.`;
+}
+
+// The command to go on after a pass that stopped: the same options; with
+// --from, from the first rule not tested (the earlier ones of this pass are
+// done, and the ones before --from are still left out).
+export function relaunchCommand(projectName, options = {}, pending = []) {
+  const parts = ['node scripts/run-project-rule-tests.mjs', `--project "${String(projectName).replace(/"/g, '\\"')}"`];
+  if (options.all) parts.push('--all');
+  if (options.only?.length) parts.push(`--only ${options.only.join(',')}`);
+  if (options.from) parts.push(`--from ${pending[0] || options.from.identifier}`);
+  if (options.limit) parts.push(`--limit ${options.limit}`);
+  if (options.parallel > 1) parts.push(`--parallel ${options.parallel}`);
+  if (options.lang && options.lang !== 'es') parts.push(`--lang ${options.lang}`);
+  if (options.no_retry) parts.push('--no-retry');
+  return parts.join(' ');
 }
 
 // Skipped by default: the last recorded test passed, on the SAME saved rule
@@ -465,7 +573,7 @@ export function buildReport(results, { lang = 'es' } = {}) {
   out.push('');
   out.push(`- ${es ? 'Proyecto' : 'Project'}: ${p.name} (${p.standard}, ${p.format})`);
   for (const run of results.runs || []) {
-    const opts = [run.options?.all ? '--all' : null, run.options?.only?.length ? `--only ${run.options.only.join(',')}` : null, run.options?.limit ? `--limit ${run.options.limit}` : null, run.options?.parallel > 1 ? `--parallel ${run.options.parallel}` : null, run.options?.no_retry ? '--no-retry' : null]
+    const opts = [run.options?.all ? '--all' : null, run.options?.only?.length ? `--only ${run.options.only.join(',')}` : null, run.options?.from ? `--from ${run.options.from.value ?? run.options.from.identifier}` : null, run.options?.limit ? `--limit ${run.options.limit}` : null, run.options?.parallel > 1 ? `--parallel ${run.options.parallel}` : null, run.options?.no_retry ? '--no-retry' : null]
       .filter(Boolean)
       .join(' ');
     const end = run.finished_at ? run.finished_at : es ? 'sin terminar' : 'not finished';
@@ -486,6 +594,9 @@ export function buildReport(results, { lang = 'es' } = {}) {
     if (knownCount) out.push(`| ${es ? '  de ellas, sin XPath que probar (siguen como estaban)' : '  of which, no XPath to test (left as they were)'} | ${knownCount} | 0 |`);
   }
   out.push(`| ${es ? 'total pasadas a Draft' : 'total moved to Draft'} | | ${movedToDraft} |`);
+  // --from: the rules before it were neither tested nor skipped in the last pass.
+  const lastRun = (results.runs || [])[(results.runs || []).length - 1];
+  if (lastRun?.options?.from) out.push(`| ${es ? 'omitidas por --from' : 'left out by --from'} | ${lastRun.options.from.omitted ?? 0} | — |`);
   out.push('');
   const repeated = latest.filter((e) => e.attempts?.length > 1);
   if (repeated.length) {
@@ -571,6 +682,11 @@ export function buildReport(results, { lang = 'es' } = {}) {
     out.push('');
     out.push(pending.join(', '));
     out.push('');
+    const last = (results.runs || [])[(results.runs || []).length - 1];
+    if (last) {
+      out.push(`${es ? 'Cómo relanzar' : 'How to go on'}: \`${relaunchCommand(results.project.name, last.options, pending)}\``);
+      out.push('');
+    }
   }
   return out.join('\n');
 }
