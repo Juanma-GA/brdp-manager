@@ -17,7 +17,7 @@ import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleT
 import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } from '../prompts/ruleProposalCheckPrompt.js';
 import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
-import { analyzeRule, describeRule, parseXmlDocument, ruleConditions, rulePathParts, rootDocumentPath, rootSelfPath } from './ruleTestEngine.js';
+import { analyzeRule, describeRule, parseXmlDocument, proposalVsRuleLists, ruleConditions, rulePathParts, rootDocumentPath, rootSelfPath } from './ruleTestEngine.js';
 import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions } from './ruleTestDossier.js';
 import { minimalDocument, minimalDocumentRuns } from './ruleMinimalDocuments.js';
 import { nodePath, stripLiterals, withoutPredicates } from './ruleTestCommon.js';
@@ -1184,8 +1184,16 @@ export function ruleRequiredAttributes(ruleXml, { graph = null, structures = [] 
 //     not answer valid JSON: never read as "implements" (the verdict says
 //     the Proposal could not be checked).
 // Never throws.
-export async function checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask, requiredAttributes = [] }) {
-  const systemPrompt = buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes });
+// `vocabulary` (optional): the standard's element names, for the PROPOSAL vs
+// RULE lists (El juez de la Propuesta, Part 2).
+export async function checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask, requiredAttributes = [], vocabulary = null, parseXml = parseXmlDocument }) {
+  let proposalVsRule;
+  try {
+    proposalVsRule = vocabulary ? proposalVsRuleLists(ruleXml, format, brdp?.proposal, vocabulary, { parseXml }) : null;
+  } catch {
+    proposalVsRule = null;
+  }
+  const systemPrompt = buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes, proposalVsRule });
   try {
     const answer = await ask([{ role: 'user', content: RULE_PROPOSAL_CHECK_USER_MESSAGE }], systemPrompt);
     const parsed = parseRuleProposalCheckResponse(answer);
@@ -1294,7 +1302,7 @@ export async function generateRuleTestExamples({
       // Proposal check (a root rule without context keeps it).
       const checkable = !contextRoot && !rootTest.coverage && askProposalCheck && ruleDescription != null;
       if (checkable) onStep({ step: 'proposal' });
-      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph }) }) : null;
+      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, vocabulary, parseXml, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph }) }) : null;
       if (!isCurrent()) return null;
       return {
         ...rootTest,
@@ -1313,7 +1321,7 @@ export async function generateRuleTestExamples({
     if (presenceTest) {
       const checkable = !presenceTest.coverage && askProposalCheck && ruleDescription != null;
       if (checkable) onStep({ step: 'proposal' });
-      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph }) }) : null;
+      const proposalCheck = checkable ? await checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, vocabulary, parseXml, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph }) }) : null;
       if (!isCurrent()) return null;
       return {
         ...presenceTest,
@@ -1362,7 +1370,7 @@ export async function generateRuleTestExamples({
     let checkSettled = false;
     const checkPromise = (
       askProposalCheck && ruleDescription != null && !coverage
-        ? checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph, structures: Object.values(prepared.setup.placements || {}).map((pl) => pl.structure) }) })
+        ? checkRuleImplementsProposal({ brdp, standard, format, ruleXml, ruleDescription, ask: askProposalCheck, vocabulary, parseXml, requiredAttributes: ruleRequiredAttributes(ruleXml, { graph, structures: Object.values(prepared.setup.placements || {}).map((pl) => pl.structure) }) })
         : Promise.resolve(null)
     ).finally(() => {
       checkSettled = true;

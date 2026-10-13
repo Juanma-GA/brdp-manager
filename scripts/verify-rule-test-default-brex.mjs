@@ -69,6 +69,7 @@ async function main() {
   // (<pmCode>PM-001</pmCode>, frontMatterType="general"); the identifier is
   // the simulator's marker.
   await makeBrdp({ identifier: "BRDP-EVAL-RT-PMCODE", title: "Attributes of references in front matter", definition: "Decide on the attributes of references to publication modules in a front matter data module.", proposal: "Attributes @id, @authorityName and @authorityDocument must not be used for references to publication modules in a front matter data module." }, rule(127));
+  await makeBrdp({ identifier: "BRDP-EXT-00019", title: "Elements of the zone CIR in a data update file", definition: "Decide which elements can be used in the data update file representing the zone CIR.", proposal: "Only zoneSpec, zoneIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the zone CIR." }, rule(19));
   await makeBrdp({ identifier: "BRDP-EXT-00152", title: "Information code of a BREX", definition: "Decide on the information code of a BREX data module.", proposal: "A BREX data module has information code 022 and item location code D." }, rule(152));
   const job = await api(`/api/projects/${project.id}/embeddings/compute`, { method: "POST" }).then((r) => r.json());
   for (let i = 0; i < 80; i++) {
@@ -206,6 +207,38 @@ async function main() {
     assert((await notes(1, "rule-test-values-replaced")).includes('@frontMatterType="tableOfContents" por "fm01"'), "EXT-00127 ES: nota de valores");
     assert((await notes(0, "rule-test-text-removed")).includes("se quitó el texto de <pmCode>"), "EXT-00127 ES: nota de texto");
     await page.screenshot({ path: shot("rule-test-app-fixes-pmcode-es.png"), fullPage: true });
+    await language("en");
+
+    // 7. El juez de la Propuesta y las listas cerradas: EXT-00019 (zone
+    // CIR). The description says the element list (8 shown, "+18 more"),
+    // the Proposal check gets the computed PROPOSAL vs RULE lists and is
+    // never "no" (the real run read the forbidden list as the allowed one).
+    await openTest("BRDP-EXT-00019");
+    const line = page.getByTestId("rule-test-ancestor-list");
+    await line.waitFor({ timeout: 20000 });
+    const cut = (await line.textContent()) || "";
+    assert(cut.startsWith('In a <dataUpdateFile> whose <updateCode> has @infoCode "00H", none of these may appear inside <update>: <partSpec>,') && cut.includes(", … (26)") && cut.includes("+18 more"), `EXT-00019: description cut to 8 (${cut})`);
+    await page.getByTestId("rule-test-ancestor-list-more").click();
+    const whole = (await line.textContent()) || "";
+    assert(whole.includes("<cautionIdent> (26)") && !whole.includes("…") && whole.includes("Show less"), `EXT-00019: whole list on "+18 more" (${whole})`);
+    await page.screenshot({ path: shot("rule-test-zone-cir-list-en.png"), fullPage: true });
+    await verdict().waitFor({ timeout: 30000 });
+    let check19 = null;
+    const systemOf = (req) => (req?.messages || []).find((m) => m.role === "system")?.content || "";
+    for (let i = 0; i < 40 && !systemOf(check19); i++) {
+      check19 = await fetch(`${MOCK}/last-proposal-check`).then((r) => r.json()).catch(() => null);
+      if (!systemOf(check19)) await page.waitForTimeout(250);
+    }
+    const sp19 = systemOf(check19);
+    assert(sp19.includes("- named in the Proposal and NOT forbidden by the rule: <zoneSpec>, <zoneIdent>, <figure>,") && sp19.includes("- named in the Proposal and forbidden by the rule: (none)") && sp19.includes("- forbidden by the rule and not named in the Proposal: 26 elements"), "EXT-00019: PROPOSAL vs RULE block in the Proposal check");
+    assert(((await verdict().textContent()) || "").startsWith("Correct"), `EXT-00019: verdict correct, never "Review" (${await verdict().textContent()})`);
+    await language("es");
+    await page.waitForTimeout(400);
+    const es = (await line.textContent()) || "";
+    assert(es.startsWith('En un <dataUpdateFile> cuyo <updateCode> tiene @infoCode "00H", no puede aparecer dentro de <update> ninguno de estos:') && es.includes("Mostrar menos"), `EXT-00019 ES: descripción (${es})`);
+    await page.getByTestId("rule-test-ancestor-list-more").click();
+    assert(((await line.textContent()) || "").includes("+18 más"), "EXT-00019 ES: +18 más");
+    await page.screenshot({ path: shot("rule-test-zone-cir-list-es.png"), fullPage: true });
     await language("en");
   } finally {
     await browser.close();

@@ -499,6 +499,15 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // these may appear inside <update>: … (26)") instead of the literal
 // condition. Only ruleProposalCheck/brex-4-2-default-closed-list-tool-cir
 // changes (its rule is BRDP-EXT-00014).
+//
+// Part 2: the Proposal check gains "PROPOSAL vs RULE (computed by the
+// application, do not recompute)" when the rule forbids a list of elements
+// AND the Proposal names elements (the app computes it with the standard's
+// vocabulary). No existing case passes the lists, so none changes (the
+// closed-list-tool-cir case keeps its old pairing, without the block); new
+// cases ruleProposalCheck/brex-4-2-default-zone-cir-proposal-vs-rule
+// (BRDP-EXT-00019) and brex-4-2-default-zone-cir-wrong-control (<zoneSpec>
+// in the forbidden list).
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

@@ -10,12 +10,12 @@
 import fs from 'node:fs';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../src/i18n/index.js';
-import { danglingReferenceProblems, exampleFailures, generateRuleTestExamples, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
+import { checkRuleImplementsProposal, danglingReferenceProblems, exampleFailures, generateRuleTestExamples, prepareRuleTestSetup } from '../src/utils/ruleTestRun.js';
 import { ruleTestVerdict } from '../src/utils/ruleTest.js';
 import { generationOutcome } from '../src/utils/ruleTestOutcome.js';
 import { formatRuleStatement, formatRuleTestReason, ruleDescriptionText, verdictToTestRecord } from '../src/utils/ruleTestReasons.js';
 import { informativeRule, lintRuleFindings } from '../src/utils/ruleLint.js';
-import { describeRule, ruleElementLists } from '../src/utils/ruleTestEngine.js';
+import { describeRule, proposalElementNames, proposalVsRuleLists, ruleElementLists } from '../src/utils/ruleTestEngine.js';
 import { predicateRequirements } from '../src/validation/rulePathCheck.js';
 import { formatCoverageItem, schemaCoverage } from '../src/validation/schemaCoverage.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
@@ -172,6 +172,51 @@ for (const n of [...INFORMATIVE, ...MUST_NOT]) {
   check('JL1 ruleElementLists EXT-00019', JSON.stringify(ruleElementLists(rule(19), F, { parseXml }).forbidden) === JSON.stringify(s19.statement.params.forbidden.map((x) => x.slice(1, -1))));
   check('JL1 ruleElementLists not(self::)', JSON.stringify(ruleElementLists(wrap('//avee/*[not(self::modelic or self::sdc)]'), 'BREX-4.2', { parseXml })) === JSON.stringify({ forbidden: [], allowedOnly: ['modelic', 'sdc'] }));
   check('JL1 ruleElementLists no list', JSON.stringify(ruleElementLists(wrap('//emphasis'), F, { parseXml })) === JSON.stringify({ forbidden: [], allowedOnly: [] }));
+}
+
+// ─── El juez de la Propuesta, Part 2: PROPOSAL vs RULE ─────────────────────
+{
+  const objectUse = (xml) => /<objectUse>([^<]*)</.exec(xml)[1];
+  const CIR_OWN = { 14: ['functionalPhysicalAreaSpec', 'functionalPhysicalAreaIdent'], 17: ['circuitBreakerSpec', 'circuitBreakerIdent'], 19: ['zoneSpec', 'zoneIdent'], 20: ['accessPointSpec', 'accessPointIdent'], 22: ['supplySpec', 'supplyIdent'], 23: ['supplyRqmtSpec', 'supplyRqmtIdent'], 25: ['controlIndicatorSpec', 'controlIndicatorIdent'] };
+  for (const [n, own] of Object.entries(CIR_OWN)) {
+    const lists = proposalVsRuleLists(rule(Number(n)), F, objectUse(rule(Number(n))), vocabulary, { parseXml });
+    check(`JL2 EXT-000${n}: 10 allowed, none forbidden, 26 others`, lists?.notForbidden.length === 10 && own.every((x) => lists.notForbidden.includes(x))
+      && lists.forbidden.length === 0 && lists.othersForbidden === 26 && !lists.notForbidden.includes('update'), JSON.stringify(lists));
+  }
+  const p19 = objectUse(rule(19));
+  check('JL2 Proposal names: loose list words count, "Data update file" does not', JSON.stringify(proposalElementNames(p19, vocabulary)) === JSON.stringify(['zoneSpec', 'zoneIdent', 'figure', 'figureIdent', 'multimedia', 'multimediaIdent', 'applicIdent', 'applicRefIdent', 'applic', 'applicRef']), JSON.stringify(proposalElementNames(p19, vocabulary)));
+  check('JL2 marked names count, @attr never', JSON.stringify(proposalElementNames('Use <figure> and never @id or the title', vocabulary)) === JSON.stringify(['figure']));
+  const desc19 = ruleDescriptionText(describeRule(rule(19), F, { parseXml }), en);
+  const withBlock = (xml, proposal) => {
+    const lists = proposalVsRuleLists(xml, F, proposal, vocabulary, { parseXml });
+    return buildRuleProposalCheckPrompt({ brdp: brdp('BRDP-EXT-00019', proposal), standard: S42, format: F, ruleXml: xml, ruleDescription: desc19, proposalVsRule: lists });
+  };
+  const prompt19 = withBlock(rule(19), p19);
+  check('JL2 EXT-00019 prompt block', prompt19.includes('PROPOSAL vs RULE (computed by the application, do not recompute):\n- named in the Proposal and NOT forbidden by the rule: <zoneSpec>, <zoneIdent>, <figure>, <figureIdent>, <multimedia>, <multimediaIdent>, <applicIdent>, <applicRefIdent>, <applic>, <applicRef>\n- named in the Proposal and forbidden by the rule: (none)\n- forbidden by the rule and not named in the Proposal: 26 elements\nIf no element named as allowed by the Proposal is forbidden by the rule, the rule implements an "only these" decision: answer "yes" (or "partly" if the list looks incomplete), never "no".'), prompt19.slice(prompt19.indexOf('PROPOSAL vs'), prompt19.indexOf('PROPOSAL vs') + 900));
+  // Deliberately wrong control: <zoneSpec> in the forbidden list.
+  const wrong = rule(19).replace('descendant::partSpec or', 'descendant::zoneSpec or descendant::partSpec or');
+  const wrongLists = proposalVsRuleLists(wrong, F, p19, vocabulary, { parseXml });
+  check('JL2 wrong control: zoneSpec forbidden', JSON.stringify(wrongLists.forbidden) === '["zoneSpec"]' && !wrongLists.notForbidden.includes('zoneSpec') && wrongLists.othersForbidden === 26, JSON.stringify(wrongLists));
+  check('JL2 wrong control prompt', withBlock(wrong, p19).includes('- named in the Proposal and forbidden by the rule: <zoneSpec>'));
+  // No element list in the rule, or no names in the Proposal: identical prompt.
+  const wrapR = (path) => `<structureObjectRule id="R1"><objectPath allowedObjectFlag="0">${path}</objectPath><objectUse>u</objectUse></structureObjectRule>`;
+  const emph = wrapR('//emphasis');
+  check('JL2 //emphasis: no lists', proposalVsRuleLists(emph, F, 'Do not use <emphasis> or <figure>.', vocabulary, { parseXml }) === null);
+  const base = buildRuleProposalCheckPrompt({ brdp: brdp('X', 'Do not use <emphasis>.'), standard: S42, format: F, ruleXml: emph, ruleDescription: '- x' });
+  check('JL2 //emphasis prompt identical', withBlock(emph, 'Do not use <emphasis>.').replace('BRDP-EXT-00019', 'X').replace(desc19, '- x') === base);
+  check('JL2 no names in the Proposal: no lists', proposalVsRuleLists(rule(19), F, 'Only the listed CIR items can be used.', vocabulary, { parseXml }) === null);
+  // not(self::…) list: every element outside it is forbidden.
+  const notSelf = wrapR('//avee/*[not(self::modelic or self::sdc)]');
+  const v301 = JSON.parse(fs.readFileSync(new URL('../public/schema-vocabulary-3-0-1.json', import.meta.url)));
+  const notSelfLists = proposalVsRuleLists(notSelf, F, 'Only modelic, sdc and chapnum are allowed.', { elements: new Set(v301.elements) }, { parseXml });
+  check('JL2 not(self::) list', JSON.stringify(notSelfLists) === JSON.stringify({ notForbidden: ['modelic', 'sdc'], forbidden: ['chapnum'], othersForbidden: 0, othersAll: true }), JSON.stringify(notSelfLists));
+  // checkRuleImplementsProposal sends the block when it has the vocabulary.
+  let sent = '';
+  await checkRuleImplementsProposal({ brdp: brdp('BRDP-EXT-00019', p19), standard: S42, format: F, ruleXml: rule(19), ruleDescription: desc19, vocabulary, parseXml, ask: async (_m, sp) => { sent = sp; return '{"implements": "yes", "reason": ""}'; } });
+  check('JL2 checkRuleImplementsProposal sends the block', sent.includes('PROPOSAL vs RULE') && sent === prompt19);
+  let sentNoVocab = '';
+  await checkRuleImplementsProposal({ brdp: brdp('BRDP-EXT-00019', p19), standard: S42, format: F, ruleXml: rule(19), ruleDescription: desc19, parseXml, ask: async (_m, sp) => { sentNoVocab = sp; return '{"implements": "yes"}'; } });
+  check('JL2 without vocabulary: no block', !sentNoVocab.includes('PROPOSAL vs RULE'));
 }
 
 // ─── Part 1.2: closed lists in the Proposal judgement ──────────────────────

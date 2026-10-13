@@ -5158,12 +5158,12 @@
       "id": "rule-test-4-2-default-closed-list-tool-cir",
       "type": "rule-test",
       "standard": "S1000D 4.2",
-      "description": "Default S1000D 4.2 BREX pass, Part 1.2 (BRDP-EXT-00014, BREX-S1-00022): 'Only toolSpec, toolIdent, … can be used in the data update file representing the tool CIR', implemented by forbidding every other CIR element. The real run judged it 'no'. Now the Proposal check is told that forbidding what is not in the list implements 'only these' and that an incomplete forbidden list is 'partly', never 'no'.",
+      "description": "Default S1000D 4.2 BREX pass, Part 1.2 (BRDP-EXT-00014, BREX-S1-00022): 'Only toolSpec, toolIdent, … can be used in the data update file representing the tool CIR', implemented by forbidding every other CIR element. The real run judged it 'no'. Now the Proposal check is told that forbidding what is not in the list implements 'only these' and that an incomplete forbidden list is 'partly', never 'no'. El juez de la Propuesta y las listas cerradas: the Proposal is now EXT-00014's own (functional physical area CIR); the tool CIR text it had before named <toolSpec>/<toolIdent>, which this rule forbids, so with the computed PROPOSAL vs RULE lists the right answer for that pairing is 'no'.",
       "brdp": {
         "identifier": "BRDP-EVAL-RT-DFLT14",
-        "title": "Elements of the tool CIR in a data update file",
-        "definition": "Decide which elements can be used in the data update file representing the tool CIR.",
-        "proposal": "Only toolSpec, toolIdent, toolAlts, reasonForUpdate, procurementData and taskRef elements can be used in the data update file representing the tool CIR.",
+        "title": "Elements of the functional physical area CIR in a data update file",
+        "definition": "Decide which elements can be used in the data update file representing the functional physical area CIR.",
+        "proposal": "Only functionalPhysicalAreaSpec, functionalPhysicalAreaIdent, applicIdent, applicRefIdent, applic, applicRef, figure, figureIdent, multimedia, multimediaIdent elements can be used in the Data update file representing the functional physical area CIR.",
         "validation": "Validated"
       },
       "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00022\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"0A1\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::circuitBreakerSpec or descendant::functionalItemSpec or descendant::accessPointSpec or descendant::enterpriseSpec or descendant::toolSpec or descendant::supplySpec or descendant::controlIndicatorSpec or descendant::supplyRqmtSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::zoneIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::partIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only functionalPhysicalAreaSpec, functionalPhysicalAreaIdent, applicIdent, applicRefIdent, applic, applicRef, figure, figureIdent, multimedia, multimediaIdent elements can be used in the Data update file representing the functional physical area CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
@@ -5181,6 +5181,71 @@
             "partly"
           ],
           "note": "never 'no'"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-default-zone-cir",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "El juez de la Propuesta y las listas cerradas (BRDP-EXT-00019, BREX-S1-00015, zone CIR): the real Proposal check answered 'no', reading the rule's 26 forbidden elements as the allowed ones. Now describeRule says 'none of these may appear inside <update>: … (26)' and the check gets the computed PROPOSAL vs RULE lists (10 named, none forbidden).",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-ZONECIR",
+        "title": "Elements of the zone CIR in a data update file",
+        "definition": "Decide which elements can be used in the data update file representing the zone CIR.",
+        "proposal": "Only zoneSpec, zoneIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the zone CIR.",
+        "validation": "Validated"
+      },
+      "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00015\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00H\" and ancestor::dataUpdateFile[descendant::update[descendant::partSpec or descendant::functionalItemSpec or descendant::circuitBreakerSpec or descendant::accessPointSpec or descendant::toolSpec or descendant::enterpriseSpec or descendant::supplySpec or descendant::supplyRqmtSpec or descendant::functionalPhysicalAreaSpec or descendant::controlIndicatorSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::partIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::functionalPhysicalAreaIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only zoneSpec, zoneIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the zone CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "description",
+          "pattern": "none of these may appear inside <update>: <partSpec>[^\\n]*\\(26\\)",
+          "note": "the element list, said"
+        },
+        {
+          "type": "contains",
+          "target": "proposal_check_prompt",
+          "pattern": "- named in the Proposal and forbidden by the rule: \\(none\\)",
+          "note": "computed block, nothing the Proposal allows is forbidden"
+        },
+        {
+          "type": "rule_proposal_check_level",
+          "expect": [
+            "yes",
+            "partly"
+          ],
+          "note": "never 'no'"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-4-2-default-zone-cir-wrong-control",
+      "type": "rule-test",
+      "standard": "S1000D 4.2",
+      "description": "Wrong control for rule-test-4-2-default-zone-cir: the same zone CIR rule with <zoneSpec> added to the forbidden list. The computed block says <zoneSpec> is named by the Proposal and forbidden by the rule: the answer must be 'no'.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-ZONEBAD",
+        "title": "Elements of the zone CIR in a data update file",
+        "definition": "Decide which elements can be used in the data update file representing the zone CIR.",
+        "proposal": "Only zoneSpec, zoneIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the zone CIR.",
+        "validation": "Validated"
+      },
+      "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/update.xsd\">\n<structureObjectRuleGroup>\n<structureObjectRule reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E EPWG80.05\" changeType=\"modify\">\n\t\t\t\t\t\t<brDecisionRef brDecisionIdentNumber=\"BREX-S1-00015\" reasonForUpdateRefIds=\"CPF2014-009IGBRTT-E\" changeType=\"add\"/>\n\t\t\t\t\t\t<objectPath allowedObjectFlag=\"0\">//updateCode[attribute::infoCode=\"00H\" and ancestor::dataUpdateFile[descendant::update[descendant::zoneSpec or descendant::partSpec or descendant::functionalItemSpec or descendant::circuitBreakerSpec or descendant::accessPointSpec or descendant::toolSpec or descendant::enterpriseSpec or descendant::supplySpec or descendant::supplyRqmtSpec or descendant::functionalPhysicalAreaSpec or descendant::controlIndicatorSpec or descendant::applicSpec or descendant::warningSpec or descendant::cautionSpec or descendant::partIdent or descendant::functionalItemIdent or descendant::circuitBreakerIdent or descendant::accessPointIdent or descendant::toolIdent or descendant::enterpriseIdent or descendant::supplyIdent or descendant::supplyRqmtIdent or descendant::functionalPhysicalAreaIdent or descendant::controlIndicatorIdent or descendant::applicSpecIdent or descendant::warningIdent or descendant::cautionIdent]]]</objectPath>\n\t\t\t\t\t\t<objectUse>Only zoneSpec, zoneIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the zone CIR (Chap 4.13.2.1, Para 2.3.1).</objectUse>\n\t\t\t\t\t</structureObjectRule>\n</structureObjectRuleGroup>\n</contextRules>",
+      "checks": [
+        {
+          "type": "contains",
+          "target": "proposal_check_prompt",
+          "pattern": "- named in the Proposal and forbidden by the rule: <zoneSpec>",
+          "note": "computed block names the contradiction"
+        },
+        {
+          "type": "rule_proposal_check_level",
+          "expect": [
+            "no"
+          ],
+          "note": "the rule forbids <zoneSpec>, which the Proposal allows"
         }
       ]
     },

@@ -55,6 +55,8 @@ try {
   }
   fs.symlinkSync(path.join(ROOT, 'src'), path.join(tmp, 'src'), 'junction');
   fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(tmp, 'node_modules'), 'junction');
+  // The snapshot reads a standard's vocabulary (public/schema-vocabulary-*.json).
+  fs.symlinkSync(path.join(ROOT, 'public'), path.join(tmp, 'public'), 'junction');
 
   const guide = fs.readFileSync(path.join(tmp, 'scripts', 'prompt-eval', 'fixtures', 'text-extract', 'guia-estilo-dita-es.md'), 'utf8');
   check('the copied fixtures really have CRLF', guide.includes('\r\n') && !/[^\r]\n/.test(guide));

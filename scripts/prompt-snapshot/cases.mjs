@@ -33,7 +33,7 @@ import { DOMParser as XmldomParser } from '@xmldom/xmldom';
 import { repeatingComparisons, singleChildPairs, viewFromStructure } from '../../src/validation/ruleRepetition.js';
 import { DOMParser } from '@xmldom/xmldom';
 import i18n from '../../src/i18n/index.js';
-import { describeRule, ruleConditions } from '../../src/utils/ruleTestEngine.js';
+import { describeRule, proposalVsRuleLists, ruleConditions } from '../../src/utils/ruleTestEngine.js';
 import { ruleDescriptionText } from '../../src/utils/ruleTestReasons.js';
 
 const xmldomParse = (text) => new DOMParser().parseFromString(text, 'text/xml');
@@ -1291,6 +1291,30 @@ ruleProposalCheckCases.push({
     },
   ],
 });
+// El juez de la Propuesta y las listas cerradas, Part 2: EXT-00019 (zone
+// CIR) with its real Proposal, and the PROPOSAL vs RULE lists computed as
+// the app does (the S1000D 4.2 vocabulary); then a deliberately wrong
+// control with <zoneSpec> inside the forbidden list.
+const VOCAB_42 = (() => {
+  const json = JSON.parse(readFileSync(new URL('../../public/schema-vocabulary-4-2.json', import.meta.url), 'utf-8'));
+  return { elements: new Set(json.elements), attributes: new Set(json.attributes) };
+})();
+const ZONE_PROPOSAL = 'Only zoneSpec, zoneIdent, figure, figureIdent, multimedia, multimediaIdent, applicIdent, applicRefIdent, applic, applicRef elements can be used in the Data update file representing the zone CIR.';
+const zoneWrong = defaultRule(19).replace('descendant::partSpec or', 'descendant::zoneSpec or descendant::partSpec or');
+const parseForLists = (t) => new XmldomParser().parseFromString(t, 'text/xml');
+for (const [name, ruleXml] of [['brex-4-2-default-zone-cir-proposal-vs-rule', defaultRule(19)], ['brex-4-2-default-zone-cir-wrong-control', zoneWrong]]) {
+  ruleProposalCheckCases.push({
+    name,
+    args: [{
+      brdp: brdpDefault('BRDP-EXT-00019', 'Elements of the zone CIR in a data update file', ZONE_PROPOSAL),
+      standard: 'S1000D 4.2',
+      format: 'BREX-4.2',
+      ruleXml,
+      ruleDescription: describeText(ruleXml, 'BREX-4.2'),
+      proposalVsRule: proposalVsRuleLists(ruleXml, 'BREX-4.2', ZONE_PROPOSAL, VOCAB_42, { parseXml: parseForLists }),
+    }],
+  });
+}
 ruleTestExamplesCases.push(
   {
     name: 'brex-4-2-default-reference-supplydescr',

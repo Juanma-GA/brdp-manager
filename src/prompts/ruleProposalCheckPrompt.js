@@ -44,7 +44,25 @@ function requiredAttributesBlock(requiredAttributes) {
     : '';
 }
 
-export function buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes = [] }) {
+// El juez de la Propuesta y las listas cerradas, Part 2: the real BRDP-EXT-00019
+// (zone CIR, "Only zoneSpec, zoneIdent, figure, … elements can be used")
+// was judged "no": the judge read the rule's list of 26 forbidden elements
+// as the allowed ones. `proposalVsRule` (ruleTestEngine.js's
+// proposalVsRuleLists, computed from the rule and the vocabulary) gives the
+// two lists already compared; null when the rule has no element list or
+// the Proposal names no element -- then the prompt does not change.
+const names = (list) => (list.length ? list.map((n) => `<${n}>`).join(', ') : '(none)');
+function proposalVsRuleBlock(lists) {
+  if (!lists) return '';
+  const others = lists.othersAll ? 'every element outside the rule\'s list' : `${lists.othersForbidden} element${lists.othersForbidden === 1 ? '' : 's'}`;
+  return `\n\nPROPOSAL vs RULE (computed by the application, do not recompute):
+- named in the Proposal and NOT forbidden by the rule: ${names(lists.notForbidden)}
+- named in the Proposal and forbidden by the rule: ${names(lists.forbidden)}
+- forbidden by the rule and not named in the Proposal: ${others}
+If no element named as allowed by the Proposal is forbidden by the rule, the rule implements an "only these" decision: answer "yes" (or "partly" if the list looks incomplete), never "no".`;
+}
+
+export function buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes = [], proposalVsRule = null }) {
   return `You check whether one ${standard} business rule implements the decision of
 its BRDP. You never write or fix anything.
 
@@ -57,7 +75,7 @@ What the rule checks (computed by the application from its XML — exact):
 ${ruleDescription}
 
 The rule (${format}):
-${ruleXml}${ruleValueLegend(ruleXml)}${requiredAttributesBlock(requiredAttributes)}
+${ruleXml}${ruleValueLegend(ruleXml)}${requiredAttributesBlock(requiredAttributes)}${proposalVsRuleBlock(proposalVsRule)}
 
 HOW TO DECIDE — answer one of three levels:
 - "yes": what the rule rejects is what the Proposal decides: what the

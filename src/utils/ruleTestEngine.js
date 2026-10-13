@@ -1516,6 +1516,56 @@ export function ruleElementLists(ruleXml, format, options = {}) {
   return { forbidden, allowedOnly };
 }
 
+// El juez de la Propuesta, Part 2: the elements a Proposal names. Marked
+// (<x>, never @x) always count; a loose word counts when it is an element
+// of the vocabulary and is camelCase ("zoneSpec"), or is in a list of names
+// (next to another element name across a comma / and / or / y / o):
+// "Only zoneSpec, zoneIdent, figure, multimedia … elements can be used in
+// the Data update file" names <figure> and <multimedia>, never <update>.
+// Case-sensitive, in Proposal order, without repeats. → ['zoneSpec', …]
+const PROPOSAL_WORD_RE = /<\/?([A-Za-z_][\w.-]*)[^<>]*>|(@?)\b([A-Za-z_][\w.-]*[\w])/g;
+const LIST_JOIN_RE = /^\s*(?:,|,?\s*(?:and|or|y|o|e|u)\b)\s*$/i;
+export function proposalElementNames(proposal, vocabulary) {
+  const elements = vocabulary?.elements;
+  if (!elements || !proposal) return [];
+  const text = String(proposal);
+  const words = [];
+  for (const m of text.matchAll(PROPOSAL_WORD_RE)) {
+    if (m[1]) words.push({ name: m[1], marked: true, start: m.index, end: m.index + m[0].length });
+    else if (!m[2] && !/^(?:and|or|y|o|e|u)$/i.test(m[3])) words.push({ name: m[3], marked: false, start: m.index, end: m.index + m[0].length });
+  }
+  const isElement = (w) => w && elements.has(w.name);
+  const joined = (a, b) => a && b && LIST_JOIN_RE.test(text.slice(a.end, b.start));
+  const out = [];
+  words.forEach((w, i) => {
+    if (!isElement(w)) return;
+    const camel = /^[a-z]+[A-Z]/.test(w.name);
+    const inList = (isElement(words[i - 1]) && joined(words[i - 1], w)) || (isElement(words[i + 1]) && joined(w, words[i + 1]));
+    if ((w.marked || camel || inList) && !out.includes(w.name)) out.push(w.name);
+  });
+  return out;
+}
+
+// The two lists the Proposal check gets (Part 2), when the rule has a list
+// of forbidden elements (ruleElementLists) AND the Proposal names elements;
+// otherwise null (the prompt does not change).
+//   → { notForbidden: ['zoneSpec', …], forbidden: [], othersForbidden: 26,
+//       othersAll: false }  (othersAll: a not(self::…) rule forbids every
+//       element outside its list)
+export function proposalVsRuleLists(ruleXml, format, proposal, vocabulary, options = {}) {
+  const lists = ruleElementLists(ruleXml, format, options);
+  if (!lists || (lists.forbidden.length === 0 && lists.allowedOnly.length === 0)) return null;
+  const named = proposalElementNames(proposal, vocabulary);
+  if (named.length === 0) return null;
+  const isForbidden = (n) => lists.forbidden.includes(n) || (lists.allowedOnly.length > 0 && !lists.allowedOnly.includes(n));
+  return {
+    notForbidden: named.filter((n) => !isForbidden(n)),
+    forbidden: named.filter(isForbidden),
+    othersForbidden: lists.forbidden.filter((n) => !named.includes(n)).length,
+    othersAll: lists.allowedOnly.length > 0,
+  };
+}
+
 // X/*[not(self::a or self::b …)] (or *[not(self::…)] alone), flag 0: every
 // element but a, b… is forbidden → ['a', 'b', …] | null.
 function notSelfList(path) {

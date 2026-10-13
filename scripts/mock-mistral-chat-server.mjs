@@ -379,6 +379,12 @@ function metadataReply(systemPrompt, rule, answer, messages = []) {
       return answer([ex("Tool in the tool CIR", "accept", cir("00N"), bad("toolSpec")), ex("Part in the tool CIR", "reject", cir("00N"), bad("partSpec"))]);
     }
     const insert = (el) => `<insertObjectGroup><insertObject insertionOrder="1" targetPath="/">${el}</insertObject></insertObjectGroup>`;
+    // El juez de la Propuesta: the zone CIR (00H, BRDP-EXT-00019).
+    if (/infoCode="00H"/.test(rule)) {
+      const zoneSpec = '<zoneSpec><zoneIdent zoneNumber="100"/><zoneAlts><zone><itemDescr>Lower fuselage</itemDescr></zone></zoneAlts></zoneSpec>';
+      const partSpec0 = '<partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/></partSpec>';
+      return answer([ex("Zone in the zone CIR", "accept", cir("00H"), insert(zoneSpec)), ex("Part in the zone CIR", "reject", cir("00H"), insert(partSpec0))]);
+    }
     const toolSpec = '<toolSpec><toolIdent manufacturerCodeValue="K0001" toolNumber="T-100"/></toolSpec>';
     const partSpec = '<partSpec><partIdent manufacturerCodeValue="K0001" partNumberValue="P-100"/></partSpec>';
     return answer([ex("Tool in the tool CIR", "accept", cir("00N"), insert(toolSpec)), ex("Part in the tool CIR", "reject", cir("00N"), insert(partSpec)), ex("Part in the parts CIR", "accept", cir("00E"), insert(partSpec))]);
@@ -1235,6 +1241,15 @@ function ruleProposalCheckReply(systemPrompt) {
     reply = { implements: "no", reason: "The Proposal is about CAGE codes; the rule checks <emphasis>." };
   } else if (/at most three substeps|como m[aá]ximo tres subpasos/i.test(proposal)) {
     reply = { implements: "no", reason: "The Proposal allows at most three substeps; the rule only rejects a step with exactly one substep, so four or more are accepted." };
+  } else if (/none of these may appear/.test(systemPrompt)) {
+    // El juez de la Propuesta y las listas cerradas: like the real run on
+    // BRDP-EXT-00019, without the computed PROPOSAL vs RULE lists the
+    // rule's forbidden list is read as the allowed one ("no"); with them,
+    // "no" only when an element the Proposal names is forbidden.
+    const forbidden = (systemPrompt.match(/\n- named in the Proposal and forbidden by the rule: (.*)\n/) || [])[1];
+    if (forbidden === undefined) reply = { implements: "no", reason: "The rule allows only partSpec, functionalItemSpec, … while the Proposal allows zoneSpec, zoneIdent, …" };
+    else if (forbidden === "(none)") reply = { implements: "yes", reason: "" };
+    else reply = { implements: "no", reason: `The rule forbids ${forbidden}, which the Proposal allows.` };
   } else if (/PARTLY|marked up with <quantity>/.test(proposal)) {
     reply = { implements: "partly", reason: "Marking the torque values up with <quantity> cannot be checked by a rule; the rule checks the unit." };
   } else {
