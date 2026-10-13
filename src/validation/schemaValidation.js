@@ -1332,11 +1332,66 @@ export function compactValueList(values) {
   return { text: list.slice(0, LIST_MAX_VALUES).join(', '), more: list.length - LIST_MAX_VALUES };
 }
 
+// ─── Formato del texto, Part 1: the facets of an element's text ─────────────
+// models[x].textFacets (generate_content_models.py, from the real XSD): for
+// an element of simple content, "patterns" (all must match), "length",
+// "minLength", "maxLength" and "enumeration". A pattern is checked like the
+// engine checks an objectValue pattern (brexToSchematron.js's
+// _valueCheckXPath): XPath/XSD regex anchored as an XSD facet,
+// matches($text, '^(pattern)$'), with fontoxpath -- the same regex dialect,
+// in the browser and in Node. A pattern fontoxpath cannot compile is not
+// judged (never a false "invalid").
+const facetMatchCache = new Map();
+
+function patternMatches(text, pattern) {
+  const key = `${pattern}\u0000${text}`;
+  if (facetMatchCache.has(key)) return facetMatchCache.get(key);
+  let result;
+  try {
+    result = fontoxpath.evaluateXPathToBoolean('matches($t, $p)', null, null, { t: text, p: `^(${pattern})$` });
+  } catch {
+    result = true;
+  }
+  if (facetMatchCache.size > 5000) facetMatchCache.clear();
+  facetMatchCache.set(key, result);
+  return result;
+}
+
+// Whether `text` meets every facet (true when there are none).
+export function meetsTextFacets(text, facets) {
+  if (!facets) return true;
+  const length = Array.from(String(text)).length;
+  if (Number.isInteger(facets.length) && length !== facets.length) return false;
+  if (Number.isInteger(facets.minLength) && length < facets.minLength) return false;
+  if (Number.isInteger(facets.maxLength) && length > facets.maxLength) return false;
+  if (Array.isArray(facets.enumeration) && facets.enumeration.length > 0 && !facets.enumeration.includes(text)) return false;
+  for (const pattern of facets.patterns || []) if (!patternMatches(text, pattern)) return false;
+  return true;
+}
+
+// The facets as one short technical text, for the messages and the cards:
+// "[A-Za-z0-9]{2,3}", "length 3", "1–4 characters", "one of: a, b".
+export function textFacetsText(facets) {
+  if (!facets) return '';
+  const parts = [...(facets.patterns || [])];
+  if (Number.isInteger(facets.length)) parts.push(`length ${facets.length}`);
+  else if (Number.isInteger(facets.minLength) || Number.isInteger(facets.maxLength)) {
+    const min = facets.minLength ?? 0;
+    parts.push(Number.isInteger(facets.maxLength) ? `${min}–${facets.maxLength} characters` : `at least ${min} characters`);
+  }
+  if (Array.isArray(facets.enumeration) && facets.enumeration.length > 0) {
+    const compact = compactValueList(facets.enumeration);
+    parts.push(`one of: ${compact.text}${compact.more ? `, +${compact.more} more` : ''}`);
+  }
+  return parts.join('; ');
+}
+
 // [{ kind: 'unknownElement', element } | { kind: 'notAllowed', element, parent }
 //  | { kind: 'unknownAttribute', attribute, element } | { kind: 'wrongRoot', element, expected }
 //  | { kind: 'missingRequiredAttribute', element, attribute } | { kind: 'textNotAllowed', element }
 //  | { kind: 'valueNotAllowed', element, attribute, value, allowed }
-//  | { kind: 'tooMany', element, parent, max, count }]
+//  | { kind: 'tooMany', element, parent, max, count }
+//  | { kind: 'textFormat', element, text, format }]
 // against one schema's structure. Prefixed attributes other than xlink:* and
 // namespace declarations are not schema vocabulary and are left out.
 // options.skipPaths: node paths (ruleTestCommon.js's nodePath) of the
@@ -1414,6 +1469,26 @@ export function checkExampleStructure(doc, structure, options = {}) {
           add({ kind: 'textNotAllowed', element: name });
           break;
         }
+      }
+    }
+    // Formato del texto, Part 1: the text of an element of simple content
+    // that does not meet its type's facets in this schema
+    // (<chapnum>B312</chapnum> where 3.0.1 says [A-Za-z0-9]{2,3}). Never the
+    // application's own elements (the skeleton, the minimal section), never
+    // an element with element children (its text is not a simple value).
+    const facets = model?.textFacets;
+    if (facets && !skipPaths.has(path)) {
+      let text = '';
+      let simple = true;
+      for (let n = el.firstChild; n; n = n.nextSibling) {
+        if (n.nodeType === 1) {
+          simple = false;
+          break;
+        }
+        if (n.nodeType === 3 || n.nodeType === 4) text += String(n.nodeValue || '');
+      }
+      if (simple && !meetsTextFacets(text, facets)) {
+        add({ kind: 'textFormat', element: name, text, format: textFacetsText(facets) });
       }
     }
     // Mejoras G, Part 1.2: more children of a kind than the element allows
@@ -1929,6 +2004,8 @@ export function formatStructureProblem(problem, schema) {
       return `<${problem.element}> requires @${problem.attribute} in the ${schema} schema`;
     case 'textNotAllowed':
       return `<${problem.element}> does not allow text in the ${schema} schema`;
+    case 'textFormat':
+      return `the text "${problem.text}" of <${problem.element}> does not meet the format of the ${schema} schema (${problem.format})`;
     case 'valueNotAllowed':
       return `@${problem.attribute} of <${problem.element}> has value "${problem.value}"; allowed: ${problem.allowed}${problem.more ? `, +${problem.more} more` : ''}`;
     case 'wrongRoot':
@@ -2194,6 +2271,7 @@ export const SCHEMA_ISSUE_KEYS = {
     unknownAttribute: 'records.ruleTest.structure.unknownAttribute',
     missingRequiredAttribute: 'records.ruleTest.structure.missingRequiredAttribute',
     textNotAllowed: 'records.ruleTest.structure.textNotAllowed',
+    textFormat: 'records.ruleTest.structure.textFormat',
     valueNotAllowed: 'records.ruleTest.structure.valueNotAllowed',
     wrongRoot: 'records.ruleTest.structure.wrongRoot',
     reservedRootAttribute: 'records.ruleTest.structure.reservedRootAttribute',

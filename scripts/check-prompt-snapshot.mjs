@@ -514,6 +514,13 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // cases ruleProposalCheck/brex-4-2-default-zone-cir-proposal-vs-rule
 // (BRDP-EXT-00019) and brex-4-2-default-zone-cir-wrong-control (<zoneSpec>
 // in the forbidden list).
+//
+// Formato del texto y valores compuestos con concat(), Part 2: when a rule
+// compares concat() of element paths with a literal that the elements'
+// text formats (models[x].textFacets) split in exactly one way, the
+// examples prompt gains a "COMPOSED VALUES" block ("In this rule, 'A91251'
+// is split as <chapnum>A9</chapnum>, …"). No existing case has such a rule,
+// so none changes; new case ruleTestExamples/brex-3-0-1-concat-sns-refdm.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_serializer
 
 
 class SchemaCardAttributeOut(BaseModel):
@@ -93,6 +93,18 @@ class ContentModelOut(BaseModel):
     # SchemaStructureOut.enum_lists} for its attributes with a closed list of
     # values (enumeration) in this schema.
     enums: dict[str, int] = {}
+    # Formato del texto, Part 1: the facets of its text when it is of simple
+    # content and its type has some -- "patterns" (all must match),
+    # "length", "minLength", "maxLength", "enumeration". Left out otherwise.
+    textFacets: dict[str, Any] | None = None
+
+    @model_serializer(mode="wrap")
+    def _drop_absent_facets(self, handler):
+        # Only a few elements have facets: no "textFacets": null on the rest.
+        data = handler(self)
+        if data.get("textFacets") is None:
+            data.pop("textFacets", None)
+        return data
 
 
 class MetadataNodeOut(BaseModel):

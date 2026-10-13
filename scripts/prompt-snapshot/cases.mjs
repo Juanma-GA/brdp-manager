@@ -36,6 +36,7 @@ import i18n from '../../src/i18n/index.js';
 import { describeRule, proposalVsRuleLists, ruleConditions } from '../../src/utils/ruleTestEngine.js';
 import { ruleDescriptionText } from '../../src/utils/ruleTestReasons.js';
 import { ownSectionConditions, withOwnSectionValues } from '../../src/utils/ownSectionValues.js';
+import { uniqueConcatSplits } from '../../src/utils/concatSplit.js';
 
 const xmldomParse = (text) => new DOMParser().parseFromString(text, 'text/xml');
 
@@ -423,6 +424,9 @@ export const suggestRuleCases = [
 // Mejoras D, Part 1.1 (BRDP-EXT-02816, 3.0.1): <figure> does not go inside
 // <para>, so the content goes in <para0> and the prompt gives the whole way.
 const ruleFigureDef301 = '<objrule id="XML-R-2828"><objpath objappl="0">//figure//legend/deflist/def[not(normalize-space(.) = ancestor::figure//graphic//hotspot/@title)]</objpath><objuse>Prohibir &lt;def&gt; que no coincida con ningun @title de los elementos de tipo &lt;hotspot&gt; de su &lt;figure&gt;</objuse></objrule>';
+// Formato del texto, Part 2 (SOPTE, 3.0.1): a <refdm> whose SNS, joined
+// with concat(), is 'A91251' -- the only split the formats allow.
+const ruleSnsRefdm301 = "<objrule><objpath objappl=\"0\">//refdm[concat(avee/chapnum, avee/section, avee/subsect, avee/subject) = 'A91251']</objpath><objuse>No reference to a data module of SNS A91251.</objuse></objrule>";
 const ruleActref301 = '<objrule id="BRDP-EXT-02613"><objpath objappl="0">/dmodule[not(//actref)]</objpath><objuse>BRDP-EXT-02613. Every data module must reference its applicability cross-reference table.</objuse></objrule>';
 const brdpRuleTest = {
   identifier: 'BRDP-TEST-001',
@@ -583,6 +587,21 @@ export const ruleTestExamplesCases = [
         format: 'BREX-3.0.1',
         ruleXml: ruleActref301,
         placements: placementsFor('S1000D 3.0.1', ruleActref301, [['descript', 'rule']]),
+      },
+    ],
+  },
+  {
+    // Formato del texto, Part 2: the literal compared with concat() of the
+    // SNS elements, split the only way the 3.0.1 formats allow.
+    name: 'brex-3-0-1-concat-sns-refdm',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-02219', title: 'References to SNS A91251', definition: 'Decide whether data modules may refer to data modules of SNS A91251.', proposal: 'No data module refers to a data module of SNS A91251.' },
+        standard: 'S1000D 3.0.1',
+        format: 'BREX-3.0.1',
+        ruleXml: ruleSnsRefdm301,
+        placements: placementsFor('S1000D 3.0.1', ruleSnsRefdm301, [['descript', 'rule']]),
+        concatSplits: uniqueConcatSplits(ruleSnsRefdm301, [realStructures['S1000D 3.0.1|descript']]),
       },
     ],
   },

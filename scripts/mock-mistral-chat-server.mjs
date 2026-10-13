@@ -842,6 +842,37 @@ function ruleTestReply(systemPrompt, messages) {
   // of type irtt04 to a supply. Like the real run, the first answer's accept
   // example points to an id no <supplyDescr> has; the correction round that
   // names it ("points to SE123 … no <supplyDescr>") points to the supply.
+  // Formato del texto y valores compuestos con concat() (SOPTE, S1000D
+  // 3.0.1): the rule compares concat(chapnum, section, subsect, subject)
+  // with an SNS. Like the real runs, without the split the SNS is split
+  // wrong, one character per element and a two-character subject that
+  // loses the rest (<chapnum>A</chapnum><section>9</section><subsect>1
+  // </subsect><subject>25</subject>: joined, not the SNS any more); with "is
+  // split as …" in the prompt or in the correction request, as said there.
+  if (/concat\(/.test(rule) && /chapnum/.test(rule)) {
+    const told = (`${systemPrompt}\n${correcting ? lastUser : ""}`.match(/is split as <chapnum>([^<]*)<\/chapnum>, <section>([^<]*)<\/section>, <subsect>([^<]*)<\/subsect>, <subject>([^<]*)<\/subject>/) || []).slice(1);
+    const literal = (rule.match(/=\s*'([^']+)'/) || [])[1] || "A91251";
+    const pieces = told.length === 4 ? told : [literal.slice(0, 1), literal.slice(1, 2), literal.slice(2, 3), literal.slice(3, 5)];
+    const lines = systemPrompt.split("\n");
+    const start = lines.findIndex((l) => l === "    <idstatus>");
+    const section = [];
+    for (let i = start; start !== -1 && i < lines.length && lines[i].startsWith("    "); i += 1) section.push(lines[i].slice(4));
+    const minimal = section.join("\n");
+    const sns = ([c, se, ss, sj]) => `<chapnum>${c}</chapnum><section>${se}</section><subsect>${ss}</subsect><subject>${sj}</subject>`;
+    const avee = (snsPieces, incode = "040") => `<avee><modelic>EXAMPLE</modelic><sdc>A</sdc>${sns(snsPieces)}<discode>00</discode><discodev>A</discodev><incode>${incode}</incode><incodev>A</incodev><itemloc>A</itemloc></avee>`;
+    const schema = ruleSchema || "descript";
+    if (/\/\/refdm\[/.test(rule)) {
+      return answer([
+        { label: "Reference to another subject", expected: "accept", schema, metadata: minimal, content: `See <refdm>${avee(["B3", "1", "2", "22"])}</refdm>.` },
+        { label: `Reference to SNS ${literal}`, expected: "reject", schema, metadata: minimal, content: `See <refdm>${avee(pieces)}</refdm>.` },
+      ]);
+    }
+    const own = (incode) => minimal.replace(/<dmc>\s*<avee>[\s\S]*?<\/avee>/, `<dmc>${avee(pieces, incode)}`);
+    return answer([
+      { label: `SNS ${literal} with an allowed information code`, expected: "accept", schema, metadata: own("040") },
+      { label: `SNS ${literal} with information code 941`, expected: "reject", schema, metadata: own("941") },
+    ]);
+  }
   if (/attribute::internalRefId = \/\/supplyDescr\/@id/.test(rule)) {
     const fixed = correcting && /points to SE123/.test(lastUser);
     const procedure = (refId) => `<preliminaryRqmts><reqCondGroup><noConds/></reqCondGroup><reqSupportEquips><noSupportEquips/></reqSupportEquips><reqSupplies><supplyDescrGroup><supplyDescr id="SUP-0001"><name>Sealant</name><identNumber><manufacturerCode>12345</manufacturerCode><partAndSerialNumber><partNumber>PN-0001</partNumber></partAndSerialNumber></identNumber><reqQuantity>1</reqQuantity></supplyDescr></supplyDescrGroup></reqSupplies><reqSpares><noSpares/></reqSpares><reqSafety><noSafety/></reqSafety></preliminaryRqmts><mainProcedure><proceduralStep><para>Apply the sealant <internalRef internalRefId="${refId}" internalRefTargetType="irtt04"/>.</para></proceduralStep></mainProcedure><closeRqmts><reqCondGroup><noConds/></reqCondGroup></closeRqmts>`;

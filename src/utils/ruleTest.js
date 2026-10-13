@@ -31,6 +31,7 @@ import {
   fixCalsRowSpans,
   formatStructureProblem,
   removeSpannedCalsEntries,
+  textFacetsText,
 } from '../validation/schemaValidation.js';
 import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, metadataXml, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { setSectionValuesInDocument, setSectionValuesInText } from './ownSectionValues.js';
@@ -451,7 +452,14 @@ function elementCards(doc, names, problems, structure) {
     else if (p.kind === 'tooMany') {
       want(p.parent);
       want(p.element);
-    } else if (p.kind === 'unknownAttribute' || p.kind === 'missingRequiredAttribute' || p.kind === 'textNotAllowed') want(p.element);
+    } else if (
+      p.kind === 'unknownAttribute' ||
+      p.kind === 'missingRequiredAttribute' ||
+      p.kind === 'textNotAllowed' ||
+      p.kind === 'textFormat'
+    ) {
+      want(p.element);
+    }
     else if (p.kind === 'unknownElement') {
       for (const el of elementsNamed(doc, (e) => e.nodeName === p.element)) want(el.parentNode?.nodeName);
     }
@@ -477,6 +485,8 @@ function elementCards(doc, names, problems, structure) {
     // Part 2 (lo que la app puede arreglar sola): said only for an element
     // whose text is the problem.
     noText: problems.some((p) => p.kind === 'textNotAllowed' && p.element === element),
+    // Formato del texto, Part 1: the format its text must meet.
+    textFormat: textFacetsText(structure.models?.[element]?.textFacets),
   }));
 }
 
@@ -505,7 +515,8 @@ function formatElementCard(card, schema) {
   // without.
   const required = card.required?.length ? `; required attributes: ${cardNameList(card.required, '@')}` : '';
   const noText = card.noText ? '; no text inside' : '';
-  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}${limits}; attributes: ${cardNameList(card.attributes, '@')}${required}${noText}`;
+  const textFormat = card.textFormat ? `; its text must match: ${card.textFormat}` : '';
+  return `card of <${card.element}>${where}: allowed children: ${cardNameList(card.children)}${limits}; attributes: ${cardNameList(card.attributes, '@')}${required}${noText}${textFormat}`;
 }
 
 // C3b: an example often fails on the markup of an element the rule does

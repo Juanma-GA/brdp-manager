@@ -13,6 +13,7 @@
 // Steps (T2b): the schema(s) and skeleton the examples are built on, the
 // prompt, the LLM's answer, the checks of each example, ONE automatic
 // correction round for the examples that fail them, and the engine run.
+import { concatSplitSentence, uniqueConcatSplits } from './concatSplit.js';
 import { buildRuleTestCorrectionMessage, buildRuleTestExamplesPrompt, parseRuleTestResponse, RULE_TEST_USER_MESSAGE } from '../prompts/ruleTestExamplesPrompt.js';
 import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROPOSAL_CHECK_USER_MESSAGE } from '../prompts/ruleProposalCheckPrompt.js';
 import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
@@ -667,6 +668,9 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   const several = ruleFormat && !acceptOnly
     ? repeatingComparisons(ruleXml, ruleFormat, views, { parseXml, schemaLocation }).filter((s) => !notRepeated.has(norm(s.path)))
     : [];
+  // Formato del texto, Part 2: a literal compared with a concat() of
+  // elements that the test schemas' facets let split only one way.
+  const concatSplits = uniqueConcatSplits(ruleXml, rulePlacements.map((p) => placements[p.schema]?.structure));
   return {
     contextSchemas,
     schemaFacts,
@@ -676,7 +680,8 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     tableModel,
     limits,
     several,
-    setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml), tableModel: Boolean(tableModel), several },
+    concatSplits,
+    setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml), tableModel: Boolean(tableModel), several, concatSplits },
   };
 }
 
@@ -1037,9 +1042,17 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
       // never sent back -- correcting it would remove what breaks the rule.
       if (r.schemaCovered) return { index, label: examples[index].label, problems: [] };
       const missing = r.validation.runnable ? missesRuleProblem(examples[index], r, ruleXml) : null;
+      // Formato del texto, Part 2: a reject example the rule selects nothing
+      // in, for a rule comparing a concat() of elements with a value that
+      // splits only one way -- the split is said again.
+      const splitLine =
+        missing && (setup?.concatSplits || []).length > 0 && (r.result?.selectedNodePaths || []).length === 0
+          ? setup.concatSplits.map(concatSplitSentence).join(' ')
+          : null;
       const problems = r.validation.runnable
         ? [
             missing,
+            splitLine,
             withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null,
             ...danglingReferenceProblems(examples[index], materialized[index]?.xml, r, references, parseXml),
           ].filter(Boolean)
@@ -1064,6 +1077,12 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             namedAttribute: named.attribute,
             structure: materialized[index].structure || null,
           });
+      // Formato del texto, Part 2: a piece of a split literal written in the
+      // wrong format (<chapnum>B312</chapnum>): the split is said with it.
+      const splitElements = new Set((setup?.concatSplits || []).flatMap((sp) => sp.pieces.filter((p) => p.element).map((p) => p.element)));
+      if (!r.validation.runnable && splitElements.size > 0 && (r.validation.structure || []).some((p) => p.kind === 'textFormat' && splitElements.has(p.element))) {
+        problems.push(setup.concatSplits.map(concatSplitSentence).join(' '));
+      }
       const wraps = (r.validation.structure || []).some((p) => p.kind === 'notAllowed');
       const keepLine = problems.movesAttribute ? keepMoving : wraps ? keepWrapping : keep;
       if (problems.length > 0 && !missing && keepLine && examples[index].expected === 'reject') problems.push(keepLine);
@@ -1422,6 +1441,7 @@ export async function generateRuleTestExamples({
       acceptOnly: coverage ? { reasons: coverage.items.map(coverageItemEnglish) } : null,
       limits: prepared.limits || [],
       several: prepared.several || [],
+      concatSplits: prepared.concatSplits || [],
       dossier: dossierRule
         ? { mainPath: DOSSIER_MAIN_PATH, maxFiles: DOSSIER_MAX_FILES, maxLines: DOSSIER_MAX_FILE_LINES, types: DOSSIER_FILE_TYPES, look: dossierLookExpressions(ruleXml, parseXml) }
         : null,

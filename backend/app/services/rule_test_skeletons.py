@@ -821,6 +821,11 @@ def schema_content_models(standard: str, schema: str) -> dict[str, dict]:
             # get_schema_structure turns the lists into indexes.
             "enums": {a["name"]: list(a["enum"]) for a in (card or {}).get("attributes", []) if a.get("enum")},
         }
+        # Formato del texto, Part 1: the facets of its text (pattern,
+        # length, minLength, maxLength, enumeration) in this schema, only
+        # for an element of simple content whose type has some.
+        if variant.get("textFacets"):
+            out[name]["textFacets"] = variant["textFacets"]
     return out
 
 

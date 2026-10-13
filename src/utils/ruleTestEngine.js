@@ -138,6 +138,7 @@ import {
 } from './ruleTestCommon.js';
 import { analyzeSchematron, describeSchematron, runSchematronOnFragment, schematronAcceptanceDetails, schematronRuleParts, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
 import { checkRuleFormat, extractXPathNames } from '../validation/schemaValidation.js';
+import { wholeConcatComparison } from './concatSplit.js';
 
 export { nodePath, parseXmlDocument };
 
@@ -835,7 +836,9 @@ function describePart(part, spec, parseXml, graph = null) {
   // bare "<def> must not appear" that hides it.
   const qualified = (statement) => {
     const qualifier = target ? checkedStepQualifier(path) : null;
-    return qualifier ? { ...statement, params: { ...statement.params, qualifier } } : statement;
+    const when = composedValueOfEarlierStep(path);
+    const params = { ...statement.params, ...(qualifier ? { qualifier } : {}), ...(when ? { when } : {}) };
+    return qualifier || when ? { ...statement, params } : statement;
   };
   // Reglas que prohíben un tipo de documento por su raíz: /R or //R, flag 0,
   // outside a context block -- "No document may be a <R> (R schema)".
@@ -948,6 +951,10 @@ function checkedStepQualifier(path) {
   // said literally, as before.
   const position = !on && preds.length === 1 ? positionQualifier(preds[0], steps, path) : null;
   if (position) return position;
+  // Formato del texto, Part 2: "[concat(avee/chapnum, …) = 'A91251']" in
+  // words, only when it is the whole predicate.
+  const composed = preds.length === 1 ? wholeConcatComparison(preds[0]) : null;
+  if (composed) return { kind: composed.negated ? 'concatNot' : 'concat', elements: composed.elements.map((n) => `<${n}>`).join(', '), value: composed.value, on };
   if (preds.length === 1) {
     const m = QUALIFIER_RELATION_RE.exec(preds[0].replace(/\s+/g, ' ').trim());
     if (m && Boolean(m[1]) === Boolean(m[4])) {
@@ -957,6 +964,25 @@ function checkedStepQualifier(path) {
     }
   }
   return { kind: 'condition', condition: preds.map((p) => `[${p.trim()}]`).join(''), on };
+}
+
+// Formato del texto, Part 2: an earlier step of the path whose predicate is
+// exactly one concat() comparison (/dmodule/idstatus[concat(…) = 'A91251']/
+// …/incode) -- the statement then ends with "Only when …". The first one;
+// null when none.
+function composedValueOfEarlierStep(path) {
+  const steps = topLevelSteps(String(path || '').trim());
+  if (!steps || steps.length < 2) return null;
+  for (const step of steps.slice(0, -1)) {
+    const preds = stepPredicateTexts(step);
+    if (preds.length !== 1) continue;
+    const composed = wholeConcatComparison(preds[0]);
+    if (!composed) continue;
+    const owner = step.replace(/\[[\s\S]*$/, '').trim().replace(/^(?:child|descendant|descendant-or-self)::/, '');
+    if (!/^[A-Za-z_][\w.:-]*$/.test(owner)) continue;
+    return { elements: composed.elements.map((n) => `<${n}>`).join(', '), value: composed.value, negated: composed.negated, on: `<${owner}>` };
+  }
+  return null;
 }
 
 const POSITION_GT_RE = /^position\(\)\s*(>=|>|\bge\b|\bgt\b)\s*(\d+)$/;

@@ -5464,6 +5464,61 @@
           "type": "rule_test_verdict_correct"
         }
       ]
+    },
+    {
+      "id": "rule-test-3-0-1-concat-sns-own-module",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Formato del texto y valores compuestos con concat() (SOPTE, S1000D 3.0.1): the rule compares concat(chapnum, section, subsect, subject) of the data module's own <avee> with the SNS 'A91251'. The LLM split the SNS wrong (<chapnum>A</chapnum><section>9</section>…, or <chapnum>B312</chapnum>), the rule selected nothing and the reject example was accepted. Now the text format of each element is checked (chapnum [A-Za-z0-9]{2,3}…) and the prompt says the only split: A9 + 1 + 2 + 51. The Proposal does NOT say the split.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-SNSOWN",
+        "title": "Information codes of SNS A91251",
+        "definition": "Decide which information codes the data modules of SNS A91251 may use.",
+        "proposal": "Data modules of SNS A91251 only use the information codes 040 and 520.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule>\n  <objpath>/dmodule/idstatus[concat(dmaddres/dmc/avee/chapnum, dmaddres/dmc/avee/section, dmaddres/dmc/avee/subsect, dmaddres/dmc/avee/subject) = 'A91251']/dmaddres/dmc/avee/incode</objpath>\n  <objuse>Data modules of SNS A91251 only use the information codes 040 and 520.</objuse>\n  <objval valtype=\"single\" val1=\"040\"/>\n  <objval valtype=\"single\" val1=\"520\"/>\n</objrule>",
+      "checks": [
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "metadata",
+          "pattern": "<dmc>\\s*<avee>[\\s\\S]*?<chapnum>A9</chapnum>\\s*<section>1</section>\\s*<subsect>2</subsect>\\s*<subject>51</subject>",
+          "note": "the reject example's own <avee> carries the SNS split as A9 + 1 + 2 + 51"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-concat-sns-refdm",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "Formato del texto y valores compuestos con concat() (SOPTE, S1000D 3.0.1): no reference to a data module of SNS 'A91251' -- concat(chapnum, section, subsect, subject) of a <refdm>'s <avee>. Without the split the LLM wrote the pieces wrong and the reject example was accepted. Now the prompt says the only split, and a piece in the wrong format goes back to the correction round with the split. The Proposal does NOT say the split.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-SNSREF",
+        "title": "References to SNS A91251",
+        "definition": "Decide whether data modules may refer to data modules of SNS A91251.",
+        "proposal": "No data module refers to a data module of SNS A91251.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule>\n  <objpath objappl=\"0\">//refdm[concat(avee/chapnum, avee/section, avee/subsect, avee/subject) = 'A91251']</objpath>\n  <objuse>No reference to a data module of SNS A91251.</objuse>\n</objrule>",
+      "checks": [
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "<refdm>\\s*<avee>[\\s\\S]*?<chapnum>A9</chapnum>\\s*<section>1</section>\\s*<subsect>2</subsect>\\s*<subject>51</subject>",
+          "note": "the reject example's <refdm> carries the SNS split as A9 + 1 + 2 + 51"
+        },
+        {
+          "type": "rule_test_verdict_correct"
+        }
+      ]
     }
   ]
 }

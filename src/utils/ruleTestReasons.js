@@ -253,7 +253,7 @@ export function formatRuleStatement(statement, schemas, t, options = {}) {
   if (params.qualifier && params.target) {
     const q = params.qualifier;
     const subject = q.on ? t('records.ruleTest.describe.qualifier.attrOf', { target: params.target, on: q.on }) : params.target;
-    values.target = t(`records.ruleTest.describe.qualifier.${q.kind}`, { target: subject, name: q.name, condition: q.condition, parent: q.parent, n: q.n, before: q.before, from: q.from });
+    values.target = t(`records.ruleTest.describe.qualifier.${q.kind}`, { target: subject, name: q.name, condition: q.condition, parent: q.parent, n: q.n, before: q.before, from: q.from, elements: q.elements, value: q.value });
   }
   if (params.values) values.values = formatValues(params.values, t);
   // Plantillas, Part 4: the names a condition looks at.
@@ -311,6 +311,10 @@ export function formatRuleStatement(statement, schemas, t, options = {}) {
   // Schematron: a role="warning"/"info" check never rejects (T4).
   if (params.warning) text = t('records.ruleTest.describe.schWarning', { text });
   else if (params.constant) text = t('records.ruleTest.describe.schConstant', { text });
+  // Formato del texto, Part 2: an earlier step's concat() comparison.
+  if (params.when) {
+    text = `${text} ${t(`records.ruleTest.describe.${params.when.negated ? 'whenConcatNot' : 'whenConcat'}`, params.when)}`;
+  }
   return schemas && schemas.length ? t('records.ruleTest.describe.onlyInSchemas', { text, schemas: schemas.join(', ') }) : text;
 }
 

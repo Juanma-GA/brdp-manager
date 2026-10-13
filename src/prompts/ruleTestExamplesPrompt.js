@@ -11,6 +11,7 @@
 // (utils/ruleTestSkeleton.js; T2b: the LLM only writes the content of the
 // insertion point), checks it, runs the rule on it (utils/ruleTestEngine.js)
 // and gives the verdict.
+import { concatSplitSentence } from '../utils/concatSplit.js';
 import { readLlmJson } from './llmJson.js';
 import { buildSchemaFactsBlock, ruleValueLegend } from './shared.js';
 import { placeSentence } from '../utils/schemaPlacement.js';
@@ -549,6 +550,10 @@ export function buildRuleTestExamplesPrompt({
   // Dosier, Part 2: { mainPath, maxFiles, maxLines, types } for a rule that
   // reads other files of the dossier; null otherwise.
   dossier = null,
+  // Formato del texto, Part 2: [{ literal, pieces }] -- the literals the
+  // rule compares with a concat() of elements that can be split only one
+  // way (uniqueConcatSplits).
+  concatSplits = [],
 }) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
@@ -632,6 +637,7 @@ ${acceptOnly ? '' : `- The reject example goes against the decision in one clear
   if (conditions.length > 0) prompt += conditionInstructions(conditions);
   if (tableModel) prompt += tableModelInstructions(tableModel);
   if (several.length > 0) prompt += severalInstructions(several);
+  if (concatSplits.length > 0) prompt += concatSplitInstructions(concatSplits);
 
   prompt += buildSchemaFactsBlock(standard, schemaFacts, { limits });
   const carded = new Set((schemaFacts || []).map((f) => f.name));
@@ -674,6 +680,17 @@ OUTPUT: strict JSON, no comments:
 OUTPUT: strict JSON, no comments:
 {"examples": [{"label": "…", "expected": "accept", "schema": "${firstSchema}", ${fields.join(', ')}}]}`;
   return prompt;
+}
+
+// Formato del texto, Part 2: the only way to write a literal the rule
+// compares with a concat() of elements (each piece in its element).
+function concatSplitInstructions(splits) {
+  return `
+
+COMPOSED VALUES: the rule joins the text of several elements with concat()
+and compares the result with a value. Write each piece in its own element,
+exactly as split here (the schema's formats allow no other split):
+${splits.map((split) => `- ${concatSplitSentence(split)}`).join('\n')}`;
 }
 
 // Mejoras E, Part 1.4: what to write when no valid document can go against

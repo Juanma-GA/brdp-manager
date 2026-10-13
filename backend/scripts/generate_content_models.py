@@ -16,6 +16,13 @@ containers down to an element:
   text      whether the element can hold text (mixed content, simple
             content, or a simple / no type) -- where a minimal instance gets
             a "…" placeholder;
+  textFacets (Formato del texto, Part 1) for an element of simple content
+            (a simple type, or a complex type with simpleContent): the
+            facets of its type resolved through the restriction chain --
+            "patterns" (one per derivation step, all must match; several
+            xs:pattern of one step joined as (a)|(b)), "length",
+            "minLength", "maxLength" (the most derived wins) and
+            "enumeration". Left out when the type has none (xs:string & co.).
   max       (Mejoras G, Part 1.1) how many times each child can appear: a
             number or "unbounded". An upper bound, never less than a valid
             document admits: in a choice the largest of its branches, in a
@@ -206,6 +213,89 @@ def _max_counts(p) -> dict:
     return {name: _times(count, maximum) for name, count in own.items()}
 
 
+_LENGTH_FACETS = ("length", "minLength", "maxLength")
+
+
+def _collect_simple_facets(node, scope, out: dict, depth: int) -> None:
+    """Facets of a simpleType node (named or inline), most derived first."""
+    if node is None or depth > _MAX_DEPTH:
+        return
+    restriction = node.find(QN("restriction"))
+    if restriction is None:
+        return  # xs:list / xs:union: not modelled
+    _collect_restriction_facets(restriction, out)
+    inline = restriction.find(QN("simpleType"))
+    if inline is not None:
+        _collect_simple_facets(inline, scope, out, depth + 1)
+        return
+    base = restriction.get("base")
+    if base and not base.startswith("xs:"):
+        target, _is_redef = scope.lookup("simpleType", base.split(":", 1)[-1], frozenset())
+        _collect_simple_facets(target, scope, out, depth + 1)
+
+
+def _collect_restriction_facets(restriction, out: dict) -> None:
+    patterns = [p.get("value") for p in restriction.findall(QN("pattern")) if p.get("value") is not None]
+    if patterns:
+        out.setdefault("patterns", []).append(
+            patterns[0] if len(patterns) == 1 else "|".join(f"({p})" for p in patterns)
+        )
+    for facet in _LENGTH_FACETS:
+        node = restriction.find(QN(facet))
+        if node is not None and facet not in out:
+            out[facet] = int(node.get("value"))
+    values = [e.get("value") for e in restriction.findall(QN("enumeration"))]
+    if values and "enumeration" not in out:
+        out["enumeration"] = values
+
+
+def _complex_text_facets(type_node, scope, out: dict, depth: int) -> None:
+    """Facets of a complex type with simpleContent."""
+    if type_node is None or depth > _MAX_DEPTH:
+        return
+    simple = type_node.find(QN("simpleContent"))
+    if simple is None:
+        return
+    body = simple.find(QN("restriction"))
+    if body is None:
+        body = simple.find(QN("extension"))
+    if body is None:
+        return
+    if _local(body.tag) == "restriction":
+        _collect_restriction_facets(body, out)
+    base = body.get("base")
+    if not base or base.startswith("xs:"):
+        return
+    local = base.split(":", 1)[-1]
+    simple_target, _ = scope.lookup("simpleType", local, frozenset())
+    if simple_target is not None:
+        _collect_simple_facets(simple_target, scope, out, depth + 1)
+        return
+    complex_target, _ = scope.lookup("complexType", local, frozenset())
+    _complex_text_facets(complex_target, scope, out, depth + 1)
+
+
+def text_facets(element_node, scope) -> dict:
+    """The facets of an element's text (see module docstring); {} for none."""
+    out: dict = {}
+    inline_simple = element_node.find(QN("simpleType"))
+    inline_complex = element_node.find(QN("complexType"))
+    type_attr = element_node.get("type")
+    if inline_simple is not None:
+        _collect_simple_facets(inline_simple, scope, out, 0)
+    elif inline_complex is not None:
+        _complex_text_facets(inline_complex, scope, out, 0)
+    elif type_attr and not type_attr.startswith("xs:"):
+        local = type_attr.split(":", 1)[-1]
+        simple_target, _ = scope.lookup("simpleType", local, frozenset())
+        if simple_target is not None:
+            _collect_simple_facets(simple_target, scope, out, 0)
+        else:
+            complex_target, _ = scope.lookup("complexType", local, frozenset())
+            _complex_text_facets(complex_target, scope, out, 0)
+    return out
+
+
 def compute_model(element_node, scope) -> dict:
     order: list = []
     required: list = []
@@ -238,6 +328,9 @@ def compute_model(element_node, scope) -> dict:
         "text": text,
         "max": {name: ("unbounded" if maxima.get(name) is None else maxima[name]) for name in order if name in maxima},
     }
+    facets = text_facets(element_node, scope)
+    if facets:
+        model["textFacets"] = facets
     if not resolved:
         model["resolved"] = False
     return model
@@ -281,7 +374,7 @@ def main() -> None:
     payload = {
         "_readme": (
             "Auto-generated by backend/scripts/generate_content_models.py -- do not hand-edit. "
-            "Child order, required children, text and child maxima per element, grouped by schemas like the schema cards."
+            "Child order, required children, text, text facets and child maxima per element, grouped by schemas like the schema cards."
         ),
         "standard": standard,
         "mode": mode,

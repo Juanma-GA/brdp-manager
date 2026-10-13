@@ -669,3 +669,100 @@ def test_known_child_maxima():
     dita = get_standard_graph("DITA 1.3 Xpath2.0")["maxima"]
     assert dita["step"][0][1]["cmd"] == 1 and "info" not in dita["step"][0][1]
     assert get_standard_graph("S1000D 5.0").get("maxima", {}) == {}
+
+
+# ─── Formato del texto, Part 1 ──────────────────────────────────────────────
+# The facets of an element's text (pattern, length, enumeration), resolved
+# from the real XSD by generate_content_models.py and served per schema.
+
+
+def test_text_facets_of_the_3_0_1_code_elements():
+    m = schema_content_models("S1000D 3.0.1", "descript")
+    assert m["chapnum"]["textFacets"] == {"patterns": ["[A-Za-z0-9]{2,3}"]}
+    assert m["section"]["textFacets"] == {"patterns": ["[A-Za-z0-9]{1}"]}
+    assert m["subsect"]["textFacets"] == {"patterns": ["[A-Za-z0-9]{1}"]}
+    assert m["subject"]["textFacets"] == {"patterns": ["([A-Za-z0-9]{2}|[A-Za-z0-9]{4})"]}
+    assert m["incode"]["textFacets"] == {"patterns": ["[A-Za-z0-9]{3}"]}
+    # An element with no facets (xs:string, mixed content) has none.
+    assert "textFacets" not in m["techname"] and "textFacets" not in m["para"]
+    # 4.x codes are attributes: no element of the module schemas has facets.
+    assert not any("textFacets" in v for v in schema_content_models("S1000D 4.2", "descript").values())
+    assert not any("textFacets" in v for v in schema_content_models("DITA 1.3 Xpath2.0", "task").values())
+
+
+def _xsd_regex(pattern: str) -> str:
+    # The patterns of these schemas use no XSD-only syntax (\i, \c, class
+    # subtraction): a Python regex anchored as an XSD facet.
+    return f"(?:{pattern})"
+
+
+@pytest.mark.parametrize("standard", S1000D)
+def test_minimal_sections_meet_the_text_facets(standard):
+    """The application's own text in the minimal identification sections
+    meets the facets of its elements (the check never flags it anyway, but
+    a minimal section that broke them would not be valid)."""
+    import re
+
+    for schema in get_document_schemas(standard):
+        metadata = derive_metadata_skeleton(standard, schema)
+        if metadata is None:
+            continue
+        models = schema_content_models(standard, schema)
+        for node in _nodes(metadata["tree"]):
+            facets = models.get(node["name"], {}).get("textFacets")
+            if not facets or node.get("text") is None:
+                continue
+            for pattern in facets.get("patterns", []):
+                assert re.fullmatch(_xsd_regex(pattern), node["text"]), (standard, schema, node["name"], node["text"], pattern)
+
+
+@pytest.mark.asyncio
+async def test_structure_endpoint_serves_text_facets(client):
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "S1000D 3.0.1", "schema": "descript"}, headers=_headers(user)
+    )
+    assert res.status_code == 200
+    models = res.json()["models"]
+    assert models["chapnum"]["textFacets"] == {"patterns": ["[A-Za-z0-9]{2,3}"]}
+    # Left out (not null) on the elements without facets.
+    assert "textFacets" not in models["para"]
+
+
+def test_text_facets_generator_on_a_synthetic_schema(tmp_path):
+    """Restriction chains, several patterns in one step, length facets,
+    enumeration and simpleContent, from a small synthetic schema."""
+    import importlib.util
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    spec = importlib.util.spec_from_file_location(
+        "generate_content_models", Path(__file__).resolve().parents[1] / "scripts" / "generate_content_models.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    (tmp_path / "doc.xsd").write_text(
+        """<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="doc"><xs:complexType><xs:sequence>
+    <xs:element ref="code"/><xs:element ref="pair"/><xs:element ref="kind"/><xs:element ref="note"/><xs:element ref="plain"/>
+  </xs:sequence></xs:complexType></xs:element>
+  <xs:simpleType name="baseCode"><xs:restriction base="xs:string"><xs:pattern value="[A-Z]+"/><xs:maxLength value="9"/></xs:restriction></xs:simpleType>
+  <xs:simpleType name="codeType"><xs:restriction base="baseCode"><xs:pattern value="A.*"/><xs:maxLength value="4"/><xs:minLength value="2"/></xs:restriction></xs:simpleType>
+  <xs:element name="code" type="codeType"/>
+  <xs:element name="pair"><xs:simpleType><xs:restriction base="xs:string"><xs:pattern value="[0-9]{2}"/><xs:pattern value="[0-9]{4}"/></xs:restriction></xs:simpleType></xs:element>
+  <xs:element name="kind"><xs:simpleType><xs:restriction base="xs:string"><xs:enumeration value="a"/><xs:enumeration value="b"/><xs:length value="1"/></xs:restriction></xs:simpleType></xs:element>
+  <xs:element name="note"><xs:complexType><xs:simpleContent><xs:extension base="codeType"><xs:attribute name="x" type="xs:string"/></xs:extension></xs:simpleContent></xs:complexType></xs:element>
+  <xs:element name="plain" type="xs:string"/>
+</xs:schema>
+""",
+        encoding="utf-8",
+    )
+    models = module.build_models(module.build_scopes(tmp_path, "isolated"))["models"]
+    facets = {name: variants[0].get("textFacets") for name, variants in models.items()}
+    # Most derived first; every step's pattern kept; the most derived length wins.
+    assert facets["code"] == {"patterns": ["A.*", "[A-Z]+"], "maxLength": 4, "minLength": 2}
+    assert facets["pair"] == {"patterns": ["([0-9]{2})|([0-9]{4})"]}
+    assert facets["kind"] == {"length": 1, "enumeration": ["a", "b"]}
+    assert facets["note"] == facets["code"]
+    assert facets["plain"] is None and facets["doc"] is None
