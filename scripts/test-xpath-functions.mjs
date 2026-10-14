@@ -16,6 +16,8 @@ import { DOMParser } from '@xmldom/xmldom';
 import { NOT_PROVIDED, prepareXPath, setExtraParser } from '../src/utils/xpathExtraFunctions.js';
 import '../src/utils/ruleTestSchematron.js'; // dossier functions, analyze-string
 import { XPATH_LANGUAGE } from '../src/utils/ruleTestCommon.js';
+import { analyzeRule } from '../src/utils/ruleTestEngine.js';
+import { readTextFile } from './lib/textFile.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -165,6 +167,43 @@ check('prepareXPath: a call name inside a literal is not touched', prepareXPath(
 check('prepareXPath: array:sort and Q{…}sort are not touched', prepareXPath('array:sort([2, 1])') === 'array:sort([2, 1])');
 check('prepareXPath: replace#3 and tokenize#2 left to fontoxpath', prepareXPath("replace(., 'a', 'b')") === "replace(., 'a', 'b')" && prepareXPath("tokenize(., ',')") === "tokenize(., ',')");
 check("prepareXPath: replace#4 rewritten", /Q\{urn:x-brdp-manager:xpath\}replace\(/.test(prepareXPath("replace(., 'a', 'b', 'i')")));
+
+// Lentitud en DITA: the same expression always gives the same text, so
+// fontoxpath's cache (keyed by the text) compiles it once. Before, a global
+// counter numbered the variables of sort/for-each-pair/apply ($brdp_s1,
+// $brdp_s37…) and every call gave a new text.
+{
+  const nested = "sort((sort(('d','c')), sort(('b','a')), for-each-pair((1,2), (3,4), function($a, $b) { $a + $b }) ! string()))";
+  const first = prepareXPath(nested);
+  check('determinism: the same expression prepared twice gives the same text', prepareXPath(nested) === first, `${first}\n     ${prepareXPath(nested)}`);
+  prepareXPath("sort(('x'))");
+  check('determinism: preparing another expression in between changes nothing', prepareXPath(nested) === first);
+  const names = (text) => [...new Set(text.match(/\$brdp_[a-z]+\d+/g) || [])];
+  const sortNumbers = (text) => [...new Set((text.match(/\$brdp_s(\d+)/g) || []).map((n) => n.slice(7)))];
+  check('determinism: the names start again at 1 for every expression', sortNumbers(prepareXPath("sort(('b','a'))")).join() === '1', prepareXPath("sort(('b','a'))"));
+  check('nested and consecutive sort(): one number each (3 sort, distinct)', sortNumbers(first).length === 3, sortNumbers(first).join());
+  check('nested sort() inside sort(): distinct names', sortNumbers(prepareXPath("sort(sort(('b','a')))")).length === 2);
+  const numbersOf = (text) => [...new Set((text.match(/\$brdp_[a-z]+(\d+)/g) || []).map((n) => n.replace(/\D/g, '')))].sort();
+  check('four rewrites (three sort, one for-each-pair): numbers 1-4, one each', numbersOf(first).join() === '1,2,3,4', names(first).join(' '));
+  check('nested and consecutive sort(): same result as before', same(evaluate(nested), ['4', '6', 'a', 'b', 'c', 'd']), JSON.stringify(evaluate(nested)));
+  check('consecutive sort() with a key: same result as before', same(evaluate("(sort(('bb','a'), (), string-length#1), sort(('y','x')))"), ['a', 'bb', 'x', 'y']), JSON.stringify(evaluate("(sort(('bb','a'), (), string-length#1), sort(('y','x')))")));
+  check('apply#2 inside sort(): same result as before', same(evaluate("sort((apply(concat#2, ['b', 'z']), 'a'))"), ['a', 'bz']));
+  const plain = "//li[count(../li) ge 2] ! normalize-space(.)";
+  check('an expression without sort/for-each-pair/apply: text unchanged', prepareXPath(plain) === plain && prepareXPath(plain) === plain);
+
+  // analyzeRule of BRDP-EXT-00025 (Navantia fixture, the ditamap search with
+  // sort()): the second call reuses the compiled expressions.
+  const sch = readTextFile(new URL('./rule-test-fixtures/navantia-dita3-reconstructed.sch', import.meta.url));
+  const rule = sch.match(/<sch:pattern id="p-BRDP-EXT-00025"[\s\S]*?<\/sch:pattern>/)[0].replace('<sch:pattern', '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron"');
+  const analyze = () => analyzeRule(rule, 'SCH-DITA', { parseXml, standard: 'DITA 1.3 Xpath3.0' });
+  const t0 = performance.now();
+  const a1 = analyze();
+  const t1 = performance.now();
+  const a2 = analyze();
+  const t2 = performance.now();
+  check('EXT-00025: analyzeRule executable twice, same analysis', a1.status === 'executable' && JSON.stringify(a1) === JSON.stringify(a2), JSON.stringify(a2));
+  check(`EXT-00025: the second analyzeRule takes < 300 ms (first ${Math.round(t1 - t0)} ms, second ${Math.round(t2 - t1)} ms)`, t2 - t1 < 300);
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

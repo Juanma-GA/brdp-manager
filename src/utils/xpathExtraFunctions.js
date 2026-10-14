@@ -513,6 +513,11 @@ function callExtent(masked, open) {
 }
 
 const CALL_RE = /(?<![\w.$:\-}/@])(?:fn:)?(sort|replace|tokenize|for-each-pair|apply)\s*\(/g;
+// The number in the names of the variables a rewrite introduces. Distinct
+// within one expression (two sort() never share a name), and restarted for
+// every top-level expression (prepareXPath): the same expression always
+// gives the same text, so fontoxpath's cache -- keyed by the text -- reuses
+// the compiled expression instead of compiling it again on every call.
 let counter = 0;
 const v = (name) => `$brdp_${name}${counter}`;
 
@@ -557,8 +562,15 @@ function contextItemArgument(expression) {
 }
 
 // The expression ready for fontoxpath: the calls above rewritten (inside
-// out); everything else byte for byte.
+// out); everything else byte for byte. The same expression always gives the
+// same text (the variable numbering starts again here; the recursive calls
+// for the arguments go through rewriteExpression and continue it).
 export function prepareXPath(expression) {
+  counter = 0;
+  return rewriteExpression(expression);
+}
+
+function rewriteExpression(expression) {
   const text = contextItemArgument(String(expression ?? ''));
   if (!/(?:sort|replace|tokenize|for-each-pair|apply)\s*\(/.test(text)) return text;
   const masked = maskLiterals(text);
@@ -571,7 +583,7 @@ export function prepareXPath(expression) {
     if (!extent) break;
     const bounds = [open, ...extent.commas, extent.close];
     const inner = text.slice(open + 1, extent.close);
-    const args = inner.trim() === '' ? [] : bounds.slice(0, -1).map((b, j) => prepareXPath(text.slice(b + 1, bounds[j + 1])));
+    const args = inner.trim() === '' ? [] : bounds.slice(0, -1).map((b, j) => rewriteExpression(text.slice(b + 1, bounds[j + 1])));
     const rewritten = rewriteCall(m[1], args);
     out += text.slice(last, m.index) + (rewritten ?? `${text.slice(m.index, open + 1)}${args.join(',')})`);
     last = extent.close + 1;
