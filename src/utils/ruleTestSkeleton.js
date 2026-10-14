@@ -369,7 +369,7 @@ const decodeEntities = (text) =>
 // The @context of every Schematron rule (sch:rule, any prefix or none).
 const SCH_RULE_CONTEXT_RE = /<(?:[\w.-]+:)?rule\b[^>]*?\scontext\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 
-function schematronContexts(ruleXml) {
+export function schematronContexts(ruleXml) {
   const out = [];
   for (const m of String(ruleXml || '').matchAll(SCH_RULE_CONTEXT_RE)) out.push(decodeEntities(m[1] ?? m[2]));
   return out;

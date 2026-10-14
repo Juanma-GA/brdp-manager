@@ -35,6 +35,7 @@ import { informativeRule } from './ruleLint.js';
 import { namedByRuleOrProposal } from './exampleSchemaFixes.js';
 import { ownSectionConditions, sectionConditionText, withOwnSectionValues } from './ownSectionValues.js';
 import { dossierTitleRequirements, dossierTopicTitles, topicTitleConditions, withTopicTitle } from './topicTitleValue.js';
+import { rootTitleRequirement } from './rootContext.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
 // "review" result (the panel shows them all, from the rule itself).
@@ -383,6 +384,13 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
         ...ruleTargets(ruleXml),
         containNames: format && format.startsWith('BREX') ? documentExistenceNames(ruleXml, format, { parseXml, schemaLocation }) : [],
       };
+  // El contexto en la raíz, Part 1 (Navantia BRDP-EXT-00034): a context
+  // anchored at the root whose predicate asks the root's own <title> or
+  // @base something other than a literal -- the LLM writes that root, so
+  // the example is the whole document (a literal title the application
+  // writes itself, topicTitleValue.js).
+  const rootTitle = format === 'SCH-DITA' && !dossierRule ? rootTitleRequirement(ruleXml) : null;
+  if (rootTitle && !rootTitle.literal) targets.wholeDocument = true;
   // Part 2.2 (BRDP-EXT-00133): what a predicate requires to exist -- with a
   // single way to meet it -- must also be writable from the insertion point
   // (ancestor::dmodule[descendant::referencedApplicGroupRef]: inside
@@ -697,6 +705,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
     limits,
     several,
     concatSplits,
+    rootTitle,
     setup: { standard, schemaLocation, placements, keepBrexReference: ruleLooksAtBrexReference(ruleXml), tableModel: Boolean(tableModel), several, concatSplits },
   };
 }
@@ -1040,9 +1049,33 @@ export function danglingReferenceProblems(example, xml, run, references, parseXm
   return lines;
 }
 
+// El contexto en la raíz, Part 2: an example the rule does not apply to
+// (its root does not meet the rule's root-anchored contexts, run.
+// notApplicable) is a fault of the EXAMPLE. Reject examples go back to the
+// correction round with this line -- never the assert's test; accept
+// examples only when NONE of the accept examples that ran applies
+// (otherwise the test proves nothing about accepting).
+export function notApplicableProblem(notApplicable) {
+  const predicates = (notApplicable?.conditions || []).map((c) => c.predicate);
+  const root = notApplicable?.root || '*';
+  const meets = predicates.length > 1 ? `one of ${predicates.join(' or ')}` : predicates[0] || '';
+  return `This example must be a document the rule applies to: its root <${root}> must meet ${meets}.`;
+}
+
+function notApplicableAcceptIndices(examples, runs) {
+  const accepts = runs
+    .map((r, index) => ({ r, index }))
+    .filter(({ r, index }) => examples[index].expected === 'accept' && r.result && r.result.status !== 'not_executable' && r.result.status !== 'error');
+  if (accepts.length === 0 || accepts.some(({ r }) => !r.notApplicable)) return new Set();
+  return new Set(accepts.map(({ index }) => index));
+}
+
 export function exampleFailures(examples, materialized, runs, { ruleXml, standard, format = null, setup = null, parseXml = parseXmlDocument }) {
   const references = ruleTargets(ruleXml).references || [];
-  const withoutNode = new Set(acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false));
+  const notApplicableAccepts = notApplicableAcceptIndices(examples, runs);
+  const withoutNode = new Set(
+    acceptWithoutNodeIndices(examples, runs, format ? ruleRestrictsValues(ruleXml, format, parseXml) : false).filter((i) => !runs[i]?.notApplicable)
+  );
   const ruleNames = extractRuleNames(ruleXml);
   const keepArgs = [
     ruleXml,
@@ -1058,7 +1091,11 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
       // Mejoras E, Part 1.3: an example the schema already rules out is
       // never sent back -- correcting it would remove what breaks the rule.
       if (r.schemaCovered) return { index, label: examples[index].label, problems: [] };
-      const missing = r.validation.runnable ? missesRuleProblem(examples[index], r, ruleXml) : null;
+      const notApplicable =
+        r.validation.runnable && r.notApplicable && (examples[index].expected === 'reject' || notApplicableAccepts.has(index))
+          ? notApplicableProblem(r.notApplicable)
+          : null;
+      const missing = r.validation.runnable && !r.notApplicable ? missesRuleProblem(examples[index], r, ruleXml) : null;
       // Formato del texto, Part 2: a reject example the rule selects nothing
       // in, for a rule comparing a concat() of elements with a value that
       // splits only one way -- the split is said again.
@@ -1068,6 +1105,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
           : null;
       const problems = r.validation.runnable
         ? [
+            notApplicable,
             missing,
             splitLine,
             withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null,
@@ -1104,7 +1142,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
       // (a dossier's files too: their problems are in validation.files)
       const wraps = [...(r.validation.structure || []), ...(r.validation.files || []).flatMap((f) => f.validation?.structure || [])].some((p) => p.kind === 'notAllowed');
       const keepLine = problems.movesAttribute ? keepMoving : wraps ? keepWrapping : keep;
-      if (problems.length > 0 && !missing && keepLine && examples[index].expected === 'reject') problems.push(keepLine);
+      if (problems.length > 0 && !missing && !notApplicable && keepLine && examples[index].expected === 'reject') problems.push(keepLine);
       return { index, label: examples[index].label, problems };
     })
     .filter((f) => f.problems.length > 0);
@@ -1476,6 +1514,7 @@ export async function generateRuleTestExamples({
       several: prepared.several || [],
       concatSplits: prepared.concatSplits || [],
       warningRule,
+      rootTitle: prepared.rootTitle || null,
       dossier: dossierRule
         ? {
             mainPath: DOSSIER_MAIN_PATH,

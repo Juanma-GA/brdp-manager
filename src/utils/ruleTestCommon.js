@@ -208,3 +208,65 @@ export function nodeTestKind(step) {
   if (!m) return null;
   return m[1] || 'pi';
 }
+
+// ─── El contexto en la raíz (Test de reglas DITA) ───────────────────────────
+// The alternatives of a Schematron context, split at the top-level "|"
+// (outside quotes, predicates and parentheses).
+export function topLevelAlternatives(expression) {
+  const text = String(expression || '');
+  const out = [];
+  let depth = 0;
+  let quote = '';
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '[' || ch === '(') depth += 1;
+    else if (ch === ']' || ch === ')') depth -= 1;
+    else if (ch === '|' && depth === 0 && text[i + 1] !== '|' && text[i - 1] !== '|') {
+      out.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(text.slice(start));
+  return out.map((a) => a.trim()).filter(Boolean);
+}
+
+// The first step of an alternative anchored at the document's root with a
+// predicate on it ("/*[…]", "/topic[…][…]"):
+//   { root: '*' | name, predicates: [text], step: '/*[…]' } -- or null.
+export function rootAnchoredStep(alternative) {
+  const t = String(alternative || '').trim();
+  const m = /^\/(\*|[A-Za-z_][\w.-]*)\s*(?=\[)/.exec(t);
+  if (!m) return null;
+  const predicates = [];
+  let i = m[0].length;
+  while (t[i] === '[') {
+    let depth = 0;
+    let quote = '';
+    let j = i;
+    for (; j < t.length; j += 1) {
+      const ch = t[j];
+      if (quote) {
+        if (ch === quote) quote = '';
+        continue;
+      }
+      if (ch === "'" || ch === '"') quote = ch;
+      else if (ch === '[') depth += 1;
+      else if (ch === ']') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    if (j >= t.length) return null;
+    predicates.push(t.slice(i + 1, j));
+    i = j + 1;
+    while (t[i] === ' ') i += 1;
+  }
+  if (predicates.length === 0) return null;
+  return { root: m[1], predicates, step: `/${m[1]}${predicates.map((p) => `[${p}]`).join('')}` };
+}

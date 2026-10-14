@@ -25,7 +25,7 @@ import { readFileSync } from 'node:fs';
 import { readTextFile } from '../lib/textFile.mjs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { placementPlaces, ruleRequiredAttributes } from '../../src/utils/ruleTestRun.js';
+import { placementPlaces, prepareRuleTestSetup, ruleRequiredAttributes } from '../../src/utils/ruleTestRun.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { extractRuleNames } from '../../src/validation/schemaValidation.js';
 import { dossierLookExpressions, dossierSheetShapes } from '../../src/utils/ruleTestDossier.js';
@@ -1024,6 +1024,47 @@ ruleTestExamplesCases.push({
     },
   ],
 });
+
+// El contexto en la raíz: Navantia BRDP-EXT-00034 (real contexts,
+// /*[matches(… concat(@base, ' ', title) …)]) -- the rule applies only to
+// documents whose own <title> (or @base) meets the predicate, which is not
+// a literal, so the AI writes the title in the root of every example. The
+// placements come from prepareRuleTestSetup itself (a whole document).
+const ruleDitaRootContext = readTextFile(new URL('../rule-test-fixtures/navantia-dita3-reconstructed.sch', import.meta.url))
+  .match(/<sch:pattern id="p-BRDP-EXT-00034"[\s\S]*?<\/sch:pattern>/)[0]
+  .replace('<sch:pattern', '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron"');
+{
+  const DITA_TYPES = ['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'];
+  const ditaStructure = (schema) => realStructures[`DITA 1.3 Xpath2.0|${schema}`];
+  const setup = await prepareRuleTestSetup({
+    ruleXml: ruleDitaRootContext,
+    standard: 'DITA 1.3 Xpath3.0',
+    format: 'SCH-DITA',
+    schemaLocation: 'flat',
+    parseXml: xmldomParse,
+    fetchSchemaCards: async (_std, names) => ({
+      cards: {},
+      document_schemas: DITA_TYPES,
+      element_schemas: Object.fromEntries(names.map((n) => [n, DITA_TYPES.filter((t) => ditaStructure(t)?.elements[n])])),
+    }),
+    fetchStructure: async (_std, schema) => ({ available: true, ...ditaStructure(schema) }),
+  });
+  ruleTestExamplesCases.push({
+    name: 'dita-xpath3-root-context-ext-00034',
+    args: [
+      {
+        brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-00034', title: 'Campos de los registros de inspecciones', definition: 'Decidir qué campos llevan las tablas de los registros de inspecciones, pruebas y acciones.', proposal: 'Las tablas de los registros de inspecciones, pruebas y acciones llevan las columnas Fecha y Firma.' },
+        standard: 'DITA 1.3 Xpath3.0',
+        format: 'SCH-DITA',
+        ruleXml: ruleDitaRootContext,
+        placements: setup.promptPlacements,
+        schemaFacts: setup.schemaFacts,
+        matchExpressions: ruleMatchExpressions(ruleDitaRootContext),
+        rootTitle: setup.rootTitle,
+      },
+    ],
+  });
+}
 
 // Barrido final 1/2: a rule that looks at tables gets the model table built
 // from the first test schema's real structure, exactly as

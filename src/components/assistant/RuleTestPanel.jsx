@@ -7,7 +7,7 @@ import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
 import { dossierFileSelection } from '../../utils/ruleTestSchematron.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
-import { ANCESTOR_LIST_SHOWN, acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleStatement, formatRuleTestReason, formatThresholdMismatch, presencePathText } from '../../utils/ruleTestReasons.js';
+import { ANCESTOR_LIST_SHOWN, acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleStatement, formatRuleTestReason, formatThresholdMismatch, presencePathText, rootPredicateText } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
 import { formatSchemaIssue, nameIssues, structureIssues } from '../../validation/schemaValidation.js';
 import RuleLintWarnings from './RuleLintWarnings';
@@ -72,6 +72,10 @@ export function verdictView(t, verdict, standard) {
       // Remates: the skeleton causes the rejection.
       if (verdict.why === 'skeleton_placement') {
         return { tone: 'warn', text: t('records.ruleTest.verdicts.skeletonPlacement', { inside: verdict.inside, at: verdict.at }) };
+      }
+      // El contexto en la raíz: the rule applies to no example.
+      if (verdict.why === 'not_applicable') {
+        return { tone: 'warn', text: t(`records.ruleTest.verdicts.notApplicable_${verdict.which || 'all'}`, { predicate: rootPredicateText(verdict.conditions, t) }) };
       }
       return {
         tone: 'warn',

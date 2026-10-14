@@ -4339,6 +4339,51 @@
       ]
     },
     {
+      "id": "rule-test-navantia-dita3-root-context-ext-00034",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "El contexto en la raíz decide a qué documentos se aplica: Navantia BRDP-EXT-00034 (real contexts /*[matches(… concat(@base, ' ', title) …, 'registro de inspecciones, pruebas y acciones de (reparacion|reacondicionamiento) en taller / a bordo')]). The rule only applies to documents whose ROOT title says so. The real run: the prompt asked for a titled <section>, Mistral put the record title there and left the topic as 'Maintenance Procedures', the rule applied to no example and the verdict said the rule did not cover the decision. The simulator repeats that unless the prompt (or the correction round) says the title is the root's own.",
+      "brdp": {
+        "identifier": "BRDP-EXT-00034",
+        "title": "Campos obligatorios de los registros",
+        "definition": "Decidir qué campos son obligatorios en los registros de inspecciones, pruebas y acciones.",
+        "proposal": "Los registros de inspecciones, pruebas y acciones (en taller y a bordo) llevan siempre los campos Fecha y Firma.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-reconstructed.sch",
+        "pattern": "p-BRDP-EXT-00034"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "every example is a record (title in the root), so the rule applies and agrees with every example -- never 'the rule does not cover the decision'"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "^\\s*<(topic|task|concept|reference|troubleshooting)\\b[^>]*>\\s*<title>Registro de inspecciones, pruebas y acciones de (reparación|reacondicionamiento) (en taller|a bordo)</title>",
+          "note": "every reject example is a document the rule applies to: the record title is the root's own <title>"
+        },
+        {
+          "type": "rule_test_accept_examples_contain",
+          "pattern": "^\\s*<(topic|task|concept|reference|troubleshooting)\\b[^>]*>\\s*<title>Registro de inspecciones, pruebas y acciones de (reparación|reacondicionamiento) (en taller|a bordo)</title>",
+          "note": "every accept example too (otherwise the test proves nothing about accepting)"
+        }
+      ]
+    },
+    {
       "id": "rule-test-navantia-dita3-warning-ext-00012",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",

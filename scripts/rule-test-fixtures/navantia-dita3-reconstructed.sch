@@ -5,8 +5,9 @@
      the ditamap going up the folders with sort(uri-collection(...)) (00012 to
      00025, 00027, 00033, 00035), one with matches(..., 'i') (00010) and 8 that
      use neither. The ditamap search is the one quoted in the report; contexts
-     and asserts are plausible but invented, except the context of 00011,
-     which is the real one (its lets and assert are reconstructed). Used by
+     and asserts are plausible but invented, except the contexts of 00011
+     and 00034, which are the real ones (their lets and asserts are
+     reconstructed). Used by
      scripts/test-xpath-functions.mjs and scripts/test-rule-test-dossier.mjs. -->
 <sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt3">
   <sch:title>Navantia (reconstruido)</sch:title>
@@ -172,8 +173,15 @@
     </sch:rule>
   </sch:pattern>
   <sch:pattern id="p-BRDP-EXT-00034">
-    <sch:rule context="fig">
-      <sch:assert id="BRDP-EXT-00034" role="error" test="exists(title)">Toda figura lleva título.</sch:assert>
+    <sch:rule context="/*[matches(translate(lower-case(string(normalize-space(concat(@base, ' ', title)))), 'áéíóúüñ', 'aeiouun'), 'registro de inspecciones, pruebas y acciones de (reparacion|reacondicionamiento) en taller')]">
+      <sch:let name="campos" value=".//thead//entry ! lower-case(normalize-space(.))"/>
+      <sch:assert id="BRDP-EXT-00034a" role="error" test="$campos = 'fecha'">El registro de inspecciones, pruebas y acciones en taller no tiene el campo obligatorio «Fecha».</sch:assert>
+      <sch:assert id="BRDP-EXT-00034b" role="error" test="$campos = 'firma'">El registro de inspecciones, pruebas y acciones en taller no tiene el campo obligatorio «Firma».</sch:assert>
+    </sch:rule>
+    <sch:rule context="/*[matches(translate(lower-case(string(normalize-space(concat(@base, ' ', title)))), 'áéíóúüñ', 'aeiouun'), 'registro de inspecciones, pruebas y acciones de (reparacion|reacondicionamiento) a bordo')]">
+      <sch:let name="campos" value=".//thead//entry ! lower-case(normalize-space(.))"/>
+      <sch:assert id="BRDP-EXT-00034c" role="error" test="$campos = 'fecha'">El registro de inspecciones, pruebas y acciones a bordo no tiene el campo obligatorio «Fecha».</sch:assert>
+      <sch:assert id="BRDP-EXT-00034d" role="error" test="$campos = 'firma'">El registro de inspecciones, pruebas y acciones a bordo no tiene el campo obligatorio «Firma».</sch:assert>
     </sch:rule>
   </sch:pattern>
   <sch:pattern id="p-BRDP-EXT-00035">

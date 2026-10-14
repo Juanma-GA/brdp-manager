@@ -83,6 +83,8 @@ import {
   withoutPredicates,
   evaluationError,
   RuleRuntimeError,
+  rootAnchoredStep,
+  topLevelAlternatives,
 } from './ruleTestCommon.js';
 
 export const SCHEMATRON_FORMATS = ['SCH-DITA'];
@@ -771,6 +773,13 @@ export function schematronAcceptanceDetails(ruleXml, fragmentXml, options = {}) 
   } catch {
     return [];
   }
+  // El contexto en la raíz: a document the rule does not apply to -- the
+  // root does not meet the root-anchored contexts -- is the cause, never
+  // "the example has 1 /* and none meets the context".
+  const applicability = schematronRootApplicability(ruleXml, fragmentXml, options);
+  if (applicability && !applicability.applies) {
+    return [{ ruleId: null, flag: null, path: null, stripped: null, schematron: true, case: 'not_applicable', root: applicability.root, conditions: applicability.conditions }];
+  }
   const { patterns, globalLets, namespaces } = parseSchematron(ruleDoc.documentElement);
   activeParseXml = parseXml;
   setExtraParser(parseXml);
@@ -819,6 +828,71 @@ export function schematronAcceptanceDetails(ruleXml, fragmentXml, options = {}) 
     }
   }
   return out;
+}
+
+// ─── El contexto en la raíz decide a qué documentos se aplica ──────────────
+// Navantia BRDP-EXT-00034: every context of the rule is anchored at the
+// document's root with a predicate on that first step
+// (/*[matches(… title …)]): the rule only applies to documents whose root
+// meets it. Whether a document does is a fact about the EXAMPLE (it is not
+// a document the rule applies to), never about the decision.
+//   → null when some context of the rule is not such a context (or the
+//     rule cannot be read); else
+//     { applies, root: the document's root name, conditions: [{ root,
+//       predicate }] } -- applies: some document (the main one, or a file
+//     of the dossier) has a root that meets one of the root steps.
+export function schematronRootApplicability(ruleXml, fragmentXml, options = {}) {
+  const parseXml = options.parseXml || parseXmlDocument;
+  let doc;
+  let ruleDoc;
+  try {
+    doc = parseXml(String(fragmentXml || ''));
+    ruleDoc = parseRuleDoc(ruleXml, parseXml);
+    if (!doc?.documentElement) return null;
+  } catch {
+    return null;
+  }
+  const { patterns, globalLets, namespaces } = parseSchematron(ruleDoc.documentElement);
+  const checks = [];
+  for (const pattern of patterns) {
+    for (const rule of pattern.rules) {
+      if (rule.abstract || !rule.context) continue;
+      for (const alternative of topLevelAlternatives(collapse(rule.context))) {
+        const step = rootAnchoredStep(alternative);
+        if (!step) return null;
+        checks.push({ lets: [...globalLets, ...pattern.lets], step });
+      }
+    }
+  }
+  if (checks.length === 0) return null;
+  activeParseXml = parseXml;
+  setExtraParser(parseXml);
+  startDossier(doc, options.dossier, parseXml);
+  const docs = [doc];
+  for (const f of options.dossier?.files || []) {
+    const fileDoc = dossierDocument(dossierUri(f.path));
+    if (fileDoc && fileDoc !== doc) docs.push(fileDoc);
+  }
+  let applies = false;
+  for (const d of docs) {
+    const evaluate = makeEvaluator(d, namespaces);
+    for (const { lets, step } of checks) {
+      try {
+        if (evaluate(documentExpr(lets, step.step), d, 'nodes').length > 0) applies = true;
+      } catch {
+        // an expression that does not evaluate says nothing: not applicable
+        // only when none of the root steps selects the root
+      }
+      if (applies) break;
+    }
+    if (applies) break;
+  }
+  const conditions = [];
+  for (const { step } of checks) {
+    const predicate = step.predicates.map((p) => `[${p}]`).join('');
+    if (!conditions.some((c) => c.root === step.root && c.predicate === predicate)) conditions.push({ root: step.root, predicate });
+  }
+  return { applies, root: localName(doc.documentElement), conditions };
 }
 
 // "<name>" for a context's last step, "@name" for an attribute, or null.

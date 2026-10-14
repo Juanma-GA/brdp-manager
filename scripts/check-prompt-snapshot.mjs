@@ -559,6 +559,14 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // dita-xpath3-warning-dossier-title-ext-00012); new case
 // ruleTestExamples/dita-xpath3-dossier-cited-figures-ext-00014. Nothing else
 // changes (no S1000D prompt has a dossier).
+//
+// El contexto en la raíz: a Schematron DITA rule whose context is anchored
+// in the root with a predicate on the topic's own <title> (or @base) gets
+// "THE RULE DEPENDS ON A TITLE: the rule applies only to documents whose own
+// <title> (or @base) meets …" (the AI writes it) or, for a literal, the
+// application sets the root's title. New case
+// ruleTestExamples/dita-xpath3-root-context-ext-00034 (Navantia
+// BRDP-EXT-00034, real contexts); no existing case changes.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

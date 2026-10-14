@@ -137,7 +137,7 @@ import {
   evaluationError,
   RuleRuntimeError,
 } from './ruleTestCommon.js';
-import { analyzeSchematron, describeSchematron, runSchematronOnFragment, schematronAcceptanceDetails, schematronRuleParts, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
+import { analyzeSchematron, describeSchematron, runSchematronOnFragment, schematronAcceptanceDetails, schematronRootApplicability, schematronRuleParts, SCHEMATRON_FORMATS } from './ruleTestSchematron.js';
 import { checkRuleFormat, extractXPathNames } from '../validation/schemaValidation.js';
 import { wholeConcatComparison } from './concatSplit.js';
 
@@ -2019,7 +2019,16 @@ function conditionNamesIn(expression, doc) {
   return { names, present };
 }
 
+// El contexto en la raíz: whether the rule applies to the document at all
+// (Schematron only; null for a BREX rule or a rule with a context that is
+// not anchored at the root with a predicate).
+export function rootApplicability(ruleXml, format, fragmentXml, options = {}) {
+  if (!SCHEMATRON_FORMATS.includes(format)) return null;
+  return schematronRootApplicability(ruleXml, fragmentXml, options);
+}
+
 function schematronCause(d) {
+  if (d.case === 'not_applicable') return { code: 'cause_sch_not_applicable', params: { root: d.root } };
   if (d.case === 'missing') return { code: 'cause_missing', params: { target: d.target || d.stripped } };
   if (d.case === 'predicate') return { code: 'cause_sch_context', params: { amount: d.amount, target: d.target || d.stripped, context: d.path } };
   return null;

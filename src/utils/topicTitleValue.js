@@ -60,7 +60,9 @@ export function topicTitleConditions(ruleXml) {
         for (const operand of operands) {
           const values = titleValues(operand);
           if (values && values.length) {
-            out.push({ step: name, value: values[0], values, rest: steps.slice(1), expression: alternative.trim() });
+            // anchored: "/*[…]" / "/topic[…]" -- the step can only be the
+            // document's root (el contexto en la raíz).
+            out.push({ step: name, value: values[0], values, rest: steps.slice(1), expression: alternative.trim(), anchored: Boolean(absolute && first.sep === '/') });
           }
         }
       }
@@ -124,8 +126,11 @@ function restFits(elements, from, rest) {
 
 // { element, value } -- the title the application writes on the topic of
 // this placement -- or null. Only a placement where the application writes
-// the topic's title (placement.titled holds the root): a whole-document
-// placement has the LLM write it, as before.
+// the topic's title (placement.titled holds the root). A context anchored
+// at the document's root ("/*[title = 'X']", el contexto en la raíz) asks
+// the root itself whatever else could carry a title, and on a
+// whole-document placement the application writes it in the LLM's root
+// (materializeExample, setRootTitleText).
 export function topicTitleFor(structure, placement, conditions) {
   if (!conditions?.length || !structure?.elements) return null;
   const root = structure.skeleton?.path?.[0];
@@ -137,7 +142,7 @@ export function topicTitleFor(structure, placement, conditions) {
   for (const c of conditions) {
     if (c.step !== '*' && c.step !== root) continue;
     if (!restFits(elements, root, c.rest)) continue;
-    if (c.step === '*' && titledInside.some((n) => restFits(elements, n, c.rest))) continue;
+    if (c.step === '*' && !c.anchored && titledInside.some((n) => restFits(elements, n, c.rest))) continue;
     return { element: root, value: c.value };
   }
   return null;

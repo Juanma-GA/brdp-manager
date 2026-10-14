@@ -17,7 +17,7 @@
 //   / not executable / nothing runnable).
 // - xmlDisplayLines: the example re-indented, split into segments so the
 //   panel can highlight the nodes the rule selected and dim the skeleton.
-import { acceptanceDetails, documentPresenceTarget, nodePath, parseXmlDocument, runRuleOnFragment } from './ruleTestEngine.js';
+import { acceptanceDetails, documentPresenceTarget, nodePath, parseXmlDocument, rootApplicability, runRuleOnFragment } from './ruleTestEngine.js';
 import {
   addMissingCalsColspecs,
   checkAgainstVocabulary,
@@ -35,6 +35,7 @@ import {
 } from '../validation/schemaValidation.js';
 import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, metadataXml, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { setSectionValuesInDocument, setSectionValuesInText } from './ownSectionValues.js';
+import { setRootTitleText } from './topicTitleValue.js';
 import { placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence, wrapLooseContent } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
 import { applyExampleSchemaFixes, namedByRuleOrProposal } from './exampleSchemaFixes.js';
@@ -392,8 +393,15 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   }
   // Test de reglas DITA: the topic's title the rule asks for, written by
   // the application (placement.topicTitle) -- said on every example.
-  if (entry.placement.topicTitle) adjusted.topicTitleSet = entry.placement.topicTitle.value;
-  else delete adjusted.topicTitleSet;
+  // El contexto en la raíz: on a whole-document placement the LLM writes
+  // the root, and the application sets its <title> to the rule's value.
+  if (entry.placement.topicTitle) {
+    adjusted.topicTitleSet = entry.placement.topicTitle.value;
+    if (entry.placement.path.length === 0) {
+      const titled = setRootTitleText(adjusted.content, entry.placement.topicTitle.value);
+      if (titled != null) adjusted.content = titled;
+    }
+  } else delete adjusted.topicTitleSet;
   const { xml, skeletonNodePaths, insertionPath, rootAttributeProblems } = assembleExample({
     standard: setup.standard,
     schema,
@@ -1145,6 +1153,16 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
       (conditionMiss ||
         (result.selectedNodePaths.length === 0 && !(result.conditions?.length > 0) && acceptance.some((d) => d.case === 'predicate')))
   );
+  // El contexto en la raíz (Schematron DITA): a rule whose every context is
+  // anchored at the root with a predicate (BRDP-EXT-00034) only applies to
+  // documents whose root meets it. An example whose root does not is not a
+  // document the rule applies to -- a fault of the EXAMPLE, never of the
+  // rule: never case b, and the correction round / verdict say so.
+  const applicability =
+    format === 'SCH-DITA' && result.status === 'accepted' && (result.selectedNodePaths || []).length === 0
+      ? rootApplicability(ruleXml, format, example.xml, { parseXml, ...(dossier ? { dossier } : {}) })
+      : null;
+  const notApplicable = applicability && !applicability.applies ? { root: applicability.root, conditions: applicability.conditions } : null;
   const rejection = example.expected === 'accept' && result.status === 'rejected' ? rejectionDetails(example, result) : null;
   // Mejoras G, Part 2.4 d: "every document must contain <x>" -- what the
   // document lacks, never "it rejects /dmodule".
@@ -1164,8 +1182,9 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     matches,
     rejectedByBrexReference: rejectedByBrexReference(result),
     acceptance,
-    predicateMiss,
+    predicateMiss: notApplicable ? false : predicateMiss,
     rejection,
+    ...(notApplicable ? { notApplicable } : {}),
     ...(skeletonPlacement ? { skeletonPlacement } : {}),
   };
 }
@@ -1581,16 +1600,34 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
     ? examples.find((ex) => ex?.expected === 'reject' && ex.schemaLimit)?.schemaLimit || null
     : null;
   const inconclusive = (why) => (limitedReject ? { kind: 'inconclusive', why, schemaLimit: limitedReject } : { kind: 'inconclusive', why });
+  // El contexto en la raíz, Part 2: the rule applies only to documents whose
+  // root meets its root-anchored contexts (BRDP-EXT-00034). After the
+  // correction round, with no example meant to be rejected -- or none meant
+  // to be accepted -- that is such a document, the test says nothing about
+  // the decision: inconclusive, naming the condition, never "the rule does
+  // not cover the decision".
+  const notApplicableRun = runs.find((r) => r.notApplicable);
+  if (notApplicableRun) {
+    const applicable = (expected) => runs.some((r, i) => r.result && examples[i].expected === expected && !r.notApplicable);
+    const reject = applicable('reject');
+    const accept = applicable('accept');
+    if (!reject || !accept) {
+      const which = !reject && !accept ? 'all' : !reject ? 'reject' : 'accept';
+      return { kind: 'inconclusive', why: 'not_applicable', which, root: notApplicableRun.notApplicable.root, conditions: notApplicableRun.notApplicable.conditions };
+    }
+  }
   if (
     !runs.some((r) => r.predicateMiss) &&
     ran.every((r) => r.result.selectedNodePaths.length === 0 && !(r.result.conditions?.length > 0))
   ) return inconclusive('nothing_selected');
   const ranExpectations = new Set(runs.map((r, i) => (r.result ? examples[i].expected : null)).filter(Boolean));
-  const mismatches = runs.map((r, i) => (r.matches === false ? examples[i].expected : null)).filter(Boolean);
+  // A document the rule does not apply to is not a mismatch (el contexto en
+  // la raíz): the rule rightly says nothing about it.
+  const mismatches = runs.map((r, i) => (r.matches === false && !r.notApplicable ? examples[i].expected : null)).filter(Boolean);
   // Remates: every example that did not give what it expects was rejected
   // only because of where the application put its content (written one
   // level up, the rule accepts it) -- the test says nothing about the rule.
-  const mismatchRuns = runs.filter((r) => r.matches === false);
+  const mismatchRuns = runs.filter((r) => r.matches === false && !r.notApplicable);
   if (mismatchRuns.length > 0 && mismatchRuns.every((r) => r.skeletonPlacement)) {
     const { inside, at } = mismatchRuns[0].skeletonPlacement;
     return { kind: 'inconclusive', why: 'skeleton_placement', inside, at };

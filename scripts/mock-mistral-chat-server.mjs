@@ -1098,6 +1098,28 @@ function ruleTestReply(systemPrompt, messages) {
     // itself that title -- with the topic titled "Example topic" nothing
     // was selected; with the topic's title written by the app, the same
     // content is selected.
+    // El contexto en la raíz (Navantia BRDP-EXT-00034): the rule applies
+    // only to documents whose ROOT <title> (or @base) is the record's. The
+    // real run: Mistral puts the record title in a <section> and leaves the
+    // topic as "Maintenance Procedures" -- it only writes the title in the
+    // root when the prompt says the title is the root's own, or when the
+    // correction round says the example must be a document the rule
+    // applies to.
+    if (/registro de inspecciones, pruebas y acciones/.test(rule) && /context="\/\*\[/.test(rule)) {
+      // ROOTSTUBBORN in the Proposal: it never does, not even when corrected.
+      const told = !/ROOTSTUBBORN/.test(proposal) && (/write\s+that text in the topic's own <title>/.test(systemPrompt) || messages.some((m) => /must be a document the rule applies to/.test(m.content || "")));
+      const T = "Registro de inspecciones, pruebas y acciones de reparación en taller";
+      const table = (heads) => `<table><tgroup cols="${heads.length}">${heads.map((_, i) => `<colspec colname="c${i + 1}"/>`).join("")}<thead><row>${heads.map((h, i) => `<entry colname="c${i + 1}">${h}</entry>`).join("")}</row></thead><tbody><row>${heads.map((_, i) => `<entry colname="c${i + 1}">bomba de achique</entry>`).join("")}</row></tbody></tgroup></table>`;
+      const doc = (heads) =>
+        told
+          ? `<${ditaType} id="r1"><title>${T}</title><body><section>${table(heads)}</section></body></${ditaType}>`
+          : `<${ditaType} id="r1"><title>Maintenance Procedures</title><body><section><title>${T}</title>${table(heads)}</section></body></${ditaType}>`;
+      return answer([
+        { label: "Registro con Fecha y Firma", expected: "accept", schema: ditaType, content: doc(["Fecha", "Firma", "Resultado"]) },
+        { label: "Registro sin Fecha", expected: "reject", schema: ditaType, content: doc(["Firma", "Resultado"]) },
+        { label: "Registro sin Firma", expected: "reject", schema: ditaType, content: doc(["Fecha", "Resultado"]) },
+      ]);
+    }
     if (/LISTA DE REFERENCIAS CONSOLIDADAS/.test(rule) && /\/\/section\/\//.test(rule)) {
       const list = (...letters) => `<section><title>LISTA DE REFERENCIAS CONSOLIDADAS</title>${letters.map((l) => `<p>(${l}) Manual de mantenimiento de la bomba de achique, edición ${l.toUpperCase()}.</p>`).join("")}</section>`;
       return answer([

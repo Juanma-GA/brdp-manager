@@ -337,7 +337,11 @@ function placementLine(p, dita) {
     // <title> is mandatory, so the LLM writes it here.
     return `- ${kind} "${p.schema}": your content is the WHOLE document — the complete
   <${p.root}> root element with everything inside it.${
-      titled.includes(p.root) ? `
+      p.topicTitle?.element === p.root
+        ? `
+  <${p.root}> starts with its required <title>; the application sets it to
+  "${p.topicTitle.value}", the title the rule asks for.`
+        : titled.includes(p.root) ? `
   <${p.root}> starts with its required <title>.` : ''
     }${
       p.metadata ? `
@@ -391,12 +395,39 @@ export function ruleDependsOnTitle(matchExpressions = []) {
   return matchExpressions.some((e) => TITLE_DEPENDENT_RE.test(e));
 }
 
-function titleDependentInstructions(placements = []) {
+function titleDependentInstructions(placements = [], rootTitle = null) {
   // Test de reglas DITA: the title is the topic's own, written by the
   // application -- a <section> takes no other <section>, so asking for a
   // titled <section> around the checked content could never be met
   // (Navantia BRDP-EXT-00011).
-  const topic = placements.find((p) => p.role === 'rule' && p.topicTitle)?.topicTitle;
+  const rulePlacement = placements.find((p) => p.role === 'rule' && p.topicTitle);
+  const topic = rulePlacement?.topicTitle;
+  // El contexto en la raíz: the whole document is the LLM's, the
+  // application only sets its root's <title>.
+  if (topic && rulePlacement.insertion == null) {
+    return `
+
+THE RULE DEPENDS ON A TITLE: it only applies to documents whose own <title> is
+"${topic.value}". That title is the root's own: the application sets the
+<title> of your root element to it in every example, to accept AND to
+reject. Never give any other element that same title, and never put it in a
+<section>.`;
+  }
+  // El contexto en la raíz, Part 1: a root-anchored context whose predicate
+  // looks at the root's own <title> or @base with something other than a
+  // literal (matches, contains…) -- the LLM writes that text on the root of
+  // every example (Navantia BRDP-EXT-00034).
+  if (!topic && rootTitle && !rootTitle.literal) {
+    const own = rootTitle.title && rootTitle.base ? '<title> (or @base)' : rootTitle.base ? '@base' : '<title>';
+    const predicates = rootTitle.predicates.map((pr) => `  ${pr}`).join('\n');
+    return `
+
+THE RULE DEPENDS ON A TITLE: the rule applies only to documents whose own ${own}
+meets${rootTitle.predicates.length > 1 ? ' one of' : ''}:
+${predicates}
+Every example — to accept AND to reject — must be such a document: write
+that text in the topic's own ${own}. Never put it in a <section>.`;
+  }
   if (topic) {
     return `
 
@@ -651,6 +682,10 @@ export function buildRuleTestExamplesPrompt({
   // Reglas que solo avisan: every check of the rule is role="warning" /
   // "info" -- "reject" means "the rule must warn".
   warningRule = false,
+  // El contexto en la raíz, Part 1: rootTitleRequirement (utils/
+  // rootContext.js) -- the root's own <title> / @base the rule's root-
+  // anchored context asks for; null otherwise.
+  rootTitle = null,
 }) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
@@ -731,7 +766,9 @@ ${acceptOnly ? '' : `- The reject example goes against the decision in one clear
 - "label": a few words saying what the example shows.`;
 
   if (warningRule) prompt += warningRuleInstructions();
-  if (ruleDependsOnTitle(matchExpressions)) prompt += dossier ? dossierTitleInstructions(dossier) : titleDependentInstructions(placements);
+  if (dossier ? ruleDependsOnTitle(matchExpressions) : ruleDependsOnTitle(matchExpressions) || (rootTitle && !rootTitle.literal)) {
+    prompt += dossier ? dossierTitleInstructions(dossier) : titleDependentInstructions(placements, rootTitle);
+  }
   if (conditions.length > 0) prompt += conditionInstructions(conditions);
   if (tableModel) prompt += tableModelInstructions(tableModel);
   if (several.length > 0) prompt += severalInstructions(several);

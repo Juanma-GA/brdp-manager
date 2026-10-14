@@ -82,7 +82,7 @@ export const ENGINE_REASON_CODES = [
   'example_no_room', 'condition_no_schema', 'reference_no_schema', 'context_schema_unknown', 'test_schema_unavailable', 'minimal_document_unavailable',
   'section_value_unavailable', 'undeclared_known_prefix', 'undeclared_prefix',
 ];
-export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement'];
+export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement', 'test_not_applicable'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -97,6 +97,11 @@ export function formatRuleTestReason(reason, t) {
   if (reason.code === 'test_incorrect') {
     const which = params.permissive && params.strict ? 'both' : params.permissive ? 'permissive' : 'strict';
     return t(`records.ruleTest.reasons.test_incorrect.${which}`);
+  }
+  // El contexto en la raíz: which examples, and the root condition(s).
+  if (reason.code === 'test_not_applicable') {
+    const which = params.which === 'reject' || params.which === 'accept' ? t(`records.ruleTest.reasons.notApplicableWhich_${params.which}`) : '';
+    return t('records.ruleTest.reasons.test_not_applicable', { which, predicate: rootPredicateText(params.conditions, t) });
   }
   if (reason.code === 'test_threshold_mismatch') {
     return t('records.ruleTest.reasons.test_threshold_mismatch', { detail: formatThresholdMismatch(params, t) || '' });
@@ -157,6 +162,14 @@ export function formatRuleTestReason(reason, t) {
   return t(`records.ruleTest.reasons.${reason.code}`, { ...values, defaultValue: reason.code });
 }
 
+// The predicate(s) a root-anchored context asks of the document's root
+// (el contexto en la raíz): "[…]" or "[…] or […]", as written in the rule.
+export function rootPredicateText(conditions, t) {
+  const predicates = [...new Set((conditions || []).map((c) => c.predicate).filter(Boolean))];
+  if (predicates.length <= 1) return predicates[0] || '';
+  return `${predicates.slice(0, -1).join(', ')} ${t('records.assistant.listOr')} ${predicates[predicates.length - 1]}`;
+}
+
 // "<inlineapplics> can only go inside <idstatus>; …" in the language of `t`.
 export function coverageDetail(items, t) {
   return (items || []).map((item) => formatCoverageItem(item, t)).join('; ');
@@ -209,6 +222,11 @@ export function verdictToTestRecord(verdict) {
       // Remates: the rejection came from the skeleton, not from the rule.
       if (verdict.why === 'skeleton_placement') {
         return { result: 'inconclusive', reason: { code: 'test_skeleton_placement', params: { inside: verdict.inside, at: verdict.at } } };
+      }
+      // El contexto en la raíz: the rule applies to no example (or to none
+      // meant to be rejected / accepted).
+      if (verdict.why === 'not_applicable') {
+        return { result: 'inconclusive', reason: { code: 'test_not_applicable', params: { which: verdict.which || 'all', conditions: verdict.conditions || [] } } };
       }
       return {
         result: 'inconclusive',
@@ -408,6 +426,8 @@ export function formatAcceptCause(cause, t) {
       return k('valuesNotProhibited', p);
     case 'cause_sch_context':
       return k('schContext', p);
+    case 'cause_sch_not_applicable':
+      return k('schNotApplicable', p);
     case 'cause_condition': {
       // Remates B, Part 1, case b: the names the example contains, and the
       // condition (flag 0: false; flag 1: true) as it is in the example.

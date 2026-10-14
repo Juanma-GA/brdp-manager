@@ -405,13 +405,27 @@ function visit(expression, context, views, hooks, inQuantified = false) {
       hooks.onStep?.(step, cur);
       // A "*" step: its predicates are read from the elements that can be
       // it, given the rest of the path (starCandidates).
-      const readFrom = cur === null && step.main === '*' ? starCandidates(views, steps.slice(i + 1)) : cur;
+      let readFrom = cur === null && step.main === '*' ? starCandidates(views, steps.slice(i + 1)) : cur;
+      // El contexto en la raíz, Part 3 (Schematron DITA only): a step that
+      // is the document's root ("/*", "/topic") is read from the roots of
+      // the topic types, as starCandidates reads a "*" step -- a topic has
+      // one <title> (Navantia BRDP-EXT-00034: concat(@base, ' ', title) on
+      // /*). hooks.rootStepRoots is set only for SCH-DITA.
+      if (hooks.rootStepRoots && absolute && i === 0 && step.sep === '/' && step.main === '*') readFrom = hooks.rootStepRoots;
       for (const pred of step.predicates) {
         if (POSITIONAL_RE.test(pred)) continue;
         visit(pred, readFrom, views, hooks, inQuantified);
       }
     });
   }
+}
+
+// El contexto en la raíz, Part 3/4: the roots a "/*" step is read from --
+// Schematron DITA only (BREX never changes).
+function rootStepHooks(format, views) {
+  if (!SCHEMATRON_FORMATS.has(format)) return {};
+  const roots = [...new Set(views.flatMap((v) => v.roots || []))];
+  return roots.length ? { rootStepRoots: roots } : {};
 }
 
 // ─── Part 1.5: text functions over paths that can give several nodes ──────
@@ -424,6 +438,7 @@ export function textFunctionWarnings(ruleXml, format, graph, options = {}) {
     const views = viewsFromGraph(graph, item.schema ? [item.schema] : null);
     if (views.length === 0) return [];
     visit(item.expression, item.context, views, {
+      ...rootStepHooks(format, views),
       onText: (fn, argument, info) => {
         const arg = argument.replace(/\s+/g, ' ').trim();
         if (!out.some((w) => w.fn === fn && w.argument === arg)) {
@@ -455,6 +470,7 @@ export function repeatingComparisons(ruleXml, format, views, options = {}) {
   const out = [];
   for (const item of ruleExpressions(ruleXml, format, options)) {
     visit(item.expression, item.context, views, {
+      ...rootStepHooks(format, views),
       onCompare: (path, info) => {
         const element = info.repeating || (info.node?.startsWith('<') ? info.node.slice(1, -1) : null);
         if (element && !out.some((r) => r.element === element)) out.push({ path: path.replace(/\s+/g, ' ').trim(), element, parent: info.repeatingParent || null });
