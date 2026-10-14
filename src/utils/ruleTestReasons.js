@@ -332,12 +332,18 @@ export function presencePathText(names, t) {
   return text;
 }
 
-// → { lines: [text], cannotReject } | null when the rule cannot be described.
+// → { lines: [text], cannotReject, warningOnly } | null when the rule
+// cannot be described. warningOnly (reglas que solo avisan): the sentence
+// that replaces "cannot reject" for a Schematron rule whose checks are all
+// role="warning"/"info".
 export function formatRuleDescription(description, t) {
   if (!description?.available) return null;
   return {
     lines: description.statements.map((s) => formatRuleStatement(s.statement, s.schemas, t)),
     cannotReject: description.cannotReject,
+    warningOnly: description.warningOnly
+      ? t('records.ruleTest.describe.warningOnly', { role: (description.warningRoles || ['warning']).map((r) => `role=${r}`).join(', ') })
+      : null,
   };
 }
 
@@ -347,6 +353,7 @@ export function ruleDescriptionText(description, t) {
   if (!formatted) return '';
   const lines = formatted.lines.map((l) => `- ${l}`);
   if (formatted.cannotReject) lines.push(`- ${t('records.ruleTest.describe.cannotReject')}`);
+  if (formatted.warningOnly) lines.push(`- ${formatted.warningOnly}`);
   return lines.join('\n');
 }
 

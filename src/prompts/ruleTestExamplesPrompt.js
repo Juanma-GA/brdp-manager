@@ -419,6 +419,49 @@ Never put that title on the checked element itself (never <table><title>…),
 and never rely on the topic's own title.`;
 }
 
+// Reglas que solo avisan (Navantia BRDP-EXT-00012, "Da aviso (warning, no
+// error)"): the rule never rejects a document, it warns -- the application
+// judges each example as WARNS / DOES NOT WARN, with the same "expected".
+function warningRuleInstructions() {
+  return `
+
+THE RULE ONLY WARNS: its assert/report have role="warning" (or "info"), so
+it never rejects a document — it gives a warning. Here "expected": "reject"
+means "the rule must give its warning" and "expected": "accept" means "the
+rule must give no warning":
+- the reject example goes against the decision, so the warning must appear;
+- the accept example follows the decision (or is a case the decision exempts),
+  so no warning must appear.`;
+}
+
+// Fichas del dosier (reglas que solo avisan, Part 2): in a dossier the LLM
+// writes every file whole, so the title a rule looks for goes in the files.
+// dossier.titles: dossierTitleRequirements (utils/topicTitleValue.js) --
+// where that title can go in each topic type, read from its structure.
+// Without it, the generic sentence (the old block told the LLM never to rely
+// on the topic's own title, which is wrong for a file the LLM writes whole).
+function dossierTitleInstructions(dossier) {
+  const titles = dossier?.titles;
+  const value = titles?.values?.length > 1 ? `one of ${titles.values.map((v) => `"${v}"`).join(', ')}` : titles ? `"${titles.value}"` : 'the one the rule asks for';
+  const checked = titles?.checked ? ` (<${titles.checked}>)` : '';
+  const ways = (titles?.ways || []).map((w) => {
+    const options = [w.topic ? `the <${w.root}> itself (its own <title>, its first child)` : null, ...w.inside.map((p) => p.join('/'))].filter(Boolean);
+    return `- in a ${w.type} file: ${options.join(', or ')}`;
+  });
+  const appWrites = Object.entries(dossier?.topicTitles || {}).map(([type]) => type);
+  return `
+
+THE RULE DEPENDS ON A TITLE: it only runs on content under an element whose
+<title> is ${value}. In the files, that element can be:
+${ways.length ? ways.join('\n') : '- the file\'s own topic (its <title>), or an element of its type that takes a <title>'}
+Put the checked content${checked} inside that element, and write the title
+exactly as the rule writes it, only where the file's type allows a <title>.
+Each file is checked against its own type: never use an element its type
+does not allow there.${appWrites.length ? `
+The application writes that title as the topic's <title> of the ${appWrites.join(', ')} files that
+contain the checked content.` : ''}`;
+}
+
 // Plantillas, Part 4: a BREX path that is a true/false condition
 // (s1kd-brexcheck's boolean objectPath) is judged on the whole document --
 // say which condition each example has to meet or avoid, and the names it
@@ -583,6 +626,9 @@ export function buildRuleTestExamplesPrompt({
   // rule compares with a concat() of elements that can be split only one
   // way (uniqueConcatSplits).
   concatSplits = [],
+  // Reglas que solo avisan: every check of the rule is role="warning" /
+  // "info" -- "reject" means "the rule must warn".
+  warningRule = false,
 }) {
   // T4: a DITA Schematron rule -- topic types instead of schemas, naval or
   // aircraft content, and no S1000D reference elements.
@@ -662,7 +708,8 @@ ${acceptOnly ? '' : `- The reject example goes against the decision in one clear
 `}- No customer data, no real manufacturer names, part numbers or CAGE codes.
 - "label": a few words saying what the example shows.`;
 
-  if (ruleDependsOnTitle(matchExpressions)) prompt += titleDependentInstructions(placements);
+  if (warningRule) prompt += warningRuleInstructions();
+  if (ruleDependsOnTitle(matchExpressions)) prompt += dossier ? dossierTitleInstructions(dossier) : titleDependentInstructions(placements);
   if (conditions.length > 0) prompt += conditionInstructions(conditions);
   if (tableModel) prompt += tableModelInstructions(tableModel);
   if (several.length > 0) prompt += severalInstructions(several);

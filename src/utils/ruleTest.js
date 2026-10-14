@@ -298,7 +298,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   // Dosier, Part 2: the other files of the example's dossier, each with the
   // same fixes and the structure of its own type.
   const dossier = setup.dossier
-    ? { mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: materializeDossierFiles(example.files || [], setup.dossier.structures, parseXml, { named }) }
+    ? { mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: materializeDossierFiles(example.files || [], setup.dossier.structures, parseXml, { named, topicTitles: setup.dossier.topicTitles || null, checked: setup.dossier.titles?.checked || null }) }
     : null;
   // Remates: the levels above the insertion point where the content could
   // be written instead (skeletonLiftLevels) -- only for the diagnosis of an
@@ -751,7 +751,55 @@ export function nearbyCarriersLine(problem, nearby, structure) {
   return lines.join(' ');
 }
 
-export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [], relationWays = [], innerWays = [], namedAttribute = null, structure = null } = {}) {
+// Fichas del dosier, Part 2: (element) → the sentence that says where it
+// goes in a file of this type, or null. The title the rule looks for gets
+// the ways dossierTitleRequirements found for the type; any other element
+// of the rule, its shortest way from the file's root (through the topic's
+// body when it can).
+function wayFromRoot(elements, root, body, target) {
+  const bfs = (from) => {
+    if (from === target) return [from];
+    const previous = new Map([[from, null]]);
+    const queue = [from];
+    while (queue.length) {
+      const name = queue.shift();
+      for (const child of elements[name]?.children || []) {
+        if (previous.has(child) || !elements[child]) continue;
+        previous.set(child, name);
+        if (child === target) {
+          const path = [target];
+          for (let x = name; x; x = previous.get(x)) path.unshift(x);
+          return path;
+        }
+        queue.push(child);
+      }
+    }
+    return null;
+  };
+  const viaBody = body && (elements[root]?.children || []).includes(body) ? bfs(body) : null;
+  return viaBody ? [root, ...viaBody] : bfs(root);
+}
+
+function dossierFileWay(structure, type, ruleElements, titles) {
+  const elements = structure?.elements;
+  if (!elements || !type) return null;
+  const root = structure.skeleton?.path?.[0] || type;
+  const body = structure.skeleton?.path?.[1] || null;
+  return (element) => {
+    if (element === 'title' && titles) {
+      const w = (titles.ways || []).find((x) => x.type === type);
+      if (!w) return null;
+      const options = [w.topic ? `on the file's own <${w.root}> (its <title>, first child)` : null, ...w.inside.map((p) => `on ${p.join('/')}`)].filter(Boolean);
+      const checked = titles.checked ? `, with the checked content (<${titles.checked}>) inside it` : '';
+      return `The title the rule looks for ("${titles.value}") goes ${options.join(', or ')}${checked}.`;
+    }
+    if (!ruleElements.has(element)) return null;
+    const path = wayFromRoot(elements, root, body, element);
+    return path && path.length > 1 ? `In a ${type} file, <${element}> goes this way: ${path.join('/')}.` : null;
+  };
+}
+
+export function exampleProblems(validation, { standard, schema, ruleNames = null, nestings = [], expected = null, tableModel = false, sectionTree = null, sectionRoutes = [], places: rulePlaces = [], carriers = [], rootAttributes = [], relationWays = [], innerWays = [], namedAttribute = null, structure = null, dossierTitles = null, fileWay = null } = {}) {
   const places = sectionTree ? minimalSectionPlaces(sectionTree) : null;
   // GMC, Part 1.3: an attribute given for the root is never "markup of an
   // element the rule does not name": no plain-text hint for it.
@@ -779,6 +827,14 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     );
   }
   for (const p of validation.structure || []) {
+    // Fichas del dosier, Part 2: in a dossier file, an element of the rule
+    // (or the title the rule looks for) put where the file's type does not
+    // allow it -- the valid way from the file's root, read from its type.
+    const way = fileWay && p.kind === 'notAllowed' ? fileWay(p.element) : null;
+    if (way) {
+      out.push(`${formatStructureProblem(p, schema)}. ${way}`);
+      continue;
+    }
     // Caminos de la sección, Part 1: an element on the way the rule's own
     // steps take through the section the LLM writes, put where the schema
     // does not allow it -- the same way(s) as the prompt (EXT-00188:
@@ -845,7 +901,15 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
   for (const p of validation.dossierProblems || []) out.push(dossierProblemText(p));
   for (const f of validation.files || []) {
     if (f.validation.runnable) continue;
-    const lines = exampleProblems(f.validation, { standard, schema: f.schema, ruleNames, tableModel, namedAttribute, structure: f.structure || null });
+    const lines = exampleProblems(f.validation, {
+      standard,
+      schema: f.schema,
+      ruleNames,
+      tableModel,
+      namedAttribute,
+      structure: f.structure || null,
+      fileWay: dossierFileWay(f.structure || null, f.schema, ruleElements, dossierTitles),
+    });
     for (const line of lines) out.push(`file "${f.path}": ${line}`);
     if (lines.movesAttribute) out.movesAttribute = true;
   }

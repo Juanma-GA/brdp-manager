@@ -62,7 +62,22 @@ function proposalVsRuleBlock(lists) {
 If no element named as allowed by the Proposal is forbidden by the rule, the rule implements an "only these" decision: answer "yes" (or "partly" if the list looks incomplete), never "no".`;
 }
 
-export function buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes = [], proposalVsRule = null }) {
+// Reglas que solo avisan: a Schematron rule whose checks are all
+// role="warning"/"info" never rejects -- its warnings are what to judge. Only
+// these rules get the block; every other prompt is unchanged.
+function warningRuleBlock(warningRule) {
+  if (!warningRule) return '';
+  return `
+
+THE RULE ONLY WARNS: its checks have role="warning" (or "info"): it never
+rejects a document, it gives a warning. Judge what it warns about as if it
+were what it rejects. When the Proposal says the case gives a warning (a
+"warning", an "aviso", "avisar"…) or only asks to flag it, a rule that warns
+on that case implements it: "yes". That the rule does not reject the
+document is never a reason for "partly" or "no".`;
+}
+
+export function buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes = [], proposalVsRule = null, warningRule = false }) {
   return `You check whether one ${standard} business rule implements the decision of
 its BRDP. You never write or fix anything.
 
@@ -75,7 +90,7 @@ What the rule checks (computed by the application from its XML — exact):
 ${ruleDescription}
 
 The rule (${format}):
-${ruleXml}${ruleValueLegend(ruleXml)}${requiredAttributesBlock(requiredAttributes)}${proposalVsRuleBlock(proposalVsRule)}
+${ruleXml}${ruleValueLegend(ruleXml)}${requiredAttributesBlock(requiredAttributes)}${proposalVsRuleBlock(proposalVsRule)}${warningRuleBlock(warningRule)}
 
 HOW TO DECIDE — answer one of three levels:
 - "yes": what the rule rejects is what the Proposal decides: what the

@@ -500,8 +500,14 @@ const ETYPE = '<structureObjectRule id="BRDP-S1-00070"><objectPath allowedObject
 
   const warnRule = NOTE.replace('role="error"', 'role="warning"');
   const warnRun = testRun(warnRule, examples, setupFor(DITA, warnRule, ['topic']), { format: 'SCH-DITA', vocab: vocabDita });
-  check('T4 run: role="warning" never rejects', warnRun.runs[1].result.status === 'accepted' && warnRun.runs[1].result.warnings.length === 1);
-  check('  so the reject example is not met', warnRun.verdict.kind === 'incorrect');
+  // A rule whose checks all only warn: the test judges whether it warns
+  // (expected reject = it must warn), so the same examples give Correct.
+  check('T4 run: warning rule warns on the reject example', warnRun.runs[1].result.status === 'rejected' && warnRun.runs[1].result.warningRule === true && warnRun.runs[1].result.violations.length === 1, JSON.stringify(warnRun.runs[1].result));
+  check('  and does not warn on the accept example', warnRun.runs[0].result.status === 'accepted' && warnRun.runs[0].result.warningRule === true);
+  check('  so the warning rule is Correct', warnRun.verdict.kind === 'correct', JSON.stringify(warnRun.verdict));
+  const infoRule = NOTE.replace('role="error"', 'role="info"');
+  const infoRun = testRun(infoRule, examples, setupFor(DITA, infoRule, ['topic']), { format: 'SCH-DITA', vocab: vocabDita });
+  check('T4 run: role="info" the same as warning', infoRun.verdict.kind === 'correct' && infoRun.runs[1].result.warningRule === true, JSON.stringify(infoRun.verdict));
 
   const prompt = buildRuleTestExamplesPrompt({
     brdp: { identifier: 'BRDP-D1-00001', title: 'Note types', definition: 'Notes declare their type.', proposal: 'Every note declares @type.' },

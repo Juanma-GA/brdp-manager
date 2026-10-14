@@ -26,15 +26,19 @@
   <sch:pattern id="p-BRDP-EXT-00012">
     <sch:let name="yo" value="base-uri()"/>
     <sch:let name="mapas" value="for $mC in (for $n in 1 to count(tokenize($yo, '/')) - 1 return string-join(subsequence(tokenize($yo, '/'), 1, count(tokenize($yo, '/')) - $n), '/') || '/')[matches(., '^file:/+[A-Za-z]:/.+/$|^file:/+[^:]+/.+/$')], $mU in sort(uri-collection($mC)[matches(., '\.ditamap$', 'i')]) return (if (doc-available($mU)) then doc($mU) else ())[some $mE in .//*[@href][not(@scope = 'external')] satisfies resolve-uri(substring-before(concat($mE/@href, '#'), '#'), base-uri($mE)) = $yo]"/>
-    <sch:rule context="topic/title">
-      <sch:assert id="BRDP-EXT-00012" role="error" test="exists($mapas)">La ficha no está referenciada desde ningún ditamap del dosier.</sch:assert>
+    <sch:rule context="row[not(parent::thead)][ancestor::*[normalize-space(title) = 'LISTA DE MATERIAL OBLIGATORIO']]">
+      <sch:let name="item" value="normalize-space(entry[1])"/>
+      <sch:let name="texto" value="string-join(ancestor::*[last()]//(cmd | p)[not(ancestor::table)] ! normalize-space(.), ' ')"/>
+      <sch:assert id="BRDP-EXT-00012" role="warning" test="empty($mapas) or $item = '' or contains(lower-case($texto), lower-case($item)) or matches(normalize-space(entry[last()]), '^exento$', 'i')">Da aviso (warning, no error): el material «<sch:value-of select="$item"/>» de la lista de material obligatorio no se nombra en ningún paso de la ficha.</sch:assert>
     </sch:rule>
   </sch:pattern>
   <sch:pattern id="p-BRDP-EXT-00013">
     <sch:let name="yo" value="base-uri()"/>
     <sch:let name="mapas" value="for $mC in (for $n in 1 to count(tokenize($yo, '/')) - 1 return string-join(subsequence(tokenize($yo, '/'), 1, count(tokenize($yo, '/')) - $n), '/') || '/')[matches(., '^file:/+[A-Za-z]:/.+/$|^file:/+[^:]+/.+/$')], $mU in sort(uri-collection($mC)[matches(., '\.ditamap$', 'i')]) return (if (doc-available($mU)) then doc($mU) else ())[some $mE in .//*[@href][not(@scope = 'external')] satisfies resolve-uri(substring-before(concat($mE/@href, '#'), '#'), base-uri($mE)) = $yo]"/>
-    <sch:rule context="row">
-      <sch:assert id="BRDP-EXT-00013" role="error" test="empty($mapas) or count(entry) ge 1">Fila sin celdas en una ficha del dosier.</sch:assert>
+    <sch:rule context="row[not(parent::thead)][ancestor::*[normalize-space(title) = 'LISTA DE HERRAMIENTAS ESPECIALES']]">
+      <sch:let name="item" value="normalize-space(entry[1])"/>
+      <sch:let name="texto" value="string-join(ancestor::*[last()]//(cmd | p)[not(ancestor::table)] ! normalize-space(.), ' ')"/>
+      <sch:assert id="BRDP-EXT-00013" role="warning" test="empty($mapas) or $item = '' or contains(lower-case($texto), lower-case($item)) or matches(normalize-space(entry[last()]), '^exento$', 'i')">Da aviso (warning, no error): la herramienta «<sch:value-of select="$item"/>» de la lista de herramientas especiales no se nombra en ningún paso de la ficha.</sch:assert>
     </sch:rule>
   </sch:pattern>
   <sch:pattern id="p-BRDP-EXT-00014">

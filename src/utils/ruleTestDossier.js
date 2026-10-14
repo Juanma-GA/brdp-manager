@@ -21,6 +21,7 @@ import { DOSSIER_BASE_URI, DOSSIER_MAX_FILES, dossierUri } from './ruleTestSchem
 import { addMissingCalsColspecs, fixCalsRowSpans, removeSpannedCalsEntries } from '../validation/schemaValidation.js';
 import { relocateMisplacedElements } from './schemaPlacement.js';
 import { applyExampleSchemaFixes } from './exampleSchemaFixes.js';
+import { setRootTitleText } from './topicTitleValue.js';
 
 export { DOSSIER_MAX_FILES };
 // The ditamap's path inside the dossier folder (the main document).
@@ -63,7 +64,12 @@ export async function loadDossierStructures(standard, fetchStructure) {
 // files: [{ path, content }] as the LLM wrote them →
 // [{ path, content, xml, schema, root, structure, colspecsAdded, colsRaised,
 //    morerowsLowered, emptyRowsRemoved, spannedEntriesRemoved, relocated }]
-export function materializeDossierFiles(files, structures, parseXml, { named = null } = {}) {
+// topicTitles (fichas del dosier, Part 2): { [type]: title } -- the types
+// where only the file's topic can carry the title the rule looks for
+// (topicTitleValue.js dossierTopicTitles): a file of that type that contains
+// the checked element (`checked`, or any file when null) gets it as its
+// topic's <title> (topicTitleSet), as the assembled document does.
+export function materializeDossierFiles(files, structures, parseXml, { named = null, topicTitles = null, checked = null } = {}) {
   return (files || []).map((file) => {
     // Test de reglas: lo que la app puede arreglar sola (exampleSchemaFixes.js),
     // before the table fixes (as in a document example); the file's type comes
@@ -78,6 +84,15 @@ export function materializeDossierFiles(files, structures, parseXml, { named = n
     const schema = root && DOSSIER_FILE_TYPES.includes(root) ? root : null;
     const structure = schema ? structures?.[schema] || null : null;
     let content = fixed;
+    let topicTitleSet = null;
+    const wanted = schema ? topicTitles?.[schema] : null;
+    if (wanted && (!checked || new RegExp(`<${checked}[\\s/>]`).test(content))) {
+      const titled = setRootTitleText(content, wanted);
+      if (titled != null && titled !== content) {
+        content = titled;
+        topicTitleSet = wanted;
+      }
+    }
     let relocated = [];
     if (structure?.models) {
       const moved = relocateMisplacedElements(content, structure, null);
@@ -102,6 +117,7 @@ export function materializeDossierFiles(files, structures, parseXml, { named = n
       emptyRowsRemoved: rowSpans.emptyRowsRemoved,
       spannedEntriesRemoved: removedRows,
       ...(relocated.length ? { relocated } : {}),
+      ...(topicTitleSet ? { topicTitleSet } : {}),
     };
   });
 }

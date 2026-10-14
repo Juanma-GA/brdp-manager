@@ -599,6 +599,39 @@ function notExecutable(r) {
   return { status: 'not_executable', violations: [], warnings: [], selectedNodePaths: [], notExecutableReason: r, notExecutableParts: [], outOfScopeSchemas: [] };
 }
 
+// Test de reglas DITA: reglas que solo avisan. A rule whose executable
+// assert/report are ALL role="warning" or role="info" (constant checks,
+// which never fire, aside) is a "warning rule": it never rejects a
+// document, it warns (Navantia BRDP-EXT-00012, "Da aviso (warning, no
+// error)"). Its test is judged as WARNS / DOES NOT WARN: the engine gives
+// such a rule "rejected" when a warning fires and "accepted" when none does,
+// with the warnings as its `violations` and `warningRule: true` -- so the
+// verdict, the causes, the record and a saved test work as for any rule,
+// and only the words change (utils/ruleTestReasons.js, RuleTestPanel).
+// A rule with any check that can reject (role error, fatal, none…) is not
+// one: its warnings never reject, as before.
+// → { warningRule, roles: ['warning' | 'info'] }
+function warningOnlyRule(patterns, globalLets, globalUnsupported, namespaces) {
+  const roles = new Set();
+  for (const pattern of patterns) {
+    try {
+      staticChecks(pattern, globalLets, globalUnsupported);
+    } catch (err) {
+      if (!(err instanceof NotExecutable)) throw err;
+      continue; // a pattern the engine cannot run says nothing here
+    }
+    const lets = [...globalLets, ...pattern.lets];
+    for (const rule of pattern.rules.filter((r) => !r.abstract)) {
+      for (const check of rule.checks) {
+        if (constantCheck(check, lets, rule.lets, namespaces)) continue;
+        if (!WARNING_ROLES.has(check.role)) return { warningRule: false, roles: [] };
+        roles.add(check.role);
+      }
+    }
+  }
+  return { warningRule: roles.size > 0, roles: [...roles].sort().reverse() };
+}
+
 function parseRuleDoc(ruleXml, parseXml) {
   return parseXml(wrapRuleXmlFragment(String(ruleXml || '')));
 }
@@ -623,6 +656,8 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
 
   activeParseXml = parseXml;
   setExtraParser(parseXml);
+  activeDossier = null;
+  const { warningRule } = warningOnlyRule(patterns, globalLets, globalUnsupported, namespaces);
   startDossier(doc, options.dossier, parseXml);
   // Part 2.3 of "funciones XPath que faltan": with a dossier, the rule runs
   // on EVERY document of it as the validated document -- the ditamap and
@@ -664,8 +699,14 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
       notRun.push({ ruleId: pattern.ruleId, reason: err.reason });
     }
   }
+  // A warning rule (warningOnlyRule): its warnings are what the test judges.
+  if (warningRule) {
+    violations.push(...warnings.splice(0));
+  }
+  const ruleKind = warningRule ? { warningRule: true } : {};
   if (runtimeErrors.length > 0) {
     return {
+      ...ruleKind,
       status: 'error',
       violations,
       warnings,
@@ -677,6 +718,7 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
     };
   }
   return {
+    ...ruleKind,
     status: ran === 0 ? 'not_executable' : violations.length ? 'rejected' : 'accepted',
     violations,
     warnings,
@@ -872,7 +914,10 @@ export function analyzeSchematron(ruleXml, options = {}) {
   if (options.standard === 'DITA 1.3 Xpath2.0' && features.size) {
     warnings.push(reason('xpath3_syntax', { features: [...features].join(', ') }));
   }
+  activeDossier = null;
+  const warningOnly = warningOnlyRule(patterns, globalLets, globalUnsupported, namespaces);
   return {
+    ...(warningOnly.warningRule ? { warningRule: true, warningRoles: warningOnly.roles } : {}),
     status: notRun.length === 0 ? 'executable' : notRun.length === patterns.length ? 'not_executable' : 'partial',
     reason: combinedReason(notRun, patterns.length),
     parts: notRun,
@@ -982,7 +1027,17 @@ export function describeSchematron(ruleXml, options = {}) {
     }
   }
   if (dossier) statements.unshift({ ruleIds: patterns.map((p) => p.ruleId), statement: { code: 'describe_dossier', params: {} }, schemas: [] });
-  return { available: true, statements, cannotReject: executable > 0 && !rejecting, dossier };
+  // A warning rule (warningOnlyRule) is not "cannot reject": it warns, and
+  // its test checks when.
+  activeDossier = null;
+  const warningOnly = executable > 0 && !rejecting ? warningOnlyRule(patterns, globalLets, globalUnsupported, namespaces) : { warningRule: false, roles: [] };
+  return {
+    available: true,
+    statements,
+    cannotReject: executable > 0 && !rejecting && !warningOnly.warningRule,
+    ...(warningOnly.warningRule ? { warningOnly: true, warningRoles: warningOnly.roles } : {}),
+    dossier,
+  };
 }
 
 // T4b: true when the check can never reject -- its test evaluates with no

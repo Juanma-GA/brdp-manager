@@ -148,3 +148,140 @@ export function withTopicTitle(placement, structure, conditions) {
   const topicTitle = topicTitleFor(structure, placement, conditions);
   return topicTitle ? { ...placement, topicTitle } : placement;
 }
+
+// ─── Fichas del dosier (reglas que solo avisan, Part 2) ─────────────────────
+// In a dossier the LLM writes every file whole, so the title a rule looks
+// for has to be in the FILES, not only in the document the application
+// assembles. Navantia BRDP-EXT-00012:
+//   row[not(parent::thead)][ancestor::*[normalize-space(title) = 'LISTA DE MATERIAL OBLIGATORIO']]
+// The LLM wrote <taskbody><sectiondiv><title>LISTA…</title><table>… -- a
+// <sectiondiv> does not go in <taskbody> and takes no <title> -- and every
+// example was invalid. Here, generically: a predicate of any step that asks
+// an ANCESTOR for its title (ancestor::*[title = 'X'],
+// ancestor-or-self::task[normalize-space(title) = 'X'], not negated and not
+// under an "or"), plus the first-step form of topicTitleConditions; and,
+// for each topic type of the dossier, where that title can go: the file's
+// own topic, or an element inside it that takes a <title> and can hold the
+// checked element.
+const ANCESTOR_STEP_RE = /^(ancestor(?:-or-self)?)::(\*|[A-Za-z_][\w.-]*)$/;
+
+export function ancestorTitleConditions(ruleXml) {
+  const out = [];
+  for (const expression of ruleMatchExpressions(ruleXml)) {
+    for (const alternative of pathAlternatives(expression)) {
+      const { steps } = pathSteps(alternative);
+      for (const step of steps) {
+        const checked = step.kind === 'element' ? step.name : null;
+        for (const predicate of step.predicates) {
+          const operands = andOperands(predicate);
+          if (!operands) continue;
+          for (const operand of operands) {
+            const inner = pathSteps(String(operand).trim());
+            if (inner.absolute || inner.steps.length !== 1) continue;
+            const m = ANCESTOR_STEP_RE.exec(inner.steps[0].main);
+            if (!m) continue;
+            for (const p of inner.steps[0].predicates) {
+              for (const o of andOperands(p) || []) {
+                const values = titleValues(o);
+                if (values && values.length) out.push({ holder: m[2], orSelf: m[1] === 'ancestor-or-self', checked, value: values[0], values, expression: alternative.trim() });
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Elements that take a title and may hold content, in the order they are
+// offered (a generic DITA list; the type's structure decides which exist).
+const TITLED_HOLDERS = ['section', 'example', 'fig', 'table'];
+const DOSSIER_TOPIC_TYPES = ['topic', 'concept', 'task', 'reference', 'troubleshooting'];
+
+function shortestPath(elements, from, to) {
+  if (from === to) return [from];
+  const previous = new Map([[from, null]]);
+  const queue = [from];
+  while (queue.length) {
+    const name = queue.shift();
+    for (const child of childrenOf(elements, name)) {
+      if (previous.has(child) || !elements[child]) continue;
+      previous.set(child, name);
+      if (child === to) {
+        const path = [to];
+        for (let p = name; p; p = previous.get(p)) path.unshift(p);
+        return path;
+      }
+      queue.push(child);
+    }
+  }
+  return null;
+}
+
+// → null, or { value, values, checked, ways: [{ type, topic, inside: [path] }] }
+//   ways: per topic type of the dossier, whether the file's topic itself
+//   can carry the title (topic) and the paths to the titled elements inside
+//   it that can hold the checked element (at most two). structures:
+//   { [type]: structure } (loadDossierStructures).
+export function dossierTitleRequirements(ruleXml, structures = {}) {
+  const first = topicTitleConditions(ruleXml).map((c) => ({ holder: c.step, value: c.value, values: c.values, rest: c.rest, checked: null }));
+  const conditions = [...first, ...ancestorTitleConditions(ruleXml)];
+  if (conditions.length === 0) return null;
+  const c = conditions[0];
+  const ways = [];
+  for (const type of DOSSIER_TOPIC_TYPES) {
+    const structure = structures?.[type];
+    const elements = structure?.elements;
+    if (!elements) continue;
+    const root = structure.skeleton?.path?.[0] || type;
+    if (!elements[root]) continue;
+    const holds = (t) => {
+      if (c.rest) return restFits(elements, t, c.rest);
+      if (!c.checked) return true;
+      return descendantsOf(elements, t).has(c.checked) || (c.orSelf && t === c.checked);
+    };
+    const topic = (c.holder === '*' || c.holder === root) && childrenOf(elements, root).includes('title') && holds(root);
+    const inside = [];
+    if (c.holder === '*' || TITLED_HOLDERS.includes(c.holder)) {
+      for (const name of TITLED_HOLDERS) {
+        if (inside.length >= 2) break;
+        if (c.holder !== '*' && c.holder !== name) continue;
+        if (!elements[name] || !childrenOf(elements, name).includes('title') || !holds(name)) continue;
+        // Through the topic's body when it can (task/taskbody/example, never
+        // task/abstract/fig): the body is where the file's content goes.
+        const body = structure.skeleton?.path?.[1];
+        const viaBody = body && childrenOf(elements, root).includes(body) ? shortestPath(elements, body, name) : null;
+        const path = viaBody ? [root, ...viaBody] : shortestPath(elements, root, name);
+        if (path) inside.push(path);
+      }
+    }
+    if (topic || inside.length) ways.push({ type, root, topic, inside });
+  }
+  return { value: c.value, values: c.values, checked: c.checked || null, ways };
+}
+
+// The file's own topic gets the rule's title when nothing else in its type
+// can carry it (the same criterion as topicTitleFor): { [type]: value }.
+export function dossierTopicTitles(requirements) {
+  const out = {};
+  for (const w of requirements?.ways || []) if (w.topic && w.inside.length === 0) out[w.type] = requirements.value;
+  return out;
+}
+
+// The XML with its root's <title> set to `value` (replaced, or written as
+// the first child), or null when the text cannot be read that way.
+export function setRootTitleText(xml, value) {
+  const text = String(xml || '');
+  const open = /^(\s*(?:<\?[\s\S]*?\?>\s*|<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*)<([A-Za-z_][\w.:-]*)\b[^>]*?(\/?)>/.exec(text);
+  if (!open || open[3] === '/') return null;
+  const after = open.index + open[0].length;
+  const escaped = String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const title = /^(\s*)<title\b[^>]*>[\s\S]*?<\/title>/.exec(text.slice(after));
+  if (title) {
+    const current = /<title\b[^>]*>([\s\S]*?)<\/title>/.exec(title[0])[1];
+    if (current.replace(/\s+/g, ' ').trim() === String(value).replace(/\s+/g, ' ').trim()) return text;
+    return `${text.slice(0, after)}${title[1]}<title>${escaped}</title>${text.slice(after + title[0].length)}`;
+  }
+  return `${text.slice(0, after)}<title>${escaped}</title>${text.slice(after)}`;
+}

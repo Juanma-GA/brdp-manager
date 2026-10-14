@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../../pages/RecordsPage.module.css';
 import { runExample } from '../../utils/ruleTest.js';
+import { analyzeRule } from '../../utils/ruleTestEngine.js';
 import { runSavedTest, savedExamplesDate } from '../../utils/ruleTestSaved.js';
 import { passedTestToReplaceAt } from '../../utils/ruleTestStatus.js';
 import VerdictCauseHint from './VerdictCauseHint';
@@ -40,6 +41,11 @@ export default function SavedRuleTestPanel({ saved, format, standard, schemaLoca
 
   const current = lastRun && rerun && lastRun.ruleXml === rerun.ruleXml && lastRun.examplesDate === examplesDate ? lastRun : null;
   const runs = current ? current.runs : keptRuns;
+  // Reglas que solo avisan: the kept test of a warning rule reads "warns".
+  const warningRule = useMemo(
+    () => format === 'SCH-DITA' && analyzeRule(current ? current.ruleXml : saved.ruleXml, format).warningRule === true,
+    [current, saved, format]
+  );
 
   const record = async (rec) => {
     const ok = await rerun.onRecord?.(rec);
@@ -111,7 +117,7 @@ export default function SavedRuleTestPanel({ saved, format, standard, schemaLoca
           <p className={`${styles.ruleTestVerdict} ${styles[TONE_CLASS[view.tone]]}`} data-testid="saved-rule-test-verdict" data-kind={current.verdict.kind}>
             {view.text}
           </p>
-          <VerdictCauseHint verdict={current.verdict} runs={current.runs} />
+          <VerdictCauseHint verdict={current.verdict} runs={current.runs} warningRule={warningRule} />
           {current.changed.length > 0 && (
             <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="saved-rule-test-changed-summary">
               {t('records.ruleTest.saved.changedSummary', {
@@ -144,6 +150,7 @@ export default function SavedRuleTestPanel({ saved, format, standard, schemaLoca
           showResult
           readOnly
           testIdPrefix="saved-rule-test-example"
+          warningRule={warningRule}
           previousResult={current && current.changed.includes(i) ? ex.saved.result : null}
         />
       ))}

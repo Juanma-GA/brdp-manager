@@ -34,7 +34,7 @@ import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats.js';
 import { informativeRule } from './ruleLint.js';
 import { namedByRuleOrProposal } from './exampleSchemaFixes.js';
 import { ownSectionConditions, sectionConditionText, withOwnSectionValues } from './ownSectionValues.js';
-import { topicTitleConditions, withTopicTitle } from './topicTitleValue.js';
+import { dossierTitleRequirements, dossierTopicTitles, topicTitleConditions, withTopicTitle } from './topicTitleValue.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
 // "review" result (the panel shows them all, from the rule itself).
@@ -890,7 +890,8 @@ export function ruleRestrictsValues(ruleXml, format, parseXml = parseXmlDocument
   return description.statements.some(({ statement }) => {
     if (VALUE_STATEMENTS.has(statement.code)) return true;
     if (statement.code !== 'describe_sch_assert' && statement.code !== 'describe_sch_report') return false;
-    if (statement.params.warning || statement.params.constant) return false;
+    // A warning rule's warnings are what it checks (reglas que solo avisan).
+    if (statement.params.constant || (statement.params.warning && !description.warningOnly)) return false;
     const test = stripLiterals(String(statement.params.test || '')).replace(/=>/g, ' ');
     return VALUE_TEST_RE.test(test);
   });
@@ -1092,6 +1093,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
             rootAttributes: setup?.placements?.[materialized[index].schema]?.placement?.rootAttributes || [],
             namedAttribute: named.attribute,
             structure: materialized[index].structure || null,
+            dossierTitles: setup?.dossier?.titles || null,
           });
       // Formato del texto, Part 2: a piece of a split literal written in the
       // wrong format (<chapnum>B312</chapnum>): the split is said with it.
@@ -1099,7 +1101,8 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
       if (!r.validation.runnable && splitElements.size > 0 && (r.validation.structure || []).some((p) => p.kind === 'textFormat' && splitElements.has(p.element))) {
         problems.push(setup.concatSplits.map(concatSplitSentence).join(' '));
       }
-      const wraps = (r.validation.structure || []).some((p) => p.kind === 'notAllowed');
+      // (a dossier's files too: their problems are in validation.files)
+      const wraps = [...(r.validation.structure || []), ...(r.validation.files || []).flatMap((f) => f.validation?.structure || [])].some((p) => p.kind === 'notAllowed');
       const keepLine = problems.movesAttribute ? keepMoving : wraps ? keepWrapping : keep;
       if (problems.length > 0 && !missing && keepLine && examples[index].expected === 'reject') problems.push(keepLine);
       return { index, label: examples[index].label, problems };
@@ -1260,7 +1263,9 @@ export async function checkRuleImplementsProposal({ brdp, standard, format, rule
   } catch {
     proposalVsRule = null;
   }
-  const systemPrompt = buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes, proposalVsRule });
+  // Reglas que solo avisan: the judge is told the rule warns instead of rejecting.
+  const warningRule = format === 'SCH-DITA' && analyzeRule(ruleXml, format, { parseXml }).warningRule === true;
+  const systemPrompt = buildRuleProposalCheckPrompt({ brdp, standard, format, ruleXml, ruleDescription, requiredAttributes, proposalVsRule, warningRule });
   try {
     const answer = await ask([{ role: 'user', content: RULE_PROPOSAL_CHECK_USER_MESSAGE }], systemPrompt);
     const parsed = parseRuleProposalCheckResponse(answer);
@@ -1418,10 +1423,22 @@ export async function generateRuleTestExamples({
     // Dosier, Part 2: a DITA rule that reads other files -- each example is
     // a dossier (the ditamap and its files), every file checked against the
     // structure of its own type.
-    const dossierRule = format === 'SCH-DITA' && analyzeRule(ruleXml, format, { parseXml, standard }).dossier === true;
+    const ruleAnalysis = format === 'SCH-DITA' ? analyzeRule(ruleXml, format, { parseXml, standard }) : null;
+    const dossierRule = ruleAnalysis?.dossier === true;
+    // Reglas que solo avisan: the examples are "warns" / "does not warn".
+    const warningRule = ruleAnalysis?.warningRule === true;
     if (dossierRule) {
-      prepared.setup.dossier = { mainPath: DOSSIER_MAIN_PATH, structures: await loadDossierStructures(standard, fetchStructure) };
+      const structures = await loadDossierStructures(standard, fetchStructure);
       if (!isCurrent()) return null;
+      // Fichas del dosier: where the title the rule looks for goes in each
+      // file type, and the types where only the topic can carry it (the
+      // application writes it there, materializeDossierFiles).
+      const titles = dossierTitleRequirements(ruleXml, structures);
+      prepared.setup.dossier = {
+        mainPath: DOSSIER_MAIN_PATH,
+        structures,
+        ...(titles ? { titles, topicTitles: dossierTopicTitles(titles) } : {}),
+      };
     }
     // The schemas whose examples the application builds whole (rootOnly):
     // their examples come with no "content".
@@ -1458,6 +1475,7 @@ export async function generateRuleTestExamples({
       limits: prepared.limits || [],
       several: prepared.several || [],
       concatSplits: prepared.concatSplits || [],
+      warningRule,
       dossier: dossierRule
         ? {
             mainPath: DOSSIER_MAIN_PATH,
@@ -1465,6 +1483,8 @@ export async function generateRuleTestExamples({
             maxLines: DOSSIER_MAX_FILE_LINES,
             types: DOSSIER_FILE_TYPES,
             look: dossierLookExpressions(ruleXml, parseXml),
+            titles: prepared.setup.dossier.titles || null,
+            topicTitles: prepared.setup.dossier.topicTitles || {},
             // the rule looks for the ditamap going up the folders
             searchesFolders: /(?<![\w.$:-])(?:fn:)?uri-collection\s*\(/.test(String(ruleXml).replace(/'[^']*'/g, "''")),
           }
@@ -1555,6 +1575,7 @@ export async function generateRuleTestExamples({
     if (!isCurrent()) return null;
     return {
       status: 'ready',
+      ...(warningRule ? { warningRule: true } : {}),
       coverage,
       proposalCheck,
       examples: materialized,

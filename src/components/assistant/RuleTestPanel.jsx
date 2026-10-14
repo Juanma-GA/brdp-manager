@@ -346,6 +346,8 @@ function DocumentFixNotes({ doc }) {
       {doc.colsRaised?.length > 0 && <TableFixNote testId="rule-test-cols-raised" text={t('records.ruleTest.colsRaised', { count: doc.colsRaised.length, values: doc.colsRaised.map((c) => `${c.from} → ${c.to}`).join(', ') })} />}
       {doc.morerowsLowered?.length > 0 && <TableFixNote testId="rule-test-morerows-lowered" text={t('records.ruleTest.morerowsLowered', { count: doc.morerowsLowered.length, rows: [...new Set(doc.morerowsLowered)].join(', ') })} />}
       {doc.emptyRowsRemoved?.length > 0 && <TableFixNote testId="rule-test-empty-rows-removed" text={t('records.ruleTest.emptyRowsRemoved', { count: doc.emptyRowsRemoved.length, rows: doc.emptyRowsRemoved.join(', ') })} />}
+      {/* Fichas del dosier: the title the rule asks for, written on a file's topic. */}
+      {doc.topicTitleSet && <TableFixNote testId="rule-test-topic-title" text={t('records.ruleTest.topicTitleSet', { title: doc.topicTitleSet })} />}
     </>
   );
 }
@@ -479,8 +481,11 @@ function SchemaFixNotes({ doc }) {
 // Copy XML.
 // previousResult ("Probar con los ejemplos guardados"): the result this
 // example gave in the kept test, when the current rule gives another.
-export function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain, readOnly = false, testIdPrefix = 'rule-test-example', previousResult = null }) {
+export function ExampleCard({ example, run, index, standard, dita, showResult, onRunAgain, readOnly = false, testIdPrefix = 'rule-test-example', previousResult = null, warningRule = false }) {
   const { t } = useTranslation();
+  // Reglas que solo avisan: the same verdict, said as "warns / does not warn".
+  const warns = warningRule || run?.result?.warningRule === true;
+  const outcome = (key) => t(`records.ruleTest.${warns ? 'warningOutcomes' : 'outcomes'}.${key}`);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(example.content);
   // Rule test on DM metadata: the identification and status section the
@@ -531,14 +536,14 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
         )}
       </div>
       <div className={styles.ruleTestOutcomes}>
-        <span>{t('records.ruleTest.expected', { outcome: t(`records.ruleTest.outcomes.${example.expected}`) })}</span>
+        <span>{t('records.ruleTest.expected', { outcome: outcome(example.expected) })}</span>
         {showResult && result && result.status !== 'not_executable' && (
           <span
             className={`${styles.ruleTestResult} ${styles[TONE_CLASS[tone]]}`}
             data-testid="rule-test-result"
             title={run.matches === true ? t('records.ruleTest.asExpected') : run.matches === false ? t('records.ruleTest.notAsExpected') : undefined}
           >
-            {t('records.ruleTest.result', { outcome: t(`records.ruleTest.outcomes.${result.status}`) })}
+            {t('records.ruleTest.result', { outcome: outcome(result.status) })}
             {mark}
           </span>
         )}
@@ -546,8 +551,8 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
       {previousResult && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneWarn}`} data-testid="rule-test-result-changed">
           {t('records.ruleTest.saved.resultChanged', {
-            before: t(`records.ruleTest.outcomes.${previousResult}`),
-            now: result && result.status !== 'not_executable' ? t(`records.ruleTest.outcomes.${result.status}`) : t('records.ruleTest.saved.notRun'),
+            before: outcome(previousResult),
+            now: result && result.status !== 'not_executable' ? outcome(result.status) : t('records.ruleTest.saved.notRun'),
           })}
         </p>
       )}
@@ -773,8 +778,8 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           .map((v, i) => (
             <p key={`${v.ruleId}:${i}`} className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`}>
               {v.file
-                ? t('records.ruleTest.ruleMessageInFile', { message: v.message, path: v.file })
-                : t('records.ruleTest.ruleMessage', { message: v.message })}
+                ? t(warns ? 'records.ruleTest.warningMessageInFile' : 'records.ruleTest.ruleMessageInFile', { message: v.message, path: v.file })
+                : t(warns ? 'records.ruleTest.warningMessage' : 'records.ruleTest.ruleMessage', { message: v.message })}
             </p>
           ))}
       {/* Mejoras B, Part 3: why the rule accepted an example meant to be
@@ -782,7 +787,7 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           example or the rule is wrong. */}
       {showResult && run?.matches === false && acceptCauseText(run, t) && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad} ${styles.ruleTestPre}`} data-testid="rule-test-accept-cause">
-          {t('records.ruleTest.acceptedBecause', { cause: acceptCauseText(run, t) })}
+          {t(warns ? 'records.ruleTest.notWarnedBecause' : 'records.ruleTest.acceptedBecause', { cause: acceptCauseText(run, t) })}
         </p>
       )}
       {/* Test de reglas, causas en Schematron (Part 1.3): under any example
@@ -790,7 +795,7 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           report that is, by id and expression. */}
       {showResult && result?.status === 'rejected' && schematronFailedChecks(result).length > 0 && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad} ${styles.ruleTestPre}`} data-testid="rule-test-sch-cause">
-          {t('records.ruleTest.schematronCause', {
+          {t(warns ? 'records.ruleTest.schematronWarnCause' : 'records.ruleTest.schematronCause', {
             checks: schematronFailedChecks(result)
               .map((c) => t(c.kind === 'report' ? 'records.ruleTest.schematronReportMet' : 'records.ruleTest.schematronAssertNotMet', { id: c.id || '—', test: c.test }))
               .join('; '),
@@ -933,6 +938,12 @@ function RuleDescription({ description, presence = null, reach = [], informative
         ))}
         {neverThere && <li data-testid="rule-test-presence-never">{neverThere}</li>}
       </ul>
+      {/* Reglas que solo avisan: instead of "cannot reject", what the test checks. */}
+      {formatted.warningOnly && (
+        <p className={`${styles.ruleTestNote} ${styles.ruleTestToneNeutral}`} data-testid="rule-test-warning-only">
+          {formatted.warningOnly}
+        </p>
+      )}
       {formatted.cannotReject && !informative && (
         <p className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`} data-testid="rule-test-cannot-reject">
           ⚠ {t('records.ruleTest.describe.cannotReject')}
@@ -1192,7 +1203,7 @@ export default function RuleTestPanel({
               {view.text}
             </p>
           )}
-          {!ruleNotExecutable && <VerdictCauseHint verdict={verdict} runs={state.runs} />}
+          {!ruleNotExecutable && <VerdictCauseHint verdict={verdict} runs={state.runs} warningRule={analysis.warningRule === true} />}
           {verdict?.engineErrors?.length > 0 && (
             <p className={`${styles.ruleTestNote} ${styles.muted}`} data-testid="rule-test-engine-message">
               {t('records.ruleTest.engineError.message', { message: verdict.engineErrors[0].message })}
@@ -1269,6 +1280,7 @@ export default function RuleTestPanel({
               standard={standard}
               dita={format === 'SCH-DITA'}
               showResult={showResults}
+              warningRule={analysis.warningRule === true}
               onRunAgain={(content, metadata, files, rootAttributes) => runAgain(i, content, metadata, files, rootAttributes)}
             />
           ))}

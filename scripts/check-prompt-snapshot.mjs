@@ -539,6 +539,15 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // No existing case has such a rule, so none changes; new case
 // ruleTestExamples/dita-xpath3-topic-title-ext-00011 (Navantia
 // BRDP-EXT-00011, real context).
+// Reglas que solo avisan, y fichas del dosier válidas: a Schematron rule
+// whose checks all have role="warning"/"info" is a warning rule (the
+// examples prompt says "expected: reject" means "must warn"; the Proposal
+// check says a rule that warns implements a decision to warn), and a dossier
+// rule that depends on a title lists where that title can go in each file
+// type. No existing case has such a rule, so none changes; new cases
+// ruleTestExamples/dita-xpath3-warning-dossier-title-ext-00012 and
+// ruleProposalCheck/dita-xpath3-warning-rule-ext-00012 (Navantia
+// BRDP-EXT-00012, reconstructed with the real shape).
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

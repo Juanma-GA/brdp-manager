@@ -327,7 +327,9 @@ function occurrences(ruleXml, format, parseXml, graph = null) {
       const { code, params } = s.statement;
       let says = '';
       if (informativeCodes.has(code)) says = s.ruleIds.map((id) => texts[id] || '').join(' ');
-      else if ((code === 'describe_sch_assert' || code === 'describe_sch_report') && (params.warning || params.constant)) says = params.message || '';
+      // A warning rule (reglas que solo avisan) is meant not to reject: its
+      // messages saying "must not" are what it warns about, never a finding.
+      else if ((code === 'describe_sch_assert' || code === 'describe_sch_report') && ((params.warning && !description.warningOnly) || params.constant)) says = params.message || '';
       if (says && MUST_NOT_RE.test(says)) add('must_not_allowed', { ruleIds: s.ruleIds, says: clip(says), ...statementOf(s) });
     }
   }

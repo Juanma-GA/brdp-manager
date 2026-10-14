@@ -512,6 +512,31 @@ function dossierExamples(rule, correcting, lastUser) {
   const prec = '<task id="precauciones"><title>PRECAUCIONES DE SEGURIDAD</title><taskbody><steps><step><cmd>No fumar en la zona de trabajo.</cmd></step><step><cmd>Usar gafas de protección.</cmd></step></steps></taskbody></task>';
   const proc = (info) => `<task id="procedimiento"><title>PROCEDIMIENTO</title><taskbody><steps><step><cmd>Desmontar la tapa de la bomba.</cmd><info>${info}</info></step></steps></taskbody></task>`;
   const PREC = { path: "fichas/precauciones.dita", content: prec };
+  // Reglas que solo avisan (reconstructed Navantia BRDP-EXT-00012/00013): a
+  // role="warning" rule on the rows of a list under an ancestor titled
+  // 'LISTA DE …'. The first answer repeats the real failure: a <sectiondiv>
+  // with that title directly in <taskbody> (a sectiondiv goes in neither
+  // and takes no title). The correction round fixes it -- the list in an
+  // <example> of <taskbody> -- only when it carries the card of <taskbody>
+  // and where the title can go in a task file.
+  const listTitle = (rule.match(/ancestor::\*\[normalize-space\(title\) = '(LISTA DE [^']+)'\]/) || [])[1];
+  if (listTitle && /role="warning"/.test(rule)) {
+    const fixed = correcting && /card of <taskbody> in the task schema/.test(lastUser) && /goes on the file's own <task>/.test(lastUser);
+    const item = /HERRAMIENTAS/.test(listTitle) ? "Llave dinamométrica L-7" : "Junta tórica J-12";
+    const row = (a, b = "") => `<row><entry colname="c1">${a}</entry><entry colname="c2">${b}</entry></row>`;
+    const list = (rows) => `<title>${listTitle}</title><table><tgroup cols="2"><colspec colname="c1"/><colspec colname="c2"/><tbody>${rows}</tbody></tgroup></table>`;
+    const steps = (cmds) => `<steps>${cmds.map((c) => `<step><cmd>${c}</cmd></step>`).join("")}</steps>`;
+    const sheet = (rows, cmds) => fixed
+      ? `<task id="ft-001"><title>Desmontaje de la bomba de achique</title><taskbody>${steps(cmds)}<example>${list(rows)}</example></taskbody></task>`
+      : `<task id="ft-001"><title>Desmontaje de la bomba de achique</title><taskbody><sectiondiv>${list(rows)}</sectiondiv>${steps(cmds)}</taskbody></task>`;
+    const content = map(["fichas/ft-001.dita"]);
+    const file = (rows, cmds) => [{ path: "fichas/ft-001.dita", content: sheet(rows, cmds) }];
+    return [
+      { label: "Every item named in a step", expected: "accept", schema: "map", content, files: file(row(item), [`Sustituir ${item}.`]) },
+      { label: "Exempt item", expected: "accept", schema: "map", content, files: file(row("Grasa G-3", "Exento"), ["Desmontar la tapa."]) },
+      { label: "Item no step names", expected: "reject", schema: "map", content, files: file(row(item) + row("Arandela A-4"), [`Sustituir ${item}.`]) },
+    ];
+  }
   // Funciones XPath que faltan, Part 2: a rule on the topics' cells that
   // finds the ditamap going up the folders (reconstructed Navantia
   // BRDP-EXT-00017): each sheet cites another sheet's code in a table cell.

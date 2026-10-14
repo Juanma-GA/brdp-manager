@@ -217,14 +217,20 @@ async function main() {
     await page.waitForTimeout(300);
     await panels().first().getByRole("button", { name: "Close" }).click();
 
-    // 2. role="warning": a warning, never a rejection.
+    // 2. role="warning": a rule that only warns -- judged as warns / does
+    //    not warn ("Reglas que solo avisan").
     await select("BRDP-DT-WARN");
     const panel2 = await testDraft();
     const desc2 = await panel2.getByTestId("rule-test-description").textContent();
-    assert(desc2.includes("(warning: does not reject)") && desc2.includes("This rule cannot reject any content."), `warning rule: described as not rejecting (${desc2})`);
+    assert(desc2.includes("(warning: does not reject)") && !desc2.includes("This rule cannot reject any content."), `warning rule: never "cannot reject" (${desc2})`);
+    assert((await panel2.getByTestId("rule-test-warning-only").textContent()) === "This rule only warns (role=warning): it does not reject documents; the test checks when it warns.", "warning rule: the 'only warns' line");
+    assert((await panel2.getByTestId("rule-test-cannot-reject").count()) === 0, "warning rule: no 'cannot reject' warning");
     const warnEx = examplesOf(panel2).nth(1);
-    assert((await warnEx.getByTestId("rule-test-result").textContent()).startsWith("Result: accepted"), "role=warning: the untyped note is accepted");
-    assert((await warnEx.getByTestId("rule-test-rule-warning").textContent()).includes("Rule warning (does not reject): Every note must declare its type (@type)."), "role=warning: the warning is shown");
+    assert((await warnEx.textContent()).includes("Expected: warns"), "role=warning: the untyped note is expected to warn");
+    assert((await warnEx.getByTestId("rule-test-result").textContent()).startsWith("Result: warned"), "role=warning: the untyped note warned");
+    assert((await warnEx.textContent()).includes("Rule's warning: Every note must declare its type (@type)."), "role=warning: the warning message under the example");
+    assert((await examplesOf(panel2).nth(0).getByTestId("rule-test-result").textContent()).startsWith("Result: did not warn"), "role=warning: the typed note did not warn");
+    assert((await panel2.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), "role=warning: verdict Correct");
     await panel2.screenshot({ path: shot("rule-test-dita-warning.png") });
     await panel2.getByRole("button", { name: "Close" }).click();
 

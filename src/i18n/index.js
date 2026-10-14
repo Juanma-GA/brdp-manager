@@ -1025,11 +1025,25 @@ const resources = {
             checkStrict: 'If the example is badly written, repeat the test or edit it; if it is right, the rule rejects what the decision allows.',
             checkBoth: 'If the examples are badly written, repeat the test or edit them; if they are right, the rule does not match the decision.',
           },
+          // Reglas que solo avisan: the same causes, said as warnings.
+          causeWarning: {
+            rulePermissive: 'The rule did not warn on an example where it should have warned.',
+            ruleStrict: 'The rule warned on an example where it should not have warned.',
+            ruleBoth: 'The rule did not warn where it should have and warned where it should not have.',
+            checkPermissive: 'If the example is badly written, repeat the test or edit it; if it is right, the rule does not warn about the decision.',
+            checkStrict: 'If the example is badly written, repeat the test or edit it; if it is right, the rule warns about what the decision allows.',
+            checkBoth: 'If the examples are badly written, repeat the test or edit them; if they are right, the rule does not match the decision.',
+          },
+          warningMessageInFile: "Rule's warning, in {{path}}: {{message}}",
+          notWarnedBecause: 'Why the rule did not warn: {{cause}}.',
+          schematronWarnCause: 'Why the rule warned: {{checks}}.',
           expected: 'Expected: {{outcome}}',
           result: 'Result: {{outcome}}',
           asExpected: 'As expected',
           notAsExpected: 'Not what the example expected',
           outcomes: { accept: 'accepted', reject: 'rejected', accepted: 'accepted', rejected: 'rejected', error: 'error' },
+          // Reglas que solo avisan (role="warning"/"info"): the same results, said as warnings.
+          warningOutcomes: { accept: 'does not warn', reject: 'warns', accepted: 'did not warn', rejected: 'warned', error: 'error' },
           // Mejoras E, Part 1: what the schema already guarantees.
           idClash: 'The id {{id}} is already used by the rule of {{identifiers}}. Two rules with the same id make an invalid BREX.',
           reach: {
@@ -1087,6 +1101,7 @@ const resources = {
           unknownNames: 'names not in the {{standard}} schema: {{names}}',
           wrongTypeNames: 'names used as the wrong kind: {{names}}',
           ruleMessage: "Rule's message: {{message}}",
+          warningMessage: "Rule's warning: {{message}}",
           ruleMessageInFile: "Rule's message, in {{path}}: {{message}}",
           conditionHolds: "The rule's condition holds in this document.",
           conditionNotHolds: "The rule's condition does not hold in this document.",
@@ -1380,6 +1395,8 @@ const resources = {
             valueUnsupported: 'a "{{form}}" value check',
             onlyInSchemas: '{{text}} Only in the schemas: {{schemas}}.',
             cannotReject: 'This rule cannot reject any content.',
+            // Reglas que solo avisan (role="warning"/"info").
+            warningOnly: 'This rule only warns ({{role}}): it does not reject documents; the test checks when it warns.',
           },
           reasons: {
             external_document: 'The rule reads another file ({{fn}}), which is not available in a test.',
@@ -3029,11 +3046,23 @@ const resources = {
             checkStrict: 'Si el ejemplo está mal escrito, repite la prueba o edítalo; si está bien, la regla rechaza lo que la decisión permite.',
             checkBoth: 'Si los ejemplos están mal escritos, repite la prueba o edítalos; si están bien, la regla no se ajusta a la decisión.',
           },
+          causeWarning: {
+            rulePermissive: 'La regla no avisó en un ejemplo en el que debía avisar.',
+            ruleStrict: 'La regla avisó en un ejemplo en el que no debía avisar.',
+            ruleBoth: 'La regla no avisó donde debía y avisó donde no debía.',
+            checkPermissive: 'Si el ejemplo está mal escrito, repite la prueba o edítalo; si está bien, la regla no avisa de la decisión.',
+            checkStrict: 'Si el ejemplo está mal escrito, repite la prueba o edítalo; si está bien, la regla avisa de lo que la decisión permite.',
+            checkBoth: 'Si los ejemplos están mal escritos, repite la prueba o edítalos; si están bien, la regla no se ajusta a la decisión.',
+          },
+          warningMessageInFile: 'Aviso de la regla, en {{path}}: {{message}}',
+          notWarnedBecause: 'Por qué la regla no avisó: {{cause}}.',
+          schematronWarnCause: 'Por qué la regla avisó: {{checks}}.',
           expected: 'Esperado: {{outcome}}',
           result: 'Resultado: {{outcome}}',
           asExpected: 'Como se esperaba',
           notAsExpected: 'No es lo que el ejemplo esperaba',
           outcomes: { accept: 'aceptado', reject: 'rechazado', accepted: 'aceptado', rejected: 'rechazado', error: 'error' },
+          warningOutcomes: { accept: 'no avisa', reject: 'avisa', accepted: 'no avisó', rejected: 'avisó', error: 'error' },
           idClash: 'El id {{id}} ya lo usa la regla de {{identifiers}}. Dos reglas con el mismo id dan un BREX no válido.',
           reach: {
             list: '{{path}} alcanza a {{names}}.',
@@ -3089,6 +3118,7 @@ const resources = {
           unknownNames: 'nombres que no están en el esquema de {{standard}}: {{names}}',
           wrongTypeNames: 'nombres usados con el tipo equivocado: {{names}}',
           ruleMessage: 'Mensaje de la regla: {{message}}',
+          warningMessage: 'Aviso de la regla: {{message}}',
           ruleMessageInFile: 'Mensaje de la regla, en {{path}}: {{message}}',
           conditionHolds: 'La condición de la regla se cumple en este documento.',
           conditionNotHolds: 'La condición de la regla no se cumple en este documento.',
@@ -3378,6 +3408,7 @@ const resources = {
             valueUnsupported: 'una comprobación de valor "{{form}}"',
             onlyInSchemas: '{{text}} Solo en los esquemas: {{schemas}}.',
             cannotReject: 'Esta regla no puede rechazar ningún contenido.',
+            warningOnly: 'Esta regla solo avisa ({{role}}): no rechaza documentos; la prueba comprueba cuándo avisa.',
           },
           reasons: {
             external_document: 'La regla lee otro fichero ({{fn}}), que no está disponible en una prueba.',

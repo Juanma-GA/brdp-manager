@@ -37,7 +37,7 @@ import { describeRule, proposalVsRuleLists, ruleConditions } from '../../src/uti
 import { ruleDescriptionText } from '../../src/utils/ruleTestReasons.js';
 import { ownSectionConditions, withOwnSectionValues } from '../../src/utils/ownSectionValues.js';
 import { uniqueConcatSplits } from '../../src/utils/concatSplit.js';
-import { topicTitleConditions, withTopicTitle } from '../../src/utils/topicTitleValue.js';
+import { dossierTitleRequirements, dossierTopicTitles, topicTitleConditions, withTopicTitle } from '../../src/utils/topicTitleValue.js';
 
 const xmldomParse = (text) => new DOMParser().parseFromString(text, 'text/xml');
 
@@ -1410,3 +1410,43 @@ ruleTestExamplesCases.push(
     }],
   },
 );
+
+// Test de reglas DITA: reglas que solo avisan, y fichas del dosier válidas --
+// Navantia BRDP-EXT-00012 (role="warning" assert, ancestor-title context;
+// reconstructed with the real shape): the examples prompt says the rule only
+// warns and where the title can go in each file type of the dossier
+// (dossierTitleRequirements over the real DITA structures, as
+// generateRuleTestExamples computes it); the Proposal check says that a rule
+// that warns implements a decision to warn.
+const ruleNavWarning = readTextFile(new URL('../rule-test-fixtures/navantia-dita3-reconstructed.sch', import.meta.url))
+  .match(/<sch:pattern id="p-BRDP-EXT-00012"[\s\S]*?<\/sch:pattern>/)[0];
+const brdpNavWarning = { ...brdpRuleTest, identifier: 'BRDP-EXT-00012', title: 'Material que sobra en la lista', definition: 'Decidir si se avisa del material de la lista de material obligatorio que ningún paso nombra.', proposal: 'Se da aviso (no error) cuando un material de la lista de material obligatorio no se nombra en ningún paso de la ficha, salvo que esté marcado como exento.' };
+const navWarningTitles = dossierTitleRequirements(
+  ruleNavWarning,
+  Object.fromEntries(['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'].map((t) => [t, realStructures[`DITA 1.3 Xpath2.0|${t}`]])),
+);
+ruleTestExamplesCases.push({
+  name: 'dita-xpath3-warning-dossier-title-ext-00012',
+  args: [
+    {
+      brdp: brdpNavWarning,
+      standard: 'DITA 1.3 Xpath3.0',
+      format: 'SCH-DITA',
+      ruleXml: ruleNavWarning,
+      placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaDossier, [['map', 'rule']]),
+      matchExpressions: ruleMatchExpressions(ruleNavWarning),
+      warningRule: true,
+      dossier: {
+        ...dossierOption,
+        look: dossierLookExpressions(ruleNavWarning, (x) => new XmldomParser().parseFromString(x, 'application/xml')),
+        searchesFolders: true,
+        titles: navWarningTitles,
+        topicTitles: dossierTopicTitles(navWarningTitles),
+      },
+    },
+  ],
+});
+ruleProposalCheckCases.push({
+  name: 'dita-xpath3-warning-rule-ext-00012',
+  args: [{ brdp: brdpNavWarning, standard: 'DITA 1.3 Xpath3.0', format: 'SCH-DITA', ruleXml: ruleNavWarning, ruleDescription: describeText(ruleNavWarning, 'SCH-DITA'), warningRule: true }],
+});

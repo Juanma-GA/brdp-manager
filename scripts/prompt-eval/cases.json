@@ -4339,6 +4339,96 @@
       ]
     },
     {
+      "id": "rule-test-navantia-dita3-warning-ext-00012",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Reglas que solo avisan: Navantia BRDP-EXT-00012 (role=\"warning\" assert, context row[…][ancestor::*[normalize-space(title) = 'LISTA DE MATERIAL OBLIGATORIO']], dossier rule; reconstructed with the real shape). Before this round the rule was 'cannot reject', every reject example came back 'accepted ✗', and the sheets put <sectiondiv><title> in <taskbody> (corrected 0 of 5). The simulator repeats that first answer and fixes it only when the correction carries the card of <taskbody> and where the title can go in a task file.",
+      "brdp": {
+        "identifier": "BRDP-EXT-00012",
+        "title": "El material que sobra en la lista",
+        "definition": "Decidir si se avisa de el material de la lista que ningún paso de la ficha nombra.",
+        "proposal": "Se da aviso (no error) cuando el material de la lista no se nombra en ningún paso de la ficha, salvo que esté marcado como exento.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-reconstructed.sch",
+        "pattern": "p-BRDP-EXT-00012"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (ditamap and sheets) passes the XML, vocabulary and structure checks after the correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example that must not warn and one that must warn"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the warning rule warns on the leftover item and stays silent on the named and exempt ones"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "files",
+          "pattern": "LISTA DE MATERIAL OBLIGATORIO",
+          "note": "every example that must warn has a sheet with the list title"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier with at least one sheet"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-navantia-dita3-warning-ext-00013",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Reglas que solo avisan: Navantia BRDP-EXT-00013 (role=\"warning\" assert, context row[…][ancestor::*[normalize-space(title) = 'LISTA DE HERRAMIENTAS ESPECIALES']], dossier rule; reconstructed with the real shape). Before this round the rule was 'cannot reject', every reject example came back 'accepted ✗', and the sheets put <sectiondiv><title> in <taskbody> (corrected 0 of 5). The simulator repeats that first answer and fixes it only when the correction carries the card of <taskbody> and where the title can go in a task file.",
+      "brdp": {
+        "identifier": "BRDP-EXT-00013",
+        "title": "La herramienta que sobra en la lista",
+        "definition": "Decidir si se avisa de la herramienta de la lista que ningún paso de la ficha nombra.",
+        "proposal": "Se da aviso (no error) cuando la herramienta de la lista no se nombra en ningún paso de la ficha, salvo que esté marcado como exento.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-reconstructed.sch",
+        "pattern": "p-BRDP-EXT-00013"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (ditamap and sheets) passes the XML, vocabulary and structure checks after the correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example that must not warn and one that must warn"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the warning rule warns on the leftover item and stays silent on the named and exempt ones"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "files",
+          "pattern": "LISTA DE HERRAMIENTAS ESPECIALES",
+          "note": "every example that must warn has a sheet with the list title"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier with at least one sheet"
+        }
+      ]
+    },
+    {
       "id": "rule-test-template-dita3-dossier-warnings",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",

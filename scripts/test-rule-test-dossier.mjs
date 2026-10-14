@@ -412,9 +412,18 @@ async function generate(id, answers) {
   // A ditamap in a folder BELOW the sheet's is never found: the rule is silent.
   r = nav('BRDP-EXT-00017', [{ path: 'ft-001.dita', xml: sheet('FT-001', 'FT-009') }], '<map><topicref href="../ft-001.dita"/></map>', 'sub/mapa.ditamap');
   check('EXT-00017: the ditamap below the sheet → not found, the rule is silent', r.status === 'accepted', summary(r));
-  // EXT-00012: a sheet no ditamap references.
-  r = nav('BRDP-EXT-00012', [FILES2[0], { path: 'otra/ft-003.dita', xml: sheet('FT-003', 'x') }]);
-  check('EXT-00012: a sheet no ditamap references → rejected on that file only', r.status === 'rejected' && r.violations.map((v) => v.file).join() === 'otra/ft-003.dita', JSON.stringify(r.violations.map((v) => v.file)));
+  // EXT-00012 (material that is not named in any step): a warning rule; it
+  // warns on the sheet with the list, never on a sheet no ditamap references.
+  const material = (items, steps) =>
+    `<task id="FT-001"><title>Ficha FT-001</title><taskbody><context><fig><title>LISTA DE MATERIAL OBLIGATORIO</title><table><tgroup cols="2"><tbody>${items.map(([m, x = '']) => `<row><entry>${m}</entry><entry>${x}</entry></row>`).join('')}</tbody></tgroup></table></fig></context><steps>${steps.map((c) => `<step><cmd>${c}</cmd></step>`).join('')}</steps></taskbody></task>`;
+  const MAP1 = '<map><title>Dosier</title><topicref href="fichas/ft-001.dita"/></map>';
+  r = nav('BRDP-EXT-00012', [{ path: 'fichas/ft-001.dita', xml: material([['Grasa'], ['Junta tórica']], ['Aplicar grasa a la junta tórica.']) }], MAP1);
+  check('EXT-00012: every material named → no warning', r.status === 'accepted' && r.warningRule === true, summary(r));
+  r = nav('BRDP-EXT-00012', [{ path: 'fichas/ft-001.dita', xml: material([['Grasa'], ['Sellante'], ['Trapo', 'exento']], ['Aplicar grasa.']) }], MAP1);
+  check('EXT-00012: a material not named → warns, on that file and row', r.status === 'rejected' && r.warningRule === true && r.violations.length === 1 && r.violations[0].file === 'fichas/ft-001.dita' && r.violations[0].role === 'warning', summary(r));
+  check('EXT-00012: the warning names the material', /«Sellante»/.test(r.violations[0]?.message || ''), r.violations[0]?.message);
+  r = nav('BRDP-EXT-00012', [{ path: 'otra/ft-003.dita', xml: material([['Sellante']], ['Aplicar grasa.']) }], MAP1);
+  check('EXT-00012: a sheet no ditamap references → silent', r.status === 'accepted', summary(r));
   // The same dossier validated with Saxon-HE 9.9.1 + SchXslt 1.9.5 (each
   // file of the folder on disk, one compiled pattern at a time; not in the
   // repo): the files each rule fails on.
@@ -423,7 +432,7 @@ async function generate(id, answers) {
     { path: 'fichas/ft-002.dita', xml: sheet('FT-002', 'FT-001', 'NOTA: algo') },
     { path: 'otra/ft-003.dita', xml: sheet('FT-003', 'x', 'Ficha') },
   ];
-  for (const [id, files] of [['BRDP-EXT-00010', ['fichas/ft-002.dita']], ['BRDP-EXT-00012', ['otra/ft-003.dita']], ['BRDP-EXT-00017', ['fichas/ft-001.dita']]]) {
+  for (const [id, files] of [['BRDP-EXT-00010', ['fichas/ft-002.dita']], ['BRDP-EXT-00017', ['fichas/ft-001.dita']]]) {
     // EXT-00010 is not a dossier rule: it runs on each document as XMetal
     // validates each one -- here, each file on its own.
     const got = id === 'BRDP-EXT-00010'

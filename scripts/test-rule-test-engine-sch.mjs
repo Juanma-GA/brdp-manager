@@ -281,9 +281,21 @@ expect(
 {
   const withRole = (role) => sch(`<§pattern><§rule context="note"><§assert id="R" ${role === null ? '' : `role="${role}" `}test="@type">Declare the note type.</§assert></§rule></§pattern>`);
   const bad = topic('<note>x</note>');
+  // A rule whose checks all only warn is a "warning rule": the test judges
+  // whether it warns, so its warnings count as the result (status rejected =
+  // warned) and the run says so.
   for (const role of ['warning', 'info']) {
-    const r = expect(`role="${role}"`, run(withRole(role), bad), 'accepted');
-    check(`  role="${role}" gives a warning`, r.warnings.length === 1 && r.warnings[0].message === 'Declare the note type.' && r.warnings[0].role === role, JSON.stringify(r.warnings));
+    const r = expect(`role="${role}" warning rule warns`, run(withRole(role), bad), 'rejected');
+    check(`  role="${role}" marks a warning rule`, r.warningRule === true);
+    check(`  role="${role}" its warning is the result`, r.violations.length === 1 && r.violations[0].message === 'Declare the note type.' && r.violations[0].role === role && r.warnings.length === 0, JSON.stringify(r));
+    const ok = expect(`role="${role}" warning rule does not warn`, run(withRole(role), topic('<note type="tip">x</note>')), 'accepted');
+    check(`  role="${role}" accepted is still a warning rule`, ok.warningRule === true);
+  }
+  // Mixed error + warning: unchanged (the warning never rejects).
+  {
+    const mixed = sch('<§pattern><§rule context="note"><§assert id="E" test="string(.)">Text.</§assert><§assert id="W" role="warning" test="@type">Type.</§assert></§rule></§pattern>');
+    const r = expect('mixed error+warning: warning alone accepted', run(mixed, bad), 'accepted');
+    check('  mixed: not a warning rule, gives a warning', !r.warningRule && r.warnings.length === 1 && r.warnings[0].message === 'Type.', JSON.stringify(r));
   }
   for (const role of ['error', 'fatal', null, 'critical']) {
     const r = expect(`role=${role === null ? 'none' : `"${role}"`}`, run(withRole(role), bad), 'rejected');
@@ -463,7 +475,10 @@ for (const [lang, t] of [['en', i18n.getFixedT('en')], ['es', i18n.getFixedT('es
   const rep = describe(sch('<§pattern><§rule context="step"><§report id="R" role="warning" test="count(cmd) &gt; 1">One cmd per step.</§report></§rule></§pattern>'));
   const repEs = formatRuleDescription(rep, i18n.getFixedT('es'));
   check('describe report + warning ES', repEs.lines[0] === 'Para cada step: no debe darse count(cmd) > 1 — mensaje: "One cmd per step." (aviso: no rechaza)', repEs.lines[0]);
-  check('describe: only warnings → cannot reject', rep.cannotReject === true);
+  check('describe: only warnings → a warning rule, not "cannot reject"', rep.cannotReject === false && rep.warningOnly === true && JSON.stringify(rep.warningRoles) === '["warning"]', JSON.stringify(rep));
+  const repEn = formatRuleDescription(rep, i18n.getFixedT('en'));
+  check('describe warning rule EN line', repEn.warningOnly === 'This rule only warns (role=warning): it does not reject documents; the test checks when it warns.', repEn.warningOnly);
+  check('describe warning rule ES line', repEs.warningOnly === 'Esta regla solo avisa (role=warning): no rechaza documentos; la prueba comprueba cuándo avisa.', repEs.warningOnly);
   const x3 = describe(templateRules['dita-xpath3'].find((r) => r.ID === 'BRDP-EXT-00006').Rule);
   const x3en = formatRuleDescription(x3, i18n.getFixedT('en')).lines;
   check('describe EXT-00006 (3.0): variables line first', /^For each \*\[title = 'LISTA DE MATERIAL OBLIGATORIO'\] \/\/table\[.*: variables colDe, colContiene, colPart, valor, cab, part, docTec, marca, figurasHalladas, sobraEnDocTec, marcas\.$/.test(x3en[0]), x3en[0]);
