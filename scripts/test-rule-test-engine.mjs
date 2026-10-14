@@ -653,7 +653,7 @@ console.log(`Coherence: ${coherent} engine runs on rules with values replayed th
   // Every code the module declares has a text in both languages.
   const { ENGINE_REASON_CODES, VERDICT_REASON_CODES } = await import('../src/utils/ruleTestReasons.js');
   for (const code of [...ENGINE_REASON_CODES, ...VERDICT_REASON_CODES.filter((c) => c !== 'test_incorrect'), 'part']) {
-    for (const lng of ['en', 'es']) check(`i18n ${lng}: records.ruleTest.reasons.${code}`, i18n.exists(`records.ruleTest.reasons.${code}`, { lng }));
+    for (const lng of ['en', 'es']) check(`i18n ${lng}: records.ruleTest.reasons.${code}`, i18n.exists(`records.ruleTest.reasons.${code}`, { lng }) || i18n.exists(`records.ruleTest.reasons.${code}`, { lng, count: 2 }));
   }
   for (const which of ['permissive', 'strict', 'both']) {
     for (const lng of ['en', 'es']) check(`i18n ${lng}: test_incorrect.${which}`, i18n.exists(`records.ruleTest.reasons.test_incorrect.${which}`, { lng }));

@@ -217,7 +217,11 @@ for (const row of templateRules['dita-xpath2']) {
   check('  names the inline function and let', /inline function/.test(w.warnings[0]?.params.features) && /let expression/.test(w.warnings[0]?.params.features), w.warnings[0]?.params.features);
   check('  names analyze-string()', /analyze-string\(\)/.test(w.warnings[0]?.params.features));
   check('  still executable', w.status === 'executable');
-  check('same rule in an XPath 3.0 project: no warning', analyze(xp3, 'DITA 1.3 Xpath3.0').warnings.length === 0);
+  const w3 = analyze(xp3, 'DITA 1.3 Xpath3.0').warnings;
+  check('same rule in an XPath 3.0 project: no xpath3_syntax warning', !w3.some((x) => x.code === 'xpath3_syntax'), JSON.stringify(w3));
+  // It types its functions "as xs:string" with no xmlns:xs of its own:
+  // Generate declares xs (sch:ns); the test says so.
+  check('  but xs: used without a declaration: undeclared_known_prefix', w3.length === 1 && w3[0].code === 'undeclared_known_prefix' && w3[0].params.prefixes === 'xs:', JSON.stringify(w3));
   check('  and it still runs in the XPath 2.0 project', run(xp3, COMMON['BRDP-EXT-00006'].bad).status === 'rejected');
 }
 

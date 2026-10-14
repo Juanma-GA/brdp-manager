@@ -419,6 +419,22 @@ export default function GeneratePage() {
             </details>
           )}
 
+          {/* A prefix the XPath uses with no sch:ns: a Schematron validator
+              refuses the document (XPST0081); generated anyway (HR7). */}
+          {isDITA && result.xml && result.undeclaredPrefixes?.length > 0 && (
+            <details className={styles.xsdSection} open data-testid="undeclared-prefixes">
+              <summary className={styles.badgeError}>
+                ⚠ {t('generate.undeclaredPrefixes', { count: result.undeclaredPrefixes.length })}
+              </summary>
+              <p className={styles.hint}>{t('generate.undeclaredPrefixesHint')}</p>
+              <ul className={styles.errorList}>
+                {result.undeclaredPrefixes.map((u) => (
+                  <li key={u.prefix}>{t('generate.undeclaredPrefixesItem', { prefix: u.prefix, rules: u.rules.join(', ') })}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {result.xml && result.schemaUrls && <SchemaUrlReport report={result.schemaUrls} />}
 
           {result.xml && result.multiPath?.invalid?.length > 0 && (

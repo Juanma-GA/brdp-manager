@@ -24,6 +24,8 @@
 //   both engines (T4b): external_placeholder {placeholder} ('@@…@@'
 //     replaced by the project's tooling after Generate);
 //     analyzeRule warning (never a refusal): xpath3_syntax {features};
+//     undeclared_known_prefix / undeclared_prefix {prefixes, count} (a
+//       prefix the rule's XPath uses with no xmlns/sch:ns of its own);
 //   the rule test's setup (rule test on DM metadata): unreachable_target
 //     {names} -- no document the examples can be built on can contain what
 //     the rule looks at (known before any LLM call); section_unavailable
@@ -78,7 +80,7 @@ export const ENGINE_REASON_CODES = [
   'extension_function', 'sch_unsupported', 'sch_missing_attribute', 'xpath3_syntax', 'external_placeholder',
   'rule_format', 'unreachable_target', 'section_unavailable', 'empty_schema_context', 'example_impossible',
   'example_no_room', 'condition_no_schema', 'reference_no_schema', 'context_schema_unknown', 'test_schema_unavailable', 'minimal_document_unavailable',
-  'section_value_unavailable',
+  'section_value_unavailable', 'undeclared_known_prefix', 'undeclared_prefix',
 ];
 export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement'];
 

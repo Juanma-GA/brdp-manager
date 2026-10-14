@@ -1,6 +1,13 @@
 import { pendingApprovalComment } from "./generateBREX.js";
 import { ruleEnters } from "../utils/generatePlan.js";
 import { _isSafePattern } from "./brexToSchematron.js";
+import {
+  XPATH_STANDARD_NAMESPACES,
+  XPATH_STANDARD_PREFIXES,
+  schematronPrefixUses,
+  undeclaredSchematronPrefixes,
+  xmlnsDeclarations,
+} from "../utils/xpathPrefixes.js";
 
 // Both DITA standards (migration 0013_split_dita_xpath_standards.py) share
 // this one FORMAT_ID/generator -- the only thing that genuinely differs is
@@ -605,9 +612,19 @@ function checkWellFormedSchematron(xml, schemaSummary, queryBinding = "xslt2") {
     errors.push(`Unresolved placeholder(s) found: ${placeholders.join(", ")}`);
   }
 
+  // A prefix the XPath uses with no <sch:ns> for it: a Schematron compiler
+  // refuses the whole document (XPST0081); an xmlns: on a pattern does not
+  // count (see src/utils/xpathPrefixes.js).
+  const undeclaredPrefixes = undeclaredSchematronPrefixes(xml);
+  for (const { prefix, owners } of undeclaredPrefixes) {
+    errors.push(
+      `Namespace prefix '${prefix}' is used in XPath without a <sch:ns> declaration${owners.length ? ` (${owners.join(", ")})` : ""}; a Schematron processor refuses the document (XPST0081)`
+    );
+  }
+
   const vocabularyWarnings = lintVocabulary(xml, schemaSummary, queryBinding);
 
-  return { valid: errors.length === 0, errors, vocabularyWarnings };
+  return { valid: errors.length === 0, errors, vocabularyWarnings, undeclaredPrefixes };
 }
 
 // ===== Shared <sch:let> deduplication and namespace declarations =====
@@ -765,32 +782,56 @@ function dedupeSharedLets(blocks) {
   return { blocks: newBlocks, sharedLets, warnings };
 }
 
-// Namespace prefixes the rules declare on their <sch:pattern> (xmlns:xs for
-// a function typed "as xs:string", copied from the file's global sch:ns by
-// AI Extract): declared once for the whole document as <sch:ns>, which is
-// what a Schematron processor reads for the prefixes of its XPath.
+// Namespace prefixes: declared once for the whole document as <sch:ns>,
+// which is the only declaration a Schematron processor reads for the
+// prefixes of its XPath (an xmlns: on a pattern is not enough, see
+// src/utils/xpathPrefixes.js).
+//   1. Every xmlns:prefix a rule declares (on its <sch:pattern> -- xmlns:xs
+//      for a function typed "as xs:string", copied from the file's global
+//      sch:ns by AI Extract --, or on any element inside it).
+//   2. XPath's own prefixes (xs, fn, math, map, array, err) that a rule uses
+//      and no rule declares: their URI is fixed by the specifications.
+//      Real case: Navantia rules imported from Excel use xs: in their
+//      functions without any declaration.
+//   3. Any other prefix used and declared nowhere is reported (undeclared:
+//      [{prefix, rules}]); the document is generated anyway.
 // Same prefix with different URIs: the first is declared, and a warning
-// names the conflict.
-const XMLNS_RE_G = /\sxmlns:([A-Za-z_][\w.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-const PATTERN_START_RE_G = new RegExp(`<${SCH}pattern\\b(${ATTR_LIST})\\s*/?>`, "g");
-
-function collectNamespaces(blocks) {
+// names the conflict. blocks: the per-BRDP blocks BEFORE dedupeSharedLets
+// (a moved let keeps no xmlns of its own); identifiers: the BRDP of each.
+function collectNamespaces(blocks, identifiers = []) {
   const byPrefix = new Map();
   const warnings = [];
-  for (const block of blocks) {
-    for (const pm of block.matchAll(PATTERN_START_RE_G)) {
-      for (const xm of pm[1].matchAll(XMLNS_RE_G)) {
-        const prefix = xm[1];
-        const uri = xm[2] ?? xm[3];
-        if (prefix === "sch" || prefix === "xml") continue;
-        if (!byPrefix.has(prefix)) byPrefix.set(prefix, uri);
-        else if (byPrefix.get(prefix) !== uri) {
-          warnings.push(`Namespace prefix '${prefix}' is declared with different URIs across approved rules; '${byPrefix.get(prefix)}' is used.`);
-        }
+  const usedBy = new Map(); // prefix -> Set(identifier)
+  blocks.forEach((block, i) => {
+    for (const [prefix, uri] of xmlnsDeclarations(block)) {
+      if (prefix === "sch") continue;
+      if (!byPrefix.has(prefix)) byPrefix.set(prefix, uri);
+      else if (byPrefix.get(prefix) !== uri) {
+        warnings.push(`Namespace prefix '${prefix}' is declared with different URIs across approved rules; '${byPrefix.get(prefix)}' is used.`);
       }
     }
+    for (const prefix of schematronPrefixUses(block).keys()) {
+      if (!usedBy.has(prefix)) usedBy.set(prefix, new Set());
+      if (identifiers[i]) usedBy.get(prefix).add(identifiers[i]);
+    }
+  });
+  const added = [];
+  for (const prefix of XPATH_STANDARD_PREFIXES) {
+    if (usedBy.has(prefix) && !byPrefix.has(prefix)) {
+      byPrefix.set(prefix, XPATH_STANDARD_NAMESPACES[prefix]);
+      added.push(prefix);
+    }
   }
-  return { namespaces: [...byPrefix].map(([prefix, uri]) => ({ prefix, uri })), warnings: [...new Set(warnings)] };
+  const undeclared = [...usedBy]
+    .filter(([prefix]) => !byPrefix.has(prefix))
+    .map(([prefix, rules]) => ({ prefix, rules: [...rules] }))
+    .sort((a, b) => a.prefix.localeCompare(b.prefix));
+  return {
+    namespaces: [...byPrefix].map(([prefix, uri]) => ({ prefix, uri })),
+    added,
+    undeclared,
+    warnings: [...new Set(warnings)],
+  };
 }
 
 // ===== Main entry point =====
@@ -838,9 +879,11 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     : new Map(approvalsOverride.map((a) => [a.brdp_id, a]));
 
   let blocks = [];
+  const blockIdentifiers = [];
   let ruleCount = 0;
   for (const brdp of targetBRDPs) {
     const approvalEntry = approvalById.get(brdp.id);
+    blockIdentifiers.push(brdp.identifier);
     if (ruleEnters(approvalEntry, includeDrafts)) {
       ruleCount += 1;
       blocks.push(approvedRuleBlock(approvalEntry));
@@ -851,12 +894,15 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     }
   }
 
-  // Repeated sch:let declared once, and the rules' namespace prefixes
-  // declared once (see dedupeSharedLets() / collectNamespaces() above).
+  // The rules' namespace prefixes declared once, and repeated sch:let
+  // declared once (see collectNamespaces() / dedupeSharedLets() above).
+  // Namespaces first, over the blocks as approved: a let moved to schema
+  // level keeps no xmlns of its own.
+  const { namespaces, added: addedNamespaces, undeclared: undeclaredPrefixes, warnings: nsWarnings } =
+    collectNamespaces(blocks, blockIdentifiers);
   const deduped = dedupeSharedLets(blocks);
   blocks = deduped.blocks;
   const sharedLets = deduped.sharedLets;
-  const { namespaces, warnings: nsWarnings } = collectNamespaces(blocks);
   const dedupWarnings = [...deduped.warnings, ...nsWarnings];
 
   const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding, sharedLets, namespaces);
@@ -872,6 +918,12 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     // unconfirmed-vocabulary flag) but shares the exact same "worth a
     // human look, never blocks generation or download" semantics.
     vocabularyWarnings: [...vocabularyWarnings, ...dedupWarnings],
+    // XPath's own prefixes declared by Generate (sch:ns) because a rule used
+    // them without a declaration, and the other prefixes used and declared
+    // nowhere, with the rules that use them (a red warning on the page:
+    // a Schematron processor refuses the document).
+    addedNamespaces,
+    undeclaredPrefixes,
     brdpCount: targetBRDPs.length,
     ruleCount,
   };

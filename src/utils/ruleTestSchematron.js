@@ -68,6 +68,7 @@
 import fontoxpath from 'fontoxpath';
 import { prepareXPath, setExtraParser, xpathRegex } from './xpathExtraFunctions.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
+import { ruleUndeclaredPrefixes } from './xpathPrefixes.js';
 import {
   EXTERNAL_PLACEHOLDER_RE,
   KNOWN_NAMESPACES,
@@ -913,6 +914,18 @@ export function analyzeSchematron(ruleXml, options = {}) {
   const warnings = [];
   if (options.standard === 'DITA 1.3 Xpath2.0' && features.size) {
     warnings.push(reason('xpath3_syntax', { features: [...features].join(', ') }));
+  }
+  // A prefix the rule's XPath uses with no declaration in the rule (no
+  // xmlns:x, no sch:ns): a real validator refuses the final Schematron if it
+  // does not declare it. Informative only: Generate writes the sch:ns of
+  // XPath's own prefixes (xs, fn, math, map, array, err) itself, and of any
+  // prefix a rule declares with xmlns.
+  const undeclared = ruleUndeclaredPrefixes(ruleXml);
+  if (undeclared.known.length) {
+    warnings.push(reason('undeclared_known_prefix', { prefixes: undeclared.known.map((p) => `${p}:`).join(', '), count: undeclared.known.length }));
+  }
+  if (undeclared.unknown.length) {
+    warnings.push(reason('undeclared_prefix', { prefixes: undeclared.unknown.map((p) => `${p}:`).join(', '), count: undeclared.unknown.length }));
   }
   activeDossier = null;
   const warningOnly = warningOnlyRule(patterns, globalLets, globalUnsupported, namespaces);

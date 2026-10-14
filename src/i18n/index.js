@@ -1442,6 +1442,10 @@ const resources = {
             reference_no_schema: 'no {{standard}} schema with <{{element}}> has any of the elements its @{{attribute}} must point to ({{destinations}}): no example can point to one.',
             rule_format: 'The stored XML is not a rule of this format, so it cannot be tested: {{detail}}',
             xpath3_syntax: 'This project uses XPath 2.0, but the rule uses XPath 3.x syntax ({{features}}); an XPath 2.0 validator would refuse it. The test runs it anyway.',
+            undeclared_known_prefix_one: 'The rule uses the prefix {{prefixes}} without declaring it. Generate declares it in the project Schematron (sch:ns), but a real validator will fail if the final Schematron does not declare it.',
+            undeclared_known_prefix_other: 'The rule uses the prefixes {{prefixes}} without declaring them. Generate declares them in the project Schematron (sch:ns), but a real validator will fail if the final Schematron does not declare them.',
+            undeclared_prefix_one: 'The rule uses the prefix {{prefixes}} without declaring it: a real validator will fail if the final Schematron does not declare it. Declare it in the rule (xmlns:prefix="…" on its sch:pattern) so Generate writes its sch:ns.',
+            undeclared_prefix_other: 'The rule uses the prefixes {{prefixes}} without declaring them: a real validator will fail if the final Schematron does not declare them. Declare them in the rule (xmlns:prefix="…" on its sch:pattern) so Generate writes their sch:ns.',
             part: '{{ruleId}}: {{reason}}',
             test_incorrect: {
               permissive: 'the rule accepted an example meant to violate it',
@@ -1887,6 +1891,11 @@ const resources = {
         emptyContextBlocks_other: 'The BREX has {{count}} context blocks with an empty schema attribute',
         emptyContextBlocksHint:
           'A BREX validator such as s1kd-brexcheck applies a block only when it has no rulesContext (context in 3.0.1) or when it is the data module\'s schema, so the rules in these blocks would apply to no schema. This should never happen: report it.',
+        undeclaredPrefixes_one: 'The Schematron uses {{count}} namespace prefix that is not declared',
+        undeclaredPrefixes_other: 'The Schematron uses {{count}} namespace prefixes that are not declared',
+        undeclaredPrefixesHint:
+          'A Schematron validator refuses the whole document when its XPath uses a prefix with no sch:ns declaration (XPST0081). The document has been generated anyway. Declare the prefix in the rule (xmlns:prefix="…" on its sch:pattern) and generate again: Generate then writes its sch:ns.',
+        undeclaredPrefixesItem: '{{prefix}}: used in {{rules}}',
         schemaUrlsUnrecognized_one: '{{count}} rule has schema URLs that were left as written',
         schemaUrlsUnrecognized_other: '{{count}} rules have schema URLs that were left as written',
         schemaUrlsUnrecognizedHint:
@@ -3454,6 +3463,10 @@ const resources = {
             reference_no_schema: 'ningún esquema de {{standard}} con <{{element}}> tiene alguno de los elementos a los que debe apuntar su @{{attribute}} ({{destinations}}): ningún ejemplo puede apuntar a uno.',
             rule_format: 'El XML guardado no es una regla de este formato, así que no se puede probar: {{detail}}',
             xpath3_syntax: 'Este proyecto usa XPath 2.0, pero la regla usa sintaxis de XPath 3.x ({{features}}); un validador XPath 2.0 la rechazaría. La prueba la ejecuta igualmente.',
+            undeclared_known_prefix_one: 'La regla usa el prefijo {{prefixes}} sin declararlo. Generate lo declara en el Schematron del proyecto (sch:ns), pero un validador real fallará si el Schematron final no lo declara.',
+            undeclared_known_prefix_other: 'La regla usa los prefijos {{prefixes}} sin declararlos. Generate los declara en el Schematron del proyecto (sch:ns), pero un validador real fallará si el Schematron final no los declara.',
+            undeclared_prefix_one: 'La regla usa el prefijo {{prefixes}} sin declararlo: un validador real fallará si el Schematron final no lo declara. Decláralo en la regla (xmlns:prefijo="…" en su sch:pattern) para que Generate escriba su sch:ns.',
+            undeclared_prefix_other: 'La regla usa los prefijos {{prefixes}} sin declararlos: un validador real fallará si el Schematron final no los declara. Decláralos en la regla (xmlns:prefijo="…" en su sch:pattern) para que Generate escriba su sch:ns.',
             part: '{{ruleId}}: {{reason}}',
             test_incorrect: {
               permissive: 'la regla aceptó un ejemplo pensado para incumplirla',
@@ -3893,6 +3906,11 @@ const resources = {
         emptyContextBlocks_other: 'El BREX tiene {{count}} bloques de contexto con el atributo de esquema vacío',
         emptyContextBlocksHint:
           'Un validador de BREX como s1kd-brexcheck solo aplica un bloque si no tiene rulesContext (context en 3.0.1) o si es el esquema del módulo de datos, así que las reglas de estos bloques no se aplicarían a ningún esquema. No debería ocurrir nunca: avísalo.',
+        undeclaredPrefixes_one: 'El Schematron usa {{count}} prefijo de espacio de nombres sin declarar',
+        undeclaredPrefixes_other: 'El Schematron usa {{count}} prefijos de espacio de nombres sin declarar',
+        undeclaredPrefixesHint:
+          'Un validador de Schematron rechaza el documento entero si su XPath usa un prefijo sin una declaración sch:ns (XPST0081). El documento se ha generado igualmente. Declara el prefijo en la regla (xmlns:prefijo="…" en su sch:pattern) y vuelve a generar: Generate escribirá entonces su sch:ns.',
+        undeclaredPrefixesItem: '{{prefix}}: usado en {{rules}}',
         schemaUrlsUnrecognized_one: '{{count}} regla tiene URL de esquema que se han dejado como estaban',
         schemaUrlsUnrecognized_other: '{{count}} reglas tienen URL de esquema que se han dejado como estaban',
         schemaUrlsUnrecognizedHint:
