@@ -1087,6 +1087,7 @@ const resources = {
           unknownNames: 'names not in the {{standard}} schema: {{names}}',
           wrongTypeNames: 'names used as the wrong kind: {{names}}',
           ruleMessage: "Rule's message: {{message}}",
+          ruleMessageInFile: "Rule's message, in {{path}}: {{message}}",
           conditionHolds: "The rule's condition holds in this document.",
           conditionNotHolds: "The rule's condition does not hold in this document.",
           // Mejoras B, Part 3: why the rule accepted an example meant to be rejected.
@@ -3087,6 +3088,7 @@ const resources = {
           unknownNames: 'nombres que no están en el esquema de {{standard}}: {{names}}',
           wrongTypeNames: 'nombres usados con el tipo equivocado: {{names}}',
           ruleMessage: 'Mensaje de la regla: {{message}}',
+          ruleMessageInFile: 'Mensaje de la regla, en {{path}}: {{message}}',
           conditionHolds: 'La condición de la regla se cumple en este documento.',
           conditionNotHolds: 'La condición de la regla no se cumple en este documento.',
           acceptedBecause: 'Por qué la regla lo aceptó: {{cause}}.',

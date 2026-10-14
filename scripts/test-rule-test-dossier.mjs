@@ -22,7 +22,7 @@
 import { DOMParser } from '@xmldom/xmldom';
 import { readPublicTemplate } from './lib/readXlsx.mjs';
 import { analyzeRule, describeRule, runRuleOnFragment } from '../src/utils/ruleTestEngine.js';
-import { DOSSIER_BASE_URI, dossierUri } from '../src/utils/ruleTestSchematron.js';
+import { DOSSIER_BASE_URI, dossierFileSelection, dossierUri } from '../src/utils/ruleTestSchematron.js';
 import i18n from '../src/i18n/index.js';
 import { formatRuleDescription } from '../src/utils/ruleTestReasons.js';
 import { DOSSIER_CASES, DOSSIER_MAP } from './lib/dossierFixtures.mjs';
@@ -90,21 +90,21 @@ const FILES = [
   { path: 'comunes/notas.dita', xml: '<topic id="notas"><title>N</title><body><note id="w1" type="warning">x</note></body></topic>' },
 ];
 check('dossierUri', dossierUri('fichas/a.dita') === `${DOSSIER_BASE_URI}fichas/a.dita` && dossierUri('../x.dita', `${DOSSIER_BASE_URI}fichas/a.dita`) === `${DOSSIER_BASE_URI}x.dita`);
-check('base-uri of a node of the ditamap', value('base-uri(//topicref[1])', FILES) === 'file:///dossier/dosier.ditamap', value('base-uri(//topicref[1])', FILES));
-check('base-uri() with no argument (the context node)', value('base-uri()', FILES) === 'file:///dossier/dosier.ditamap', value('base-uri()', FILES));
+check('base-uri of a node of the ditamap', value('base-uri(//topicref[1])', FILES) === 'file:///csdb/dossier/dosier.ditamap', value('base-uri(//topicref[1])', FILES));
+check('base-uri() with no argument (the context node)', value('base-uri()', FILES) === 'file:///csdb/dossier/dosier.ditamap', value('base-uri()', FILES));
 check(
   'base-uri of a node of another file',
-  value("base-uri(doc('fichas/precauciones.dita')//title)", FILES) === 'file:///dossier/fichas/precauciones.dita',
+  value("base-uri(doc('fichas/precauciones.dita')//title)", FILES) === 'file:///csdb/dossier/fichas/precauciones.dita',
   value("base-uri(doc('fichas/precauciones.dita')//title)", FILES),
 );
 check(
   'resolve-uri with ../ from a node of another file',
-  value("resolve-uri('../comunes/notas.dita', base-uri(doc('fichas/precauciones.dita')/*))", FILES) === 'file:///dossier/comunes/notas.dita',
+  value("resolve-uri('../comunes/notas.dita', base-uri(doc('fichas/precauciones.dita')/*))", FILES) === 'file:///csdb/dossier/comunes/notas.dita',
 );
-check("resolve-uri with one argument: against the ditamap", value("resolve-uri('fichas/a.dita')", FILES) === 'file:///dossier/fichas/a.dita');
-check("resolve-uri keeps a #fragment (the rule removes it)", value("resolve-uri('a.dita#t1/x', base-uri(.))", FILES) === 'file:///dossier/a.dita#t1/x');
+check("resolve-uri with one argument: against the ditamap", value("resolve-uri('fichas/a.dita')", FILES) === 'file:///csdb/dossier/fichas/a.dita');
+check("resolve-uri keeps a #fragment (the rule removes it)", value("resolve-uri('a.dita#t1/x', base-uri(.))", FILES) === 'file:///csdb/dossier/a.dita#t1/x');
 check("resolve-uri of an absolute URI: unchanged", value("resolve-uri('http://example.com/a.dita', base-uri(.))", FILES) === 'http://example.com/a.dita');
-check('doc-available: a dossier file', value("doc-available('file:///dossier/fichas/precauciones.dita')", FILES) === 'true');
+check('doc-available: a dossier file', value("doc-available('file:///csdb/dossier/fichas/precauciones.dita')", FILES) === 'true');
 check('doc-available: relative to the ditamap', value("doc-available('comunes/notas.dita')", FILES) === 'true');
 check('doc-available: another folder', value("doc-available('file:///otra/fichas/precauciones.dita')", FILES) === 'false');
 check('doc-available: http', value("doc-available('http://example.com/fichas/precauciones.dita')", FILES) === 'false');
@@ -117,7 +117,7 @@ check(
   'document($u, $node) resolves against the node',
   value("document('../comunes/notas.dita', doc('fichas/precauciones.dita')/*)//note/@id", FILES) === 'w1',
 );
-check('the same file read twice is the same document', value("doc('comunes/notas.dita') is doc('file:///dossier/comunes/notas.dita')", FILES) === 'true');
+check('the same file read twice is the same document', value("doc('comunes/notas.dita') is doc('file:///csdb/dossier/comunes/notas.dita')", FILES) === 'true');
 check("root() of a node of another file is that file", value("root(doc('comunes/notas.dita')//note) is doc('comunes/notas.dita')", FILES) === 'true');
 {
   // doc() without doc-available() on a missing file: an engine error on this
@@ -229,7 +229,8 @@ async function generate(id, answers) {
   ] };
   const { result, asked, prompt } = await generate('BRDP-EXT-00007', [good]);
   check('EXT-00007: one LLM call, ready', result.status === 'ready' && asked.length === 1, JSON.stringify(result.error || ''));
-  check('prompt: the dossier block', /each example is a DOSSIER/.test(prompt) && /"files": at most 4 more files/.test(prompt) && /at most\s+30 lines each/.test(prompt) && /not only in the ditamap/.test(prompt), prompt);
+  check('prompt: the dossier block', /each example is a\s+DOSSIER/.test(prompt) && /"files": at most 4 more files/.test(prompt) && /at most\s+30 lines each/.test(prompt) && /not only in the ditamap/.test(prompt), prompt);
+  check('prompt: no "going up the folders" line for a rule without uri-collection', !/going up the folders/.test(prompt));
   check('prompt: output with files', prompt.includes('"files": [{"path": "topics/….dita"'), prompt.slice(-400));
   check('prompt: no "lists above" (there are none)', !/the rule's own names and the lists above/.test(prompt));
   const [a] = result.examples;
@@ -353,6 +354,127 @@ async function generate(id, answers) {
   const answer = { examples: [{ label: 'a', expected: 'accept', schema: 'map', content: MAP2(['topics/prec.dita']), files: [{ path: 'topics/prec.dita', content: PREC_TASK }] }, { label: 'b', expected: 'reject', schema: 'map', content: MAP2(['topics/prec.dita']), files: [{ path: 'topics/prec.dita', content: PREC_TASK }] }] };
   const { prompt } = await generate('BRDP-EXT-00008', [answer]);
   check('generation: the prompt quotes $pasosPrec and $notas', prompt.includes('- $pasosPrec := $docPrec//cmd ! normalize-space(.)') && prompt.includes('- $notas := $docs//note['), prompt.split('WHERE THE RULE LOOKS')[1]?.slice(0, 300));
+}
+
+// ─── 6. Funciones XPath que faltan, Part 2: uri-collection, a CSDB folder,
+// every document of the dossier ─────────────────────────────────────────────
+// scripts/rule-test-fixtures/navantia-dita3-reconstructed.sch: the shape of
+// the Navantia "DITA 1.3 Xpath3.0" project (26 rules; the real file is not in
+// the repo). Before this round: 8 executable, 18 XPST0017 (17 sort#1 in the
+// ditamap search, 1 matches#3) -- measured with the previous engine.
+{
+  const sch = fs.readFileSync(new URL('./rule-test-fixtures/navantia-dita3-reconstructed.sch', import.meta.url), 'utf8');
+  const navRule = (id) =>
+    sch.match(new RegExp(`<sch:pattern id="p-${id}"[\\s\\S]*?</sch:pattern>`))[0].replace('<sch:pattern', '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron"');
+  const ids = [...sch.matchAll(/<sch:pattern id="p-(BRDP-EXT-\d+)"/g)].map((m) => m[1]);
+  check('Navantia fixture: 26 rules', ids.length === 26, String(ids.length));
+  const statuses = ids.map((id) => [id, analyze(navRule(id))]);
+  check('Navantia: all 26 executable now (before: 8)', statuses.every(([, a]) => a.status === 'executable'), JSON.stringify(statuses.filter(([, a]) => a.status !== 'executable').map(([id, a]) => [id, a.reason])));
+  const dossierIds = statuses.filter(([, a]) => a.dossier).map(([id]) => id.slice(-5));
+  check('Navantia: the 17 ditamap-search rules are dossier rules', dossierIds.join(' ') === '00012 00013 00014 00015 00016 00017 00018 00019 00020 00021 00022 00023 00024 00025 00027 00033 00035', dossierIds.join(' '));
+  check('Navantia: EXT-00010 (matches with "i") executable, not a dossier rule', statuses.find(([id]) => id === 'BRDP-EXT-00010')[1].dossier === false);
+
+  check('the dossier folder has two levels (a CSDB folder)', /^file:\/\/\/[^/]+\/[^/]+\/$/.test(DOSSIER_BASE_URI), DOSSIER_BASE_URI);
+  const MAPN = '<map><title>Dosier</title><topicref href="fichas/ft-001.dita"/><topicref href="fichas/ft-002.dita"/></map>';
+  const sheet = (id, cite, title = `Ficha ${id}`) => `<topic id="${id}"><title>${title}</title><body><table><tgroup cols="1"><tbody><row><entry>${cite}</entry></row></tbody></tgroup></table></body></topic>`;
+  const nav = (id, files, main = MAPN, mainPath = 'dossier.ditamap') => runRuleOnFragment(navRule(id), FORMAT, main, null, { parseXml, dossier: { mainPath, files } });
+  const FILES2 = [{ path: 'fichas/ft-001.dita', xml: sheet('FT-001', 'FT-002') }, { path: 'fichas/ft-002.dita', xml: sheet('FT-002', 'FT-001') }];
+  // uri-collection over the dossier
+  const uc = (expr, files = FILES2, mainPath = 'dossier.ditamap') => {
+    const probe = `<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron" id="p"><sch:rule context="/*"><sch:report id="U" test="true()"><sch:value-of select="string-join(${expr}, '|')"/></sch:report></sch:rule></sch:pattern>`;
+    const r = runRuleOnFragment(probe, FORMAT, MAPN, null, { parseXml, dossier: { mainPath, files } });
+    return r.violations.filter((v) => !v.file).map((v) => v.message)[0] ?? `(${r.status})`;
+  };
+  const base = DOSSIER_BASE_URI;
+  check("uri-collection('fichas/'): the files directly in it, sorted", uc("uri-collection('fichas/')") === `${base}fichas/ft-001.dita|${base}fichas/ft-002.dita`, uc("uri-collection('fichas/')"));
+  check('uri-collection of the folder without the final /', uc("uri-collection('fichas')") === `${base}fichas/ft-001.dita|${base}fichas/ft-002.dita`);
+  check('uri-collection of the top folder: not recursive', uc(`uri-collection('${base}')`) === `${base}dossier.ditamap`, uc(`uri-collection('${base}')`));
+  check("uri-collection ?recurse=yes;select=*.dita", uc(`uri-collection('${base}?recurse=yes;select=*.dita')`) === `${base}fichas/ft-001.dita|${base}fichas/ft-002.dita`, uc(`uri-collection('${base}?recurse=yes;select=*.dita')`));
+  check('uri-collection of a folder outside the dossier: ()', uc("uri-collection('file:///otra/')") === '');
+  check('uri-collection(): no default collection, ()', uc('uri-collection()') === '');
+  check('sort(uri-collection(…)[matches(., …, "i")]) finds the ditamap', uc(`sort(uri-collection('${base}')[matches(., '\\.DITAMAP$', 'i')])`) === `${base}dossier.ditamap`);
+  check('base-uri of a file with the new folder', uc("base-uri(doc('fichas/ft-001.dita'))") === `${base}fichas/ft-001.dita`);
+  check('resolve-uri and doc with the new folder', uc("doc(resolve-uri('ft-002.dita', base-uri(doc('fichas/ft-001.dita'))))/*/@id") === 'FT-002');
+  check('collection() still not executable', analyze('<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron" id="p"><sch:rule context="map"><sch:assert id="C" test="exists(collection(\'x\'))">x</sch:assert></sch:rule></sch:pattern>').reason?.code === 'external_document');
+
+  // EXT-00017: the rule runs on every file; the sheet cites a code.
+  let r = nav('BRDP-EXT-00017', FILES2);
+  check('EXT-00017: a code of the dossier → accepted', r.status === 'accepted', summary(r));
+  check('EXT-00017: the entries of both sheets are selected, with their file', r.selectedNodePaths.filter((p) => p.endsWith('/entry[1]')).length === 2 && r.selectedNodePaths.some((p) => p.startsWith('fichas/ft-001.dita::')), JSON.stringify(r.selectedNodePaths));
+  r = nav('BRDP-EXT-00017', [{ path: 'fichas/ft-001.dita', xml: sheet('FT-001', 'FT-009') }, FILES2[1]]);
+  check('EXT-00017: a code that does not exist → rejected', r.status === 'rejected' && r.violations.length === 1, summary(r));
+  check('EXT-00017: the violation names the file', r.violations[0]?.file === 'fichas/ft-001.dita' && r.violations[0].nodePaths[0].startsWith('fichas/ft-001.dita::/topic[1]'), JSON.stringify(r.violations));
+  check('EXT-00017: the message', /cita el código FT-009/.test(r.violations[0]?.message || ''));
+  check('dossierFileSelection: the paths of one file, without the prefix', dossierFileSelection(r.violations[0].nodePaths, 'fichas/ft-001.dita')[0] === '/topic[1]/body[1]/table[1]/tgroup[1]/tbody[1]/row[1]/entry[1]' && dossierFileSelection(r.violations[0].nodePaths, null).length === 0);
+  // The ditamap in the same folder as the sheet.
+  r = nav('BRDP-EXT-00017', [{ path: 'fichas/ft-001.dita', xml: sheet('FT-001', 'FT-009') }], '<map><topicref href="ft-001.dita"/></map>', 'fichas/mapa.ditamap');
+  check('EXT-00017: the ditamap in the same folder → found, rejected', r.status === 'rejected', summary(r));
+  // A ditamap in a folder BELOW the sheet's is never found: the rule is silent.
+  r = nav('BRDP-EXT-00017', [{ path: 'ft-001.dita', xml: sheet('FT-001', 'FT-009') }], '<map><topicref href="../ft-001.dita"/></map>', 'sub/mapa.ditamap');
+  check('EXT-00017: the ditamap below the sheet → not found, the rule is silent', r.status === 'accepted', summary(r));
+  // EXT-00012: a sheet no ditamap references.
+  r = nav('BRDP-EXT-00012', [FILES2[0], { path: 'otra/ft-003.dita', xml: sheet('FT-003', 'x') }]);
+  check('EXT-00012: a sheet no ditamap references → rejected on that file only', r.status === 'rejected' && r.violations.map((v) => v.file).join() === 'otra/ft-003.dita', JSON.stringify(r.violations.map((v) => v.file)));
+  // The same dossier validated with Saxon-HE 9.9.1 + SchXslt 1.9.5 (each
+  // file of the folder on disk, one compiled pattern at a time; not in the
+  // repo): the files each rule fails on.
+  const SAXON_FILES = [
+    { path: 'fichas/ft-001.dita', xml: sheet('FT-001', 'FT-009') },
+    { path: 'fichas/ft-002.dita', xml: sheet('FT-002', 'FT-001', 'NOTA: algo') },
+    { path: 'otra/ft-003.dita', xml: sheet('FT-003', 'x', 'Ficha') },
+  ];
+  for (const [id, files] of [['BRDP-EXT-00010', ['fichas/ft-002.dita']], ['BRDP-EXT-00012', ['otra/ft-003.dita']], ['BRDP-EXT-00017', ['fichas/ft-001.dita']]]) {
+    // EXT-00010 is not a dossier rule: it runs on each document as XMetal
+    // validates each one -- here, each file on its own.
+    const got = id === 'BRDP-EXT-00010'
+      ? SAXON_FILES.filter((f) => runRuleOnFragment(navRule(id), FORMAT, f.xml, null, { parseXml }).status === 'rejected').map((f) => f.path)
+      : [...new Set(nav(id, SAXON_FILES).violations.map((v) => v.file || 'dossier.ditamap'))];
+    check(`${id}: the same files as Saxon (${files.join(', ')})`, JSON.stringify(got) === JSON.stringify(files), JSON.stringify(got));
+  }
+  // A rule whose context is only in the ditamap: unchanged (no file paths).
+  r = runDossier(rule('BRDP-EXT-00007'), [{ path: 'fichas/precauciones.dita', xml: '<task id="precauciones"><title>PRECAUCIONES DE SEGURIDAD</title><taskbody><steps><step><cmd>x</cmd></step></steps></taskbody></task>' }], '<map><topicref href="fichas/precauciones.dita"/></map>');
+  check('a ditamap rule: nothing selected in the files', r.selectedNodePaths.every((p) => !p.includes('::')), JSON.stringify(r.selectedNodePaths));
+
+  // Generation (EXT-00017): the main document is the ditamap, the prompt
+  // says where the ditamap goes.
+  const answer = {
+    examples: [
+      { label: 'cites a sheet of the dossier', expected: 'accept', schema: 'map', content: MAPN, files: [{ path: 'fichas/ft-001.dita', content: sheet('FT-001', 'FT-002') }, { path: 'fichas/ft-002.dita', content: sheet('FT-002', 'FT-001') }] },
+      { label: 'cites a sheet that does not exist', expected: 'reject', schema: 'map', content: MAPN, files: [{ path: 'fichas/ft-001.dita', content: sheet('FT-001', 'FT-009') }, { path: 'fichas/ft-002.dita', content: sheet('FT-002', 'FT-001') }] },
+    ],
+  };
+  const asked = [];
+  let prompt = null;
+  const result = await generateRuleTestExamples({
+    ruleXml: navRule('BRDP-EXT-00017'),
+    format: FORMAT,
+    standard: 'DITA 1.3 Xpath3.0',
+    schemaLocation: 'flat',
+    brdp: { identifier: 'BRDP-EXT-00017', title: 'Códigos citados', definition: 'Decidir si los códigos citados en las fichas deben existir.', proposal: 'Todo código de ficha citado en una tabla debe corresponder a una ficha del dosier.' },
+    vocabulary: VOCAB,
+    parseXml,
+    ask: async (messages) => {
+      asked.push(messages);
+      return JSON.stringify(answer);
+    },
+    onPrompt: (p) => {
+      prompt = p;
+    },
+    fetchSchemaCards,
+    fetchStructure,
+    fetchSchemaAttribute: async () => ({ owners: [] }),
+  });
+  check('EXT-00017 generation: one LLM call, ready', result.status === 'ready' && asked.length === 1, JSON.stringify(result.error || ''));
+  check('EXT-00017 prompt: the main document is the ditamap', /Every example is a DITA map \("schema": "map"\)/.test(prompt), (prompt || '').split('\n').find((l) => /Every example/.test(l)));
+  check('EXT-00017 prompt: the rule runs on every file; the ditamap references the topic', /The\s+rule runs on EVERY document of the dossier/.test(prompt) && /the ditamap references it with\s+a <topicref>/.test(prompt));
+  check('EXT-00017 prompt: where the ditamap goes (going up the folders)', /finds the ditamap by going up the folders from each file/.test(prompt) && /never below it/.test(prompt));
+  check('EXT-00017: accept accepted, reject rejected', result.runs[0].result?.status === 'accepted' && result.runs[1].result?.status === 'rejected', JSON.stringify(result.runs.map((x) => x.result?.status)));
+  check('EXT-00017: verdict correct', ruleTestVerdict(result.examples, result.runs, null).kind === 'correct');
+  // The saved passed test re-runs the same way (no LLM).
+  const payload = passedTestPayload(result.examples, result.runs, 'x');
+  const saved = savedPassedTest({ last_passed_test: { ...payload, at: '2026-10-14T10:00:00Z', rule_xml: navRule('BRDP-EXT-00017'), rule_hash: 'x' }, rule_xml: navRule('BRDP-EXT-00017') });
+  const rerun = runSavedTest(saved, navRule('BRDP-EXT-00017'), FORMAT, { parseXml });
+  check('EXT-00017: saved test re-run, correct, nothing changed', rerun.verdict.kind === 'correct' && rerun.changed.length === 0, JSON.stringify(rerun.verdict));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

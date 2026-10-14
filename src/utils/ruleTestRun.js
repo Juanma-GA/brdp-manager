@@ -359,6 +359,9 @@ function unknownContextReason({ schema, url }, documentSchemas, standard) {
 // rule forbids (schemaCoverage.js) -- only examples meant to be accepted are
 // written, so the relation split (one example inside, one outside) is not
 // needed: the "outside" example cannot exist.
+// The targets of a dossier example's main document: the ditamap, whole.
+const DOSSIER_MAIN_RULE = '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron"><sch:rule context="map"><sch:assert test="true()"/></sch:rule></sch:pattern>';
+
 export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, fetchSchemaCards, fetchStructure, fetchSchemaAttribute, acceptOnly = false, format = null, parseXml = parseXmlDocument }) {
   const contextInfo = contextSchemasOfRule(ruleXml, schemaLocation);
   let contextSchemas = contextInfo.schemas;
@@ -368,10 +371,17 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   // Default BREX pass, Part 2.2: what the predicates of every step require
   // to exist -- a preference for the test schema.
   const stepRequirements = format && format.startsWith('BREX') ? predicateRequirements(ruleXml, format, { parseXml, schemaLocation }) : [];
-  const targets = {
-    ...ruleTargets(ruleXml),
-    containNames: format && format.startsWith('BREX') ? documentExistenceNames(ruleXml, format, { parseXml, schemaLocation }) : [],
-  };
+  // Funciones XPath que faltan, Part 2.3: the main document of a dossier
+  // example is always the ditamap (the rule then runs on every file of the
+  // dossier too), whatever the rule's contexts -- a rule on the topics'
+  // rows or entries is tested on the files the ditamap points to.
+  const dossierRule = format === 'SCH-DITA' && analyzeRule(ruleXml, format, { parseXml }).dossier === true;
+  const targets = dossierRule
+    ? { ...ruleTargets(DOSSIER_MAIN_RULE), containNames: [] }
+    : {
+        ...ruleTargets(ruleXml),
+        containNames: format && format.startsWith('BREX') ? documentExistenceNames(ruleXml, format, { parseXml, schemaLocation }) : [],
+      };
   // Part 2.2 (BRDP-EXT-00133): what a predicate requires to exist -- with a
   // single way to meet it -- must also be writable from the insertion point
   // (ancestor::dmodule[descendant::referencedApplicGroupRef]: inside
@@ -1443,7 +1453,15 @@ export async function generateRuleTestExamples({
       several: prepared.several || [],
       concatSplits: prepared.concatSplits || [],
       dossier: dossierRule
-        ? { mainPath: DOSSIER_MAIN_PATH, maxFiles: DOSSIER_MAX_FILES, maxLines: DOSSIER_MAX_FILE_LINES, types: DOSSIER_FILE_TYPES, look: dossierLookExpressions(ruleXml, parseXml) }
+        ? {
+            mainPath: DOSSIER_MAIN_PATH,
+            maxFiles: DOSSIER_MAX_FILES,
+            maxLines: DOSSIER_MAX_FILE_LINES,
+            types: DOSSIER_FILE_TYPES,
+            look: dossierLookExpressions(ruleXml, parseXml),
+            // the rule looks for the ditamap going up the folders
+            searchesFolders: /(?<![\w.$:-])(?:fn:)?uri-collection\s*\(/.test(String(ruleXml).replace(/'[^']*'/g, "''")),
+          }
         : null,
     });
     onPrompt?.(systemPrompt);

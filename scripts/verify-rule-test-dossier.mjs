@@ -144,7 +144,7 @@ async function main() {
     const desc = await panel().getByTestId("rule-test-description").textContent();
     assert(desc.includes("Reads other files of the dossier: the examples include the ditamap and the topics it points to."), `description: the dossier line (${desc.slice(0, 160)})`);
     const prompt7 = systemOf(await lastRequest());
-    assert(prompt7.includes("each example is a DOSSIER") && prompt7.includes('"files": at most 4 more files'), "prompt: the dossier block");
+    assert(/each example is a\s+DOSSIER/.test(prompt7) && prompt7.includes('"files": at most 4 more files'), "prompt: the dossier block");
     const verdict7 = await panel().getByTestId("rule-test-verdict").textContent();
     assert(verdict7.startsWith("Correct"), `EXT-00007: verdict Correct (${verdict7})`);
     assert((await examples().count()) === 2, "two dossier examples");

@@ -972,6 +972,29 @@ ruleTestExamplesCases.push(
     ],
   }
 );
+// Funciones XPath que faltan, Part 2: a rule on the topics' cells that
+// finds the ditamap going up the folders with sort(uri-collection(...))
+// (reconstructed Navantia BRDP-EXT-00017): the "going up the folders" line.
+const ruleDitaDossierSheet = readTextFile(new URL('../rule-test-fixtures/navantia-dita3-reconstructed.sch', import.meta.url))
+  .match(/<sch:pattern id="p-BRDP-EXT-00017"[\s\S]*?<\/sch:pattern>/)[0];
+ruleTestExamplesCases.push({
+  name: 'dita-xpath3-dossier-sheet-uri-collection',
+  args: [
+    {
+      brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-00017', title: 'Códigos de ficha citados', definition: 'Decidir si los códigos de ficha citados en las tablas deben existir en el dosier.', proposal: 'Todo código de ficha citado en una tabla debe corresponder a una ficha del dosier.' },
+      standard: 'DITA 1.3 Xpath3.0',
+      format: 'SCH-DITA',
+      ruleXml: ruleDitaDossierSheet,
+      placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaDossier, [['map', 'rule']]),
+      matchExpressions: ruleMatchExpressions(ruleDitaDossierSheet),
+      dossier: {
+        ...dossierOption,
+        look: dossierLookExpressions(ruleDitaDossierSheet, (x) => new XmldomParser().parseFromString(x, 'application/xml')),
+        searchesFolders: true,
+      },
+    },
+  ],
+});
 
 // Barrido final 1/2: a rule that looks at tables gets the model table built
 // from the first test schema's real structure, exactly as

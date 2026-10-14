@@ -4254,6 +4254,51 @@
       ]
     },
     {
+      "id": "rule-test-navantia-dita3-dossier-sheet-codes",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Funciones XPath que faltan: Navantia BRDP-EXT-00017 (reconstructed): each topic finds its ditamap going up the folders with sort(uri-collection(...)) and the codes FT-nnn cited in its table cells must be topics of the dossier. Before this round: No ejecutable (XPST0017, fn:sort#1).",
+      "brdp": {
+        "identifier": "BRDP-EXT-00017",
+        "title": "Códigos de ficha citados",
+        "definition": "Decidir si los códigos de ficha citados en las tablas deben existir en el dosier.",
+        "proposal": "Todo código de ficha citado en una tabla debe corresponder a una ficha del dosier.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-reconstructed.sch",
+        "pattern": "p-BRDP-EXT-00017"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier: the ditamap and 1 to 4 more files"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "the ditamap and every file pass the XML, vocabulary and structure checks after the one correction round"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the engine runs the rule on every document of each dossier (sort, uri-collection) and agrees with every example"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "target": "files",
+          "pattern": "FT-[0-9]{3}",
+          "note": "every reject example cites a sheet code in one of its files (the decision applies inside the topics)"
+        }
+      ]
+    },
+    {
       "id": "rule-test-template-dita3-dossier-warnings",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",

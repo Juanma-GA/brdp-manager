@@ -116,6 +116,7 @@
 // result also carries `warnings` (T4): Schematron assert/report with
 // role="warning"/"info" that fired (they never reject), [] for BREX.
 import fontoxpath from 'fontoxpath';
+import { prepareXPath } from './xpathExtraFunctions.js';
 import { _isContextPattern, _normSpace, _splitTopLevel, _valueCheckXPath } from '../api/brexToSchematron.js';
 import { schemaNameFromContext } from './ruleSchemaContext.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
@@ -444,9 +445,12 @@ function makeEvaluator(doc) {
   };
   const { evaluateXPath } = fontoxpath;
   return (expression, contextNode, variables, kind) => {
+    // Funciones XPath que faltan (xpathExtraFunctions.js): sort, replace#4,
+    // tokenize#3… rewritten before fontoxpath sees them.
+    const prepared = prepareXPath(expression);
     try {
-      if (kind === 'boolean') return fontoxpath.evaluateXPathToBoolean(expression, contextNode, null, variables, options);
-      const items = evaluateXPath(expression, contextNode, null, variables, evaluateXPath.ALL_RESULTS_TYPE, options);
+      if (kind === 'boolean') return fontoxpath.evaluateXPathToBoolean(prepared, contextNode, null, variables, options);
+      const items = evaluateXPath(prepared, contextNode, null, variables, evaluateXPath.ALL_RESULTS_TYPE, options);
       // A path that is a condition (s1kd-brexcheck evaluates it as such).
       if (kind === 'path' && items.length === 1 && typeof items[0] === 'boolean') return { condition: items[0] };
       const nonNode = items.find((item) => item === null || typeof item !== 'object' || typeof item.nodeType !== 'number');
@@ -1836,7 +1840,7 @@ export function acceptanceDetails(ruleXml, format, fragmentXml, fragmentSchema =
     : null;
   const schema = fragmentSchema || (xsi ? schemaNameFromContext(xsi, options.schemaLocation || null) : null);
   const evaluate = makeEvaluator(doc);
-  const evalNumber = (expression, node) => Number(fontoxpath.evaluateXPathToNumber(expression, node, null, null, { language: XPATH_LANGUAGE }));
+  const evalNumber = (expression, node) => Number(fontoxpath.evaluateXPathToNumber(prepareXPath(expression), node, null, null, { language: XPATH_LANGUAGE }));
   const out = [];
   for (const part of collectParts(ruleDoc.documentElement, spec, options.schemaLocation || null)) {
     if (part.kind !== 'rule' || part.emptyContext) continue;

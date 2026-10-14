@@ -1319,6 +1319,16 @@ async function main() {
     c.brdp = { identifier: row.ID, title: row.Title, definition: row.Definition, proposal: row.Proposal, validation: row["Proposal Status"] || "Validated" };
     c.rule = row.Rule;
   }
+  // Funciones XPath que faltan: a case can take its rule from one pattern of
+  // a Schematron fixture ("ruleFile": {"path", "pattern"}), with the sch:
+  // namespace declared on it as the rule is stored.
+  for (const c of cases) {
+    if (!c.ruleFile) continue;
+    const sch = readTextFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", c.ruleFile.path));
+    const m = sch.match(new RegExp(`<sch:pattern id="${c.ruleFile.pattern}"[\\s\\S]*?</sch:pattern>`));
+    if (!m) throw new Error(`${c.id}: pattern ${c.ruleFile.pattern} not found in ${c.ruleFile.path}`);
+    c.rule = m[0].replace("<sch:pattern", '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron"');
+  }
   // --only takes one case id, or several separated by commas.
   const selectedCases = args.only ? cases.filter((c) => args.only.split(",").includes(c.id)) : cases;
   if (selectedCases.length === 0) throw new Error(`No cases matched --only ${args.only}`);

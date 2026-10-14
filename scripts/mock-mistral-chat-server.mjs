@@ -512,6 +512,17 @@ function dossierExamples(rule, correcting, lastUser) {
   const prec = '<task id="precauciones"><title>PRECAUCIONES DE SEGURIDAD</title><taskbody><steps><step><cmd>No fumar en la zona de trabajo.</cmd></step><step><cmd>Usar gafas de protección.</cmd></step></steps></taskbody></task>';
   const proc = (info) => `<task id="procedimiento"><title>PROCEDIMIENTO</title><taskbody><steps><step><cmd>Desmontar la tapa de la bomba.</cmd><info>${info}</info></step></steps></taskbody></task>`;
   const PREC = { path: "fichas/precauciones.dita", content: prec };
+  // Funciones XPath que faltan, Part 2: a rule on the topics' cells that
+  // finds the ditamap going up the folders (reconstructed Navantia
+  // BRDP-EXT-00017): each sheet cites another sheet's code in a table cell.
+  if (/uri-collection/.test(rule) && /FT-\[0-9\]\{3\}/.test(rule)) {
+    const sheet = (id, cite) => `<topic id="${id}"><title>Ficha ${id}</title><body><table><tgroup cols="1"><colspec colname="c1"/><tbody><row><entry colname="c1">${cite}</entry></row></tbody></tgroup></table></body></topic>`;
+    const content = map(["fichas/ft-001.dita", "fichas/ft-002.dita"]);
+    return [
+      { label: "Cites a sheet of the dossier", expected: "accept", schema: "map", content, files: [{ path: "fichas/ft-001.dita", content: sheet("FT-001", "FT-002") }, { path: "fichas/ft-002.dita", content: sheet("FT-002", "FT-001") }] },
+      { label: "Cites a sheet that does not exist", expected: "reject", schema: "map", content, files: [{ path: "fichas/ft-001.dita", content: sheet("FT-001", "FT-009") }, { path: "fichas/ft-002.dita", content: sheet("FT-002", "FT-001") }] },
+    ];
+  }
   if (/escalonPlan/.test(rule)) {
     const plan = (v) => `<topic id="planificacion"><title>HOJA DE DATOS DE PLANIFICACIÓN CONSOLIDADA</title><body><section><title>DATOS PARA LA PLANIFICACIÓN</title><table><tgroup cols="2"><colspec colname="c1"/><colspec colname="c2"/><thead><row><entry colname="c1">EQUIPO</entry><entry colname="c2">ESCALÓN DE MANTENIMIENTO</entry></row></thead><tbody><row><entry colname="c1">Bomba</entry><entry colname="c2">${v}</entry></row></tbody></tgroup></table></section></body></topic>`;
     const resumen = (v) => `<topic id="resumen"><title>HOJA RESUMEN DE PROCEDIMIENTO</title><body><table><tgroup cols="1"><colspec colname="c1"/><tbody><row><entry colname="c1"><p><b>ESCALÓN DE MANTENIMIENTO</b></p><p>${v}</p></entry></row></tbody></tgroup></table></body></topic>`;
@@ -714,7 +725,7 @@ function ruleTestReply(systemPrompt, messages) {
   // the XPath 3.0 template). For 00008 the first answer gives the common
   // notes file an unknown root (<notes>); the correction round, which names
   // that file, gives it a real <topic>.
-  if (/each example is a DOSSIER/.test(systemPrompt)) return answer(dossierExamples(rule, correcting, lastUser));
+  if (/each example is a\s+DOSSIER/.test(systemPrompt)) return answer(dossierExamples(rule, correcting, lastUser));
   // Test de reglas: referencias, antepasados y reglas de esquema prohibido
   // (CMP 4.2). EXT-00039: like the real run, without the destinations line
   // the referenced <figure> is written inside the <para> (where it cannot

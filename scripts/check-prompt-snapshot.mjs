@@ -303,6 +303,16 @@
 // (EXT-00134, the minimal section with infoCode 0A2 and the line on the
 // values the rule asks of it). No existing case has this pattern: every
 // other prompt is identical.
+//
+// Funciones XPath que faltan (DITA, dosier con fichas): the 2 dossier cases
+// of ruleTestExamples change on purpose (dita-xpath3-dossier-safety-topic,
+// dita-xpath2-dossier-safety-topic): the dossier block names uri-collection()
+// and says the rule runs on every document of the dossier, with the topic
+// the decision applies to referenced by the ditamap. New case
+// dita-xpath3-dossier-sheet-uri-collection (reconstructed Navantia
+// BRDP-EXT-00017, a rule on the topics' cells that finds the ditamap going
+// up the folders): also the line on where the ditamap goes. No other
+// prompt changes.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

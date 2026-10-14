@@ -194,8 +194,8 @@ export function dossierWarningText(w) {
 //
 // Which expressions, decided from the rule's text (never guessed):
 //   - the dossier-derived set D, to a fixed point: a sch:let whose value
-//     calls doc(), doc-available() or document(); one whose value names a
-//     $variable of D; a function let ("function(") called from a value of D
+//     calls doc(), doc-available(), document() or uri-collection(); one
+//     whose value names a $variable of D; a function let ("function(") called from a value of D
 //     (EXT-00004's $escalonPlan, applied to $tablasPlan's nodes by
 //     $valoresPlan); and a rule's @context / an assert's or report's @test
 //     that names a $variable of D;
@@ -210,7 +210,7 @@ export function dossierWarningText(w) {
 export const DOSSIER_LOOK_MAX = 10;
 export const DOSSIER_LOOK_MAX_CHARS = 700;
 const SCH_NS = 'http://purl.oclc.org/dsdl/schematron';
-const DOC_CALL_RE = /\b(?:doc|doc-available|document)\s*\(/;
+const DOC_CALL_RE = /(?<![\w.$:-])(?:fn:)?(?:doc|doc-available|document|uri-collection)\s*\(/;
 
 // The text outside string literals (literals emptied: '' / "").
 function outsideLiterals(text) {

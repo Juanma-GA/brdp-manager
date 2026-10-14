@@ -47,9 +47,13 @@
 // | fn:analyze-string        | not in fontoxpath: registered here (same result element, match /     | TPL (EXT-00006 |
 // |                          | non-match children; no fn:group, JavaScript regex dialect)           | xpath3) |
 // | sch:phase                | ignored: every pattern runs (a validator with no phase selected)     | ISO    |
-// | Dossier (other files)    | doc(), doc-available(), document() read the example's DOSSIER only:  | XPath F&O, |
-// |                          | a virtual folder file:///dossier/ with the main document (the        | XSLT 2.0 |
-// |                          | ditamap) and up to 4 more files. See "The dossier" below             |        |
+// | Other F&O 3.1 functions  | the ones fontoxpath lacks and that read nothing outside the example  | F&O 3.1 |
+// |                          | (sort, matches#3, replace#4, tokenize#3…): utils/xpathExtraFunctions |        |
+// | Dossier (other files)    | doc(), doc-available(), document(), uri-collection() read the        | XPath F&O, |
+// |                          | example's DOSSIER only: a virtual CSDB folder file:///csdb/dossier/  | XSLT 2.0 |
+// |                          | with the main document (the ditamap) and up to 4 more files. The     |        |
+// |                          | rule runs on EVERY document of the dossier (as XMetal validates each |        |
+// |                          | topic). See "The dossier" below                                      |        |
 // | Not executable           | collection()/unparsed-text*() (external_document); a prefixed        | —      |
 // |                          | function outside fn/xs/math/map/                                      |        |
 // |                          | array (extension_function); sch:include, abstract patterns (is-a),   |        |
@@ -62,6 +66,7 @@
 // not independently, as in the BREX engine. A violation's ruleId is the
 // assert/report @id when it has one.
 import fontoxpath from 'fontoxpath';
+import { prepareXPath, setExtraParser, xpathRegex } from './xpathExtraFunctions.js';
 import { wrapRuleXmlFragment } from './ruleXmlFragment.js';
 import {
   EXTERNAL_PLACEHOLDER_RE,
@@ -119,14 +124,9 @@ const escXml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').rep
 
 function analyzeString(input, pattern, flags = '') {
   const text = input ?? '';
-  const source = flags.includes('x') ? String(pattern).replace(/\s+/g, '') : String(pattern);
-  const jsFlags = `g${flags.includes('i') ? 'i' : ''}${flags.includes('m') ? 'm' : ''}${flags.includes('s') ? 's' : ''}`;
-  let re;
-  try {
-    re = new RegExp(source, `${jsFlags}u`);
-  } catch {
-    re = new RegExp(source, jsFlags);
-  }
+  // The same XSD→JavaScript conversion as matches#3/replace#4/tokenize#3
+  // (xpathExtraFunctions.js): flags s m i x q.
+  const re = xpathRegex(pattern, flags);
   let out = '';
   let last = 0;
   let m;
@@ -189,13 +189,31 @@ for (const [params, fn] of [
 //                       error.
 //   document($u[, $n])  XSLT's document(): as doc(), relative to the main
 //                       document or to base-uri($n).
+//   uri-collection($u)  the URIs of the dossier files directly in folder $u
+//                       (see uriCollection below).
 // Return types are xs:string, not xs:anyURI: fontoxpath cannot adapt a
 // JavaScript value to xs:anyURI; every use in a rule (string functions,
 // another resolve-uri, doc) accepts a string the same way.
-export const DOSSIER_BASE_URI = 'file:///dossier/';
+// Two levels (Part 2.2 of "funciones XPath que faltan"): a real CSDB folder,
+// so a rule that looks for the ditamap going up the folders and keeps only
+// '^file:/+[^:]+/.+/$' (at least two levels) finds the dossier's own one.
+export const DOSSIER_BASE_URI = 'file:///csdb/dossier/';
 export const DOSSIER_MAX_FILES = 4;
+// "<file path>::<node path>": a node of a dossier file (not the ditamap).
+export const DOSSIER_PATH_SEPARATOR = '::';
+
+// The node paths of one dossier file (filePath) or of the main document
+// (null), without the prefix.
+export function dossierFileSelection(paths, filePath = null) {
+  const out = [];
+  for (const p of paths || []) {
+    const at = p.indexOf(DOSSIER_PATH_SEPARATOR);
+    if (filePath === null ? at < 0 : at >= 0 && p.slice(0, at) === filePath) out.push(at < 0 ? p : p.slice(at + DOSSIER_PATH_SEPARATOR.length));
+  }
+  return out;
+}
 // Functions that read another file of the dossier / that never can.
-export const DOSSIER_FILE_RE = /(?<![\w.$:-])(?:fn:)?(doc-available|document|doc)\s*\(/;
+export const DOSSIER_FILE_RE = /(?<![\w.$:-])(?:fn:)?(doc-available|document|doc|uri-collection)\s*\(/;
 const NON_DOSSIER_FILE_RE = /(?<![\w.$:-])(?:fn:)?(collection|unparsed-text(?:-lines|-available)?)\s*\(/;
 
 export function dossierUri(path, base = DOSSIER_BASE_URI) {
@@ -255,6 +273,35 @@ function readDossierFile(uri, base) {
   return doc;
 }
 
+// uri-collection($u): the URIs of the dossier files directly in the folder
+// $u (resolved against the main document; with or without the final '/'),
+// sorted -- not recursive. As in Saxon, '?select=glob' keeps the names that
+// match the glob and 'recurse=yes' includes the subfolders. A folder outside
+// the dossier, or with no file of the dossier, gives () (as doc-available()
+// is false there). uri-collection() with no argument: the default
+// collection, which a test has none of → ().
+function uriCollection(uri) {
+  if (uri === null || uri === undefined || !activeDossier) return [];
+  const [path, query = ''] = String(uri).split('?');
+  let folder = dossierUri(path.split('#')[0], activeDossier.mainUri || DOSSIER_BASE_URI);
+  if (!folder) return [];
+  if (!folder.endsWith('/')) folder += '/';
+  const params = new URLSearchParams(query.replace(/;/g, '&'));
+  const recurse = params.get('recurse') === 'yes';
+  const select = params.get('select');
+  const globSource = select ? select.replace(/[.+^$(){}|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') : null;
+  const glob = globSource ? new RegExp(`^${globSource}$`) : null;
+  const out = [];
+  for (const fileUri of activeDossier.files.keys()) {
+    if (!fileUri.startsWith(folder)) continue;
+    const rest = fileUri.slice(folder.length);
+    if (!rest || (!recurse && rest.includes('/'))) continue;
+    if (glob && !glob.test(rest.split('/').pop())) continue;
+    out.push(fileUri);
+  }
+  return out.sort();
+}
+
 const baseUriOf = (node) => {
   if (!node) return null;
   const doc = node.nodeType === 9 ? node : node.ownerDocument;
@@ -273,6 +320,8 @@ for (const [name, params, returns, fn] of [
   ['doc', ['xs:string?'], 'document-node()?', (_c, u) => readDossierFile(u)],
   ['document', ['xs:string?'], 'document-node()?', (_c, u) => readDossierFile(u)],
   ['document', ['xs:string?', 'node()'], 'document-node()?', (_c, u, n) => readDossierFile(u, baseUriOf(n))],
+  ['uri-collection', [], 'xs:string*', () => []],
+  ['uri-collection', ['xs:string?'], 'xs:string*', (_c, u) => uriCollection(u)],
 ]) {
   try {
     fontoxpath.registerCustomXPathFunction({ namespaceURI: FN_NS, localName: name }, params, returns, fn);
@@ -468,10 +517,13 @@ function makeEvaluator(doc, ruleNamespaces) {
   const { evaluateXPath } = fontoxpath;
   return (raw, contextNode, kind) => {
     const expression = explicitBaseUri(raw);
+    // Funciones XPath que faltan (xpathExtraFunctions.js): sort, replace#4,
+    // tokenize#3… rewritten before fontoxpath sees them.
+    const prepared = prepareXPath(expression);
     try {
-      if (kind === 'boolean') return fontoxpath.evaluateXPathToBoolean(expression, contextNode, null, null, options);
-      if (kind === 'string') return fontoxpath.evaluateXPathToString(expression, contextNode, null, null, options);
-      const items = evaluateXPath(expression, contextNode, null, null, evaluateXPath.ALL_RESULTS_TYPE, options);
+      if (kind === 'boolean') return fontoxpath.evaluateXPathToBoolean(prepared, contextNode, null, null, options);
+      if (kind === 'string') return fontoxpath.evaluateXPathToString(prepared, contextNode, null, null, options);
+      const items = evaluateXPath(prepared, contextNode, null, null, evaluateXPath.ALL_RESULTS_TYPE, options);
       const nonNode = items.find((item) => item === null || typeof item !== 'object' || typeof item.nodeType !== 'number');
       if (nonNode !== undefined) {
         throw new NotExecutable(REASON.notNodes(typeof nonNode === 'boolean' ? 'boolean' : typeof nonNode === 'number' ? 'number' : 'value'));
@@ -570,8 +622,21 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
   if (!patterns.length) return notExecutable(REASON.noRule('pattern'));
 
   activeParseXml = parseXml;
+  setExtraParser(parseXml);
   startDossier(doc, options.dossier, parseXml);
-  const evaluate = makeEvaluator(doc, namespaces);
+  // Part 2.3 of "funciones XPath que faltan": with a dossier, the rule runs
+  // on EVERY document of it as the validated document -- the ditamap and
+  // each file, as XMetal validates each topic --, so a rule whose context is
+  // in a topic (row, entry, *[text()]…) selects its nodes. A file's node
+  // paths are prefixed "<path>::" (dossierFileSelection) and its violations
+  // carry `file`; a file that does not parse is skipped (its validation
+  // already says so).
+  const documents = [{ doc, file: null }];
+  for (const f of options.dossier?.files || []) {
+    const fileDoc = dossierDocument(dossierUri(f.path));
+    if (fileDoc && fileDoc !== doc) documents.push({ doc: fileDoc, file: f.path });
+  }
+  const evaluators = documents.map((d) => makeEvaluator(d.doc, namespaces));
   const violations = [];
   const warnings = [];
   const selected = [];
@@ -581,11 +646,15 @@ export function runSchematronOnFragment(ruleXml, fragmentXml, options = {}) {
   for (const pattern of patterns) {
     try {
       staticChecks(pattern, globalLets, globalUnsupported);
-      const result = runPattern(pattern, globalLets, doc, evaluate);
+      documents.forEach((d, i) => {
+        const result = runPattern(pattern, globalLets, d.doc, evaluators[i]);
+        const prefix = d.file ? `${d.file}${DOSSIER_PATH_SEPARATOR}` : '';
+        const withFile = (v) => (d.file ? { ...v, file: d.file, nodePaths: v.nodePaths.map((p) => prefix + p) } : v);
+        selected.push(...result.selectedNodePaths.map((p) => prefix + p));
+        violations.push(...result.violations.map(withFile));
+        warnings.push(...result.warnings.map(withFile));
+      });
       ran += 1;
-      selected.push(...result.selectedNodePaths);
-      violations.push(...result.violations);
-      warnings.push(...result.warnings);
     } catch (err) {
       if (err instanceof RuleRuntimeError) {
         runtimeErrors.push({ ruleId: pattern.ruleId, ...err.runtime });
@@ -661,8 +730,17 @@ export function schematronAcceptanceDetails(ruleXml, fragmentXml, options = {}) 
   }
   const { patterns, globalLets, namespaces } = parseSchematron(ruleDoc.documentElement);
   activeParseXml = parseXml;
+  setExtraParser(parseXml);
   startDossier(doc, options.dossier, parseXml);
-  const evaluate = makeEvaluator(doc, namespaces);
+  // Every document of the dossier (as runSchematronOnFragment): a context
+  // that selects something in any of them is not "missing".
+  const docs = [doc];
+  for (const f of options.dossier?.files || []) {
+    const fileDoc = dossierDocument(dossierUri(f.path));
+    if (fileDoc && fileDoc !== doc) docs.push(fileDoc);
+  }
+  const evaluators = docs.map((d) => makeEvaluator(d, namespaces));
+  const evaluateAll = (expression) => docs.flatMap((d, i) => evaluators[i](expression, d, 'nodes'));
   const out = [];
   for (const pattern of patterns) {
     const lets = [...globalLets, ...pattern.lets];
@@ -673,7 +751,7 @@ export function schematronAcceptanceDetails(ruleXml, fragmentXml, options = {}) 
       const base = { ruleId: pattern.ruleId, flag: null, path, stripped, schematron: true };
       let selected;
       try {
-        selected = evaluate(documentExpr(lets, `//(${rule.context})`), doc, 'nodes');
+        selected = evaluateAll(documentExpr(lets, `//(${rule.context})`));
       } catch {
         continue;
       }
@@ -688,7 +766,7 @@ export function schematronAcceptanceDetails(ruleXml, fragmentXml, options = {}) 
       }
       let nodes;
       try {
-        nodes = evaluate(documentExpr(lets, `//(${stripped})`), doc, 'nodes');
+        nodes = evaluateAll(documentExpr(lets, `//(${stripped})`));
       } catch {
         out.push({ ...base, case: 'unsafe' });
         continue;
@@ -757,6 +835,7 @@ export function analyzeSchematron(ruleXml, options = {}) {
   if (!patterns.length) return none(REASON.noRule('pattern'));
 
   activeParseXml = parseXml;
+  setExtraParser(parseXml);
   const doc = parseXml('<topic/>');
   startDossier(doc, null, parseXml);
   const evaluate = makeEvaluator(doc, namespaces);
@@ -912,7 +991,7 @@ export function describeSchematron(ruleXml, options = {}) {
 // its lets, reads the context) means it depends on the document: false.
 function constantCheck(check, patternLets, ruleLets, namespaces) {
   try {
-    const value = fontoxpath.evaluateXPathToBoolean(nodeExpr(patternLets, ruleLets, `boolean(${check.test})`), null, null, null, {
+    const value = fontoxpath.evaluateXPathToBoolean(prepareXPath(explicitBaseUri(nodeExpr(patternLets, ruleLets, `boolean(${check.test})`))), null, null, null, {
       language: XPATH_LANGUAGE,
       namespaceResolver: (prefix) => (prefix ? BUILTIN_PREFIXES[prefix] ?? namespaces[prefix] ?? KNOWN_NAMESPACES[prefix] ?? null : null),
     });

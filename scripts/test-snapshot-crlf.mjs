@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(SCRIPTS);
-const TEXT = /\.(mjs|js|json|md|txt|xml)$/;
+const TEXT = /\.(mjs|js|json|md|txt|xml|sch)$/;
 
 let checks = 0;
 let failures = 0;

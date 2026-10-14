@@ -6,7 +6,7 @@
 //
 // Every case: { name, status, files: [{ path, xml }], main?, ids?, message? }.
 // The main document (the ditamap) is DOSSIER_MAP unless `main` is given; the
-// dossier's folder is file:///dossier/, the ditamap is dosier.ditamap.
+// dossier's folder is file:///csdb/dossier/, the ditamap is dosier.ditamap.
 
 export const DOSSIER_MAP =
   '<map><title>Dosier de mantenimiento</title>' +

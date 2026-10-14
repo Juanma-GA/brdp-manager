@@ -5,6 +5,7 @@ import VerdictCauseHint from './VerdictCauseHint';
 import MinimalDocumentsLine from './MinimalDocumentsLine.jsx';
 import { useRuleTest } from '../../hooks/useRuleTest';
 import { RULE_TEST_FORMATS } from '../../utils/ruleTestEngine.js';
+import { dossierFileSelection } from '../../utils/ruleTestSchematron.js';
 import { displayIndent, displayText, xmlDisplayLines } from '../../utils/ruleTest.js';
 import { ANCESTOR_LIST_SHOWN, acceptCauseText, coverageDetail, engineErrorText, formatRuleDescription, formatRuleStatement, formatRuleTestReason, formatThresholdMismatch, presencePathText } from '../../utils/ruleTestReasons.js';
 import { contextSchemasOfRule } from '../../utils/ruleSchemaContext.js';
@@ -362,7 +363,7 @@ function DossierFiles({ example, selected, readOnly, onRunAgain, testIdPrefix })
         path={example.mainPath}
         xml={example.xml}
         content={example.content}
-        selected={selected}
+        selected={dossierFileSelection(selected, null)}
         skeleton={example.skeletonNodePaths}
         isMain
         readOnly={readOnly}
@@ -375,6 +376,7 @@ function DossierFiles({ example, selected, readOnly, onRunAgain, testIdPrefix })
           path={f.path}
           xml={f.xml}
           content={f.content}
+          selected={dossierFileSelection(selected, f.path)}
           readOnly={readOnly}
           fixes={<DocumentFixNotes doc={f} />}
           onRunAgain={(text) => runWith(i, text)}
@@ -764,7 +766,9 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
           .filter((v) => v.message)
           .map((v, i) => (
             <p key={`${v.ruleId}:${i}`} className={`${styles.ruleTestNote} ${styles.ruleTestToneBad}`}>
-              {t('records.ruleTest.ruleMessage', { message: v.message })}
+              {v.file
+                ? t('records.ruleTest.ruleMessageInFile', { message: v.message, path: v.file })
+                : t('records.ruleTest.ruleMessage', { message: v.message })}
             </p>
           ))}
       {/* Mejoras B, Part 3: why the rule accepted an example meant to be

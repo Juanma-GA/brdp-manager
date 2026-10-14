@@ -477,8 +477,12 @@ ${placements.map((p) => placementLine(p, dita)).join('\n')}`;
 // unchanged.
 function dossierInstructions(standard, dossier) {
   return `HOW EACH EXAMPLE IS BUILT: the rule reads other files of a DITA dossier
-(doc(), doc-available(), document()), so each example is a DOSSIER: a folder
-with the ditamap the rule runs on and the files the ditamap points to.
+(doc(), doc-available(), document(), uri-collection()), so each example is a
+DOSSIER: a folder with the ditamap and the files the ditamap points to. The
+rule runs on EVERY document of the dossier (the ditamap and each file), as a
+validator checks each topic: when the decision applies inside the topics, the
+topic where it applies is one of the files, and the ditamap references it with
+a <topicref>.
 - "content": the whole ditamap (${dossier.mainPath}, at the top of the folder):
   a complete ${standard} <map> whose <topicref href="…"> point to the files by
   their path relative to the folder (for example "topics/safety.dita").
@@ -492,7 +496,11 @@ with the ditamap the rule runs on and the files the ditamap points to.
   missing, a note that is not where the decision requires it, a conref to a
   file or id that is not there...), not only in the ditamap.
 - Titles and texts the rule looks for are written exactly as the rule writes
-  them.${whereTheRuleLooks(dossier.look)}`;
+  them.${dossier.searchesFolders ? `
+- The rule finds the ditamap by going up the folders from each file
+  (uri-collection()): keep the ditamap at the top of the folder and the files
+  in it or in subfolders (for example "topics/…"), so the ditamap is in the
+  same folder as each file or in one above it, never below it.` : ''}${whereTheRuleLooks(dossier.look)}`;
 }
 
 // Test de reglas, progreso y causas, Part 1.5: the rule's own expressions
