@@ -34,6 +34,7 @@ import { STANDARD_TO_RULE_FORMAT } from '../constants/ruleFormats.js';
 import { informativeRule } from './ruleLint.js';
 import { namedByRuleOrProposal } from './exampleSchemaFixes.js';
 import { ownSectionConditions, sectionConditionText, withOwnSectionValues } from './ownSectionValues.js';
+import { topicTitleConditions, withTopicTitle } from './topicTitleValue.js';
 
 // Mejoras C, Part 1: at most this many path problems are recorded with a
 // "review" result (the panel shows them all, from the rule itself).
@@ -543,6 +544,10 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   // rule not executable (Part 2) -- before any LLM call.
   const ownConditions = format && format.startsWith('BREX') ? ownSectionConditions(ruleXml) : null;
   const sectionValueUnavailable = [];
+  // Test de reglas DITA: el título del topic montado cuando la regla lo
+  // exige (Navantia BRDP-EXT-00011): the title the rule's first step asks of
+  // the topic, written by the application on every example.
+  const titleConditions = String(standard).startsWith('DITA') ? topicTitleConditions(ruleXml) : [];
   for (const item of wanted) {
     let { schema } = item;
     const { role, targets: schemaTargets, group, relation } = item;
@@ -583,6 +588,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
       placement = own.placement;
       if (role === 'rule' && own.unavailable.length) sectionValueUnavailable.push(...own.unavailable);
     }
+    if (titleConditions.length) placement = withTopicTitle(placement, structure, titleConditions);
     placements[schema] = { structure, placement };
     promptPlacements.push({ schema, role, ...placement, ...(group ? { group } : {}) });
   }

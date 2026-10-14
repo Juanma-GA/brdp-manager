@@ -277,6 +277,10 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     adjusted.brexReferenceNormalized = normalized.changed && !normalized.shared;
     if (normalized.shared) adjusted.brexModelIdentFollowed = true;
   }
+  // Test de reglas DITA: the topic's title the rule asks for, written by
+  // the application (placement.topicTitle) -- said on every example.
+  if (entry.placement.topicTitle) adjusted.topicTitleSet = entry.placement.topicTitle.value;
+  else delete adjusted.topicTitleSet;
   const { xml, skeletonNodePaths, insertionPath, rootAttributeProblems } = assembleExample({
     standard: setup.standard,
     schema,

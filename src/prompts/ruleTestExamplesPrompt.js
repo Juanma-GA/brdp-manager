@@ -358,8 +358,13 @@ ${metadataLine(p)}${carrierLines(p)}${placeLines(p)}`;
   (${p.path.join('/')}${p.metadata ? ', with its minimal identification and status section' : ''}); write no "content".${sectionValueLines(p, { appWrites: true })}${carrierLines(p)}${placeLines(p)}`;
   }
   // T4b: the skeleton's own <title> (a DITA topic's, mandatory).
-  const titleLine =
-    titled.length > 0
+  // Test de reglas DITA: the topic's title the rule asks for, written by
+  // the application (topicTitleValue.js).
+  const titleLine = p.topicTitle
+    ? `
+  The application already writes the <title> of <${p.topicTitle.element}> as "${p.topicTitle.value}", the
+  title the rule asks for; never write another one there.`
+    : titled.length > 0
       ? `
   The application already writes the <title> of ${titled.map((n) => `<${n}>`).join(', ')}; never write another one there.`
       : '';
@@ -386,7 +391,23 @@ export function ruleDependsOnTitle(matchExpressions = []) {
   return matchExpressions.some((e) => TITLE_DEPENDENT_RE.test(e));
 }
 
-function titleDependentInstructions() {
+function titleDependentInstructions(placements = []) {
+  // Test de reglas DITA: the title is the topic's own, written by the
+  // application -- a <section> takes no other <section>, so asking for a
+  // titled <section> around the checked content could never be met
+  // (Navantia BRDP-EXT-00011).
+  const topic = placements.find((p) => p.role === 'rule' && p.topicTitle)?.topicTitle;
+  if (topic) {
+    return `
+
+THE RULE DEPENDS ON A TITLE: it only runs on content under an element whose
+<title> has a given value. Here that element is the <${topic.element}> itself, and the
+application already writes its <title> as "${topic.value}" in every
+example. Write your content directly inside it, as said above, with the
+elements the rule's path needs (for example its <section> elements); never
+give any other element that same title, and never write the <${topic.element}>'s
+title yourself.`;
+  }
   return `
 
 THE RULE DEPENDS ON A TITLE: it only runs on content under an element whose
@@ -641,7 +662,7 @@ ${acceptOnly ? '' : `- The reject example goes against the decision in one clear
 `}- No customer data, no real manufacturer names, part numbers or CAGE codes.
 - "label": a few words saying what the example shows.`;
 
-  if (ruleDependsOnTitle(matchExpressions)) prompt += titleDependentInstructions();
+  if (ruleDependsOnTitle(matchExpressions)) prompt += titleDependentInstructions(placements);
   if (conditions.length > 0) prompt += conditionInstructions(conditions);
   if (tableModel) prompt += tableModelInstructions(tableModel);
   if (several.length > 0) prompt += severalInstructions(several);

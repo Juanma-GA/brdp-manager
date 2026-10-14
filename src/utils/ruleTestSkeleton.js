@@ -2052,6 +2052,10 @@ const indentOf = (n) => '  '.repeat(n);
 // The neutral text of a skeleton <title> (T4b). The examples are in
 // English, like the rest of the test fragments.
 export const SKELETON_TITLE_TEXT = 'Example topic';
+
+function escapeXmlText(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 // Marks, in skeletonNodePaths, the text of a skeleton element (the title's),
 // so the panel dims it with its tags.
 export const SKELETON_TEXT_SUFFIX = '/text()';
@@ -2300,7 +2304,10 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
   // added spaces). The panel re-indents for display.
   const last = path.length - 1;
   const titled = new Set(placement.titled || []);
-  const title = `<title>${SKELETON_TITLE_TEXT}</title>`;
+  // Test de reglas DITA: the topic's title the rule asks for
+  // (placement.topicTitle, topicTitleValue.js) instead of "Example topic".
+  const titleOf = (name) =>
+    `<title>${placement.topicTitle?.element === name ? escapeXmlText(placement.topicTitle.value) : SKELETON_TITLE_TEXT}</title>`;
   const lines = [];
   const sectionPaths = [];
   const pushSection = (name) => {
@@ -2332,10 +2339,10 @@ export function assembleExample({ standard, schema, schemaLocation, placement, c
       return;
     }
     if (i === last) {
-      lines.push(`${open}${titled.has(name) ? title : ''}${body}</${name}>`);
+      lines.push(`${open}${titled.has(name) ? titleOf(name) : ''}${body}</${name}>`);
     } else {
       lines.push(open);
-      if (titled.has(name)) lines.push(`${indentOf(i + 1)}${title}`);
+      if (titled.has(name)) lines.push(`${indentOf(i + 1)}${titleOf(name)}`);
     }
   });
   for (let i = last - 1; i >= 0; i -= 1) lines.push(`${indentOf(i)}</${path[i]}>`);

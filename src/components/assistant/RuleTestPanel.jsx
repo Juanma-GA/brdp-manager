@@ -565,6 +565,12 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
       {example.colsRaised?.length > 0 && <TableFixNote testId="rule-test-cols-raised" text={t('records.ruleTest.colsRaised', { count: example.colsRaised.length, values: example.colsRaised.map((c) => `${c.from} → ${c.to}`).join(', ') })} />}
       {example.morerowsLowered?.length > 0 && <TableFixNote testId="rule-test-morerows-lowered" text={t('records.ruleTest.morerowsLowered', { count: example.morerowsLowered.length, rows: [...new Set(example.morerowsLowered)].join(', ') })} />}
       {example.emptyRowsRemoved?.length > 0 && <TableFixNote testId="rule-test-empty-rows-removed" text={t('records.ruleTest.emptyRowsRemoved', { count: example.emptyRowsRemoved.length, rows: example.emptyRowsRemoved.join(', ') })} />}
+      {/* Test de reglas DITA: the topic's title the rule asks for. */}
+      {example.topicTitleSet && (
+        <p className={styles.ruleTestNote} data-testid="rule-test-topic-title">
+          {t('records.ruleTest.topicTitleSet', { title: example.topicTitleSet })}
+        </p>
+      )}
       {/* Test de reglas: condiciones sobre la sección de identificación del propio documento. */}
       {example.sectionBuilt?.length > 0 && (
         <p className={styles.ruleTestNote} data-testid="rule-test-section-built">

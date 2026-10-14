@@ -5,7 +5,8 @@
      the ditamap going up the folders with sort(uri-collection(...)) (00012 to
      00025, 00027, 00033, 00035), one with matches(..., 'i') (00010) and 8 that
      use neither. The ditamap search is the one quoted in the report; contexts
-     and asserts are plausible but invented. Used by
+     and asserts are plausible but invented, except the context of 00011,
+     which is the real one (its lets and assert are reconstructed). Used by
      scripts/test-xpath-functions.mjs and scripts/test-rule-test-dossier.mjs. -->
 <sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt3">
   <sch:title>Navantia (reconstruido)</sch:title>
@@ -15,8 +16,11 @@
     </sch:rule>
   </sch:pattern>
   <sch:pattern id="p-BRDP-EXT-00011">
-    <sch:rule context="note">
-      <sch:assert id="BRDP-EXT-00011" role="error" test="@type">Toda nota debe llevar @type.</sch:assert>
+    <sch:rule context="*[normalize-space(title) = 'LISTA DE REFERENCIAS CONSOLIDADAS'] //section//*[self::p or self::entry[not(p)]][matches(normalize-space(.), '^\([a-z]\)')]">
+      <sch:let name="letra" value="substring(normalize-space(.), 2, 1)"/>
+      <sch:let name="seccion" value="ancestor::section[1]"/>
+      <sch:let name="previos" value="count(preceding::*[self::p or self::entry[not(p)]][matches(normalize-space(.), '^\([a-z]\)')][ancestor::section[1] is $seccion])"/>
+      <sch:assert id="BRDP-EXT-00011" role="error" test="string-to-codepoints($letra) = $previos + 97">En la lista de referencias consolidadas el apartado (<sch:value-of select="$letra"/>) está fuera de orden: los apartados van (a), (b), (c)… sin saltos ni repeticiones.</sch:assert>
     </sch:rule>
   </sch:pattern>
   <sch:pattern id="p-BRDP-EXT-00012">

@@ -1044,6 +1044,21 @@ function ruleTestReply(systemPrompt, messages) {
   // follow the rule's context (step, the document root, or note).
   const ditaType = (systemPrompt.match(/Every example is a DITA ([\w-]+) \("schema"/) || [])[1];
   if (ditaType) {
+    // El título del topic montado (Navantia BRDP-EXT-00011): the context
+    // asks an ancestor's title to be 'LISTA DE REFERENCIAS CONSOLIDADAS'
+    // and then //section//p. The real run: Mistral gives the <section>
+    // itself that title -- with the topic titled "Example topic" nothing
+    // was selected; with the topic's title written by the app, the same
+    // content is selected.
+    if (/LISTA DE REFERENCIAS CONSOLIDADAS/.test(rule) && /\/\/section\/\//.test(rule)) {
+      const list = (...letters) => `<section><title>LISTA DE REFERENCIAS CONSOLIDADAS</title>${letters.map((l) => `<p>(${l}) Manual de mantenimiento de la bomba de achique, edición ${l.toUpperCase()}.</p>`).join("")}</section>`;
+      return answer([
+        { label: "Apartados en orden", expected: "accept", schema: ditaType, content: list("a", "b", "c") },
+        { label: "Falta el apartado (b)", expected: "reject", schema: ditaType, content: list("a", "c") },
+        { label: "No empieza por (a)", expected: "reject", schema: ditaType, content: list("b", "c") },
+        { label: "Apartado repetido", expected: "reject", schema: ditaType, content: list("a", "a") },
+      ]);
+    }
     // T4b: a context that depends on an element's title and checks table
     // rows (the real template rule BRDP-EXT-00001). The first answer puts
     // the title on the table itself (table/title, the real run: nothing

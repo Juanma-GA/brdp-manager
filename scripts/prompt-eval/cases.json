@@ -4299,6 +4299,46 @@
       ]
     },
     {
+      "id": "rule-test-navantia-dita3-topic-title-ext-00011",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "El título del topic montado: Navantia BRDP-EXT-00011 (real context *[normalize-space(title) = 'LISTA DE REFERENCIAS CONSOLIDADAS'] //section//…). The application writes that title on the topic; before this round the topic was 'Example topic', the LLM titled a <section> (which cannot hold another section) and nothing was selected: every reject example came back accepted.",
+      "brdp": {
+        "identifier": "BRDP-EXT-00011",
+        "title": "Orden de los apartados de la lista de referencias",
+        "definition": "Decidir cómo se ordenan los apartados de la lista de referencias consolidadas.",
+        "proposal": "Los apartados de la lista de referencias consolidadas van (a), (b), (c)… sin saltos ni repeticiones.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-reconstructed.sch",
+        "pattern": "p-BRDP-EXT-00011"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "with the topic titled as the rule asks, the rule selects the list items and agrees with every example"
+        },
+        {
+          "type": "rule_test_reject_examples_contain",
+          "pattern": "\\([a-z]\\)",
+          "note": "every reject example writes lettered items (a), (b)…"
+        }
+      ]
+    },
+    {
       "id": "rule-test-template-dita3-dossier-warnings",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",

@@ -138,6 +138,9 @@ export function maxChildren(views, parent, child) {
 // Whether <child> can appear more than once in one parent (any parent when
 // `parent` is unknown).
 function mayRepeatChild(views, parent, child) {
+  // A "*" step read from the rest of its path (starCandidates): the
+  // elements that can be that step.
+  if (Array.isArray(parent)) return parent.some((p) => mayRepeatChild(views, p, child));
   if (parent) return views.some((v) => v.max(parent, child) > 1);
   return views.some((v) => [...v.parents(child)].some((p) => v.max(p, child) > 1));
 }
@@ -159,6 +162,47 @@ function onceIn(view, name, docSet, seen) {
   if (parents.length !== 1) return false;
   if (view.max(parents[0], name) !== 1) return false;
   return onceIn(view, parents[0], docSet, seen);
+}
+
+// Test de reglas DITA: los elementos que pueden ser un paso "*" -- those
+// below which the rest of the path can be written, in any view: for
+// *[normalize-space(title) = 'X']//section//p (Navantia BRDP-EXT-00011)
+// only a topic, never a <section> (a section takes no other section), so
+// "title" is read from the topic, where it appears once. null when the rest
+// is empty or has a step this reader does not follow -- then every element
+// that has the child counts, as before.
+function starCandidates(views, rest) {
+  if (rest.length === 0) return null;
+  const stepNames = (step) => {
+    if (step.kind === 'element') return new Set([step.name]);
+    if (step.main === '*') {
+      for (const predicate of step.predicates) {
+        const names = [...predicate.matchAll(/(?<![\w:-])self::([A-Za-z_][\w.-]*)/g)].map((m) => m[1]);
+        if (names.length && !/\bnot\s*\(\s*self::/.test(predicate)) return new Set(names);
+      }
+      return null;
+    }
+    return undefined;
+  };
+  const named = rest.map(stepNames);
+  if (named.some((n) => n === undefined) || rest.some((st) => st.kind === 'axis')) return null;
+  const out = new Set();
+  for (const view of views) {
+    for (const start of inDocument(view)) {
+      let current = new Set([start]);
+      rest.forEach((step, i) => {
+        if (current.size === 0) return;
+        const next = new Set();
+        for (const c of current) {
+          const reach = step.sep === '//' || step.desc ? view.reach(c) : new Set(view.children(c) || []);
+          for (const n of reach) if (!named[i] || named[i].has(n)) next.add(n);
+        }
+        current = next;
+      });
+      if (current.size > 0) out.add(start);
+    }
+  }
+  return out.size > 0 ? [...out] : null;
 }
 
 export function occursAtMostOnce(views, name) {
@@ -267,7 +311,7 @@ export function pathInfo(text, context, views) {
       if (!known) return;
       const positional = step.predicates.some((p) => POSITIONAL_RE.test(p));
       if (step.kind === 'self') {
-        node = cur ? `<${cur}>` : node;
+        node = typeof cur === 'string' ? `<${cur}>` : node;
         return;
       }
       if (step.kind === 'attribute') {
@@ -355,15 +399,18 @@ function visit(expression, context, views, hooks, inQuantified = false) {
   for (const alt of pathAlternatives(e)) {
     const { absolute, steps } = pathSteps(alt);
     let cur = absolute ? null : context;
-    for (const step of steps) {
+    steps.forEach((step, i) => {
       if (step.kind === 'element' || step.kind === 'axis') cur = step.name;
       else if (step.kind !== 'self' && step.kind !== 'attribute') cur = null;
       hooks.onStep?.(step, cur);
+      // A "*" step: its predicates are read from the elements that can be
+      // it, given the rest of the path (starCandidates).
+      const readFrom = cur === null && step.main === '*' ? starCandidates(views, steps.slice(i + 1)) : cur;
       for (const pred of step.predicates) {
         if (POSITIONAL_RE.test(pred)) continue;
-        visit(pred, cur, views, hooks, inQuantified);
+        visit(pred, readFrom, views, hooks, inQuantified);
       }
-    }
+    });
   }
 }
 

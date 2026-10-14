@@ -531,6 +531,14 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // examples prompt gains a "COMPOSED VALUES" block ("In this rule, 'A91251'
 // is split as <chapnum>A9</chapnum>, …"). No existing case has such a rule,
 // so none changes; new case ruleTestExamples/brex-3-0-1-concat-sns-refdm.
+//
+// El título del topic montado: when a DITA rule asks the title of its first
+// "*" (or topic-type) step to be a literal and the rest of its path fits
+// only inside the topic, the application writes that title on the topic,
+// and the placement line and the "THE RULE DEPENDS ON A TITLE" block say so.
+// No existing case has such a rule, so none changes; new case
+// ruleTestExamples/dita-xpath3-topic-title-ext-00011 (Navantia
+// BRDP-EXT-00011, real context).
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

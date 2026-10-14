@@ -37,6 +37,7 @@ import { describeRule, proposalVsRuleLists, ruleConditions } from '../../src/uti
 import { ruleDescriptionText } from '../../src/utils/ruleTestReasons.js';
 import { ownSectionConditions, withOwnSectionValues } from '../../src/utils/ownSectionValues.js';
 import { uniqueConcatSplits } from '../../src/utils/concatSplit.js';
+import { topicTitleConditions, withTopicTitle } from '../../src/utils/topicTitleValue.js';
 
 const xmldomParse = (text) => new DOMParser().parseFromString(text, 'text/xml');
 
@@ -992,6 +993,27 @@ ruleTestExamplesCases.push({
         look: dossierLookExpressions(ruleDitaDossierSheet, (x) => new XmldomParser().parseFromString(x, 'application/xml')),
         searchesFolders: true,
       },
+    },
+  ],
+});
+
+// El título del topic montado: Navantia BRDP-EXT-00011 (real context) --
+// the rule asks the topic's own title, so the application writes it and
+// the "depends on a title" block says so (withTopicTitle, like
+// prepareRuleTestSetup).
+const ruleDitaTopicTitle = readTextFile(new URL('../rule-test-fixtures/navantia-dita3-reconstructed.sch', import.meta.url))
+  .match(/<sch:pattern id="p-BRDP-EXT-00011"[\s\S]*?<\/sch:pattern>/)[0];
+ruleTestExamplesCases.push({
+  name: 'dita-xpath3-topic-title-ext-00011',
+  args: [
+    {
+      brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-00011', title: 'Orden de los apartados de la lista de referencias', definition: 'Decidir cómo se ordenan los apartados de la lista de referencias consolidadas.', proposal: 'Los apartados de la lista de referencias consolidadas van (a), (b), (c)… sin saltos ni repeticiones.' },
+      standard: 'DITA 1.3 Xpath3.0',
+      format: 'SCH-DITA',
+      ruleXml: ruleDitaTopicTitle,
+      placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaTopicTitle, [['topic', 'rule']])
+        .map((p) => withTopicTitle(p, realStructures['DITA 1.3 Xpath2.0|topic'], topicTitleConditions(ruleDitaTopicTitle))),
+      matchExpressions: ruleMatchExpressions(ruleDitaTopicTitle),
     },
   ],
 });
