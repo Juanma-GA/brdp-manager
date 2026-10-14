@@ -4429,6 +4429,100 @@
       ]
     },
     {
+      "id": "rule-test-navantia-dita3-loose-content-ext-00014",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Contenido suelto en el cuerpo de las fichas: Navantia BRDP-EXT-00014 (reconstructed: every fig with an @id is cited by an <xref> of the dossier's sheets). The simulator writes <p>/<fig> straight in <taskbody>, as Mistral did, and never corrects it; before this round the correction fixed 0 of the examples and nothing ran.",
+      "brdp": {
+        "identifier": "BRDP-EXT-00014",
+        "title": "Figuras citadas",
+        "definition": "Decidir si toda figura de una ficha debe citarse en el texto.",
+        "proposal": "Toda figura con identificador de una ficha se cita con una referencia cruzada en alguna ficha del dosier.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-cited-figures-tables.sch",
+        "pattern": "p-BRDP-EXT-00014"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier with at least one sheet"
+        },
+        {
+          "type": "rule_test_app_fixes",
+          "wrapped": [
+            "context"
+          ],
+          "noCorrection": true,
+          "note": "the application puts the loose <p>/<table>/<fig> of <taskbody> in a <context> itself, with no correction round"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (ditamap and sheets) passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule runs on every document of each dossier and agrees with every example"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-navantia-dita3-loose-content-ext-00015",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Contenido suelto en el cuerpo de las fichas: Navantia BRDP-EXT-00015 (reconstructed: every table with an @id is cited by an <xref> of the dossier's sheets). The simulator writes <p>/<table> straight in <taskbody>, as Mistral did, and never corrects it; before this round the correction fixed 0 of the examples and nothing ran.",
+      "brdp": {
+        "identifier": "BRDP-EXT-00015",
+        "title": "Tablas citadas",
+        "definition": "Decidir si toda tabla de una ficha debe citarse en el texto.",
+        "proposal": "Toda tabla con identificador de una ficha se cita con una referencia cruzada en alguna ficha del dosier.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-cited-figures-tables.sch",
+        "pattern": "p-BRDP-EXT-00015"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier with at least one sheet"
+        },
+        {
+          "type": "rule_test_app_fixes",
+          "wrapped": [
+            "context"
+          ],
+          "noCorrection": true,
+          "note": "the application puts the loose <p>/<table>/<fig> of <taskbody> in a <context> itself, with no correction round"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (ditamap and sheets) passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule runs on every document of each dossier and agrees with every example"
+        }
+      ]
+    },
+    {
       "id": "rule-test-template-dita3-dossier-warnings",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",

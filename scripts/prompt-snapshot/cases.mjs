@@ -28,7 +28,7 @@ import path from 'node:path';
 import { placementPlaces, ruleRequiredAttributes } from '../../src/utils/ruleTestRun.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from '../../src/utils/ruleTestSkeleton.js';
 import { extractRuleNames } from '../../src/validation/schemaValidation.js';
-import { dossierLookExpressions } from '../../src/utils/ruleTestDossier.js';
+import { dossierLookExpressions, dossierSheetShapes } from '../../src/utils/ruleTestDossier.js';
 import { DOMParser as XmldomParser } from '@xmldom/xmldom';
 import { repeatingComparisons, singleChildPairs, viewFromStructure } from '../../src/validation/ruleRepetition.js';
 import { DOMParser } from '@xmldom/xmldom';
@@ -943,6 +943,12 @@ const dossierOption = {
   types: ['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'],
   look: dossierLookExpressions(ruleDitaDossier, (x) => new XmldomParser().parseFromString(x, 'application/xml')),
 };
+// Contenido suelto en el cuerpo de las fichas, Part 1: how each type of
+// sheet is built, from the real structures and the rule's element names
+// (as generateRuleTestExamples computes it).
+const ditaStructures = Object.fromEntries(['topic', 'concept', 'task', 'reference', 'troubleshooting', 'map'].map((t) => [t, realStructures[`DITA 1.3 Xpath2.0|${t}`]]));
+const sheetsFor = (ruleXml) => dossierSheetShapes(ditaStructures, extractRuleNames(ruleXml).elements);
+dossierOption.sheets = sheetsFor(ruleDitaDossier);
 ruleTestExamplesCases.push(
   {
     name: 'dita-xpath3-dossier-safety-topic',
@@ -991,6 +997,7 @@ ruleTestExamplesCases.push({
       dossier: {
         ...dossierOption,
         look: dossierLookExpressions(ruleDitaDossierSheet, (x) => new XmldomParser().parseFromString(x, 'application/xml')),
+        sheets: sheetsFor(ruleDitaDossierSheet),
         searchesFolders: true,
       },
     },
@@ -1439,9 +1446,35 @@ ruleTestExamplesCases.push({
       dossier: {
         ...dossierOption,
         look: dossierLookExpressions(ruleNavWarning, (x) => new XmldomParser().parseFromString(x, 'application/xml')),
+        sheets: sheetsFor(ruleNavWarning),
         searchesFolders: true,
         titles: navWarningTitles,
         topicTitles: dossierTopicTitles(navWarningTitles),
+      },
+    },
+  ],
+});
+// Contenido suelto en el cuerpo de las fichas del dosier: Navantia
+// BRDP-EXT-00014 (every figure of a sheet is cited; reconstructed with the
+// reported shape) -- the SHEETS lines say a task's content goes in
+// task/taskbody/context, never directly in <taskbody>.
+const ruleNavCitedFigures = readTextFile(new URL('../rule-test-fixtures/navantia-dita3-cited-figures-tables.sch', import.meta.url))
+  .match(/<sch:pattern id="p-BRDP-EXT-00014"[\s\S]*?<\/sch:pattern>/)[0];
+ruleTestExamplesCases.push({
+  name: 'dita-xpath3-dossier-cited-figures-ext-00014',
+  args: [
+    {
+      brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-00014', title: 'Figuras citadas', definition: 'Decidir si toda figura de una ficha debe citarse en el texto.', proposal: 'Toda figura de una ficha se cita en el texto con una referencia.' },
+      standard: 'DITA 1.3 Xpath3.0',
+      format: 'SCH-DITA',
+      ruleXml: ruleNavCitedFigures,
+      placements: placementsFor('DITA 1.3 Xpath2.0', ruleDitaDossier, [['map', 'rule']]),
+      matchExpressions: ruleMatchExpressions(ruleNavCitedFigures),
+      dossier: {
+        ...dossierOption,
+        look: dossierLookExpressions(ruleNavCitedFigures, (x) => new XmldomParser().parseFromString(x, 'application/xml')),
+        sheets: sheetsFor(ruleNavCitedFigures),
+        searchesFolders: true,
       },
     },
   ],

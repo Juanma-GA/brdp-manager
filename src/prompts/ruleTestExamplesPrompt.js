@@ -560,11 +560,33 @@ a <topicref>.
   missing, a note that is not where the decision requires it, a conref to a
   file or id that is not there...), not only in the ditamap.
 - Titles and texts the rule looks for are written exactly as the rule writes
-  them.${dossier.searchesFolders ? `
+  them.${sheetLines(dossier.sheets)}${dossier.searchesFolders ? `
 - The rule finds the ditamap by going up the folders from each file
   (uri-collection()): keep the ditamap at the top of the folder and the files
   in it or in subfolders (for example "topics/…"), so the ditamap is in the
   same folder as each file or in one above it, never below it.` : ''}${whereTheRuleLooks(dossier.look)}`;
+}
+
+// Contenido suelto en el cuerpo de las fichas, Part 1: how each type of
+// sheet is built (utils/ruleTestDossier.js dossierSheetShapes, from the real
+// structure of each type). Nothing without it.
+function sheetLines(sheets) {
+  if (!sheets?.lines?.length) return '';
+  const tags = (names) => names.map((n) => `<${n}>`).join(', ');
+  const lines = sheets.lines.map((l) => {
+    const where = `${l.root}/${l.body}${l.direct ? '' : `/${l.container}`}`;
+    const there = l.names.length ? ` (${tags(l.names)} there)` : '';
+    const never = l.direct ? '' : `, never directly in <${l.body}>`;
+    const deep = l.deep ? `; its main flow: ${l.deep.join('/')}` : '';
+    return `  - <${l.root}>: its content goes in ${where}${there}${never}${deep}.`;
+  });
+  if (sheets.base && (sheets.ownTypes || []).length === 0) {
+    lines.push(`  Write each sheet as <${sheets.base.root}> with <${sheets.base.body}> unless the rule needs another type.`);
+  }
+  return `
+- SHEETS: each file is one of these types, built as its schema says (an
+  element its parent does not take makes the file invalid):
+${lines.join('\n')}`;
 }
 
 // Test de reglas, progreso y causas, Part 1.5: the rule's own expressions

@@ -7,8 +7,9 @@
 //   1. Test rule on EXT-00012: "This rule only warns", no "cannot reject";
 //      the examples prompt says the rule only warns and where the list
 //      title can go in a task file; the simulator repeats the real failure
-//      (<sectiondiv><title> in <taskbody>), the correction round carries the
-//      card of <taskbody> and where the title goes, the sheets come back
+//      (<sectiondiv><title> in <taskbody>); the app puts the <sectiondiv> in a
+//      container of <taskbody>, the correction round names its <title> and
+//      says where the title goes, the sheets come back
 //      valid; named and exempt items "did not warn", the leftover "warned"
 //      with the rule's warning under it; verdict Correct, recorded as passed.
 //   2. EXT-00013, the same.
@@ -139,8 +140,11 @@ async function main() {
       assert(sys.includes("- in a task file: the <task> itself (its own <title>, its first child), or task/taskbody/"), `${c.id}: the prompt says where the title goes in a task file`);
       const correction = proxyBodies.map(messagesOf).find((m) => m.length > 2);
       const fix = correction ? correction.at(-1).content : "";
-      assert(fix.includes('file "fichas/ft-001.dita": <sectiondiv> is not allowed inside <taskbody>'), `${c.id}: the correction names the file and the <sectiondiv>`);
-      assert(/card of <taskbody> in the task schema: allowed children: [^;]*example/.test(fix), `${c.id}: the correction carries the card of <taskbody>`);
+      // Contenido suelto: the app puts the loose <sectiondiv> in a container
+      // of <taskbody> itself; what goes to the correction is its <title>.
+      assert(!fix.includes("<sectiondiv> is not allowed inside <taskbody>"), `${c.id}: the loose <sectiondiv> is not sent to the correction`);
+      assert(fix.includes('file "fichas/ft-001.dita": <title> is not allowed inside <sectiondiv>'), `${c.id}: the correction names the file and the <title> left`);
+      assert(/card of <sectiondiv> in the task schema: allowed children:/.test(fix), `${c.id}: the correction carries the card of <sectiondiv>`);
       assert(fix.includes(`The title the rule looks for ("${c.title}") goes on the file's own <task>`), `${c.id}: the correction says where the title goes`);
       assert((await panel().textContent()).includes("3 examples were corrected automatically"), `${c.id}: 3 of 3 corrected`);
       const results = await resultsOf();

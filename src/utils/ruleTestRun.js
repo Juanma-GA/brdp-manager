@@ -19,7 +19,7 @@ import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROP
 import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { analyzeRule, describeRule, parseXmlDocument, proposalVsRuleLists, ruleConditions, rulePathParts, rootDocumentPath, rootSelfPath } from './ruleTestEngine.js';
-import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions } from './ruleTestDossier.js';
+import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions, dossierSheetShapes } from './ruleTestDossier.js';
 import { minimalDocument, minimalDocumentRuns } from './ruleMinimalDocuments.js';
 import { nodePath, stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
@@ -1485,6 +1485,8 @@ export async function generateRuleTestExamples({
             look: dossierLookExpressions(ruleXml, parseXml),
             titles: prepared.setup.dossier.titles || null,
             topicTitles: prepared.setup.dossier.topicTitles || {},
+            // Contenido suelto, Part 1: how each type of sheet is built.
+            sheets: dossierSheetShapes(prepared.setup.dossier.structures, prepared.setup.rule?.names || []),
             // the rule looks for the ditamap going up the folders
             searchesFolders: /(?<![\w.$:-])(?:fn:)?uri-collection\s*\(/.test(String(ruleXml).replace(/'[^']*'/g, "''")),
           }

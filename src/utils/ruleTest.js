@@ -35,7 +35,7 @@ import {
 } from '../validation/schemaValidation.js';
 import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, metadataXml, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { setSectionValuesInDocument, setSectionValuesInText } from './ownSectionValues.js';
-import { placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence } from './schemaPlacement.js';
+import { placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence, wrapLooseContent } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
 import { applyExampleSchemaFixes, namedByRuleOrProposal } from './exampleSchemaFixes.js';
 import {
@@ -45,7 +45,9 @@ import {
   dossierProblems,
   dossierReferenceWarnings,
   materializeDossierFiles,
+  wrapDossierFiles,
 } from './ruleTestDossier.js';
+import { DOSSIER_PATH_SEPARATOR } from './ruleTestSchematron.js';
 
 // Unprefixed element and attribute names of a parsed fragment. Prefixed
 // names (xsi:…, xlink:…) and namespace declarations are not schema
@@ -131,6 +133,88 @@ export function mergeElementGroups(groups) {
     for (const a of g.attributes) if (!found.attributes.includes(a)) found.attributes.push(a);
   }
   return out;
+}
+
+// Contenido suelto, Part 2.8: what the rule selects and decides on a
+// document (and its dossier) as one comparable string -- the run's status,
+// its violations' messages, and for every selected node its name,
+// attributes and string value (never its position: wrapping moves nodes
+// under a new container, and a rule that does not depend on the direct
+// parent selects the very same nodes after it). A rule on taskbody/p
+// selects nothing once the <p> is in <context>: the strings differ and the
+// wrap is refused. null when the rule cannot be run.
+function resolveNodePath(doc, path) {
+  let node = doc;
+  for (const step of String(path || '').split('/').filter(Boolean)) {
+    if (!node) return null;
+    if (step.startsWith('@')) {
+      node = node.getAttributeNode ? node.getAttributeNode(step.slice(1)) : null;
+      continue;
+    }
+    const m = /^(.+)\[(\d+)\]$/.exec(step);
+    if (!m) return null;
+    const [, name, n] = m;
+    const kind = name === 'text()' ? 3 : name === 'comment()' ? 8 : name === 'processing-instruction()' ? 7 : 1;
+    let count = 0;
+    let found = null;
+    for (let c = node.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType !== kind || (kind === 1 && c.nodeName !== name)) continue;
+      count += 1;
+      if (count === Number(n)) {
+        found = c;
+        break;
+      }
+    }
+    node = found;
+  }
+  return node;
+}
+
+function nodeSignature(node) {
+  if (!node) return '?';
+  const value = String(node.nodeType === 1 ? node.textContent : node.nodeValue ?? '').replace(/\s+/g, ' ').trim();
+  if (node.nodeType === 2) return `@${node.nodeName}=${value}`;
+  if (node.nodeType !== 1) return `${node.nodeType}:${value}`;
+  const list = node.attributes || { length: 0 };
+  const attrs = Array.from({ length: list.length }, (_, i) => list.item ? list.item(i) : list[i])
+    .map((a) => `${a.nodeName}=${a.nodeValue}`)
+    .sort()
+    .join(' ');
+  return `<${node.nodeName} ${attrs}>${value}`;
+}
+
+export function ruleSelectionSignature(rule, xml, schema, { parseXml = parseXmlDocument, schemaLocation = null, dossier = null } = {}) {
+  if (!rule?.ruleXml || !xml) return null;
+  let result;
+  try {
+    result = runRuleOnFragment(rule.ruleXml, rule.format, xml, schema, { parseXml, schemaLocation, ...(dossier ? { dossier } : {}) });
+  } catch {
+    return null;
+  }
+  if (!result || result.status === 'not_executable' || result.status === 'error') return null;
+  const docs = new Map();
+  const docOf = (file) => {
+    if (!docs.has(file)) {
+      const text = file === null ? xml : dossier?.files?.find((f) => f.path === file)?.xml;
+      let doc;
+      try {
+        doc = text != null ? parseXml(String(text)) : null;
+      } catch {
+        doc = null;
+      }
+      docs.set(file, doc);
+    }
+    return docs.get(file);
+  };
+  const selected = (result.selectedNodePaths || []).map((p) => {
+    const at = p.indexOf(DOSSIER_PATH_SEPARATOR);
+    const file = at >= 0 ? p.slice(0, at) : null;
+    const path = at >= 0 ? p.slice(at + DOSSIER_PATH_SEPARATOR.length) : p;
+    const doc = docOf(file);
+    return `${file ?? ''}|${doc ? nodeSignature(resolveNodePath(doc, path)) : '?'}`;
+  }).sort();
+  const messages = (result.violations || []).map((v) => `${v.file || ''}|${v.message || ''}`).sort();
+  return JSON.stringify([result.status, selected, messages, (result.conditions || []).map((c) => c.holds)]);
 }
 
 export function materializeExample(example, setup, parseXml = parseXmlDocument) {
@@ -226,6 +310,35 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   }
   if (relocated.length) adjusted.relocated = relocated;
   else delete adjusted.relocated;
+  // Contenido suelto en el cuerpo (Part 2): a run of consecutive children
+  // the schema does not allow in their parent, with no single way down
+  // (the relocation above did nothing for them), goes into ONE container
+  // the parent allows and that admits all of them (schemaPlacement.js
+  // wrapLooseContent) -- only when the rule selects and decides the same on
+  // the example before and after (ruleSelectionSignature). In the content
+  // only, never the skeleton. DITA (SCH-DITA) only: a BREX example (S1000D
+  // 4.2, 4.1, 3.0.1) is never wrapped, even with the same pattern -- it goes
+  // to the correction round as before (Part 4).
+  delete adjusted.wrapped;
+  if (rule?.ruleXml && rule.format === 'SCH-DITA' && entry.structure?.models) {
+    const rawDossier = setup.dossier
+      ? dossierForEngine({ mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: example.files || [] })
+      : null;
+    const signature = (content) => {
+      const { xml: doc } = assembleExample({ standard: setup.standard, schema, schemaLocation: setup.schemaLocation, placement: entry.placement, content, metadata: adjusted.metadata, rootAttributes: adjusted.rootAttributes || null });
+      return doc ? ruleSelectionSignature(rule, doc, schema, { parseXml, schemaLocation: setup.schemaLocation, dossier: rawDossier }) : null;
+    };
+    const r = wrapLooseContent(adjusted.content, entry.structure, entry.placement.insertion || null, {
+      keeps: (before, after) => {
+        const a = signature(before);
+        return a !== null && a === signature(after);
+      },
+    });
+    if (r.wrapped.length) {
+      adjusted.content = r.text;
+      adjusted.wrapped = r.wrapped;
+    }
+  }
   // Rule test on DM metadata: the rule looks at the identification and
   // status section, so the LLM had to write it; an example without it is
   // not run (its validation says so). Its brexDmRef follows the DM's own
@@ -297,9 +410,23 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   const missingContent = example.noContent === true && !String(adjusted.content || '').trim() && !String(adjusted.metadata || '').trim();
   // Dosier, Part 2: the other files of the example's dossier, each with the
   // same fixes and the structure of its own type.
-  const dossier = setup.dossier
+  let dossier = setup.dossier
     ? { mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: materializeDossierFiles(example.files || [], setup.dossier.structures, parseXml, { named, topicTitles: setup.dossier.topicTitles || null, checked: setup.dossier.titles?.checked || null }) }
     : null;
+  // Contenido suelto (Part 2): the loose children of each dossier file
+  // wrapped too -- the rule runs on the whole dossier (it reads the other
+  // files) before and after, and a wrap that changes what it selects or
+  // decides in any document is refused.
+  if (dossier && rule?.ruleXml && rule.format === 'SCH-DITA' && xml) {
+    const engineDossier = (files, path, text) => ({ mainPath: dossier.mainPath, files: files.map((f) => ({ path: f.path, xml: f.path === path ? text : f.xml ?? f.content ?? '' })) });
+    dossier = {
+      ...dossier,
+      files: wrapDossierFiles(dossier.files, (path, before, after, files) => {
+        const a = ruleSelectionSignature(rule, xml, schema, { parseXml, schemaLocation: setup.schemaLocation, dossier: engineDossier(files, path, before) });
+        return a !== null && a === ruleSelectionSignature(rule, xml, schema, { parseXml, schemaLocation: setup.schemaLocation, dossier: engineDossier(files, path, after) });
+      }, setup.dossier.structures),
+    };
+  }
   // Remates: the levels above the insertion point where the content could
   // be written instead (skeletonLiftLevels) -- only for the diagnosis of an
   // example meant to be accepted that the rule rejects (runExample).

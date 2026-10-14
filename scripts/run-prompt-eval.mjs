@@ -541,8 +541,12 @@ async function runCheck(check, answer, ctx = {}) {
       const added = new Set(r.examples.flatMap((ex) => (ex.requiredAttributesAdded || []).map((g) => g.element)));
       const removed = new Set(r.examples.flatMap((ex) => ex.textRemoved || []));
       const values = new Set(r.examples.flatMap((ex) => (ex.valuesReplaced || []).map((v) => v.attribute)));
+      // Loose content put in a container by the application (content and
+      // dossier files): `wrapped` lists the containers expected.
+      const containers = new Set(r.examples.flatMap((ex) => [...(ex.wrapped || []), ...(ex.files || []).flatMap((f) => f.wrapped || [])].map((w) => w.container)));
       const missing = [
         ...(check.requiredAttributes || []).filter((n) => !added.has(n)).map((n) => `required attributes of <${n}>`),
+        ...(check.wrapped || []).filter((n) => !containers.has(n)).map((n) => `loose content put in <${n}>`),
         ...(check.textRemoved || []).filter((n) => !removed.has(n)).map((n) => `text of <${n}>`),
         ...(check.values || []).filter((n) => !values.has(n)).map((n) => `value of @${n}`),
       ];
@@ -550,7 +554,7 @@ async function runCheck(check, answer, ctx = {}) {
       const bad = [...missing.map((m) => `not fixed: ${m}`), ...corrected];
       return {
         status: bad.length ? "fail" : "pass",
-        detail: bad.length ? bad.join("; ") : `fixed by the app: attributes on ${[...added].join(", ") || "-"}; text of ${[...removed].join(", ") || "-"}; values of ${[...values].map((v) => `@${v}`).join(", ") || "-"}${r.correction ? "" : "; no correction round"}`,
+        detail: bad.length ? bad.join("; ") : `fixed by the app: attributes on ${[...added].join(", ") || "-"}; text of ${[...removed].join(", ") || "-"}; values of ${[...values].map((v) => `@${v}`).join(", ") || "-"}; wrapped in ${[...containers].map((c) => `<${c}>`).join(", ") || "-"}${r.correction ? "" : "; no correction round"}`,
       };
     }
     case "rule_test_examples_by_app": {
@@ -1131,6 +1135,9 @@ async function runRuleTestCase(project, aiProvider, createdBrdp, testCase) {
           requiredAttributesAdded: ex.requiredAttributesAdded || [],
           textRemoved: ex.textRemoved || [],
           valuesReplaced: ex.valuesReplaced || [],
+          // Loose content put in a container (SCH-DITA only), in the content
+          // and in each dossier file.
+          wrapped: [...(ex.wrapped || []), ...(ex.files || []).flatMap((f) => (f.wrapped || []).map((w) => ({ ...w, file: f.path })))],
         },
       })),
     },

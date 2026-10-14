@@ -548,6 +548,17 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // ruleTestExamples/dita-xpath3-warning-dossier-title-ext-00012 and
 // ruleProposalCheck/dita-xpath3-warning-rule-ext-00012 (Navantia
 // BRDP-EXT-00012, reconstructed with the real shape).
+//
+// Contenido suelto en el cuerpo de las fichas del dosier, Part 1: the
+// dossier block of the examples prompt says how each type of sheet is built
+// (SHEETS: topic/body, task/taskbody/context with its main flow to <cmd>,
+// …; and "Write each sheet as <topic> with <body>" when the rule names no
+// element of another type), from the real structures. Changed on purpose:
+// the 4 dossier cases (dita-xpath3/xpath2-dossier-safety-topic,
+// dita-xpath3-dossier-sheet-uri-collection,
+// dita-xpath3-warning-dossier-title-ext-00012); new case
+// ruleTestExamples/dita-xpath3-dossier-cited-figures-ext-00014. Nothing else
+// changes (no S1000D prompt has a dossier).
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

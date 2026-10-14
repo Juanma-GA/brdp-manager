@@ -537,19 +537,29 @@ export function singleChildPairs(ruleXml, format, views, options = {}) {
 // Part 1.6, in the panel: the requested elements (several, from
 // repeatingComparisons) that no executed example carries two or more of --
 // "No example has more than one <p>: the test does not cover that case."
-// An example counts when the rule ran on it (its run has a result).
+// An example counts when the rule ran on it (its run has a result); a
+// dossier example counts with all its documents (the ditamap and each file:
+// the rule runs on every one). Contenido suelto, Part 3: with NO example
+// run there is nothing the test covers or misses -- no note at all (the
+// verdict already says nothing could be run); computing it on the examples
+// as written would describe documents the rule never judged.
 export function severalUncovered(several, examples, runs, parseXml = parseXmlDocument) {
   if (!several || several.length === 0) return [];
   const docs = [];
+  let executed = 0;
   (examples || []).forEach((ex, i) => {
     const result = runs?.[i]?.result;
     if (!result || (result.status !== 'accepted' && result.status !== 'rejected')) return;
-    try {
-      docs.push(parseXml(String(ex.xml || '')));
-    } catch {
-      // not readable: does not count
+    executed += 1;
+    for (const text of [ex.xml, ...(Array.isArray(ex.files) ? ex.files.map((f) => f.xml ?? f.content) : [])]) {
+      try {
+        docs.push(parseXml(String(text || '')));
+      } catch {
+        // not readable: does not count
+      }
     }
   });
+  if (executed === 0) return [];
   return several.filter((s) => !docs.some((doc) => documentCarriesSeveral(doc, s.element, s.parent))).map((s) => s.element);
 }
 

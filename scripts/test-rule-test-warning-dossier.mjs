@@ -148,8 +148,12 @@ for (const [id, title, item] of [['BRDP-EXT-00012', 'LISTA DE MATERIAL OBLIGATOR
     const { result, asked } = await run(id, title, item, sheetBad, sheetGood);
     check(`${id}: <sectiondiv> in <taskbody> → one correction round`, asked.length === 2 && result.correction?.attempted === 3 && result.correction?.fixed === 3, JSON.stringify(result.correction));
     const correction = asked[1].messages.at(-1).content;
-    check(`${id}: correction names the file and the problem`, correction.includes('file "fichas/ft-001.dita": <sectiondiv> is not allowed inside <taskbody>'), correction.slice(0, 400));
-    check(`${id}: correction carries the card of <taskbody> with its children`, /card of <taskbody> in the task schema: allowed children: [^;]*\bexample\b[^;]*\bsteps\b/.test(correction));
+    // Contenido suelto: the loose <sectiondiv> is put in a container of
+    // <taskbody> by the application (no more "<sectiondiv> is not allowed
+    // inside <taskbody>"); what is left is its <title>, which no container fixes.
+    check(`${id}: the loose <sectiondiv> is not sent to the correction`, !correction.includes('<sectiondiv> is not allowed inside <taskbody>'), correction.slice(0, 400));
+    check(`${id}: correction names the file and the problem left (the title)`, correction.includes('file "fichas/ft-001.dita": <title> is not allowed inside <sectiondiv>'), correction.slice(0, 400));
+    check(`${id}: correction carries the card of <sectiondiv>`, /card of <sectiondiv> in the task schema: allowed children:/.test(correction));
     check(`${id}: correction says where the title can go`, correction.includes(`The title the rule looks for ("${title}") goes on the file's own <task>`) && correction.includes('task/taskbody/'));
     check(`${id}: after the correction, Correct`, ruleTestVerdict(result.examples, result.runs, analyzeRule(navRule(id), FORMAT, { parseXml })).kind === 'correct');
   }
@@ -157,6 +161,8 @@ for (const [id, title, item] of [['BRDP-EXT-00012', 'LISTA DE MATERIAL OBLIGATOR
   {
     const { result } = await run(id, title, item, sheetBad, sheetBad);
     const verdict = ruleTestVerdict(result.examples, result.runs, analyzeRule(navRule(id), FORMAT, { parseXml }));
+    const f = result.examples[0].files?.[0];
+    check(`${id}: the loose <sectiondiv> wrapped by the app in a container of <taskbody>`, f?.wrapped?.[0]?.parent === 'taskbody' && f.wrapped[0].elements.join() === 'sectiondiv' && f.content.includes(`<taskbody><${f.wrapped[0].container}><sectiondiv>`), JSON.stringify(f?.wrapped));
     check(`${id}: still invalid → no_runnable names the schema and the reason`, verdict.kind === 'no_runnable' && verdict.bySchema?.[0]?.schema === 'map' && /sectiondiv/.test(JSON.stringify(verdict.bySchema)), JSON.stringify(verdict));
   }
 }

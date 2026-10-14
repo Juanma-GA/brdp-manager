@@ -328,6 +328,24 @@ function DossierFileBlock({ path, xml, content, selected, skeleton, isMain, fixe
   );
 }
 
+// Contenido suelto (Part 2): loose children the application put in a
+// container their parent allows -- one line per container.
+function WrappedLooseNotes({ wrapped }) {
+  const { t } = useTranslation();
+  if (!wrapped?.length) return null;
+  return wrapped.map((w, i) => {
+    const names = w.elements.map((n) => `<${n}>`);
+    const elements = names.length > 1 ? `${names.slice(0, -1).join(', ')} ${t('records.assistant.listAnd')} ${names[names.length - 1]}` : names[0];
+    return (
+      <TableFixNote
+        key={`${w.parent}-${w.container}-${i}`}
+        testId="rule-test-wrapped-loose"
+        text={t('records.ruleTest.wrappedLoose', { count: w.elements.length, elements, container: `<${w.container}>`, parent: `<${w.parent}>` })}
+      />
+    );
+  });
+}
+
 // The fixes the application made to one document of the example.
 function DocumentFixNotes({ doc }) {
   const { t } = useTranslation();
@@ -340,6 +358,7 @@ function DocumentFixNotes({ doc }) {
           })}
         </p>
       )}
+      <WrappedLooseNotes wrapped={doc.wrapped} />
       {doc.colspecsAdded > 0 && <ColspecsAddedNote count={doc.colspecsAdded} />}
       <SchemaFixNotes doc={doc} />
       {doc.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={doc.spannedEntriesRemoved} />}
@@ -564,6 +583,7 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
         </p>
       )}
       {example.namespacesRemoved?.length > 0 && <TableFixNote testId="rule-test-namespace-removed" text={t('records.ruleTest.namespaceRemoved', { namespace: example.namespacesRemoved.join('", "') })} />}
+      <WrappedLooseNotes wrapped={example.wrapped} />
       {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
       <SchemaFixNotes doc={example} />
       {example.spannedEntriesRemoved?.length > 0 && <SpannedEntriesNote rows={example.spannedEntriesRemoved} />}

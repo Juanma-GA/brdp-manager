@@ -191,7 +191,8 @@ const twoEvaluates = minimal.replace('</displaytext>', '</displaytext><evaluate/
   const ran = { result: { status: 'accepted' } };
   check('1.6 no example with two <p> → note', severalUncovered(r2, [onePara], [ran], parseXml).join() === 'p');
   check('1.6 an example with two <p> → no note', severalUncovered(r2, [onePara, twoPara], [ran, ran], parseXml).length === 0);
-  check('1.6 not executed → does not count', severalUncovered(r2, [twoPara], [{ result: null }], parseXml).join() === 'p');
+  // Contenido suelto, Part 3: with no example run there is no coverage note at all.
+  check('1.6 not executed → does not count (and with none run, no note)', severalUncovered(r2, [twoPara], [{ result: null }], parseXml).length === 0 && severalUncovered(r2, [twoPara, onePara], [{ result: null }, ran], parseXml).join() === 'p');
   check('1.6 note ES', es('records.ruleTest.repetition.severalUncovered', { element: '<p>' }) === 'Ningún ejemplo tiene más de un <p>: la prueba no cubre ese caso.');
   // through the real setup
   const fetchers = {

@@ -19,7 +19,7 @@
 //   file means (doc-available() is false for it).
 import { DOSSIER_BASE_URI, DOSSIER_MAX_FILES, dossierUri } from './ruleTestSchematron.js';
 import { addMissingCalsColspecs, fixCalsRowSpans, removeSpannedCalsEntries } from '../validation/schemaValidation.js';
-import { relocateMisplacedElements } from './schemaPlacement.js';
+import { looseContainerFor, relocateMisplacedElements, wrapLooseContent } from './schemaPlacement.js';
 import { applyExampleSchemaFixes } from './exampleSchemaFixes.js';
 import { setRootTitleText } from './topicTitleValue.js';
 
@@ -120,6 +120,79 @@ export function materializeDossierFiles(files, structures, parseXml, { named = n
       ...(topicTitleSet ? { topicTitleSet } : {}),
     };
   });
+}
+
+// Contenido suelto (Part 2): the loose children of each file wrapped in a
+// container its parent allows (schemaPlacement.js wrapLooseContent), after
+// every other fix. `keeps(path, before, after, files)` -- the caller runs the
+// rule on the whole dossier before and after (files: the dossier as it is at
+// that moment) and refuses a wrap that changes what the rule selects. Files
+// in order, each one seeing the earlier ones already wrapped. `structures`:
+// every type's structure, so the most general container is the one more
+// types have (rankContainers). A file gets
+// `wrapped` ([{ parent, container, elements, reused }]) for its note.
+export function wrapDossierFiles(files, keeps = null, structures = null) {
+  const related = Object.values(structures || {});
+  const out = (files || []).map((f) => ({ ...f }));
+  out.forEach((file, i) => {
+    if (!file.structure?.models) return;
+    const r = wrapLooseContent(file.content, file.structure, null, {
+      keeps: keeps ? (before, after) => keeps(file.path, before, after, out) : null,
+      related,
+    });
+    if (!r.wrapped.length) return;
+    out[i] = { ...file, content: r.text, xml: r.text, wrapped: r.wrapped };
+  });
+  return out;
+}
+
+// Contenido suelto, Part 1: how each type of sheet is built, from the
+// real structure of each type -- for the dossier prompt. Per type (never the
+// map): its body (the skeleton's second element) and the element its
+// general content goes in -- the body itself when it takes the rule's
+// elements directly (or, for a rule with none of this type, the content its
+// most general child takes), else the container the application would wrap
+// that content in (schemaPlacement.js looseContainerFor: <context> in
+// <taskbody>); and, when the type's skeleton goes deeper than its body, that
+// chain with its required children (task/taskbody/steps/step/cmd).
+// `ownTypes`: the types whose own elements (not in the first type's
+// structure: <step>, <cmd>…) the rule names; none → the prompt says to write
+// every sheet as the first type.
+// → { lines: [{ type, root, body, container, direct, names, deep }], base: { type, root, body } | null, ownTypes }
+const SHEET_DEEP_MAX = 4;
+export function dossierSheetShapes(structures, ruleNames = []) {
+  const related = Object.values(structures || {});
+  const names = [...new Set(ruleNames || [])];
+  const types = DOSSIER_FILE_TYPES.filter((t) => t !== 'map' && structures?.[t]?.elements);
+  const lines = [];
+  for (const type of types) {
+    const st = structures[type];
+    const elements = st.elements;
+    const path = st.skeleton?.path || [];
+    const [root, body] = path;
+    if (!root || !body || !elements[body]) continue;
+    const bodyChildren = elements[body].children || [];
+    const onPath = new Set(path);
+    const targets = names.filter((n) => elements[n] && !onPath.has(n) && bodyChildren.some((c) => c === n || elements[c]?.children?.includes(n)));
+    const best = looseContainerFor(st, body, [], related);
+    const content = targets.length ? targets : best ? elements[best].children || [] : [];
+    const direct = content.filter((n) => bodyChildren.includes(n));
+    const container = direct.length ? body : looseContainerFor(st, body, content.filter((n) => !bodyChildren.includes(n)), related);
+    let deep = null;
+    if (path.length > 2) {
+      deep = [...path];
+      for (let i = 0; i < SHEET_DEEP_MAX; i += 1) {
+        const slot = (st.models?.[deep[deep.length - 1]]?.required || [])[0];
+        if (!slot || Array.isArray(slot) || deep.includes(slot)) break;
+        deep.push(slot);
+      }
+    }
+    lines.push({ type, root, body, container, direct: container === body, names: targets.filter((n) => elements[container]?.children?.includes(n)), deep });
+  }
+  const first = types[0] ? structures[types[0]] : null;
+  const base = first?.skeleton?.path?.length >= 2 ? { type: types[0], root: first.skeleton.path[0], body: first.skeleton.path[1] } : null;
+  const ownTypes = types.filter((t) => t !== types[0] && names.some((n) => structures[t].elements[n] && !first?.elements?.[n]));
+  return { lines, base, ownTypes };
 }
 
 // What the engine needs: { mainPath, files: [{ path, xml }] }.

@@ -521,7 +521,10 @@ function dossierExamples(rule, correcting, lastUser) {
   // and where the title can go in a task file.
   const listTitle = (rule.match(/ancestor::\*\[normalize-space\(title\) = '(LISTA DE [^']+)'\]/) || [])[1];
   if (listTitle && /role="warning"/.test(rule)) {
-    const fixed = correcting && /card of <taskbody> in the task schema/.test(lastUser) && /goes on the file's own <task>/.test(lastUser);
+    // Since the app puts a loose <sectiondiv> in a container of <taskbody>
+    // itself (contenido suelto), the problem left is its <title>: either
+    // message, with where the title can go, fixes it.
+    const fixed = correcting && (/card of <taskbody> in the task schema/.test(lastUser) || /<title> is not allowed inside <sectiondiv>/.test(lastUser)) && /goes on the file's own <task>/.test(lastUser);
     const item = /HERRAMIENTAS/.test(listTitle) ? "Llave dinamométrica L-7" : "Junta tórica J-12";
     const row = (a, b = "") => `<row><entry colname="c1">${a}</entry><entry colname="c2">${b}</entry></row>`;
     const list = (rows) => `<title>${listTitle}</title><table><tgroup cols="2"><colspec colname="c1"/><colspec colname="c2"/><tbody>${rows}</tbody></tgroup></table>`;
@@ -535,6 +538,26 @@ function dossierExamples(rule, correcting, lastUser) {
       { label: "Every item named in a step", expected: "accept", schema: "map", content, files: file(row(item), [`Sustituir ${item}.`]) },
       { label: "Exempt item", expected: "accept", schema: "map", content, files: file(row("Grasa G-3", "Exento"), ["Desmontar la tapa."]) },
       { label: "Item no step names", expected: "reject", schema: "map", content, files: file(row(item) + row("Arandela A-4"), [`Sustituir ${item}.`]) },
+    ];
+  }
+  // Contenido suelto en el cuerpo de las fichas (reconstructed Navantia
+  // BRDP-EXT-00014/00015: every figure / table with an @id is cited by an
+  // <xref> of the dossier's sheets). As Mistral wrote them: <p>, <table> and
+  // <fig> straight in <taskbody>, and never corrected -- the application
+  // puts them in a <context> itself.
+  const cited = /context="(fig|table)\[@id\]"/.exec(rule);
+  if (cited && /uri-collection/.test(rule)) {
+    const kind = cited[1];
+    const target = kind === "fig" ? "f1" : "t1";
+    const xref = (yes) => (yes ? `<p>Ver la <xref href="#desmontaje/${target}"/>.</p>` : "<p>Desmontar la bomba de achique.</p>");
+    const table = '<table id="t1"><title>Juntas</title><tgroup cols="1"><colspec colname="c1"/><tbody><row><entry colname="c1">Junta tórica J-12</entry></row></tbody></tgroup></table>';
+    const fig = '<fig id="f1"><title>Bomba de achique</title></fig>';
+    const sheet = (yes) => `<task id="desmontaje"><title>Desmontaje de la bomba</title><taskbody>${xref(yes)}${kind === "fig" ? fig : table}</taskbody></task>`;
+    const content = map(["fichas/desmontaje.dita"]);
+    const file = (yes) => [{ path: "fichas/desmontaje.dita", content: sheet(yes) }];
+    return [
+      { label: `The ${kind === "fig" ? "figure" : "table"} is cited`, expected: "accept", schema: "map", content, files: file(true) },
+      { label: `The ${kind === "fig" ? "figure" : "table"} is not cited`, expected: "reject", schema: "map", content, files: file(false) },
     ];
   }
   // Funciones XPath que faltan, Part 2: a rule on the topics' cells that

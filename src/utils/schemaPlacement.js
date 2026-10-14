@@ -761,3 +761,211 @@ export function relocateToOnlyParent(text, structure, parentName, names, keepsRe
   }
   return { text: current, moved };
 }
+
+// ─── Contenido suelto: wrapping loose children in a container ───────────────
+
+// The children C of `parent` that can take every one of `names`: in the
+// parent's model, no required attribute without a value, every required
+// child covered by `names` (never fabricated), each of `names` allowed in C.
+// → [{ name, ord }] in the XSD's order.
+function containerCandidates(structure, parent, names) {
+  const elements = structure?.elements || {};
+  const models = structure?.models || {};
+  const order = models[parent]?.order || [];
+  const set = new Set(names);
+  const allowedIn = (p, name) => Boolean(elements[p]?.children?.includes(name));
+  return order
+    .filter((c, i) => {
+      if (order.indexOf(c) !== i || !allowedIn(parent, c) || !models[c] || !elements[c]) return false;
+      if ((models[c].attributes || []).some(([, v]) => v == null)) return false;
+      if (![...set].every((n) => allowedIn(c, n))) return false;
+      const required = models[c].required || [];
+      return required.every((slot) => (Array.isArray(slot) ? slot : [slot]).some((n) => set.has(n)));
+    })
+    .map((c) => ({ name: c, ord: order.indexOf(c) }));
+}
+
+// `fits` ranked best first -- see wrapLooseContent: the most kinds of
+// children; then the position next to the run's allowed siblings
+// (`prev`/`next` names), or before the child the skeleton uses in `parent`
+// when there is none; then the most document types (`related`, the
+// structures of the other types: a dossier's topic, concept, task…) that
+// have it; then the most parents in the schema; then the XSD's order.
+function rankContainers(structure, parent, fits, { prev = null, next = null, related = [] } = {}) {
+  const elements = structure?.elements || {};
+  const order = structure?.models?.[parent]?.order || [];
+  const ord = (n) => order.indexOf(n);
+  const kinds = (c) => (elements[c]?.children || []).length;
+  const parentsOf = (c) => Object.values(elements).filter((e) => (e.children || []).includes(c)).length;
+  const types = (c) => (related || []).filter((st) => st?.elements?.[c]).length;
+  const path = structure?.skeleton?.path || [];
+  const spineAt = path.indexOf(parent);
+  const spine = spineAt >= 0 && spineAt + 1 < path.length ? ord(path[spineAt + 1]) : -1;
+  // Closeness to the anchor: the next allowed sibling, the previous one,
+  // or the child the skeleton uses in the parent -- 0 with no anchor.
+  const position = (c) => {
+    if (next) return -c.ord;
+    if (prev) return c.ord;
+    if (spine >= 0) return c.ord < spine ? spine - c.ord : 1000 + c.ord;
+    return 0;
+  };
+  return [...fits].sort(
+    (a, b) =>
+      kinds(b.name) - kinds(a.name) ||
+      position(a) - position(b) ||
+      types(b.name) - types(a.name) ||
+      parentsOf(b.name) - parentsOf(a.name) ||
+      a.ord - b.ord,
+  );
+}
+
+// The container the application would wrap loose `names` in, inside
+// `parent` with no other child (contenido suelto, Part 1: the prompt says
+// where a sheet's content goes). null when there is none.
+export function looseContainerFor(structure, parent, names, related = []) {
+  const models = structure?.models || {};
+  const fits = containerCandidates(structure, parent, names).filter((c) => (models[parent]?.max?.[c.name] ?? Infinity) >= 1);
+  return rankContainers(structure, parent, fits, { related })[0]?.name || null;
+}
+
+// Test de reglas DITA: contenido suelto en el cuerpo de las fichas del dosier
+// (BRDP-EXT-00014/00015, Navantia): the LLM wrote
+// <task><taskbody><p/><table/><fig/></taskbody></task>; <taskbody> admits
+// none of them, but its child <context> admits all three. There is no single
+// way down for each one (relocateMisplacedElements does nothing: <p> fits in
+// <prereq>, <context>, <result>, …), so the children are WRAPPED instead:
+// a run of consecutive children of P that P does not allow (only whitespace
+// or comments between them) goes into ONE container C that P allows and that
+// admits every one of them.
+//
+// Which C: one of P's children (its XSD's order) whose model exists, with no
+// required attribute without a value, whose required children are all
+// covered by the run (never fabricated), and that admits every element of
+// the run. Where: next to an existing C right before or after the run (then
+// the run goes into it); otherwise a new C placed between the run's nearest
+// allowed siblings (rankContainers): the candidate that admits the most
+// kinds of children; among equals the one closest to the next sibling (the
+// latest in the order before it), else the one closest after the previous
+// one, else (no allowed sibling at all) the latest before the child the
+// schema's skeleton uses in P (structure.skeleton.path: <steps> in
+// <taskbody>); then the one more document types have (`related`: <section>
+// rather than <refsyn> in <refbody>), then the one more elements allow, then
+// the XSD's order. "The first in the XSD's order" alone would pick <prereq>
+// in <taskbody> and <refsyn> in <refbody>: the generality and the
+// neighbouring position tell a general container from a specific one, with
+// no element name in the code. The count of C must
+// stay within P's maximum. Nothing is done with no such C; the example then
+// goes to the correction round as before.
+//
+// `keeps(before, after)` (optional) decides on the whole text whether a wrap
+// may be applied: the caller runs the rule before and after and refuses a
+// wrap that changes what the rule selects (a rule on taskbody/p).
+// → { text, wrapped: [{ parent, container, elements, reused }] }
+export function wrapLooseContent(text, structure, parentName, { keeps = null, related = [] } = {}) {
+  const original = String(text ?? '');
+  const elements = structure?.elements || {};
+  const models = structure?.models || {};
+  if (!structure?.models || !Object.keys(models).length) return { text: original, wrapped: [] };
+  const allowedIn = (p, name) => Boolean(elements[p]?.children?.includes(name));
+  const gapIsBlank = (from, to) => /^\s*$/.test(current.slice(from, to).replace(/<!--[\s\S]*?-->/g, ''));
+  let current = original;
+  const wrapped = [];
+  const skip = new Set();
+
+  const candidatesFor = (p, run, siblings) =>
+    containerCandidates(structure, p, run.map((c) => c.name)).map((c) => ({ ...c, existing: siblings.filter((s) => s.name === c.name).length }));
+
+  const findRun = (top) => {
+    const visit = (node, name) => {
+      if (name && models[name] && elements[name]) {
+        const kids = node.children;
+        let i = 0;
+        while (i < kids.length) {
+          const loose = (k) => elements[k.name] && !allowedIn(name, k.name);
+          if (!loose(kids[i])) {
+            i += 1;
+            continue;
+          }
+          let j = i;
+          while (j + 1 < kids.length && loose(kids[j + 1]) && gapIsBlank(kids[j].end, kids[j + 1].start)) j += 1;
+          const run = kids.slice(i, j + 1);
+          const key = `${name}@${run[0].start}`;
+          if (!skip.has(key)) return { node, name, run, from: i, to: j, key };
+          i = j + 1;
+        }
+      }
+      for (const child of node.children) {
+        const found = visit(child, child.name);
+        if (found) return found;
+      }
+      return null;
+    };
+    return visit(top, parentName);
+  };
+
+  for (let pass = 0; pass < 20; pass += 1) {
+    const top = parseSpans(current);
+    if (!top) return { text: original, wrapped: [] };
+    const found = findRun(top);
+    if (!found) break;
+    const { node, name: p, run, from, to, key } = found;
+    skip.add(key);
+    const kids = node.children;
+    const order = models[p]?.order || [];
+    const ord = (n) => order.indexOf(n);
+    let prev = null;
+    for (let k = from - 1; k >= 0; k -= 1) if (allowedIn(p, kids[k].name)) { prev = kids[k]; break; }
+    let next = null;
+    for (let k = to + 1; k < kids.length; k += 1) if (allowedIn(p, kids[k].name)) { next = kids[k]; break; }
+    const candidates = candidatesFor(p, run, kids);
+    if (!candidates.length) continue;
+    const runText = current.slice(run[0].start, run[run.length - 1].end);
+    let edit;
+    let container = null;
+    let reused = false;
+    const adjacent = (sib, before) => sib && !sib.selfClosing && candidates.some((c) => c.name === sib.name) && (before ? gapIsBlank(sib.end, run[0].start) : gapIsBlank(run[run.length - 1].end, sib.start));
+    if (adjacent(prev, true)) {
+      container = prev.name;
+      reused = true;
+      edit = (s) => s.slice(0, prev.closeStart) + current.slice(prev.end, run[0].start) + runText + s.slice(prev.closeStart, prev.end) + s.slice(run[run.length - 1].end);
+    } else if (adjacent(next, false)) {
+      container = next.name;
+      reused = true;
+      edit = (s) => s.slice(0, run[0].start) + s.slice(next.start, next.openEnd) + runText + current.slice(run[run.length - 1].end, next.start) + s.slice(next.openEnd);
+    } else {
+      const lo = prev ? ord(prev.name) : -Infinity;
+      const hi = next ? ord(next.name) : Infinity;
+      const fits = candidates.filter((c) => c.ord >= 0 && c.ord >= lo && c.ord <= hi && c.existing + 1 <= (models[p].max?.[c.name] ?? Infinity));
+      const pick = rankContainers(structure, p, fits, { prev: prev?.name ?? null, next: next?.name ?? null, related })[0] || null;
+      if (!pick) continue;
+      container = pick.name;
+      const attrs = (models[container].attributes || []).map(([n, v]) => ` ${n}="${escAttr(v)}"`).join('');
+      edit = (s) => s.slice(0, run[0].start) + `<${container}${attrs}>${runText}</${container}>` + s.slice(run[run.length - 1].end);
+    }
+    const after = edit(current);
+    // Valid for P: its allowed children in the XSD's order, within the
+    // maxima. Never applied otherwise.
+    const check = parseSpans(after);
+    if (!check) continue;
+    const parentNode = (function locate(n) {
+      if (n.start === node.start && n.name === node.name) return n;
+      for (const c of n.children) {
+        const f = locate(c);
+        if (f) return f;
+      }
+      return null;
+    })(check);
+    if (parentNode && models[p]) {
+      const seq = parentNode.children.filter((c) => allowedIn(p, c.name)).map((c) => ord(c.name));
+      const okOrder = seq.every((v, i) => i === 0 || v < 0 || seq[i - 1] < 0 || v >= seq[i - 1]);
+      const counts = {};
+      for (const c of parentNode.children) counts[c.name] = (counts[c.name] || 0) + 1;
+      const okMax = Object.entries(models[p].max || {}).every(([n, m]) => (counts[n] || 0) <= m);
+      if (!okOrder || !okMax) continue;
+    }
+    if (keeps && !keeps(current, after)) continue;
+    current = after;
+    wrapped.push({ parent: p, container, elements: [...new Set(run.map((c) => c.name))], reused });
+  }
+  return { text: current, wrapped };
+}
