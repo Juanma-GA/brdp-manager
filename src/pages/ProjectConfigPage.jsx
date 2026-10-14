@@ -146,10 +146,13 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   // an error -- {total, cells: [{id, field}]}.
   const [exportOmitted, setExportOmitted] = useState(null);
   const [templateError, setTemplateError] = useState(null);
-  // Only for the parse + analyze calls and the Export request -- Apply
-  // itself is a background job now (docs request), tracked via the job
-  // below, never this flag.
-  const [busy, setBusy] = useState(false);
+  // Choosing and analyzing an Excel file (parse + analyze calls) and the
+  // Export request each have their own flag, so the Export button only
+  // shows "Exporting…" while exporting; while either runs, the other
+  // control is disabled (never both at once). Apply itself is a background
+  // job (docs request), tracked via the job below, never these flags.
+  const [analyzingImport, setAnalyzingImport] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [brdpCount, setBrdpCount] = useState(null);
   // True only while the POST /apply request itself is in flight (a real,
   // short-lived network round trip) -- once it returns 202, the actual
@@ -242,7 +245,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     if (!file) return;
     resetImportState();
     if (fileInputRef.current) fileInputRef.current.value = '';
-    setBusy(true);
+    setAnalyzingImport(true);
     try {
       const form = new FormData();
       form.append('file', file);
@@ -271,7 +274,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     } catch (err) {
       setImportErrors([err.message]);
     } finally {
-      setBusy(false);
+      setAnalyzingImport(false);
     }
   };
 
@@ -345,7 +348,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
   const standardVersion = standard?.replace(/^S1000D\s+/, '');
 
   const handleExport = async () => {
-    setBusy(true);
+    setExporting(true);
     setExportError(null);
     setExportOmitted(null);
     try {
@@ -384,7 +387,7 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
     } catch (err) {
       setExportError(t('config.dataManagement.exportFailed', { message: err.message }));
     } finally {
-      setBusy(false);
+      setExporting(false);
     }
   };
 
@@ -411,12 +414,12 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
 
       <div className={styles.subsection}>
         <h3 className={styles.subsectionHeading}>{t('config.dataManagement.exportTitle')}</h3>
-        <Button onClick={handleExport} disabled={busy}>
+        <Button onClick={handleExport} disabled={exporting || analyzingImport}>
           {/* A large project's export takes a few seconds (fetching every
               BRDP and rule, then the server writing the file) -- the
               spinner keeps the "still working" signal visible. */}
-          {busy && <span className={styles.spinner} aria-hidden="true" />}
-          {busy ? t('config.dataManagement.exporting') : t('config.dataManagement.exportButton')}
+          {exporting && <span className={styles.spinner} aria-hidden="true" />}
+          {exporting ? t('config.dataManagement.exporting') : t('config.dataManagement.exportButton')}
         </Button>
         {brdpCount !== null && (
           <p className={styles.hint}>{t('config.dataManagement.countAvailable', { count: brdpCount })}</p>
@@ -504,11 +507,11 @@ function DataManagementSection({ projectId, standard, canEdit, dataVersion, onDa
                       accept=".xlsx"
                       onChange={handleFileSelect}
                       hidden
-                      disabled={busy}
+                      disabled={analyzingImport || exporting}
                     />
                   </label>
                   <p className={styles.hint}>{t('config.dataManagement.chooseFileHint')}</p>
-                  {busy && <p className={styles.hint}>{t('config.dataManagement.analyzing')}</p>}
+                  {analyzingImport && <p className={styles.hint}>{t('config.dataManagement.analyzing')}</p>}
                 </>
               )}
 
