@@ -4568,6 +4568,50 @@
       ]
     },
     {
+      "id": "rule-test-navantia-dita3-dossier-missing-file-ext-00015",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Un ejemplo de dosier al que le falta un fichero: Navantia BRDP-EXT-00015 (reconstructed: a table cited as \"Tabla X.Y de la ficha N\" belongs to a sheet the ditamap mentions). The simulator, as Mistral did, points the reject example's ditamap to topics/procedimiento_L00009.dita without writing it, and adds the file only when the correction round names that path. Before this round the example counted as case b (never corrected) and the test failed. (Its own identifier: BRDP-EXT-00015 is taken by the loose-content case in the same temporary project.)",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-MISSINGFILE",
+        "title": "Tablas citadas de otras fichas",
+        "definition": "Decidir cómo se cita una tabla de otra ficha del dosier.",
+        "proposal": "Una tabla citada como \"Tabla X.Y de la ficha N\" es de una ficha mencionada en el ditamap.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-missing-file-ext-00015.sch",
+        "pattern": "p-BRDP-EXT-00015"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier with at least one sheet"
+        },
+        {
+          "type": "rule_test_correction_contains",
+          "pattern": "points to topics/procedimiento_L00009\\.dita, which is not in the dossier",
+          "note": "the reject example whose ditamap points to a file it does not have goes to the correction round, naming the path"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (ditamap and sheets) passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "with the missing sheet added, the rule rejects the citation of a sheet the ditamap does not mention"
+        }
+      ]
+    },
+    {
       "id": "rule-test-template-dita3-dossier-warnings",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",

@@ -72,6 +72,7 @@
 import { formatSchemaIssue } from '../validation/schemaValidation.js';
 import { formatPathProblem } from '../validation/rulePathCheck.js';
 import { formatCoverageItem } from '../validation/schemaCoverage.js';
+import { DOSSIER_MAIN_PATH } from './ruleTestDossier.js';
 
 export const ENGINE_REASON_CODES = [
   'external_document', 'non_context_rule', 'mandatory_whole_document', 'xpath_error', 'unsupported_value_form',
@@ -82,7 +83,7 @@ export const ENGINE_REASON_CODES = [
   'example_no_room', 'condition_no_schema', 'reference_no_schema', 'context_schema_unknown', 'test_schema_unavailable', 'minimal_document_unavailable',
   'section_value_unavailable', 'undeclared_known_prefix', 'undeclared_prefix',
 ];
-export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement', 'test_not_applicable'];
+export const VERDICT_REASON_CODES = ['test_impossible_path', 'test_incorrect', 'test_nothing_selected', 'test_missing_expectation', 'test_no_runnable', 'test_proposal_mismatch', 'test_proposal_unchecked', 'test_threshold_mismatch', 'test_schema_covered', 'test_informative', 'test_engine_error', 'test_root_rejects_all', 'test_skeleton_placement', 'test_not_applicable', 'test_missing_file'];
 
 // A reason as text in the language of `t`. Unknown codes (a newer build's
 // reason read by an older one) fall back to the code itself, never to "".
@@ -102,6 +103,10 @@ export function formatRuleTestReason(reason, t) {
   if (reason.code === 'test_not_applicable') {
     const which = params.which === 'reject' || params.which === 'accept' ? t(`records.ruleTest.reasons.notApplicableWhich_${params.which}`) : '';
     return t('records.ruleTest.reasons.test_not_applicable', { which, predicate: rootPredicateText(params.conditions, t) });
+  }
+  // Un ejemplo de dosier al que le falta un fichero: the path(s).
+  if (reason.code === 'test_missing_file') {
+    return t('records.ruleTest.reasons.test_missing_file', { paths: (params.paths || []).join(', ') });
   }
   if (reason.code === 'test_threshold_mismatch') {
     return t('records.ruleTest.reasons.test_threshold_mismatch', { detail: formatThresholdMismatch(params, t) || '' });
@@ -225,6 +230,10 @@ export function verdictToTestRecord(verdict) {
       }
       // El contexto en la raíz: the rule applies to no example (or to none
       // meant to be rejected / accepted).
+      // Un ejemplo de dosier al que le falta un fichero.
+      if (verdict.why === 'missing_file') {
+        return { result: 'inconclusive', reason: { code: 'test_missing_file', params: { paths: verdict.paths || [] } } };
+      }
       if (verdict.why === 'not_applicable') {
         return { result: 'inconclusive', reason: { code: 'test_not_applicable', params: { which: verdict.which || 'all', conditions: verdict.conditions || [] } } };
       }
@@ -445,6 +454,16 @@ export function formatAcceptCause(cause, t) {
 
 // The line of one run: the causes of its parts joined, or null.
 export function acceptCauseText(run, t) {
+  // Un ejemplo de dosier al que le falta un fichero: that is the cause.
+  if (run?.missingFiles?.length) {
+    return run.missingFiles
+      .map((m) =>
+        m.from === DOSSIER_MAIN_PATH
+          ? t('records.ruleTest.acceptCause.missingFileFromMap', { path: m.path })
+          : t('records.ruleTest.acceptCause.missingFileFromFile', { path: m.path, from: m.from })
+      )
+      .join('; ');
+  }
   const lines = (run?.acceptance || []).map((d) => formatAcceptCause(d.cause, t)).filter(Boolean);
   return lines.length ? [...new Set(lines)].join('; ') : null;
 }

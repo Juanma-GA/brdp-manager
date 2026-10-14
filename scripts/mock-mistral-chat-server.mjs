@@ -540,6 +540,24 @@ function dossierExamples(rule, correcting, lastUser) {
       { label: "Item no step names", expected: "reject", schema: "map", content, files: file(row(item) + row("Arandela A-4"), [`Sustituir ${item}.`]) },
     ];
   }
+  // Un ejemplo de dosier al que le falta un fichero (reconstructed Navantia
+  // BRDP-EXT-00015: a table cited as "Tabla X.Y de la ficha N" belongs to a
+  // sheet the ditamap mentions). As in the real run, the example meant to be
+  // rejected points to topics/procedimiento_L00009.dita and never writes it;
+  // the file is added only when the correction round names that path.
+  if (/uri-collection/.test(rule) && /Tabla \\d\+\\\.\\d\+ de la ficha/.test(rule)) {
+    const L9 = "topics/procedimiento_L00009.dita";
+    const L10 = "topics/procedimiento_L00010.dita";
+    const sheet = (id, text) => `<topic id="${id}"><title>Procedimiento ${id}</title><body><p>${text}</p></body></topic>`;
+    const content = map([L9, L10]);
+    const fixed = correcting && lastUser.includes(`points to ${L9}, which is not in the dossier`);
+    const rejectFiles = [{ path: L10, content: sheet("L00010", "Montar la bomba de achique.") }];
+    if (fixed) rejectFiles.push({ path: L9, content: sheet("L00009", "Véase la Tabla 3.1 de la ficha L00099.") });
+    return [
+      { label: "Cita a tabla de una ficha mencionada", expected: "accept", schema: "map", content, files: [{ path: L9, content: sheet("L00009", "Desmontar la bomba de achique.") }, { path: L10, content: sheet("L00010", "Véase la Tabla 2.1 de la ficha L00009.") }] },
+      { label: "Cita a tabla con número en formato X.Y en ficha NO mencionada", expected: "reject", schema: "map", content, files: rejectFiles },
+    ];
+  }
   // Contenido suelto en el cuerpo de las fichas (reconstructed Navantia
   // BRDP-EXT-00014/00015: every figure / table with an @id is cited by an
   // <xref> of the dossier's sheets). As Mistral wrote them: <p>, <table> and

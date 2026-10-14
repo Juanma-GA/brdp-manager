@@ -46,6 +46,7 @@ import {
   dossierProblems,
   dossierReferenceWarnings,
   materializeDossierFiles,
+  missingDossierFiles,
   wrapDossierFiles,
 } from './ruleTestDossier.js';
 import { DOSSIER_PATH_SEPARATOR } from './ruleTestSchematron.js';
@@ -1163,6 +1164,14 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
       ? rootApplicability(ruleXml, format, example.xml, { parseXml, ...(dossier ? { dossier } : {}) })
       : null;
   const notApplicable = applicability && !applicability.applies ? { root: applicability.root, conditions: applicability.conditions } : null;
+  // Un ejemplo de dosier al que le falta un fichero (Navantia BRDP-EXT-00015):
+  // a reject example the rule accepted while its dossier points to files it
+  // does not have is incomplete -- the missing file is the one that should
+  // break the decision. A fault of the EXAMPLE: never case b, it goes to the
+  // correction round and, if still missing, the verdict is inconclusive.
+  const missing =
+    dossier && example.expected === 'reject' && result.status === 'accepted' ? missingDossierFiles(validation.referenceWarnings) : [];
+  const missingFiles = missing.length > 0 ? missing : null;
   const rejection = example.expected === 'accept' && result.status === 'rejected' ? rejectionDetails(example, result) : null;
   // Mejoras G, Part 2.4 d: "every document must contain <x>" -- what the
   // document lacks, never "it rejects /dmodule".
@@ -1182,9 +1191,10 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     matches,
     rejectedByBrexReference: rejectedByBrexReference(result),
     acceptance,
-    predicateMiss: notApplicable ? false : predicateMiss,
+    predicateMiss: notApplicable || missingFiles ? false : predicateMiss,
     rejection,
     ...(notApplicable ? { notApplicable } : {}),
+    ...(missingFiles ? { missingFiles } : {}),
     ...(skeletonPlacement ? { skeletonPlacement } : {}),
   };
 }
@@ -1616,6 +1626,19 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
       return { kind: 'inconclusive', why: 'not_applicable', which, root: notApplicableRun.notApplicable.root, conditions: notApplicableRun.notApplicable.conditions };
     }
   }
+  // Un ejemplo de dosier al que le falta un fichero: after the correction
+  // round, a reject example the rule accepted whose dossier still points to
+  // a file it does not have says nothing about the decision -- inconclusive,
+  // naming the path, never "the rule does not cover the decision" (unless
+  // another example shows a real mismatch).
+  const missingFileRuns = runs.filter((r) => r.missingFiles);
+  if (missingFileRuns.length > 0) {
+    const others = runs.filter((r) => r.matches === false && !r.notApplicable && !r.missingFiles);
+    if (others.length === 0 || others.every((r) => r.skeletonPlacement)) {
+      const paths = [...new Set(missingFileRuns.flatMap((r) => r.missingFiles.map((m) => m.path)))];
+      return { kind: 'inconclusive', why: 'missing_file', paths };
+    }
+  }
   if (
     !runs.some((r) => r.predicateMiss) &&
     ran.every((r) => r.result.selectedNodePaths.length === 0 && !(r.result.conditions?.length > 0))
@@ -1623,11 +1646,11 @@ export function ruleTestVerdict(examples, runs, analysis = null, proposalCheck =
   const ranExpectations = new Set(runs.map((r, i) => (r.result ? examples[i].expected : null)).filter(Boolean));
   // A document the rule does not apply to is not a mismatch (el contexto en
   // la raíz): the rule rightly says nothing about it.
-  const mismatches = runs.map((r, i) => (r.matches === false && !r.notApplicable ? examples[i].expected : null)).filter(Boolean);
+  const mismatches = runs.map((r, i) => (r.matches === false && !r.notApplicable && !r.missingFiles ? examples[i].expected : null)).filter(Boolean);
   // Remates: every example that did not give what it expects was rejected
   // only because of where the application put its content (written one
   // level up, the rule accepts it) -- the test says nothing about the rule.
-  const mismatchRuns = runs.filter((r) => r.matches === false && !r.notApplicable);
+  const mismatchRuns = runs.filter((r) => r.matches === false && !r.notApplicable && !r.missingFiles);
   if (mismatchRuns.length > 0 && mismatchRuns.every((r) => r.skeletonPlacement)) {
     const { inside, at } = mismatchRuns[0].skeletonPlacement;
     return { kind: 'inconclusive', why: 'skeleton_placement', inside, at };

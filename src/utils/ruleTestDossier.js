@@ -271,6 +271,37 @@ export function dossierReferenceWarnings(mainXml, files, parseXml, mainPath = DO
   return warnings;
 }
 
+// Un ejemplo de dosier al que le falta un fichero: the files the dossier's
+// references point to that are not in it ({ path, from }), once per path --
+// path as written in the reference (without its #fragment), from the
+// referring file's path. A conref to an id inside a file that IS in the
+// dossier never counts (dossierReferenceWarnings already skips it).
+export function missingDossierFiles(warnings) {
+  const out = [];
+  for (const w of warnings || []) {
+    const path = String(w.value || '').split('#')[0];
+    if (!path || out.some((m) => m.path === path)) continue;
+    out.push({ path, from: w.file });
+  }
+  return out;
+}
+
+export const MISSING_FILES_SHOWN = 4;
+
+// The correction-round line for a reject example the rule accepted while
+// files its dossier points to are missing (real case: Navantia
+// BRDP-EXT-00015, the ditamap pointed to topics/procedimiento_L00009.dita
+// and the AI never wrote it).
+export function missingFilesProblem(missing, mainPath = DOSSIER_MAIN_PATH) {
+  const paths = missing.map((m) => m.path);
+  const shown = paths.slice(0, MISSING_FILES_SHOWN).join(', ') + (paths.length > MISSING_FILES_SHOWN ? `, +${paths.length - MISSING_FILES_SHOWN} more` : '');
+  const sources = [...new Set(missing.map((m) => m.from))];
+  const fromMap = sources.length === 1 && sources[0] === mainPath;
+  const who = fromMap ? 'The ditamap' : sources.length === 1 ? `The file ${sources[0]}` : 'The dossier';
+  const one = paths.length === 1;
+  return `${who} points to ${shown}, which ${one ? 'is' : 'are'} not in the dossier. Add ${one ? 'that file (a complete DITA document)' : 'those files (complete DITA documents)'} with the content that breaks the decision, or point ${fromMap ? 'the ditamap' : 'it'} to ${one ? 'a file' : 'files'} you write.`;
+}
+
 export function dossierWarningText(w) {
   return `file "${w.file}": @${w.attr}="${w.value}" points to a file that is not in the dossier`;
 }

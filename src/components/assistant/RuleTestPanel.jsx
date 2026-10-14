@@ -73,6 +73,10 @@ export function verdictView(t, verdict, standard) {
       if (verdict.why === 'skeleton_placement') {
         return { tone: 'warn', text: t('records.ruleTest.verdicts.skeletonPlacement', { inside: verdict.inside, at: verdict.at }) };
       }
+      // Un ejemplo de dosier al que le falta un fichero.
+      if (verdict.why === 'missing_file') {
+        return { tone: 'warn', text: t('records.ruleTest.verdicts.missingFile', { paths: (verdict.paths || []).join(', ') }) };
+      }
       // El contexto en la raíz: the rule applies to no example.
       if (verdict.why === 'not_applicable') {
         return { tone: 'warn', text: t(`records.ruleTest.verdicts.notApplicable_${verdict.which || 'all'}`, { predicate: rootPredicateText(verdict.conditions, t) }) };

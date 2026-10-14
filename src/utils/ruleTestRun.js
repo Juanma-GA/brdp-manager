@@ -19,7 +19,7 @@ import { buildRuleProposalCheckPrompt, parseRuleProposalCheckResponse, RULE_PROP
 import { extractRuleNames, extractRuleXPaths } from '../validation/schemaValidation.js';
 import { contextSchemasOfRule } from './ruleSchemaContext.js';
 import { analyzeRule, describeRule, parseXmlDocument, proposalVsRuleLists, ruleConditions, rulePathParts, rootDocumentPath, rootSelfPath } from './ruleTestEngine.js';
-import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions, dossierSheetShapes } from './ruleTestDossier.js';
+import { DOSSIER_MAIN_PATH, DOSSIER_MAX_FILES, DOSSIER_MAX_FILE_LINES, DOSSIER_FILE_TYPES, loadDossierStructures, dossierLookExpressions, dossierSheetShapes, missingFilesProblem } from './ruleTestDossier.js';
 import { minimalDocument, minimalDocumentRuns } from './ruleMinimalDocuments.js';
 import { nodePath, stripLiterals, withoutPredicates } from './ruleTestCommon.js';
 import { ancestorRelations, calsTableModel, chooseTestSchemas, placeExample, relationCases, ruleLooksAtBrexReference, ruleLooksAtTables, ruleMatchExpressions, ruleTargets, ruleUseNames, targetsForGroup } from './ruleTestSkeleton.js';
@@ -1095,7 +1095,10 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
         r.validation.runnable && r.notApplicable && (examples[index].expected === 'reject' || notApplicableAccepts.has(index))
           ? notApplicableProblem(r.notApplicable)
           : null;
-      const missing = r.validation.runnable && !r.notApplicable ? missesRuleProblem(examples[index], r, ruleXml) : null;
+      // Un ejemplo de dosier al que le falta un fichero: the missing file is
+      // what is asked for (never the rule's nodes nor its test).
+      const missingFileLine = r.validation.runnable && r.missingFiles ? missingFilesProblem(r.missingFiles, materialized[index]?.mainPath || DOSSIER_MAIN_PATH) : null;
+      const missing = r.validation.runnable && !r.notApplicable && !r.missingFiles ? missesRuleProblem(examples[index], r, ruleXml) : null;
       // Formato del texto, Part 2: a reject example the rule selects nothing
       // in, for a rule comparing a concat() of elements with a value that
       // splits only one way -- the split is said again.
@@ -1106,6 +1109,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
       const problems = r.validation.runnable
         ? [
             notApplicable,
+            missingFileLine,
             missing,
             splitLine,
             withoutNode.has(index) ? acceptWithoutNodeProblem(ruleXml) : null,
@@ -1142,7 +1146,7 @@ export function exampleFailures(examples, materialized, runs, { ruleXml, standar
       // (a dossier's files too: their problems are in validation.files)
       const wraps = [...(r.validation.structure || []), ...(r.validation.files || []).flatMap((f) => f.validation?.structure || [])].some((p) => p.kind === 'notAllowed');
       const keepLine = problems.movesAttribute ? keepMoving : wraps ? keepWrapping : keep;
-      if (problems.length > 0 && !missing && !notApplicable && keepLine && examples[index].expected === 'reject') problems.push(keepLine);
+      if (problems.length > 0 && !missing && !notApplicable && !missingFileLine && keepLine && examples[index].expected === 'reject') problems.push(keepLine);
       return { index, label: examples[index].label, problems };
     })
     .filter((f) => f.problems.length > 0);

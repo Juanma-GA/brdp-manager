@@ -578,6 +578,16 @@ async function runCheck(check, answer, ctx = {}) {
       const ok = ran > 0 && !["no_runnable", "not_executable"].includes(verdict.kind);
       return { status: ok ? "pass" : "fail", detail: `${ran}/${r.runs.length} example(s) ran; engine verdict ${verdict.kind}` };
     }
+    case "rule_test_correction_contains": {
+      // Un ejemplo de dosier al que le falta un fichero: the correction round
+      // sent a line matching `pattern` (e.g. the missing file's path).
+      const r = ctx.ruleTest;
+      if (!r || r.status !== "ready") return { status: "fail", detail: "no examples" };
+      if (!r.correction) return { status: "fail", detail: "no correction round" };
+      const re = new RegExp(check.pattern, flags);
+      const hits = (r.correction.problems || []).flatMap((f) => f.problems.filter((line) => re.test(line)).map((line) => `"${f.label}": ${line}`));
+      return { status: hits.length ? "pass" : "fail", detail: hits.length ? `sent: ${hits.join(" | ").slice(0, 400)}` : `no correction line matches /${check.pattern}/` };
+    }
     case "rule_test_correction_not_contains": {
       // Mejoras B, Part 1: what the correction round sent (every line of
       // every example) never matches `pattern` -- e.g. it never asks an
