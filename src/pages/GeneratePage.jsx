@@ -8,6 +8,7 @@ import { generateBREX301 } from '../api/generateBREX301.js';
 import { generateBREXSch } from '../api/generateBREXSch.js';
 import { generateSchematronDITA } from '../api/generateSchematronDITA.js';
 import { planGeneration, omittedByReason } from '../utils/generatePlan.js';
+import { formatSchemaIssue } from '../validation/schemaValidation.js';
 import styles from './GeneratePage.module.css';
 
 // The rule-approval format id of each standard: this page loads the
@@ -406,17 +407,30 @@ export default function GeneratePage() {
             </div>
           )}
 
-          {isDITA && result.xml && result.vocabularyWarnings?.length > 0 && (
-            <details className={styles.xsdSection}>
+          {/* Names of the rules that do not exist in the DITA vocabulary
+              (the same messages as a suggested or pasted rule, by BRDP),
+              and the shared sch:let notes; never block the download. */}
+          {isDITA && result.xml && (result.vocabularyWarnings?.length > 0 || result.sharedLetWarnings?.length > 0) && (
+            <details className={styles.xsdSection} data-testid="vocabulary-warnings">
               <summary className={styles.badgePending}>
-                ⚠ {t('generate.vocabularyWarnings', { count: result.vocabularyWarnings.length })}
+                ⚠ {t('generate.vocabularyWarnings', {
+                  count: (result.vocabularyWarnings?.length || 0) + (result.sharedLetWarnings?.length || 0),
+                })}
               </summary>
               <ul className={styles.errorList}>
-                {result.vocabularyWarnings.map((w, i) => (
-                  <li key={i}>{w}</li>
+                {(result.vocabularyWarnings || []).map((w, i) => (
+                  <li key={`n${i}`}>{w.owner}: {formatSchemaIssue(w.issue, t)}</li>
+                ))}
+                {(result.sharedLetWarnings || []).map((w, i) => (
+                  <li key={`s${i}`}>{w}</li>
                 ))}
               </ul>
             </details>
+          )}
+          {isDITA && result.xml && result.vocabularyUnavailable && (
+            <p className={styles.badgePending} data-testid="vocabulary-unavailable">
+              ⚠ {t('generate.vocabularyUnavailable', { reason: result.vocabularyUnavailable })}
+            </p>
           )}
 
           {/* A prefix the XPath uses with no sch:ns: a Schematron validator

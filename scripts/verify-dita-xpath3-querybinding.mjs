@@ -68,7 +68,7 @@ async function main() {
       });
 
       return {
-        x3: { valid: outputX3.valid, errors: outputX3.errors, vocabularyWarnings: outputX3.vocabularyWarnings, xmlHead: outputX3.xml.slice(0, 200) },
+        x3: { valid: outputX3.valid, errors: outputX3.errors, vocabularyWarnings: outputX3.vocabularyWarnings, vocabularyUnavailable: outputX3.vocabularyUnavailable, xmlHead: outputX3.xml.slice(0, 200) },
         x2: { valid: outputX2.valid, errors: outputX2.errors, xmlHead: outputX2.xml.slice(0, 200) },
         bare: { valid: outputBareDITA.valid, xmlHead: outputBareDITA.xml.slice(0, 200) },
       };
@@ -78,18 +78,21 @@ async function main() {
     assert(result.x3.xmlHead.includes('queryBinding="xslt3"'), "DITA 1.3 Xpath3.0 project generates queryBinding=\"xslt3\"");
     assert(result.x3.valid === true, "Xpath3.0 document with map{}/array{}/=>/string-join content reports valid:true");
     assert(result.x3.errors.length === 0, `Xpath3.0 document has zero errors (got ${JSON.stringify(result.x3.errors)})`);
-    assert(!result.x3.vocabularyWarnings.some((w) => w.includes("'array'")), "'array' (used in array{...}) is NOT flagged as unconfirmed for an Xpath3.0 project");
-    assert(!result.x3.vocabularyWarnings.some((w) => w.includes("'map'")), "'map' (used in map{...}) is NOT flagged as unconfirmed (already known regardless of flavor)");
-    assert(!result.x3.vocabularyWarnings.some((w) => w.includes("string-join")), "'string-join' single-arg form is NOT flagged as unconfirmed");
+    // Vocabulary warnings are { owner, issue } (the app's name checker,
+    // see lintVocabulary in generateSchematronDITA.js).
+    const x3Names = JSON.stringify(result.x3.vocabularyWarnings);
+    assert(result.x3.vocabularyUnavailable === null, "the DITA vocabulary loaded in the browser");
+    assert(!x3Names.includes("array"), "'array' (used in array{...}) is NOT reported as a name");
+    assert(!x3Names.includes("map"), "'map' (used in map{...}) is NOT reported as a name");
+    assert(!x3Names.includes("string-join"), "'string-join' single-arg form is NOT reported as a name");
 
     assert(result.x2.xmlHead.includes('queryBinding="xslt2"'), "DITA 1.3 Xpath2.0 project generates queryBinding=\"xslt2\" (unchanged behavior)");
     assert(result.x2.valid === true, "Xpath2.0 document unaffected, still valid:true");
 
     assert(result.bare.xmlHead.includes('queryBinding="xslt2"'), "a bare pre-migration 'DITA 1.3' standard string safely defaults to xslt2, never guesses xslt3");
 
-    // Cross-check: an Xpath2.0 project must NOT get the Xpath3.0-only
-    // vocabulary silently widened -- construct one that uses "array" as a
-    // bare unconfirmed name and confirm it STILL gets flagged there.
+    // Cross-check: "array" written as a bare name (a path step, not an
+    // array{...} constructor) is not a DITA element, so it is reported.
     const crossCheck = await page.evaluate(async () => {
       const mod = await import("/src/api/generateSchematronDITA.js");
       const rule =
@@ -104,8 +107,8 @@ async function main() {
       return { vocabularyWarnings: output.vocabularyWarnings };
     });
     assert(
-      crossCheck.vocabularyWarnings.some((w) => w.includes("'array'")),
-      "'array' STILL gets flagged as unconfirmed for an Xpath2.0 project (the Xpath3.0-only vocabulary never leaks across flavors)"
+      crossCheck.vocabularyWarnings.some((w) => w.owner === "BRDP-X2-ARR" && w.issue.code === "names_not_found" && w.issue.params.names === "<array>"),
+      "a bare 'array' step is reported as a name not found in DITA"
     );
 
     console.log("\nAll DITA Xpath2.0/Xpath3.0 queryBinding checks passed.");

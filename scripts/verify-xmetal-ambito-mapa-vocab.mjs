@@ -68,26 +68,18 @@ async function main() {
     assert(result.valid === true, "checkWellFormedSchematron reports valid:true");
     const warnings = result.vocabularyWarnings;
 
-    const ambitoWarnings = warnings.filter((w) => /ambito-mapa/.test(w));
-    assert(ambitoWarnings.length > 0, "at least one warning uses the expanded ambito-mapa message");
-    for (const name of ["dosier", "ficha", "mapa", "exists"]) {
-      assert(
-        warnings.some((w) => w.includes(`uses '${name}'`) && w.includes("ambito-mapa.sch")),
-        `'${name}' gets the expanded ambito-mapa message`
-      );
-      assert(
-        !warnings.some((w) => w.includes(`uses unconfirmed element/attribute '${name}'`)),
-        `'${name}' does NOT also get the old generic message`
-      );
-    }
+    // { owner, issue } per pattern (lintVocabulary in generateSchematronDITA.js).
+    const of = (owner) => warnings.filter((w) => w.owner === owner).map((w) => w.issue);
+    const a = of("BRDP-EXT-00004");
     assert(
-      warnings.some((w) => w.includes("uses unconfirmed element/attribute 'frobnicate'")),
-      "a genuinely unconfirmed name still gets the plain generic message, unaffected"
+      a.some((i) => i.code === "names_not_found" && i.params.names === "<dosier>, <ficha>, <frobnicate>, <mapa>"),
+      "dosier/ficha/mapa and frobnicate are reported as names not found"
     );
-    assert(
-      !warnings.some((w) => w.includes("frobnicate") && w.includes("ambito-mapa")),
-      "the genuinely unconfirmed name never gets the ambito-mapa text"
-    );
+    assert(a.some((i) => i.code === "xmetal_ambito_mapa" && i.params.names === "<dosier>, <ficha>, <mapa>"), "plus the ambito-mapa line, only for dosier/ficha/mapa");
+    assert(!JSON.stringify(warnings).includes("exists"), "exists() is a function, never reported");
+    const env = of("BRDP-ENV-00001");
+    assert(env.some((i) => i.code === "xmetal_ambito_mapa"), "the ambito-mapa line for BRDP-ENV-00001 too");
+    assert(!env.some((i) => JSON.stringify(i).includes("frobnicate")), "frobnicate only where it is used");
 
     console.log("\nAll ambito-mapa vocabulary-message checks passed.");
   } finally {

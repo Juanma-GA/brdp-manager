@@ -170,17 +170,24 @@ async function main() {
     assert(/Duplicate/i.test(errorBadgeText), "error message names the real duplicate-id problem");
     assert(/BRDP-EXT-00007/.test(errorBadgeText), "error message names the real duplicated ids");
 
-    // Vocabulary warnings: must be ZERO for this real xslt3 content --
-    // confirms head/function/exists/empty/distinct-values/analyze-string/
-    // local-name/element/as no longer produce false positives.
-    const vocabWarningsToggle = page.locator("text=/vocabulary warning/i");
-    const vocabCount = await vocabWarningsToggle.count();
-    if (vocabCount > 0) {
-      const toggleText = await vocabWarningsToggle.first().innerText();
-      console.log("Vocabulary warnings toggle text:", toggleText);
-      throw new Error(`ASSERTION FAILED: expected zero vocabulary warnings for real Xpath3.0 content, but found a warnings panel: "${toggleText}"`);
-    }
-    console.log("OK: zero vocabulary warnings for the real Xpath3.0 content (no warnings panel rendered)");
+    // Vocabulary warnings (the app's name checker, lintVocabulary in
+    // generateSchematronDITA.js): no XPath function or operator is ever
+    // reported (head, function, exists, empty, distinct-values,
+    // analyze-string, local-name, element, as...). The only names are the
+    // three <ditacomponent> of ancestor::ditacomponent -- XMetal's wrapper
+    // of a conref'd component, not DITA -- in EXT-00007/00008/00009, which
+    // share the same copied rule in this file.
+    const vocabWarningsToggle = page.locator('[data-testid="vocabulary-warnings"] summary');
+    const toggleText = await vocabWarningsToggle.innerText();
+    console.log("Vocabulary warnings toggle text:", toggleText);
+    assert(/^⚠ 3 vocabulary warnings/.test(toggleText), "three vocabulary warnings");
+    await vocabWarningsToggle.click();
+    const lines = await page.locator('[data-testid="vocabulary-warnings"] li').allInnerTexts();
+    assert(
+      JSON.stringify(lines) ===
+        JSON.stringify(["BRDP-EXT-00007", "BRDP-EXT-00008", "BRDP-EXT-00009"].map((id) => `${id}: The rule uses names not found in the DITA 1.3 Xpath3.0 schema: <ditacomponent>`)),
+      `only <ditacomponent>, by BRDP (got ${JSON.stringify(lines)})`
+    );
 
     await page.screenshot({ path: shot("verify-dita-xpath3-real-output.png"), fullPage: true });
 

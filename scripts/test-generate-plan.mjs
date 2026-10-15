@@ -169,7 +169,7 @@ for (const [flavor, standard, binding] of [
     check('xpath3: sch:ns xs once, before the lets', (xml.match(/<sch:ns prefix="xs" uri="http:\/\/www.w3.org\/2001\/XMLSchema"\/>/g) || []).length === 1 && head.indexOf('<sch:ns') < head.indexOf('<sch:let'));
     // A rule-level let that reads the context node stays in its rule.
     check('xpath3: cab never moved', !head.includes('name="cab"') && (xml.match(/name="cab"/g) || []).length === 5);
-    check('xpath3: no warnings about shared names', !(out.vocabularyWarnings || []).some((w) => w.startsWith('Shared sch:let')), (out.vocabularyWarnings || []).join(' | '));
+    check('xpath3: no warnings about shared names', !(out.sharedLetWarnings || []).some((w) => w.startsWith('Shared sch:let')), (out.sharedLetWarnings || []).join(' | '));
     // Each function's comment (the one right before it in the file) travels
     // with it: written once, right before the function, never in a pattern.
     const source = fs.readFileSync(new URL('../backend/tests/fixtures/schematron/BRDP-D1_schematron-xpath3.sch', import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
@@ -218,7 +218,7 @@ for (const [flavor, standard, binding] of [
 // checkWellFormedSchematron accepts the sch:ns line.
 {
   const out = await generateDita('xpath3', 'DITA 1.3 Xpath3.0');
-  const again = checkWellFormedSchematron(out.xml, ditaSummary, 'xslt3');
+  const again = checkWellFormedSchematron(out.xml, 'xslt3');
   check('re-check of the generated document', again.valid, again.errors.join('; '));
 }
 

@@ -997,7 +997,11 @@ function decodeEntities(text) {
 }
 
 const TEXT_PATH_RE = /<(objectPath|objpath)\b[^>]*>([\s\S]*?)<\/\1>/g;
-const SCH_ATTR_RE = /<(?:[A-Za-z_][\w.-]*:)?(?:rule|assert|report)\b([^>]*)>/g;
+// Quote-aware: an XPath attribute may hold a literal ">" (XPath 3.0's
+// arrow operator "=>", or "a > b" written without &gt;, both legal XML).
+const SCH_ATTR_RE = /<(?:[A-Za-z_][\w.-]*:)?(?:rule|assert|report)\b((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+const SCH_LET_RE = /<(?:[A-Za-z_][\w.-]*:)?let\b((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+const VALUE_ATTR_RE = /\svalue\s*=\s*("([^"]*)"|'([^']*)')/;
 const CONTEXT_TEST_ATTR_RE = /\s(context|test)\s*=\s*("([^"]*)"|'([^']*)')/g;
 
 // Every XPath expression in a rule fragment, entity-decoded.
@@ -1093,6 +1097,9 @@ export function extractXPathNames(xpath) {
       const next = peekNonSpace(i);
       const isAxis = src[next] === ':' && src[next + 1] === ':';
       const isCall = src[next] === '(';
+      // "map {…}", "array {…}", "function(…) as x {…}": an XPath 3.0
+      // constructor or body -- never a step name.
+      const isConstructor = src[next] === '{';
       const afterAt = prevSignificant === '@';
       const inStepPosition = prevSignificant === '' || '/@[(,|:'.includes(prevSignificant);
       // "for $x in", "some $r in", "let $v :=" -- a keyword binding a
@@ -1105,7 +1112,7 @@ export function extractXPathNames(xpath) {
         prevSignificant = ':';
         continue;
       }
-      if (!prefixed && !isCall && !isOperator) {
+      if (!prefixed && !isCall && !isConstructor && !isOperator) {
         if (afterAt || pendingAttributeAxis) attributes.add(name);
         else elements.add(name);
       }
@@ -1133,11 +1140,37 @@ export function extractRuleNames(ruleXml) {
   return { elements: [...elements].sort(), attributes: [...attributes].sort() };
 }
 
+// The @value of every Schematron sch:let (with or without a prefix) in a
+// fragment, entity-decoded. Not part of extractRuleXPaths: the rule panels
+// (Suggest Rule, Paste rule, the editor) check what they always checked;
+// Generate's vocabulary lint checks the lets too (generateSchematronDITA.js).
+export function extractSchematronLetValues(xml) {
+  const out = [];
+  let m;
+  SCH_LET_RE.lastIndex = 0;
+  while ((m = SCH_LET_RE.exec(xml || ''))) {
+    const v = VALUE_ATTR_RE.exec(m[1]);
+    if (v) out.push(decodeEntities(v[2] !== undefined ? v[2] : v[3]));
+  }
+  return out.filter(Boolean);
+}
+
+// The names of some XPath expressions checked against the vocabulary.
 // Same result shape as checkAgainstVocabulary ({available, notFound,
 // wrongType}), so the UI renders it with the exact same red warning.
+export function checkXPathNames(expressions, vocabulary) {
+  const elements = new Set();
+  const attributes = new Set();
+  for (const xpath of expressions || []) {
+    const names = extractXPathNames(xpath);
+    names.elements.forEach((n) => elements.add(n));
+    names.attributes.forEach((n) => attributes.add(n));
+  }
+  return checkAgainstVocabulary({ elements: [...elements].sort(), attributes: [...attributes].sort(), camelCase: [] }, vocabulary);
+}
+
 export function checkRuleNames(ruleXml, vocabulary) {
-  const { elements, attributes } = extractRuleNames(ruleXml);
-  return checkAgainstVocabulary({ elements, attributes, camelCase: [] }, vocabulary);
+  return checkXPathNames(extractRuleXPaths(ruleXml), vocabulary);
 }
 
 // ═══ 2. Ask answers ════════════════════════════════════════════════════════
@@ -2263,6 +2296,11 @@ export const SCHEMA_ISSUE_KEYS = {
     rule_format_foreign: 'records.assistant.ruleFormat.foreign',
     rule_format_multiple: 'records.assistant.ruleFormat.multiple',
     rule_format_duplicate_ids: 'records.assistant.ruleFormat.duplicateIds',
+  },
+  // Generate's vocabulary warnings (generateSchematronDITA.js), besides
+  // the 'rule' ones.
+  generate: {
+    xmetal_ambito_mapa: 'generate.xmetalAmbitoMapa',
   },
   // A suggested Title (Suggest Title).
   title: {

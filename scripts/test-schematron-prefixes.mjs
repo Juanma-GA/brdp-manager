@@ -126,7 +126,7 @@ check('fixture: they use xs:', navantia.some((r) => schematronPrefixUses(r.rule_
   check('production: sch:ns right after sch:title, before the lets', titleAt < nsAt && nsAt < firstLet);
   // What the document was before: same document without the sch:ns line.
   const before = res.xml.replace(/\n\s*<sch:ns prefix="xs"[^>]*\/>/, '');
-  const check2 = checkWellFormedSchematron(before, summary, 'xslt3');
+  const check2 = checkWellFormedSchematron(before, 'xslt3');
   check('without the sch:ns: checkWellFormed reports xs', check2.undeclaredPrefixes.some((u) => u.prefix === 'xs'));
   check('without the sch:ns: not valid, XPST0081 named', !check2.valid && check2.errors.some((e) => /'xs'.*XPST0081/.test(e)), check2.errors.join('; '));
 }

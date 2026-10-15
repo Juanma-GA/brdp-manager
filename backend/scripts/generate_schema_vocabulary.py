@@ -44,10 +44,8 @@ machineryTask.xsd shows why: it is a constraint MODULE (its own comment
 says "It must be declared in topic-type shells"), and this OASIS module
 set ships modules, not the final shell XSDs that declare each topic
 type's own root element -- unlike topic/concept/task/map/bookmap, which
-this module set DOES declare directly. Same principle already
-established in generateSchematronDITA.js's XPATH3_ONLY_VOCAB/
-XMETAL_AMBITO_MAPA_VOCAB: a name added here must be a CONFIRMED real gap,
-never a guess to silence a warning.
+this module set DOES declare directly. A name added here must be a
+CONFIRMED real gap, never a guess to silence a warning.
 """
 import json
 import sys

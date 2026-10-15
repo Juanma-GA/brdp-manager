@@ -8,6 +8,14 @@ import {
   undeclaredSchematronPrefixes,
   xmlnsDeclarations,
 } from "../utils/xpathPrefixes.js";
+import {
+  STANDARD_TO_VOCABULARY_FILE,
+  checkXPathNames,
+  extractRuleXPaths,
+  extractSchematronLetValues,
+  loadSchemaVocabulary,
+  nameIssues,
+} from "../validation/schemaValidation.js";
 
 // Both DITA standards (migration 0013_split_dita_xpath_standards.py) share
 // this one FORMAT_ID/generator -- the only thing that genuinely differs is
@@ -278,319 +286,80 @@ function checkPlaceholders(xml) {
   return markers.filter((marker) => code.includes(marker));
 }
 
-// Non-blocking lint: flags element/attribute-shaped tokens in context/test
-// that are not present in vocabulary_by_domain (nor in a small curated set of
-// base DITA structural names). Heuristic by design (not a real XPath parser)
-// -- it exists specifically to catch the class of error that caused real
-// false positives before (assuming an element/attribute exists without
-// checking the confirmed vocabulary).
-const XPATH_FUNCTIONS = new Set([
-  "not", "count", "matches", "normalize-space", "contains", "concat",
-  "tokenize", "last", "text", "string", "string-length", "starts-with",
-  "ends-with", "substring",
-  // document($href, .) -- STRICT RULE 20's cross-file lookup function.
-  "document",
-  // Confirmed real usage in the Navantia S80 dataset (native, non-curated
-  // XPath 2.0 Schematron -- see CLAUDE.md): standard XPath 2.0 functions,
-  // not DITA vocabulary, so they belong here rather than in the confirmed
-  // element/attribute set.
-  "string-join", "number", "doc-available",
-  // Confirmed real usage in the Navantia-Xpath3.0 dataset
-  // (nav_dtm_xpath3_import.xlsx, migration 0013_split_dita_xpath_standards.py):
-  // all five are standard XPath 2.0 functions (NOT 3.0-specific -- unlike
-  // fn:head below, these exist in 2.0 too), so added here unconditionally
-  // rather than gated to XPATH3_ONLY_VOCAB, same rationale as the
-  // string-join/number/doc-available entries above.
-  "exists", "empty", "distinct-values", "analyze-string", "local-name",
-  // element() -- a node-kind test, not a function, but "text" above is
-  // already (loosely) categorized here for the same reason: NAME_TOKEN_RE
-  // tokenizes "element(" the same way it tokenizes a function call. Valid
-  // since XPath 1.0, confirmed real usage in the same dataset ("as element()"
-  // inline function parameter typing).
-  "element",
-  // Confirmed real usage in the Navantia-Xpath3.0 project once its Rule
-  // content grew to include the shared helper function definitions
-  // themselves (valor/docFicha/etc., not just their $-prefixed call
-  // sites) -- 45 non-blocking warnings, none of them 3.0-specific: root,
-  // substring-before, substring-after, base-uri, resolve-uri and doc are
-  // XPath 1.0/2.0 functions, document-node() a node-kind test since 2.0
-  // (same category as element()/text() above). Added unconditionally,
-  // same rationale as every entry above this point -- none of these are
-  // gated to XPATH3_ONLY_VOCAB because none are exclusive to 3.0, and an
-  // Xpath2.0 project's Rule can equally well call fn:doc() or fn:root().
-  "document-node", "substring-before", "substring-after", "resolve-uri",
-  "base-uri", "doc", "root",
-]);
-const XPATH_AXES = new Set([
-  "ancestor", "ancestor-or-self", "parent", "child", "descendant",
-  "descendant-or-self", "following", "following-sibling", "preceding",
-  "preceding-sibling", "self", "attribute",
-]);
-// "every"/"some"/"satisfies"/"let"/"return"/"in" are XPath 2.0 quantifier/let
-// keywords (STRICT RULE 19) -- without these, the lint flags every
-// "every $x in ... satisfies (let ... return ...)" construct as unconfirmed
-// vocabulary, which is noise, not a real finding.
-const XPATH_KEYWORDS = new Set([
-  "and", "or", "not", "true", "false", "div", "mod",
-  "every", "some", "satisfies", "let", "return", "in",
-  // Confirmed real usage in the Navantia S80 dataset: XPath 2.0's
-  // conditional ("if (...) then ... else ...") and "for $x in ... return"
-  // expression keywords -- same rationale as the quantifier keywords above.
-  "if", "then", "else", "for",
-  // Confirmed real usage in the Navantia-Xpath3.0 dataset: "as" (sequence
-  // type declaration, e.g. "$t as element()") is valid XPath since 2.0's
-  // SequenceType matching -- not 3.0-specific -- so added unconditionally.
-  "as",
-  // "ge" -- one of the general comparison operators (eq/ne/lt/le/gt/ge),
-  // XPath 2.0, confirmed real usage alongside the helper-function
-  // definitions above. Not 3.0-specific either.
-  "ge",
-]);
-
-const EXTRA_KNOWN_NAMES = [
-  "topic", "concept", "task", "map", "bookmap", "machineryTask",
-  "title", "titlealts", "shortdesc", "abstract", "prolog", "body", "related-links", "topic-info-types",
-  "conbody", "info-types", "taskbody", "task-info-types", "prereq", "context", "steps", "steps-unordered",
-  "steps-informal", "stepsection", "step", "substeps", "substep", "cmd", "info", "itemgroup", "stepxmp",
-  "tutorialinfo", "choices", "choice", "choicetable", "chhead", "choptionhd", "chdeschd", "chrow", "choption",
-  "chdesc", "stepresult", "steptroubleshooting", "tasktroubleshooting", "result", "postreq",
-  "topicmeta", "anchor", "navref", "reltable", "topicref", "relheader", "relcolspec", "relrow", "relcell",
-  "bookmeta", "frontmatter", "backmatter", "chapter", "part", "appendices", "appendix", "booktitle",
-  "bookabstract", "booklists", "colophon", "dedication", "draftintro", "notices", "preface", "amendments",
-  "p", "fig", "table", "tgroup", "thead", "tbody", "row", "entry", "note", "dl", "ul", "ol", "sl", "lq", "example",
-  "section", "bodydiv", "desc", "id", "class", "xref", "image", "object", "param",
-  "author", "copyright", "copyryear", "copyrholder", "critdates", "created", "revised", "permissions",
-  "data", "data-about", "sort-as", "unknown",
-  "fn", "draft-comment", "required-cleanup",
-  "b", "i", "u", "tt", "sup", "sub", "line-through", "overline",
-  "imagemap", "area", "shape", "coords",
-  "hazardstatement", "messagepanel", "hazardsymbol", "typeofhazard", "consequence", "howtoavoid",
-  "prelreqs", "closereqs", "reqconds", "reqcond", "reqcontp", "noconds", "reqpers", "personnel", "perscat",
-  "perskill", "esttime", "supequip", "nosupeq", "supeqli", "supequi", "supplies", "nosupply", "supplyli",
-  "supply", "spares", "nospares", "sparesli", "spare", "safety", "nosafety", "safecond",
-  "href", "keyref", "format", "type", "scope", "value", "name", "modified", "date", "lang", "outputclass",
-  "conref", "importance", "domains",
-  // Real DITA elements confirmed against the vendored XSD, referenced by
-  // curated few-shots (BRDP-D1-00118, 00299, 00300) but outside the 6-type
-  // topic_types scope, so they'd otherwise never appear in known vocabulary:
-  // reference/glossentry (topic types -- technicalContent/xsd/referenceMod.xsd,
-  // glossentryMod.xsd), topichead/topicgroup (map grouping elements --
-  // base/xsd/mapGroupMod.xsd), navtitle (a real ELEMENT inside <titlealts> --
-  // base/xsd/commonElementMod.xsd:935 -- distinct from the @navtitle
-  // attribute also confirmed on topicref/chapter/part).
-  "reference", "glossentry", "topichead", "topicgroup", "navtitle",
-  // ph: extremely common base phrase element -- base/xsd/commonElementMod.xsd:1893.
-  "ph",
-  // toc: a REAL element (bookmap/xsd/bookmapMod.xsd:1831), but note its actual
-  // semantics are narrow: an EMPTY placeholder inside <booklists> (frontmatter)
-  // telling the publishing engine "generate a table of contents here" --
-  // <xs:group name="toc.content"><xs:sequence/></xs:group>, no children, no
-  // relation whatsoever to <topic>/<topicref> nesting depth. Confirmed real so
-  // it belongs in known vocabulary (a rule that legitimately targets the
-  // bookmap <toc> placeholder shouldn't be flagged), but its presence here does
-  // NOT vouch for how a generated rule actually uses it -- a rule computing
-  // topic-nesting depth via a context/test built around <toc> is still almost
-  // certainly a semantic mismatch, just not a vocabulary one (see STRICT RULE
-  // 18 below, added after finding exactly this in a real generated rule for
-  // BRDP-D1-00497).
-  "toc",
-  // keydef/keyword -- STRICT RULE 20's cross-file key-declaration lookup
-  // (CURATED-escalon-consistency). keydef: map-level key-scope declaration
-  // element, base/xsd/mapGroupMod.xsd -- only ever appears inside
-  // map/bookmap, never inside a topic body. keyword: base phrase element
-  // confirmed real across many XSDs (e.g. base/xsd/commonElementMod.xsd).
-  "keydef", "keyword",
-];
-
-function collectStrings(value, out) {
-  if (typeof value === "string") {
-    out.push(value);
-  } else if (Array.isArray(value)) {
-    value.forEach((v) => collectStrings(v, out));
-  } else if (value && typeof value === "object") {
-    Object.values(value).forEach((v) => collectStrings(v, out));
-  }
-}
-
-function buildKnownVocabulary(schemaSummary) {
-  const names = new Set(EXTRA_KNOWN_NAMES);
-  const domains = (schemaSummary && schemaSummary.vocabulary_by_domain) || {};
-  for (const domain of Object.values(domains)) {
-    for (const key of Object.keys(domain.elements || {})) {
-      key.split(/[/,]|\s+/).map((s) => s.trim()).filter(Boolean).forEach((n) => names.add(n));
-    }
-  }
-  // topic_types is free-text prose (content_sequence, body_content, etc.),
-  // not a clean element list -- tokenize every string value the same way
-  // context/test XPath is tokenized below, so any element name documented
-  // there (prereq, steps, topicref, chapter, reltable, ...) is recognized as
-  // known even though it isn't repeated in vocabulary_by_domain. Harmless
-  // over-inclusion (the occasional Spanish prose word) is an acceptable
-  // trade-off for a non-blocking lint -- it can only reduce false positives.
-  const topicTypeStrings = [];
-  collectStrings((schemaSummary && schemaSummary.topic_types) || {}, topicTypeStrings);
-  const genericTokenRe = /\b[a-zA-Z][a-zA-Z0-9-]*\b/g;
-  for (const s of topicTypeStrings) {
-    for (const m of s.matchAll(genericTokenRe)) names.add(m[0]);
-  }
-  return names;
-}
-
-// Excludes tokens preceded by @ (attribute names, handled separately),
-// '/" (already-quoted string literals), : (axis/prefix separator) -- and,
-// since STRICT RULE 19 introduced XPath 2.0 $variable references (e.g.
-// $colCant), also $ -- a variable name is never DITA vocabulary and should
-// never be flagged as an unconfirmed element/attribute.
-const NAME_TOKEN_RE = /(?<![@'":$])\b([a-zA-Z][a-zA-Z0-9-]*)\b(?=\s*(?:\/|\[|\||\s|\(|$|::))/g;
-
-function findUnknownNames(value, known) {
-  const stripped = value.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');
-  const unknown = new Set();
-  for (const tok of stripped.matchAll(NAME_TOKEN_RE)) {
-    const name = tok[1];
-    if (XPATH_FUNCTIONS.has(name) || XPATH_AXES.has(name) || XPATH_KEYWORDS.has(name)) continue;
-    if (/^\d/.test(name)) continue;
-    if (!known.has(name)) unknown.add(name);
-  }
-  return unknown;
-}
-
-// Confirmed real vocabulary of XMetal's "ambito-mapa" ditamap second-pass
-// mechanism (ambito-mapa.sch -- a virtual-dossier construct built on top of
-// DITA, not part of it) -- dosier/ficha/mapa navigation names plus the
-// `exists` check that mechanism uses. These are NOT core DITA vocabulary,
-// so vocabulary_by_domain (built from the real DITA XSDs) has no way to
-// confirm them, but for a project that legitimately uses this mechanism a
-// bare "unconfirmed element/attribute" warning is misleading -- it reads
-// as "might not exist" when this is the mechanism's expected, real
-// vocabulary. Deliberately kept OUT of EXTRA_KNOWN_NAMES/known (that would
-// silence the warning outright) -- it stays visible, just with an expanded
-// message, because there is no way to tell from the rule alone whether a
-// given project actually uses ambito-mapa or these names just happen to
-// coincide with something else; the message says "expected... verify
-// manually", never "this IS ambito-mapa", to stay honest about that.
-const XMETAL_AMBITO_MAPA_VOCAB = new Set(["dosier", "ficha", "mapa", "exists"]);
-
-// Real XPath 3.0-only syntax absent from 2.0, gated to queryBinding ===
-// "xslt3" (DITA 1.3 Xpath3.0 projects only, migration
-// 0013_split_dita_xpath_standards.py) so an Xpath2.0 project's known
-// vocabulary is never widened without reason. Two constructs named in the
-// encargo, "=>" (arrow operator) and "map{...}"/"array{...}" (map/array
-// constructors), turn out NOT to need an entry here at all: "=>" is pure
-// punctuation NAME_TOKEN_RE never tokenizes as a name in the first place
-// (nothing to silence), and "map" is already unconditionally known (it's
-// also the real DITA root <map> element, in EXTRA_KNOWN_NAMES) -- only
-// "array" was a genuine gap (confirmed by the same regex reasoning: a
-// space-separated "array {...}" construct tokenizes as the name "array",
-// which was not previously known). string-join's single-argument XPath 3.0
-// form needs no entry either -- XPATH_FUNCTIONS already recognizes the bare
-// function name regardless of how many arguments it's called with. Extend
-// this set (not EXTRA_KNOWN_NAMES/XPATH_FUNCTIONS directly, so it never
-// leaks into Xpath2.0 projects) with whatever else real Xpath3.0 content
-// actually turns out to use -- do not add speculative entries here without
-// confirming against real content first, the same standard already applied
-// to XPATH_FUNCTIONS/XPATH_KEYWORDS.
+// Generate's vocabulary warnings (non-blocking): the same name checker as
+// the rest of the app -- checkXPathNames (src/validation/schemaValidation.js),
+// a real XPath tokenizer for which string literals, $variables, numbers,
+// prefixed names (xs:string, fn:head), function calls, kind tests, axes,
+// constructors and XPath 2.0/3.0 operators (to, is, lt, intersect,
+// instance of…) are never names -- against the standard's vocabulary
+// (public/schema-vocabulary-dita.json, generated from the DITA 1.3 XSDs),
+// with the same "not found" and "wrong type" messages as a suggested or
+// pasted rule. Run on each sch:pattern of the final document (its
+// @context, @test and sch:let/@value) and on each schema-level sch:let
+// (the ones dedupeSharedLets hoisted).
 //
-// Two more confirmed by nav_dtm_xpath3_import.xlsx (real Navantia
-// Xpath3.0 data, BRDP-EXT-00004/00007/00008/00009's sch:let values):
-// "head" (fn:head -- introduced in Functions & Operators 3.0, absent from
-// 2.0, unlike distinct-values/exists/empty/analyze-string/local-name above
-// which are 2.0+3.0 and so went into the unconditional XPATH_FUNCTIONS
-// instead) and "function" (the "function($t as element()) as xs:string {
-// ... }" inline function-item expression -- function items/higher-order
-// functions are a 3.0 feature, absent from 2.0's grammar entirely).
-const XPATH3_ONLY_VOCAB = new Set(["array", "head", "function"]);
+// It replaces a heuristic built on hand-written lists of XPath functions
+// and keywords: every function or operator missing from those lists was
+// reported as an unconfirmed element (623 false warnings for 22 names on a
+// real 35-rule Navantia Schematron: replace, lower-case, sort,
+// uri-collection, to, is, intersect…). A vocabulary question only: whether
+// XPath 3.0 syntax suits an XPath 2.0 project is not a name, and the Test
+// rule panel already says it (analyzeRule's xpath3_syntax).
+//
+// One entry per owner: { owner, issue } with the issues of nameIssues(…,
+// 'rule'). Owner: the BRDP identifier when the caller knows it
+// (patternOwners, one per sch:pattern in document order: Generate does),
+// else the ids of the pattern's sch:assert/sch:report, else its @id;
+// "shared:<name>" for a schema-level sch:let.
+//
+// XMetal's ditamap second-pass mechanism (ambito-mapa.sch) navigates a
+// virtual dossier with elements named dosier/ficha/mapa: not DITA, so they
+// are reported as not found like any other name, with one more line that
+// says where they usually come from (never that the project uses it: the
+// rule alone cannot tell). Its `exists` was in the old list too, but it is
+// the XPath function exists(), never a name for the tokenizer.
+const XMETAL_AMBITO_MAPA_VOCAB = new Set(["dosier", "ficha", "mapa"]);
 
-// One warning per (BRDP id, unconfirmed name) pair, in English to match the
-// rest of the UI -- a global "these names are unconfirmed somewhere" list
-// isn't actionable; the reviewer needs to know exactly which rule to check.
-function lintVocabulary(xml, schemaSummary, queryBinding = "xslt2") {
-  const known = buildKnownVocabulary(schemaSummary);
-  if (queryBinding === "xslt3") {
-    for (const name of XPATH3_ONLY_VOCAB) known.add(name);
-  }
+function blankComments(xml) {
+  return xml.replace(/<!--[\s\S]*?-->/g, (c) => " ".repeat(c.length));
+}
+
+// The sch:pattern elements of a document or block (comments blanked):
+// [{ xml, attrs }] in document order.
+function schematronPatterns(xml) {
+  const patternRe = new RegExp(`<${SCH}pattern\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}pattern>`, "g");
+  return [...blankComments(xml).matchAll(patternRe)].map((pm) => ({ xml: pm[0], attrs: pm[1] }));
+}
+
+function lintVocabulary(xml, vocabulary, standard, patternOwners = null) {
+  if (!vocabulary) return [];
   const warnings = [];
-  const seen = new Set();
-
-  const addWarning = (id, name) => {
-    const key = `${id}|${name}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    warnings.push(
-      XMETAL_AMBITO_MAPA_VOCAB.has(name)
-        ? `${id}: uses '${name}' — expected in the XMetal ditamap second-pass mechanism (ambito-mapa.sch), not core DITA vocabulary; verify manually if this project doesn't use that mechanism`
-        : `${id}: uses unconfirmed element/attribute '${name}'`
-    );
+  const add = (owner, result) => {
+    for (const issue of nameIssues(result, "rule", { standard })) warnings.push({ owner, issue });
+    const xmetal = (result.typedNotFound || [])
+      .filter((n) => n.type === "element" && XMETAL_AMBITO_MAPA_VOCAB.has(n.name))
+      .map((n) => `<${n.name}>`);
+    if (xmetal.length) {
+      warnings.push({ owner, issue: { source: "generate", code: "xmetal_ambito_mapa", params: { names: xmetal.join(", ") } } });
+    }
   };
 
-  const ruleRe = new RegExp(`<${SCH}rule\\b(${ATTR_LIST})\\s*>([\\s\\S]*?)</${SCH}rule>`, "g");
-  for (const rm of xml.matchAll(ruleRe)) {
-    const ctx = getAttr(rm[1], "context") || "";
-    const ruleBody = rm[2];
+  const checkRe = new RegExp(`<${SCH}(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
+  schematronPatterns(xml).forEach(({ xml: patternXml, attrs }, index) => {
+    const ids = [...new Set([...patternXml.matchAll(checkRe)].map((cm) => getAttr(cm[1], "id")).filter(Boolean))];
+    const owner = patternOwners?.[index] || (ids.length ? ids.join(", ") : getAttr(attrs, "id") || "pattern");
+    add(owner, checkXPathNames([...extractRuleXPaths(patternXml), ...extractSchematronLetValues(patternXml)], vocabulary));
+  });
 
-    const checkRe = new RegExp(`<${SCH}(?:assert|report)\\b(${ATTR_LIST})\\s*/?>`, "g");
-    const checks = [...ruleBody.matchAll(checkRe)]
-      .map((cm) => ({ id: getAttr(cm[1], "id"), test: getAttr(cm[1], "test") || "" }))
-      .filter((c) => c.id);
-    if (checks.length === 0) continue;
-
-    // A context can be shared by more than one assert/report in the same
-    // rule (e.g. BRDP-D1-00313's two sch:report) -- attribute an unknown name
-    // found in context to every id in that rule.
-    if (ctx) {
-      const unknownInContext = findUnknownNames(ctx, known);
-      for (const name of unknownInContext) {
-        for (const { id } of checks) addWarning(id, name);
-      }
-    }
-    // sch:let/@value carries its own XPath (STRICT RULE 19/20's column
-    // lookups and document() cross-file resolution) and was previously
-    // never scanned at all -- exactly the category of rule (cross-file,
-    // document()) where the LLM inventing vocabulary is most likely, so
-    // leaving it unchecked would blind the lint precisely where it matters
-    // most. Same attribution rule as context: a sch:let is scoped to the
-    // whole sch:rule, so an unknown name in it applies to every check in
-    // that rule.
-    const letRe = new RegExp(`<${SCH}let\\b(${ATTR_LIST})\\s*/?>`, "g");
-    for (const lm of ruleBody.matchAll(letRe)) {
-      const letValue = getAttr(lm[1], "value") || "";
-      if (!letValue) continue;
-      for (const name of findUnknownNames(letValue, known)) {
-        for (const { id } of checks) addWarning(id, name);
-      }
-    }
-    for (const { id, test } of checks) {
-      if (!test) continue;
-      for (const name of findUnknownNames(test, known)) addWarning(id, name);
-    }
-  }
-
-  // Schema-level sch:let -- not inside any sch:pattern/sch:rule. The only
-  // way one of these exists is dedupeSharedLets() below hoisting a shared
-  // helper-function definition out of every rule that used it (DITA 1.3
-  // Xpath3.0 only). Without this pass, hoisting would silently stop
-  // checking vocabulary inside that definition altogether -- before
-  // dedup, the SAME content was scanned once per rule that had its own
-  // copy (via the ruleRe loop above); losing that coverage the moment it
-  // moves to schema level would be exactly the kind of silent degradation
-  // this lint exists to avoid. Warnings are attributed to "shared:<name>"
-  // rather than a BRDP id, since a hoisted let by definition no longer
-  // belongs to one specific rule.
-  const withoutPatterns = xml.replace(new RegExp(`<${SCH}pattern\\b[\\s\\S]*?</${SCH}pattern>`, "g"), "");
-  const schemaLevelLetRe = new RegExp(`<${SCH}let\\b(${ATTR_LIST})\\s*/>`, "g");
+  const withoutPatterns = blankComments(xml).replace(new RegExp(`<${SCH}pattern\\b[\\s\\S]*?</${SCH}pattern>`, "g"), "");
+  const schemaLevelLetRe = new RegExp(`<${SCH}let\\b(${ATTR_LIST})\\s*/?>`, "g");
   for (const lm of withoutPatterns.matchAll(schemaLevelLetRe)) {
-    const letName = getAttr(lm[1], "name") || "shared";
-    const letValue = getAttr(lm[1], "value") || "";
-    if (!letValue) continue;
-    for (const name of findUnknownNames(letValue, known)) {
-      addWarning(`shared:${letName}`, name);
-    }
+    add(`shared:${getAttr(lm[1], "name") || "let"}`, checkXPathNames(extractSchematronLetValues(lm[0]), vocabulary));
   }
-
   return warnings;
 }
 
-function checkWellFormedSchematron(xml, schemaSummary, queryBinding = "xslt2") {
+function checkWellFormedSchematron(xml, queryBinding = "xslt2", { vocabulary = null, standard, patternOwners = null } = {}) {
   const errors = [];
 
   const tagCheck = checkTagBalance(xml);
@@ -622,7 +391,7 @@ function checkWellFormedSchematron(xml, schemaSummary, queryBinding = "xslt2") {
     );
   }
 
-  const vocabularyWarnings = lintVocabulary(xml, schemaSummary, queryBinding);
+  const vocabularyWarnings = lintVocabulary(xml, vocabulary, standard, patternOwners);
 
   return { valid: errors.length === 0, errors, vocabularyWarnings, undeclaredPrefixes };
 }
@@ -854,6 +623,7 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
     schemaSummary: schemaSummaryOverride,
     standard,
     includeDrafts = false,
+    vocabulary: vocabularyOverride,
   } = options;
   const queryBinding = queryBindingForStandard(standard);
 
@@ -906,18 +676,45 @@ export async function generateSchematronDITA(brdps, projectConfig, options = {})
   const dedupWarnings = [...deduped.warnings, ...nsWarnings];
 
   const finalXml = finalizeSchematronDocument(blocks, projectConfig, schemaSummary, queryBinding, sharedLets, namespaces);
-  const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, schemaSummary, queryBinding);
+
+  // The DITA vocabulary for the warnings (both DITA flavors share one
+  // file). Passed by the caller (the Node tests read the file), else
+  // loaded like every other panel does. A vocabulary that cannot be
+  // loaded is said on the page, never taken as "no warnings" (HR7).
+  const vocabStandard = STANDARD_TO_VOCABULARY_FILE[standard] ? standard : "DITA 1.3 Xpath2.0";
+  let vocabulary = vocabularyOverride || null;
+  let vocabularyUnavailable = null;
+  if (vocabularyOverride === undefined) {
+    try {
+      vocabulary = await loadSchemaVocabulary(vocabStandard);
+    } catch (err) {
+      vocabularyUnavailable = err?.message || String(err);
+    }
+  }
+  if (!vocabulary && !vocabularyUnavailable) vocabularyUnavailable = "no vocabulary";
+  // The BRDP of each sch:pattern, in document order: the final document is
+  // the blocks in order after the header, which has no pattern.
+  const patternOwners = blocks.flatMap((block, i) =>
+    schematronPatterns(block).map(() => blockIdentifiers[i])
+  );
+  const { valid, errors, vocabularyWarnings } = checkWellFormedSchematron(finalXml, queryBinding, {
+    vocabulary,
+    standard: standard || "DITA 1.3",
+    patternOwners,
+  });
 
   return {
     xml: finalXml,
     valid,
     errors,
-    // Same non-blocking, informational surface as vocabularyWarnings
-    // (rendered together in the same UI panel) -- a name-collision warning
-    // is a different KIND of note (an authoring-consistency flag, not an
-    // unconfirmed-vocabulary flag) but shares the exact same "worth a
-    // human look, never blocks generation or download" semantics.
-    vocabularyWarnings: [...vocabularyWarnings, ...dedupWarnings],
+    // Names of the rules that do not exist in the DITA vocabulary
+    // ({ owner, issue }, see lintVocabulary); null reason when checked.
+    vocabularyWarnings,
+    vocabularyUnavailable,
+    // Same non-blocking panel on the page, a different kind of note: a
+    // shared sch:let name declared with different values, or a prefix
+    // declared with two URIs (English, as always).
+    sharedLetWarnings: dedupWarnings,
     // XPath's own prefixes declared by Generate (sch:ns) because a rule used
     // them without a declaration, and the other prefixes used and declared
     // nowhere, with the rules that use them (a red warning on the page:
