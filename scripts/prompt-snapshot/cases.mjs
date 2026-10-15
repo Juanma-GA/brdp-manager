@@ -38,6 +38,8 @@ import { ruleDescriptionText } from '../../src/utils/ruleTestReasons.js';
 import { ownSectionConditions, withOwnSectionValues } from '../../src/utils/ownSectionValues.js';
 import { uniqueConcatSplits } from '../../src/utils/concatSplit.js';
 import { dossierTitleRequirements, dossierTopicTitles, topicTitleConditions, withTopicTitle } from '../../src/utils/topicTitleValue.js';
+import { mismatchedExamples } from '../../src/prompts/ruleTestReviewPrompt.js';
+import { exampleAdjustmentNotes } from '../../src/utils/exampleAdjustments.js';
 
 const xmldomParse = (text) => new DOMParser().parseFromString(text, 'text/xml');
 
@@ -1523,4 +1525,39 @@ ruleTestExamplesCases.push({
 ruleProposalCheckCases.push({
   name: 'dita-xpath3-warning-rule-ext-00012',
   args: [{ brdp: brdpNavWarning, standard: 'DITA 1.3 Xpath3.0', format: 'SCH-DITA', ruleXml: ruleNavWarning, ruleDescription: describeText(ruleNavWarning, 'SCH-DITA'), warningRule: true }],
+});
+
+// La revisión sabe qué ajustó la app (BRDP-EXT-00015, Navantia): an example
+// to accept that the application changed (its loose <title> and <table> put
+// in <example>, before this round's fix) and the rule rejected -- the review
+// prompt carries the same note the panel shows, plus the fixed line about
+// the application's changes.
+const ruleNavCitedTables = readTextFile(new URL('../rule-test-fixtures/navantia-dita3-cited-figures-tables.sch', import.meta.url))
+  .match(/<sch:pattern id="p-BRDP-EXT-00015"[\s\S]*?<\/sch:pattern>/)[0]
+  .replace('<sch:pattern', '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron"');
+const exampleWrappedTitle = {
+  label: 'Cited table',
+  expected: 'accept',
+  content: '<map><title>Dosier</title><topicref href="topics/removal.dita"/></map>',
+  xml: '<map><title>Dosier</title><topicref href="topics/removal.dita"/></map>',
+  files: [
+    {
+      path: 'topics/removal.dita',
+      content: '<task id="removal"><title>Removal</title><taskbody><example><title>Tabla 1</title><table id="t1"><tgroup cols="1"><tbody><row><entry>Pump P-1</entry></row></tbody></tgroup></table></example></taskbody></task>',
+      wrapped: [{ parent: 'taskbody', container: 'example', elements: ['title', 'table'], reused: false }],
+    },
+  ],
+};
+ruleTestReviewCases.push({
+  name: 'dita-xpath3-adjusted-example-wrapped-title-ext-00015',
+  args: [
+    {
+      brdp: { ...brdpRuleTest, identifier: 'BRDP-EXT-00015', title: 'Tablas citadas', definition: 'Decidir si toda tabla de una ficha debe citarse en el texto.', proposal: 'Toda tabla de una ficha se cita en el texto con una referencia.' },
+      standard: 'DITA 1.3 Xpath3.0',
+      format: 'SCH-DITA',
+      ruleXml: ruleNavCitedTables,
+      ruleDescription: describeText(ruleNavCitedTables, 'SCH-DITA'),
+      mismatches: mismatchedExamples([exampleWrappedTitle], [{ matches: false, result: { status: 'rejected' } }], { notes: (ex) => exampleAdjustmentNotes(ex, tEnglish) }),
+    },
+  ],
 });

@@ -29,6 +29,7 @@ import {
   parseRuleTestReviewResponse,
   RULE_TEST_REVIEW_USER_MESSAGE,
 } from '../prompts/ruleTestReviewPrompt.js';
+import { exampleAdjustmentNotes } from '../utils/exampleAdjustments.js';
 import { analyzeRule, describeRule } from '../utils/ruleTestEngine.js';
 import { useSchemaGraph } from './useSchemaGraph.js';
 import { editExample, editedExamplesRecord, runExample, ruleTestVerdict } from '../utils/ruleTest.js';
@@ -332,7 +333,7 @@ export function useRuleTest({ ruleXml, format, standard, schemaLocation, brdp, a
   // interface language) and the examples whose result did not match.
   const reviewFailure = async () => {
     if (state.status !== 'ready') return;
-    const mismatches = mismatchedExamples(state.examples, state.runs);
+    const mismatches = mismatchedExamples(state.examples, state.runs, { notes: (ex) => exampleAdjustmentNotes(ex, i18n.getFixedT('en')) });
     if (mismatches.length === 0) return;
     const generation = generationRef.current;
     setReview({ status: 'loading', mismatches });

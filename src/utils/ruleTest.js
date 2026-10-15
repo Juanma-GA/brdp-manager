@@ -513,9 +513,41 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
     structure: structureProblems,
     cards: structure ? elementCards(doc, names, structureProblems, structure) : [],
     attributeContexts: structure ? attributeContexts(doc, structureProblems, options.skeletonNodePaths || []) : [],
+    looseTitles: structure && options.titleHints ? looseTitles(doc, structureProblems, structure) : [],
     unknownSchema: null,
     runnable: namesOk && structureProblems.length === 0,
   };
+}
+
+// ─── A loose <title> that belongs to what follows it ────────────────────────
+// No meter un <title> suelto en un contenedor (BRDP-EXT-00015, Navantia): the
+// LLM wrote <title>Tabla 1</title><table>…</table> loose in <taskbody>;
+// wrapLooseContent leaves it as it is, and the correction round says where
+// such a title goes. For each "<title> is not allowed inside <P>" problem, a
+// <title> directly in <P> whose next element sibling admits a <title> (its
+// structure) and has none of its own: { parent, next }. SCH-DITA only
+// (options.titleHints).
+function looseTitles(doc, problems, structure) {
+  const elements = structure?.elements || {};
+  const out = [];
+  for (const p of problems) {
+    if (p.kind !== 'notAllowed' || p.element !== 'title') continue;
+    for (const el of elementsNamed(doc, (e) => e.nodeName === 'title' && e.parentNode?.nodeName === p.parent)) {
+      let next = el.nextSibling;
+      while (next && next.nodeType !== 1) next = next.nextSibling;
+      if (!next || !(elements[next.nodeName]?.children || []).includes('title')) continue;
+      let own = false;
+      for (let c = next.firstChild; c; c = c.nextSibling) if (c.nodeType === 1 && c.nodeName === 'title') own = true;
+      if (own || out.some((x) => x.parent === p.parent && x.next === next.nodeName)) continue;
+      out.push({ parent: p.parent, next: next.nodeName });
+    }
+  }
+  return out;
+}
+
+// The correction line for a loose <title> (looseTitles).
+export function looseTitleHint(next) {
+  return `If this <title> belongs to the <${next}> that follows, write it as the first child of that <${next}>.`;
 }
 
 // ─── Where an attribute can go, from where the LLM put it ──────────────────
@@ -963,11 +995,18 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     );
   }
   for (const p of validation.structure || []) {
+    // A loose <title> followed by an untitled element that admits one: say
+    // where the title goes (looseTitles), after whatever else the line says.
+    const looseTitle = p.kind === 'notAllowed' && p.element === 'title' ? (validation.looseTitles || []).find((x) => x.parent === p.parent) : null;
+    // (never with the plain-text hint: the title is moved, not removed)
+    const push = (line) => out.push(looseTitle ? `${String(line).replace(`. ${PLAIN_TEXT_HINT}`, '').replace(/\.?$/, '.')} ${looseTitleHint(looseTitle.next)}` : line);
     // Fichas del dosier, Part 2: in a dossier file, an element of the rule
     // (or the title the rule looks for) put where the file's type does not
     // allow it -- the valid way from the file's root, read from its type.
     const way = fileWay && p.kind === 'notAllowed' ? fileWay(p.element) : null;
     if (way) {
+      // (the title the rule looks for: its own way wins over the generic
+      // loose-title hint)
       out.push(`${formatStructureProblem(p, schema)}. ${way}`);
       continue;
     }
@@ -977,24 +1016,24 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     // <para> inside <copyrightPara>, <para> inside <emphasis>).
     const routes = p.kind === 'notAllowed' ? routesThrough(sectionRoutes, p.element) : [];
     if (routes.length) {
-      out.push(`${formatStructureProblem(p, schema)}. ${routes.map(sectionRouteSentence).join(' ')}`);
+      push(`${formatStructureProblem(p, schema)}. ${routes.map(sectionRouteSentence).join(' ')}`);
       continue;
     }
     const relationHint = relationWayHint(p, relationWays, innerWays);
     if (relationHint) {
-      out.push(`${formatStructureProblem(p, schema)}. ${relationHint}`);
+      push(`${formatStructureProblem(p, schema)}. ${relationHint}`);
       continue;
     }
     // (before the general nesting hint: these ways follow every step of
     // the rule, the nesting only the pair it names).
     const hint = expected === 'reject' ? nestingHint(p, nestings) : null;
     if (hint) {
-      out.push(`${formatStructureProblem(p, schema)}. ${hint}`);
+      push(`${formatStructureProblem(p, schema)}. ${hint}`);
       continue;
     }
     const place = sectionPlaceHint(p, places);
     if (place) {
-      out.push(`${formatStructureProblem(p, schema)}. ${place}.`);
+      push(`${formatStructureProblem(p, schema)}. ${place}.`);
       continue;
     }
     // Mejoras C, Part 2: an element the rule names, put where the schema
@@ -1009,26 +1048,26 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
       const context = (validation.attributeContexts || []).find((c) => c.attribute === p.attribute && c.element === p.element);
       const nearby = context ? nearbyAttributeCarriers(structure, context, places) : null;
       if (nearby) {
-        out.push(nearbyCarriersLine(p, nearby, structure));
+        push(nearbyCarriersLine(p, nearby, structure));
         out.movesAttribute = true;
         continue;
       }
     }
     const carrier = p.kind === 'unknownAttribute' ? carriers.find((c) => c.attribute === p.attribute) : null;
     if (carrier) {
-      out.push(`${formatStructureProblem(p, schema)}. ${attributeCarrierLines(carrier).join(' ')}`);
+      push(`${formatStructureProblem(p, schema)}. ${attributeCarrierLines(carrier).join(' ')}`);
       continue;
     }
     if (rulePlace) {
-      out.push(`${formatStructureProblem(p, schema)}. ${placeSentence(rulePlace)}`);
+      push(`${formatStructureProblem(p, schema)}. ${placeSentence(rulePlace)}`);
       continue;
     }
     const element = ['unknownElement', 'notAllowed', 'unknownAttribute'].includes(p.kind) ? p.element : null;
     if (p.kind === 'unknownAttribute' && rootElements.has(p.element)) {
-      out.push(formatStructureProblem(p, schema));
+      push(formatStructureProblem(p, schema));
       continue;
     }
-    out.push(offer(formatStructureProblem(p, schema), element));
+    push(offer(formatStructureProblem(p, schema), element));
   }
   for (const card of validation.cards || []) out.push(formatElementCard(card, schema));
   if (tableModel && (validation.structure || []).some((p) => TABLE_PROBLEM_KINDS.has(p.kind))) out.push(TABLE_MODEL_HINT);
@@ -1079,6 +1118,7 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
     missingContent: example.missingContent === true,
     rootAttributeProblems: example.rootAttributeProblems || [],
     skeletonNodePaths: example.skeletonNodePaths || [],
+    titleHints: format === 'SCH-DITA',
   });
   // Dosier, Part 2: every file of the example's dossier is validated with
   // the structure of its own type; a problem in any of them (or in the
@@ -1090,7 +1130,7 @@ export function runExample(ruleXml, format, example, { vocabulary = null, parseX
       const entry = {
         path: f.path,
         schema: f.schema || null,
-        validation: validateExample(f.xml ?? f.content, vocabulary, parseXml, f.structure || null, { ignoreValueOf }),
+        validation: validateExample(f.xml ?? f.content, vocabulary, parseXml, f.structure || null, { ignoreValueOf, titleHints: format === 'SCH-DITA' }),
       };
       // (not enumerable: the structure is only for the correction round)
       Object.defineProperty(entry, 'structure', { value: f.structure || null, enumerable: false });

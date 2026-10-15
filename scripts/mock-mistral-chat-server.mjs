@@ -507,7 +507,7 @@ function metadataReply(systemPrompt, rule, answer, messages = []) {
   return null;
 }
 
-function dossierExamples(rule, correcting, lastUser) {
+function dossierExamples(rule, correcting, lastUser, systemPrompt = "") {
   const map = (hrefs) => `<map><title>Dosier de mantenimiento</title>${hrefs.map((h) => `<topicref href="${h}"/>`).join("")}</map>`;
   const prec = '<task id="precauciones"><title>PRECAUCIONES DE SEGURIDAD</title><taskbody><steps><step><cmd>No fumar en la zona de trabajo.</cmd></step><step><cmd>Usar gafas de protección.</cmd></step></steps></taskbody></task>';
   const proc = (info) => `<task id="procedimiento"><title>PROCEDIMIENTO</title><taskbody><steps><step><cmd>Desmontar la tapa de la bomba.</cmd><info>${info}</info></step></steps></taskbody></task>`;
@@ -564,6 +564,24 @@ function dossierExamples(rule, correcting, lastUser) {
   // <fig> straight in <taskbody>, and never corrected -- the application
   // puts them in a <context> itself.
   const cited = /context="(fig|table)\[@id\]"/.exec(rule);
+  // No meter un <title> suelto en un contenedor (BRDP-EVAL-RT-LOOSETITLE):
+  // as Mistral wrote the table sheet, its <title> loose before the <table>
+  // in <taskbody>; only when the correction round says where that title
+  // goes is it written inside the <table> (and the content in <context>).
+  if (cited && cited[1] === "table" && /uri-collection/.test(rule) && /BRDP-EVAL-RT-LOOSETITLE/.test(systemPrompt)) {
+    const fixed = correcting && /If this <title> belongs to the <table> that follows, write it as the first child of that <table>\./.test(lastUser);
+    const grid = '<tgroup cols="1"><colspec colname="c1"/><tbody><row><entry colname="c1"><p>Junta tórica J-12</p></entry></row></tbody></tgroup>';
+    const xref = (yes) => (yes ? '<p>Ver la <xref href="#desmontaje/t1"/>.</p>' : "<p>Desmontar la bomba de achique.</p>");
+    const sheet = (yes) =>
+      fixed
+        ? `<task id="desmontaje"><title>Desmontaje de la bomba</title><taskbody><context>${xref(yes)}<table id="t1"><title>Tabla 1</title>${grid}</table></context></taskbody></task>`
+        : `<task id="desmontaje"><title>Desmontaje de la bomba</title><taskbody>${xref(yes)}<title>Tabla 1</title><table id="t1">${grid}</table></taskbody></task>`;
+    const content = map(["fichas/desmontaje.dita"]);
+    return [
+      { label: "The table is cited", expected: "accept", schema: "map", content, files: [{ path: "fichas/desmontaje.dita", content: sheet(true) }] },
+      { label: "The table is not cited", expected: "reject", schema: "map", content, files: [{ path: "fichas/desmontaje.dita", content: sheet(false) }] },
+    ];
+  }
   if (cited && /uri-collection/.test(rule)) {
     const kind = cited[1];
     const target = kind === "fig" ? "f1" : "t1";
@@ -791,7 +809,7 @@ function ruleTestReply(systemPrompt, messages) {
   // the XPath 3.0 template). For 00008 the first answer gives the common
   // notes file an unknown root (<notes>); the correction round, which names
   // that file, gives it a real <topic>.
-  if (/each example is a\s+DOSSIER/.test(systemPrompt)) return answer(dossierExamples(rule, correcting, lastUser));
+  if (/each example is a\s+DOSSIER/.test(systemPrompt)) return answer(dossierExamples(rule, correcting, lastUser, systemPrompt));
   // Test de reglas: referencias, antepasados y reglas de esquema prohibido
   // (CMP 4.2). EXT-00039: like the real run, without the destinations line
   // the referenced <figure> is written inside the <para> (where it cannot

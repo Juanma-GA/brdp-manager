@@ -11,8 +11,10 @@ import fs from 'node:fs';
 import { DOMParser } from '@xmldom/xmldom';
 import { generateRuleTestExamples } from '../src/utils/ruleTestRun.js';
 import { analyzeRule } from '../src/utils/ruleTestEngine.js';
-import { ruleSelectionSignature, ruleTestVerdict } from '../src/utils/ruleTest.js';
-import { looseContainerFor, wrapLooseContent } from '../src/utils/schemaPlacement.js';
+import { exampleProblems, ruleSelectionSignature, ruleTestVerdict, validateExample } from '../src/utils/ruleTest.js';
+import { DITA_TITLE_ELEMENTS, looseContainerFor, wrapLooseContent } from '../src/utils/schemaPlacement.js';
+import { buildRuleTestReviewPrompt, mismatchedExamples } from '../src/prompts/ruleTestReviewPrompt.js';
+import { exampleAdjustmentNotes } from '../src/utils/exampleAdjustments.js';
 import { dossierSheetShapes } from '../src/utils/ruleTestDossier.js';
 import { severalUncovered } from '../src/validation/ruleRepetition.js';
 import { readTextFile } from './lib/textFile.mjs';
@@ -224,7 +226,92 @@ for (const [id, kind, label] of [['BRDP-EXT-00014', 'fig', 'figure'], ['BRDP-EXT
   check('a dossier file with two <entry> counts', severalUncovered(several, [{ xml: '<map/>', files: [{ xml: '<row><entry/><entry/></row>' }] }], [{ result: { status: 'accepted' } }], parseXml).length === 0);
 }
 
-// ─── 7. Texts ───────────────────────────────────────────────────────────────
+// ─── 7. A loose title is never wrapped (BRDP-EXT-00015) ─────────────────────
+{
+  const TABLE = '<table id="t1"><tgroup cols="1"><tbody><row><entry>Pump P-1</entry></row></tbody></tgroup></table>';
+  const titled = `<task id="t"><title>R</title><taskbody><title>Tabla 1</title>${TABLE}</taskbody></task>`;
+  const r = wrap(titled);
+  check('<title> + <table> loose in <taskbody> → not wrapped', r.wrapped.length === 0 && r.text === titled, r.text);
+  const v = validateExample(titled, vocabDita, parseXml, task, { titleHints: true });
+  const lines = exampleProblems(v, { standard: STANDARD, schema: 'task' });
+  check('…the structure problem carries the hint', lines.includes('<title> is not allowed inside <taskbody>. If this <title> belongs to the <table> that follows, write it as the first child of that <table>.'), lines.join('\n'));
+  check('…and <table> keeps its own problem', lines.includes('<table> is not allowed inside <taskbody>'), lines.join('\n'));
+  const noHints = exampleProblems(validateExample(titled, vocabDita, parseXml, task), { standard: STANDARD, schema: 'task' });
+  check('without titleHints (BREX) no hint', !noHints.some((l) => l.includes('belongs to the')), noHints.join('\n'));
+  const owned = `<task id="t"><title>R</title><taskbody><title>Tabla 1</title><table id="t1"><title>T</title><tgroup cols="1"><tbody><row><entry>a</entry></row></tbody></tgroup></table></taskbody></task>`;
+  const ownedLines = exampleProblems(validateExample(owned, vocabDita, parseXml, task, { titleHints: true }), { standard: STANDARD, schema: 'task' });
+  check('a <table> with its own <title> → no hint', !ownedLines.some((l) => l.includes('belongs to the')), ownedLines.join('\n'));
+  for (const kind of ['fig', 'section']) {
+    const next = kind === 'fig' ? '<fig id="f1"><image href="a.png"/></fig>' : '<section><p>x</p></section>';
+    const doc = `<topic id="t"><title>R</title><body><title>Uno</title>${next}</body></topic>`;
+    const ls = exampleProblems(validateExample(doc, vocabDita, parseXml, st('topic'), { titleHints: true }), { standard: STANDARD, schema: 'topic' });
+    check(`<title> before an untitled <${kind}> → hint names <${kind}>`, ls.some((l) => l.endsWith(`write it as the first child of that <${kind}>.`)), ls.join('\n'));
+  }
+  const p = wrap('<task id="t"><title>R</title><taskbody><p>See.</p><fig id="f1"><title>F</title></fig></taskbody></task>');
+  check('<p> + <fig> loose → still one <context>', p.wrapped.length === 1 && p.wrapped[0].container === 'context', JSON.stringify(p.wrapped));
+  const titleP = '<task id="t"><title>R</title><taskbody><title>Uno</title><p>x</p></taskbody></task>';
+  check('<title> + <p> loose → not wrapped (the run is not split)', wrap(titleP).wrapped.length === 0 && wrap(titleP).text === titleP);
+  const alone = '<task id="t"><title>R</title><taskbody><title>Uno</title></taskbody></task>';
+  check('<title> alone, loose → not wrapped', wrap(alone).wrapped.length === 0 && wrap(alone).text === alone);
+  const sd = '<task id="t"><title>R</title><taskbody><shortdesc>Short.</shortdesc></taskbody></task>';
+  check('<shortdesc> loose → not wrapped', wrap(sd).wrapped.length === 0 && wrap(sd).text === sd);
+  // A structure where a container would take every title element: without
+  // DITA_TITLE_ELEMENTS each of them would be wrapped.
+  const syn = {
+    elements: { root: { children: ['body'], attributes: [] }, body: { children: ['box'], attributes: [] }, box: { children: ['title', 'navtitle', 'searchtitle', 'shortdesc', 'p'], attributes: [] }, title: { children: [], attributes: [] }, navtitle: { children: [], attributes: [] }, searchtitle: { children: [], attributes: [] }, shortdesc: { children: [], attributes: [] }, p: { children: [], attributes: [] } },
+    models: { body: { order: ['box'], required: [], attributes: [] }, box: { order: ['title', 'navtitle', 'searchtitle', 'shortdesc', 'p'], required: [], attributes: [] } },
+  };
+  check('synthetic: <p> alone is wrapped in <box>', wrapLooseContent('<root><body><p>x</p></body></root>', syn, null).wrapped[0]?.container === 'box');
+  for (const name of DITA_TITLE_ELEMENTS) {
+    check(`synthetic: <${name}> is never wrapped`, wrapLooseContent(`<root><body><${name}>x</${name}><p>y</p></body></root>`, syn, null).wrapped.length === 0);
+  }
+  check('DITA_TITLE_ELEMENTS: title, navtitle, searchtitle, shortdesc', [...DITA_TITLE_ELEMENTS].join() === 'title,navtitle,searchtitle,shortdesc');
+}
+
+// ─── 8. EXT-00015 end to end: a loose <title> before the <table> ─────────────
+{
+  const id = 'BRDP-EXT-00015';
+  const TABLE = (title) => `<table id="t1">${title}<tgroup cols="1"><tbody><row><entry><p>Pump P-1</p></entry></row></tbody></tgroup></table>`;
+  const sheetWith = (cited, loose) =>
+    `<task id="removal"><title>Removal</title><taskbody><context>${cited ? '<p>See <xref href="#removal/t1"/>.</p>' : '<p>Remove the pump.</p>'}</context>${loose ? `<title>Tabla 1</title>${TABLE('')}` : ''}</taskbody></task>`;
+  const fixed = (cited) => `<task id="removal"><title>Removal</title><taskbody><context>${cited ? '<p>See <xref href="#removal/t1"/>.</p>' : '<p>Remove the pump.</p>'}${TABLE('<title>Tabla 1</title>')}</context></taskbody></task>`;
+  const answer = (sheet) => JSON.stringify({
+    examples: [
+      { label: 'cited', expected: 'accept', schema: 'map', content: MAP, files: [{ path: 'topics/removal.dita', content: sheet(true) }] },
+      { label: 'not cited', expected: 'reject', schema: 'map', content: MAP, files: [{ path: 'topics/removal.dita', content: sheet(false) }] },
+    ],
+  });
+  const { result, asked } = await run(rule(id), (n) => (n === 1 ? answer((c) => sheetWith(c, true)) : answer(fixed)), id);
+  const first = asked[1]?.messages.at(-1).content || '';
+  check(`${id}: one correction round`, asked.length === 2 && result.correction?.attempted === 2, JSON.stringify([asked.length, result.correction]));
+  check(`${id}: the correction carries the loose-title hint`, first.includes('<title> is not allowed inside <taskbody>. If this <title> belongs to the <table> that follows, write it as the first child of that <table>.'), first.slice(0, 900));
+  check(`${id}: …never with the plain-text hint for that title`, !/<title> is not allowed inside <taskbody>[^\n]*use plain text/.test(first), first.slice(0, 900));
+  check(`${id}: after the correction every example is valid`, result.examples.every((e) => e.validation?.runnable !== false) && result.runs.every((x) => ['accepted', 'rejected'].includes(x.result?.status)), result.runs.map((x) => x.result?.status).join());
+  check(`${id}: no <example> made by the app`, result.examples.every((e) => !(e.files?.[0]?.wrapped || []).some((w) => w.container === 'example')), JSON.stringify(result.examples.map((e) => e.files?.[0]?.wrapped)));
+  const verdict = ruleTestVerdict(result.examples, result.runs, analyzeRule(rule(id), FORMAT, { parseXml }));
+  check(`${id}: verdict Correct`, verdict.kind === 'correct', JSON.stringify(verdict));
+}
+
+// ─── 9. The review prompt knows what the application adjusted ──────────────
+{
+  const base = { brdp: { identifier: 'BRDP-EXT-00015', title: 'T', definition: 'D', proposal: 'P' }, standard: STANDARD, format: FORMAT, ruleXml: rule('BRDP-EXT-00015'), ruleDescription: '- x' };
+  const ex = { label: 'cited', expected: 'accept', xml: MAP, files: [{ path: 'topics/removal.dita', wrapped: [{ parent: 'taskbody', container: 'example', elements: ['title', 'table'] }] }] };
+  const runs = [{ matches: false, result: { status: 'rejected' } }];
+  const notes = exampleAdjustmentNotes(ex, en);
+  check('notes: the panel\'s text, prefixed with the file', notes.length === 1 && notes[0] === 'topics/removal.dita: Adjusted by the app: <title> and <table> were put in <example> (they do not go directly in <taskbody>).', JSON.stringify(notes));
+  const withNotes = buildRuleTestReviewPrompt({ ...base, mismatches: mismatchedExamples([ex], runs, { notes: (e) => exampleAdjustmentNotes(e, en) }) });
+  check('review prompt: the example carries its note', withNotes.includes(`The application changed this example:\n- ${notes[0]}\n${MAP}`), withNotes.split('did not match:')[1]);
+  check('review prompt: the fixed line', withNotes.includes('If the application changed an example, consider whether that change, not the rule, explains the mismatch; if so, the cause is "example".'));
+  const plain = { label: 'cited', expected: 'accept', xml: MAP };
+  const before = buildRuleTestReviewPrompt({ ...base, mismatches: mismatchedExamples([plain], runs) });
+  const after = buildRuleTestReviewPrompt({ ...base, mismatches: mismatchedExamples([plain], runs, { notes: (e) => exampleAdjustmentNotes(e, en) }) });
+  check('review prompt with no adjustments: byte-identical', before === after && !after.includes('The application changed') && !after.includes('If the application changed'));
+  const many = { label: 'x', expected: 'accept', xml: '<x/>', colspecsAdded: 2, relocated: [{ element: 'a', path: ['b', 'c', 'a'] }], topicTitleSet: 'T', sectionValuesSet: [{ element: 'dmCode', attribute: 'infoCode', value: '0A2' }], requiredAttributesAdded: [{ element: 'note', attributes: ['type'] }], valuesReplaced: [{ element: 'note', attribute: 'type', from: 'x', to: 'note' }], morerowsLowered: [2], spannedEntriesRemoved: [3], emptyRowsRemoved: [4], colsRaised: [{ from: 1, to: 2 }], textRemoved: ['pmCode'] };
+  const all = exampleAdjustmentNotes(many, en);
+  check('every kind of adjustment gives a note', all.length === 11 && all.every((n) => /^(Adjusted|Corrected) by the app/.test(n)), JSON.stringify(all, null, 1));
+}
+
+// ─── 10. Texts ──────────────────────────────────────────────────────────────
 check('note ES', es('records.ruleTest.wrappedLoose', { count: 2, elements: '<p> y <table>', container: '<context>', parent: '<taskbody>' }) === 'Ajustado por la app: <p> y <table> se metieron en <context> (no van directamente en <taskbody>).');
 check('note ES singular', es('records.ruleTest.wrappedLoose', { count: 1, elements: '<p>', container: '<context>', parent: '<taskbody>' }) === 'Ajustado por la app: <p> se metió en <context> (no va directamente en <taskbody>).');
 check('note EN', en('records.ruleTest.wrappedLoose', { count: 2, elements: '<p> and <table>', container: '<context>', parent: '<taskbody>' }) === 'Adjusted by the app: <p> and <table> were put in <context> (they do not go directly in <taskbody>).');

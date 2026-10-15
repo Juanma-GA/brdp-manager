@@ -13,11 +13,15 @@ const REVIEW_CAUSES = ['example', 'rule', 'unclear'];
 
 // `input`: { brdp, standard, format, ruleXml, ruleDescription (English
 // text, one "- " line per statement), mismatches: [{ label, expected,
-// got ('accepted' | 'rejected'), xml }] }.
+// got ('accepted' | 'rejected'), xml, notes? }] }. `notes` (La revisión sabe
+// qué ajustó la app): what the APPLICATION changed in the example, in
+// English, the same notes the panel shows under it (exampleAdjustments.js).
+// With no notes in any example the prompt is the same as before.
 export function buildRuleTestReviewPrompt({ brdp, standard, format, ruleXml, ruleDescription, mismatches }) {
+  const adjusted = mismatches.some((m) => m.notes?.length);
   const blocks = mismatches.map(
     (m, i) => `Example ${i + 1} ("${m.label}"): expected ${m.expected === 'reject' ? 'rejected' : 'accepted'}, the rule ${m.got} it.
-${m.xml}`
+${m.notes?.length ? `The application changed this example:\n${m.notes.map((n) => `- ${n}`).join('\n')}\n` : ''}${m.xml}`
   );
   return `You review a failed test of one ${standard} business rule in BRDP Manager's
 "Test rule". The application wrote examples from the decision below, ran
@@ -46,7 +50,12 @@ HOW TO DECIDE:
   decide (a missing attribute when the Proposal only restricts its values),
   or it does not really follow or break the decision.
 - "unclear": you cannot tell from the Proposal.
-Judge against the Proposal, not against the example's label.
+Judge against the Proposal, not against the example's label.${
+    adjusted
+      ? `
+If the application changed an example, consider whether that change, not the rule, explains the mismatch; if so, the cause is "example".`
+      : ''
+  }
 
 OUTPUT: strict JSON:
 {"cause": "example" | "rule" | "unclear", "explanation": "…"}
@@ -71,8 +80,11 @@ export function parseRuleTestReviewResponse(raw) {
 }
 
 // The mismatched examples of a test run, in the shape the review prompt and
-// the "PREVIOUS …" blocks of the other prompts take.
-export function mismatchedExamples(examples, runs) {
+// the "PREVIOUS …" blocks of the other prompts take. `notes(example)`
+// (optional): the application's adjustment notes of each example
+// (exampleAdjustmentNotes with the English `t`); only the review prompt
+// reads them.
+export function mismatchedExamples(examples, runs, { notes = null } = {}) {
   return examples
     .map((ex, i) => ({ ex, run: runs[i] }))
     .filter(({ run }) => run?.matches === false)
@@ -82,5 +94,6 @@ export function mismatchedExamples(examples, runs) {
       got: run.result.status,
       content: ex.content,
       xml: ex.xml || ex.content,
+      ...(notes ? { notes: notes(ex) } : {}),
     }));
 }

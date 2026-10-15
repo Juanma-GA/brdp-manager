@@ -567,6 +567,13 @@ import { buildRuleTestExamplesPrompt } from '../src/prompts/ruleTestExamplesProm
 // application sets the root's title. New case
 // ruleTestExamples/dita-xpath3-root-context-ext-00034 (Navantia
 // BRDP-EXT-00034, real contexts); no existing case changes.
+//
+// Test de reglas DITA, no meter un <title> suelto en un contenedor: the
+// review prompt carries each mismatched example's adjustment notes (what
+// the application changed in it) and, only then, a fixed line about those
+// changes. New case ruleTestReview/dita-xpath3-adjusted-example-wrapped-
+// title-ext-00015; the review cases with no adjustment, and every other
+// prompt, unchanged.
 import { buildRuleTestReviewPrompt } from '../src/prompts/ruleTestReviewPrompt.js';
 import { buildRuleProposalCheckPrompt } from '../src/prompts/ruleProposalCheckPrompt.js';
 import { buildExtractFromRulesPrompt } from '../src/prompts/extractFromRulesPrompt.js';

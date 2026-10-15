@@ -547,11 +547,14 @@ async function runCheck(check, answer, ctx = {}) {
       const missing = [
         ...(check.requiredAttributes || []).filter((n) => !added.has(n)).map((n) => `required attributes of <${n}>`),
         ...(check.wrapped || []).filter((n) => !containers.has(n)).map((n) => `loose content put in <${n}>`),
+        // `notWrapped`: containers the application must never have used
+        // (no meter un <title> suelto en un contenedor).
+        ...(check.notWrapped || []).filter((n) => containers.has(n)).map((n) => `loose content wrongly put in <${n}>`),
         ...(check.textRemoved || []).filter((n) => !removed.has(n)).map((n) => `text of <${n}>`),
         ...(check.values || []).filter((n) => !values.has(n)).map((n) => `value of @${n}`),
       ];
       const corrected = check.noCorrection && r.correction ? [`a correction round (${r.correction.fixed}/${r.correction.attempted} fixed)`] : [];
-      const bad = [...missing.map((m) => `not fixed: ${m}`), ...corrected];
+      const bad = [...missing.map((m) => (m.startsWith('loose content wrongly') ? m : `not fixed: ${m}`)), ...corrected];
       return {
         status: bad.length ? "fail" : "pass",
         detail: bad.length ? bad.join("; ") : `fixed by the app: attributes on ${[...added].join(", ") || "-"}; text of ${[...removed].join(", ") || "-"}; values of ${[...values].map((v) => `@${v}`).join(", ") || "-"}; wrapped in ${[...containers].map((c) => `<${c}>`).join(", ") || "-"}${r.correction ? "" : "; no correction round"}`,
@@ -1164,7 +1167,7 @@ async function runRuleReviewCase(project, aiProvider, createdBrdp, testCase) {
   const schemas = testCase.schemas || [];
   const ruleXml = schemas.length ? wrapRuleInSchemaContexts(testCase.rule, format, testCase.standard, schemas, location) : testCase.rule;
   const description = ruleDescriptionText(describeRule(ruleXml, format, { parseXml: xmldomParse }), i18n.getFixedT("en"));
-  const mismatches = testCase.mismatches.map((m) => ({ label: m.label, expected: m.expected, got: m.got, content: m.content || m.xml, xml: m.xml }));
+  const mismatches = testCase.mismatches.map((m) => ({ label: m.label, expected: m.expected, got: m.got, content: m.content || m.xml, xml: m.xml, ...(m.notes ? { notes: m.notes } : {}) }));
   const systemPrompt = buildRuleTestReviewPrompt({ brdp: createdBrdp, standard: testCase.standard, format, ruleXml, ruleDescription: description, mismatches });
   const answer = await sendMessagesToLlm(aiProvider, systemPrompt, [{ role: "user", content: RULE_TEST_REVIEW_USER_MESSAGE }], RULE_TEST_REVIEW_TEMPERATURE);
   const review = parseRuleTestReviewResponse(answer);

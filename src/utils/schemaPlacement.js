@@ -857,10 +857,21 @@ export function looseContainerFor(structure, parent, names, related = []) {
 // stay within P's maximum. Nothing is done with no such C; the example then
 // goes to the correction round as before.
 //
+// A run with a title element (DITA_TITLE_ELEMENTS) is never wrapped, nor
+// split: the container would take it as its OWN title and the meaning would
+// change (BRDP-EXT-00015, Navantia: <title>Tabla 1</title><table/> loose in
+// <taskbody> became <example><title>Tabla 1</title><table/></example>, the
+// example's title and no longer the table's). The whole run stays as it is
+// and goes to the correction round with its structure problems.
+//
 // `keeps(before, after)` (optional) decides on the whole text whether a wrap
 // may be applied: the caller runs the rule before and after and refuses a
 // wrap that changes what the rule selects (a rule on taskbody/p).
 // → { text, wrapped: [{ parent, container, elements, reused }] }
+// DITA elements that are the title of their parent: in a container they
+// would title the container, not what follows them.
+export const DITA_TITLE_ELEMENTS = new Set(['title', 'navtitle', 'searchtitle', 'shortdesc']);
+
 export function wrapLooseContent(text, structure, parentName, { keeps = null, related = [] } = {}) {
   const original = String(text ?? '');
   const elements = structure?.elements || {};
@@ -910,6 +921,7 @@ export function wrapLooseContent(text, structure, parentName, { keeps = null, re
     if (!found) break;
     const { node, name: p, run, from, to, key } = found;
     skip.add(key);
+    if (run.some((c) => DITA_TITLE_ELEMENTS.has(c.name))) continue;
     const kids = node.children;
     const order = models[p]?.order || [];
     const ord = (n) => order.indexOf(n);

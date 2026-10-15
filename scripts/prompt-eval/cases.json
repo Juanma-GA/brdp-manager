@@ -4568,6 +4568,57 @@
       ]
     },
     {
+      "id": "rule-test-navantia-dita3-loose-title-ext-00015",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "No meter un <title> suelto en un contenedor: Navantia BRDP-EXT-00015 (reconstructed). The simulator, as Mistral did, writes the table's <title> loose before the <table> in <taskbody>; the application used to put both in an <example>, so the <title> became the example's. Now the run is never wrapped, and the simulator moves the <title> into the <table> only when the correction round carries the hint.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-LOOSETITLE",
+        "title": "Tablas citadas",
+        "definition": "Decidir si toda tabla de una ficha debe citarse en el texto.",
+        "proposal": "Toda tabla con identificador de una ficha se cita con una referencia cruzada en alguna ficha del dosier.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-cited-figures-tables.sch",
+        "pattern": "p-BRDP-EXT-00015"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier with at least one sheet"
+        },
+        {
+          "type": "rule_test_correction_contains",
+          "pattern": "If this <title> belongs to the <table> that follows, write it as the first child of that <table>\\.",
+          "note": "the correction round says where the loose <title> goes"
+        },
+        {
+          "type": "rule_test_app_fixes",
+          "notWrapped": [
+            "example"
+          ],
+          "note": "the application never wraps the loose <title> (and its <table>) in an <example>"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (ditamap and sheets) passes the XML, vocabulary and structure checks after the correction"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "the rule runs on every document of each dossier and agrees with every example"
+        }
+      ]
+    },
+    {
       "id": "rule-test-navantia-dita3-dossier-missing-file-ext-00015",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",
