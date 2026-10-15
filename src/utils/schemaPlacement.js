@@ -494,19 +494,27 @@ function parseSpans(text) {
   return stack.length === 1 ? top : null;
 }
 
-function findMisplaced(node, parentName, elements, skip) {
+// Whether `parent` admits `child` in this structure: its children in the
+// graph, or (DITA) a topic type it nests (structure.nesting, the shells' own
+// rule: a <concept> nests <concept>, after its <conbody>).
+export function allowsChild(structure, parent, child) {
+  if (structure?.elements?.[parent]?.children?.includes(child)) return true;
+  return Boolean(structure?.nesting?.[parent]?.nested?.includes(child));
+}
+
+function findMisplaced(node, parentName, elements, skip, structure) {
   for (const child of node.children) {
     const name = child.name;
     if (
       parentName &&
       elements[name] &&
       elements[parentName] &&
-      !elements[parentName].children.includes(name) &&
+      !allowsChild(structure, parentName, name) &&
       !skip.has(`${parentName}>${name}@${child.start}`)
     ) {
       return { node: child, parent: node, parentName };
     }
-    const deeper = findMisplaced(child, name, elements, skip);
+    const deeper = findMisplaced(child, name, elements, skip, structure);
     if (deeper) return deeper;
   }
   return null;
@@ -533,7 +541,7 @@ export function relocateMisplacedElements(text, structure, parentName) {
   for (let pass = 0; pass < 20; pass += 1) {
     const top = parseSpans(current);
     if (!top) return { text: original, moved: [] };
-    const found = findMisplaced(top, parentName, elements, skip);
+    const found = findMisplaced(top, parentName, elements, skip, structure);
     if (!found) break;
     const { node, parent, parentName: pName } = found;
     const { paths, complete } = simplePaths(elements, [pName], node.name, 2);
@@ -718,7 +726,7 @@ export function relocateToOnlyParent(text, structure, parentName, names, keepsRe
           wanted.has(child.name) &&
           elements[child.name] &&
           elements[name] &&
-          !elements[name].children.includes(child.name) &&
+          !allowsChild(structure, name, child.name) &&
           !skip.has(`${name}>${child.name}@${child.start}`)
         ) {
           found = { node: child, parentName: name };
@@ -877,7 +885,7 @@ export function wrapLooseContent(text, structure, parentName, { keeps = null, re
   const elements = structure?.elements || {};
   const models = structure?.models || {};
   if (!structure?.models || !Object.keys(models).length) return { text: original, wrapped: [] };
-  const allowedIn = (p, name) => Boolean(elements[p]?.children?.includes(name));
+  const allowedIn = (p, name) => allowsChild(structure, p, name);
   const gapIsBlank = (from, to) => /^\s*$/.test(current.slice(from, to).replace(/<!--[\s\S]*?-->/g, ''));
   let current = original;
   const wrapped = [];
@@ -980,4 +988,134 @@ export function wrapLooseContent(text, structure, parentName, { keeps = null, re
     wrapped.push({ parent: p, container, elements: [...new Set(run.map((c) => c.name))], reused });
   }
   return { text: current, wrapped };
+}
+
+// ─── Test de reglas DITA: un topic anidado dentro del cuerpo se sube ────────
+// (BRDP-EXT-00016, Navantia: the steps of a dossier sheet are
+// <concept outputclass="numbered"> nested in the sheet's <concept>.) In DITA
+// a nested topic goes right inside its parent topic, after the parent's body
+// (and <related-links>, and the nested topics already there), never inside
+// the body; the LLM wrote
+// <concept><title/><conbody><p/><concept>…</concept></conbody></concept>.
+// relocateMisplacedElements only moves DOWN a single way; here the element
+// has to go UP one level, out of the body.
+//
+// A topic element N whose parent B is the body of its own parent topic P
+// (structure.nesting[P].body), when P nests N's type (nesting[P].nested) and
+// B does not admit it, is moved -- its exact text, attributes and content --
+// out of B, to right after the last child of P that is B, <related-links>
+// (anything after B in P's model) or a nested topic, so several keep the
+// order they had. P must be in the TEXT (never the skeleton: a top-level
+// topic of a content whose parent is the skeleton's body stays, and goes to
+// the correction round). Two levels (a nested topic inside a nested one's
+// body) are lifted pass after pass. Only when P stays valid for its model
+// (its children in the XSD's order, nested topics last, within the maxima),
+// and when `keeps(before, after)` (the caller runs the rule before and
+// after) accepts it; otherwise nothing.
+// → { text, lifted: [{ element, body, parent }] }
+export function liftNestedTopics(text, structure, { keeps = null } = {}) {
+  const original = String(text ?? '');
+  const nesting = structure?.nesting || {};
+  const models = structure?.models || {};
+  if (!Object.keys(nesting).length) return { text: original, lifted: [] };
+  let current = original;
+  const lifted = [];
+  const skip = new Set();
+  // N, its parent B (the body) and B's parent P, all in the text (the
+  // fragment's virtual top has no name: never P or B).
+  const find = (node, parent) => {
+    for (const child of node.children) {
+      const rule = parent?.name && node.name ? nesting[parent.name] : null;
+      if (
+        rule?.body === node.name &&
+        rule.nested.includes(child.name) &&
+        !allowsChild(structure, node.name, child.name) &&
+        !skip.has(`${child.name}@${child.start}`)
+      ) {
+        return { n: child, b: node, p: parent };
+      }
+      const deeper = find(child, node);
+      if (deeper) return deeper;
+    }
+    return null;
+  };
+  const rank = (p, name) => {
+    const order = models[p]?.order || [];
+    if (nesting[p]?.nested?.includes(name) && !order.includes(name)) return Infinity;
+    const i = order.indexOf(name);
+    return i < 0 ? -1 : i;
+  };
+  for (let pass = 0; pass < 20; pass += 1) {
+    const top = parseSpans(current);
+    if (!top) return { text: original, lifted: [] };
+    const found = find(top, null);
+    if (!found) break;
+    const { b, p } = found;
+    // Every nested topic of this body moves at once, in its order: one at a
+    // time would leave the others with different siblings in between (a
+    // step's number counted among its siblings would change and back).
+    const ns = b.children.filter(
+      (c) => nesting[p.name].nested.includes(c.name) && !allowsChild(structure, b.name, c.name) && !skip.has(`${c.name}@${c.start}`),
+    );
+    // (a node left where it is is remembered by its position: the edits
+    // that follow only touch text after it, so its position holds)
+    const refuse = () => ns.forEach((c) => skip.add(`${c.name}@${c.start}`));
+    const bRank = rank(p.name, b.name);
+    let anchor = b;
+    for (const c of p.children) {
+      if (c.start <= b.start) continue;
+      const r = rank(p.name, c.name);
+      if (r === Infinity || r > bRank) anchor = c;
+    }
+    // Each one's own line goes with it; written on the body's indentation.
+    const bLineStart = current.lastIndexOf('\n', b.start - 1) + 1;
+    const indent = /^[ \t]*$/.test(current.slice(bLineStart, b.start)) && bLineStart > 0 ? current.slice(bLineStart, b.start) : null;
+    const removals = ns.map((n) => {
+      const lineStart = current.lastIndexOf('\n', n.start - 1) + 1;
+      const lineEnd = current.indexOf('\n', n.end);
+      const ownLine = /^[ \t]*$/.test(current.slice(lineStart, n.start)) && /^[ \t]*$/.test(current.slice(n.end, lineEnd < 0 ? current.length : lineEnd));
+      return ownLine && lineStart > 0 ? [lineStart - 1, lineEnd < 0 ? current.length : lineEnd] : [n.start, n.end];
+    });
+    const insertText = ns.map((n) => `${indent !== null ? `\n${indent}` : ''}${current.slice(n.start, n.end)}`).join('');
+    // (the removals are inside B, before the insertion after the anchor)
+    let kept = '';
+    let at = 0;
+    for (const [from, to] of removals) {
+      kept += current.slice(at, from);
+      at = to;
+    }
+    const after = kept + current.slice(at, anchor.end) + insertText + current.slice(anchor.end);
+    // P valid for its model: its children in the XSD's order (the nested
+    // topics last), within the maxima.
+    const check = parseSpans(after);
+    if (!check) {
+      refuse();
+      continue;
+    }
+    const locate = (node) => {
+      if (node.start === p.start && node.name === p.name) return node;
+      for (const c of node.children) {
+        const f = locate(c);
+        if (f) return f;
+      }
+      return null;
+    };
+    const parentNode = locate(check);
+    if (!parentNode) {
+      refuse();
+      continue;
+    }
+    const seq = parentNode.children.map((c) => rank(p.name, c.name)).filter((r) => r >= 0);
+    const okOrder = seq.every((v, i) => i === 0 || v >= seq[i - 1]);
+    const counts = {};
+    for (const c of parentNode.children) counts[c.name] = (counts[c.name] || 0) + 1;
+    const okMax = Object.entries(models[p.name]?.max || {}).every(([name, m]) => (counts[name] || 0) <= m);
+    if (!okOrder || !okMax || (keeps && !keeps(current, after))) {
+      refuse();
+      continue;
+    }
+    current = after;
+    for (const n of ns) lifted.push({ element: n.name, body: b.name, parent: p.name });
+  }
+  return { text: current, lifted };
 }

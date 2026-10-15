@@ -848,6 +848,37 @@ def _indexed_enum_lists(models: dict[str, dict]) -> tuple[dict[str, dict], list[
     return out, lists
 
 
+# Test de reglas DITA: un topic anidado dentro del cuerpo se sube a su sitio.
+# The topic types each topic element nests in a DITA document type's own
+# shell (backend/scripts/generate_dita_nesting.py: the merged cards say every
+# type nests <task> and none nests itself -- not what the shells say).
+_DITA_NESTING_PATH = _CONTENT_MODELS_DIR / "dita-nesting.json"
+
+
+@lru_cache(maxsize=1)
+def _dita_nesting_file() -> dict:
+    if not _DITA_NESTING_PATH.is_file():
+        return {}
+    return json.loads(_DITA_NESTING_PATH.read_text(encoding="utf-8")).get("types", {})
+
+
+def dita_nesting(standard: str, schema: str) -> dict[str, dict]:
+    """{topic element: {"nested": [topic types it nests], "body": its body}}
+    for one DITA document type (empty for S1000D and the map). A nested
+    topic goes right inside its parent topic, after the parent's body (and
+    <related-links>), never inside the body; "body" is the second element of
+    that topic type's own skeleton (concept/conbody, task/taskbody, …), None
+    when the type has no skeleton of its own here."""
+    if not is_dita_standard(standard):
+        return {}
+    out: dict[str, dict] = {}
+    for topic, nested in _dita_nesting_file().get(schema, {}).items():
+        own = derive_skeleton(standard, topic) if topic in DITA_DOCUMENT_TYPES else None
+        path = (own or {}).get("path") or []
+        out[topic] = {"nested": list(nested), "body": path[1] if len(path) > 1 else None}
+    return out
+
+
 def get_schema_structure(standard: str, schema: str) -> dict:
     """The compact structure the Test rule panel needs for one schema: the
     derived skeleton plus every element's children and attribute names (no
@@ -868,6 +899,7 @@ def get_schema_structure(standard: str, schema: str) -> dict:
         "elements": graph,
         "models": models,
         "enum_lists": enum_lists,
+        "nesting": dita_nesting(standard, schema),
     }
 
 

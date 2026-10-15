@@ -157,6 +157,17 @@ class SchemaStructureOut(BaseModel):
     # The closed lists of values the models' `enums` point to, each once
     # (frontMatterType's fm01…fm99 is shared by every element that has it).
     enum_lists: list[list[str]] = []
+    # DITA only: the topic types each topic element nests, and its body
+    # (rule_test_skeletons.dita_nesting) -- {} for S1000D and the map.
+    nesting: dict[str, "DitaNestingOut"] = {}
+
+
+class DitaNestingOut(BaseModel):
+    nested: list[str] = []
+    body: str | None = None
+
+
+SchemaStructureOut.model_rebuild()
 
 
 class SchemaRelationSchemaOut(BaseModel):

@@ -33,7 +33,7 @@ def main() -> None:
             data = get_schema_structure(standard, schema)
             if not data["available"]:
                 raise RuntimeError(f"No structure for {standard}/{schema}")
-            out[f"{standard}|{schema}"] = {"skeleton": data["skeleton"], "elements": data["elements"], "models": data["models"], "enum_lists": data["enum_lists"]}
+            out[f"{standard}|{schema}"] = {"skeleton": data["skeleton"], "elements": data["elements"], "models": data["models"], "enum_lists": data["enum_lists"], "nesting": data["nesting"]}
     _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     _OUT_PATH.write_text(json.dumps(out, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
     print(f"Wrote {_OUT_PATH} ({len(out)} structures)")

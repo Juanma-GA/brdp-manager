@@ -544,8 +544,12 @@ async function runCheck(check, answer, ctx = {}) {
       // Loose content put in a container by the application (content and
       // dossier files): `wrapped` lists the containers expected.
       const containers = new Set(r.examples.flatMap((ex) => [...(ex.wrapped || []), ...(ex.files || []).flatMap((f) => f.wrapped || [])].map((w) => w.container)));
+      // Un topic anidado dentro del cuerpo se sube: `lifted` lists the topic
+      // types the application moved out of their parent's body.
+      const lifted = new Set(r.examples.flatMap((ex) => [...(ex.nestedLifted || []), ...(ex.files || []).flatMap((f) => f.nestedLifted || [])].map((l) => l.element)));
       const missing = [
         ...(check.requiredAttributes || []).filter((n) => !added.has(n)).map((n) => `required attributes of <${n}>`),
+        ...(check.lifted || []).filter((n) => !lifted.has(n)).map((n) => `nested <${n}> moved out of its parent's body`),
         ...(check.wrapped || []).filter((n) => !containers.has(n)).map((n) => `loose content put in <${n}>`),
         // `notWrapped`: containers the application must never have used
         // (no meter un <title> suelto en un contenedor).
@@ -557,7 +561,7 @@ async function runCheck(check, answer, ctx = {}) {
       const bad = [...missing.map((m) => (m.startsWith('loose content wrongly') ? m : `not fixed: ${m}`)), ...corrected];
       return {
         status: bad.length ? "fail" : "pass",
-        detail: bad.length ? bad.join("; ") : `fixed by the app: attributes on ${[...added].join(", ") || "-"}; text of ${[...removed].join(", ") || "-"}; values of ${[...values].map((v) => `@${v}`).join(", ") || "-"}; wrapped in ${[...containers].map((c) => `<${c}>`).join(", ") || "-"}${r.correction ? "" : "; no correction round"}`,
+        detail: bad.length ? bad.join("; ") : `fixed by the app: attributes on ${[...added].join(", ") || "-"}; text of ${[...removed].join(", ") || "-"}; values of ${[...values].map((v) => `@${v}`).join(", ") || "-"}; wrapped in ${[...containers].map((c) => `<${c}>`).join(", ") || "-"}; nested topics lifted: ${[...lifted].map((c) => `<${c}>`).join(", ") || "-"}${r.correction ? "" : "; no correction round"}`,
       };
     }
     case "rule_test_examples_by_app": {

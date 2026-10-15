@@ -1419,7 +1419,14 @@ export function checkExampleStructure(doc, structure, options = {}) {
     const name = el.nodeName;
     const known = Boolean(elements[name]);
     if (!known) add({ kind: 'unknownElement', element: name });
-    else if (parentName && elements[parentName] && !elements[parentName].children.includes(name)) {
+    else if (
+      parentName &&
+      elements[parentName] &&
+      !elements[parentName].children.includes(name) &&
+      // DITA: a topic type its parent topic nests (structure.nesting: a
+      // <concept> right inside a <concept>, after its <conbody>).
+      !structure.nesting?.[parentName]?.nested?.includes(name)
+    ) {
       add({ kind: 'notAllowed', element: name, parent: parentName });
     }
     if (known) {

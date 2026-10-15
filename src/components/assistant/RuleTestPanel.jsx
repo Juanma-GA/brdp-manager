@@ -354,6 +354,20 @@ function WrappedLooseNotes({ wrapped }) {
   });
 }
 
+// Un topic anidado dentro del cuerpo se sube: one line per nested topic the
+// application moved out of its parent's body.
+function NestedLiftedNotes({ lifted }) {
+  const { t } = useTranslation();
+  if (!lifted?.length) return null;
+  return lifted.map((l, i) => (
+    <TableFixNote
+      key={`${l.parent}-${l.body}-${l.element}-${i}`}
+      testId="rule-test-nested-lifted"
+      text={t('records.ruleTest.nestedTopicLifted', { element: `<${l.element}>`, body: `<${l.body}>`, parent: `<${l.parent}>` })}
+    />
+  ));
+}
+
 // The fixes the application made to one document of the example.
 function DocumentFixNotes({ doc }) {
   const { t } = useTranslation();
@@ -366,6 +380,7 @@ function DocumentFixNotes({ doc }) {
           })}
         </p>
       )}
+      <NestedLiftedNotes lifted={doc.nestedLifted} />
       <WrappedLooseNotes wrapped={doc.wrapped} />
       {doc.colspecsAdded > 0 && <ColspecsAddedNote count={doc.colspecsAdded} />}
       <SchemaFixNotes doc={doc} />
@@ -591,6 +606,7 @@ export function ExampleCard({ example, run, index, standard, dita, showResult, o
         </p>
       )}
       {example.namespacesRemoved?.length > 0 && <TableFixNote testId="rule-test-namespace-removed" text={t('records.ruleTest.namespaceRemoved', { namespace: example.namespacesRemoved.join('", "') })} />}
+      <NestedLiftedNotes lifted={example.nestedLifted} />
       <WrappedLooseNotes wrapped={example.wrapped} />
       {example.colspecsAdded > 0 && <ColspecsAddedNote count={example.colspecsAdded} />}
       <SchemaFixNotes doc={example} />

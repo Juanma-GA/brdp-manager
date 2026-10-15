@@ -19,7 +19,7 @@
 //   file means (doc-available() is false for it).
 import { DOSSIER_BASE_URI, DOSSIER_MAX_FILES, dossierUri } from './ruleTestSchematron.js';
 import { addMissingCalsColspecs, fixCalsRowSpans, removeSpannedCalsEntries } from '../validation/schemaValidation.js';
-import { looseContainerFor, relocateMisplacedElements, wrapLooseContent } from './schemaPlacement.js';
+import { liftNestedTopics, looseContainerFor, relocateMisplacedElements, wrapLooseContent } from './schemaPlacement.js';
 import { applyExampleSchemaFixes } from './exampleSchemaFixes.js';
 import { setRootTitleText } from './topicTitleValue.js';
 
@@ -142,6 +142,23 @@ export function wrapDossierFiles(files, keeps = null, structures = null) {
     });
     if (!r.wrapped.length) return;
     out[i] = { ...file, content: r.text, xml: r.text, wrapped: r.wrapped };
+  });
+  return out;
+}
+
+// Un topic anidado dentro del cuerpo se sube (schemaPlacement.js
+// liftNestedTopics) in each file, before the wrap and with the same check
+// (`keeps(path, before, after, files)`: the rule on the whole dossier). A
+// file gets `nestedLifted` ([{ element, body, parent }]) for its note.
+export function liftDossierFiles(files, keeps = null) {
+  const out = (files || []).map((f) => ({ ...f }));
+  out.forEach((file, i) => {
+    if (!file.structure?.nesting) return;
+    const r = liftNestedTopics(file.content, file.structure, {
+      keeps: keeps ? (before, after) => keeps(file.path, before, after, out) : null,
+    });
+    if (!r.lifted.length) return;
+    out[i] = { ...file, content: r.text, xml: r.text, nestedLifted: r.lifted };
   });
   return out;
 }

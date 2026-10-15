@@ -4619,6 +4619,53 @@
       ]
     },
     {
+      "id": "rule-test-navantia-dita3-nested-topic-ext-00016",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Un topic anidado dentro del cuerpo se sube a su sitio: Navantia BRDP-EXT-00016 (reconstructed rule: the real $pasosDosier is not in the repo). The steps of a sheet are <concept outputclass=\"numbered\"> nested in the sheet's <concept>; the simulator, as Mistral did, writes them inside <conbody> and never corrects them. The application moves them after the parent's <conbody> (two levels), with no correction round.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-NESTEDTOPIC",
+        "title": "Pasos citados",
+        "definition": "Decidir si un paso citado en una ficha debe existir en el dosier.",
+        "proposal": "Todo paso citado en una ficha (\"paso 2.1\") existe en el dosier.",
+        "validation": "Validated"
+      },
+      "ruleFile": {
+        "path": "scripts/rule-test-fixtures/navantia-dita3-nested-steps-ext-00016.sch",
+        "pattern": "p-BRDP-EXT-00016"
+      },
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_dossier_files",
+          "note": "every example is a dossier with at least one sheet"
+        },
+        {
+          "type": "rule_test_app_fixes",
+          "lifted": [
+            "concept"
+          ],
+          "noCorrection": true,
+          "note": "the application moves the nested <concept> out of <conbody>, with no correction round"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example (ditamap and sheets) passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "step 2.1 cited and existing is accepted; 2.3 is rejected"
+        }
+      ]
+    },
+    {
       "id": "rule-test-navantia-dita3-dossier-missing-file-ext-00015",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",

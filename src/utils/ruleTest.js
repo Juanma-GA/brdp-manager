@@ -36,7 +36,7 @@ import {
 import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, metadataXml, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { setSectionValuesInDocument, setSectionValuesInText } from './ownSectionValues.js';
 import { setRootTitleText } from './topicTitleValue.js';
-import { placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence, wrapLooseContent } from './schemaPlacement.js';
+import { liftNestedTopics, placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence, wrapLooseContent } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
 import { applyExampleSchemaFixes, namedByRuleOrProposal } from './exampleSchemaFixes.js';
 import {
@@ -45,6 +45,7 @@ import {
   dossierProblemText,
   dossierProblems,
   dossierReferenceWarnings,
+  liftDossierFiles,
   materializeDossierFiles,
   missingDossierFiles,
   wrapDossierFiles,
@@ -322,6 +323,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   // 4.2, 4.1, 3.0.1) is never wrapped, even with the same pattern -- it goes
   // to the correction round as before (Part 4).
   delete adjusted.wrapped;
+  delete adjusted.nestedLifted;
   if (rule?.ruleXml && rule.format === 'SCH-DITA' && entry.structure?.models) {
     const rawDossier = setup.dossier
       ? dossierForEngine({ mainPath: setup.dossier.mainPath || DOSSIER_MAIN_PATH, files: example.files || [] })
@@ -330,12 +332,19 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
       const { xml: doc } = assembleExample({ standard: setup.standard, schema, schemaLocation: setup.schemaLocation, placement: entry.placement, content, metadata: adjusted.metadata, rootAttributes: adjusted.rootAttributes || null });
       return doc ? ruleSelectionSignature(rule, doc, schema, { parseXml, schemaLocation: setup.schemaLocation, dossier: rawDossier }) : null;
     };
-    const r = wrapLooseContent(adjusted.content, entry.structure, entry.placement.insertion || null, {
-      keeps: (before, after) => {
-        const a = signature(before);
-        return a !== null && a === signature(after);
-      },
-    });
+    const keeps = (before, after) => {
+      const a = signature(before);
+      return a !== null && a === signature(after);
+    };
+    // Un topic anidado dentro del cuerpo se sube (schemaPlacement.js
+    // liftNestedTopics) -- before the wrap: a <concept> in a run of loose
+    // children would leave the whole run without a container.
+    const up = liftNestedTopics(adjusted.content, entry.structure, { keeps });
+    if (up.lifted.length) {
+      adjusted.content = up.text;
+      adjusted.nestedLifted = up.lifted;
+    }
+    const r = wrapLooseContent(adjusted.content, entry.structure, entry.placement.insertion || null, { keeps });
     if (r.wrapped.length) {
       adjusted.content = r.text;
       adjusted.wrapped = r.wrapped;
@@ -428,12 +437,13 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   // decides in any document is refused.
   if (dossier && rule?.ruleXml && rule.format === 'SCH-DITA' && xml) {
     const engineDossier = (files, path, text) => ({ mainPath: dossier.mainPath, files: files.map((f) => ({ path: f.path, xml: f.path === path ? text : f.xml ?? f.content ?? '' })) });
+    const fileKeeps = (path, before, after, files) => {
+      const a = ruleSelectionSignature(rule, xml, schema, { parseXml, schemaLocation: setup.schemaLocation, dossier: engineDossier(files, path, before) });
+      return a !== null && a === ruleSelectionSignature(rule, xml, schema, { parseXml, schemaLocation: setup.schemaLocation, dossier: engineDossier(files, path, after) });
+    };
     dossier = {
       ...dossier,
-      files: wrapDossierFiles(dossier.files, (path, before, after, files) => {
-        const a = ruleSelectionSignature(rule, xml, schema, { parseXml, schemaLocation: setup.schemaLocation, dossier: engineDossier(files, path, before) });
-        return a !== null && a === ruleSelectionSignature(rule, xml, schema, { parseXml, schemaLocation: setup.schemaLocation, dossier: engineDossier(files, path, after) });
-      }, setup.dossier.structures),
+      files: wrapDossierFiles(liftDossierFiles(dossier.files, fileKeeps), fileKeeps, setup.dossier.structures),
     };
   }
   // Remates: the levels above the insertion point where the content could
@@ -1000,6 +1010,15 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     const looseTitle = p.kind === 'notAllowed' && p.element === 'title' ? (validation.looseTitles || []).find((x) => x.parent === p.parent) : null;
     // (never with the plain-text hint: the title is moved, not removed)
     const push = (line) => out.push(looseTitle ? `${String(line).replace(`. ${PLAIN_TEXT_HINT}`, '').replace(/\.?$/, '.')} ${looseTitleHint(looseTitle.next)}` : line);
+    // Un topic anidado dentro del cuerpo: a topic type put inside the body
+    // of a topic that nests it (the application could not lift it: its
+    // parent is the skeleton, the move changed the rule's result, or the
+    // parent would not stay valid) -- where a nested topic goes.
+    const nested = nestedTopicHint(p, structure);
+    if (nested) {
+      out.push(`${formatStructureProblem(p, schema)}. ${nested}`);
+      continue;
+    }
     // Fichas del dosier, Part 2: in a dossier file, an element of the rule
     // (or the title the rule looks for) put where the file's type does not
     // allow it -- the valid way from the file's root, read from its type.
@@ -1089,6 +1108,17 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     if (lines.movesAttribute) out.movesAttribute = true;
   }
   return out;
+}
+
+// "<concept> is not allowed inside <conbody>" where <conbody> is the body of
+// a topic type that nests <concept> (structure.nesting) → the line that says
+// where a nested topic goes; null otherwise (S1000D: no nesting).
+export function nestedTopicHint(p, structure) {
+  if (p?.kind !== 'notAllowed' || !structure?.nesting) return null;
+  const parent = Object.entries(structure.nesting).find(([, rule]) => rule.body === p.parent && rule.nested.includes(p.element));
+  return parent
+    ? `A nested <${p.element}> goes directly inside its parent <${parent[0]}>, after <${p.parent}>, never inside it.`
+    : null;
 }
 
 // One example → { validation, result (engine output) | null, matches }.

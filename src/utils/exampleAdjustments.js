@@ -19,6 +19,9 @@ function documentNotes(doc, t) {
     out.push(t('records.ruleTest.relocated', { moves: doc.relocated.map((m) => `<${m.element}> → ${m.path.slice(0, -1).join('/')}`).join('; ') }));
   }
   if (doc.namespacesRemoved?.length) out.push(t('records.ruleTest.namespaceRemoved', { namespace: doc.namespacesRemoved.join('", "') }));
+  for (const l of doc.nestedLifted || []) {
+    out.push(t('records.ruleTest.nestedTopicLifted', { element: `<${l.element}>`, body: `<${l.body}>`, parent: `<${l.parent}>` }));
+  }
   for (const w of doc.wrapped || []) {
     out.push(
       t('records.ruleTest.wrappedLoose', {

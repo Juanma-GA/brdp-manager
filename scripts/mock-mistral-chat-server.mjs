@@ -558,6 +558,25 @@ function dossierExamples(rule, correcting, lastUser, systemPrompt = "") {
       { label: "Cita a tabla con número en formato X.Y en ficha NO mencionada", expected: "reject", schema: "map", content, files: rejectFiles },
     ];
   }
+  // Un topic anidado dentro del cuerpo (reconstructed Navantia
+  // BRDP-EXT-00016: a step cited in a sheet, "paso 2.1", exists in the
+  // dossier). As Mistral wrote it: the numbered steps -- nested
+  // <concept outputclass="numbered"> -- inside the sheet's <conbody>, and
+  // never corrected: the application moves them out itself.
+  if (/pasosDosier/.test(rule) && /uri-collection/.test(rule)) {
+    const sheet = (cited) =>
+      `<concept id="ft-001"><title>Desmontaje de la bomba</title><conbody><p>Antes de desmontar, véase el paso ${cited}.</p>` +
+      '<concept id="p1" outputclass="numbered"><title>Preparar</title><conbody><p>Cerrar la válvula.</p></conbody></concept>' +
+      '<concept id="p2" outputclass="numbered"><title>Desmontar</title><conbody><p>Retirar la tapa.</p>' +
+      '<concept id="p21" outputclass="numbered"><title>Aflojar</title><conbody><p>Aflojar los tornillos.</p></conbody></concept>' +
+      '<concept id="p22" outputclass="numbered"><title>Retirar</title><conbody><p>Retirar la bomba.</p></conbody></concept>' +
+      "</conbody></concept></conbody></concept>";
+    const content = map(["fichas/ft-001.dita"]);
+    return [
+      { label: "Cites step 2.1, which exists", expected: "accept", schema: "map", content, files: [{ path: "fichas/ft-001.dita", content: sheet("2.1") }] },
+      { label: "Cites step 2.3, which does not exist", expected: "reject", schema: "map", content, files: [{ path: "fichas/ft-001.dita", content: sheet("2.3") }] },
+    ];
+  }
   // Contenido suelto en el cuerpo de las fichas (reconstructed Navantia
   // BRDP-EXT-00014/00015: every figure / table with an @id is cited by an
   // <xref> of the dossier's sheets). As Mistral wrote them: <p>, <table> and

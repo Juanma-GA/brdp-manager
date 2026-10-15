@@ -766,3 +766,53 @@ def test_text_facets_generator_on_a_synthetic_schema(tmp_path):
     assert facets["kind"] == {"length": 1, "enumeration": ["a", "b"]}
     assert facets["note"] == facets["code"]
     assert facets["plain"] is None and facets["doc"] is None
+
+
+# ─── Un topic anidado dentro del cuerpo se sube: the shells' nesting ────────
+def test_dita_nesting_file_matches_the_shells():
+    """The committed dita-nesting.json is what the generator reads from the
+    DITA 1.3 shells today, and says what the shells say."""
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "generate_dita_nesting", Path(__file__).resolve().parents[1] / "scripts" / "generate_dita_nesting.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    built = module.build_nesting()
+    stored = json.loads((Path(__file__).resolve().parents[1] / "schema_cards" / "dita-nesting.json").read_text(encoding="utf-8"))
+    assert built == stored["types"]
+    assert built["concept"] == {"concept": ["concept"]}
+    assert built["topic"] == {"topic": ["topic"]}
+    assert built["task"] == {"task": ["task"]}
+    assert built["reference"] == {"reference": ["reference"]}
+    # troubleshooting.xsd redefines its info-types: it nests <task> only.
+    assert built["troubleshooting"] == {"troubleshooting": ["task"], "task": ["task"]}
+
+
+def test_structure_serves_the_nesting_with_each_topics_body():
+    from app.services.rule_test_skeletons import dita_nesting, get_schema_structure
+
+    assert dita_nesting("DITA 1.3 Xpath3.0", "concept") == {"concept": {"nested": ["concept"], "body": "conbody"}}
+    assert dita_nesting("DITA 1.3 Xpath2.0", "task") == {"task": {"nested": ["task"], "body": "taskbody"}}
+    trouble = dita_nesting("DITA 1.3 Xpath2.0", "troubleshooting")
+    assert trouble["troubleshooting"]["body"] == "troublebody" and trouble["task"]["body"] == "taskbody"
+    assert dita_nesting("DITA 1.3 Xpath2.0", "map") == {}
+    assert dita_nesting("S1000D 4.2", "descript") == {}
+    assert get_schema_structure("DITA 1.3 Xpath2.0", "topic")["nesting"] == {"topic": {"nested": ["topic"], "body": "body"}}
+    assert get_schema_structure("S1000D 4.2", "descript")["nesting"] == {}
+
+
+@pytest.mark.asyncio
+async def test_structure_endpoint_serves_the_nesting(client):
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "DITA 1.3 Xpath2.0", "schema": "concept"}, headers=_headers(user)
+    )
+    assert res.status_code == 200
+    assert res.json()["nesting"] == {"concept": {"nested": ["concept"], "body": "conbody"}}
+    res = await client.get(
+        "/api/schema-cards/structure", params={"standard": "S1000D 4.2", "schema": "descript"}, headers=_headers(user)
+    )
+    assert res.json()["nesting"] == {}

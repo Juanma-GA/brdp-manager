@@ -94,6 +94,7 @@ async def read_schema_structure(
         elements=data["elements"],
         models=data["models"],
         enum_lists=data.get("enum_lists", []),
+        nesting=data.get("nesting", {}),
     )
 
 
