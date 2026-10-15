@@ -1233,6 +1233,19 @@ function ruleTestReply(systemPrompt, messages) {
         { label: "Four first-level steps", expected: "reject", schema: ditaType, content: procedure(4) },
       ]);
     }
+    // Remates, Part 1 (TABLEINCMD): the real case -- a <table> written
+    // directly in <cmd>. The application used to wrap it in <draft-comment>
+    // (the only child of <cmd> that admits a table); now it does not, and
+    // the correction round says where it can go inside <step>. Told
+    // "Inside <step> it can go in <info>", the example puts it there.
+    if (/TABLEINCMD/.test(proposal) && /context="step"/.test(rule)) {
+      const told = correcting && /Inside <step> it can go in <info>/.test(lastUser);
+      const table = (v) => `<table><tgroup cols="1"><colspec colname="c1"/><tbody><row><entry colname="c1">${v}</entry></row></tbody></tgroup></table>`;
+      return answer([
+        { label: "Torque table with the step", expected: "accept", schema: ditaType, content: told ? `<step><cmd>Torque the pump bolts.</cmd><info>${table("25 N.m")}</info></step>` : `<step><cmd>Torque the pump bolts. ${table("25 N.m")}</cmd></step>` },
+        { label: "Torque table in the step example", expected: "reject", schema: ditaType, content: `<step><cmd>Torque the pump bolts.</cmd><stepxmp>${table("25 N.m")}</stepxmp></step>` },
+      ]);
+    }
     if (/context="step"/.test(rule)) {
       // Mejoras H: told "<step> allows at most 1 <cmd>", the correction
       // merges the two commands into one -- what Mistral did (08/10). The

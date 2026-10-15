@@ -244,8 +244,12 @@ async function main() {
     // 4. XPath 3.x syntax in an XPath 2.0 project: warned, still run.
     await select("BRDP-DT-X3");
     const panel4 = await testDraft();
-    const x3 = await panel4.getByTestId("rule-test-analysis-warning").textContent();
-    assert(x3.includes("This project uses XPath 2.0, but the rule uses XPath 3.x syntax (inline function, dynamic function call)") && x3.includes("The test runs it anyway."), `XPath 3.x warning (${x3})`);
+    // Since the "prefijos sin declarar" round (NS) the rule's xs: prefix
+    // without sch:ns gives a second analysis warning next to the XPath 3.x one.
+    const warnings4 = await panel4.getByTestId("rule-test-analysis-warning").allTextContents();
+    const x3 = warnings4.find((w) => w.includes("XPath 3.x")) || "";
+    assert(x3.includes("This project uses XPath 2.0, but the rule uses XPath 3.x syntax (inline function, dynamic function call)") && x3.includes("The test runs it anyway."), `XPath 3.x warning (${warnings4.join(" | ")})`);
+    assert(warnings4.length === 2 && warnings4.some((w) => w.includes("xs:")), `…and the undeclared xs: prefix warning (${warnings4.join(" | ")})`);
     // Mejoras H: the example with two <cmd> cannot be written within the
     // schema (<step> allows at most 1 <cmd>); the simulator's correction
     // merges them, the app discards it -- inconclusive with the reason,
@@ -289,7 +293,7 @@ async function main() {
     await openProject(p3);
     await select("BRDP-DT-LET");
     const panel6 = await testDraft();
-    assert((await panel6.getByTestId("rule-test-analysis-warning").count()) === 0, "XPath 3.0 project: no XPath 3.x warning");
+    assert(!(await panel6.getByTestId("rule-test-analysis-warning").allTextContents()).some((w) => w.includes("XPath 3.x")), "XPath 3.0 project: no XPath 3.x warning");
     assert((await panel6.getByTestId("rule-test-description").textContent()).includes("For each step: variables cuenta, n."), "description lists the sch:let variables");
     assert((await examplesOf(panel6).nth(0).textContent()).includes("Topic type: task"), "step rule: task topic type");
     // Mejoras H, Parts 1.2-1.3: the correction that merged the two <cmd> is

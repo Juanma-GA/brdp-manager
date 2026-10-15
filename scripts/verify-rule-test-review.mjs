@@ -1,9 +1,10 @@
 // Live verification for "Test de reglas" T3b: the deterministic description
-// of the rule (describeRule) in the Test rule panel, the "cannot reject any
-// content" warning, examples written from the Proposal's decision, and
-// "Review with the assistant" on an incorrect verdict -- cause "rule" →
-// "Suggest a corrected rule" (Suggest Rule with the failed test in its
-// prompt) → flag-0 rule → Test rule correct → Accept records it; cause
+// of the rule (describeRule) in the Test rule panel, a flag-2 rule with no
+// values tested without the AI as "Informative" (since 7929fbf; before, it
+// went through examples and "Review with the assistant" -- that loop, cause
+// "rule" → corrected rule → Accept, is now in verify-rule-test-dita.mjs),
+// examples written from the Proposal's decision, and "Review with the
+// assistant" on an incorrect verdict -- cause
 // "example" → "Regenerate examples" with the diagnosis → correct; cause
 // "unclear" → both actions (the corrected rule blocked while a suggestion
 // is pending). The review never changes the recorded result.
@@ -86,10 +87,6 @@ async function main() {
     const { project, brdp, format } = brdps[identifier];
     return api(`/api/projects/${project.id}/brdps/${brdp.id}/approvals/${format}`).then((r) => r.json());
   };
-  const historyOf = (identifier) => {
-    const { project, brdp } = brdps[identifier];
-    return api(`/api/projects/${project.id}/brdps/${brdp.id}/history`).then((r) => r.json());
-  };
   async function embed(project) {
     const job = await api(`/api/projects/${project.id}/embeddings/compute`, { method: "POST" }).then((r) => r.json());
     for (let i = 0; i < 80; i++) {
@@ -154,60 +151,27 @@ async function main() {
     await page.waitForTimeout(300);
     await openProject(p42);
 
-    // 1. The wrong rule (flag 2 on //emphasis): description + warning,
-    //    incorrect verdict, review → rule → corrected rule → correct test.
+    // 1. The wrong rule (flag 2 on //emphasis, no values). Since the
+    //    "Informativas" round (7929fbf) such a rule rejects nothing and is
+    //    tested without the AI: verdict and recorded result "Informative",
+    //    no examples, no review. (The review → "rule" → corrected rule →
+    //    Accept loop is covered by verify-rule-test-dita.mjs, step 5, on an
+    //    inverted Schematron assert.)
+    await fetch(`${MOCK}/reset`, { method: "POST" });
     await select("BRDP-RV-WRONG");
     await testDraft();
     const panel = panels().first();
     const description = await panel.getByTestId("rule-test-description").textContent();
     assert(description.includes("<emphasis> is allowed: this rule does not reject it (path //emphasis)."), `flag 2: deterministic description (${description})`);
-    const warning = panel.getByTestId("rule-test-cannot-reject");
-    assert((await warning.textContent()).includes("This rule cannot reject any content."), "flag 2: cannot-reject warning");
-    assert((await warning.evaluate((el) => getComputedStyle(el).color)) === "rgb(185, 28, 28)", "cannot-reject warning in red");
-    const examplesPrompt = systemOf(await lastRequest());
-    assert(examplesPrompt.includes("the examples test THIS") && examplesPrompt.includes("written from the Proposal's DECISION"), "examples prompt: written from the decision");
-    assert(!examplesPrompt.includes('"explanation"'), "examples prompt: no LLM explanation asked");
-    assert((await panel.getByTestId("rule-test-verdict").textContent()).startsWith("Test failed."), `flag 2: verdict incorrect (${await panel.getByTestId("rule-test-verdict").textContent()})`);
-    await waitIndicator("failed");
-    const historyBefore = (await historyOf("BRDP-RV-WRONG")).filter((h) => h.field_name === "rule_test").length;
-    await panel.getByTestId("rule-test-review").click();
-    const reviewBox = panel.getByTestId("rule-test-review-result");
-    await reviewBox.waitFor({ timeout: 15000 });
-    const reviewReq = await lastRequest();
-    const reviewPrompt = systemOf(reviewReq);
-    assert(reviewReq.temperature === 0.3, `review sent at 0.3 (${reviewReq.temperature})`);
-    assert(reviewReq.messages.at(-1).content === "Review this failed rule test.", "review: fixed user message");
-    assert(reviewPrompt.includes("What the rule checks (computed by the application from its XML — exact):\n- <emphasis> is allowed") && reviewPrompt.includes("- This rule cannot reject any content."), "review prompt carries the deterministic description");
-    assert(reviewPrompt.includes('expected rejected, the rule accepted it.') && reviewPrompt.includes("<emphasis>25 N.m</emphasis>"), "review prompt carries the mismatched example");
-    assert((await reviewBox.getAttribute("data-cause")) === "rule", "review: cause rule");
-    assert((await reviewBox.textContent()).includes("The rule looks wrong.") && (await reviewBox.textContent()).includes("Indicative: MOCK-REVIEW"), "review shown as indicative");
-    assert((await panel.getByTestId("rule-test-regenerate-with-review").count()) === 0, "cause rule: no Regenerate examples");
-    const a1 = await approvalOf("BRDP-RV-WRONG");
-    assert(a1.last_test_result === "failed" && (await historyOf("BRDP-RV-WRONG")).filter((h) => h.field_name === "rule_test").length === historyBefore, "the review records nothing: still failed, no new History entry");
+    assert((await panel.getByTestId("rule-test-cannot-reject").count()) === 0, "flag 2: informative, so no cannot-reject warning");
+    const verdict1 = panel.getByTestId("rule-test-verdict");
+    assert((await verdict1.getAttribute("data-kind")) === "informative" && (await verdict1.textContent()).startsWith("Informative: this rule rejects nothing"), `flag 2: verdict informative (${await verdict1.textContent()})`);
+    assert((await fetch(`${MOCK}/last-request`).then((r) => r.json()).catch(() => null)) === null, "flag 2: no call to the AI");
+    assert((await panel.getByTestId("rule-test-review").count()) === 0, "flag 2: no Review with the assistant");
+    await waitIndicator("informative");
+    assert((await approvalOf("BRDP-RV-WRONG")).last_test_result === "informative", "flag 2: recorded as informative");
     await panel.screenshot({ path: shot("rule-test-review-rule.png") });
-    await panel.getByTestId("rule-test-suggest-corrected").click();
-    await page.getByTestId("rule-corrected-note").waitFor({ timeout: 15000 });
-    const sugReq = await lastRequest();
-    const sugPrompt = systemOf(sugReq);
-    assert(sugReq.messages.at(-1).content === "Write the rule for this BRDP.", "corrected rule: Suggest Rule's own message");
-    assert(sugPrompt.includes("PREVIOUS RULE FAILED ITS TEST") && sugPrompt.includes('<objectPath allowedObjectFlag="2">//emphasis</objectPath>') && sugPrompt.includes("Diagnosis: MOCK-REVIEW"), "Suggest Rule prompt carries the failed rule, its examples and the diagnosis");
-    const suggested = await page.locator('[class*="suggestionCode"]').first().textContent();
-    assert(suggested.includes('allowedObjectFlag="0">//emphasis<'), `corrected rule is flag 0 (${suggested})`);
-    // Test the corrected suggestion straight away, in the suggestion's own
-    // box (the Draft rule's panel is closed first).
     await panel.getByRole("button", { name: "Close" }).click();
-    const sugBox = page.locator('xpath=//*[@data-testid="rule-corrected-note"]/..');
-    await sugBox.getByRole("button", { name: "Test rule" }).click();
-    const sugPanel = sugBox.getByTestId("rule-test-panel");
-    await sugPanel.getByTestId("rule-test-verdict").waitFor({ timeout: 15000 });
-    assert((await sugPanel.getByTestId("rule-test-description").textContent()).includes("<emphasis> must not appear"), "corrected rule: description says it must not appear");
-    assert((await sugPanel.getByTestId("rule-test-cannot-reject").count()) === 0, "corrected rule: no cannot-reject warning");
-    assert((await sugPanel.getByTestId("rule-test-verdict").textContent()).startsWith("Correct"), `corrected rule: verdict correct (${await sugPanel.getByTestId("rule-test-verdict").textContent()})`);
-    await page.screenshot({ path: shot("rule-test-corrected-rule.png"), fullPage: true });
-    await page.getByRole("button", { name: "Accept", exact: true }).click();
-    await waitIndicator("passed");
-    const a1b = await approvalOf("BRDP-RV-WRONG");
-    assert(a1b.last_test_result === "passed" && a1b.last_test_up_to_date && a1b.rule_xml.includes('allowedObjectFlag="0"'), "accepted corrected rule: Draft, recorded as passed");
 
     // 2. A correct rule with a wrong example (no @emphasisType, expected
     //    rejected): review → example → regenerate with the diagnosis.

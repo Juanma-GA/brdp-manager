@@ -19,7 +19,7 @@
 //   file means (doc-available() is false for it).
 import { DOSSIER_BASE_URI, DOSSIER_MAX_FILES, dossierUri } from './ruleTestSchematron.js';
 import { addMissingCalsColspecs, fixCalsRowSpans, removeSpannedCalsEntries } from '../validation/schemaValidation.js';
-import { liftNestedTopics, looseContainerFor, relocateMisplacedElements, wrapLooseContent } from './schemaPlacement.js';
+import { liftNestedTopics, looseContainerFor, NON_CONTENT_CONTAINERS, relocateMisplacedElements, wrapLooseContent } from './schemaPlacement.js';
 import { applyExampleSchemaFixes } from './exampleSchemaFixes.js';
 import { setRootTitleText } from './topicTitleValue.js';
 
@@ -95,7 +95,7 @@ export function materializeDossierFiles(files, structures, parseXml, { named = n
     }
     let relocated = [];
     if (structure?.models) {
-      const moved = relocateMisplacedElements(content, structure, null);
+      const moved = relocateMisplacedElements(content, structure, null, { avoid: NON_CONTENT_CONTAINERS });
       if (moved.moved.length) {
         content = moved.text;
         relocated = moved.moved;

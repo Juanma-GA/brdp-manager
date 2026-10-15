@@ -707,5 +707,32 @@ const emptyCtx = { elements: [], attributes: [], camelCase: [], phraseCandidates
   assert(marked.elements.includes("if") && marked.attributes.includes("emphasisType") && !marked.phraseCandidates.some((p) => p.name === "if"), "<if> and @x written with markup: unchanged");
 }
 
+// ─── Remates, Part 2: a conjunction is never a name ───────────────────────
+// Real case: "La etiqueta y los numerales…" proposed «¿Quisiste decir @y?»
+// (y is a real DITA attribute: SVG). After a trigger word, a list word or
+// conjunction (y, o, ni, e, u, and, or, nor) is never a candidate and ends
+// the phrase; after a list's comma it ends the list.
+{
+  const vd = JSON.parse(readFileSync(join(__dirname, "../public/schema-vocabulary-dita.json"), "utf8"));
+  const dita = { elements: new Set(vd.elements), attributes: new Set(vd.attributes) };
+  const v42 = JSON.parse(readFileSync(join(__dirname, "../public/schema-vocabulary-4-2.json"), "utf8"));
+  const s42 = { elements: new Set(v42.elements), attributes: new Set(v42.attributes) };
+  assert(dita.attributes.has("y"), "@y does exist in DITA (so only the new rule stops the proposal)");
+  const suggest = (t, v) => resolvePhraseCandidates(extractContextCandidates(t).phraseCandidates, v);
+  assert(suggest("La etiqueta y los numerales deben ir juntos.", dita).length === 0, '"La etiqueta y los numerales…": no chip');
+  assert(extractContextCandidates("La etiqueta y los numerales deben ir juntos.").phraseCandidates.length === 0, "…and no candidate at all");
+  for (const w of ["y", "o", "ni", "e", "u", "and", "or", "nor", "Y", "AND"]) {
+    assert(extractContextCandidates(`el elemento ${w} table`).phraseCandidates.length === 0, `a conjunction right after the trigger ends the phrase: "${w}"`);
+  }
+  assert(extractContextCandidates("the element or attribute name").phraseCandidates.length === 0, '"the element or attribute name": no candidate (or)');
+  const tbl = suggest("el elemento table", s42);
+  assert(tbl.length === 1 && tbl[0].name === "table" && tbl[0].type === "element", '"el elemento table": chip as today');
+  const appl = suggest("el atributo applicRefId debe indicarse", s42);
+  assert(appl.length === 1 && appl[0].name === "applicRefId", '"el atributo applicRefId": chip as today');
+  assert(extractContextCandidates("the elements cl, pl and ip").phraseCandidates.map((p) => p.name).join() === "cl,pl,ip", '"the elements cl, pl and ip": as today');
+  assert(extractContextCandidates("los atributos cl, y pl").phraseCandidates.map((p) => p.name).join() === "cl", "a conjunction after a list's comma ends the list");
+  assert(extractContextCandidates("los elementos cl, pl o ip").phraseCandidates.map((p) => p.name).join() === "cl,pl,ip", '"o" between items still continues a list');
+}
+
 console.log(failures === 0 ? "\nALL CHECKS PASSED\n" : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

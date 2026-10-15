@@ -5356,7 +5356,7 @@
       "id": "rule-test-4-2-cmp-forbidden-schema-icnmetadata",
       "type": "rule-test",
       "standard": "S1000D 4.2",
-      "description": "CMP 4.2 pass, BRDP-EXT-00086: //icnMetadataFile in an icnmetadata context block. The application cannot build a valid minimal ICN metadata file: not executable with the reason, no LLM call.",
+      "description": "CMP 4.2 pass, BRDP-EXT-00086: //icnMetadataFile in an icnmetadata context block. Since the identification sections of icnmetadata/comment/SCORM, the application builds the minimal ICN metadata file: tested like the other forbidden schemas, minimal documents built by the app, no LLM call, Correct.",
       "brdp": {
         "identifier": "BRDP-EVAL-RT-CMP86",
         "title": "Use of the ICN metadata schema",
@@ -5367,9 +5367,11 @@
       "rule": "<contextRules rulesContext=\"http://www.s1000d.org/S1000D_4-2/xml_schema_flat/icnmetadata.xsd\"><structureObjectRuleGroup><structureObjectRule><objectPath allowedObjectFlag=\"0\">//icnMetadataFile</objectPath><objectUse>BREX-CMMST-00006: The icnmetadata schema is not allowed.</objectUse></structureObjectRule></structureObjectRuleGroup></contextRules>",
       "checks": [
         {
-          "type": "rule_test_not_executable",
-          "pattern": "only asks whether the document is of the icnmetadata schema",
-          "note": "not executable with the reason, no LLM call"
+          "type": "rule_test_examples_by_app",
+          "note": "minimal documents built by the app, no LLM call"
+        },
+        {
+          "type": "rule_test_verdict_correct"
         }
       ]
     },

@@ -533,6 +533,11 @@ const SKIP_WORDS = new Set([
 // pl ni ip" / "cl, pl and ip") -- only interpreted as continuators
 // immediately after a candidate, never elsewhere in the sentence.
 const LIST_CONTINUATION_WORDS = new Set(['y', 'o', 'ni', 'and', 'or']);
+// Remates, Part 2: a list word or conjunction is never a name. Right after
+// a trigger word it ends the phrase ("La etiqueta y los numerales…" never
+// proposes @y / <y>); after a list's comma it ends the list.
+const CONJUNCTION_WORDS = new Set(['y', 'o', 'ni', 'e', 'u', 'and', 'or', 'nor']);
+const isConjunction = (token) => token?.type === 'word' && CONJUNCTION_WORDS.has(token.value.toLowerCase());
 
 // Each word knows whether it is written as markup (`<x`, `</x`, `@x`, or
 // followed by `>`), which ends a list (see extractPhraseCandidates).
@@ -607,6 +612,7 @@ function extractPhraseCandidates(text) {
       continue;
     }
     if (j >= tokens.length || tokens[j].type !== 'word') continue;
+    if (isConjunction(tokens[j])) continue; // "la etiqueta y los numerales": no name
     if (TRIGGER_WORDS.has(tokens[j].value.toLowerCase())) continue; // re-anchor: let the outer loop reach this trigger itself
     if (brokenBetween(source, t, tokens[j])) continue; // another part of the sentence: not the trigger's name
 
@@ -632,7 +638,7 @@ function extractPhraseCandidates(text) {
       }
       if (!isContinuator) break;
       k2 = skipSkipWords(tokens, k2);
-      if (k2 >= tokens.length || tokens[k2].type !== 'word' || TRIGGER_WORDS.has(tokens[k2].value.toLowerCase())) break;
+      if (k2 >= tokens.length || tokens[k2].type !== 'word' || isConjunction(tokens[k2]) || TRIGGER_WORDS.has(tokens[k2].value.toLowerCase())) break;
       if (brokenBetween(source, previous, tokens[k2])) break; // a list does not continue past a parenthesis, colon…
       candidates.push({ name: tokens[k2].value, type });
       previousMarked = tokens[k2].marked;

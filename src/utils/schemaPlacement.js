@@ -530,9 +530,17 @@ function findMisplaced(node, parentName, elements, skip, structure) {
 // or more than one, or a way whose containers cannot be built. The moved
 // element keeps its text exactly; the new containers are written on one line.
 // → { text, moved: [{ element, parent, path }] }.
-export function relocateMisplacedElements(text, structure, parentName) {
+// `avoid` (SCH-DITA: NON_CONTENT_CONTAINERS): elements a way never goes
+// through -- a way only through them counts as no way.
+export function relocateMisplacedElements(text, structure, parentName, { avoid = null } = {}) {
   const original = String(text ?? '');
   const elements = structure?.elements || {};
+  const wayElements = (target) => {
+    if (!avoid?.size) return elements;
+    const out = {};
+    for (const [name, el] of Object.entries(elements)) if (name === target || !avoid.has(name)) out[name] = el;
+    return out;
+  };
   const models = structure?.models || {};
   if (!structure?.models || !Object.keys(models).length) return { text: original, moved: [] };
   let current = original;
@@ -544,7 +552,7 @@ export function relocateMisplacedElements(text, structure, parentName) {
     const found = findMisplaced(top, parentName, elements, skip, structure);
     if (!found) break;
     const { node, parent, parentName: pName } = found;
-    const { paths, complete } = simplePaths(elements, [pName], node.name, 2);
+    const { paths, complete } = simplePaths(wayElements(node.name), [pName], node.name, 2);
     if (paths.length !== 1 || !complete) {
       skip.add(`${pName}>${node.name}@${node.start}`);
       continue;
@@ -705,7 +713,7 @@ export function placeSentence(place) {
 // goes to the correction round with the place). Nothing either with several
 // possible parents, or several (or no) instances of the parent.
 // → { text, moved: [{ element, parent, path }] }
-export function relocateToOnlyParent(text, structure, parentName, names, keepsResult = () => true) {
+export function relocateToOnlyParent(text, structure, parentName, names, keepsResult = () => true, { avoid = null } = {}) {
   const original = String(text ?? '');
   const elements = structure?.elements || {};
   const models = structure?.models || {};
@@ -740,7 +748,7 @@ export function relocateToOnlyParent(text, structure, parentName, names, keepsRe
     const { node, parentName: wrong } = found;
     const key = `${wrong}>${node.name}@${node.start}`;
     const parents = Object.keys(elements).filter((p) => (elements[p].children || []).includes(node.name));
-    const targets = parents.length === 1 ? treeNodes(top).filter((n) => n.name === parents[0] && !n.selfClosing && n !== top) : [];
+    const targets = parents.length === 1 && !avoid?.has(parents[0]) ? treeNodes(top).filter((n) => n.name === parents[0] && !n.selfClosing && n !== top) : [];
     if (targets.length !== 1) {
       skip.add(key);
       continue;
@@ -772,9 +780,28 @@ export function relocateToOnlyParent(text, structure, parentName, names, keepsRe
 
 // ─── Contenido suelto: wrapping loose children in a container ───────────────
 
+// Remates del test de reglas, Part 1: DITA elements that hold something
+// that is not the topic's content -- the application never puts loose
+// content in them (wrapLooseContent, looseContainerFor) nor builds a way
+// through them (relocateMisplacedElements, relocateToOnlyParent with
+// `avoid`). Real case: a <table> written directly in <cmd> ended up in
+// <draft-comment>, the only child of <cmd> that admits a table. Each with
+// why it is not content:
+export const NON_CONTENT_CONTAINERS = new Map([
+  ['draft-comment', 'a comment for the authors; publishing drops it'],
+  ['required-cleanup', 'migrated content to be cleaned up; publishing drops it'],
+  ['data', 'metadata about the content, not the content itself'],
+  ['data-about', 'metadata about another element'],
+  ['foreign', 'content in another vocabulary (MathML, SVG…)'],
+  ['unknown', 'content of an unknown type that processors skip'],
+  ['indexterm', 'an index entry, not text in place'],
+  ['sort-as', 'a sorting key, not displayed'],
+]);
+
 // The children C of `parent` that can take every one of `names`: in the
 // parent's model, no required attribute without a value, every required
-// child covered by `names` (never fabricated), each of `names` allowed in C.
+// child covered by `names` (never fabricated), each of `names` allowed in C,
+// never a NON_CONTENT_CONTAINERS element.
 // → [{ name, ord }] in the XSD's order.
 function containerCandidates(structure, parent, names) {
   const elements = structure?.elements || {};
@@ -784,7 +811,7 @@ function containerCandidates(structure, parent, names) {
   const allowedIn = (p, name) => Boolean(elements[p]?.children?.includes(name));
   return order
     .filter((c, i) => {
-      if (order.indexOf(c) !== i || !allowedIn(parent, c) || !models[c] || !elements[c]) return false;
+      if (order.indexOf(c) !== i || NON_CONTENT_CONTAINERS.has(c) || !allowedIn(parent, c) || !models[c] || !elements[c]) return false;
       if ((models[c].attributes || []).some(([, v]) => v == null)) return false;
       if (![...set].every((n) => allowedIn(c, n))) return false;
       const required = models[c].required || [];

@@ -11,8 +11,8 @@ import fs from 'node:fs';
 import { DOMParser } from '@xmldom/xmldom';
 import { generateRuleTestExamples } from '../src/utils/ruleTestRun.js';
 import { analyzeRule } from '../src/utils/ruleTestEngine.js';
-import { exampleProblems, ruleSelectionSignature, ruleTestVerdict, validateExample } from '../src/utils/ruleTest.js';
-import { DITA_TITLE_ELEMENTS, looseContainerFor, wrapLooseContent } from '../src/utils/schemaPlacement.js';
+import { exampleProblems, outerPlaceHint, ruleSelectionSignature, ruleTestVerdict, validateExample } from '../src/utils/ruleTest.js';
+import { DITA_TITLE_ELEMENTS, looseContainerFor, NON_CONTENT_CONTAINERS, relocateMisplacedElements, relocateToOnlyParent, wrapLooseContent } from '../src/utils/schemaPlacement.js';
 import { buildRuleTestReviewPrompt, mismatchedExamples } from '../src/prompts/ruleTestReviewPrompt.js';
 import { exampleAdjustmentNotes } from '../src/utils/exampleAdjustments.js';
 import { dossierSheetShapes } from '../src/utils/ruleTestDossier.js';
@@ -309,6 +309,49 @@ for (const [id, kind, label] of [['BRDP-EXT-00014', 'fig', 'figure'], ['BRDP-EXT
   const many = { label: 'x', expected: 'accept', xml: '<x/>', colspecsAdded: 2, relocated: [{ element: 'a', path: ['b', 'c', 'a'] }], topicTitleSet: 'T', sectionValuesSet: [{ element: 'dmCode', attribute: 'infoCode', value: '0A2' }], requiredAttributesAdded: [{ element: 'note', attributes: ['type'] }], valuesReplaced: [{ element: 'note', attribute: 'type', from: 'x', to: 'note' }], morerowsLowered: [2], spannedEntriesRemoved: [3], emptyRowsRemoved: [4], colsRaised: [{ from: 1, to: 2 }], textRemoved: ['pmCode'] };
   const all = exampleAdjustmentNotes(many, en);
   check('every kind of adjustment gives a note', all.length === 11 && all.every((n) => /^(Adjusted|Corrected) by the app/.test(n)), JSON.stringify(all, null, 1));
+}
+
+// ─── 11. Remates, Part 1: never a non-content container ────────────────────
+{
+  check('NON_CONTENT_CONTAINERS: the minimum list, each with its reason',
+    ['draft-comment', 'required-cleanup', 'data', 'data-about', 'foreign', 'unknown', 'indexterm', 'sort-as'].every((n) => typeof NON_CONTENT_CONTAINERS.get(n) === 'string' && NON_CONTENT_CONTAINERS.get(n).length > 10));
+  // The real case: a <table> written directly in <cmd>. The only child of
+  // <cmd> that admits a table is <draft-comment>.
+  const cmdTable = '<step><cmd>Torque the bolts. <table><tgroup cols="1"><tbody><row><entry><p>A</p></entry></row></tbody></tgroup></table></cmd></step>';
+  check('real structure: <draft-comment> is the only child of <cmd> that admits <table>',
+    task.elements.cmd.children.filter((c) => (task.elements[c]?.children || []).includes('table')).join() === 'draft-comment');
+  const w = wrapLooseContent(cmdTable, task, 'steps', { related });
+  check('<table> loose in <cmd> → not wrapped (never in <draft-comment>)', w.wrapped.length === 0 && w.text === cmdTable && !w.text.includes('draft-comment'), w.text);
+  check('…nor moved down a way through <draft-comment> (DITA avoid)', relocateMisplacedElements(cmdTable, task, 'steps', { avoid: NON_CONTENT_CONTAINERS }).moved.length === 0);
+  check('looseContainerFor(<cmd>, [table]) → none', looseContainerFor(task, 'cmd', ['table'], related) === null);
+  const xml = `<task id="t"><title>T</title><taskbody><steps>${cmdTable}</steps></taskbody></task>`;
+  const v = validateExample(xml, vocabDita, parseXml, task, { titleHints: true });
+  const lines = exampleProblems(v, { standard: STANDARD, schema: 'task', structure: task });
+  check('correction: says where <table> can go inside <step>, <info> first (after <cmd>)',
+    lines.includes('<table> is not allowed inside <cmd>. Inside <step> it can go in <info>, <itemgroup>, <stepxmp> or <tutorialinfo> (after <cmd>); +3 more.'), lines.join('\n'));
+  check('…never names a non-content element', !lines.some((l) => /draft-comment|required-cleanup/.test(l.split('card of')[0])), lines.join('\n'));
+  check('…and carries the card of <step> (the parent one level up)', lines.some((l) => l.startsWith('card of <step> in the task schema: allowed children: choices, choicetable, cmd')), lines.join('\n'));
+  const brex = validateExample(xml, vocabDita, parseXml, task, {});
+  check('without titleHints (BREX) no outer-place hint', !exampleProblems(brex, { standard: STANDARD, schema: 'task', structure: task }).some((l) => l.includes('Inside <step>')));
+  // Only non-content containers available (synthetic): no wrap.
+  const syn = {
+    elements: { root: { children: ['body'] }, body: { children: ['draft-comment', 'data', 'box'] }, 'draft-comment': { children: ['p', 'q'] }, data: { children: ['p', 'q'] }, box: { children: ['p'] }, p: { children: [] }, q: { children: [] } },
+    models: { root: { order: ['body'], required: [], attributes: [] }, body: { order: ['draft-comment', 'data', 'box'], required: [], attributes: [] }, 'draft-comment': { order: ['p', 'q'], required: [], attributes: [] }, data: { order: ['p', 'q'], required: [], attributes: [] }, box: { order: ['p'], required: [], attributes: [] }, p: { order: [], required: [], attributes: [] }, q: { order: [], required: [], attributes: [] } },
+  };
+  const only = '<root><body><q>x</q></body></root>';
+  check('synthetic: only non-content containers admit <q> → not wrapped', wrapLooseContent(only, syn, null).wrapped.length === 0);
+  check('synthetic: <p> → the content container <box>, never <draft-comment>/<data>', wrapLooseContent('<root><body><p>x</p></body></root>', syn, null).wrapped[0]?.container === 'box');
+  // A single way down through a non-content element: moved without avoid
+  // (S1000D, unchanged), not moved with it (SCH-DITA).
+  const one = { elements: { root: { children: ['body'] }, body: { children: ['data'] }, data: { children: ['q'] }, q: { children: [] } }, models: { root: { order: ['body'], required: [], attributes: [] }, body: { order: ['data'], required: [], attributes: [] }, data: { order: ['q'], required: [], attributes: [] }, q: { order: [], required: [], attributes: [] } } };
+  check('relocation without avoid: moved through <data> (as before, S1000D)', relocateMisplacedElements('<body><q>x</q></body>', one, 'root').moved.length === 1);
+  check('relocation with avoid: not moved', relocateMisplacedElements('<body><q>x</q></body>', one, 'root', { avoid: NON_CONTENT_CONTAINERS }).moved.length === 0);
+  check('only-parent move into a non-content parent: not with avoid', relocateToOnlyParent('<body><data></data><q>x</q></body>', one, 'root', ['q'], () => true, { avoid: NON_CONTENT_CONTAINERS }).moved.length === 0
+    && relocateToOnlyParent('<body><data></data><q>x</q></body>', one, 'root', ['q']).moved.length === 1);
+  // The dossier prompt's sheet shapes never name a non-content container.
+  const shapes = JSON.stringify(dossierSheetShapes(structures, ['table', 'fig', 'p']));
+  check('sheet shapes: no non-content container', ![...NON_CONTENT_CONTAINERS.keys()].some((n) => shapes.includes(`/${n}`)), shapes);
+  check('outerPlaceHint: direct + before/after', outerPlaceHint({ element: 'x', parent: 'p', grandparent: 'g', direct: true, places: [{ name: 'a', side: 'before' }, { name: 'b', side: 'after' }] }) === 'Inside <g> it can go directly in <g>, or in <b> (after <p>), or in <a> (before <p>).');
 }
 
 // ─── 10. Texts ──────────────────────────────────────────────────────────────

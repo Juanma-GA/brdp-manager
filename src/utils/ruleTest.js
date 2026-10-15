@@ -36,7 +36,7 @@ import {
 import { CONTENT_NODE_MARK, SKELETON_TEXT_SUFFIX, assembleExample, attributeCarrierLines, metadataXml, nestingPath, normalizeBrexReferenceCode, ruleTargets } from './ruleTestSkeleton.js';
 import { setSectionValuesInDocument, setSectionValuesInText } from './ownSectionValues.js';
 import { setRootTitleText } from './topicTitleValue.js';
-import { liftNestedTopics, placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence, wrapLooseContent } from './schemaPlacement.js';
+import { liftNestedTopics, NON_CONTENT_CONTAINERS, placeSentence, relocateMisplacedElements, relocateToOnlyParent, routesThrough, sectionRouteSentence, wrapLooseContent } from './schemaPlacement.js';
 import { coveredRelationAlternatives } from '../validation/schemaCoverage.js';
 import { applyExampleSchemaFixes, namedByRuleOrProposal } from './exampleSchemaFixes.js';
 import {
@@ -264,14 +264,17 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
   // the identification and status section (inside the root). With more than
   // one way nothing is moved and the example goes to the correction round.
   const relocated = [];
+  // Remates, Part 1: in DITA a way never goes through a non-content
+  // element (<draft-comment>…); S1000D unchanged.
+  const avoid = setup.rule?.format === 'SCH-DITA' ? NON_CONTENT_CONTAINERS : null;
   if (entry.structure?.models) {
-    const inContent = relocateMisplacedElements(adjusted.content, entry.structure, entry.placement.insertion || null);
+    const inContent = relocateMisplacedElements(adjusted.content, entry.structure, entry.placement.insertion || null, { avoid });
     if (inContent.moved.length) {
       adjusted.content = inContent.text;
       relocated.push(...inContent.moved);
     }
     if (entry.placement.metadata?.insertion && example.metadata != null) {
-      const inSection = relocateMisplacedElements(example.metadata, entry.structure, entry.placement.root);
+      const inSection = relocateMisplacedElements(example.metadata, entry.structure, entry.placement.root, { avoid });
       if (inSection.moved.length) {
         adjusted.metadata = inSection.text;
         relocated.push(...inSection.moved);
@@ -295,7 +298,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     const inContent = relocateToOnlyParent(adjusted.content, entry.structure, entry.placement.insertion || null, rule.names, (before, after) => {
       const a = decides(before, adjusted.metadata);
       return a !== null && a === decides(after, adjusted.metadata);
-    });
+    }, { avoid });
     if (inContent.moved.length) {
       adjusted.content = inContent.text;
       relocated.push(...inContent.moved);
@@ -304,7 +307,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
       const inSection = relocateToOnlyParent(adjusted.metadata, entry.structure, entry.placement.root, rule.names, (before, after) => {
         const a = decides(adjusted.content, before);
         return a !== null && a === decides(adjusted.content, after);
-      });
+      }, { avoid });
       if (inSection.moved.length) {
         adjusted.metadata = inSection.text;
         relocated.push(...inSection.moved);
@@ -518,14 +521,18 @@ export function validateExample(xml, vocabulary, parseXml = parseXmlDocument, st
     // GMC, Part 1.3: a "rootAttributes" name the application never writes.
     ...(options.rootAttributeProblems || []),
   ];
+  // (SCH-DITA, the titleHints flag: the DITA-only correction hints)
+  const outer = structure && options.titleHints ? outerPlaces(doc, structureProblems, structure) : [];
   return {
     wellFormed: true,
     error: null,
     names,
     structure: structureProblems,
-    cards: structure ? elementCards(doc, names, structureProblems, structure) : [],
+    // (with an outer place, the card of the parent one level up too)
+    cards: structure ? elementCards(doc, names, structureProblems, structure, outer.map((x) => x.grandparent)) : [],
     attributeContexts: structure ? attributeContexts(doc, structureProblems, options.skeletonNodePaths || []) : [],
     looseTitles: structure && options.titleHints ? looseTitles(doc, structureProblems, structure) : [],
+    outerPlaces: outer,
     unknownSchema: null,
     runnable: namesOk && structureProblems.length === 0,
   };
@@ -560,6 +567,61 @@ function looseTitles(doc, problems, structure) {
 // The correction line for a loose <title> (looseTitles).
 export function looseTitleHint(next) {
   return `If this <title> belongs to the <${next}> that follows, write it as the first child of that <${next}>.`;
+}
+
+// ─── Remates, Part 1: where an element can go, one level up ─────────────────
+// A <table> written directly in <cmd>: no content container of <cmd> admits
+// it (only <draft-comment>, never used: NON_CONTENT_CONTAINERS), so
+// wrapLooseContent leaves it and the correction round says where it can go
+// inside the parent of <cmd> in the example (<step>): its children that
+// admit it -- read from the parent's card -- with their position next to
+// <cmd> by the XSD's order. For each "<X> is not allowed inside <P>" problem
+// where no content child of <P> admits <X>, P's parent G in the example
+// (the first such <P> whose parent is in the structure):
+// { element, parent, grandparent, direct, places: [{ name, side }] }
+// (direct: G itself admits <X>; side: 'after' | 'before' <P>). SCH-DITA only.
+const OUTER_PLACES_MAX = 4;
+function outerPlaces(doc, problems, structure) {
+  const elements = structure?.elements || {};
+  const models = structure?.models || {};
+  const out = [];
+  for (const p of problems) {
+    if (p.kind !== 'notAllowed' || out.some((x) => x.element === p.element && x.parent === p.parent)) continue;
+    const inside = (elements[p.parent]?.children || []).some((c) => !NON_CONTENT_CONTAINERS.has(c) && (elements[c]?.children || []).includes(p.element));
+    if (inside) continue;
+    const el = elementsNamed(doc, (e) => e.nodeName === p.element && e.parentNode?.nodeName === p.parent)[0];
+    const g = el?.parentNode?.parentNode;
+    if (!g || g.nodeType !== 1 || !elements[g.nodeName]) continue;
+    const G = g.nodeName;
+    const order = models[G]?.order || [];
+    const at = order.indexOf(p.parent);
+    const places = (elements[G].children || [])
+      .filter((c) => c !== p.parent && !NON_CONTENT_CONTAINERS.has(c) && (elements[c]?.children || []).includes(p.element))
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+      .map((name) => ({ name, side: at >= 0 && order.indexOf(name) >= 0 ? (order.indexOf(name) > at ? 'after' : 'before') : null }));
+    const direct = (elements[G].children || []).includes(p.element);
+    if (!direct && places.length === 0) continue;
+    out.push({ element: p.element, parent: p.parent, grandparent: G, direct, places });
+  }
+  return out;
+}
+
+// "Inside <step> it can go in <info>, <itemgroup> or <stepxmp> (after
+// <cmd>), or in <note> (before <cmd>); +3 more." -- the places after <P>
+// first, the nearest first; then those before it, the nearest first.
+export function outerPlaceHint(place) {
+  const list = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0]);
+  const after = place.places.filter((x) => x.side !== 'before');
+  const before = place.places.filter((x) => x.side === 'before').reverse();
+  const shown = [...after, ...before].slice(0, OUTER_PLACES_MAX);
+  const more = place.places.length - shown.length;
+  const a = shown.filter((x) => x.side !== 'before').map((x) => `<${x.name}>`);
+  const b = shown.filter((x) => x.side === 'before').map((x) => `<${x.name}>`);
+  const parts = [];
+  if (place.direct) parts.push(`directly in <${place.grandparent}>`);
+  if (a.length) parts.push(`in ${list(a)}${shown.some((x) => x.side === 'after') ? ` (after <${place.parent}>)` : ''}`);
+  if (b.length) parts.push(`in ${list(b)} (before <${place.parent}>)`);
+  return `Inside <${place.grandparent}> it can go ${parts.join(', or ')}${more > 0 ? `; +${more} more` : ''}.`;
 }
 
 // ─── Where an attribute can go, from where the LLM put it ──────────────────
@@ -626,7 +688,7 @@ function elementsNamed(doc, predicate) {
   return out;
 }
 
-function elementCards(doc, names, problems, structure) {
+function elementCards(doc, names, problems, structure, extra = []) {
   const wanted = [];
   const want = (name) => {
     if (name && structure.elements[name] && !wanted.includes(name)) wanted.push(name);
@@ -648,6 +710,7 @@ function elementCards(doc, names, problems, structure) {
       for (const el of elementsNamed(doc, (e) => e.nodeName === p.element)) want(el.parentNode?.nodeName);
     }
   }
+  for (const name of extra) want(name);
   for (const w of names.wrongType || []) {
     if (w.usedAs === 'element') {
       // <x> written as an element, but x is an attribute: the card of the
@@ -1086,6 +1149,13 @@ export function exampleProblems(validation, { standard, schema, ruleNames = null
     const element = ['unknownElement', 'notAllowed', 'unknownAttribute'].includes(p.kind) ? p.element : null;
     if (p.kind === 'unknownAttribute' && rootElements.has(p.element)) {
       push(formatStructureProblem(p, schema));
+      continue;
+    }
+    // Remates, Part 1 (SCH-DITA): no content container inside the parent
+    // admits it -- where it can go one level up (outerPlaces).
+    const outer = p.kind === 'notAllowed' ? (validation.outerPlaces || []).find((x) => x.element === p.element && x.parent === p.parent) : null;
+    if (outer) {
+      push(`${formatStructureProblem(p, schema)}. ${outerPlaceHint(outer)}`);
       continue;
     }
     push(offer(formatStructureProblem(p, schema), element));
