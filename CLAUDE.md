@@ -21,6 +21,8 @@ El trabajo activo vive en la rama `v2-multiproyecto`. La app v1 (Express + SQLit
 - **Import de Excel** (`backend/app/services/import_jobs.py` + `backend/app/schemas/brdp_import.py`) es un job asíncrono en background (`BackgroundTasks`, no bloqueante): `/import/analyze` (fase 1, solo lectura, devuelve avisos) → `/import/apply` (fase 2, devuelve `job_id`, se sondea `/import/status/{job_id}`). Un `running` job antiguo (>60 min, `STALE_JOB_MINUTES`) se marca `failed` automáticamente al leerlo (`_reap_if_stale`) — cubre crashes; una interrupción limpia (`asyncio.CancelledError`, p.ej. un `--reload` de uvicorn) tiene su propio handler explícito porque `CancelledError` hereda de `BaseException`, no de `Exception`, desde Python 3.8.
 - **Documentación de diseño original** (útil como contexto histórico, pero YA DESACTUALIZADA frente al código real tras ~106 rondas de iteración — no la trates como fuente de verdad, el código y los tests son la fuente de verdad): `docs/v2/01-arquitectura-y-estructura.md` (snapshot de v1, la base de la decisión de reescribir), `docs/v2/02-analisis-aacf-requisitos-no-cumplidos.md`, `docs/v2/03-especificacion-v2-para-claude-code.md` (spec original de v2).
 
+**Instalación en servidor (producción, sin Docker) y migración de datos**: guías para IT en [`docs/instalacion/`](docs/instalacion/README.md) (Ubuntu/Debian, RHEL 9, Windows Server, y paso de la base de Docker al servidor). Si cambia algo que afecta al despliegue (variables de `backend/app/core/config.py`, scripts de `backend/scripts/`, requisitos del proxy, versiones), actualízalas.
+
 ### Cómo levantar el entorno de desarrollo real (v2)
 
 ```bash
