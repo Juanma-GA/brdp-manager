@@ -1009,11 +1009,13 @@ export function wrapLooseContent(text, structure, parentName, { keeps = null, re
 // topic of a content whose parent is the skeleton's body stays, and goes to
 // the correction round). Two levels (a nested topic inside a nested one's
 // body) are lifted pass after pass. Only when P stays valid for its model
-// (its children in the XSD's order, nested topics last, within the maxima),
-// and when `keeps(before, after)` (the caller runs the rule before and
-// after) accepts it; otherwise nothing.
+// (its children in the XSD's order, nested topics last, within the maxima);
+// otherwise nothing. Unlike wrapLooseContent, no check that the rule's
+// result stays the same: the position inside the body is not valid for the
+// schema, so the rule's result there is not one to keep (a rule that reads
+// the first-level nested topics of a sheet only sees them once lifted).
 // → { text, lifted: [{ element, body, parent }] }
-export function liftNestedTopics(text, structure, { keeps = null } = {}) {
+export function liftNestedTopics(text, structure) {
   const original = String(text ?? '');
   const nesting = structure?.nesting || {};
   const models = structure?.models || {};
@@ -1110,7 +1112,7 @@ export function liftNestedTopics(text, structure, { keeps = null } = {}) {
     const counts = {};
     for (const c of parentNode.children) counts[c.name] = (counts[c.name] || 0) + 1;
     const okMax = Object.entries(models[p.name]?.max || {}).every(([name, m]) => (counts[name] || 0) <= m);
-    if (!okOrder || !okMax || (keeps && !keeps(current, after))) {
+    if (!okOrder || !okMax) {
       refuse();
       continue;
     }

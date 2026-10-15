@@ -147,16 +147,15 @@ export function wrapDossierFiles(files, keeps = null, structures = null) {
 }
 
 // Un topic anidado dentro del cuerpo se sube (schemaPlacement.js
-// liftNestedTopics) in each file, before the wrap and with the same check
-// (`keeps(path, before, after, files)`: the rule on the whole dossier). A
-// file gets `nestedLifted` ([{ element, body, parent }]) for its note.
-export function liftDossierFiles(files, keeps = null) {
+// liftNestedTopics) in each file, before the wrap -- without the wrap's
+// check that the rule's result stays the same (the position inside the body
+// is not valid for the schema). A file gets `nestedLifted`
+// ([{ element, body, parent }]) for its note.
+export function liftDossierFiles(files) {
   const out = (files || []).map((f) => ({ ...f }));
   out.forEach((file, i) => {
     if (!file.structure?.nesting) return;
-    const r = liftNestedTopics(file.content, file.structure, {
-      keeps: keeps ? (before, after) => keeps(file.path, before, after, out) : null,
-    });
+    const r = liftNestedTopics(file.content, file.structure);
     if (!r.lifted.length) return;
     out[i] = { ...file, content: r.text, xml: r.text, nestedLifted: r.lifted };
   });

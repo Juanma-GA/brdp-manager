@@ -4666,6 +4666,46 @@
       ]
     },
     {
+      "id": "rule-test-dita3-nested-topic-first-level",
+      "type": "rule-test",
+      "standard": "DITA 1.3 Xpath3.0",
+      "description": "Subir topics anidados aunque cambie el resultado de la regla: a generic rule (reconstructed, no client identifiers) on the root's first-level nested topics -- a procedure has at most three first-level <concept outputclass=\"numbered\"> steps. The simulator, as Mistral did, writes the steps inside <conbody> and never corrects them. Inside <conbody> the rule does not see them, so the lift changes its result; it is done anyway (that position is not valid for the schema), with no correction round.",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-FIRSTLEVEL",
+        "title": "Number of steps of a procedure",
+        "definition": "Decide how many first-level steps a procedure may have.",
+        "proposal": "A procedure has at most three first-level steps.",
+        "validation": "Validated"
+      },
+      "rule": "<sch:pattern xmlns:sch=\"http://purl.oclc.org/dsdl/schematron\" id=\"p-BRDP-EVAL-RT-FIRSTLEVEL\"><sch:rule context=\"/concept\"><sch:assert id=\"BRDP-EVAL-RT-FIRSTLEVEL\" role=\"error\" test=\"count(concept[@outputclass = 'numbered']) le 3\">A procedure has at most 3 first-level steps.</sch:assert></sch:rule></sch:pattern>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid",
+          "note": "the LLM's answer is valid JSON with examples"
+        },
+        {
+          "type": "rule_test_app_fixes",
+          "lifted": [
+            "concept"
+          ],
+          "noCorrection": true,
+          "note": "the application moves the nested <concept> out of <conbody>, with no correction round, also in the example whose result changes"
+        },
+        {
+          "type": "rule_test_examples_valid",
+          "note": "every example passes the XML, vocabulary and structure checks"
+        },
+        {
+          "type": "rule_test_accept_and_reject",
+          "note": "at least one example meant to be accepted and one meant to be rejected"
+        },
+        {
+          "type": "rule_test_verdict_correct",
+          "note": "three first-level steps accepted; four rejected"
+        }
+      ]
+    },
+    {
       "id": "rule-test-navantia-dita3-dossier-missing-file-ext-00015",
       "type": "rule-test",
       "standard": "DITA 1.3 Xpath3.0",

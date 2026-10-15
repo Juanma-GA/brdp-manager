@@ -120,11 +120,6 @@ const step = (id, inner = '') => `<concept id="${id}" outputclass="numbered"><ti
   check('…the correction says where a nested topic goes', lines.some((l) => l.includes('<concept> is not allowed inside <conbody>') && l.endsWith('A nested <concept> goes directly inside its parent <concept>, after <conbody>, never inside it.')), lines.join('\n'));
 }
 {
-  const text = `<concept id="a"><title>A</title><conbody>${step('s1')}</conbody></concept>`;
-  const r = liftNestedTopics(text, concept, { keeps: () => false });
-  check('moving it changes the rule\'s result → not moved', r.lifted.length === 0 && r.text === text);
-}
-{
   // The content of a concept example goes inside the skeleton's <conbody>:
   // a top-level concept's parent is the skeleton.
   const text = `<p>x</p>${step('s1')}`;
@@ -197,6 +192,71 @@ check('EXT-00016: verdict Correct', verdict?.kind === 'correct', JSON.stringify(
   const ex = { label: 'x', expected: 'reject', schema: 'map', content: MAP, files: [{ path: 'fichas/ft-001.dita', content: sheet('2.1') }] };
   const m = materializeExample(ex, setup, parseXml);
   check('not SCH-DITA → nothing moved', !m.files?.[0]?.nestedLifted && m.files?.[0]?.content.includes('<p>Antes de desmontar, véase el paso 2.1.</p><concept'), JSON.stringify(m.files?.[0]?.nestedLifted));
+}
+
+// ─── 4. Subir topics anidados aunque cambie el resultado de la regla ────────
+// A generic rule whose result depends on the root's FIRST-LEVEL nested
+// topics (reconstructed, no client identifiers): inside <conbody> the rule
+// does not see them, so the lift changes its result -- and is done anyway
+// (the position inside the body is not valid for the schema).
+const FIRST_LEVEL = '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron" id="p-FIRSTLEVEL"><sch:rule context="/concept"><sch:assert id="FIRSTLEVEL-1" role="error" test="count(concept[@outputclass = \'numbered\']) le 3">A procedure has at most 3 first-level steps.</sch:assert></sch:rule></sch:pattern>';
+const steps = (n) => Array.from({ length: n }, (_, i) => step(`s${i + 1}`)).join('');
+const procedure = (n) => `<concept id="proc"><title>Pump removal</title><conbody><p>Intro.</p>${steps(n)}</conbody></concept>`;
+const run = async (rule, answer, brdp) => {
+  const calls = [];
+  const r = await generateRuleTestExamples({
+    ruleXml: rule, format: FORMAT, standard: STANDARD, schemaLocation: 'flat', brdp, vocabulary: vocabDita, parseXml,
+    ask: async (messages, systemPrompt) => {
+      calls.push({ messages, systemPrompt });
+      return answer;
+    },
+    fetchSchemaCards, fetchStructure,
+  });
+  return { r, calls, verdict: r.examples ? ruleTestVerdict(r.examples, r.runs, analyzeRule(rule, FORMAT, { parseXml })) : null };
+};
+const STEPS_BRDP = { identifier: 'BRDP-EXT-00900', title: 'Number of steps', definition: 'Decide how many first-level steps a procedure may have.', proposal: 'A procedure has at most three first-level steps.' };
+{
+  const answer = JSON.stringify({ examples: [
+    { label: 'three steps', expected: 'accept', schema: 'concept', content: procedure(3) },
+    { label: 'four steps', expected: 'reject', schema: 'concept', content: procedure(4) },
+  ] });
+  const { r, calls, verdict } = await run(FIRST_LEVEL, answer, STEPS_BRDP);
+  check('first-level steps: one LLM call, no correction round', r.status === 'ready' && calls.length === 1 && !r.correction?.attempted, JSON.stringify([r.status, calls.length, r.correction]));
+  check('first-level steps: the concepts moved in both examples (also the one whose result changes)', r.examples?.[0]?.nestedLifted?.length === 3 && r.examples?.[1]?.nestedLifted?.length === 4, JSON.stringify(r.examples?.map((e) => e.nestedLifted?.length)));
+  check('first-level steps: both valid and run', (r.runs || []).every((x) => x.validation.runnable), JSON.stringify(r.runs?.map((x) => x.validation.structure)));
+  check('first-level steps: 3 accepted, 4 rejected with the rule\'s message', r.runs?.[0]?.result?.status === 'accepted' && r.runs?.[1]?.result?.status === 'rejected' && /at most 3 first-level steps/.test(r.runs[1].result.violations?.[0]?.message || ''), JSON.stringify(r.runs?.map((x) => x.result?.status)));
+  check('first-level steps: verdict Correct', verdict?.kind === 'correct', JSON.stringify(verdict));
+  // The same rule on the content BEFORE the lift: no first-level step is
+  // seen (the result the old check kept), on the lifted one four.
+  const before = parseXml(procedure(4));
+  const after = parseXml(r.examples[1].content);
+  check('…the lift changes what the rule sees (0 → 4 first-level steps)', before.documentElement.getElementsByTagName('conbody')[0].getElementsByTagName('concept').length === 4 && Array.from(after.documentElement.childNodes).filter((n) => n.nodeName === 'concept').length === 4);
+}
+{
+  // The parent would not stay valid (a <title> after <conbody>): not moved,
+  // the correction round as today -- the simulator never corrects.
+  const bad = (n) => `<concept id="proc"><title>Pump removal</title><conbody><p>Intro.</p>${steps(n)}</conbody><title>Again</title></concept>`;
+  const answer = JSON.stringify({ examples: [
+    { label: 'three steps', expected: 'accept', schema: 'concept', content: bad(3) },
+    { label: 'four steps', expected: 'reject', schema: 'concept', content: bad(4) },
+  ] });
+  const { r, calls } = await run(FIRST_LEVEL, answer, STEPS_BRDP);
+  check('parent left invalid → not moved, correction round', !r.examples?.some((e) => e.nestedLifted) && calls.length === 2 && r.correction?.attempted === 2 && r.correction?.fixed === 0, JSON.stringify([calls.length, r.correction?.attempted, r.correction?.fixed]));
+}
+{
+  // A dossier sheet: the rule reads the first-level steps of each sheet.
+  const DOSSIER_RULE = '<sch:pattern xmlns:sch="http://purl.oclc.org/dsdl/schematron" id="p-FIRSTLEVEL-DOSSIER"><sch:let name="fichas" value="for $t in /map//topicref[@href] return (let $u := resolve-uri($t/@href, base-uri($t)) return if (doc-available($u)) then doc($u) else ())"/><sch:rule context="/map"><sch:assert id="FIRSTLEVEL-2" role="error" test="every $f in $fichas satisfies count($f/concept/concept[@outputclass = \'numbered\']) le 3">A sheet has at most 3 first-level steps.</sch:assert></sch:rule></sch:pattern>';
+  const sheetMap = '<map><title>Dossier</title><topicref href="fichas/ft-001.dita"/></map>';
+  const answer = JSON.stringify({ examples: [
+    { label: 'three steps', expected: 'accept', schema: 'map', content: sheetMap, files: [{ path: 'fichas/ft-001.dita', content: procedure(3) }] },
+    { label: 'four steps', expected: 'reject', schema: 'map', content: sheetMap, files: [{ path: 'fichas/ft-001.dita', content: procedure(4) }] },
+  ] });
+  const { r, calls, verdict } = await run(DOSSIER_RULE, answer, STEPS_BRDP);
+  check('dossier: an executable dossier rule', analyzeRule(DOSSIER_RULE, FORMAT, { parseXml }).dossier === true);
+  check('dossier: one LLM call, no correction round', r.status === 'ready' && calls.length === 1 && !r.correction?.attempted, JSON.stringify([r.status, calls.length, r.correction]));
+  check('dossier: the sheet\'s concepts moved in both examples', r.examples?.[0]?.files?.[0]?.nestedLifted?.length === 3 && r.examples?.[1]?.files?.[0]?.nestedLifted?.length === 4, JSON.stringify(r.examples?.map((e) => e.files?.[0]?.nestedLifted?.length)));
+  check('dossier: 3 accepted, 4 rejected', r.runs?.[0]?.result?.status === 'accepted' && r.runs?.[1]?.result?.status === 'rejected', JSON.stringify(r.runs?.map((x) => x.result?.status)));
+  check('dossier: verdict Correct', verdict?.kind === 'correct', JSON.stringify(verdict));
 }
 
 console.log(`${passed} passed, ${failed} failed`);

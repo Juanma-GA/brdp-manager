@@ -338,8 +338,10 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     };
     // Un topic anidado dentro del cuerpo se sube (schemaPlacement.js
     // liftNestedTopics) -- before the wrap: a <concept> in a run of loose
-    // children would leave the whole run without a container.
-    const up = liftNestedTopics(adjusted.content, entry.structure, { keeps });
+    // children would leave the whole run without a container. Without the
+    // wrap's `keeps`: inside the body it is not valid for the schema, so the
+    // rule's result there is not one to keep.
+    const up = liftNestedTopics(adjusted.content, entry.structure);
     if (up.lifted.length) {
       adjusted.content = up.text;
       adjusted.nestedLifted = up.lifted;
@@ -443,7 +445,7 @@ export function materializeExample(example, setup, parseXml = parseXmlDocument) 
     };
     dossier = {
       ...dossier,
-      files: wrapDossierFiles(liftDossierFiles(dossier.files, fileKeeps), fileKeeps, setup.dossier.structures),
+      files: wrapDossierFiles(liftDossierFiles(dossier.files), fileKeeps, setup.dossier.structures),
     };
   }
   // Remates: the levels above the insertion point where the content could

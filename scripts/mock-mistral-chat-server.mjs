@@ -1220,6 +1220,19 @@ function ruleTestReply(systemPrompt, messages) {
         { label: "Part row without quantity", expected: "reject", schema: ditaType, content: wrap("") },
       ]);
     }
+    // Subir topics anidados aunque cambie el resultado de la regla
+    // (BRDP-EVAL-RT-FIRSTLEVEL: a generic rule on the root's first-level
+    // nested topics). As Mistral wrote them: the numbered steps inside the
+    // procedure's <conbody>, and never corrected -- the application moves them
+    // out itself, even though the rule only sees them once moved.
+    if (/context="\/concept"/.test(rule) && /count\(concept\[@outputclass = 'numbered'\]\)/.test(rule)) {
+      const step = (i) => `<concept id="s${i}" outputclass="numbered"><title>Step ${i}</title><conbody><p>Do step ${i}.</p></conbody></concept>`;
+      const procedure = (n) => `<concept id="proc"><title>Pump removal</title><conbody><p>Remove the pump.</p>${Array.from({ length: n }, (_, i) => step(i + 1)).join("")}</conbody></concept>`;
+      return answer([
+        { label: "Three first-level steps", expected: "accept", schema: ditaType, content: procedure(3) },
+        { label: "Four first-level steps", expected: "reject", schema: ditaType, content: procedure(4) },
+      ]);
+    }
     if (/context="step"/.test(rule)) {
       // Mejoras H: told "<step> allows at most 1 <cmd>", the correction
       // merges the two commands into one -- what Mistral did (08/10). The
