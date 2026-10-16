@@ -14,7 +14,6 @@ reads it (tests/_testdb.py).
 import re
 from pathlib import Path
 
-import pytest
 from dotenv import dotenv_values
 
 from app.core.config import Settings

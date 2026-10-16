@@ -29,6 +29,7 @@
 //      test file, not a code bug, and does not block download.
 //
 // Usage: node scripts/verify-dita-xpath3-real-navantia.mjs <path-to-xlsx>
+import fs from "node:fs";
 import { chromium } from "playwright-core";
 import path from "node:path";
 import { shot } from "./lib/shots.mjs";
@@ -56,10 +57,13 @@ async function apiLogin() {
 }
 
 async function main() {
-  const xlsxPath = process.argv[2];
-  if (!xlsxPath) {
-    console.error("Usage: node scripts/verify-dita-xpath3-real-navantia.mjs <path-to-xlsx>");
-    process.exit(1);
+  // The real Navantia Excel (nav_dtm_xpath3_import.xlsx) is customer data and is not in the
+  // repo: pass its path, or set NAVANTIA_XPATH3_XLSX. Without it the script cannot run
+  // here: it says so and exits with 2 ("not run", not a failure of the app).
+  const xlsxPath = process.argv[2] || process.env.NAVANTIA_XPATH3_XLSX;
+  if (!xlsxPath || !fs.existsSync(xlsxPath)) {
+    console.error(`NOT RUN: needs the real Navantia Excel (nav_dtm_xpath3_import.xlsx, not in the repo): node scripts/verify-dita-xpath3-real-navantia.mjs <path-to-xlsx>, or set NAVANTIA_XPATH3_XLSX.${xlsxPath ? ` Not found: ${xlsxPath}` : ""}`);
+    process.exit(2);
   }
   const absXlsxPath = path.resolve(xlsxPath);
 

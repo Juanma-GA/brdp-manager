@@ -8,7 +8,7 @@ checkable against a precomputed ground truth, not just "looks about right".
 Rerunning wipes and recreates the project's BRDPs, so it's safe to reuse
 in a future round without accumulating duplicates.
 
-    cd backend && python scripts/seed_sopte_scale_verification.py
+    cd backend && python scripts/seed_sopte_scale_verification.py [cleanup]
 """
 import asyncio
 import sys
@@ -151,5 +151,19 @@ async def main():
         print(f"  rule_status_counts = to_do:{N_TODO} draft:{N_DRAFT} verified:{N_VERIFIED}")
 
 
+async def cleanup(names) -> None:
+    """`cleanup`: delete the seeded projects (BRDPs, rules and roles go with
+    them: ON DELETE CASCADE)."""
+    from sqlalchemy import delete as _delete
+
+    async with async_session_factory() as db:
+        result = await db.execute(_delete(Project).where(Project.name.in_(list(names))))
+        await db.commit()
+        print(f"Deleted {result.rowcount} seeded project(s)")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    if len(sys.argv) > 1 and sys.argv[1] == "cleanup":
+        asyncio.run(cleanup([PROJECT_NAME]))
+    else:
+        asyncio.run(main())

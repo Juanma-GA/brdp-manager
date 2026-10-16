@@ -78,16 +78,23 @@ async function main() {
     });
     const { access_token } = await loginResp.json();
     const auth = { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" };
-    await fetch(`${API}/api/projects/${projectId}/brdps`, {
+    // Since 2f01e52 Generate writes no document when no rule enters it, so
+    // the BRDP gets a Validated Proposal and a Verified Schematron rule.
+    const brdp = await fetch(`${API}/api/projects/${projectId}/brdps`, {
       method: "POST",
       headers: auth,
-      body: JSON.stringify({ identifier: "BRDP-CFGFIX-1", title: "t", definition: "d" }),
+      body: JSON.stringify({ identifier: "BRDP-CFGFIX-1", title: "t", definition: "d", proposal: "p", validation: "Validated" }),
+    }).then((r) => r.json());
+    const ruleXml = '<sch:pattern id="p-cfgfix"><sch:rule context="note"><sch:assert id="a-cfgfix" test="@type">Each note needs a type.</sch:assert></sch:rule></sch:pattern>';
+    const put = await fetch(`${API}/api/projects/${projectId}/brdps/${brdp.id}/approvals/SCH-DITA`, {
+      method: "PUT",
+      headers: auth,
+      body: JSON.stringify({ rule_xml: ruleXml, status: "approved", source: "manual" }),
     });
+    if (!put.ok) throw new Error(`rule PUT failed: ${put.status} ${await put.text()}`);
 
     await page.goto(`${BASE_URL}/projects/${projectId}/generate`);
     await page.waitForSelector(`p:has-text("DITA 1.3")`, { timeout: 10000 });
-    const onlyValidatedCb = page.locator('input[type="checkbox"]').first();
-    if (await onlyValidatedCb.isChecked()) await onlyValidatedCb.uncheck();
     await page.click('button:has-text("Generate")');
     await page.waitForSelector("pre", { timeout: 15000 });
     const xml = await page.locator("pre").innerText();

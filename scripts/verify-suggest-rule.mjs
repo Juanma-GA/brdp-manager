@@ -14,6 +14,10 @@
 import { chromium } from "playwright-core";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 import { shot } from "./lib/shots.mjs";
+import { seedForThisRun } from "./lib/seeds.mjs";
+
+// Its data, seeded here and removed when the script ends (scripts/lib/seeds.mjs).
+seedForThisRun("seed_suggest_proposal_catalog.py");
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";

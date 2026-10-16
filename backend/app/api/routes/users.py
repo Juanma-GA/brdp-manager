@@ -2,14 +2,14 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import error_detail
-from app.api.deps import get_current_user, project_not_found, require_admin
+from app.api.deps import project_not_found, require_admin
 from app.core.security import generate_temporary_password, hash_password
 from app.db.base import get_db
-from app.models import Project, RefreshToken, User, UserProjectRole
+from app.models import Project, User, UserProjectRole
 from app.repositories.project_repository import (
     ACTIVE_PROJECT_IDS,
     ACTIVE_USER_FILTER,
@@ -19,6 +19,7 @@ from app.repositories.project_repository import (
 )
 from app.schemas.auth import UserOut
 from app.services.audit import record
+from app.services.refresh_tokens import end_sessions
 from app.schemas.user import (
     DeletedUserOut,
     ProjectRoleAssign,
@@ -181,11 +182,7 @@ async def reset_password(
     user.password_hash = hash_password(temporary_password)
     user.must_change_password = True
 
-    await db.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc))
-    )
+    await end_sessions(db, user.id)
     # Never the temporary password in the audit row.
     _record_user(db, _admin, "user.password_reset", user)
 
@@ -284,11 +281,7 @@ async def delete_user(
     user.deleted_at = now
     user.deleted_by = admin.id
     user.deleted_by_email = admin.email
-    await db.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=now)
-    )
+    await end_sessions(db, user.id)
     _record_user(db, admin, "user.trashed", user, {"global_role": user.global_role})
     await db.commit()
 

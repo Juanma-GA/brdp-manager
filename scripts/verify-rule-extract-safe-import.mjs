@@ -313,7 +313,11 @@ async function main() {
     await openHistoryOnEachLoad(page);
     await page.goto(`${BASE_URL}/projects/${ca.id}/records`);
     await page.getByPlaceholder(/Search/).first().fill("-4.1");
-    await page.waitForTimeout(300);
+    // The filter applies after the table has loaded: wait for it, never a fixed time.
+    await page.waitForFunction(() => {
+      const rows = [...document.querySelectorAll("tbody tr")];
+      return rows.length > 0 && rows.every((r) => r.innerText.includes("-4.1"));
+    }, null, { timeout: 15000 }).catch(() => {});
     const shown = await page.locator("tbody tr").allInnerTexts();
     assert(shown.length === 1 && shown[0].includes(b2.identifier), `search "-4.1" finds only ${b2.identifier}`);
     assert((await page.locator("tbody tr").first().getByTestId("catalog-edition-tag").innerText()) === "4.1", "the suffixed BRDP keeps its '4.1' label");

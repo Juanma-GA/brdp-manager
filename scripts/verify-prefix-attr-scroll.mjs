@@ -27,6 +27,10 @@
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
+import { seedForThisRun } from "./lib/seeds.mjs";
+
+// Its data, seeded here and removed when the script ends (scripts/lib/seeds.mjs).
+seedForThisRun("seed_generate_report_scale.py");
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";

@@ -14,6 +14,10 @@
 import { chromium } from "playwright-core";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 import { shot } from "./lib/shots.mjs";
+import { seedForThisRun } from "./lib/seeds.mjs";
+
+// Its data, seeded here and removed when the script ends (scripts/lib/seeds.mjs).
+seedForThisRun("seed_compare_verification.py");
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -157,9 +161,14 @@ async function main() {
     await open(pLh, "BRDP-S1-00052");
     await openCompare();
     await dialog().getByTestId("compare-candidate").first().waitFor();
-    const names = await dialog().getByTestId("compare-candidate").allTextContents();
+    // Only this run's projects count: an admin sees every project of the
+    // database, other runs' included.
+    const allNames = await dialog().getByTestId("compare-candidate").allTextContents();
+    const ownProjects = [pOd, p41, p301, pHidden, pLh];
+    const names = allNames.filter((n) => ownProjects.some((p) => n.includes(p.name)));
     assert(names.length === 4, `admin sees the 4 other projects with BRDP-S1-00052 (${names.length})`);
     assert(names[0].includes(pOd.name), "the first candidate (Official Default 4.2) is listed first");
+    if (!allNames[0].includes(pOd.name)) await chooseCandidate(pOd.name);
     assert(names.some((n) => n.includes("S1000D 4.1")) && names.some((n) => n.includes("S1000D 3.0.1")), "projects of other standards are included, marked with their standard");
     assert(names[0].includes("Validated") && names[0].includes("Rule: Verified") && names[0].includes("Test: Not tested"), "each candidate shows Proposal status, rule status and test");
     await waitView();

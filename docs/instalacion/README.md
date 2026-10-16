@@ -95,6 +95,7 @@ El backend lee estas variables del fichero `backend/.env` (o del entorno). La li
 | `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` | `keys/jwt_private.pem` / `keys/jwt_public.pem` | Claves que firman las sesiones (relativas a `backend/`) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `45` | Duración del token de acceso |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `14` | Duración de la sesión (cookie) |
+| `REFRESH_TOKEN_REUSE_GRACE_SECONDS` | `30` | Segundos que un token de sesión ya renovado sigue valiendo (una recarga a mitad de una renovación, dos pestañas a la vez). Cerrar sesión nunca lo deja usar. `0` = desactivado |
 | `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` | vacías | Solo para `scripts/create_admin_user.py`; no las dejes en el fichero |
 | `ACTIVE_LLM_PROVIDER` | `mistral` | `mistral` o `qwen`. Los embeddings (Sugerir, comparar parecidas) solo funcionan con `mistral` |
 | `MISTRAL_API_KEY` | vacía | `<CLAVE_MISTRAL>` |

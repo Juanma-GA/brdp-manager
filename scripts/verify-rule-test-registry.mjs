@@ -83,9 +83,15 @@ async function main() {
   await makeBrdp("BRDP-T3-GOOD");
   await putDraft("BRDP-T3-GOOD", rule("BRDP-T3-GOOD", "//emphasis"));
   await makeBrdp("BRDP-T3-FAIL");
-  await putDraft("BRDP-T3-FAIL", rule("BRDP-T3-FAIL", "//emphasis", "2"));
+  // Flag 2 without values is "Informative" since 7929fbf (it never rejects):
+  // with //emphasis[@emphasisType] the simulator's accept example carries
+  // emphasisType="em01", which the rule rejects: a failed test.
+  await putDraft("BRDP-T3-FAIL", rule("BRDP-T3-FAIL", "//emphasis[@emphasisType]"));
   await makeBrdp("BRDP-T3-INC");
-  await putDraft("BRDP-T3-INC", rule("BRDP-T3-INC", "//table"));
+  // //table puts the examples in <levelledPara>, where the simulator's plain-text
+  // examples are not valid ("none could be run", 79e5873); //acronym goes in
+  // <para>, the examples run and select nothing.
+  await putDraft("BRDP-T3-INC", rule("BRDP-T3-INC", "//acronym"));
   await makeBrdp("BRDP-T3-DOC");
   await putDraft("BRDP-T3-DOC", rule("BRDP-T3-DOC", "document('common.xml')//emphasis"));
   await makeBrdp("BRDP-T3-SUG");
@@ -153,8 +159,14 @@ async function main() {
     await page.getByTestId("rule-test-example-0").getByRole("button", { name: "Edit" }).click();
     await page.getByTestId("rule-test-example-0").locator("textarea").fill("Torque the <emphasis>bolts</emphasis>.");
     await page.getByTestId("rule-test-example-0").getByRole("button", { name: "Run again" }).click();
-    await page.waitForTimeout(800);
-    assert((await verdict().textContent()).startsWith("The rule rejected an example meant to comply"), "Run again: the panel verdict changes");
+    // Since 55b39f5 the verdict says only "Test failed." and the cause is
+    // its own line (VerdictCauseHint). Wait for it, not for a fixed time.
+    await page.getByTestId("rule-test-cause").first().waitFor({ timeout: 15000 }).catch(() => {});
+    assert(
+      (await verdict().textContent()).startsWith("Test failed") &&
+        (await page.getByTestId("rule-test-cause").first().textContent()).startsWith("The rule rejected an example it should have accepted."),
+      "Run again: the panel verdict changes"
+    );
     a = await approvalOf("BRDP-T3-GOOD");
     assert(a.last_test_result === "passed" && a.last_test_at === recordedAt, "Run again: the recorded result is unchanged");
 
@@ -192,13 +204,13 @@ async function main() {
     await waitIndicator("failed");
     assert((await indicator().textContent()) === "Test failed", `failed: "${await indicator().textContent()}"`);
     assert(
-      (await indicator().getAttribute("title")).includes("failed: the rule accepted an example meant to violate it"),
+      (await indicator().getAttribute("title")).includes("failed: the rule rejected an example meant to comply with it"),
       `failed indicator title carries the reason (${await indicator().getAttribute("title")})`
     );
     await page.getByRole("button", { name: "Verify", exact: true }).click();
     await dialog().waitFor({ timeout: 3000 });
     const failedText = await dialog().textContent();
-    assert(failedText.includes("The last test failed: the rule accepted an example meant to violate it."), `dialog: failed reason (${failedText})`);
+    assert(failedText.includes("The last test failed: the rule rejected an example meant to comply with it."), `dialog: failed reason (${failedText})`);
     const buttons = await dialog().getByRole("button").allTextContents();
     assert(buttons.join("|") === "Test now|Verify anyway|Cancel", `dialog buttons: ${buttons.join(" | ")}`);
     await dialog().screenshot({ path: shot("rule-test-verify-dialog-failed.png") });
@@ -217,7 +229,7 @@ async function main() {
     assert((await indicator().textContent()) === "Inconclusive", "inconclusive indicator");
     await page.getByRole("button", { name: "Verify", exact: true }).click();
     await dialog().waitFor({ timeout: 3000 });
-    assert((await dialog().textContent()).includes("The last test was inconclusive: the rule's path selected nothing in any example."), "dialog: inconclusive reason");
+    assert((await dialog().textContent()).includes("The last test was inconclusive: the rule's path selected nothing in any example."), `dialog: inconclusive reason (${await dialog().textContent()})`);
     await dialog().getByRole("button", { name: "Cancel" }).click();
 
     // 7. A non-executable rule never tested: the dialog explains why, in the

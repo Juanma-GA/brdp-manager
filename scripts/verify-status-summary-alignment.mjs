@@ -13,6 +13,10 @@
 // scripts/verify-two-level-header-and-full-labels.mjs.
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { seedForThisRun } from "./lib/seeds.mjs";
+
+// Its data, seeded here and removed when the script ends (scripts/lib/seeds.mjs).
+seedForThisRun("seed_alignment_check_projects.py");
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";

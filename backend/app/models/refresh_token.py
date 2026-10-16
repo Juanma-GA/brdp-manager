@@ -26,3 +26,7 @@ class RefreshToken(Base):
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set only when a refresh replaced the token (rotation): within
+    # REFRESH_TOKEN_REUSE_GRACE_SECONDS of it the token still refreshes
+    # (migration 0031). NULL for a token revoked to end a session.
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

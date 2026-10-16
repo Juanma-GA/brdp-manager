@@ -143,4 +143,18 @@ async def main():
         print("\nDone. 10 projects seeded for the alignment check.")
 
 
-asyncio.run(main())
+async def cleanup(names) -> None:
+    """`cleanup`: delete the seeded projects (BRDPs, rules and roles go with
+    them: ON DELETE CASCADE)."""
+    from sqlalchemy import delete as _delete
+
+    async with async_session_factory() as db:
+        result = await db.execute(_delete(Project).where(Project.name.in_(list(names))))
+        await db.commit()
+        print(f"Deleted {result.rowcount} seeded project(s)")
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "cleanup":
+    asyncio.run(cleanup([p[0] for p in PROJECTS]))
+else:
+    asyncio.run(main())

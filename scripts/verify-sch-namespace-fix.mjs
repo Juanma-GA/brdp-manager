@@ -6,6 +6,7 @@
 // and (2) checkWellFormedSchematron's checks actually inspect that content
 // instead of silently finding zero patterns because of the old hardcoded
 // "sch:" prefix requirement.
+import fs from "node:fs";
 import { chromium } from "playwright-core";
 import { readXlsxRows } from "./lib/readXlsx.mjs";
 
@@ -13,11 +14,15 @@ import { readXlsxRows } from "./lib/readXlsx.mjs";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 // The Verified rows of the real Navantia file, read like the app's Excel
 // import: node scripts/verify-sch-namespace-fix.mjs <nav_dtm_xpath2_import_v3.xlsx>
-if (!process.argv[2]) {
-  console.error("Usage: node scripts/verify-sch-namespace-fix.mjs <path-to-xlsx>");
-  process.exit(1);
+// The real Navantia Excel (nav_dtm_xpath2_import_v3.xlsx) is customer data and is not in the
+// repo: pass its path, or set NAVANTIA_XPATH2_XLSX. Without it the script cannot run
+// here: it says so and exits with 2 ("not run", not a failure of the app).
+const xlsxPath = process.argv[2] || process.env.NAVANTIA_XPATH2_XLSX;
+if (!xlsxPath || !fs.existsSync(xlsxPath)) {
+  console.error(`NOT RUN: needs the real Navantia Excel (nav_dtm_xpath2_import_v3.xlsx, not in the repo): node scripts/verify-sch-namespace-fix.mjs <path-to-xlsx>, or set NAVANTIA_XPATH2_XLSX.${xlsxPath ? ` Not found: ${xlsxPath}` : ""}`);
+  process.exit(2);
 }
-const rows = readXlsxRows(process.argv[2])
+const rows = readXlsxRows(xlsxPath)
   .filter((r) => r["Rule Status"] === "Verified")
   .map((r) => ({ id: r.ID, identifier: r.ID, rule: r.Rule }));
 

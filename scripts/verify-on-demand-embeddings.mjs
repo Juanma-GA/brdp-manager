@@ -29,7 +29,30 @@ import { chromium } from "playwright-core";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { shot } from "./lib/shots.mjs";
+import { BACKEND_DIR, backendPython, pythonEnv } from "./lib/backendPython.mjs";
+
+// Validated BRDPs without an embedding in S1000D 4.2 projects other than
+// `excludedProjectId` -- the number the "excluded" notice shows. Other
+// projects of the database (earlier runs, other scripts) count too, so the
+// script reads it before adding its own two and expects that number + 2.
+function pendingInOtherProjects(excludedProjectId) {
+  const code = [
+    "import asyncio, sys",
+    "from sqlalchemy import func, select",
+    "from app.db.base import async_session_factory",
+    "from app.models import BRDP, Project",
+    "from app.repositories.brdp_repository import ACTIVE_BRDP_FILTER",
+    "from app.repositories.project_repository import ACTIVE_PROJECT_FILTER",
+    "async def main():",
+    "    async with async_session_factory() as db:",
+    "        q = select(func.count()).select_from(BRDP).join(Project, BRDP.project_id == Project.id).where(ACTIVE_PROJECT_FILTER).where(Project.standard == 'S1000D 4.2', Project.id != sys.argv[1], BRDP.validation == 'Validated', BRDP.embedding.is_(None), ACTIVE_BRDP_FILTER)",
+    "        print((await db.execute(q)).scalar_one())",
+    "asyncio.run(main())",
+  ].join("\n");
+  return Number(execFileSync(backendPython(), ["-c", code, excludedProjectId], { cwd: BACKEND_DIR, env: pythonEnv(), encoding: "utf8" }).trim());
+}
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -144,6 +167,7 @@ async function main() {
     assert(pendingAfterImport.project_pending === 5, "all 5 imported Validated BRDPs are pending (no embedding call happened)");
 
     // ---- Seed Project B ("other project"): 2 Validated, pending BRDPs ----
+    const pendingElsewhere = pendingInOtherProjects(projA.id);
     for (let i = 0; i < 2; i++) {
       await fetch(`${API}/api/projects/${projB.id}/brdps`, {
         method: "POST",
@@ -256,7 +280,11 @@ async function main() {
     await page.waitForSelector("text=/from other projects excluded/i", { timeout: 15000 });
     const excludedText = await page.locator("text=/from other projects excluded/i").first().innerText();
     console.log("Exclusion notice text:", excludedText);
-    assert(/2 BRDPs from other projects excluded: pending embedding/i.test(excludedText), `exclusion notice names the real count from Project B (got "${excludedText}")`);
+    const expected = pendingElsewhere + 2;
+    assert(
+      new RegExp(`\\b${expected} BRDPs? from other projects excluded: pending embedding`, "i").test(excludedText),
+      `exclusion notice names the real count: Project B's 2 + ${pendingElsewhere} already pending elsewhere (got "${excludedText}")`
+    );
 
     await page.screenshot({ path: shot("embeddings-excluded-notice.png") });
 

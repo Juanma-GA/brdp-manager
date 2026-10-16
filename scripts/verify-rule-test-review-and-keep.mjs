@@ -1,9 +1,13 @@
 // Live verification for "Test de reglas: resultado 'Revisar', no
 // sobrescribir una prueba aprobada sin preguntar, Historial desplegable".
-//  1. "at most three substeps" tested against //proceduralStep[count(
-//     proceduralStep) = 1]: the examples pass but the LLM says the rule does
-//     not implement the Proposal -- amber "Review" verdict, recorded as
-//     "review": amber indicator, amber History label, Verify warns.
+//  1. A Proposal tested against //proceduralStep[count(proceduralStep) = 1]:
+//     the examples pass but the LLM says the rule does not implement the
+//     Proposal (MISMATCH: the simulator's judge says "no") -- amber "Review"
+//     verdict, recorded as "review": amber indicator, amber History label,
+//     Verify warns. (The Proposal has no number: "at most three substeps",
+//     the original case, is caught first by the threshold check since
+//     Mejoras B, d85cc86, with another text; that case is in
+//     verify-rule-test-final-1.mjs.)
 //  2. S1-00187 (the same rule, the Proposal it implements): "Tested ✓".
 //     Regenerate → passed again: no question.
 //  3. Regenerate with the examples swapped (mock /invert-next) → failed:
@@ -65,7 +69,7 @@ async function main() {
     identifier: "BRDP-REV-001",
     title: "Number of substeps in a step",
     definition: "Decide how many sub-steps a procedural step may have.",
-    proposal: "A step shall have at most three substeps.",
+    proposal: "A step shall not be split into substeps when it is short. MISMATCH",
   });
   const passed = await makeBrdp({
     identifier: "BRDP-S1-00187",
@@ -155,7 +159,7 @@ async function main() {
     await settle();
     const vText = (await verdict().textContent()) || "";
     assert((await verdict().getAttribute("data-kind")) === "review", `verdict is review (${vText})`);
-    assert(vText.startsWith("Review: the examples pass, but the rule does not seem to implement the Proposal.") && vText.includes("at most three substeps"), "verdict text with the mismatch");
+    assert(vText.startsWith("Review: the examples pass, but the rule does not seem to implement the Proposal."), "verdict text with the mismatch");
     assert((await color(verdict())) === AMBER, "verdict in amber");
     const rev = await approval(review);
     assert(rev.last_test_result === "review" && rev.last_test_reason?.code === "test_proposal_mismatch", `recorded as review (${rev.last_test_result})`);
@@ -195,7 +199,8 @@ async function main() {
     // 3. Regenerate → failed: the question; Keep the previous one.
     await fetch(`${MOCK}/invert-next`, { method: "POST" });
     await regenerate();
-    assert(((await verdict().textContent()) || "").startsWith("The rule"), `failed verdict (${await verdict().textContent()})`);
+    // Since 55b39f5 the verdict says only "Test failed." (the cause is its own line).
+    assert(((await verdict().textContent()) || "").startsWith("Test failed"), `failed verdict (${await verdict().textContent()})`);
     await question().waitFor({ timeout: 5000 });
     assert(/^The previous test passed on .+\. Record this result and replace it\?/.test((await question().textContent()) || ""), `question: ${await question().textContent()}`);
     assert((await approval(passed)).last_test_at === p2.last_test_at && (await ruleTestHistory(passed)).length === 2, "nothing recorded before answering");

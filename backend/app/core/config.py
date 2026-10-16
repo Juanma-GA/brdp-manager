@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     jwt_public_key_path: str = "keys/jwt_public.pem"
     access_token_expire_minutes: int = 45
     refresh_token_expire_days: int = 14
+    # A refresh token replaced by a refresh still refreshes for this many
+    # seconds (once per request, giving a new pair): a reload or navigation
+    # that aborts a refresh the server already did, or two tabs opened at
+    # once, would otherwise send the old cookie and lose the session.
+    # Logout, password change/reset and deleting the user never leave this
+    # grace. 0 = off (strict single use).
+    refresh_token_reuse_grace_seconds: int = 30
     initial_admin_email: str | None = None
     initial_admin_password: str | None = None
 

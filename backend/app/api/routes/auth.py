@@ -18,6 +18,7 @@ from app.core.security import (
 )
 from app.db.base import get_db
 from app.models import RefreshToken, User
+from app.services.refresh_tokens import end_sessions
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, MeUpdate, TokenResponse, UserOut
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -92,20 +93,37 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
     result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     stored = result.scalar_one_or_none()
 
-    if stored is None or stored.revoked_at is not None:
+    if stored is None:
         raise invalid
     if stored.expires_at < datetime.now(timezone.utc):
+        raise invalid
+    if stored.revoked_at is not None and not _within_rotation_grace(stored):
         raise invalid
 
     user = await db.get(User, stored.user_id)
     if user is None or user.deleted_at is not None:
         raise invalid
 
-    # Rotate: revoke the token that was just used, issue a fresh pair. Limits
-    # the blast radius of a leaked refresh token to a single use.
-    stored.revoked_at = datetime.now(timezone.utc)
-    await db.commit()
+    if stored.revoked_at is None:
+        # Rotate: revoke the token that was just used, issue a fresh pair.
+        # Limits the blast radius of a leaked refresh token to a single use
+        # -- plus the short grace below.
+        now = datetime.now(timezone.utc)
+        stored.revoked_at = now
+        stored.rotated_at = now
+        await db.commit()
+    # else: the token was rotated a moment ago and its new cookie never
+    # reached the browser (a reload or navigation aborted that refresh) or
+    # another tab sent the same cookie at the same time: a fresh pair, so
+    # that tab keeps its session.
     return await _issue_tokens(user, db, response)
+
+
+def _within_rotation_grace(stored: RefreshToken) -> bool:
+    grace = get_settings().refresh_token_reuse_grace_seconds
+    if grace <= 0 or stored.rotated_at is None:
+        return False
+    return (datetime.now(timezone.utc) - stored.rotated_at).total_seconds() <= grace
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -115,8 +133,8 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
         token_hash = hash_refresh_token(raw_token)
         result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
         stored = result.scalar_one_or_none()
-        if stored is not None and stored.revoked_at is None:
-            stored.revoked_at = datetime.now(timezone.utc)
+        if stored is not None:
+            await end_sessions(db, stored.user_id, only_hash=token_hash)
             await db.commit()
     # Logging out with an already-revoked, unknown, or absent cookie is a
     # no-op, not an error -- the caller's goal (no valid session left) is
@@ -203,9 +221,8 @@ async def change_password(
     # it to pass it in the body, but the cookie travels with this request
     # the same way it does to /refresh and /logout.
     current_refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
-    conditions = [RefreshToken.user_id == current_user.id, RefreshToken.revoked_at.is_(None)]
-    if current_refresh_token:
-        conditions.append(RefreshToken.token_hash != hash_refresh_token(current_refresh_token))
-    await db.execute(update(RefreshToken).where(*conditions).values(revoked_at=datetime.now(timezone.utc)))
+    await end_sessions(
+        db, current_user.id, keep_hash=hash_refresh_token(current_refresh_token) if current_refresh_token else None
+    )
 
     await db.commit()

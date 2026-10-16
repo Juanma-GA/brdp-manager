@@ -17,6 +17,7 @@
 // all Proposal Status = Validated).
 //
 // Usage: node scripts/verify-reimport-unchanged-skips-embeddings.mjs <path-to-xlsx>
+import fs from "node:fs";
 import { chromium } from "playwright-core";
 import path from "node:path";
 import { shot } from "./lib/shots.mjs";
@@ -69,10 +70,13 @@ async function apiLogin() {
 }
 
 async function main() {
-  const xlsxPath = process.argv[2];
-  if (!xlsxPath) {
-    console.error("Usage: node scripts/verify-reimport-unchanged-skips-embeddings.mjs <path-to-xlsx>");
-    process.exit(1);
+  // The real Navantia Excel (nav_dtm_xpath2_import_v3.xlsx) is customer data and is not in the
+  // repo: pass its path, or set NAVANTIA_XPATH2_XLSX. Without it the script cannot run
+  // here: it says so and exits with 2 ("not run", not a failure of the app).
+  const xlsxPath = process.argv[2] || process.env.NAVANTIA_XPATH2_XLSX;
+  if (!xlsxPath || !fs.existsSync(xlsxPath)) {
+    console.error(`NOT RUN: needs the real Navantia Excel (nav_dtm_xpath2_import_v3.xlsx, not in the repo): node scripts/verify-reimport-unchanged-skips-embeddings.mjs <path-to-xlsx>, or set NAVANTIA_XPATH2_XLSX.${xlsxPath ? ` Not found: ${xlsxPath}` : ""}`);
+    process.exit(2);
   }
   const absXlsxPath = path.resolve(xlsxPath);
 

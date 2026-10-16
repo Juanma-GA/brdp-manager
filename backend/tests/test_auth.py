@@ -12,10 +12,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import ASGITransport, AsyncClient
 
-from app.core.security import create_access_token, hash_password
+from sqlalchemy import update
+
+from app.core.security import create_access_token, hash_password, hash_refresh_token
 from app.db.base import async_session_factory
 from app.main import app
-from app.models import User
+from app.models import RefreshToken, User
 
 TEST_PASSWORD = "correct-horse-battery-staple"
 
@@ -266,14 +268,23 @@ async def test_refresh_rotates_token_and_invalidates_the_old_one(client, test_us
     new_refresh = client.cookies["refresh_token"]
     assert new_refresh != old_refresh
 
-    # The old refresh token was single-use -- force it back onto the
-    # client's own cookie jar (which has already moved on to the rotated
+    # The old refresh token is single-use once its short rotation grace
+    # (REFRESH_TOKEN_REUSE_GRACE_SECONDS, tests/test_refresh_grace.py) is
+    # over: age its rotation past the grace, force it back onto the
+    # client's cookie jar (which has already moved on to the rotated
     # value) and confirm reusing it fails.
+    async with async_session_factory() as session:
+        await session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.token_hash == hash_refresh_token(old_refresh))
+            .values(rotated_at=RefreshToken.rotated_at - timedelta(hours=1))
+        )
+        await session.commit()
     client.cookies["refresh_token"] = old_refresh
     reused = await client.post("/api/auth/refresh")
     assert reused.status_code == 401
 
-    # The freshly rotated one still works exactly once.
+    # The freshly rotated one still works.
     client.cookies["refresh_token"] = new_refresh
     second_refresh = await client.post("/api/auth/refresh")
     assert second_refresh.status_code == 200

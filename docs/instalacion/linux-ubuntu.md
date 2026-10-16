@@ -247,7 +247,7 @@ sudo systemctl status brdp-backend
 curl -s http://127.0.0.1:8000/health
 ```
 
-`/health` tiene que devolver `{"status":"ok","migrations":{"current":"0030","head":"0030","up_to_date":true}}` (el número cambia con las versiones; lo importante es `up_to_date: true`). El log: `journalctl -u brdp-backend -f`.
+`/health` tiene que devolver `{"status":"ok","migrations":{"current":"0031","head":"0031","up_to_date":true}}` (el número cambia con las versiones; lo importante es `up_to_date: true`). El log: `journalctl -u brdp-backend -f`.
 
 - Un solo proceso es suficiente: no añadas `--workers`.
 - uvicorn escucha solo en `127.0.0.1`: desde fuera se entra por nginx.

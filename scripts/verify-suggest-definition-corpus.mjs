@@ -23,6 +23,11 @@
 // seed_ask_compare_catalog.py already run (S1000D 4.2 catalog: 3 entries).
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { seedForThisRun } from "./lib/seeds.mjs";
+
+// Its data, seeded here and removed when the script ends (scripts/lib/seeds.mjs).
+seedForThisRun("seed_ask_compare_catalog.py");
+seedForThisRun("seed_suggest_definition_catalog.py");
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";

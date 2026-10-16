@@ -36,6 +36,10 @@
 // MISTRAL_ENDPOINT overridden to it, real Vite dev server, real Postgres.
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { seedForThisRun } from "./lib/seeds.mjs";
+
+// Its data, seeded here and removed when the script ends (scripts/lib/seeds.mjs).
+seedForThisRun("seed_suggest_proposal_catalog.py");
 
 // Suggest Rule prerequisites (Suggest Rule round): Rule may be disabled
 // by its OWN reasons (no Validated/filled Proposal on these fixtures) --
@@ -475,10 +479,23 @@ async function main() {
     assert(states0.every((d) => !d), "Suggest buttons never blocked by vocabulary on the 'not available' standard either");
 
     // ==== 5. Same BRDP group highlighted red (unchanged by this round) ====
+    // The catalog row this script seeds has no embedding yet: Suggest stays
+    // disabled ("pending embedding") until the project's job computes it.
+    {
+      const pending = await fetch(`${API}/api/projects/${projS.id}/embeddings/pending`, { headers: auth }).then((r) => r.json());
+      if (pending.project_pending || pending.catalog_pending) {
+        const { job_id } = await fetch(`${API}/api/projects/${projS.id}/embeddings/compute`, { method: "POST", headers: auth }).then((r) => r.json());
+        for (let i = 0; i < 240; i++) {
+          const job = await fetch(`${API}/api/projects/${projS.id}/embeddings/status/${job_id}`, { headers: auth }).then((r) => r.json());
+          if (job.status !== "running") break;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+    }
     await openRecords(`Vocab Verify S ${suffix}`, SAME_ID);
     await resetMock();
     const suggestPropButtonS = page.getByRole("button", { name: "Suggest Proposal", exact: true });
-    assert(await suggestPropButtonS.isEnabled(), "Suggest Proposal enabled (Definition is present)");
+    assert(await suggestPropButtonS.isEnabled(), `Suggest Proposal enabled (Definition is present) (title: ${await suggestPropButtonS.getAttribute("title")})`);
     await suggestPropButtonS.click();
     await page.waitForSelector("text=/MOCK-/", { timeout: 15000 });
     await page.waitForSelector("text=Same BRDP in other projects", { timeout: 5000 });

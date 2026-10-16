@@ -1271,8 +1271,11 @@ function ruleTestReply(systemPrompt, messages) {
     ]);
   }
   if (/SPANNEDCELLS/.test(proposal)) {
+    // Cell text inside <para>: S1000D's <entry> takes no text of its own
+    // (79e5873, "texto donde el esquema no lo admite"); before that commit
+    // the cells held bare text.
     const table = (head) =>
-      `<table><title>Torque values</title><tgroup cols="3"><colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/>${head ? '<thead><row><entry colname="c1">Panel</entry><entry colname="c2">Bolt</entry><entry colname="c3">Torque</entry></row></thead>' : ""}<tbody><row><entry colname="c1" morerows="1">Access panel</entry><entry colname="c2">M6</entry><entry colname="c3">10 N.m</entry></row><row><entry colname="c1">Access panel</entry><entry colname="c2">M8</entry><entry colname="c3">25 N.m</entry></row></tbody></tgroup></table>`;
+      `<table><title>Torque values</title><tgroup cols="3"><colspec colname="c1"/><colspec colname="c2"/><colspec colname="c3"/>${head ? '<thead><row><entry colname="c1"><para>Panel</para></entry><entry colname="c2"><para>Bolt</para></entry><entry colname="c3"><para>Torque</para></entry></row></thead>' : ""}<tbody><row><entry colname="c1" morerows="1"><para>Access panel</para></entry><entry colname="c2"><para>M6</para></entry><entry colname="c3"><para>10 N.m</para></entry></row><row><entry colname="c1"><para>Access panel</para></entry><entry colname="c2"><para>M8</para></entry><entry colname="c3"><para>25 N.m</para></entry></row></tbody></tgroup></table>`;
     // NOCOLSPECS (C3b follow-up): the same tables with colname c1/c2/c3 and
     // no <colspec> at all (the EXT-00001 run of 29/09); the app adds them.
     const strip = (xml) => (/NOCOLSPECS/.test(proposal) ? xml.replace(/<colspec colname="c\d"\/>/g, "") : xml);

@@ -86,6 +86,9 @@ async function main() {
   await makeBrdp(pDita, "SCH-DITA", "BRDP-FIN-STUBBORN", { title: EXT1.Title, definition: EXT1.Definition, proposal: `${EXT1.Proposal} MERGEDROWSSTUBBORN` }, EXT1.Rule);
   const p42 = await makeProject("Final 1-2 S1000D", "S1000D 4.2");
   await makeBrdp(p42, "BREX-4.2", "BRDP-FIN-REVIEW", { title: "Substeps", definition: "Number of substeps in a step.", proposal: "A step shall have at most three substeps." }, ONE_SUBSTEP);
+  // The judge's own "no", without a number for the threshold check to catch
+  // first (MISMATCH: the simulator's judge answers "no").
+  await makeBrdp(p42, "BREX-4.2", "BRDP-FIN-JUDGE", { title: "Substeps", definition: "Use of substeps in a step.", proposal: "A step shall not be split into substeps when it is short. MISMATCH" }, ONE_SUBSTEP);
   await makeBrdp(p42, "BREX-4.2", "BRDP-FIN-OK", { title: R187.Title, definition: R187.Definition, proposal: R187.Proposal }, R187.Rule);
   // Barrido final 3: the judge answers "partly" (PARTLY) and writes raw
   // line breaks inside its JSON strings and inside the examples' (CTRLCHARS).
@@ -169,7 +172,10 @@ async function main() {
     await page.waitForTimeout(300);
     await panels().first().getByRole("button", { name: "Close" }).click();
 
-    // ---- 2. Review from its own call ----
+    // ---- 2. Review ----
+    // "at most three substeps" vs a rule that only rejects exactly one: since
+    // Mejoras B (d85cc86) the deterministic threshold check catches it
+    // before the Proposal check, every time, with the numbers.
     await openProject(p42);
     await select("BRDP-FIN-REVIEW");
     for (let i = 1; i <= 3; i++) {
@@ -184,13 +190,34 @@ async function main() {
         }
       }
       const verdict = await panel.getByTestId("rule-test-verdict").textContent();
-      assert(verdict.startsWith("Review: the examples pass, but the rule does not seem to implement the Proposal.") && verdict.includes("at most three substeps"), `review ${i}/3 with what is missing (${verdict})`);
+      assert(verdict.startsWith("Review:") && verdict.includes("The Proposal speaks of 3"), `review ${i}/3 with the numbers (${verdict})`);
+    }
+    await waitIndicator("review");
+    assert((await approvalOf("BRDP-FIN-REVIEW")).last_test_reason?.code === "test_threshold_mismatch", "recorded as review (test_threshold_mismatch)");
+    await panels().first().getByRole("button", { name: "Close" }).click();
+
+    // The Proposal check's own "no" (its own call, temperature 0).
+    await select("BRDP-FIN-JUDGE");
+    for (let i = 1; i <= 3; i++) {
+      await fetch(`${MOCK}/reset`, { method: "POST" });
+      const panel = i === 1 ? await testDraft() : panels().first();
+      if (i > 1) {
+        await panel.getByRole("button", { name: /Regenerate examples/ }).click();
+        await page.waitForTimeout(300);
+        await panel.getByTestId("rule-test-verdict").waitFor({ timeout: 20000 });
+        if (await page.getByRole("button", { name: /Record this result|Registrar este resultado/ }).count()) {
+          await page.getByRole("button", { name: /Record this result|Registrar este resultado/ }).click();
+        }
+      }
+      const verdict = await panel.getByTestId("rule-test-verdict").textContent();
+      assert(verdict.startsWith("Review: the examples pass, but the rule does not seem to implement the Proposal."), `review ${i}/3 from the Proposal check (${verdict})`);
       assert((await checkCalls()) === 1, `review ${i}/3: one Proposal check call`);
     }
     const check = await fetch(`${MOCK}/last-proposal-check`).then((r) => r.json());
-    assert(check.temperature === 0 && check.messages.find((m) => m.role === "system").content.includes("<proceduralStep> must not appear"), "the check gets the deterministic description, at temperature 0");
+    // The description reads the threshold since Mejoras A, Part 4 (e64fd10).
+    assert(check.temperature === 0 && check.messages.find((m) => m.role === "system").content.includes("with exactly 1 <proceduralStep> child must not appear"), "the check gets the deterministic description, at temperature 0");
     await waitIndicator("review");
-    assert((await approvalOf("BRDP-FIN-REVIEW")).last_test_reason?.code === "test_proposal_mismatch", "recorded as review (test_proposal_mismatch)");
+    assert((await approvalOf("BRDP-FIN-JUDGE")).last_test_reason?.code === "test_proposal_mismatch", "recorded as review (test_proposal_mismatch)");
     await panels().first().screenshot({ path: shot("rule-test-final-review.png") });
     await panels().first().getByRole("button", { name: "Close" }).click();
 
