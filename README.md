@@ -190,10 +190,9 @@ That's it — no certificate path to find, no environment variable to set. `pip-
 **Manual alternative** (if you'd rather not add the dev dependency, or need this outside the `[dev]` extras): point Python at your organization's root CA `.pem` before starting `uvicorn`:
 ```bash
 set SSL_CERT_FILE=C:\path\to\corporate-root-cert.pem
-set REQUESTS_CA_BUNDLE=C:\path\to\corporate-root-cert.pem
 uvicorn app.main:app --reload
 ```
-(`export` instead of `set` on Linux/Mac.) Same `.pem` file as problem #1 — ask IT or export it from `certmgr.msc` → *Trusted Root Certification Authorities* if you don't have it yet. Both variables point to the same file; between them they cover `httpx` and the other Python HTTP libraries in the dependency chain, so set both rather than guessing which one your setup needs.
+(`export` instead of `set` on Linux/Mac.) Same `.pem` file as problem #1 — ask IT or export it from `certmgr.msc` → *Trusted Root Certification Authorities* if you don't have it yet. `httpx` (the only HTTP client the backend uses) reads `SSL_CERT_FILE`; it must be a real environment variable of the uvicorn process -- a line in `backend/.env` does nothing.
 
 ## Usage
 

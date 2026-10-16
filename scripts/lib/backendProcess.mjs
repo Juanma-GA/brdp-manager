@@ -41,10 +41,22 @@ export function uvicornPid() {
   return (python || procs[0])?.pid ?? null;
 }
 
+// The Mistral simulators (scripts/mock-mistral-chat-server.mjs on 8902,
+// mock-mistral-embed-server.mjs on 8901). A browser script that restarts
+// the backend always starts it against them -- MISTRAL_ENDPOINT /
+// MISTRAL_EMBED_ENDPOINT from the environment if set, these otherwise -- so
+// the rest of a batch of scripts never goes to the real Mistral just
+// because one script restarted uvicorn.
+export const SIMULATOR_ENV = Object.freeze({
+  MISTRAL_ENDPOINT: process.env.MISTRAL_ENDPOINT || 'http://localhost:8902',
+  MISTRAL_EMBED_ENDPOINT: process.env.MISTRAL_EMBED_ENDPOINT || 'http://localhost:8901',
+});
+
+// env adds to (or overrides) SIMULATOR_ENV.
 export function startUvicorn({ env = {}, log, port = 8000 } = {}) {
   const child = spawn(backendPython(), ['-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', String(port)], {
     cwd: BACKEND_DIR,
-    env: pythonEnv(env),
+    env: pythonEnv({ ...SIMULATOR_ENV, ...env }),
     detached: true,
     windowsHide: true,
     stdio: ['ignore', log ?? 'ignore', log ?? 'ignore'],

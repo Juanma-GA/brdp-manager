@@ -384,7 +384,7 @@ cd C:\BRDP\app\backend
 .venv\Scripts\python scripts\create_admin_user.py
 ```
 
-Pide correo y contraseña y crea un usuario con rol global `admin`. **El correo tiene que tener un dominio real**: el login rechaza dominios reservados (`.local`, `.localhost`, `.test`, `.invalid`), aunque el script los acepte.
+Pide correo y contraseña y crea un usuario con rol global `admin`. **El correo tiene que tener un dominio real**: el script comprueba el correo igual que el login y rechaza, sin crear nada, los dominios reservados (`.local`, `.localhost`, `.test`, `.invalid`).
 
 ---
 
@@ -475,7 +475,7 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 | Síntoma | Causa y arreglo |
 |---|---|
 | Al recargar la página vuelve al login | Se entra por HTTP: la cookie es `Secure`. Entra por `https://`. En el propio servidor por `http://localhost` sí funciona: no sirve como prueba |
-| El login dice que el correo no es válido | Dominio reservado (`.local`, `.test`…): crea el usuario con un dominio real |
+| `create_admin_user.py` dice «Invalid email … special-use or reserved name» | Dominio reservado (`.local`, `.test`…): vuelve a ejecutarlo con un dominio real |
 | El servicio no arranca o se para enseguida | `C:\BRDP\logs\backend.log`; casi siempre `.env` (paso 4.2), las claves (4.3) o los permisos (4.7) |
 | `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff` al arrancar | `.env` guardado en UTF-16: vuelve a guardarlo como UTF-8 (paso 4.2) |
 | `502.3 Bad Gateway` en `/api` | Backend parado (`Get-Service brdp-backend`) o ARR sin activar (paso 6.1) |

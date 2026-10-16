@@ -102,7 +102,7 @@ async function restartBackend() {
     await waitBackend(false);
   }
   const log = fs.openSync(path.join(os.tmpdir(), "uvicorn-restarted.log"), "a");
-  startUvicorn({ env: { MISTRAL_ENDPOINT: process.env.MISTRAL_ENDPOINT || "http://localhost:8902", MISTRAL_EMBED_ENDPOINT: process.env.MISTRAL_EMBED_ENDPOINT || "http://localhost:8901" }, log });
+  startUvicorn({ log }); // against the simulators (SIMULATOR_ENV)
   await waitBackend(true);
 }
 

@@ -372,7 +372,7 @@ sudo -u brdp .venv/bin/python scripts/create_admin_user.py
 
 Pide el correo y la contraseña (dos veces) y crea un usuario con rol global `admin`. Se niega a tocar un correo que ya exista.
 
-**El correo tiene que tener un dominio real** (por ejemplo, el corporativo). El script acepta cualquier texto, pero el login rechaza dominios reservados como `.local`, `.localhost`, `.test` o `.invalid`: un administrador `admin@brdp.local` se crea y nunca puede entrar.
+**El correo tiene que tener un dominio real** (por ejemplo, el corporativo). El script comprueba el correo igual que el login y, con un dominio reservado como `.local`, `.localhost`, `.test` o `.invalid` (`admin@brdp.local`), sale con «Invalid email … special-use or reserved name» sin crear nada.
 
 (También acepta `INITIAL_ADMIN_EMAIL`/`INITIAL_ADMIN_PASSWORD` del entorno o del `.env`; si las pones en el `.env`, bórralas después.)
 
@@ -471,7 +471,7 @@ curl -s http://127.0.0.1:8000/health
 | Síntoma | Causa y arreglo |
 |---|---|
 | Al recargar la página vuelve al login (o a los 45 minutos) | Se entra por HTTP. Con `ENVIRONMENT=production` la cookie es `Secure`: entra por `https://`. En el propio servidor por `http://localhost` sí funciona: no sirve como prueba |
-| El login dice que el correo no es válido | El dominio es reservado (`.local`, `.test`…). Crea el usuario con un dominio real (paso 7) |
+| `create_admin_user.py` dice «Invalid email … special-use or reserved name» | El dominio es reservado (`.local`, `.test`…). Vuelve a ejecutarlo con un dominio real (paso 7) |
 | «No se pudo conectar con el servidor» | Backend parado: `systemctl status brdp-backend`, `journalctl -u brdp-backend -n 100` |
 | `502 Bad Gateway` en `/api` | Igual: el backend no responde en `127.0.0.1:8000` |
 | El backend no arranca: no encuentra `keys/jwt_private.pem` | Falta el paso 4.3, o `WorkingDirectory` no es `/opt/brdp/app/backend` |

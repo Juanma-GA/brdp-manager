@@ -35,7 +35,7 @@ El `.venv` de `backend/` ya existe con todas las dependencias instaladas. `uvico
 
 **Dependencias fijadas** (Protecciones 1): frontend con `npm ci` (instala exactamente `package-lock.json`; el `Dockerfile` también); backend con `pip install --require-hashes -r backend/requirements-dev.lock.txt` (desarrollo y tests) o `requirements.lock.txt` (servidor), sin instalar la app como paquete (todo corre desde `backend/`). Los lockfiles salen de `backend/pyproject.toml` (que conserva sus rangos) con uv, válidos en Windows y Linux (`--universal`, con hashes); para regenerarlos, desde `backend/`: `uv pip compile pyproject.toml [--extra dev] --universal --python-version 3.11 --generate-hashes -o requirements[-dev].lock.txt` -- uv conserva las versiones ya fijadas; `--upgrade-package <nombre>` sube una. Nunca `npm audit fix --force`.
 
-Hay un proyecto de desarrollo sembrado ("Demo Project (S1000D 4.2)") y un admin de pruebas (`admin@example.com` / `AdminTest123!`, ver `backend/scripts/seed_dev_data.py`) — usarlos para verificación con navegador real en vez de crear datos nuevos cada vez, salvo que el propio caso de prueba lo requiera (y luego limpiar lo creado).
+Hay un proyecto de desarrollo sembrado ("Demo Project (S1000D 4.2)") y un admin de pruebas (`admin@example.com` / `AdminTest123!`: `seed_dev_data.py` siembra el proyecto, el editor y el viewer; el admin lo crea `INITIAL_ADMIN_EMAIL=admin@example.com INITIAL_ADMIN_PASSWORD='AdminTest123!' python scripts/create_admin_user.py`) — usarlos para verificación con navegador real en vez de crear datos nuevos cada vez, salvo que el propio caso de prueba lo requiera (y luego limpiar lo creado).
 
 ### Cómo verificar cambios: `npm run check:all`
 

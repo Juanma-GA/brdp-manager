@@ -5,7 +5,9 @@ the Alembic migration on purpose -- run this once per environment:
     cd backend && python scripts/create_admin_user.py
 
 Reads INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD from the environment
-(backend/.env) if set; otherwise prompts interactively. Refuses to modify an
+(backend/.env) if set; otherwise prompts interactively. The email goes through
+the same check as the login (app.core.emails): a reserved domain such as
+.local is refused before anything is created. Refuses to modify an
 existing user rather than silently changing its role or password.
 """
 import asyncio
@@ -18,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.emails import InvalidEmail, normalize_email
 from app.core.security import hash_password
 from app.db.base import async_session_factory
 from app.models import User
@@ -26,6 +29,23 @@ from app.models import User
 async def main() -> None:
     settings = get_settings()
     email = settings.initial_admin_email or input("Admin email: ").strip()
+    if not email:
+        print("Email and password are both required.", file=sys.stderr)
+        sys.exit(1)
+    # Same check as the login, before anything else (no password prompt, no
+    # database): an email the login refuses would give an admin who can
+    # never sign in.
+    try:
+        email = normalize_email(email)
+    except InvalidEmail as exc:
+        print(
+            f"Invalid email {email!r}: {exc} The login would refuse it, so the "
+            "admin could never sign in. Nothing was created. Use a real "
+            "domain (reserved ones such as .local, .localhost, .test, "
+            ".invalid and .example are not accepted).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     password = settings.initial_admin_password
     if not password:

@@ -368,7 +368,7 @@ cd /opt/brdp/app/backend
 sudo -u brdp .venv/bin/python scripts/create_admin_user.py
 ```
 
-Pide correo y contraseña y crea un usuario con rol global `admin`. **El correo tiene que tener un dominio real**: el login rechaza dominios reservados (`.local`, `.localhost`, `.test`, `.invalid`), aunque el script los acepte.
+Pide correo y contraseña y crea un usuario con rol global `admin`. **El correo tiene que tener un dominio real**: el script comprueba el correo igual que el login y rechaza, sin crear nada, los dominios reservados (`.local`, `.localhost`, `.test`, `.invalid`).
 
 ---
 
@@ -446,7 +446,7 @@ curl -s http://127.0.0.1:8000/health
 | Síntoma | Causa y arreglo |
 |---|---|
 | Al recargar la página vuelve al login | Se entra por HTTP: la cookie es `Secure`. Entra por `https://` |
-| El login dice que el correo no es válido | Dominio reservado (`.local`, `.test`…): crea el usuario con un dominio real |
+| `create_admin_user.py` dice «Invalid email … special-use or reserved name» | Dominio reservado (`.local`, `.test`…): vuelve a ejecutarlo con un dominio real |
 | `502 Bad Gateway` y `connect() … failed (13: Permission denied)` en `/var/log/nginx/error.log` | SELinux: `setsebool -P httpd_can_network_connect 1` |
 | `502 Bad Gateway` y `Connection refused` | Backend parado: `systemctl status brdp-backend`, `journalctl -u brdp-backend -n 100` |
 | La página da `403` | Contexto SELinux de `/var/www/brdp`: `restorecon -Rv /var/www/brdp` |

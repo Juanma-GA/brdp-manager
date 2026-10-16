@@ -288,40 +288,9 @@ function fakeBackend({ goodPassword = "pw", loginFailsFrom = Infinity } = {}) {
   const out2 = await cleanupLeftoverProjects(client, { log: (l) => logged2.push(l) });
   check("--cleanup with nothing: says so and ends ok", out2.deleted.length === 0 && logged2.join() === 'No leftover "Prompt Eval — …" projects: nothing to delete.', logged2.join());
 }
-// Against the real backend, when it is up: a 401 from the real server
-// (an invalid token sent once) is recovered, and --cleanup deletes a real
-// leftover project.
-{
-  const API = process.env.PROMPT_EVAL_API_URL || "http://localhost:8000";
-  const email = process.env.PROMPT_EVAL_EMAIL || "admin@example.com";
-  const password = process.env.PROMPT_EVAL_PASSWORD || "AdminTest123!";
-  const up = await fetch(`${API}/api/auth/login`, { method: "OPTIONS" }).then((r) => r.status < 500, () => false);
-  if (!up) console.log("  (backend not reachable: real-server session checks skipped)");
-  else {
-    let spoil = false;
-    const fetchImpl = (url, init = {}) => {
-      if (spoil && init.headers?.Authorization) {
-        spoil = false;
-        return fetch(url, { ...init, headers: { ...init.headers, Authorization: "Bearer expired" } });
-      }
-      return fetch(url, init);
-    };
-    const client = createEvalClient({ api: API, email, password, fetchImpl });
-    await client.login();
-    const project = await client.apiFetch("/api/projects", {
-      method: "POST",
-      body: JSON.stringify({ name: `${EVAL_PROJECT_PREFIX}leftover check — ${Date.now()}`, standard: "S1000D 4.2", project_config: {}, seed_from_catalog: false }),
-    });
-    spoil = true;
-    const listed = await client.apiFetch("/api/projects");
-    check("real backend: a real 401 is recovered by logging in again", Array.isArray(listed) && client.relogins === 1);
-    const logged = [];
-    const out = await cleanupLeftoverProjects(client, { log: (l) => logged.push(l) });
-    check("real backend: --cleanup deletes the leftover", out.deleted.includes(project.name), JSON.stringify(out));
-    const after = await client.apiFetch("/api/projects");
-    check("real backend: it is gone (not in the Trash list either)", !after.some((p) => p.id === project.id));
-  }
-}
+// The same checks against a real running backend live in
+// scripts/verify-prompt-eval-session.mjs: npm run check never depends on
+// whichever backend happens to be on port 8000.
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

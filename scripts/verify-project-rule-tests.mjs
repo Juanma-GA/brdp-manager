@@ -48,10 +48,6 @@ const CHAT = 'http://localhost:8902';
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = process.env.PROMPT_EVAL_EMAIL || 'admin@example.com';
 const ADMIN_PASSWORD = process.env.PROMPT_EVAL_PASSWORD || 'AdminTest123!';
-const MOCKS = {
-  MISTRAL_ENDPOINT: process.env.MISTRAL_ENDPOINT || 'http://localhost:8902',
-  MISTRAL_EMBED_ENDPOINT: process.env.MISTRAL_EMBED_ENDPOINT || 'http://localhost:8901',
-};
 const FORMAT = 'BREX-4.2';
 
 let failures = 0;
@@ -77,7 +73,7 @@ async function restartBackend(extraEnv = {}) {
     await waitBackend(false);
   }
   const log = fs.openSync(path.join(os.tmpdir(), 'uvicorn-project-rule-tests.log'), 'a');
-  startUvicorn({ env: { ...MOCKS, ...extraEnv }, log });
+  startUvicorn({ env: extraEnv, log });
   await waitBackend(true);
 }
 
