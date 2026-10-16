@@ -213,6 +213,38 @@ async function main() {
       assert((await err.textContent()).includes("could not be loaded") && (await e.locator('button:has-text("Generate")').first().isDisabled()), "a failed load is shown and Generate stays disabled");
       await e.close();
     }
+    // The same for the BRDPs: while they load the counter said "0 BRDPs will
+    // be included", and a failed load left it there for good.
+    {
+      const e = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+      await login(e);
+      let release;
+      const held = new Promise((r) => (release = r));
+      await e.route(/\/api\/projects\/[^/]+\/brdps$/, async (route) => {
+        await held;
+        await route.continue();
+      });
+      await e.goto(`${BASE_URL}/projects/${scale.id}/generate`);
+      await e.getByTestId("generate-brdps-loading").waitFor({ timeout: 10000 });
+      assert(
+        (await e.getByTestId("generate-brdps-loading").innerText()).includes("Loading the project's BRDPs") && (await e.locator("text=/will be included/").count()) === 0,
+        "while the BRDPs load: 'Loading the project's BRDPs…', never '0 BRDPs will be included'"
+      );
+      release();
+      await e.getByTestId("generate-summary").waitFor({ timeout: 60000 });
+      assert(!/^0 BRDPs/.test(await e.getByTestId("generate-summary").innerText()), "once loaded, the real count", await e.getByTestId("generate-summary").innerText());
+      await e.close();
+      const f = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+      await login(f);
+      await f.route(/\/api\/projects\/[^/]+\/brdps$/, (route) => route.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"boom"}' }));
+      await f.goto(`${BASE_URL}/projects/${scale.id}/generate`);
+      await f.getByTestId("generate-brdps-error").waitFor({ timeout: 10000 });
+      assert(
+        (await f.getByTestId("generate-brdps-error").innerText()).includes("BRDPs could not be loaded") && (await f.locator('button:has-text("Generate")').first().isDisabled()),
+        "a failed BRDP load is shown and Generate stays disabled"
+      );
+      await f.close();
+    }
     await btn.click();
     await g.waitForSelector("pre", { timeout: 180000 });
     await g.waitForSelector("text=/Valid against XSD schema|XSD validation issue|XSD validation failed/", { timeout: 180000 });

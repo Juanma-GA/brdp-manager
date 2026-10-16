@@ -25,6 +25,7 @@ import os from "node:os";
 import path from "node:path";
 import { readPublicTemplate } from "./lib/readXlsx.mjs";
 import { chromium } from "playwright-core";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const EXT1 = readPublicTemplate("brdp-template-dita-xpath3.xlsx").find((r) => r.ID === "BRDP-EXT-00001");
 const R187 = readPublicTemplate("brdp-template-4-2.xlsx").find((r) => r.ID === "BRDP-S1-00187");
@@ -35,6 +36,9 @@ const API = "http://localhost:8000";
 const MOCK = "http://localhost:8902";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (the
+// language selector saves it on the account; see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 const shot = (name) => path.join(os.tmpdir(), name);
 

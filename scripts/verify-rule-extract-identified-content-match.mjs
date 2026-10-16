@@ -29,11 +29,15 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { backendPython, pythonEnv } from "./lib/backendPython.mjs";
 import { shot } from "./lib/shots.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const EMAIL = process.env.PROMPT_EVAL_EMAIL || "admin@example.com";
+// Gives the account back its language when the process exits (the
+// language selector saves it on the account; see lib/seeds.mjs).
+keepAccountLanguage(EMAIL);
 const PASSWORD = process.env.PROMPT_EVAL_EMAIL ? process.env.PROMPT_EVAL_PASSWORD || "" : "AdminTest123!";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GMC_018 = path.join(ROOT, "backend", "tests", "fixtures", "brex", "GMC-like-018-reconstructed.xml");

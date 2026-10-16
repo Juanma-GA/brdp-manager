@@ -48,3 +48,19 @@ export function seedForThisRun(script, args = []) {
   }
   return out;
 }
+
+// A script that switches the account to another language (the language
+// selector saves it on the account, AACF 3) gives it back the one it had
+// when the process exits, however it ends: otherwise the next script of a
+// batch runs in Spanish and looks for English texts.
+export function keepAccountLanguage(email) {
+  const previous = runSeed('account_language.py', [email]).trim();
+  process.once('exit', () => {
+    try {
+      runSeed('account_language.py', [email, previous]);
+    } catch (err) {
+      console.error(`could not restore the language of ${email}: ${err.message}`);
+    }
+  });
+  return previous;
+}

@@ -161,11 +161,24 @@ export default function GeneratePage() {
   const approvals = useProjectApprovals(projectId, formatDef?.approvalsFormat);
   const approvalsByBrdpId = approvals.map;
 
+  // Same rule as the rules above: until the BRDPs arrive the counter says
+  // they are loading (it used to say "0 BRDPs will be included"), and a
+  // failed load is shown instead of staying on that 0 for good (HR7).
+  const [brdpsError, setBrdpsError] = useState(null);
   useEffect(() => {
-    authFetchJson(`/api/projects/${projectId}/brdps`).then((data) => {
-      setBrdps(data);
-      setIsLoading(false);
-    });
+    let cancelled = false;
+    authFetchJson(`/api/projects/${projectId}/brdps`)
+      .then((data) => {
+        if (cancelled) return;
+        setBrdps(data);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        if (!cancelled) setBrdpsError(err.message);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   useEffect(() => {
@@ -333,7 +346,18 @@ export default function GeneratePage() {
           {t('generate.onlyVerified')}
         </label>
 
-        <p className={styles.summary}>{t('generate.summary', { count: includedCount })}</p>
+        {isLoading ? (
+          <p className={styles.summary} data-testid="generate-brdps-loading">
+            {brdpsError ? '' : t('generate.brdpsLoading')}
+          </p>
+        ) : (
+          <p className={styles.summary} data-testid="generate-summary">{t('generate.summary', { count: includedCount })}</p>
+        )}
+        {brdpsError && (
+          <p className={styles.warning} role="alert" data-testid="generate-brdps-error">
+            ⚠ {t('generate.brdpsLoadFailed', { message: brdpsError })}
+          </p>
+        )}
 
         {!isConfigComplete && <p className={styles.warning}>⚠ {t('generate.configIncomplete')}</p>}
         {(!onlyValidated || !onlyVerified) && (

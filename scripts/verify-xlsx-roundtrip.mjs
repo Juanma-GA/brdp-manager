@@ -41,12 +41,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { readXlsxRows } from "./lib/readXlsx.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = process.env.PROMPT_EVAL_EMAIL || "admin@example.com";
+// Gives the account back its language when the process exits (the
+// language selector saves it on the account; see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = process.env.PROMPT_EVAL_EMAIL ? process.env.PROMPT_EVAL_PASSWORD || "" : "AdminTest123!";
 // fileURLToPath, not URL.pathname: on Windows .pathname gives "/C:/...".
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));

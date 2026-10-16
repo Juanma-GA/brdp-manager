@@ -18,6 +18,7 @@
 // Usage: node scripts/verify-standards-rename.mjs
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { adminRequest, deleteProjectsNamed } from "./lib/cleanup.mjs";
 
 const BASE_URL = "http://localhost:5173";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
@@ -36,6 +37,7 @@ function assert(condition, message) {
 async function main() {
   const browser = await chromium.launch({ headless: true, ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}) });
   const page = await browser.newPage();
+  let suffix = null;
   page.on("console", (msg) => {
     if (msg.type() === "error") console.log("[browser console error]", msg.text());
   });
@@ -83,7 +85,7 @@ async function main() {
 
     // ---- Create one project per renamed S1000D standard + both DITA standards ----
     const createdNames = {};
-    const suffix = Math.random().toString(36).slice(2, 8);
+    suffix = Math.random().toString(36).slice(2, 8);
     for (const standard of ["S1000D 3.0.1", "S1000D 4.1", "S1000D 4.2", "DITA 1.3 Xpath2.0", "DITA 1.3 Xpath3.0"]) {
       const name = `Verify ${standard} ${suffix}`;
       createdNames[standard] = name;
@@ -220,6 +222,11 @@ async function main() {
     console.log("\nAll checks passed: standards rename, selector presence/absence, and real BREX+Schematron generation from an S1000D 4.2 project.");
   } finally {
     await browser.close();
+    // Its five projects, for good (it used to leave them behind).
+    if (suffix) {
+      const request = await adminRequest("http://localhost:8000", ADMIN_EMAIL, ADMIN_PASSWORD);
+      await deleteProjectsNamed(request, (name) => name.startsWith("Verify ") && name.endsWith(` ${suffix}`));
+    }
   }
 }
 

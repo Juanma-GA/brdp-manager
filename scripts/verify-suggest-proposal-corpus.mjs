@@ -29,6 +29,7 @@
 // backend/scripts/seed_suggest_proposal_catalog.py already run (S1000D 4.2
 // catalog: BRDP-SPCAT-LIVE-001).
 import { chromium } from "playwright-core";
+import { deleteProjectsForGood } from "./lib/cleanup.mjs";
 import { shot } from "./lib/shots.mjs";
 import { seedForThisRun } from "./lib/seeds.mjs";
 
@@ -80,12 +81,19 @@ async function computeAndWait(auth, projectId) {
   throw new Error(`Embedding job ${job_id} never left 'running' status`);
 }
 
+// Every project it creates, deleted at the end however the run ends (an
+// assertion before the browser part used to skip the cleanup).
+const created = { auth: null, ids: [] };
+
 async function makeProject(auth, name, standard) {
-  return fetch(`${API}/api/projects`, {
+  const project = await fetch(`${API}/api/projects`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({ name, standard }),
   }).then((r) => r.json());
+  created.auth = auth;
+  created.ids.push(project.id);
+  return project;
 }
 
 async function makeBrdp(auth, projectId, body) {
@@ -425,14 +433,16 @@ async function main() {
     console.log("\nALL CHECKS PASSED\n");
   } finally {
     await browser.close();
-    for (const proj of [projA, projB, projC, projD, projE]) {
-      await fetch(`${API}/api/projects/${proj.id}?permanent=true`, { method: "DELETE", headers: auth }).catch(() => {});
-    }
-    console.log("Cleaned up the 5 seeded projects.");
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    if (!created.ids.length) return;
+    const left = await deleteProjectsForGood((path, init = {}) => fetch(`${API}${path}`, { ...init, headers: created.auth }), created.ids);
+    console.log(`Cleaned up ${created.ids.length - left.length} of the ${created.ids.length} seeded projects.`);
+  });
