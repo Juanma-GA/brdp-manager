@@ -18,6 +18,7 @@
 //     node scripts/verify-rule-test-required-attribute.mjs
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -25,6 +26,8 @@ const MOCK = "http://localhost:8902";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 
 let failures = 0;
@@ -130,6 +133,8 @@ async function main() {
     assert(vEs.startsWith(VERDICT_ES), `ES: veredicto (${vEs})`);
     const noteEs = (await exampleLabelled("First verification without its type").getByTestId("rule-test-schema-covered-example").textContent()).trim();
     assert(noteEs.startsWith(NOTE_ES), `ES: nota del ejemplo (${noteEs})`);
+    // The test is recorded after the verdict shows: wait for the indicator.
+    await page.waitForFunction((t) => (document.querySelector('[data-testid="rule-test-indicator"]')?.textContent || "").includes(t), "El esquema ya lo incluye", { timeout: 15000 }).catch(() => {});
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("El esquema ya lo incluye"), "ES: indicador");
     await panel().screenshot({ path: shot("rule-test-required-attribute-es.png") });
     await language("en");

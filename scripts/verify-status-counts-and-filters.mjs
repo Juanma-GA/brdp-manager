@@ -13,7 +13,7 @@
 // linger in the projects list -- rerun the seed script to bring it back.
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
-import { seedForThisRun } from "./lib/seeds.mjs";
+import { seedForThisRun, keepAccountLanguage } from "./lib/seeds.mjs";
 
 // Its data, seeded here and removed when the script ends (scripts/lib/seeds.mjs).
 seedForThisRun("seed_sopte_scale_verification.py");
@@ -23,6 +23,8 @@ const API = "http://localhost:8000";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 
 function assert(cond, msg) {

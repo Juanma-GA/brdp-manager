@@ -14,6 +14,7 @@
 // the same mock for this round's specific checks.
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -21,6 +22,8 @@ const MOCK = "http://localhost:8902";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 
 function assert(cond, msg) {
@@ -104,6 +107,9 @@ async function main() {
 
     // ---- Normal question: exchange appears, textarea auto-clears ----
     await resetMock();
+    // The simulator answers at once, so the loading indicator could be gone
+    // before it was looked for: hold this one answer for 2 s.
+    await fetch(`${MOCK}/slow-next?ms=2000`, { method: "POST" });
     await askTextarea.fill("What does this BRDP require?");
     await askButton.click();
     // While pending: the question is already shown, with a loading indicator.

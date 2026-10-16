@@ -19,11 +19,14 @@
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
 import { adminRequest, deleteProjectsNamed } from "./lib/cleanup.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 
 const RULE_XML =

@@ -132,8 +132,11 @@ async function main() {
     await row.getByTestId("trash-project-rename").waitFor({ timeout: 20000 });
     assert(/An active project is already called/.test(await row.getByTestId("trash-project-rename").textContent()), "restore refused: the name is taken, another name offered");
     await row.getByTestId("trash-project-new-name").fill(`${projectName} restored`);
+    // The row leaves at once (optimistic, HR20): wait for the server's answer.
+    const restored = page.waitForResponse((r) => r.request().method() === "POST" && /\/api\/trash\/projects\/[^/]+\/restore$/.test(r.url()), { timeout: 20000 });
     await row.getByTestId("trash-project-restore-renamed").click();
     await row.waitFor({ state: "detached", timeout: 20000 });
+    assert((await restored).ok(), "the server restored the project");
     const brdps = await api(`/api/projects/${project.id}/brdps`).then((r) => r.json());
     assert(brdps.length === 2, "restored with its BRDPs");
     await page.goto(`${BASE_URL}/projects`);

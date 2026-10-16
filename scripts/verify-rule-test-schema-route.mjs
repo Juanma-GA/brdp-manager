@@ -155,6 +155,8 @@ async function main() {
     assert((await example(0).getByTestId("rule-test-result").textContent()).includes("accepted ✓") && (await example(1).getByTestId("rule-test-result").textContent()).includes("rejected ✓"), "4.2: current notice accepted, wrong year rejected");
     assert((await page.getByTestId("rule-test-relocated").count()) === 0, "4.2: nothing to move when the LLM follows the way");
     await panel().screenshot({ path: shot("rule-test-schema-route-copyright.png") });
+    // The test is recorded after the verdict shows: wait for the indicator.
+    await page.waitForFunction((t) => (document.querySelector('[data-testid="rule-test-indicator"]')?.textContent || "").includes(t), "Tested", { timeout: 15000 }).catch(() => {});
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "4.2: recorded as passed");
 
     // 2. The real run's mistake: moved by the application.

@@ -27,7 +27,7 @@
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
-import { seedForThisRun } from "./lib/seeds.mjs";
+import { seedForThisRun, keepAccountLanguage } from "./lib/seeds.mjs";
 
 // Its data, seeded here and removed when the script ends (scripts/lib/seeds.mjs).
 seedForThisRun("seed_generate_report_scale.py");
@@ -38,6 +38,8 @@ const MOCK = "http://localhost:8902";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 const SCALE_PROJECT = "Generate Report Scale Verification";
 const shot = (name) => path.join(os.tmpdir(), name);

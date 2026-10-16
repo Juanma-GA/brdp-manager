@@ -148,6 +148,8 @@ async function main() {
     assert(JSON.stringify(schemas) === '["descript","descript","descript","proced","proced","proced"]', `S1-00120: examples in descript and proced (${JSON.stringify(schemas)})`);
     assert(JSON.stringify(results) === '["accepted ✓","rejected ✓","rejected ✓","accepted ✓","rejected ✓","rejected ✓"]', `S1-00120: 5 levels accepted, 6 levels and a title on level 5 rejected (${JSON.stringify(results)})`);
     assert((await example(4).locator("pre").textContent()).includes("<mainProcedure>") && (await example(1).locator("pre").textContent()).includes("<description>"), "S1-00120: each example built on its own schema");
+    // The test is recorded after the verdict shows: wait for the indicator.
+    await page.waitForFunction((t) => (document.querySelector('[data-testid="rule-test-indicator"]')?.textContent || "").includes(t), "Tested", { timeout: 15000 }).catch(() => {});
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "S1-00120: recorded as passed");
     await panel().screenshot({ path: shot("rule-test-schema-groups.png") });
 

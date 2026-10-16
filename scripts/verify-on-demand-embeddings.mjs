@@ -32,6 +32,7 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { shot } from "./lib/shots.mjs";
 import { BACKEND_DIR, backendPython, pythonEnv } from "./lib/backendPython.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 // Validated BRDPs without an embedding in S1000D 4.2 projects other than
 // `excludedProjectId` -- the number the "excluded" notice shows. Other
@@ -61,6 +62,8 @@ const MOCK_CHAT = "http://localhost:8902";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 
 function assert(cond, msg) {

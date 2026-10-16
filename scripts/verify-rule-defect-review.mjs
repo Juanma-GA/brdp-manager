@@ -26,11 +26,14 @@ import { BACKEND_DIR, pythonCandidates, pythonEnv } from "./lib/backendPython.mj
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 import { readTextFile } from "./lib/textFile.mjs";
 import { shot } from "./lib/shots.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 const FORMAT = "BREX-4.2";
 

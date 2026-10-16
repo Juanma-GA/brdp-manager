@@ -30,11 +30,14 @@ import { chromium } from "playwright-core";
 import { deleteProjectsForGood } from "./lib/cleanup.mjs";
 import { backendPython, pythonEnv } from "./lib/backendPython.mjs";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = process.env.PROMPT_EVAL_EMAIL || "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = process.env.PROMPT_EVAL_EMAIL ? process.env.PROMPT_EVAL_PASSWORD || "" : "AdminTest123!";
 const BACKEND = fileURLToPath(new URL("../backend/", import.meta.url));
 

@@ -22,12 +22,15 @@
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 const shot = (name) => path.join(os.tmpdir(), name);
 const IPD = "http://www.s1000d.org/S1000D_4-2/xml_schema_flat/ipd.xsd";

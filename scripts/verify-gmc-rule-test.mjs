@@ -17,6 +17,7 @@
 //     node scripts/verify-gmc-rule-test.mjs
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -24,6 +25,8 @@ const MOCK = "http://localhost:8902";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 const SKELETON_COLOR = "rgb(100, 116, 139)";
 
@@ -127,6 +130,8 @@ async function main() {
     assert((await colorOf(rootSpan)) === SKELETON_COLOR, "EXT-00057: the rest of the root is dimmed skeleton");
     const marks1 = (await example(1).locator("mark").allTextContents()).join(" ");
     assert(marks1.includes('pmType="pt09"'), `EXT-00057: the rejected value highlighted (${marks1})`);
+    // The test is recorded after the verdict shows: wait for the indicator.
+    await page.waitForFunction((t) => (document.querySelector('[data-testid="rule-test-indicator"]')?.textContent || "").includes(t), "Tested", { timeout: 15000 }).catch(() => {});
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "EXT-00057: recorded as passed");
     await panel().screenshot({ path: shot("gmc-rule-test-root-attributes.png") });
 

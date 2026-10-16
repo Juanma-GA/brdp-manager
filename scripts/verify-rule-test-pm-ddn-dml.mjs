@@ -26,6 +26,7 @@
 //     node scripts/verify-rule-test-pm-ddn-dml.mjs
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -33,6 +34,8 @@ const MOCK = "http://localhost:8902";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 
 let failures = 0;
@@ -152,6 +155,8 @@ async function main() {
     await panel().screenshot({ path: shot("rule-test-ext29-pm-ddn-dml.png") });
     await example(6).screenshot({ path: shot("rule-test-ext29-ddn-built-by-app.png") });
     await example(5).screenshot({ path: shot("rule-test-ext29-pm-rejected.png") });
+    // The test is recorded after the verdict shows: wait for the indicator.
+    await page.waitForFunction((t) => (document.querySelector('[data-testid="rule-test-indicator"]')?.textContent || "").includes(t), "Tested", { timeout: 15000 }).catch(() => {});
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), "EXT-00029: recorded as passed");
 
     // 2. A node path rooted only at /pm, run on a pm.

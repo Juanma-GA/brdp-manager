@@ -22,6 +22,7 @@
 import fs from "node:fs";
 import { chromium } from "playwright-core";
 import { shot } from "./lib/shots.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
@@ -29,6 +30,8 @@ const MOCK = "http://localhost:8902";
 // Set CHROMIUM_PATH to use a specific Chromium; otherwise Playwright uses its default browser.
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 const RULES = JSON.parse(fs.readFileSync(new URL("./rule-test-fixtures/default-brex-4-2.json", import.meta.url))).rules;
 const rule = (n) => RULES[`BRDP-EXT-${String(n).padStart(5, "0")}`].rule_xml;

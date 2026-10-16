@@ -29,11 +29,14 @@ import { chromium } from "playwright-core";
 import { BACKEND_DIR, pythonCandidates, pythonEnv } from "./lib/backendPython.mjs";
 import { openHistoryOnEachLoad } from "./lib/openHistory.mjs";
 import { shot } from "./lib/shots.mjs";
+import { keepAccountLanguage } from "./lib/seeds.mjs";
 
 const BASE_URL = "http://localhost:5173";
 const API = "http://localhost:8000";
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = "admin@example.com";
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = "AdminTest123!";
 const FORMAT = "BREX-3.0.1";
 
@@ -158,6 +161,8 @@ async function main() {
     const a16 = await approvalOf("BRDP-EXT-02816");
     assert(a16.rule_xml.includes("//figure//legend/deflist/def[") && a16.status === "pending_review", "02816 saved corrected, Draft");
     assert(a16.test_category === "outdated", `02816 test outdated (${a16.test_category})`);
+    // The test is recorded after the verdict shows: wait for the indicator.
+    await page.waitForFunction((t) => (document.querySelector('[data-testid="rule-test-indicator"]')?.textContent || "").includes(t), "Test outdated", { timeout: 15000 }).catch(() => {});
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Test outdated"), "02816 indicator: Test outdated");
     await page.getByText("Correction accepted").first().waitFor({ timeout: 10000 });
     const historyText = await page.locator("body").textContent();

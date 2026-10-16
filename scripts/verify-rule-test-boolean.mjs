@@ -152,6 +152,8 @@ async function main() {
     assert((await example(1).getByTestId("rule-test-condition").textContent()) === "The rule's condition holds in this document.", '"or": the reject example says the condition holds');
     assert((await example(0).getByTestId("rule-test-condition").textContent()) === "The rule's condition does not hold in this document.", '"or": the accept example says it does not hold');
     assert((await example(1).locator("mark").count()) === 0, '"or": no node to highlight');
+    // The test is recorded after the verdict shows: wait for the indicator.
+    await page.waitForFunction(() => (document.querySelector('[data-testid="rule-test-indicator"]')?.textContent || "").includes("Tested"), null, { timeout: 15000 }).catch(() => {});
     assert((await page.getByTestId("rule-test-indicator").textContent()).includes("Tested"), '"or": recorded as passed');
     await panel().screenshot({ path: shot("rule-test-boolean-or.png") });
     await page.locator("header select, nav select").first().selectOption("es");

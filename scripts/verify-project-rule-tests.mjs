@@ -40,6 +40,7 @@ import { chromium } from 'playwright-core';
 import { startUvicorn, uvicornPid } from './lib/backendProcess.mjs';
 import { BACKEND_DIR, backendPython, pythonEnv } from './lib/backendPython.mjs';
 import { runDir } from './lib/projectRuleTests.mjs';
+import { keepAccountLanguage } from './lib/seeds.mjs';
 
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 const BASE_URL = 'http://localhost:5173';
@@ -47,6 +48,8 @@ const API = 'http://localhost:8000';
 const CHAT = 'http://localhost:8902';
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH;
 const ADMIN_EMAIL = process.env.PROMPT_EVAL_EMAIL || 'admin@example.com';
+// Gives the account back its language when the process exits (see lib/seeds.mjs).
+keepAccountLanguage(ADMIN_EMAIL);
 const ADMIN_PASSWORD = process.env.PROMPT_EVAL_PASSWORD || 'AdminTest123!';
 const FORMAT = 'BREX-4.2';
 
