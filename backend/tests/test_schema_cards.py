@@ -91,6 +91,28 @@ async def test_element_with_genuinely_different_definitions_across_schemas_retur
 
 
 @pytest.mark.asyncio
+async def test_parents_by_schema_when_they_differ(client):
+    """Test de reglas, Part 5: <response> in S1000D 3.0.1 is inside
+    <cstatus> only in comment and inside <challrsp> only in crew -- the
+    joined `parents` stays, and parents_by_schema says it per schema. One
+    group when the parents really are the same in every schema (<table>
+    in 4.2 has one variant, but its parents are checked the same way)."""
+    user = await _make_user()
+    res = await client.get(
+        "/api/schema-cards", params={"standard": "S1000D 3.0.1", "names": "response"}, headers=_headers(user)
+    )
+    assert res.status_code == 200
+    entry = res.json()["cards"]["response"]
+    assert entry["parents"] == ["challrsp", "cstatus"]
+    groups = {tuple(g["schemas"]): g["parents"] for g in entry["parents_by_schema"]}
+    assert groups == {("comment",): ["cstatus"], ("crew",): ["challrsp"]}
+    assert all(g["parents_truncated"] is False and g["parents_omitted"] == 0 for g in entry["parents_by_schema"])
+    # Every schema of the card is in exactly one group.
+    schemas = [s for g in entry["parents_by_schema"] for s in g["schemas"]]
+    assert sorted(schemas) == sorted(s for v in entry["variants"] for s in v["schemas"])
+
+
+@pytest.mark.asyncio
 async def test_unknown_name_is_reported_separately_never_as_an_error(client):
     user = await _make_user()
     res = await client.get(

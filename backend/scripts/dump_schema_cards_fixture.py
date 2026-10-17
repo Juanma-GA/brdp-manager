@@ -10,7 +10,6 @@ approximation that could quietly drift from production.
 
 This needs no running server and no database -- get_schema_cards() is a
 pure, in-memory lookup over backend/schema_cards/*.json, loaded once at
-import sys
 import time. Re-run this whenever generate_schema_cards.py regenerates
 those files (a schema/XSD update) so the frontend prompt-snapshot fixture
 stays honest about what the backend would actually return today:
@@ -19,6 +18,7 @@ stays honest about what the backend would actually return today:
     python scripts/dump_schema_cards_fixture.py
 """
 import json
+import sys
 from pathlib import Path
 
 from app.services.schema_cards import get_schema_cards

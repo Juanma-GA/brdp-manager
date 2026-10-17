@@ -26,15 +26,25 @@ class SchemaCardVariantOut(BaseModel):
     resolved: bool
 
 
+class SchemaCardParentsGroupOut(BaseModel):
+    schemas: list[str]
+    parents: list[str]
+    parents_truncated: bool = False
+    parents_omitted: int = 0
+
+
 class SchemaCardEntryOut(BaseModel):
     variants: list[SchemaCardVariantOut]
     # The reverse index (docs request point 1: "Padres: índice inverso de
     # los hijos") -- which elements allow THIS name as a child, across
-    # every schema variant combined (not itself split by variant: the
-    # generator's own `parents` index is a single flat list per name).
+    # every schema variant combined (the generator's own `parents` index is
+    # a single flat list per name).
     parents: list[str]
     parents_truncated: bool = False
     parents_omitted: int = 0
+    # Test de reglas, Part 5: the same parents per schema, grouped by
+    # identical lists (services/schema_cards.py _parents_by_schema).
+    parents_by_schema: list[SchemaCardParentsGroupOut] = []
 
 
 class SchemaCardsOut(BaseModel):

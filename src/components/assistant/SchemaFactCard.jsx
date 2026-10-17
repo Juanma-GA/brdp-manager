@@ -132,9 +132,21 @@ export default function SchemaFactCard({ name, entry }) {
       {summary.anyUnresolved && <div className={styles.vocabWarning}>{t('records.assistant.schemaFactUnresolved')}</div>}
       <KindRows kind="attributes" mode={summary.attributesMode} common={summary.common.attributes} perVariant={summary.perVariant} t={t} />
       <KindRows kind="children" mode={summary.childrenMode} common={summary.common.children} perVariant={summary.perVariant} t={t} />
-      <div>
-        {t('records.assistant.schemaFactAllowedInside')}: {parentsText}
-      </div>
+      {/* Test de reglas, Part 5: the parents per schema when they differ. */}
+      {(entry.parents_by_schema || []).length > 1 ? (
+        <div>
+          {t('records.assistant.schemaFactAllowedInsideBySchema')}:
+          {entry.parents_by_schema.map((g, idx) => (
+            <div key={idx} className={styles.schemaFactVariant}>
+              [{g.schemas.join(', ')}]: {formatSchemaFactNameListUi(g.parents, g.parents_truncated, g.parents_omitted, t)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div>
+          {t('records.assistant.schemaFactAllowedInside')}: {parentsText}
+        </div>
+      )}
       {diffs.length > 0 && <div className={styles.schemaFactDifferencesHeading}>{t('records.assistant.schemaFactDifferences')}</div>}
       {/* "Pulido de fichas" round, points 2-3 (kept): a variant with
           nothing to add beyond the common set renders no row; a truncated

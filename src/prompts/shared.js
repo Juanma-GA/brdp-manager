@@ -231,13 +231,11 @@ The user does not see this block by that name; if you refer to it, call it the s
     block += kindLines('children', summary.childrenMode, summary.common.children, summary.perVariant);
     // "Ajustes a los prompts de Proposal y fichas" round, Part 4: a real
     // Mistral test answered that <para>'s schema variants "differ in
-    // additional allowed parents (e.g. footnote)" -- factually wrong on
-    // two counts at once (footnote is a CHILDREN difference, and parents
-    // never vary per variant in this data model at all -- there is only
-    // ever one parents list per element, see summarizeSchemaFactEntry's
-    // own docstring). Said in words on both ends: where "allowed inside"
-    // is stated, and where "Differences by schema" is introduced.
-    block += `\n  allowed inside: ${parentsText} (this is the same for every schema listed above — allowed-inside parents never differ by schema)`;
+    // additional allowed parents (e.g. footnote)" -- footnote is a CHILDREN
+    // difference. The parents are never part of "Differences by schema";
+    // they have their own line (allowedInsideLines: per schema when they
+    // differ -- Test de reglas, Part 5).
+    block += allowedInsideLines(entry, parentsText);
     // Every variant group is still named here (the only place the schemas
     // of a 'common'-mode card are listed); a 'bySchema' kind is already
     // listed per group by kindLines(), so with no 'common' kind there is
@@ -249,6 +247,25 @@ The user does not see this block by that name; if you refer to it, call it the s
     block += limitLines(limits, name);
   }
   return block;
+}
+
+// Test de reglas, Part 5: `parents` joins the parents of every schema --
+// <response> in S1000D 3.0.1 is inside <cstatus> only in comment and inside
+// <challrsp> only in crew, and the line said "the same for every schema".
+// parents_by_schema (GET /api/schema-cards) gives them per schema, like the
+// attributes and the children; one group is really the same for all. A
+// card without it (an older answer) says the list joins every schema.
+function allowedInsideLines(entry, parentsText) {
+  const groups = entry.parents_by_schema;
+  if (!Array.isArray(groups)) {
+    return `\n  allowed inside (the parents of every schema listed above together — they may differ by schema): ${parentsText}`;
+  }
+  if (groups.length <= 1) {
+    return `\n  allowed inside: ${parentsText} (this is the same for every schema listed above)`;
+  }
+  return `\n  allowed inside, by schema:${groups
+    .map((g) => `\n    [${g.schemas.join(', ')}]: ${formatSchemaFactNameList(g.parents, g.parents_truncated, g.parents_omitted)}`)
+    .join('')}`;
 }
 
 function limitLines(limits, name) {

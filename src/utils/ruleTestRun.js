@@ -466,7 +466,7 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
   }
   const unknownContextNotes = unknownContexts.map((reason) => ({ schema: reason.params.schema, kind: 'context_unknown', reason }));
   const attributeSchemas = await attributeOnlyCarriers(targets, standard, fetchSchemaAttribute, elementSchemas);
-  const { testSchema, otherSchema, groups, candidates, noConditionSchema, noReferenceSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets, conditionRequirements, predicateRequirements: stepRequirements });
+  const { testSchema, otherSchema, groups, candidates, noConditionSchema, noReferenceSchema, noAttributeSchema } = chooseTestSchemas({ contextSchemas, documentSchemas, cards, elementSchemas, attributeSchemas, targets, conditionRequirements, predicateRequirements: stepRequirements });
   if (noConditionSchema) {
     return {
       contextSchemas,
@@ -477,6 +477,19 @@ export async function prepareRuleTestSetup({ ruleXml, standard, schemaLocation, 
         code: 'condition_no_schema',
         params: { paths: noConditionSchema.map((names) => `/${names.join('/')}`).join(' | '), standard },
       },
+      setup: { standard, schemaLocation, placements: {}, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
+    };
+  }
+  // "El atributo de la regla": no schema whose <E> has the rule's @a
+  // (//response/@rsptype where only crew had <response> without it) --
+  // said before any LLM call.
+  if (noAttributeSchema) {
+    return {
+      contextSchemas,
+      schemaFacts,
+      promptPlacements: [],
+      untested: [],
+      unreachable: { code: 'attribute_no_schema', params: { element: noAttributeSchema.element, attribute: noAttributeSchema.attribute, standard } },
       setup: { standard, schemaLocation, placements: {}, keepBrexReference: ruleLooksAtBrexReference(ruleXml) },
     };
   }

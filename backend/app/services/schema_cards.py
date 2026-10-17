@@ -265,8 +265,43 @@ def get_schema_cards(
             "parents": parents[:max_parents],
             "parents_truncated": parents_truncated,
             "parents_omitted": len(parents) - max_parents if parents_truncated else 0,
+            "parents_by_schema": _parents_by_schema(all_cards, name, variants, parents, max_parents),
         }
     return True, cards, sorted(unknown)
+
+
+def _parents_by_schema(
+    all_cards: dict, name: str, variants: list[dict], parents: list[str], max_parents: int | None
+) -> list[dict]:
+    """Test de reglas, Part 5: `parents` joins the parents of every schema
+    (<response> in S1000D 3.0.1: challrsp only in crew, cstatus only in
+    comment), so the SCHEMA FACTS said "the same for every schema" when it
+    was not. The parents of `name` in each of its schemas -- a parent whose
+    own variant for that schema lists `name` as a child -- grouped by
+    identical lists, in the order of the element's schemas:
+    [{schemas, parents, parents_truncated, parents_omitted}]. One group
+    means they really are the same in every schema."""
+    schemas = list(dict.fromkeys(s for v in variants for s in v.get("schemas", [])))
+    groups: list[dict] = []
+    by_list: dict[tuple, dict] = {}
+    for schema in schemas:
+        own = [
+            p
+            for p in parents
+            if any(schema in pv.get("schemas", []) and name in pv.get("children", []) for pv in all_cards.get(p, []))
+        ]
+        key = tuple(own)
+        if key not in by_list:
+            truncated = max_parents is not None and len(own) > max_parents
+            by_list[key] = {
+                "schemas": [],
+                "parents": own[:max_parents],
+                "parents_truncated": truncated,
+                "parents_omitted": len(own) - max_parents if truncated else 0,
+            }
+            groups.append(by_list[key])
+        by_list[key]["schemas"].append(schema)
+    return groups
 
 
 def get_attribute_owners(standard: str, name: str) -> tuple[bool, list[dict]]:

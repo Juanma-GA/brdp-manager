@@ -313,6 +313,16 @@
 // BRDP-EXT-00017, a rule on the topics' cells that finds the ditamap going
 // up the folders): also the line on where the ditamap goes. No other
 // prompt changes.
+//
+// Test de reglas, dentro/fuera de X (Parts 1 and 5): 4 cases change.
+// ruleTestExamples/brex-4-2-cmp-footnote-table-prelim and
+// brex-4-2-default-applic-repository-0a2: the line "and <x> outside it by
+// any other valid way" becomes the way outside (through the identification
+// and status section for EXT-00134). ask/multi-variant-para-refused-notfound
+// and ask/children-vary-by-schema-identandstatussection: only the "allowed
+// inside" line, now per schema (parents_by_schema; schema-cards-fixture.json
+// dumped again) instead of "the same for every schema", which was false.
+// Every other prompt is identical.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

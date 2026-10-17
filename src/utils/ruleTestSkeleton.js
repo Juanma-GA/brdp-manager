@@ -709,11 +709,47 @@ export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], c
   const order = (list) => byPreference(list, documentSchemas);
   const carriersOf = attributeOnlySchemas(attributeSchemas, documentSchemas);
   const attributeOnly = (targets?.alternatives || []).map(carriersOf).filter(Boolean);
-  const fittingAll = order(
+  // "El atributo de la regla" (S1000D 3.0.1, //response/@rsptype): a rule
+  // whose last step is an attribute of an element (E/@a) is tested on a
+  // schema whose <E> has @a -- the cards say it per schema (variants, the
+  // SCHEMA FACTS' data). <response> is in comment (with @rsptype, in its
+  // status section) and in crew (without it): crew came first and the
+  // examples could only put @rsptype where it does not exist. A general
+  // rule only (a context rule keeps its schemas); DITA's cards merge the
+  // topic types, so nothing is narrowed there.
+  const ownedAttributes = contextSchemas.length === 0 && !elementSchemas
+    ? (targets?.alternatives || []).filter(
+        (a) =>
+          !a.opaque && a.attribute && a.steps.length > 0 && !a.descendantAttribute && a.checked
+          && (cards[a.checked]?.variants || []).length > 0
+          // a card without its attribute lists says nothing about them
+          && cards[a.checked].variants.every((v) => Array.isArray(v.attributes))
+      )
+    : [];
+  const carries = (a, schema) =>
+    cards[a.checked].variants.some(
+      (v) => (v.schemas || []).includes(schema) && (v.attributes_truncated || (v.attributes || []).some((x) => (x?.name ?? x) === a.attribute))
+    );
+  // An E/@a no schema has narrows nothing (the rest of the rule is tested
+  // as before: /dmodule/content//table/tgroup/@changeMark | …/title/@changeMark);
+  // only a rule with nothing else is "not executable", with the reason --
+  // never a schema where the attribute does not exist.
+  const possible = ownedAttributes.filter((a) => documentSchemas.some((schema) => carries(a, schema)));
+  const carriesAttributes = (schema) => possible.every((a) => carries(a, schema));
+  const fittingByElements = order(
     schemasHavingAll(required, cards, documentSchemas, elementSchemas).filter(
       (schema) => attributeOnly.every((schemas) => schemas.includes(schema)) && meetsConditions(schema)
     )
   );
+  const narrowed = fittingByElements.filter(carriesAttributes);
+  // No single schema has every such attribute: as before.
+  const fittingAll = narrowed.length > 0 ? narrowed : fittingByElements;
+  const testable = (targets?.alternatives || []).filter((a) => !a.opaque);
+  const unowned = ownedAttributes.find((a) => !possible.includes(a));
+  if (unowned && testable.every((a) => ownedAttributes.includes(a) && !possible.includes(a))) {
+    return { testSchema: null, otherSchema: null, groups: null, candidates: [], noAttributeSchema: { element: unowned.checked, attribute: unowned.attribute } };
+  }
+  const ownsAttribute = (alt, schema) => !possible.includes(alt) || carries(alt, schema);
   const withReferences = contextSchemas.length === 0 && referenceSets.length > 0 ? fittingAll.filter(meetsReferences) : fittingAll;
   if (contextSchemas.length === 0 && referenceSets.length > 0 && fittingAll.length > 0 && withReferences.length === 0) {
     const r = referenceSets.find((x) => !fittingAll.some((s) => x.names.some((n) => schemasHavingAll([n], cards, [s], elementSchemas).length > 0))) || referenceSets[0];
@@ -734,7 +770,7 @@ export function chooseTestSchemas({ contextSchemas = [], documentSchemas = [], c
     return { testSchema: contextSchemas[0], otherSchema: others[0] || fallback[0] || null, groups: null };
   }
   const fallback = order(conditionRequirements.length ? fitting : documentSchemas);
-  const groups = schemaGroups(targets, fitting[0] || null, { known, order, cards, documentSchemas, elementSchemas, carriersOf });
+  const groups = schemaGroups(targets, fitting[0] || null, { known, order, cards, documentSchemas, elementSchemas, carriersOf, ownsAttribute });
   if (groups) return { testSchema: groups[0].schema, otherSchema: null, groups };
   // Mejoras A, Part 1: a single schema must also have every element step of
   // the rule's alternatives, not only the checked (last) one.
@@ -770,14 +806,14 @@ function attributeOnlySchemas(attributeSchemas, documentSchemas) {
   };
 }
 
-function schemaGroups(targets, common, { known, order, cards, documentSchemas, elementSchemas, carriersOf }) {
+function schemaGroups(targets, common, { known, order, cards, documentSchemas, elementSchemas, carriersOf, ownsAttribute = () => true }) {
   const bySchema = new Map();
   for (const alt of targets?.alternatives || []) {
     if (alt.opaque) continue;
     const carriers = carriersOf(alt);
     const names = [...new Set([...alt.steps, ...(alt.absolutePrefix ? [alt.absolutePrefix[0]] : [])])].filter(known);
     if (names.length === 0 && !carriers) continue;
-    const preferred = order(carriers || schemasHavingAll(names, cards, documentSchemas, elementSchemas))[0];
+    const preferred = order((carriers || schemasHavingAll(names, cards, documentSchemas, elementSchemas)).filter((schema) => ownsAttribute(alt, schema)))[0];
     if (!preferred) continue;
     if (!bySchema.has(preferred)) bySchema.set(preferred, []);
     bySchema.get(preferred).push(alt);

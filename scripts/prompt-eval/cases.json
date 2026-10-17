@@ -6042,6 +6042,18 @@
           "type": "rule_test_accept_and_reject"
         },
         {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "examples where <seqlist> is NOT inside <descript>; way: dmodule/content/proced/",
+          "note": "the outside case has its schema (proced) and its way"
+        },
+        {
+          "type": "not_contains",
+          "target": "prompt",
+          "pattern": "every example uses the \"descript\" schema|by any other valid way",
+          "note": "never descript alone, never a case without a way"
+        },
+        {
           "type": "rule_test_verdict_correct"
         }
       ]
@@ -6070,6 +6082,52 @@
           ],
           "why": "relation_side",
           "note": "the moved example is not counted"
+        }
+      ]
+    },
+    {
+      "id": "rule-test-3-0-1-response-rsptype",
+      "type": "rule-test",
+      "standard": "S1000D 3.0.1",
+      "description": "El atributo de la regla (Parts 4 and 5): general rule //response/@rsptype, values rt01-rt04. <response> is in comment (with @rsptype, required, in <cstatus>) and in crew (in <challrsp>, without @rsptype). The test used crew and Mistral put @rsptype on <para>: no example could run. Now the test schema is comment and the LLM writes the whole <cstatus>; the SCHEMA FACTS give the parents of <response> per schema, never \"the same for every schema\".",
+      "brdp": {
+        "identifier": "BRDP-EVAL-RT-RSPTYPE",
+        "title": "Response types",
+        "definition": "Decide which response types are used in comments.",
+        "proposal": "Only the response types rt01 to rt04 are used.",
+        "validation": "Validated"
+      },
+      "rule": "<objrule>\n  <objpath objappl=\"1\">//response/@rsptype</objpath>\n  <objuse>Only the response types rt01 to rt04 are used.</objuse>\n  <objval val1=\"rt01\" val2=\"rt04\" valtype=\"range\"/>\n</objrule>",
+      "checks": [
+        {
+          "type": "rule_test_json_valid"
+        },
+        {
+          "type": "rule_test_examples_valid"
+        },
+        {
+          "type": "rule_test_accept_and_reject"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "every example uses the \"comment\" schema",
+          "note": "a schema whose <response> has @rsptype"
+        },
+        {
+          "type": "contains",
+          "target": "prompt",
+          "pattern": "\\[comment\\]: cstatus",
+          "note": "the parents of <response> per schema"
+        },
+        {
+          "type": "not_contains",
+          "target": "prompt",
+          "pattern": "the same for every schema listed above — allowed-inside parents never differ",
+          "note": "the false claim is gone"
+        },
+        {
+          "type": "rule_test_verdict_correct"
         }
       ]
     }

@@ -753,6 +753,30 @@ function ruleTestReply(systemPrompt, messages) {
       { label: "Sequential list in the description", expected: "accept", schema: ruleSchema || "descript", content: inDescript },
     ]);
   }
+  // "El atributo de la regla" (S1000D 3.0.1, //response/@rsptype, rt01–rt04),
+  // as Mistral answered. Tested on crew (whose <response> has no
+  // @rsptype), it put @rsptype on a <para> -- not valid, also after the
+  // correction. Tested on comment, the whole <cstatus> (the minimal one of
+  // the prompt) with <response rsptype>.
+  if (/\/\/response\/@rsptype/.test(rule)) {
+    const lines = systemPrompt.split("\n");
+    const start = lines.findIndex((l) => l.startsWith("    <cstatus>"));
+    if (/your "metadata" is the WHOLE <cstatus>/.test(systemPrompt) && start !== -1) {
+      const out = [];
+      for (let i = start; i < lines.length && lines[i].startsWith("    "); i += 1) out.push(lines[i].slice(4));
+      const minimal = out.join("\n");
+      const withResponse = (value) => minimal.replace(/(\s*)<crefs>/, `$1<response rsptype="${value}"/>$1<crefs>`);
+      return answer([
+        { label: "Response type rt02", expected: "accept", schema: "comment", metadata: withResponse("rt02") },
+        { label: "Response type rt07", expected: "reject", schema: "comment", metadata: withResponse("rt07") },
+      ]);
+    }
+    const crew = (value) => `<challrsp><challeng><para>Fuel quantity</para></challeng><response><para rsptype="${value}">Checked</para></response></challrsp>`;
+    return answer([
+      { label: "Response type rt02", expected: "accept", schema: ruleSchema, content: crew("rt02") },
+      { label: "Response type rt07", expected: "reject", schema: ruleSchema, content: crew("rt07") },
+    ]);
+  }
   if (/ALLINVALID/.test(proposal)) {
     const bad = "<sbSummary><levelledPara><para>Remove the panel.</para></levelledPara></sbSummary>";
     return answer([

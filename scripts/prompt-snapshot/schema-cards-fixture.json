@@ -9,6 +9,88 @@
         "pm",
         "scormContentPackage"
       ],
+      "parents_by_schema": [
+        {
+          "parents": [
+            "dmodule"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "appliccrossreftable",
+            "brdoc",
+            "brex",
+            "checklist",
+            "comrep",
+            "condcrossreftable",
+            "container",
+            "crew",
+            "descript",
+            "fault",
+            "frontmatter",
+            "ipd",
+            "learning",
+            "prdcrossreftable",
+            "proced",
+            "process",
+            "sb",
+            "schedul",
+            "scocontent",
+            "wrngdata",
+            "wrngflds"
+          ]
+        },
+        {
+          "parents": [
+            "comment"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "comment"
+          ]
+        },
+        {
+          "parents": [
+            "ddn"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "ddn"
+          ]
+        },
+        {
+          "parents": [
+            "dml"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "dml"
+          ]
+        },
+        {
+          "parents": [
+            "pm"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "pm"
+          ]
+        },
+        {
+          "parents": [
+            "scormContentPackage"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "scormcontentpackage"
+          ]
+        }
+      ],
       "parents_omitted": 0,
       "parents_truncated": false,
       "variants": [
@@ -170,6 +252,225 @@
         "sbSupportEquipsList",
         "sbTopicContent",
         "subCrewDrill"
+      ],
+      "parents_by_schema": [
+        {
+          "parents": [
+            "footnote",
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "appliccrossreftable",
+            "comment",
+            "container",
+            "ddn",
+            "dml",
+            "pm",
+            "scormcontentpackage",
+            "condcrossreftable",
+            "prdcrossreftable",
+            "wrngdata",
+            "wrngflds",
+            "frontmatter"
+          ]
+        },
+        {
+          "parents": [
+            "brAction",
+            "brCategoryDescription",
+            "brDecisionExplanation",
+            "brDecisionPointExplanation",
+            "brDecisionPointValue",
+            "brDecisionText",
+            "brDecisionValue",
+            "brDoc",
+            "brLevelledPara",
+            "entry",
+            "footnote",
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "brdoc"
+          ]
+        },
+        {
+          "parents": [
+            "description",
+            "entry",
+            "footnote",
+            "levelledPara",
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "descript",
+            "learning"
+          ]
+        },
+        {
+          "parents": [
+            "footnote",
+            "icnSupportingFilesDescr",
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "icnmetadata"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfo",
+            "commonInfoDescrPara",
+            "entry",
+            "footnote",
+            "levelledPara",
+            "listItem",
+            "listItemDefinition",
+            "proceduralStep",
+            "sbAccomplishmentInstructions",
+            "sbAdditionalInfo",
+            "sbIndustrySupport",
+            "sbMaterialInfo",
+            "sbMaterialSetList",
+            "sbPlanningInfo",
+            "sbRemovedSparesList",
+            "sbRevisionInfo",
+            "sbSparesList",
+            "sbSummary",
+            "sbSuppliesList",
+            "sbSupportEquipsList",
+            "sbTopicContent"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "sb"
+          ]
+        },
+        {
+          "parents": [
+            "entry",
+            "footnote",
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "scocontent"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfo",
+            "commonInfoDescrPara",
+            "entry",
+            "footnote",
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "brex",
+            "schedul",
+            "fault"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfo",
+            "commonInfoDescrPara",
+            "entry",
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "comrep"
+          ]
+        },
+        {
+          "parents": [
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "ipd",
+            "update"
+          ]
+        },
+        {
+          "parents": [
+            "checkListPara",
+            "checkListStep",
+            "commonInfo",
+            "commonInfoDescrPara",
+            "entry",
+            "equipmentNotAvailable",
+            "footnote",
+            "listItem",
+            "listItemDefinition"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "checklist"
+          ]
+        },
+        {
+          "parents": [
+            "challenge",
+            "crewDrill",
+            "crewDrillStep",
+            "crewProcedureName",
+            "crewRefCard",
+            "endMatter",
+            "entry",
+            "footnote",
+            "levelledPara",
+            "listItem",
+            "listItemDefinition",
+            "response",
+            "subCrewDrill"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "crew"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfo",
+            "commonInfoDescrPara",
+            "entry",
+            "footnote",
+            "listItem",
+            "listItemDefinition",
+            "proceduralStep"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "proced",
+            "process"
+          ]
+        }
       ],
       "parents_omitted": 0,
       "parents_truncated": false,
@@ -1215,6 +1516,136 @@
         "response",
         "sbTopicContent",
         "subCrewDrill"
+      ],
+      "parents_by_schema": [
+        {
+          "parents": [
+            "brAction",
+            "brDecisionExplanation",
+            "brDecisionPointExplanation",
+            "brDoc",
+            "brLevelledPara",
+            "foldout"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "brdoc"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfoDescrPara",
+            "foldout"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "brex",
+            "checklist",
+            "comrep",
+            "schedul"
+          ]
+        },
+        {
+          "parents": [
+            "challenge",
+            "crewDrill",
+            "crewDrillStep",
+            "crewProcedureName",
+            "crewRefCard",
+            "descrCrew",
+            "endMatter",
+            "foldout",
+            "levelledPara",
+            "response",
+            "subCrewDrill"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "crew"
+          ]
+        },
+        {
+          "parents": [
+            "description",
+            "foldout",
+            "levelledPara"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "descript",
+            "learning"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfoDescrPara",
+            "foldout",
+            "isolationMainProcedure",
+            "isolationProcedureEnd",
+            "isolationStep"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "fault"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfoDescrPara",
+            "foldout",
+            "mainProcedure",
+            "proceduralStep"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "proced"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfoDescrPara",
+            "dmNode",
+            "foldout",
+            "proceduralStep"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "process"
+          ]
+        },
+        {
+          "parents": [
+            "commonInfoDescrPara",
+            "foldout",
+            "levelledPara",
+            "mainProcedure",
+            "proceduralStep",
+            "sbTopicContent"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "sb"
+          ]
+        },
+        {
+          "parents": [
+            "extraResources",
+            "foldout"
+          ],
+          "parents_omitted": 0,
+          "parents_truncated": false,
+          "schemas": [
+            "scocontent"
+          ]
+        }
       ],
       "parents_omitted": 0,
       "parents_truncated": false,
