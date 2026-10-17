@@ -252,16 +252,14 @@ The user does not see this block by that name; if you refer to it, call it the s
 // Test de reglas, Part 5: `parents` joins the parents of every schema --
 // <response> in S1000D 3.0.1 is inside <cstatus> only in comment and inside
 // <challrsp> only in crew, and the line said "the same for every schema".
-// parents_by_schema (GET /api/schema-cards) gives them per schema, like the
-// attributes and the children; one group is really the same for all. A
-// card without it (an older answer) says the list joins every schema.
+// Only where that is false (parents_by_schema, GET /api/schema-cards, with
+// more than one group) the parents go per schema, like the attributes and
+// the children; every other card keeps its line byte for byte (also one
+// without parents_by_schema).
 function allowedInsideLines(entry, parentsText) {
   const groups = entry.parents_by_schema;
-  if (!Array.isArray(groups)) {
-    return `\n  allowed inside (the parents of every schema listed above together — they may differ by schema): ${parentsText}`;
-  }
-  if (groups.length <= 1) {
-    return `\n  allowed inside: ${parentsText} (this is the same for every schema listed above)`;
+  if (!Array.isArray(groups) || groups.length <= 1) {
+    return `\n  allowed inside: ${parentsText} (this is the same for every schema listed above — allowed-inside parents never differ by schema)`;
   }
   return `\n  allowed inside, by schema:${groups
     .map((g) => `\n    [${g.schemas.join(', ')}]: ${formatSchemaFactNameList(g.parents, g.parents_truncated, g.parents_omitted)}`)

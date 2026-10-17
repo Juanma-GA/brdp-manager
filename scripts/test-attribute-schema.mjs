@@ -141,13 +141,14 @@ const brdp = { identifier: 'BRDP-EXT-09002', title: 'Response types', definition
   const block = buildSchemaFactsBlock(S301, [{ name: 'response', entry }]);
   check('facts: never "the same for every schema" when they differ', !block.includes('the same for every schema') && !block.includes('never differ by schema'), block);
   check('facts: the parents of each schema', block.includes('allowed inside, by schema:') && block.includes('[comment]: cstatus') && block.includes('[crew]: challrsp'), block);
-  // Without parents_by_schema (an older answer): the list joins every schema.
+  // Every other card keeps its line byte for byte: without parents_by_schema
+  // (an older answer) and with one group (the same parents everywhere).
+  const SAME = 'allowed inside: challrsp, cstatus (this is the same for every schema listed above — allowed-inside parents never differ by schema)';
   const { parents_by_schema: _g, ...old } = entry;
   const oldBlock = buildSchemaFactsBlock(S301, [{ name: 'response', entry: old }]);
-  check('facts without parents_by_schema: says the list joins every schema', oldBlock.includes('allowed inside (the parents of every schema listed above together — they may differ by schema): challrsp, cstatus') && !oldBlock.includes('never differ'), oldBlock);
-  // One group: really the same for all.
-  const one = { ...entry, parents: ['x'], parents_by_schema: [{ schemas: ['comment', 'crew'], parents: ['x'], parents_truncated: false, parents_omitted: 0 }] };
-  check('facts, one group: the same for every schema', buildSchemaFactsBlock(S301, [{ name: 'response', entry: one }]).includes('allowed inside: x (this is the same for every schema listed above)'));
+  check('facts without parents_by_schema: the line as before', oldBlock.includes(SAME), oldBlock);
+  const one = { ...entry, parents_by_schema: [{ schemas: ['comment', 'crew'], parents: ['challrsp', 'cstatus'], parents_truncated: false, parents_omitted: 0 }] };
+  check('facts, one group: the line as before, byte for byte', buildSchemaFactsBlock(S301, [{ name: 'response', entry: one }]) === oldBlock);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
