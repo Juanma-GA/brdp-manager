@@ -161,7 +161,13 @@ async function main() {
 
     async function assertAllSuggestButtonsEnabled(context) {
       for (const kind of ["Definition", "Proposal"]) {
-        assert(!(await suggestButton(`Suggest ${kind}`).isDisabled()), `Suggest ${kind} is ENABLED ${context}`);
+        const button = suggestButton(`Suggest ${kind}`);
+        // Right after a save the pending-embeddings query is refetched: give
+        // the buttons a moment to settle before reading them.
+        await page
+          .waitForFunction((name) => [...document.querySelectorAll("button")].some((b) => b.textContent.trim() === name && !b.disabled), `Suggest ${kind}`, { timeout: 5000 })
+          .catch(() => {});
+        assert(!(await button.isDisabled()), `Suggest ${kind} is ENABLED ${context} (title: ${await button.getAttribute("title")})`);
       }
       const rule = suggestButton("Suggest Rule");
       assert(
